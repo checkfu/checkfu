@@ -2,7 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
-import { NonEmptyString, PositiveInt, TextBlocks } from "./SessionTypes.ts"
+import { MessageText, PositiveInt, TextBlocks } from "./SessionTypes.ts"
 
 export class UserMessage extends Domain.Event("user.message", {
 	content: TextBlocks,
@@ -10,13 +10,25 @@ export class UserMessage extends Domain.Event("user.message", {
 
 export class SessionStatusRunning extends Domain.Event("session.status_running") {}
 
+export class PendingMessageQueueFull extends Domain.Rejection(
+	"PendingMessageQueueFull",
+	{
+		session_id: SessionId,
+		limit: PositiveInt,
+	},
+	{
+		httpApiStatus: 429,
+		description: "Too many queued user messages are already waiting for the active turn.",
+	},
+) {}
+
 export class SendUserMessage extends Domain.Command("SendUserMessage", {
 	input: {
 		session_id: SessionId,
-		text: NonEmptyString,
+		text: MessageText,
 	},
 	events: [UserMessage, SessionStatusRunning],
-	rejects: [SessionNotFound, SessionTerminated],
+	rejects: [SessionNotFound, SessionTerminated, PendingMessageQueueFull],
 	reply: {
 		turn: PositiveInt,
 	},

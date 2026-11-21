@@ -38,17 +38,25 @@
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started >= before.model_requests_started"
 			},
-			"Session.InterruptFlagStaysSetDuringSameTurn": {
-				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.interrupt_requested ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.interrupt_requested"
-			},
-			"Sessions.ASessionRunsATurn": {
-				"kind": "sometimes",
-				"source": "(m) => m.Session.some((s) => s.state._tag === \"Running\")"
-			},
 			"Sessions.ASessionTerminates": {
 				"kind": "sometimes",
 				"source": "(m) => m.Session.some((s) => s.state._tag === \"Terminated\")"
+			},
+			"Sessions.ASessionCompletesATurn": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Session.some((s) => s.state._tag === \"Idle\" && s.state.turn >= 1)"
+			},
+			"Sessions.EveryTurnSettles": {
+				"kind": "eventually",
+				"source": "(m) => m.Session.every((s) => s.state._tag !== \"Running\")"
+			},
+			"Session.PendingUserMessagesWithinBounds": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8)"
+			},
+			"Session.ArchivedSessionStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" ||\n\t\t\t!before.archived ||\n\t\t\t(after._tag === \"Terminated\" && after.archived)"
 			}
 		}
 	}

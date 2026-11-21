@@ -1,8 +1,14 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { ArchiveSession, SessionStatusTerminated } from "./ArchiveSession.command.ts"
+import {
+	ArchiveSession,
+	SessionArchived,
+	SessionStatusTerminated,
+} from "./ArchiveSession.command.ts"
+import { CommitModelReply } from "./CommitModelReply.command.ts"
 import { CompleteTurn, SessionStatusIdle } from "./CompleteTurn.command.ts"
 import { CreateSession, SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
+import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { OpenModelRequests } from "./OpenModelRequests.rejection.ts"
 import { AgentMessage, RecordAgentMessage } from "./RecordAgentMessage.command.ts"
 import { AgentThinking, RecordAgentThinking } from "./RecordAgentThinking.command.ts"
@@ -19,13 +25,21 @@ import {
 } from "./RecordModelRequestStart.command.ts"
 import { RecordSessionError, SessionErrorEvent } from "./RecordSessionError.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
-import { SendUserMessage, SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
+import {
+	PendingMessageQueueFull,
+	SendUserMessage,
+	SessionStatusRunning,
+	UserMessage,
+} from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
-import { NonEmptyString, NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
+import { NonEmptyString, NonNegativeInt, PositiveInt, type StopReason } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
+import { versionedSnapshot } from "./VersionedSnapshot.ts"
+
+export const SESSION_STATE_SCHEMA_VERSION = 1 as const
 
 export const SessionState = Schema.Union([
 	Schema.Struct({ _tag: Schema.Literal("Uninitialized") }),
@@ -33,16 +47,28 @@ export const SessionState = Schema.Union([
 	Schema.Struct({
 		_tag: Schema.Literal("Running"),
 		turn: PositiveInt,
-		interrupt_requested: Schema.Boolean,
 		open_model_request_id: Schema.NullOr(NonEmptyString),
 		model_requests_started: NonNegativeInt,
+		pending_user_messages: NonNegativeInt,
 	}),
-	Schema.Struct({ _tag: Schema.Literal("Terminated") }),
+	Schema.Struct({
+		_tag: Schema.Literal("Terminated"),
+		archived: Schema.Boolean,
+	}),
 ])
 export type SessionState = typeof SessionState.Type
 
+export const SessionStateSnapshot = versionedSnapshot({
+	current: SESSION_STATE_SCHEMA_VERSION,
+	schema: SessionState,
+})
+
 type ActiveState = Extract<SessionState, { readonly _tag: "Idle" | "Running" }>
 type RunningState = Extract<SessionState, { readonly _tag: "Running" }>
+
+const shouldDrainQueue = (pending_user_messages: number, stop_reason: StopReason): boolean =>
+	pending_user_messages > 0 &&
+	(stop_reason.type === "end_turn" || stop_reason.type === "retries_exhausted")
 
 const requireActive = (
 	state: SessionState,
@@ -73,7 +99,7 @@ const requireRunningTurn = (
 
 export class Session extends Domain.Aggregate("Session", {
 	id: SessionId,
-	state: SessionState,
+	state: SessionStateSnapshot,
 	initial: { _tag: "Uninitialized" as const },
 	commands: [
 		CreateSession,
@@ -84,6 +110,8 @@ export class Session extends Domain.Aggregate("Session", {
 		RecordAgentMessage,
 		RecordModelRequestEnd,
 		CompleteTurn,
+		CommitModelReply,
+		FailModelRequest,
 		RecordSessionError,
 		ArchiveSession,
 	],
@@ -92,12 +120,18 @@ export class Session extends Domain.Aggregate("Session", {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
 		IdleTurnIsNonNegative: (s) => s._tag !== "Idle" || s.turn >= 0,
 		ModelRequestsStartedNonNegative: (s) => s._tag !== "Running" || s.model_requests_started >= 0,
+		PendingUserMessagesWithinBounds: (s) =>
+			s._tag !== "Running" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8),
 		OpenModelRequestRequiresStartedCount: (s) =>
 			s._tag !== "Running" || s.open_model_request_id === null || s.model_requests_started >= 1,
 	},
 	transitions: {
 		TerminatedSessionStaysTerminated: ({ before, after }) =>
 			before._tag !== "Terminated" || after._tag === "Terminated",
+		ArchivedSessionStaysArchived: ({ before, after }) =>
+			before._tag !== "Terminated" ||
+			!before.archived ||
+			(after._tag === "Terminated" && after.archived),
 		CreatedSessionNeverReturnsToUninitialized: ({ before, after }) =>
 			before._tag === "Uninitialized" || after._tag !== "Uninitialized",
 		TurnNeverDecreases: ({ before, after }) =>
@@ -113,12 +147,6 @@ export class Session extends Domain.Aggregate("Session", {
 			after._tag !== "Running" ||
 			after.turn !== before.turn ||
 			after.model_requests_started >= before.model_requests_started,
-		InterruptFlagStaysSetDuringSameTurn: ({ before, after }) =>
-			before._tag !== "Running" ||
-			!before.interrupt_requested ||
-			after._tag !== "Running" ||
-			after.turn !== before.turn ||
-			after.interrupt_requested,
 	},
 	decide: {
 		CreateSession: (state, cmd, ctx) =>
@@ -136,6 +164,9 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserMessage: (state, cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
 			if (active._tag !== "Idle" && active._tag !== "Running") return active
+			if (active._tag === "Running" && active.pending_user_messages >= 8) {
+				return new PendingMessageQueueFull({ session_id: ctx.id, limit: 8 })
+			}
 			const message = new UserMessage({ content: [{ type: "text", text: cmd.text }] })
 			return active._tag === "Running" ? [message] : [message, new SessionStatusRunning()]
 		},
@@ -143,9 +174,23 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserInterrupt: (state, _cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
 			if (active._tag !== "Idle" && active._tag !== "Running") return active
-			if (active._tag !== "Running")
+			if (active._tag !== "Running") {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
-			return active.interrupt_requested ? [] : [new UserInterrupt()]
+			}
+			const interrupt = new UserInterrupt()
+			const idle = new SessionStatusIdle({ stop_reason: { type: "interrupted" } })
+			if (active.open_model_request_id !== null) {
+				return [
+					interrupt,
+					new SpanModelRequestEnd({
+						model_request_start_id: active.open_model_request_id,
+						model_usage: { input_tokens: 0, output_tokens: 0 },
+						is_error: true,
+					}),
+					idle,
+				]
+			}
+			return [interrupt, idle]
 		},
 
 		RecordModelRequestStart: (state, cmd, ctx) => {
@@ -158,6 +203,8 @@ export class Session extends Domain.Aggregate("Session", {
 				return new DuplicateModelRequest({
 					session_id: ctx.id,
 					model_request_start_id: cmd.model_request_start_id,
+					open_model_request_id: running.open_model_request_id,
+					model_requests_started: running.model_requests_started,
 				})
 			}
 			if (cmd.request_seq !== running.model_requests_started + 1) {
@@ -212,7 +259,74 @@ export class Session extends Domain.Aggregate("Session", {
 					open_model_request_id: running.open_model_request_id,
 				})
 			}
-			return [new SessionStatusIdle({ stop_reason: cmd.stop_reason })]
+			const idle = new SessionStatusIdle({ stop_reason: cmd.stop_reason })
+			if (shouldDrainQueue(running.pending_user_messages, cmd.stop_reason)) {
+				return [idle, new SessionStatusRunning()]
+			}
+			return [idle]
+		},
+
+		CommitModelReply: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") return running
+			if (
+				running.open_model_request_id !== cmd.model_request_start_id ||
+				running.model_requests_started !== cmd.request_seq
+			) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			const msg = new AgentMessage({ content: [{ type: "text", text: cmd.text }] })
+			const end = new SpanModelRequestEnd({
+				model_request_start_id: cmd.model_request_start_id,
+				model_usage: cmd.model_usage,
+				is_error: false,
+			})
+			const idle = new SessionStatusIdle({ stop_reason: cmd.stop_reason })
+			const drain = shouldDrainQueue(running.pending_user_messages, cmd.stop_reason)
+			if (cmd.thinking !== null) {
+				const thought = new AgentThinking({ thinking: cmd.thinking })
+				return drain
+					? [thought, msg, end, idle, new SessionStatusRunning()]
+					: [thought, msg, end, idle]
+			}
+			return drain ? [msg, end, idle, new SessionStatusRunning()] : [msg, end, idle]
+		},
+
+		FailModelRequest: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") return running
+			if (
+				running.open_model_request_id !== cmd.model_request_start_id ||
+				running.model_requests_started !== cmd.request_seq
+			) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			const end = new SpanModelRequestEnd({
+				model_request_start_id: cmd.model_request_start_id,
+				model_usage: { input_tokens: 0, output_tokens: 0 },
+				is_error: true,
+			})
+			const errorEvent = new SessionErrorEvent({
+				error: {
+					type: cmd.error_type,
+					message: cmd.message,
+					retry_status: { type: cmd.terminal ? "terminal" : "exhausted" },
+				},
+			})
+			if (cmd.terminal) {
+				return [end, errorEvent, new SessionStatusTerminated()]
+			}
+			const stop_reason = { type: "retries_exhausted" as const }
+			const idle = new SessionStatusIdle({ stop_reason })
+			return shouldDrainQueue(running.pending_user_messages, stop_reason)
+				? [end, errorEvent, idle, new SessionStatusRunning()]
+				: [end, errorEvent, idle]
 		},
 
 		RecordSessionError: (state, cmd, ctx) => {
@@ -240,7 +354,12 @@ export class Session extends Domain.Aggregate("Session", {
 							open_model_request_id: active.open_model_request_id,
 						})
 					}
-					return [errorEvent, new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } })]
+					const stop_reason = { type: "retries_exhausted" as const }
+					const idle = new SessionStatusIdle({ stop_reason })
+					if (shouldDrainQueue(active.pending_user_messages, stop_reason)) {
+						return [errorEvent, idle, new SessionStatusRunning()]
+					}
+					return [errorEvent, idle]
 				}
 				return [errorEvent]
 			}
@@ -251,23 +370,42 @@ export class Session extends Domain.Aggregate("Session", {
 
 		ArchiveSession: (state, _cmd, ctx) => {
 			if (state._tag === "Uninitialized") return new SessionNotFound({ session_id: ctx.id })
-			if (state._tag === "Terminated") return []
-			return [new SessionStatusTerminated()]
+			if (state._tag === "Terminated") {
+				return state.archived ? [] : [new SessionArchived()]
+			}
+			if (state._tag === "Running" && state.open_model_request_id !== null) {
+				return [
+					new SpanModelRequestEnd({
+						model_request_start_id: state.open_model_request_id,
+						model_usage: { input_tokens: 0, output_tokens: 0 },
+						is_error: true,
+					}),
+					new SessionStatusTerminated(),
+					new SessionArchived(),
+				]
+			}
+			return [new SessionStatusTerminated(), new SessionArchived()]
 		},
 	},
 	evolve: {
 		"session.created": () => ({ _tag: "Idle" as const, turn: 0 }),
-		"user.message": (state) => state,
-		"user.interrupt": (state) =>
-			state._tag === "Running" ? { ...state, interrupt_requested: true } : state,
+		"user.message": (state) =>
+			state._tag === "Running"
+				? {
+						...state,
+						pending_user_messages:
+							state.pending_user_messages < 8 ? state.pending_user_messages + 1 : 8,
+					}
+				: state,
+		"user.interrupt": (state) => state,
 		"session.status_running": (state) =>
 			state._tag === "Idle"
 				? {
 						_tag: "Running" as const,
 						turn: state.turn + 1,
-						interrupt_requested: false,
 						open_model_request_id: null,
 						model_requests_started: 0,
+						pending_user_messages: 0,
 					}
 				: state,
 		"span.model_request_start": (state, e) =>
@@ -290,7 +428,10 @@ export class Session extends Domain.Aggregate("Session", {
 		"session.status_idle": (state) =>
 			state._tag === "Running" ? { _tag: "Idle" as const, turn: state.turn } : state,
 		"session.error": (state) => state,
-		"session.status_terminated": () => ({ _tag: "Terminated" as const }),
+		"session.status_terminated": (state) =>
+			state._tag === "Terminated" ? state : { _tag: "Terminated" as const, archived: false },
+		"session.archived": (state) =>
+			state._tag === "Terminated" ? { _tag: "Terminated" as const, archived: true } : state,
 	},
 	reply: {
 		SendUserMessage: (state) => ({ turn: state._tag === "Running" ? state.turn : 1 }),

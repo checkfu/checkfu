@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { OpenModelRequests } from "./OpenModelRequests.rejection.ts"
+import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
@@ -16,6 +17,6 @@ export class CompleteTurn extends Domain.Command("CompleteTurn", {
 		turn: PositiveInt,
 		stop_reason: StopReason,
 	},
-	events: [SessionStatusIdle],
+	events: [SessionStatusIdle, SessionStatusRunning],
 	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, OpenModelRequests],
 }) {}

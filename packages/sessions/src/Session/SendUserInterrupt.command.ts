@@ -1,4 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
+import { SessionStatusIdle } from "./CompleteTurn.command.ts"
+import { SpanModelRequestEnd } from "./RecordModelRequestEnd.command.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
@@ -10,6 +12,6 @@ export class SendUserInterrupt extends Domain.Command("SendUserInterrupt", {
 	input: {
 		session_id: SessionId,
 	},
-	events: [UserInterrupt],
+	events: [UserInterrupt, SpanModelRequestEnd, SessionStatusIdle],
 	rejects: [SessionNotFound, SessionTerminated, SessionNotRunning],
 }) {}
