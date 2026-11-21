@@ -1,0 +1,12 @@
+{
+	"$schema": "https://turborepo.com/schema.json",
+	"globalDependencies": ["tsconfig.base.json"],
+	"futureFlags": {
+		"affectedUsingTaskInputs": true
+	},
+	"tasks": {
+		"typecheck": {
+			"dependsOn": ["^typecheck"]
+		}
+	}
+}
