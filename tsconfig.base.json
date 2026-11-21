@@ -13,6 +13,37 @@
 		"erasableSyntaxOnly": true,
 		"allowImportingTsExtensions": true,
 		"skipLibCheck": true,
-		"noEmit": true
+		"noEmit": true,
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				"diagnostics": true,
+				"includeSuggestionsInTsc": false,
+				"ignoreEffectSuggestionsInTscExitCode": true,
+				"ignoreEffectWarningsInTscExitCode": false,
+				"ignoreEffectErrorsInTscExitCode": false,
+				"diagnosticSeverity": {
+					"floatingEffect": "error",
+					"floatingEffectInVitest": "error",
+					"missingEffectContext": "error",
+					"missingEffectError": "error",
+					"missingLayerContext": "error",
+					"leakingRequirements": "error",
+					"anyUnknownInErrorContext": "error",
+					"missingReturnYieldStar": "error",
+					"missingStarInYieldEffectGen": "error",
+					"classSelfMismatch": "error",
+					"duplicatePackage": "error",
+					"serviceNotAsClass": "error",
+					"catchUnfailableEffect": "error",
+					"returnEffectInGen": "error",
+					"globalFetchInEffect": "error",
+					"globalConsoleInEffect": "error",
+					"globalDateInEffect": "error",
+					"unstableApiUsage": "off",
+					"experimentalApiUsage": "off"
+				}
+			}
+		]
 	}
 }

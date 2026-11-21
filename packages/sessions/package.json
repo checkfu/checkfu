@@ -1,0 +1,24 @@
+{
+	"name": "@checkfu/sessions",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"@alchemy.run/domain": "catalog:",
+		"alchemy": "catalog:",
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@effect/vitest": "catalog:",
+		"vitest": "catalog:"
+	}
+}

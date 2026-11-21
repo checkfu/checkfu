@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"plugins": ["typescript", "unicorn", "oxc", "import", "promise"],
+	"plugins": ["typescript", "unicorn", "oxc", "import", "vitest", "promise"],
 	"ignorePatterns": ["node_modules", ".turbo"],
 	"rules": {
 		"oxc/no-accumulating-spread": "error",
@@ -27,5 +27,16 @@
 		"promise/no-return-in-finally": "error",
 		"promise/valid-params": "error",
 		"unicorn/prefer-number-properties": "error",
+		"vitest/no-focused-tests": "error",
+		"vitest/no-disabled-tests": "error",
+		"vitest/expect-expect": "off",
 	},
+	"overrides": [
+		{
+			"files": ["**/*.story.{test,spec}.ts"],
+			"rules": {
+				"promise/valid-params": "off",
+			},
+		},
+	],
 }
