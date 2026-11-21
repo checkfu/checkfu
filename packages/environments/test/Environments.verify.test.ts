@@ -1,0 +1,44 @@
+import { Story } from "@alchemy.run/domain/Story"
+import * as Verify from "@alchemy.run/domain/Verify"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import { Environments, EnvironmentsApi } from "../src/Environments.model.ts"
+
+const story = Story.make(Environments)
+
+const STANDING = {
+	"Environment.StatusIsKnown": "proved",
+	"Environment.CreatedExactlyWhenVersioned": "proved",
+	"Environment.CreatedEnvironmentNeverReturnsToUninitialized": "proved",
+	"Environment.ArchivedNeverReactivates": "proved",
+	"Environment.DeletedStaysDeleted": "proved",
+	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
+	"Environments.AnEnvironmentIsUpdated": "reached",
+	"Environments.AnEnvironmentIsArchived": "reached",
+	"Environments.AnEnvironmentIsDeleted": "reached",
+} as const
+
+const PROVED = Object.entries(STANDING)
+	.filter(([, standing]) => standing === "proved")
+	.map(([name]) => name)
+
+describe("Environments Z3 formal verification", () => {
+	it("proves every Environment invariant and transition in Z3", async () => {
+		const report = await Effect.runPromise(
+			Verify.model(Environments, {
+				apis: [EnvironmentsApi],
+				story,
+				instances: 1,
+				walks: { count: 20 },
+				lock: "./Environments.verify.lock.json",
+				require: { proved: PROVED },
+			}).pipe(Effect.provide(NodeServices.layer)),
+		)
+		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
+			STANDING,
+		)
+		expect(report.explored.disagreements).toEqual([])
+		expect(report.explored.agreement.compared).toBeGreaterThan(0)
+	}, 120_000)
+})

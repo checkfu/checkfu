@@ -27,6 +27,20 @@
         "vitest": "catalog:",
       },
     },
+    "packages/environments": {
+      "name": "@checkfu/environments",
+      "version": "0.0.0",
+      "dependencies": {
+        "@alchemy.run/domain": "catalog:",
+        "alchemy": "catalog:",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/sessions": {
       "name": "@checkfu/sessions",
       "version": "0.0.0",
@@ -62,6 +76,8 @@
     "@alchemy.run/sigil": ["@alchemy.run/sigil@0.1.0-alpha.4", "", { "peerDependencies": { "@types/react": ">=19.2.0", "react-devtools-core": ">=6.1.2" }, "optionalPeers": ["@types/react", "react-devtools-core"] }, "sha512-d6Uo16C2P6Wk7TNoYt4qzjjNGyjsrJLjq8bBotl86Nmcp/U6+R34/n4CZomqFERF2wMinut2DBqWNeUQPTBtFQ=="],
 
     "@checkfu/agents": ["@checkfu/agents@workspace:packages/agents"],
+
+    "@checkfu/environments": ["@checkfu/environments@workspace:packages/environments"],
 
     "@checkfu/sessions": ["@checkfu/sessions@workspace:packages/sessions"],
 

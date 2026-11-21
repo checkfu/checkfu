@@ -1,0 +1,43 @@
+{
+	"version": 1,
+	"rules": {
+		"Environments": {
+			"Environment.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"archived\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.version === 0, s.name === \"\"].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.version >= 1, s.name !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.CreatedEnvironmentNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Environment.ArchivedNeverReactivates": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"archived\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"archived\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"deleted\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tbefore.status === \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.status === \"\", after.version === 0].every((ok) => ok),\n\t\t\t\t\t\t[after.status === \"active\", after.version === 1].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.status !== \"\",\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.version === before.version, after.name === before.name].every((ok) => ok),\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environments.AnEnvironmentIsUpdated": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Environment.some((e) =>\n\t\t\t\t[e.state.status === \"active\", e.state.version >= 2].every((ok) => ok),\n\t\t\t)"
+			},
+			"Environments.AnEnvironmentIsArchived": {
+				"kind": "sometimes",
+				"source": "(m) => m.Environment.some((e) => e.state.status === \"archived\")"
+			},
+			"Environments.AnEnvironmentIsDeleted": {
+				"kind": "sometimes",
+				"source": "(m) => m.Environment.some((e) => e.state.status === \"deleted\")"
+			}
+		}
+	}
+}
