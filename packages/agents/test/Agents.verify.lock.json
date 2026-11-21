@@ -1,0 +1,67 @@
+{
+	"version": 1,
+	"rules": {
+		"Agents": {
+			"Agent.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"active\", s.status === \"archived\"].some((ok) => ok)"
+			},
+			"Agent.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\ts.status === \"\",\n\t\t\t\t\ts.version === 0,\n\t\t\t\t\ts.current_version_id === \"\",\n\t\t\t\t\ts.name === \"\",\n\t\t\t\t\ts.model_id === \"\",\n\t\t\t\t\t!s.has_system,\n\t\t\t\t\ts.system === \"\",\n\t\t\t\t\t!s.has_description,\n\t\t\t\t\ts.description === \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.status !== \"\",\n\t\t\t\t\ts.version >= 1,\n\t\t\t\t\ts.current_version_id !== \"\",\n\t\t\t\t\ts.name !== \"\",\n\t\t\t\t\ts.model_id !== \"\",\n\t\t\t\t\t[s.has_system, s.system === \"\"].some((ok) => ok),\n\t\t\t\t\t[s.has_description, s.description === \"\"].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.CreatedAgentNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Agent.ArchivedAgentStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"archived\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"archived\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.current_version_id === before.current_version_id,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"AgentVersion.MintedExactlyWhenNumbered": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\t!s.minted,\n\t\t\t\t\ts.agent_id === \"\",\n\t\t\t\t\ts.version === 0,\n\t\t\t\t\ts.name === \"\",\n\t\t\t\t\ts.model_id === \"\",\n\t\t\t\t\t!s.has_system,\n\t\t\t\t\ts.system === \"\",\n\t\t\t\t\t!s.has_description,\n\t\t\t\t\ts.description === \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.minted,\n\t\t\t\t\ts.agent_id !== \"\",\n\t\t\t\t\ts.version >= 1,\n\t\t\t\t\ts.name !== \"\",\n\t\t\t\t\ts.model_id !== \"\",\n\t\t\t\t\t[s.has_system, s.system === \"\"].some((ok) => ok),\n\t\t\t\t\t[s.has_description, s.description === \"\"].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"AgentVersion.MintedVersionNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t!before.minted,\n\t\t\t\t[\n\t\t\t\t\tafter.minted,\n\t\t\t\t\tafter.agent_id === before.agent_id,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"CreateAgent.NewAgentStartsAtVersionOne": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"\",\n\t\t\t\t!before.version.minted,\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === 1,\n\t\t\t\tafter.agent.current_version_id === command.version_id,\n\t\t\t\tafter.version.minted,\n\t\t\t\tafter.version.version === 1,\n\t\t\t\tafter.version.agent_id === command.agent_id,\n\t\t\t].every((ok) => ok)"
+			},
+			"UpdateAgent.ChangeMintsNextVersionOrNoOps": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tconst hasSystem = command.system !== null\n\t\t\tconst system = command.system ?? \"\"\n\t\t\tconst hasDescription = command.description !== null\n\t\t\tconst description = command.description ?? \"\"\n\t\t\tconst unchanged = [\n\t\t\t\tcommand.name === before.agent.name,\n\t\t\t\tcommand.model.id === before.agent.model_id,\n\t\t\t\thasSystem === before.agent.has_system,\n\t\t\t\tsystem === before.agent.system,\n\t\t\t\thasDescription === before.agent.has_description,\n\t\t\t\tdescription === before.agent.description,\n\t\t\t].every((same) => same)\n\t\t\treturn [\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\t[\n\t\t\t\t\t[\n\t\t\t\t\t\tunchanged,\n\t\t\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\t\t\tafter.agent.current_version_id === before.agent.current_version_id,\n\t\t\t\t\t\tafter.version.minted === before.version.minted,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\t!unchanged,\n\t\t\t\t\t\tafter.agent.version === before.agent.version + 1,\n\t\t\t\t\t\tafter.agent.current_version_id === command.next_version_id,\n\t\t\t\t\t\tafter.agent.name === command.name,\n\t\t\t\t\t\tafter.agent.model_id === command.model.id,\n\t\t\t\t\t\tafter.agent.has_system === hasSystem,\n\t\t\t\t\t\tafter.agent.system === system,\n\t\t\t\t\t\tafter.agent.has_description === hasDescription,\n\t\t\t\t\t\tafter.agent.description === description,\n\t\t\t\t\t\t!before.version.minted,\n\t\t\t\t\t\tafter.version.minted,\n\t\t\t\t\t\tafter.version.version === after.agent.version,\n\t\t\t\t\t\tafter.version.agent_id === command.agent_id,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t].some((ok) => ok),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"UpdateAgent.UnchangedConfigMintsNothing": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tconst hasSystem = command.system !== null\n\t\t\tconst system = command.system ?? \"\"\n\t\t\tconst hasDescription = command.description !== null\n\t\t\tconst description = command.description ?? \"\"\n\t\t\treturn [\n\t\t\t\tbefore.agent.status !== \"active\",\n\t\t\t\tcommand.name !== before.agent.name,\n\t\t\t\tcommand.model.id !== before.agent.model_id,\n\t\t\t\thasSystem !== before.agent.has_system,\n\t\t\t\tsystem !== before.agent.system,\n\t\t\t\thasDescription !== before.agent.has_description,\n\t\t\t\tdescription !== before.agent.description,\n\t\t\t\t[\n\t\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\t\tafter.agent.current_version_id === before.agent.current_version_id,\n\t\t\t\t\tafter.version.minted === before.version.minted,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Agents.AnAgentIsUpdated": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Agent.some((a) => [a.state.status === \"active\", a.state.version >= 2].every((ok) => ok))"
+			},
+			"Agents.AnAgentIsArchived": {
+				"kind": "sometimes",
+				"source": "(m) => m.Agent.some((a) => a.state.status === \"archived\")"
+			},
+			"Agents.AMintedVersionBelongsToItsAgent": {
+				"kind": "relation",
+				"source": "({ version, agent }) =>\n\t\t\t\t[\n\t\t\t\t\t!version.state.minted,\n\t\t\t\t\tversion.state.agent_id !== agent.id,\n\t\t\t\t\t[agent.state.status !== \"\", version.state.version <= agent.state.version].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t),\n\t\t\t\t].some((ok) => ok)"
+			},
+			"Agents.AnAgentsHeadIsItsLatestVersion": {
+				"kind": "relation",
+				"source": "({ agent, version }) =>\n\t\t\t\t[\n\t\t\t\t\tagent.state.status === \"\",\n\t\t\t\t\tagent.state.current_version_id !== version.id,\n\t\t\t\t\t[\n\t\t\t\t\t\tversion.state.minted,\n\t\t\t\t\t\tversion.state.agent_id === agent.id,\n\t\t\t\t\t\tversion.state.version === agent.state.version,\n\t\t\t\t\t\tversion.state.name === agent.state.name,\n\t\t\t\t\t\tversion.state.model_id === agent.state.model_id,\n\t\t\t\t\t\tversion.state.has_system === agent.state.has_system,\n\t\t\t\t\t\tversion.state.system === agent.state.system,\n\t\t\t\t\t\tversion.state.has_description === agent.state.has_description,\n\t\t\t\t\t\tversion.state.description === agent.state.description,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t].some((ok) => ok)"
+			},
+			"Agents.VersionNumbersAreDistinct": {
+				"kind": "relation",
+				"source": "({ a, b }) =>\n\t\t\t\t[\n\t\t\t\t\ta.id === b.id,\n\t\t\t\t\t!a.state.minted,\n\t\t\t\t\t!b.state.minted,\n\t\t\t\t\ta.state.agent_id !== b.state.agent_id,\n\t\t\t\t\ta.state.version !== b.state.version,\n\t\t\t\t].some((ok) => ok)"
+			}
+		}
+	}
+}

@@ -13,6 +13,20 @@
         "typescript": "catalog:",
       },
     },
+    "packages/agents": {
+      "name": "@checkfu/agents",
+      "version": "0.0.0",
+      "dependencies": {
+        "@alchemy.run/domain": "catalog:",
+        "alchemy": "catalog:",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/sessions": {
       "name": "@checkfu/sessions",
       "version": "0.0.0",
@@ -46,6 +60,8 @@
     "@alchemy.run/node-utils": ["@alchemy.run/node-utils@https://pkg.alchemy.run/@alchemy.run/node-utils/-/3ac66c7f1348b366450188594ee3013ea56adb8cb5bff8088cba7960961df25e.tgz", { "dependencies": { "chokidar": "^5.0.0", "rolldown": "1.2.16" }, "peerDependencies": { "effect": "^4.1.4" } }, "sha512-QoWbmntoVvL45vkqCuUDg4E1VFjcElKsbFUcdDowwABNNGsjRVEoj4Mi/VSyNbY1vt5q/s4jTuYTyXdn4Ijk7g=="],
 
     "@alchemy.run/sigil": ["@alchemy.run/sigil@0.1.0-alpha.4", "", { "peerDependencies": { "@types/react": ">=19.2.0", "react-devtools-core": ">=6.1.2" }, "optionalPeers": ["@types/react", "react-devtools-core"] }, "sha512-d6Uo16C2P6Wk7TNoYt4qzjjNGyjsrJLjq8bBotl86Nmcp/U6+R34/n4CZomqFERF2wMinut2DBqWNeUQPTBtFQ=="],
+
+    "@checkfu/agents": ["@checkfu/agents@workspace:packages/agents"],
 
     "@checkfu/sessions": ["@checkfu/sessions@workspace:packages/sessions"],
 
