@@ -1,5 +1,4 @@
 import * as Domain from "@alchemy.run/domain"
-import * as HashSet from "effect/HashSet"
 import * as Schema from "effect/Schema"
 import { ArchiveSession, SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { CompleteTurn, SessionStatusIdle } from "./CompleteTurn.command.ts"
@@ -14,6 +13,7 @@ import {
 } from "./RecordModelRequestEnd.command.ts"
 import {
 	DuplicateModelRequest,
+	OutOfOrderModelRequest,
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
@@ -34,8 +34,8 @@ export const SessionState = Schema.Union([
 		_tag: Schema.Literal("Running"),
 		turn: PositiveInt,
 		interrupt_requested: Schema.Boolean,
-		open_model_request_ids: Schema.HashSet(NonEmptyString),
-		started_model_request_ids: Schema.HashSet(NonEmptyString),
+		open_model_request_id: Schema.NullOr(NonEmptyString),
+		model_requests_started: NonNegativeInt,
 	}),
 	Schema.Struct({ _tag: Schema.Literal("Terminated") }),
 ])
@@ -87,6 +87,39 @@ export class Session extends Domain.Aggregate("Session", {
 		RecordSessionError,
 		ArchiveSession,
 	],
+	keyOf: (cmd) => cmd.session_id,
+	invariants: {
+		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
+		IdleTurnIsNonNegative: (s) => s._tag !== "Idle" || s.turn >= 0,
+		ModelRequestsStartedNonNegative: (s) => s._tag !== "Running" || s.model_requests_started >= 0,
+		OpenModelRequestRequiresStartedCount: (s) =>
+			s._tag !== "Running" || s.open_model_request_id === null || s.model_requests_started >= 1,
+	},
+	transitions: {
+		TerminatedSessionStaysTerminated: ({ before, after }) =>
+			before._tag !== "Terminated" || after._tag === "Terminated",
+		CreatedSessionNeverReturnsToUninitialized: ({ before, after }) =>
+			before._tag === "Uninitialized" || after._tag !== "Uninitialized",
+		TurnNeverDecreases: ({ before, after }) =>
+			(before._tag !== "Idle" && before._tag !== "Running") ||
+			(after._tag !== "Idle" && after._tag !== "Running") ||
+			after.turn >= before.turn,
+		TurnAdvancesByAtMostOne: ({ before, after }) =>
+			(before._tag !== "Idle" && before._tag !== "Running") ||
+			(after._tag !== "Idle" && after._tag !== "Running") ||
+			after.turn <= before.turn + 1,
+		ModelRequestsStartedNeverDecreasesWithinTurn: ({ before, after }) =>
+			before._tag !== "Running" ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.model_requests_started >= before.model_requests_started,
+		InterruptFlagStaysSetDuringSameTurn: ({ before, after }) =>
+			before._tag !== "Running" ||
+			!before.interrupt_requested ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.interrupt_requested,
+	},
 	decide: {
 		CreateSession: (state, cmd, ctx) =>
 			state._tag !== "Uninitialized"
@@ -103,7 +136,7 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserMessage: (state, cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
 			if (active._tag !== "Idle" && active._tag !== "Running") return active
-			const message = new UserMessage({ content: cmd.content })
+			const message = new UserMessage({ content: [{ type: "text", text: cmd.text }] })
 			return active._tag === "Running" ? [message] : [message, new SessionStatusRunning()]
 		},
 
@@ -118,10 +151,20 @@ export class Session extends Domain.Aggregate("Session", {
 		RecordModelRequestStart: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
 			if (running._tag !== "Running") return running
-			if (HashSet.has(running.started_model_request_ids, cmd.model_request_start_id)) {
+			if (
+				running.open_model_request_id !== null ||
+				cmd.request_seq <= running.model_requests_started
+			) {
 				return new DuplicateModelRequest({
 					session_id: ctx.id,
 					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			if (cmd.request_seq !== running.model_requests_started + 1) {
+				return new OutOfOrderModelRequest({
+					session_id: ctx.id,
+					expected_request_seq: running.model_requests_started + 1,
+					received_request_seq: cmd.request_seq,
 				})
 			}
 			return [new SpanModelRequestStart({ model_request_start_id: cmd.model_request_start_id })]
@@ -134,13 +177,18 @@ export class Session extends Domain.Aggregate("Session", {
 
 		RecordAgentMessage: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			return running._tag === "Running" ? [new AgentMessage({ content: cmd.content })] : running
+			return running._tag === "Running"
+				? [new AgentMessage({ content: [{ type: "text", text: cmd.text }] })]
+				: running
 		},
 
 		RecordModelRequestEnd: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
 			if (running._tag !== "Running") return running
-			if (!HashSet.has(running.open_model_request_ids, cmd.model_request_start_id)) {
+			if (
+				running.open_model_request_id !== cmd.model_request_start_id ||
+				running.model_requests_started !== cmd.request_seq
+			) {
 				return new UnknownModelRequest({
 					session_id: ctx.id,
 					model_request_start_id: cmd.model_request_start_id,
@@ -158,10 +206,10 @@ export class Session extends Domain.Aggregate("Session", {
 		CompleteTurn: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
 			if (running._tag !== "Running") return running
-			if (HashSet.size(running.open_model_request_ids) > 0) {
+			if (running.open_model_request_id !== null) {
 				return new OpenModelRequests({
 					session_id: ctx.id,
-					open_model_request_ids: Array.from(running.open_model_request_ids).sort(),
+					open_model_request_id: running.open_model_request_id,
 				})
 			}
 			return [new SessionStatusIdle({ stop_reason: cmd.stop_reason })]
@@ -186,10 +234,10 @@ export class Session extends Domain.Aggregate("Session", {
 					return [errorEvent, new SessionStatusTerminated()]
 				}
 				if (cmd.error.retry_status.type === "exhausted") {
-					if (HashSet.size(active.open_model_request_ids) > 0) {
+					if (active.open_model_request_id !== null) {
 						return new OpenModelRequests({
 							session_id: ctx.id,
-							open_model_request_ids: Array.from(active.open_model_request_ids).sort(),
+							open_model_request_id: active.open_model_request_id,
 						})
 					}
 					return [errorEvent, new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } })]
@@ -218,34 +266,25 @@ export class Session extends Domain.Aggregate("Session", {
 						_tag: "Running" as const,
 						turn: state.turn + 1,
 						interrupt_requested: false,
-						open_model_request_ids: HashSet.empty(),
-						started_model_request_ids: HashSet.empty(),
+						open_model_request_id: null,
+						model_requests_started: 0,
 					}
 				: state,
 		"span.model_request_start": (state, e) =>
 			state._tag === "Running"
 				? {
 						...state,
-						open_model_request_ids: HashSet.add(
-							state.open_model_request_ids,
-							e.model_request_start_id,
-						),
-						started_model_request_ids: HashSet.add(
-							state.started_model_request_ids,
-							e.model_request_start_id,
-						),
+						open_model_request_id: e.model_request_start_id,
+						model_requests_started: state.model_requests_started + 1,
 					}
 				: state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>
-			state._tag === "Running"
+			state._tag === "Running" && state.open_model_request_id === e.model_request_start_id
 				? {
 						...state,
-						open_model_request_ids: HashSet.remove(
-							state.open_model_request_ids,
-							e.model_request_start_id,
-						),
+						open_model_request_id: null,
 					}
 				: state,
 		"session.status_idle": (state) =>

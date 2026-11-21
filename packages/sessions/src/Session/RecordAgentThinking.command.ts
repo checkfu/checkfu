@@ -11,8 +11,8 @@ export class AgentThinking extends Domain.Event("agent.thinking", {
 }) {}
 
 export class RecordAgentThinking extends Domain.Command("RecordAgentThinking", {
-	target: SessionId,
 	input: {
+		session_id: SessionId,
 		turn: PositiveInt,
 		thinking: Schema.String,
 	},

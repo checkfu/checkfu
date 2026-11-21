@@ -1,0 +1,55 @@
+{
+	"version": 1,
+	"rules": {
+		"Sessions": {
+			"Session.RunningTurnIsPositive": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || s.turn >= 1"
+			},
+			"Session.IdleTurnIsNonNegative": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Idle\" || s.turn >= 0"
+			},
+			"Session.ModelRequestsStartedNonNegative": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
+			},
+			"Session.OpenModelRequestRequiresStartedCount": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || s.open_model_request_id === null || s.model_requests_started >= 1"
+			},
+			"Session.TerminatedSessionStaysTerminated": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" || after._tag === \"Terminated\""
+			},
+			"Session.CreatedSessionNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag === \"Uninitialized\" || after._tag !== \"Uninitialized\""
+			},
+			"Session.TurnNeverDecreases": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.turn >= before.turn"
+			},
+			"Session.TurnAdvancesByAtMostOne": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.turn <= before.turn + 1"
+			},
+			"Session.ModelRequestsStartedNeverDecreasesWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started >= before.model_requests_started"
+			},
+			"Session.InterruptFlagStaysSetDuringSameTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.interrupt_requested ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.interrupt_requested"
+			},
+			"Sessions.ASessionRunsATurn": {
+				"kind": "sometimes",
+				"source": "(m) => m.Session.some((s) => s.state._tag === \"Running\")"
+			},
+			"Sessions.ASessionTerminates": {
+				"kind": "sometimes",
+				"source": "(m) => m.Session.some((s) => s.state._tag === \"Terminated\")"
+			}
+		}
+	}
+}

@@ -22,9 +22,10 @@ export class UnknownModelRequest extends Domain.Rejection(
 ) {}
 
 export class RecordModelRequestEnd extends Domain.Command("RecordModelRequestEnd", {
-	target: SessionId,
 	input: {
+		session_id: SessionId,
 		turn: PositiveInt,
+		request_seq: PositiveInt,
 		model_request_start_id: NonEmptyString,
 		model_usage: ModelUsage,
 		is_error: Schema.NullOr(Schema.Boolean),

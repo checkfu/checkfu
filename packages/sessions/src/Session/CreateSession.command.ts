@@ -17,8 +17,8 @@ export class SessionAlreadyExists extends Domain.Rejection(
 ) {}
 
 export class CreateSession extends Domain.Command("CreateSession", {
-	target: SessionId,
 	input: {
+		session_id: SessionId,
 		agent_id: Schema.String,
 		agent_version: PositiveInt,
 		environment_id: Schema.String,

@@ -2,7 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
-import { PositiveInt, TextBlocks } from "./SessionTypes.ts"
+import { NonEmptyString, PositiveInt, TextBlocks } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 
 export class AgentMessage extends Domain.Event("agent.message", {
@@ -10,10 +10,10 @@ export class AgentMessage extends Domain.Event("agent.message", {
 }) {}
 
 export class RecordAgentMessage extends Domain.Command("RecordAgentMessage", {
-	target: SessionId,
 	input: {
+		session_id: SessionId,
 		turn: PositiveInt,
-		content: TextBlocks,
+		text: NonEmptyString,
 	},
 	events: [AgentMessage],
 	rejects: [SessionNotFound, SessionNotRunning, StaleTurn],

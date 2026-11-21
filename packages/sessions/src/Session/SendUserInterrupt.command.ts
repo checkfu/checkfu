@@ -7,7 +7,9 @@ import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 export class UserInterrupt extends Domain.Event("user.interrupt") {}
 
 export class SendUserInterrupt extends Domain.Command("SendUserInterrupt", {
-	target: SessionId,
+	input: {
+		session_id: SessionId,
+	},
 	events: [UserInterrupt],
 	rejects: [SessionNotFound, SessionTerminated, SessionNotRunning],
 }) {}

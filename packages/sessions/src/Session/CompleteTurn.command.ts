@@ -11,8 +11,8 @@ export class SessionStatusIdle extends Domain.Event("session.status_idle", {
 }) {}
 
 export class CompleteTurn extends Domain.Command("CompleteTurn", {
-	target: SessionId,
 	input: {
+		session_id: SessionId,
 		turn: PositiveInt,
 		stop_reason: StopReason,
 	},

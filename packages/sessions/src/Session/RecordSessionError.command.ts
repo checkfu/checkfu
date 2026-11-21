@@ -15,8 +15,8 @@ export class SessionErrorEvent extends Domain.Event("session.error", {
 }) {}
 
 export class RecordSessionError extends Domain.Command("RecordSessionError", {
-	target: SessionId,
 	input: {
+		session_id: SessionId,
 		turn: Schema.NullOr(PositiveInt),
 		error: SessionErrorBody,
 	},
