@@ -1,0 +1,325 @@
+import { type ApiError, CheckfuApi } from "@checkfu/api/Http/Api"
+import type * as Command from "effect/cli/Command"
+import type * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
+import type * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientError from "effect/http/HttpClientError"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import type * as Stdio from "effect/Stdio"
+import * as Stream from "effect/Stream"
+import { type CliFailure, formatClientError, isApiErrorEnvelope, usageError } from "./Errors.ts"
+import { diagnoseSessionCreateNotFound, ensureIdempotencyKeyHeader } from "./Hooks.ts"
+import {
+	isPlainRecord,
+	parseJsonOrYaml,
+	readPipedStdin,
+	readPipedStdinRecord,
+	resolveStructuredInput,
+	resolveTextOrFile,
+} from "./Input.ts"
+import { getClient, renderOutput } from "./RootCommand.ts"
+
+export interface GeneratedFlagDescriptor {
+	readonly propName: string
+	readonly flagName: string
+	readonly wireName: string
+	readonly location: "path" | "query" | "header" | "body"
+	readonly kind:
+		| "string"
+		| "int"
+		| "boolean"
+		| "literals"
+		| "file-text"
+		| "text-or-object"
+		| "structured"
+		| "repeat-structured"
+	readonly required: boolean
+	readonly min?: number
+	readonly max?: number
+}
+
+export interface GeneratedOperationDescriptor {
+	readonly cliLabel: string
+	readonly apiGroup: string
+	readonly apiEndpoint: string
+	readonly hasBody: boolean
+	readonly flags: ReadonlyArray<GeneratedFlagDescriptor>
+}
+
+interface RuntimeEndpoint {
+	readonly params: Schema.Top | undefined
+	readonly query: Schema.Top | undefined
+	readonly headers: Schema.Top | undefined
+	readonly payload: ReadonlyMap<
+		string,
+		{ readonly schemas: readonly [Schema.Top, ...Array<Schema.Top>] }
+	>
+}
+
+const lookupEndpoint = (
+	groupName: string,
+	endpointName: string,
+): Effect.Effect<RuntimeEndpoint, CliFailure> => {
+	const groups = CheckfuApi.groups as unknown as Record<
+		string,
+		{ readonly endpoints: Record<string, RuntimeEndpoint> } | undefined
+	>
+	const endpoint = groups[groupName]?.endpoints[endpointName]
+	if (endpoint === undefined) {
+		return Effect.fail(usageError(`Unknown CheckfuApi endpoint ${groupName}.${endpointName}.`))
+	}
+	return Effect.succeed(endpoint)
+}
+
+const decodeWithTop = (
+	schema: Schema.Top,
+	raw: unknown,
+	label: string,
+): Effect.Effect<unknown, CliFailure> =>
+	Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown, never, unknown>)(raw).pipe(
+		Effect.mapError((err) => usageError(`Invalid ${label}: ${err.message}`)),
+	)
+
+const parseTextOrObjectFlag = (
+	raw: string,
+	flagName: string,
+): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem> =>
+	Effect.gen(function* () {
+		const isFile = raw.startsWith("@") && !raw.startsWith("@@") && raw.length > 1
+		const text = yield* resolveTextOrFile(raw)
+		const trimmed = text.trim()
+		if (trimmed.startsWith("{") || trimmed.includes("\n") || /^id\s*:/.test(trimmed)) {
+			return yield* parseJsonOrYaml(trimmed, `--${flagName}`)
+		}
+		return isFile ? trimmed : text
+	})
+
+const unwrapFlagValue = (raw: unknown): Option.Option<unknown> =>
+	Option.isOption(raw) ? raw : Option.some(raw)
+
+const collectRequestParts = (
+	spec: GeneratedOperationDescriptor,
+	rawFlags: Readonly<Record<string, unknown>>,
+): Effect.Effect<
+	{
+		readonly params: Record<string, unknown>
+		readonly query: Record<string, string>
+		readonly headers: Record<string, string>
+		readonly body: Record<string, unknown> | undefined
+	},
+	CliFailure,
+	FileSystem.FileSystem | Stdio.Stdio
+> =>
+	Effect.gen(function* () {
+		const params: Record<string, unknown> = {}
+		const query: Record<string, string> = {}
+		const headers: Record<string, string> = {}
+		let body: Record<string, unknown> | undefined
+
+		const repeatFlag = spec.flags.find((fl) => fl.kind === "repeat-structured")
+		if (spec.hasBody) {
+			if (repeatFlag !== undefined) {
+				const rawList = rawFlags[repeatFlag.propName]
+				const items = Array.isArray(rawList) ? rawList : []
+				const stdinVal = yield* readPipedStdin()
+				if (items.length > 0 && Option.isSome(stdinVal)) {
+					return yield* usageError(
+						`Provide ${repeatFlag.wireName} via either --${repeatFlag.flagName} or stdin, not both.`,
+					)
+				}
+				if (items.length > 0) {
+					const parsed: Array<unknown> = []
+					for (const [index, entry] of items.entries()) {
+						parsed.push(
+							yield* resolveStructuredInput(String(entry), `--${repeatFlag.flagName}[${index}]`),
+						)
+					}
+					body = { [repeatFlag.wireName]: parsed }
+				} else if (Option.isSome(stdinVal)) {
+					const val = stdinVal.value
+					if (Array.isArray(val)) {
+						body = { [repeatFlag.wireName]: val }
+					} else if (isPlainRecord(val) && repeatFlag.wireName in val) {
+						body = { ...val }
+					} else if (isPlainRecord(val) && "type" in val) {
+						body = { [repeatFlag.wireName]: [val] }
+					} else {
+						return yield* usageError(
+							`Expected stdin to be { ${repeatFlag.wireName}: [...] }, an array, or a single item object.`,
+						)
+					}
+				} else {
+					return yield* usageError(
+						`Provide at least one item via --${repeatFlag.flagName} or stdin.`,
+					)
+				}
+			} else {
+				body = { ...(yield* readPipedStdinRecord(spec.cliLabel)) }
+			}
+		}
+
+		for (const fl of spec.flags) {
+			if (fl.kind === "repeat-structured") continue
+			const maybeVal = unwrapFlagValue(rawFlags[fl.propName])
+			if (Option.isNone(maybeVal)) continue
+			const value = maybeVal.value
+
+			if (fl.kind === "int" && typeof value === "number") {
+				if (fl.min !== undefined && value < fl.min) {
+					return yield* usageError(`--${fl.flagName} must be an integer >= ${fl.min}.`)
+				}
+				if (fl.max !== undefined && value > fl.max) {
+					return yield* usageError(
+						`--${fl.flagName} must be an integer between ${fl.min ?? 0} and ${fl.max}.`,
+					)
+				}
+			}
+
+			if (fl.location === "path") {
+				params[fl.wireName] = value
+				continue
+			}
+			if (fl.location === "query") {
+				query[fl.wireName] = String(value)
+				continue
+			}
+			if (fl.location === "header") {
+				headers[fl.wireName] = String(value)
+				continue
+			}
+			if (body !== undefined) {
+				if (fl.kind === "file-text") {
+					body[fl.wireName] = yield* resolveTextOrFile(String(value))
+				} else if (fl.kind === "text-or-object") {
+					body[fl.wireName] = yield* parseTextOrObjectFlag(String(value), fl.flagName)
+				} else if (fl.kind === "structured") {
+					body[fl.wireName] = yield* resolveStructuredInput(String(value), `--${fl.flagName}`)
+				} else {
+					body[fl.wireName] = value
+				}
+			}
+		}
+
+		return { params, query, headers, body }
+	})
+
+type UntypedClientMethod = (
+	req: Record<string, unknown>,
+) => Effect.Effect<unknown, ApiError | HttpClientError.HttpClientError | Schema.SchemaError>
+
+export const invokeGeneratedOperation = (
+	spec: GeneratedOperationDescriptor,
+	rawFlags: Readonly<Record<string, unknown>>,
+): Effect.Effect<
+	void,
+	CliFailure,
+	| Command.CommandContext<"checkfu">
+	| FileSystem.FileSystem
+	| HttpClient.HttpClient
+	| SecureRandom.SecureRandom
+	| Stdio.Stdio
+> =>
+	Effect.gen(function* () {
+		const endpoint = yield* lookupEndpoint(spec.apiGroup, spec.apiEndpoint)
+		const parts = yield* collectRequestParts(spec, rawFlags)
+
+		const request: Record<string, unknown> = {}
+		if (endpoint.params !== undefined) {
+			request["params"] = yield* decodeWithTop(
+				endpoint.params,
+				parts.params,
+				`${spec.cliLabel} params`,
+			)
+		}
+		if (endpoint.query !== undefined) {
+			request["query"] = yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
+		}
+		if (spec.hasBody) {
+			const jsonEntry = endpoint.payload.get("application/json")
+			if (jsonEntry !== undefined) {
+				const schema =
+					jsonEntry.schemas.length === 1 ? jsonEntry.schemas[0] : Schema.Union(jsonEntry.schemas)
+				request["payload"] = yield* decodeWithTop(schema, parts.body, `${spec.cliLabel} payload`)
+			} else {
+				request["payload"] = parts.body
+			}
+		}
+
+		const client = yield* getClient()
+
+		if (endpoint.headers !== undefined) {
+			const effectiveHeaders =
+				spec.apiGroup === "sessions" && spec.apiEndpoint === "sendEvents"
+					? yield* ensureIdempotencyKeyHeader(client, parts.headers)
+					: parts.headers
+			request["headers"] = yield* decodeWithTop(
+				endpoint.headers,
+				effectiveHeaders,
+				`${spec.cliLabel} headers`,
+			)
+		}
+
+		const clientGroups = client.api as unknown as Record<
+			string,
+			Record<string, UntypedClientMethod> | undefined
+		>
+		const method = clientGroups[spec.apiGroup]?.[spec.apiEndpoint]
+		if (method === undefined) {
+			return yield* usageError(`Client method ${spec.apiGroup}.${spec.apiEndpoint} is unavailable.`)
+		}
+
+		const result = yield* method(request).pipe(
+			Effect.catch((err) => {
+				if (
+					spec.apiGroup === "sessions" &&
+					spec.apiEndpoint === "create" &&
+					isApiErrorEnvelope(err) &&
+					err.error.type === "not_found_error"
+				) {
+					return Effect.flatMap(
+						diagnoseSessionCreateNotFound(client, request["payload"], err.error.message),
+						Effect.fail,
+					)
+				}
+				return Effect.fail(formatClientError(err))
+			}),
+		)
+
+		yield* renderOutput(result)
+	})
+
+export const invokeGeneratedStream = (
+	spec: GeneratedOperationDescriptor,
+	rawFlags: Readonly<Record<string, unknown>>,
+): Effect.Effect<
+	void,
+	CliFailure,
+	| Command.CommandContext<"checkfu">
+	| FileSystem.FileSystem
+	| HttpClient.HttpClient
+	| SecureRandom.SecureRandom
+	| Stdio.Stdio
+> =>
+	Effect.gen(function* () {
+		const endpoint = yield* lookupEndpoint(spec.apiGroup, spec.apiEndpoint)
+		const parts = yield* collectRequestParts(spec, rawFlags)
+
+		if (endpoint.params !== undefined) {
+			yield* decodeWithTop(endpoint.params, parts.params, `${spec.cliLabel} params`)
+		}
+		if (endpoint.query !== undefined) {
+			yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
+		}
+
+		const rawSessionId = parts.params["session_id"]
+		const sessionId = typeof rawSessionId === "string" ? rawSessionId : ""
+		const afterRaw = parts.query["after"]
+		const after = afterRaw === undefined ? undefined : Number(afterRaw)
+
+		const client = yield* getClient()
+		yield* client
+			.streamSessionEvents(sessionId, after === undefined ? undefined : { after })
+			.pipe(Stream.runForEach((event) => renderOutput(event.data, { streaming: true })))
+	})

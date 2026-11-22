@@ -32,6 +32,7 @@ import {
 	randomId,
 	requestPath,
 } from "./HttpHelpers.ts"
+import { OPENAPI_DOCUMENT_JSON } from "./OpenApiDocument.generated.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
@@ -71,7 +72,15 @@ const withCachePolicy = (path: string, response: HttpServerResponse.HttpServerRe
 	)
 }
 
-const ApiLive = HttpApiBuilder.layer(CheckfuApi, { openapiPath: "/openapi.json" }).pipe(
+const OpenApiRouteLive = HttpRouter.add(
+	"GET",
+	"/openapi.json",
+	HttpServerResponse.text(OPENAPI_DOCUMENT_JSON, {
+		contentType: "application/json; charset=utf-8",
+	}),
+)
+
+const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi), OpenApiRouteLive).pipe(
 	Layer.provide([HealthLive, AgentsLive, EnvironmentsLive, SessionsLive]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),

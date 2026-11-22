@@ -1,0 +1,32 @@
+{
+	"name": "@checkfu/cli",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"bin": {
+		"checkfu": "./src/main.ts"
+	},
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"@checkfu/agents": "workspace:*",
+		"@checkfu/api": "workspace:*",
+		"@checkfu/environments": "workspace:*",
+		"@checkfu/sessions": "workspace:*",
+		"@effect/platform-bun": "catalog:",
+		"effect": "catalog:",
+		"yaml": "catalog:"
+	},
+	"devDependencies": {
+		"@alchemy.run/domain": "catalog:",
+		"@effect/vitest": "catalog:",
+		"vitest": "catalog:"
+	}
+}
