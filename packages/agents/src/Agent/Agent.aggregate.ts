@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { NonNegativeInt } from "../AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
@@ -20,9 +21,16 @@ export const AgentState = Schema.Struct({
 })
 export type AgentState = typeof AgentState.Type
 
+export const AGENT_STATE_SCHEMA_VERSION = 1 as const
+
+export const AgentStateSnapshot = versionedSnapshot({
+	current: AGENT_STATE_SCHEMA_VERSION,
+	schema: AgentState,
+})
+
 export class Agent extends Domain.Aggregate("Agent", {
 	id: AgentId,
-	state: AgentState,
+	state: AgentStateSnapshot,
 	initial: {
 		status: "",
 		version: 0,

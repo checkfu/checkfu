@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { Agent } from "./Agent/Agent.aggregate.ts"
 import { AgentVersion } from "./Agent/AgentVersion.aggregate.ts"
+import { AgentVersionByNumberView } from "./Agent/AgentVersionByNumberView.view.ts"
 import { AgentVersionView } from "./Agent/AgentVersionView.view.ts"
 import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
@@ -9,7 +10,7 @@ import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 export class Agents extends Domain.Model("Agents", {
 	aggregates: [Agent, AgentVersion],
 	decisions: [CreateAgentDecision, UpdateAgentDecision],
-	views: [AgentView, AgentVersionView],
+	views: [AgentView, AgentVersionView, AgentVersionByNumberView],
 	relations: {
 		AMintedVersionBelongsToItsAgent: Domain.Relation({
 			over: { version: AgentVersion, agent: Agent },
@@ -63,5 +64,5 @@ export class Agents extends Domain.Model("Agents", {
 export class AgentsApi extends Domain.Api("AgentsApi", {
 	model: Agents,
 	commands: ["CreateAgent", "UpdateAgent", "ArchiveAgent"],
-	views: ["AgentView", "AgentVersionView"],
+	views: ["AgentView", "AgentVersionView", "AgentVersionByNumberView"],
 }) {}

@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { NonNegativeInt } from "../EnvironmentTypes.ts"
 import { ArchiveEnvironment, EnvironmentArchived } from "./ArchiveEnvironment.command.ts"
@@ -24,9 +25,16 @@ export const EnvironmentState = Schema.Struct({
 })
 export type EnvironmentState = typeof EnvironmentState.Type
 
+export const ENVIRONMENT_STATE_SCHEMA_VERSION = 1 as const
+
+export const EnvironmentStateSnapshot = versionedSnapshot({
+	current: ENVIRONMENT_STATE_SCHEMA_VERSION,
+	schema: EnvironmentState,
+})
+
 export class Environment extends Domain.Aggregate("Environment", {
 	id: EnvironmentId,
-	state: EnvironmentState,
+	state: EnvironmentStateSnapshot,
 	initial: {
 		status: "",
 		version: 0,

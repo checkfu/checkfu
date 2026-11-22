@@ -9,6 +9,10 @@ import { AgentArchivedError } from "../src/Agent/AgentArchived.rejection.ts"
 import { AgentNotFound } from "../src/Agent/AgentNotFound.rejection.ts"
 import { AgentVersion, AgentVersionMinted } from "../src/Agent/AgentVersion.aggregate.ts"
 import { AgentVersionAlreadyExists } from "../src/Agent/AgentVersionAlreadyExists.rejection.ts"
+import {
+	AgentVersionByNumberView,
+	agentVersionLookupKey,
+} from "../src/Agent/AgentVersionByNumberView.view.ts"
 import { AgentVersionView } from "../src/Agent/AgentVersionView.view.ts"
 import { AgentView } from "../src/Agent/AgentView.view.ts"
 import { AgentArchived, ArchiveAgent } from "../src/Agent/ArchiveAgent.command.ts"
@@ -105,6 +109,17 @@ describe("Agents", () => {
 					created_at: t0,
 					updated_at: t0,
 					archived_at: null,
+				}),
+				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 1), {
+					id: v1.id,
+					agent_id: agent.id,
+					type: "agent",
+					version: 1,
+					name: "Coding Assistant",
+					model: { id: "gpt-5.4" },
+					system: "You are helpful.",
+					description: "General coding agent",
+					created_at: t0,
 				}),
 				Story.view(AgentVersionView, v1, {
 					id: v1.id,
@@ -233,6 +248,28 @@ describe("Agents", () => {
 				created_at: t0,
 				updated_at: t1,
 				archived_at: null,
+			}),
+			Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 1), {
+				id: v1.id,
+				agent_id: agent.id,
+				type: "agent",
+				version: 1,
+				name: "Reviewer",
+				model: { id: "gpt-5.4" },
+				system: null,
+				description: null,
+				created_at: t0,
+			}),
+			Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 2), {
+				id: v2.id,
+				agent_id: agent.id,
+				type: "agent",
+				version: 2,
+				name: "Reviewer",
+				model: { id: "gpt-5.4" },
+				system: "Review every pull request carefully.",
+				description: "Code reviewer",
+				created_at: t1,
 			}),
 			Story.view(AgentVersionView, v1, {
 				id: v1.id,
