@@ -418,18 +418,20 @@ export const makeCheckfuClient = (
 										}),
 									),
 								),
+								Stream.rechunk(1),
 								Stream.mapEffect((sseEvent) =>
 									Effect.gen(function* () {
 										const data = yield* parseSseData(sseEvent.data)
 										const seq = parseSeq(sseEvent.id, data)
-										if (seq !== undefined) {
-											loopState.cursor = String(seq)
-										} else if (sseEvent.id !== undefined && sseEvent.id.length > 0) {
+										if (sseEvent.id !== undefined && sseEvent.id.length > 0) {
 											loopState.cursor = sseEvent.id
+										} else if (seq !== undefined) {
+											loopState.cursor = String(seq)
 										}
 										sawEvent = true
 										if (requestSpec.isTerminalEvent?.(data) === true) {
 											terminalReached = true
+											loopState.done = true
 										}
 										return {
 											id: sseEvent.id,
@@ -439,6 +441,7 @@ export const makeCheckfuClient = (
 										} satisfies SessionStreamEvent
 									}),
 								),
+								Stream.takeUntil(() => terminalReached),
 								Stream.catch((err) => {
 									if (err instanceof StreamBodyReadError) {
 										const nextAttempt = (sawEvent ? 0 : loopState.attempt) + 1

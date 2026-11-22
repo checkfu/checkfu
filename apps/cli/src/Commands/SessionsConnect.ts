@@ -61,6 +61,7 @@ interface ConnectState {
 	readonly status: "idle" | "running" | "terminated"
 	readonly liveStatus: "idle" | "running" | "terminated"
 	readonly liveTurn: number
+	readonly liveStateVersion: number
 	readonly connectHeadSeq: number
 	readonly lastObservedSeq: number
 	readonly observedTurn: number
@@ -257,6 +258,7 @@ const renderConnectEvent = (
 						observedTurn: nextObserved,
 						liveStatus: reachedLive ? ("running" as const) : state.liveStatus,
 						liveTurn: reachedLive ? nextObserved : state.liveTurn,
+						liveStateVersion: reachedLive ? state.liveStateVersion + 1 : state.liveStateVersion,
 					}
 				})
 				break
@@ -316,10 +318,14 @@ const renderConnectEvent = (
 						nextFailed.set(turn, turnError ?? "Model retries exhausted.")
 						failedTurnErrors = nextFailed
 					}
+					const reachedLiveIdle =
+						turn > state.liveTurn || (turn === state.liveTurn && state.liveStatus === "running")
 					return {
 						...state,
 						status: "idle" as const,
 						liveStatus: turn >= state.liveTurn ? ("idle" as const) : state.liveStatus,
+						liveTurn: Math.max(state.liveTurn, turn),
+						liveStateVersion: reachedLiveIdle ? state.liveStateVersion + 1 : state.liveStateVersion,
 						settledTurn: Math.max(state.settledTurn, turn),
 						latestSettledStopReason,
 						failedTurnErrors,
@@ -352,6 +358,7 @@ const renderConnectEvent = (
 						...state,
 						status: "terminated" as const,
 						liveStatus: "terminated" as const,
+						liveStateVersion: state.liveStateVersion + 1,
 						failedTurnErrors,
 					}
 				})
@@ -420,17 +427,28 @@ const dispatchUserLine = (
 		}
 
 		const key = yield* client.generateIdempotencyKey()
-		yield* Ref.update(stateRef, (state) => ({
-			...state,
-			localSentMessages: [
-				...state.localSentMessages,
-				{
-					id: key,
-					text: line,
-					minSeq: Math.max(state.connectHeadSeq, state.lastObservedSeq),
-				},
-			],
-		}))
+		const sendSnapshot = yield* Ref.modify(
+			stateRef,
+			(state) =>
+				[
+					{
+						liveStatus: state.liveStatus,
+						liveTurn: state.liveTurn,
+						liveStateVersion: state.liveStateVersion,
+					},
+					{
+						...state,
+						localSentMessages: [
+							...state.localSentMessages,
+							{
+								id: key,
+								text: line,
+								minSeq: Math.max(state.connectHeadSeq, state.lastObservedSeq),
+							},
+						],
+					},
+				] as const,
+		)
 		const res = yield* Effect.result(
 			sendConnectEventsWithRetry(
 				client.api.sessions.sendEvents({
@@ -463,22 +481,30 @@ const dispatchUserLine = (
 		yield* Ref.update(stateRef, (state) => {
 			const nextSubmitted = new Set(state.submittedTurns)
 			nextSubmitted.add(turn)
-			const startedFromIdle = state.liveStatus === "idle" && turn > state.liveTurn
+			const startedFromIdle =
+				sendSnapshot.liveStatus === "idle" &&
+				state.liveStateVersion === sendSnapshot.liveStateVersion &&
+				state.liveStatus === "idle" &&
+				turn === sendSnapshot.liveTurn + 1
 			return {
 				...state,
 				targetTurn: Math.max(state.targetTurn, turn),
 				submittedTurns: nextSubmitted,
 				liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
-				liveTurn: startedFromIdle ? state.liveTurn + 1 : state.liveTurn,
+				liveTurn: startedFromIdle ? turn : state.liveTurn,
 			}
 		})
 		return "continue" as const
 	})
 
-const resolveCursorBaseline = (
+type SessionSnapshotResponse = Effect.Success<ReturnType<typeof fetchSessionStatusWithRetry>>
+
+const MAX_SUFFIX_CONSISTENCY_ATTEMPTS = 3
+
+const resolveCursorBaselineFromPrefix = (
 	client: CheckfuClient,
 	sessionId: SessionId,
-	after: number | undefined,
+	after: number,
 ): Effect.Effect<
 	{
 		readonly status: ConnectState["status"]
@@ -486,15 +512,8 @@ const resolveCursorBaseline = (
 		readonly settledTurn: number
 	},
 	CliFailure
-> => {
-	if (after === undefined || after === 0) {
-		return Effect.succeed({
-			status: "idle" as const,
-			observedTurn: 0,
-			settledTurn: 0,
-		})
-	}
-	return Effect.gen(function* () {
+> =>
+	Effect.gen(function* () {
 		let pageCursor = 0
 		let lastSeenSeq = 0
 		let observedTurn = 0
@@ -549,6 +568,134 @@ const resolveCursorBaseline = (
 		}
 		return { status, observedTurn, settledTurn }
 	})
+
+const resolveCursorBaseline = (
+	client: CheckfuClient,
+	sessionId: SessionId,
+	initialSession: SessionSnapshotResponse,
+	after: number | undefined,
+	headSeq: number,
+): Effect.Effect<
+	{
+		readonly status: ConnectState["status"]
+		readonly observedTurn: number
+		readonly settledTurn: number
+		readonly latestSession: SessionSnapshotResponse
+		readonly connectHeadSeq: number
+	},
+	CliFailure
+> => {
+	if (after === undefined || after === 0) {
+		return Effect.succeed({
+			status: "idle" as const,
+			observedTurn: 0,
+			settledTurn: 0,
+			latestSession: initialSession,
+			connectHeadSeq: headSeq,
+		})
+	}
+	if (after > headSeq) {
+		return Effect.fail(
+			usageError(
+				`--after cursor ${after} is beyond the latest session event sequence (${headSeq}).`,
+			),
+		)
+	}
+	return Effect.gen(function* () {
+		// Derive the cursor baseline from the shorter side: when resuming near the head,
+		// scan only the suffix (after, head] and reconcile against a consistent head snapshot.
+		if (headSeq - after <= after) {
+			let before = initialSession
+			let latestHeadSeq = headSeq
+			for (let attempt = 0; attempt < MAX_SUFFIX_CONSISTENCY_ATTEMPTS; attempt++) {
+				let pageCursor = after
+				let runningAfter = 0
+				let firstStatusAfter:
+					| "session.status_running"
+					| "session.status_idle"
+					| "session.status_terminated"
+					| "session.archived"
+					| undefined
+
+				while (true) {
+					const page = yield* client.api.sessions
+						.listEvents({
+							params: { session_id: sessionId },
+							query: {
+								after: String(pageCursor),
+								limit: "100",
+								order: "asc",
+							},
+						})
+						.pipe(Effect.mapError(formatClientError))
+					for (const entry of page.data) {
+						const seq = typeof entry["seq"] === "number" ? entry["seq"] : undefined
+						if (seq !== undefined) {
+							latestHeadSeq = Math.max(latestHeadSeq, seq)
+						}
+						const eventType = typeof entry["type"] === "string" ? entry["type"] : undefined
+						if (eventType === "session.status_running") {
+							runningAfter += 1
+							firstStatusAfter ??= eventType
+						} else if (
+							eventType === "session.status_idle" ||
+							eventType === "session.status_terminated" ||
+							eventType === "session.archived"
+						) {
+							firstStatusAfter ??= eventType
+						}
+					}
+					if (!page.has_more || page.next_cursor === null) {
+						break
+					}
+					pageCursor = page.next_cursor
+				}
+
+				const afterSnap = yield* fetchSessionStatusWithRetry(client, sessionId)
+				const consistent =
+					before.turn === afterSnap.turn &&
+					before.status === afterSnap.status &&
+					(before.archived_at === null) === (afterSnap.archived_at === null)
+				if (consistent) {
+					const observedTurn = Math.max(0, afterSnap.turn - runningAfter)
+					let status: ConnectState["status"]
+					let settledTurn: number
+					if (firstStatusAfter === "session.status_running") {
+						status = "idle"
+						settledTurn = observedTurn
+					} else if (firstStatusAfter === "session.status_idle") {
+						status = "running"
+						settledTurn = Math.max(0, observedTurn - 1)
+					} else if (firstStatusAfter === "session.archived") {
+						status = "terminated"
+						settledTurn = observedTurn
+					} else if (firstStatusAfter === "session.status_terminated") {
+						status = observedTurn > 0 ? "running" : "idle"
+						settledTurn = observedTurn
+					} else {
+						status = afterSnap.status
+						settledTurn =
+							afterSnap.status === "running" ? Math.max(0, observedTurn - 1) : observedTurn
+					}
+					return {
+						status,
+						observedTurn,
+						settledTurn,
+						latestSession: afterSnap,
+						connectHeadSeq: latestHeadSeq,
+					}
+				}
+				before = afterSnap
+			}
+		}
+
+		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after)
+		return {
+			...prefix,
+			latestSession: initialSession,
+			connectHeadSeq: headSeq,
+		}
+	})
 }
 
 export const sessionsConnectCommand = Command.make(
@@ -597,7 +744,7 @@ export const sessionsConnectCommand = Command.make(
 			const terminal = yield* Terminal.Terminal
 			const client = yield* getClient()
 
-			const session = yield* client.api.sessions
+			const initialSession = yield* client.api.sessions
 				.get({ params: { session_id: sessionId } })
 				.pipe(Effect.mapError(formatClientError))
 
@@ -605,12 +752,10 @@ export const sessionsConnectCommand = Command.make(
 				root.format !== "auto" || Option.isSome(root.transform) || root.rawOutput
 
 			const after = Option.getOrUndefined(input.after)
-			const baseline = yield* resolveCursorBaseline(client, sessionId, after)
-			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
-			const isInteractiveTty = yield* stdio.stdinIsTerminal
-
-			let connectHeadSeq = after ?? 0
-			if (!initiallyEnded) {
+			const initialEnded =
+				initialSession.status === "terminated" || initialSession.archived_at !== null
+			let headSeq = 0
+			if ((after !== undefined && after > 0) || !initialEnded) {
 				const latestPage = yield* client.api.sessions
 					.listEvents({
 						params: { session_id: sessionId },
@@ -619,9 +764,21 @@ export const sessionsConnectCommand = Command.make(
 					.pipe(Effect.mapError(formatClientError))
 				const latestEntry = latestPage.data[0]
 				if (latestEntry !== undefined && typeof latestEntry["seq"] === "number") {
-					connectHeadSeq = Math.max(connectHeadSeq, latestEntry["seq"])
+					headSeq = latestEntry["seq"]
 				}
 			}
+
+			const baseline = yield* resolveCursorBaseline(
+				client,
+				sessionId,
+				initialSession,
+				after,
+				headSeq,
+			)
+			const session = baseline.latestSession
+			const connectHeadSeq = Math.max(after ?? 0, baseline.connectHeadSeq)
+			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
+			const isInteractiveTty = yield* stdio.stdinIsTerminal
 
 			yield* writeStderrLine(
 				`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
@@ -631,6 +788,7 @@ export const sessionsConnectCommand = Command.make(
 				status: baseline.status,
 				liveStatus: session.status,
 				liveTurn: session.turn,
+				liveStateVersion: 0,
 				connectHeadSeq,
 				lastObservedSeq: after ?? 0,
 				observedTurn: baseline.observedTurn,

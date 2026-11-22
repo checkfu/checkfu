@@ -1576,4 +1576,151 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 	})
+
+	it("ignores delayed queued receipts after refusal and resumes near head without scanning from seq 0", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Delayed queued turn-2 receipt arriving AFTER SSE delivers turn 1's idle(refusal)
+					//    must NOT mark turn 2 as running
+					const delayedReceiptSigint = makeSigintController()
+					const delayedTurn1Running = yield* Deferred.make<void>()
+					const releaseDelayedTurn1 = yield* Deferred.make<void>()
+					const delayedIdleDelivered = yield* Deferred.make<void>()
+					const delayedCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(delayedTurn1Running, undefined)
+								yield* Deferred.await(releaseDelayedTurn1)
+								return {
+									thinking: null,
+									text: "Refused turn 1",
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "refusal" as const },
+								}
+							}),
+					})
+					const delayedSessionId = yield* createReadySession(delayedCli)
+					let delayedPosts = 0
+					let sigintAfterDelayedReceipt = true
+					const delayedRes = yield* delayedCli.run(
+						["sessions", "connect", "--session-id", delayedSessionId],
+						{
+							stdinIsTerminal: true,
+							sigintController: delayedReceiptSigint,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									delayedPosts++
+									const res = await next(request)
+									if (delayedPosts === 2) {
+										// Release turn 1 to stop with refusal and hold the queued receipt until
+										// SSE has delivered session.status_idle(refusal)
+										await Effect.runPromise(Deferred.succeed(releaseDelayedTurn1, undefined))
+										await Effect.runPromise(Deferred.await(delayedIdleDelivered))
+										await new Promise((resolve) => setTimeout(resolve, 30))
+									}
+									return res
+								}
+								if (!request.url.includes("/events/stream")) return next(request)
+								const res = await next(request)
+								if (res.status !== 200 || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								let idleSignaled = false
+								const observed = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										const text = decoder.decode(chunk.value, { stream: true })
+										controller.enqueue(chunk.value)
+										if (!idleSignaled && text.includes("session.status_idle")) {
+											idleSignaled = true
+											await Effect.runPromise(Deferred.succeed(delayedIdleDelivered, undefined))
+										}
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(observed, { status: 200, headers: res.headers })
+							},
+							terminalReads: [
+								Effect.succeed("start turn 1"),
+								Deferred.await(delayedTurn1Running).pipe(Effect.as("queue turn 2")),
+								Effect.sync(() => {
+									sigintAfterDelayedReceipt = delayedReceiptSigint.handleSigint()
+								}).pipe(Effect.as("/exit")),
+							],
+						},
+					)
+					expect(delayedRes.exitCode).toBe(0)
+					expect(delayedPosts).toBe(2)
+					expect(sigintAfterDelayedReceipt).toBe(false)
+					expect(delayedRes.stderr).not.toContain("Interrupt requested.")
+
+					// 9) Resuming near the head with --after N uses the head+suffix path instead of
+					//    scanning history from sequence 0
+					const resumeCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `T${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const resumeSessionId = yield* createReadySession(resumeCli)
+					for (const msg of ["one", "two", "three"]) {
+						const turnRes = yield* resumeCli.run(
+							["sessions", "connect", "--session-id", resumeSessionId],
+							{ stdin: `${msg}\n` },
+						)
+						expect(turnRes.exitCode).toBe(0)
+					}
+					const latestList = yield* resumeCli.run([
+						"sessions:events",
+						"list",
+						"--session-id",
+						resumeSessionId,
+						"--limit",
+						"1",
+						"--order",
+						"desc",
+					])
+					const headSeq =
+						(JSON.parse(latestList.stdout) as { data: Array<{ seq: number }> }).data[0]?.seq ?? 0
+					expect(headSeq).toBeGreaterThan(5)
+
+					const ascQueries: Array<string> = []
+					const resumed = yield* resumeCli.run(
+						["sessions", "connect", "--session-id", resumeSessionId, "--after", String(headSeq)],
+						{
+							stdin: "four\n",
+							interceptFetch: async (next, request) => {
+								const url = new URL(request.url)
+								if (
+									request.method === "GET" &&
+									url.pathname.endsWith("/events") &&
+									url.searchParams.get("order") === "asc"
+								) {
+									ascQueries.push(url.search)
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(resumed.exitCode).toBe(0)
+					expect(resumed.stdout).toContain("T4:four")
+					expect(resumed.stdout).not.toContain("T1:one")
+					expect(ascQueries).toHaveLength(1)
+					expect(ascQueries[0]).toContain(`after=${headSeq}`)
+				}),
+			),
+		)
+	})
 })

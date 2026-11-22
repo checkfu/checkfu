@@ -431,6 +431,22 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(
 						(JSON.parse(quotedAgentFileSession.stdout) as { agent: { id: string } }).agent.id,
 					).toBe(agent.id)
+
+					// Misspelled top-level or nested keys in request bodies are rejected instead of dropped
+					const typoTopLevel = yield* cli.run(["environments", "create"], {
+						stdin: "name: typo-env\nconfg:\n  type: cloud\n",
+					})
+					expect(typoTopLevel.exitCode).toBe(1)
+					expect(typoTopLevel.stdout).toBe("")
+					expect(typoTopLevel.stderr).toContain("confg")
+
+					const typoNested = yield* cli.run(["environments", "create"], {
+						stdin:
+							"name: typo-env\nconfig:\n  type: cloud\n  netwroking:\n    type: unrestricted\n",
+					})
+					expect(typoNested.exitCode).toBe(1)
+					expect(typoNested.stdout).toBe("")
+					expect(typoNested.stderr).toContain("netwroking")
 				}),
 			),
 		)

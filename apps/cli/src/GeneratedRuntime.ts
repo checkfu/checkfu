@@ -79,10 +79,12 @@ const decodeWithTop = (
 	schema: Schema.Top,
 	raw: unknown,
 	label: string,
+	options?: { readonly onExcessProperty?: "ignore" | "error" },
 ): Effect.Effect<unknown, CliFailure> =>
-	Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown, never, unknown>)(raw).pipe(
-		Effect.mapError((err) => usageError(`Invalid ${label}: ${err.message}`)),
-	)
+	Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown, never, unknown>)(
+		raw,
+		options,
+	).pipe(Effect.mapError((err) => usageError(`Invalid ${label}: ${err.message}`)))
 
 const parseTextOrObjectFlag = (
 	raw: string,
@@ -255,7 +257,9 @@ export const invokeGeneratedOperation = (
 			if (jsonEntry !== undefined) {
 				const schema =
 					jsonEntry.schemas.length === 1 ? jsonEntry.schemas[0] : Schema.Union(jsonEntry.schemas)
-				request["payload"] = yield* decodeWithTop(schema, parts.body, `${spec.cliLabel} payload`)
+				request["payload"] = yield* decodeWithTop(schema, parts.body, `${spec.cliLabel} payload`, {
+					onExcessProperty: "error",
+				})
 			} else {
 				request["payload"] = parts.body
 			}

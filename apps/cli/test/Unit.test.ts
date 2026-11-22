@@ -503,7 +503,13 @@ describe("normalizeApiUrl", () => {
 						lastEventId: headers.get("last-event-id"),
 					})
 					if (seenCustomRequests.length === 1) {
-						return new Response('id: cur_1\nevent: custom.ping\ndata: {"ok":true}\n\n', {
+						return new Response('id: cur_7\nevent: custom.ping\ndata: {"seq":7,"ok":true}\n\n', {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (seenCustomRequests.length === 2) {
+						return new Response('id: 007\nevent: custom.ping\ndata: {"seq":7,"ok":true}\n\n', {
 							status: 200,
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
 						})
@@ -535,10 +541,59 @@ describe("normalizeApiUrl", () => {
 					{
 						url: "http://localhost:1337/v1/custom/abc/stream?filter=live",
 						trace: "t1",
-						lastEventId: "cur_1",
+						lastEventId: "cur_7",
+					},
+					{
+						url: "http://localhost:1337/v1/custom/abc/stream?filter=live",
+						trace: "t1",
+						lastEventId: "007",
 					},
 				])
-				expect(Array.from(customEvents).map((e) => e.data)).toEqual([{ ok: true }])
+				expect(Array.from(customEvents).map((e) => ({ id: e.id, seq: e.seq }))).toEqual([
+					{ id: "cur_7", seq: 7 },
+					{ id: "007", seq: 7 },
+				])
+
+				// 8) Terminal event (session.archived) finishes the stream immediately even if the HTTP
+				//    body remains open or contains trailing frames in the same chunk
+				let openBodyCanceled = false
+				const openAfterArchiveFetch = (async () => {
+					let sent = false
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (!sent) {
+								sent = true
+								controller.enqueue(
+									encoder.encode(
+										'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\nid: 2\nevent: bogus\ndata: NOT_JSON\n\n',
+									),
+								)
+								return
+							}
+							return new Promise<void>(() => {
+								// intentionally never resolves — simulates server keeping connection open
+							})
+						},
+						cancel() {
+							openBodyCanceled = true
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+				const archivedImmediate = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_open_archive", {
+							maxReconnectAttempts: 0,
+							baseReconnectDelayMs: 1,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(openAfterArchiveFetch)))
+				expect(Array.from(archivedImmediate).map((e) => e.seq)).toEqual([1])
+				expect(openBodyCanceled).toBe(true)
 			}),
 		)
 	})
