@@ -11,13 +11,19 @@ import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
 import { UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
-import type { AgentModel } from "@checkfu/agents/AgentTypes"
+import {
+	AgentDescription,
+	type AgentModel,
+	AgentName,
+	AgentSystem,
+} from "@checkfu/agents/AgentTypes"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import { createPiModels, resolveCatalogModel } from "../Pi/PiModels.ts"
 import { EventBatch } from "../Checkfu.model.ts"
 import { CheckfuApi } from "./Api.ts"
@@ -36,6 +42,12 @@ import {
 	randomId,
 	reject,
 } from "./HttpHelpers.ts"
+
+const ValidatedAgentFields = Schema.Struct({
+	name: AgentName,
+	system: Schema.NullOr(AgentSystem),
+	description: Schema.NullOr(AgentDescription),
+})
 
 export const AgentVersionWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/AgentVersionWaitTimeout",
@@ -205,26 +217,31 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					if (committed.version !== payload.version) {
 						return yield* reject(409, "Agent version does not match.")
 					}
+					const nextFields = yield* Schema.decodeUnknownEffect(ValidatedAgentFields)({
+						name: payload.name ?? committed.name,
+						system:
+							payload.system !== undefined
+								? payload.system
+								: committed.has_system
+									? committed.system
+									: null,
+						description:
+							payload.description !== undefined
+								? payload.description
+								: committed.has_description
+									? committed.description
+									: null,
+					}).pipe(Effect.catch((error) => reject(400, error.message)))
 					const nextVersionId = AgentVersionId.make(yield* randomId(random, "aver"))
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,
 							expected_version: payload.version,
 							next_version_id: nextVersionId,
-							name: payload.name ?? committed.name,
+							name: nextFields.name,
 							model: model ?? { id: committed.model_id },
-							system:
-								payload.system !== undefined
-									? payload.system
-									: committed.has_system
-										? committed.system
-										: null,
-							description:
-								payload.description !== undefined
-									? payload.description
-									: committed.has_description
-										? committed.description
-										: null,
+							system: nextFields.system,
+							description: nextFields.description,
 						}),
 					)
 					return yield* loadCommittedAgentVersion(

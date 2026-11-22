@@ -1,9 +1,13 @@
 import * as v8 from "node:v8"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
-import { Agent } from "@checkfu/agents/Agent/Agent.aggregate"
+import { Agent, AgentStateSnapshot } from "@checkfu/agents/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/agents/Agent/Agent.id"
-import { AgentVersion } from "@checkfu/agents/Agent/AgentVersion.aggregate"
+import {
+	AgentVersion,
+	AgentVersionMinted,
+	AgentVersionStateSnapshot,
+} from "@checkfu/agents/Agent/AgentVersion.aggregate"
 import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
 import {
 	AgentVersionByNumberView,
@@ -11,9 +15,9 @@ import {
 } from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
 import { AgentVersionView } from "@checkfu/agents/Agent/AgentVersionView.view"
 import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
-import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
+import { AgentCreated, CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
-import { UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
+import { AgentUpdated, UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
 import { Agents } from "@checkfu/agents/Agents.model"
 import {
@@ -21,12 +25,21 @@ import {
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/agents/AgentTypes"
-import { CreateEnvironment } from "@checkfu/environments/Environment/CreateEnvironment.command"
+import {
+	CreateEnvironment,
+	EnvironmentCreated,
+} from "@checkfu/environments/Environment/CreateEnvironment.command"
 import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
-import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
+import {
+	Environment,
+	EnvironmentStateSnapshot,
+} from "@checkfu/environments/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
-import { UpdateEnvironment } from "@checkfu/environments/Environment/UpdateEnvironment.command"
+import {
+	EnvironmentUpdated,
+	UpdateEnvironment,
+} from "@checkfu/environments/Environment/UpdateEnvironment.command"
 import { Environments } from "@checkfu/environments/Environments.model"
 import {
 	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
@@ -46,6 +59,7 @@ import * as Effect from "effect/Effect"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import { Checkfu } from "../src/Checkfu.model.ts"
@@ -2834,17 +2848,13 @@ describe("Agent and environment field length limits", () => {
 							>
 						>
 					}
-					const schemaJson = (path: string, method: string, status?: string) =>
+					const schemaJson = (path: string, method: string) =>
 						JSON.stringify(
-							status === undefined
-								? spec.paths[path]?.[method]?.requestBody?.content?.["application/json"]?.schema
-								: spec.paths[path]?.[method]?.responses?.[status]?.content?.["application/json"]
-										?.schema,
+							spec.paths[path]?.[method]?.requestBody?.content?.["application/json"]?.schema,
 						)
 					for (const json of [
 						schemaJson("/v1/agents", "post"),
 						schemaJson("/v1/agents/{agent_id}", "post"),
-						schemaJson("/v1/agents/{agent_id}", "get", "200"),
 					]) {
 						expect(json).toContain(`"maxLength":${MAX_AGENT_NAME_LENGTH}`)
 						expect(json).toContain(`"maxLength":${MAX_AGENT_DESCRIPTION_LENGTH}`)
@@ -2853,7 +2863,6 @@ describe("Agent and environment field length limits", () => {
 					for (const json of [
 						schemaJson("/v1/environments", "post"),
 						schemaJson("/v1/environments/{environment_id}", "post"),
-						schemaJson("/v1/environments/{environment_id}", "get", "200"),
 					]) {
 						expect(json).toContain(`"maxLength":${MAX_ENVIRONMENT_NAME_LENGTH}`)
 						expect(json).toContain(`"maxLength":${MAX_ENVIRONMENT_DESCRIPTION_LENGTH}`)
@@ -2864,6 +2873,159 @@ describe("Agent and environment field length limits", () => {
 			await closeAll()
 		}
 	})
+
+	const makeDurableObjectsPlatform = (
+		testScope: Scope.Scope,
+		backingStore: Map<string, Map<string, Uint8Array>>,
+		onWrite?: (write: {
+			readonly className: string
+			readonly objectId: string
+			readonly key: string
+			readonly bytes: number
+		}) => void,
+	) => {
+		const makeStorage = (className: string, objectId: string): DurableObjects.ObjectStorage => {
+			const storeKey = `${className}:${objectId}`
+			let data = backingStore.get(storeKey)
+			if (data === undefined) {
+				data = new Map<string, Uint8Array>()
+				backingStore.set(storeKey, data)
+			}
+			const recordWrite = (key: string, value: unknown) => {
+				const encoded = v8.serialize(value)
+				onWrite?.({ className, objectId, key, bytes: encoded.byteLength })
+				data.set(key, encoded)
+			}
+			return {
+				get: <T>(key: string) =>
+					Effect.sync(() => {
+						const raw = data.get(key)
+						return raw === undefined ? undefined : (v8.deserialize(raw) as T)
+					}),
+				put: ((keyOrEntries: string | Record<string, unknown>, value?: unknown) =>
+					Effect.sync(() => {
+						if (typeof keyOrEntries === "string") {
+							recordWrite(keyOrEntries, value)
+						} else {
+							for (const [key, entry] of Object.entries(keyOrEntries)) {
+								recordWrite(key, entry)
+							}
+						}
+					})) as DurableObjects.ObjectStorage["put"],
+				delete: ((keyOrKeys: string | ReadonlyArray<string>) =>
+					Effect.sync(() => {
+						if (typeof keyOrKeys === "string") {
+							return data.delete(keyOrKeys)
+						}
+						let removed = 0
+						for (const key of keyOrKeys) {
+							if (data.delete(key)) removed += 1
+						}
+						return removed
+					})) as DurableObjects.ObjectStorage["delete"],
+				list: <T>(options?: DurableObjects.ListOptions) =>
+					Effect.sync(() => {
+						let keys = [...data.keys()].sort()
+						if (options?.prefix !== undefined) {
+							keys = keys.filter((key) => key.startsWith(options.prefix!))
+						}
+						if (options?.start !== undefined) {
+							keys = keys.filter((key) => key >= options.start!)
+						}
+						if (options?.startAfter !== undefined) {
+							keys = keys.filter((key) => key > options.startAfter!)
+						}
+						if (options?.end !== undefined) {
+							keys = keys.filter((key) => key < options.end!)
+						}
+						if (options?.reverse) keys.reverse()
+						if (options?.limit !== undefined) keys = keys.slice(0, options.limit)
+						return new Map(keys.map((key) => [key, v8.deserialize(data.get(key)!) as T]))
+					}),
+				transaction: (effect) => effect,
+			}
+		}
+
+		const host: DurableObjects.Host = {
+			claimKey: Effect.succeed({}),
+			declare: (_model, className, impl) =>
+				Effect.sync((): DurableObjects.Namespace => {
+					const instances = new Map<string, Effect.Effect<Record<string, unknown>, never, never>>()
+					const getInstance = (objectId: string) => {
+						let existing = instances.get(objectId)
+						if (existing === undefined) {
+							const storage = makeStorage(className, objectId)
+							const gate = Semaphore.makeUnsafe(1)
+							let alarmAt: number | null = null
+							let fireAlarm: Effect.Effect<void> = Effect.void
+							const { callbacks, fire } = DurableObjects.alarmCallbacks(storage, {
+								get: Effect.sync(() => alarmAt),
+								set: (at) =>
+									Effect.gen(function* () {
+										alarmAt = at
+										const delay = Math.max(0, at - (yield* Clock.currentTimeMillis))
+										yield* Effect.forkIn(
+											Effect.sleep(Duration.millis(delay)).pipe(
+												Effect.andThen(
+													Effect.suspend(() => {
+														alarmAt = null
+														return fireAlarm
+													}),
+												),
+											),
+											testScope,
+										)
+									}),
+							})
+							fireAlarm = fire
+							const runtimeContext: BaseRuntimeContext = {
+								Type: "Test",
+								id: `${className}:${objectId}`,
+								env: {},
+								get: () => Effect.succeed(undefined),
+								set: (id) => Effect.succeed(id),
+							}
+							const objectState: DurableObjects.ObjectStateShape = {
+								storage,
+								exclusive: (effect) => gate.withPermit(effect),
+								waitUntil: (effect) => Effect.forkIn(effect, testScope).pipe(Effect.asVoid),
+							}
+							const built = impl.pipe(
+								Effect.provideService(DurableObjects.ObjectState, objectState),
+								Effect.provideService(RuntimeContext, runtimeContext),
+								Effect.provide(callbacks),
+								Effect.provideService(Scope.Scope, testScope),
+							)
+							existing = Effect.runSync(Effect.cached(built))
+							instances.set(objectId, existing)
+						}
+						return existing
+					}
+					return {
+						getByName: (objectId) =>
+							new Proxy({} as DurableObjects.Stub, {
+								get:
+									(_target, prop) =>
+									(...args: ReadonlyArray<unknown>) =>
+										Effect.flatMap(getInstance(objectId), (methods) => {
+											const fn = methods[String(prop)] as (
+												...callArgs: ReadonlyArray<unknown>
+											) => Effect.Effect<unknown>
+											return fn(...args)
+										}),
+							}),
+					}
+				}),
+		}
+
+		const platform = DurableObjects.makePlatform(host).pipe(
+			Layer.provide(SecureRandom.layerWebCrypto),
+		)
+		return Layer.mergeAll(Agents.layer(Layer.empty), Environments.layer(Layer.empty)).pipe(
+			Layer.provide(platform),
+			Layer.provide(SecureRandom.layerWebCrypto),
+		)
+	}
 
 	it("keeps every persisted Durable Object value for worst-case agent decisions and environment commands below 2 MiB in V8 structured clone", async () => {
 		const DO_ROW_LIMIT_BYTES = 2 * 1024 * 1024
@@ -2880,149 +3042,9 @@ describe("Agent and environment field length limits", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const testScope = yield* Scope.Scope
-
-					const makeStorage = (
-						className: string,
-						objectId: string,
-					): DurableObjects.ObjectStorage => {
-						const data = new Map<string, Uint8Array>()
-						const recordWrite = (key: string, value: unknown) => {
-							const encoded = v8.serialize(value)
-							writes.push({ className, objectId, key, bytes: encoded.byteLength })
-							data.set(key, encoded)
-						}
-						return {
-							get: <T>(key: string) =>
-								Effect.sync(() => {
-									const raw = data.get(key)
-									return raw === undefined ? undefined : (v8.deserialize(raw) as T)
-								}),
-							put: ((keyOrEntries: string | Record<string, unknown>, value?: unknown) =>
-								Effect.sync(() => {
-									if (typeof keyOrEntries === "string") {
-										recordWrite(keyOrEntries, value)
-									} else {
-										for (const [key, entry] of Object.entries(keyOrEntries)) {
-											recordWrite(key, entry)
-										}
-									}
-								})) as DurableObjects.ObjectStorage["put"],
-							delete: ((keyOrKeys: string | ReadonlyArray<string>) =>
-								Effect.sync(() => {
-									if (typeof keyOrKeys === "string") {
-										return data.delete(keyOrKeys)
-									}
-									let removed = 0
-									for (const key of keyOrKeys) {
-										if (data.delete(key)) removed += 1
-									}
-									return removed
-								})) as DurableObjects.ObjectStorage["delete"],
-							list: <T>(options?: DurableObjects.ListOptions) =>
-								Effect.sync(() => {
-									let keys = [...data.keys()].sort()
-									if (options?.prefix !== undefined) {
-										keys = keys.filter((key) => key.startsWith(options.prefix!))
-									}
-									if (options?.start !== undefined) {
-										keys = keys.filter((key) => key >= options.start!)
-									}
-									if (options?.startAfter !== undefined) {
-										keys = keys.filter((key) => key > options.startAfter!)
-									}
-									if (options?.end !== undefined) {
-										keys = keys.filter((key) => key < options.end!)
-									}
-									if (options?.reverse) keys.reverse()
-									if (options?.limit !== undefined) keys = keys.slice(0, options.limit)
-									return new Map(keys.map((key) => [key, v8.deserialize(data.get(key)!) as T]))
-								}),
-							transaction: (effect) => effect,
-						}
-					}
-
-					const host: DurableObjects.Host = {
-						claimKey: Effect.succeed({}),
-						declare: (_model, className, impl) =>
-							Effect.sync((): DurableObjects.Namespace => {
-								const instances = new Map<
-									string,
-									Effect.Effect<Record<string, unknown>, never, never>
-								>()
-								const getInstance = (objectId: string) => {
-									let existing = instances.get(objectId)
-									if (existing === undefined) {
-										const storage = makeStorage(className, objectId)
-										const gate = Semaphore.makeUnsafe(1)
-										let alarmAt: number | null = null
-										let fireAlarm: Effect.Effect<void> = Effect.void
-										const { callbacks, fire } = DurableObjects.alarmCallbacks(storage, {
-											get: Effect.sync(() => alarmAt),
-											set: (at) =>
-												Effect.gen(function* () {
-													alarmAt = at
-													const delay = Math.max(0, at - (yield* Clock.currentTimeMillis))
-													yield* Effect.forkIn(
-														Effect.sleep(Duration.millis(delay)).pipe(
-															Effect.andThen(
-																Effect.suspend(() => {
-																	alarmAt = null
-																	return fireAlarm
-																}),
-															),
-														),
-														testScope,
-													)
-												}),
-										})
-										fireAlarm = fire
-										const runtimeContext: BaseRuntimeContext = {
-											Type: "Test",
-											id: `${className}:${objectId}`,
-											env: {},
-											get: () => Effect.succeed(undefined),
-											set: (id) => Effect.succeed(id),
-										}
-										const objectState: DurableObjects.ObjectStateShape = {
-											storage,
-											exclusive: (effect) => gate.withPermit(effect),
-											waitUntil: (effect) => Effect.forkIn(effect, testScope).pipe(Effect.asVoid),
-										}
-										const built = impl.pipe(
-											Effect.provideService(DurableObjects.ObjectState, objectState),
-											Effect.provideService(RuntimeContext, runtimeContext),
-											Effect.provide(callbacks),
-											Effect.provideService(Scope.Scope, testScope),
-										)
-										existing = Effect.runSync(Effect.cached(built))
-										instances.set(objectId, existing)
-									}
-									return existing
-								}
-								return {
-									getByName: (objectId) =>
-										new Proxy({} as DurableObjects.Stub, {
-											get:
-												(_target, prop) =>
-												(...args: ReadonlyArray<unknown>) =>
-													Effect.flatMap(getInstance(objectId), (methods) => {
-														const fn = methods[String(prop)] as (
-															...callArgs: ReadonlyArray<unknown>
-														) => Effect.Effect<unknown>
-														return fn(...args)
-													}),
-										}),
-								}
-							}),
-					}
-
-					const platform = DurableObjects.makePlatform(host).pipe(
-						Layer.provide(SecureRandom.layerWebCrypto),
-					)
-					const layer = Layer.mergeAll(
-						Agents.layer(Layer.empty),
-						Environments.layer(Layer.empty),
-					).pipe(Layer.provide(platform), Layer.provide(SecureRandom.layerWebCrypto))
+					const layer = makeDurableObjectsPlatform(testScope, new Map(), (write) => {
+						writes.push(write)
+					})
 
 					yield* Effect.gen(function* () {
 						const createAgent = yield* CreateAgentDecision
@@ -3172,5 +3194,627 @@ describe("Agent and environment field length limits", () => {
 		expect(writes.some((write) => write.key === "snapshot")).toBe(true)
 		const largest = Math.max(...writes.map((write) => write.bytes))
 		expect(largest).toBeLessThan(MAX_ROW_BYTES)
+	})
+
+	it("preserves reads, replay, repair updates, archive, and delete for pre-existing over-limit records", async () => {
+		const legacyAgentName = "a".repeat(MAX_AGENT_NAME_LENGTH + 1)
+		const legacyAgentDescription = "d".repeat(MAX_AGENT_DESCRIPTION_LENGTH + 1)
+		const legacyAgentSystem = "s".repeat(MAX_AGENT_SYSTEM_LENGTH + 1)
+		const legacyEnvName = "e".repeat(MAX_ENVIRONMENT_NAME_LENGTH + 1)
+		const legacyEnvDescription = "x".repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH + 1)
+
+		const decodedAgentSnapshot = Schema.decodeUnknownSync(AgentStateSnapshot)({
+			schema_version: 1,
+			state: {
+				status: "active",
+				version: 1,
+				current_version_id: "aver_legacy_snap_1",
+				name: legacyAgentName,
+				model_id: "openai/gpt-4o-mini",
+				has_system: true,
+				system: legacyAgentSystem,
+				has_description: true,
+				description: legacyAgentDescription,
+			},
+		})
+		expect(decodedAgentSnapshot.name).toBe(legacyAgentName)
+		expect(decodedAgentSnapshot.system).toBe(legacyAgentSystem)
+		expect(decodedAgentSnapshot.description).toBe(legacyAgentDescription)
+
+		const decodedAgentVersionSnapshot = Schema.decodeUnknownSync(AgentVersionStateSnapshot)({
+			schema_version: 1,
+			state: {
+				minted: true,
+				agent_id: "agent_legacy_snap",
+				version: 1,
+				name: legacyAgentName,
+				model_id: "openai/gpt-4o-mini",
+				has_system: true,
+				system: legacyAgentSystem,
+				has_description: true,
+				description: legacyAgentDescription,
+			},
+		})
+		expect(decodedAgentVersionSnapshot.name).toBe(legacyAgentName)
+		expect(decodedAgentVersionSnapshot.system).toBe(legacyAgentSystem)
+		expect(decodedAgentVersionSnapshot.description).toBe(legacyAgentDescription)
+
+		const decodedEnvSnapshot = Schema.decodeUnknownSync(EnvironmentStateSnapshot)({
+			schema_version: 1,
+			state: {
+				status: "active",
+				version: 1,
+				name: legacyEnvName,
+			},
+		})
+		expect(decodedEnvSnapshot.name).toBe(legacyEnvName)
+
+		expect(
+			() =>
+				new CreateAgent({
+					agent_id: AgentId.make("agent_cmd_reject"),
+					version_id: AgentVersionId.make("aver_cmd_reject"),
+					name: legacyAgentName,
+					model: { id: "openai/gpt-4o-mini" },
+					system: null,
+					description: null,
+				}),
+		).toThrow("Schema validation failed")
+		expect(
+			() =>
+				new UpdateAgent({
+					agent_id: AgentId.make("agent_cmd_reject"),
+					expected_version: 1,
+					next_version_id: AgentVersionId.make("aver_cmd_reject_2"),
+					name: "Valid Name",
+					model: { id: "openai/gpt-4o-mini" },
+					system: legacyAgentSystem,
+					description: null,
+				}),
+		).toThrow("Schema validation failed")
+		expect(
+			() =>
+				new CreateEnvironment({
+					environment_id: EnvironmentId.make("env_cmd_reject"),
+					name: legacyEnvName,
+					description: null,
+					config: { type: "cloud", networking: { type: "unrestricted" } },
+				}),
+		).toThrow("Schema validation failed")
+		expect(
+			() =>
+				new UpdateEnvironment({
+					environment_id: EnvironmentId.make("env_cmd_reject"),
+					expected_version: 1,
+					name: "Valid Name",
+					description: legacyEnvDescription,
+					config: { type: "cloud", networking: { type: "unrestricted" } },
+				}),
+		).toThrow("Schema validation failed")
+
+		// Persist over-limit snapshots, historical events, and view rows in Durable Objects
+		// storage, then cold-restart fresh DO instances against the same backing store.
+		const persistedStore = new Map<string, Map<string, Uint8Array>>()
+		const doAgentId = AgentId.make("agent_do_legacy")
+		const doV1Id = AgentVersionId.make("aver_do_legacy_1")
+		const doV2Id = AgentVersionId.make("aver_do_legacy_2")
+		const doV3Id = AgentVersionId.make("aver_do_legacy_3")
+		const doEnvId = EnvironmentId.make("env_do_legacy")
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const seedScope = yield* Scope.Scope
+					const seedLayer = makeDurableObjectsPlatform(seedScope, persistedStore)
+					yield* Effect.gen(function* () {
+						const agents = yield* Agent
+						const agentVersions = yield* AgentVersion
+						const agentViews = yield* AgentView
+						const versionViews = yield* AgentVersionView
+						const byNumberViews = yield* AgentVersionByNumberView
+						const environments = yield* Environment
+						const envViews = yield* EnvironmentView
+
+						const agentImport = yield* agents.import(
+							doAgentId,
+							[
+								new AgentCreated({
+									version: 1,
+									version_id: doV1Id,
+									name: legacyAgentName,
+									model: { id: "openai/gpt-4o-mini" },
+									system: legacyAgentSystem,
+									description: legacyAgentDescription,
+								}),
+								new AgentUpdated({
+									version: 2,
+									version_id: doV2Id,
+									name: `${legacyAgentName}!`,
+									model: { id: "openai/gpt-4o-mini" },
+									system: `${legacyAgentSystem}!`,
+									description: `${legacyAgentDescription}!`,
+								}),
+							],
+							{ commandId: "import:do_agent_legacy" },
+						)
+						const v1Import = yield* agentVersions.import(
+							doV1Id,
+							[
+								new AgentVersionMinted({
+									agent_id: doAgentId,
+									version: 1,
+									name: legacyAgentName,
+									model: { id: "openai/gpt-4o-mini" },
+									system: legacyAgentSystem,
+									description: legacyAgentDescription,
+								}),
+							],
+							{ commandId: "import:do_aver_legacy_1" },
+						)
+						const v2Import = yield* agentVersions.import(
+							doV2Id,
+							[
+								new AgentVersionMinted({
+									agent_id: doAgentId,
+									version: 2,
+									name: `${legacyAgentName}!`,
+									model: { id: "openai/gpt-4o-mini" },
+									system: `${legacyAgentSystem}!`,
+									description: `${legacyAgentDescription}!`,
+								}),
+							],
+							{ commandId: "import:do_aver_legacy_2" },
+						)
+						const envImport = yield* environments.import(
+							doEnvId,
+							[
+								new EnvironmentCreated({
+									version: 1,
+									name: legacyEnvName,
+									description: legacyEnvDescription,
+									config: { type: "cloud", networking: { type: "unrestricted" } },
+								}),
+								new EnvironmentUpdated({
+									version: 2,
+									name: `${legacyEnvName}!`,
+									description: `${legacyEnvDescription}!`,
+									config: { type: "cloud", networking: { type: "unrestricted" } },
+								}),
+							],
+							{ commandId: "import:do_env_legacy" },
+						)
+						expect(
+							Option.isSome(yield* agentViews.get(Agent.ref(doAgentId), { atLeast: agentImport })),
+						).toBe(true)
+						expect(
+							Option.isSome(
+								yield* versionViews.get(AgentVersion.ref(doV1Id), { atLeast: v1Import }),
+							),
+						).toBe(true)
+						expect(
+							Option.isSome(
+								yield* byNumberViews.get(agentVersionLookupKey(doAgentId, 2), {
+									atLeast: v2Import,
+								}),
+							),
+						).toBe(true)
+						expect(
+							Option.isSome(yield* envViews.get(Environment.ref(doEnvId), { atLeast: envImport })),
+						).toBe(true)
+					}).pipe(Effect.provide(seedLayer))
+				}),
+			),
+		)
+
+		const persistedAgentMeta = v8.deserialize(
+			persistedStore.get(`AgentAggregate:${doAgentId}`)!.get("meta")!,
+		) as { state: { schema_version: number; state: { name: string } }; version: number }
+		expect(persistedAgentMeta.version).toBe(2)
+		expect(persistedAgentMeta.state.schema_version).toBe(1)
+		expect(persistedAgentMeta.state.state.name).toBe(`${legacyAgentName}!`)
+		expect(persistedStore.get(`AgentAggregate:${doAgentId}`)!.has("event:000000000001")).toBe(true)
+		expect(persistedStore.get(`AgentAggregate:${doAgentId}`)!.has("event:000000000002")).toBe(true)
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const upgradedScope = yield* Scope.Scope
+					const upgradedLayer = makeDurableObjectsPlatform(upgradedScope, persistedStore)
+					yield* Effect.gen(function* () {
+						const agents = yield* Agent
+						const agentVersions = yield* AgentVersion
+						const updateAgent = yield* UpdateAgentDecision
+						const agentViews = yield* AgentView
+						const versionViews = yield* AgentVersionView
+						const byNumberViews = yield* AgentVersionByNumberView
+						const environments = yield* Environment
+						const envViews = yield* EnvironmentView
+
+						const committedAgent = yield* agents.get(doAgentId)
+						expect(committedAgent.name).toBe(`${legacyAgentName}!`)
+						expect(committedAgent.system).toBe(`${legacyAgentSystem}!`)
+						expect(committedAgent.description).toBe(`${legacyAgentDescription}!`)
+
+						const committedV1 = yield* agentVersions.get(doV1Id)
+						expect(committedV1.name).toBe(legacyAgentName)
+						expect(committedV1.system).toBe(legacyAgentSystem)
+
+						const committedEnv = yield* environments.get(doEnvId)
+						expect(committedEnv.name).toBe(`${legacyEnvName}!`)
+
+						expect(Option.getOrNull(yield* agentViews.get(Agent.ref(doAgentId)))?.description).toBe(
+							`${legacyAgentDescription}!`,
+						)
+						expect(
+							Option.getOrNull(yield* versionViews.get(AgentVersion.ref(doV1Id)))?.system,
+						).toBe(legacyAgentSystem)
+						expect(
+							Option.getOrNull(yield* byNumberViews.get(agentVersionLookupKey(doAgentId, 2)))?.name,
+						).toBe(`${legacyAgentName}!`)
+						expect(
+							Option.getOrNull(yield* envViews.get(Environment.ref(doEnvId)))?.description,
+						).toBe(`${legacyEnvDescription}!`)
+
+						const repairReceipt = yield* updateAgent.send(
+							new UpdateAgent({
+								agent_id: doAgentId,
+								expected_version: 2,
+								next_version_id: doV3Id,
+								name: "DO Repaired Agent",
+								model: { id: "openai/gpt-4o-mini" },
+								system: "Short system",
+								description: "Short description",
+							}),
+						)
+						const repairedView = yield* agentViews.get(Agent.ref(doAgentId), {
+							atLeast: repairReceipt.commits.find((c) => c.stream === `Agent/${doAgentId}`)!,
+						})
+						expect(Option.getOrNull(repairedView)?.version).toBe(3)
+						expect(Option.getOrNull(repairedView)?.name).toBe("DO Repaired Agent")
+
+						const repairEnvReceipt = yield* environments.send(
+							new UpdateEnvironment({
+								environment_id: doEnvId,
+								expected_version: 2,
+								name: "DO Repaired Env",
+								description: "Short env description",
+								config: { type: "cloud", networking: { type: "unrestricted" } },
+							}),
+						)
+						const repairedEnvView = yield* envViews.get(Environment.ref(doEnvId), {
+							atLeast: repairEnvReceipt,
+						})
+						expect(Option.getOrNull(repairedEnvView)?.version).toBe(3)
+						expect(Option.getOrNull(repairedEnvView)?.name).toBe("DO Repaired Env")
+					}).pipe(Effect.provide(upgradedLayer))
+				}),
+			),
+		)
+
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agents = yield* Agent
+					const agentVersions = yield* AgentVersion
+					const agentViews = yield* AgentView
+					const versionViews = yield* AgentVersionView
+					const byNumberViews = yield* AgentVersionByNumberView
+					const environments = yield* Environment
+					const envViews = yield* EnvironmentView
+
+					const repairAgentId = AgentId.make("agent_legacy_repair")
+					const repairV1Id = AgentVersionId.make("aver_legacy_repair_1")
+					const repairAgentImport = yield* agents.import(
+						repairAgentId,
+						[
+							new AgentCreated({
+								version: 1,
+								version_id: repairV1Id,
+								name: legacyAgentName,
+								model: { id: "openai/gpt-4o-mini" },
+								system: legacyAgentSystem,
+								description: legacyAgentDescription,
+							}),
+						],
+						{ commandId: "import:agent_legacy_repair" },
+					)
+					const repairVersionImport = yield* agentVersions.import(
+						repairV1Id,
+						[
+							new AgentVersionMinted({
+								agent_id: repairAgentId,
+								version: 1,
+								name: legacyAgentName,
+								model: { id: "openai/gpt-4o-mini" },
+								system: legacyAgentSystem,
+								description: legacyAgentDescription,
+							}),
+						],
+						{ commandId: "import:aver_legacy_repair_1" },
+					)
+					expect(
+						Option.isSome(
+							yield* agentViews.get(Agent.ref(repairAgentId), { atLeast: repairAgentImport }),
+						),
+					).toBe(true)
+					const projectedVersion = yield* versionViews.get(AgentVersion.ref(repairV1Id), {
+						atLeast: repairVersionImport,
+					})
+					expect(Option.getOrNull(projectedVersion)?.system).toBe(legacyAgentSystem)
+					const projectedByNumber = yield* byNumberViews.get(
+						agentVersionLookupKey(repairAgentId, 1),
+						{ atLeast: repairVersionImport },
+					)
+					expect(Option.getOrNull(projectedByNumber)?.description).toBe(legacyAgentDescription)
+
+					const getLegacyAgentRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/agents/${repairAgentId}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(getLegacyAgentRes.status).toBe(200)
+					const legacyAgent = (yield* Effect.promise(() => getLegacyAgentRes.json())) as {
+						id: string
+						version: number
+						name: string
+						description: string
+						system: string
+					}
+					expect(legacyAgent.name).toBe(legacyAgentName)
+					expect(legacyAgent.description).toBe(legacyAgentDescription)
+					expect(legacyAgent.system).toBe(legacyAgentSystem)
+
+					for (const [body, field, limit] of [
+						[
+							{ version: 1, name: "Repaired Agent", description: "Short description" },
+							"system",
+							MAX_AGENT_SYSTEM_LENGTH,
+						],
+						[
+							{ version: 1, name: "Repaired Agent", system: "Short system" },
+							"description",
+							MAX_AGENT_DESCRIPTION_LENGTH,
+						],
+						[
+							{ version: 1, description: "Short description", system: "Short system" },
+							"name",
+							MAX_AGENT_NAME_LENGTH,
+						],
+					] as const) {
+						const partialRes = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/agents/${repairAgentId}`,
+							headers: AUTH_HEADERS,
+							body,
+						})
+						expect(partialRes.status).toBe(400)
+						const partialErr = (yield* Effect.promise(() => partialRes.json())) as {
+							type: string
+							error: { type: string; message: string }
+						}
+						expect(partialErr.type).toBe("error")
+						expect(partialErr.error.type).toBe("invalid_request_error")
+						expect(partialErr.error.message).toContain(field)
+						expect(partialErr.error.message).toContain(String(limit))
+					}
+
+					const repairEnvId = EnvironmentId.make("env_legacy_repair")
+					const repairEnvImport = yield* environments.import(
+						repairEnvId,
+						[
+							new EnvironmentCreated({
+								version: 1,
+								name: legacyEnvName,
+								description: legacyEnvDescription,
+								config: { type: "cloud", networking: { type: "unrestricted" } },
+							}),
+						],
+						{ commandId: "import:env_legacy_repair" },
+					)
+					expect(
+						Option.isSome(
+							yield* envViews.get(Environment.ref(repairEnvId), { atLeast: repairEnvImport }),
+						),
+					).toBe(true)
+
+					const getLegacyEnvRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/environments/${repairEnvId}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(getLegacyEnvRes.status).toBe(200)
+					const legacyEnv = (yield* Effect.promise(() => getLegacyEnvRes.json())) as {
+						id: string
+						version: number
+						name: string
+						description: string
+					}
+					expect(legacyEnv.name).toBe(legacyEnvName)
+					expect(legacyEnv.description).toBe(legacyEnvDescription)
+
+					const legacySessionRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: {
+							agent: { id: repairAgentId, version: 1 },
+							environment_id: repairEnvId,
+						},
+					})
+					expect(legacySessionRes.status).toBe(201)
+
+					const repairedAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${repairAgentId}`,
+						headers: AUTH_HEADERS,
+						body: {
+							version: 1,
+							name: "Repaired Agent",
+							description: "Short description",
+							system: "Short system",
+						},
+					})
+					expect(repairedAgentRes.status).toBe(200)
+					const repairedAgent = (yield* Effect.promise(() => repairedAgentRes.json())) as {
+						version: number
+						name: string
+						description: string
+						system: string
+					}
+					expect(repairedAgent.version).toBe(2)
+					expect(repairedAgent.name).toBe("Repaired Agent")
+					expect(repairedAgent.description).toBe("Short description")
+					expect(repairedAgent.system).toBe("Short system")
+
+					for (const [body, field, limit] of [
+						[
+							{ version: 1, name: "Repaired Env" },
+							"description",
+							MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
+						],
+						[{ version: 1, description: "Short description" }, "name", MAX_ENVIRONMENT_NAME_LENGTH],
+					] as const) {
+						const partialRes = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/environments/${repairEnvId}`,
+							headers: AUTH_HEADERS,
+							body,
+						})
+						expect(partialRes.status).toBe(400)
+						const partialErr = (yield* Effect.promise(() => partialRes.json())) as {
+							type: string
+							error: { type: string; message: string }
+						}
+						expect(partialErr.type).toBe("error")
+						expect(partialErr.error.type).toBe("invalid_request_error")
+						expect(partialErr.error.message).toContain(field)
+						expect(partialErr.error.message).toContain(String(limit))
+					}
+
+					const repairedEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/environments/${repairEnvId}`,
+						headers: AUTH_HEADERS,
+						body: {
+							version: 1,
+							name: "Repaired Env",
+							description: "Short description",
+						},
+					})
+					expect(repairedEnvRes.status).toBe(200)
+					const repairedEnv = (yield* Effect.promise(() => repairedEnvRes.json())) as {
+						version: number
+						name: string
+						description: string
+					}
+					expect(repairedEnv.version).toBe(2)
+					expect(repairedEnv.name).toBe("Repaired Env")
+					expect(repairedEnv.description).toBe("Short description")
+
+					const archiveAgentId = AgentId.make("agent_legacy_archive")
+					const archiveV1Id = AgentVersionId.make("aver_legacy_archive_1")
+					const archiveV2Id = AgentVersionId.make("aver_legacy_archive_2")
+					const archiveAgentImport = yield* agents.import(
+						archiveAgentId,
+						[
+							new AgentCreated({
+								version: 1,
+								version_id: archiveV1Id,
+								name: legacyAgentName,
+								model: { id: "openai/gpt-4o-mini" },
+								system: legacyAgentSystem,
+								description: legacyAgentDescription,
+							}),
+							new AgentUpdated({
+								version: 2,
+								version_id: archiveV2Id,
+								name: `${legacyAgentName}!`,
+								model: { id: "openai/gpt-4o-mini" },
+								system: `${legacyAgentSystem}!`,
+								description: `${legacyAgentDescription}!`,
+							}),
+						],
+						{ commandId: "import:agent_legacy_archive" },
+					)
+					expect(
+						Option.isSome(
+							yield* agentViews.get(Agent.ref(archiveAgentId), { atLeast: archiveAgentImport }),
+						),
+					).toBe(true)
+
+					const archiveAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${archiveAgentId}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveAgentRes.status).toBe(200)
+					const archivedAgent = (yield* Effect.promise(() => archiveAgentRes.json())) as {
+						version: number
+						name: string
+						archived_at: string | null
+					}
+					expect(archivedAgent.version).toBe(2)
+					expect(archivedAgent.name).toBe(`${legacyAgentName}!`)
+					expect(archivedAgent.archived_at).not.toBeNull()
+
+					const deleteEnvId = EnvironmentId.make("env_legacy_archive_delete")
+					const deleteEnvImport = yield* environments.import(
+						deleteEnvId,
+						[
+							new EnvironmentCreated({
+								version: 1,
+								name: legacyEnvName,
+								description: legacyEnvDescription,
+								config: { type: "cloud", networking: { type: "unrestricted" } },
+							}),
+							new EnvironmentUpdated({
+								version: 2,
+								name: `${legacyEnvName}!`,
+								description: `${legacyEnvDescription}!`,
+								config: { type: "cloud", networking: { type: "unrestricted" } },
+							}),
+						],
+						{ commandId: "import:env_legacy_archive_delete" },
+					)
+					expect(
+						Option.isSome(
+							yield* envViews.get(Environment.ref(deleteEnvId), { atLeast: deleteEnvImport }),
+						),
+					).toBe(true)
+
+					const archiveEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/environments/${deleteEnvId}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveEnvRes.status).toBe(200)
+					const archivedEnv = (yield* Effect.promise(() => archiveEnvRes.json())) as {
+						version: number
+						name: string
+						archived_at: string | null
+					}
+					expect(archivedEnv.version).toBe(2)
+					expect(archivedEnv.name).toBe(`${legacyEnvName}!`)
+					expect(archivedEnv.archived_at).not.toBeNull()
+
+					const deleteEnvRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: `/v1/environments/${deleteEnvId}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(deleteEnvRes.status).toBe(200)
+					expect(yield* Effect.promise(() => deleteEnvRes.json())).toEqual({
+						id: deleteEnvId,
+						type: "environment_deleted",
+					})
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
 	})
 })

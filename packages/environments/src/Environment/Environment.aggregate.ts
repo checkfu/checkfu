@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { EnvironmentName, NonNegativeInt } from "../EnvironmentTypes.ts"
+import { NonNegativeInt } from "../EnvironmentTypes.ts"
 import { ArchiveEnvironment, EnvironmentArchived } from "./ArchiveEnvironment.command.ts"
 import {
 	CreateEnvironment,
@@ -21,7 +21,7 @@ import {
 export const EnvironmentState = Schema.Struct({
 	status: Schema.String,
 	version: NonNegativeInt,
-	name: Schema.Union([Schema.Literal(""), EnvironmentName]),
+	name: Schema.String,
 })
 export type EnvironmentState = typeof EnvironmentState.Type
 

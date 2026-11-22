@@ -5,12 +5,14 @@ import { Environment } from "@checkfu/environments/Environment/Environment.aggre
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
 import { UpdateEnvironment } from "@checkfu/environments/Environment/UpdateEnvironment.command"
+import { EnvironmentDescription, EnvironmentName } from "@checkfu/environments/EnvironmentTypes"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import { EventBatch } from "../Checkfu.model.ts"
 import { CheckfuApi } from "./Api.ts"
 import {
@@ -26,6 +28,11 @@ import {
 	randomId,
 	reject,
 } from "./HttpHelpers.ts"
+
+const ValidatedEnvironmentFields = Schema.Struct({
+	name: EnvironmentName,
+	description: Schema.NullOr(EnvironmentDescription),
+})
 
 export const EnvironmentPartialUpdateWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/EnvironmentPartialUpdateWaitTimeout",
@@ -210,13 +217,16 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 						if (description === undefined) description = view.description
 						if (config === undefined) config = view.config
 					}
-					const nextName = payload.name ?? committed.name
+					const nextFields = yield* Schema.decodeUnknownEffect(ValidatedEnvironmentFields)({
+						name: payload.name ?? committed.name,
+						description,
+					}).pipe(Effect.catch((error) => reject(400, error.message)))
 					const receipt = yield* environments.send(
 						new UpdateEnvironment({
 							environment_id: id,
 							expected_version: payload.version,
-							name: nextName,
-							description,
+							name: nextFields.name,
+							description: nextFields.description,
 							config,
 						}),
 					)

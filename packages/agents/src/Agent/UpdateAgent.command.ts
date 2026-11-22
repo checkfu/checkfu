@@ -1,6 +1,13 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { AgentDescription, AgentModel, AgentName, AgentSystem, PositiveInt } from "../AgentTypes.ts"
+import {
+	AgentDescription,
+	AgentModel,
+	AgentName,
+	AgentSystem,
+	NonEmptyString,
+	PositiveInt,
+} from "../AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentArchivedError } from "./AgentArchived.rejection.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
@@ -11,10 +18,10 @@ import { AgentVersionAlreadyExists } from "./AgentVersionAlreadyExists.rejection
 export class AgentUpdated extends Domain.Event("agent.updated", {
 	version: PositiveInt,
 	version_id: AgentVersionId,
-	name: AgentName,
+	name: NonEmptyString,
 	model: AgentModel,
-	system: Schema.NullOr(AgentSystem),
-	description: Schema.NullOr(AgentDescription),
+	system: Schema.NullOr(Schema.String),
+	description: Schema.NullOr(Schema.String),
 }) {}
 
 export class AgentVersionConflict extends Domain.Rejection(
