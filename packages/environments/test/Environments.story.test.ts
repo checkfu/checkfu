@@ -1,9 +1,13 @@
 import * as Domain from "@alchemy.run/domain"
 import { Story } from "@alchemy.run/domain/Story"
-import { describe, it } from "@effect/vitest"
+import { describe, expect, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import {
+	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
+	MAX_ENVIRONMENT_NAME_LENGTH,
+} from "../src/EnvironmentTypes.ts"
 import {
 	ArchiveEnvironment,
 	EnvironmentArchived,
@@ -241,5 +245,42 @@ describe("Environments", () => {
 			),
 			Story.rejected(new EnvironmentAlreadyExists({ environment_id: env.id })),
 		)
+	})
+
+	it("keeps worst-case JSON-escaped environment state and view rows well below 2 MiB", () => {
+		const DO_ROW_LIMIT_BYTES = 2 * 1024 * 1024
+		const ENVELOPE_HEADROOM_BYTES = 64 * 1024
+		const MAX_ROW_BYTES = DO_ROW_LIMIT_BYTES - ENVELOPE_HEADROOM_BYTES
+		const utf8Bytes = (value: string): number => {
+			let bytes = 0
+			for (let i = 0; i < value.length; i++) {
+				const code = value.charCodeAt(i)
+				if (code < 0x80) bytes += 1
+				else if (code < 0x800) bytes += 2
+				else if (code >= 0xd800 && code <= 0xdbff) {
+					bytes += 4
+					i++
+				} else bytes += 3
+			}
+			return bytes
+		}
+		for (const char of ["\u0000", "😀"]) {
+			const worstName = char.repeat(MAX_ENVIRONMENT_NAME_LENGTH)
+			const worstDescription = char.repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH)
+			const viewBytes = utf8Bytes(
+				JSON.stringify({
+					id: "env_001",
+					type: "environment",
+					version: 1,
+					name: worstName,
+					description: worstDescription,
+					config: limitedConfig,
+					created_at: "2026-01-01T00:00:00.000Z",
+					updated_at: "2026-01-01T00:00:00.000Z",
+					archived_at: null,
+				}),
+			)
+			expect(viewBytes).toBeLessThan(MAX_ROW_BYTES)
+		}
 	})
 })

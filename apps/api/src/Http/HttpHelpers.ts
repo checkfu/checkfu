@@ -1,4 +1,9 @@
-import type { AgentModel } from "@checkfu/agents/AgentTypes"
+import {
+	type AgentModel,
+	MAX_AGENT_DESCRIPTION_LENGTH,
+	MAX_AGENT_NAME_LENGTH,
+	MAX_AGENT_SYSTEM_LENGTH,
+} from "@checkfu/agents/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/environments/EnvironmentTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
 import { createHash, timingSafeEqual } from "node:crypto"
@@ -16,6 +21,7 @@ import type * as SecureRandom from "effect/crypto/SecureRandom"
 import { ClaimEventBatch, type EventBatch, EventBatchId } from "../Checkfu.model.ts"
 import { optionalSecret } from "../Secrets.ts"
 import {
+	AgentBodyLimit,
 	type ApiError,
 	Authentication,
 	type ERRORS,
@@ -30,6 +36,8 @@ import {
 } from "./Api.ts"
 
 export const MAX_REQUEST_BODY_BYTES = 160 * 1024
+export const MAX_AGENT_BODY_BYTES =
+	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) * 12 + 16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
@@ -295,6 +303,14 @@ export const AuthenticationLive = Layer.effect(
 			apiKey: (handler, { credential }) => guard(handler, credential),
 		}
 	}),
+)
+
+export const AgentBodyLimitLive = Layer.succeed(AgentBodyLimit, (httpEffect) =>
+	Effect.provideService(
+		httpEffect,
+		HttpIncomingMessage.MaxBodySize,
+		ByteSize.bytes(MAX_AGENT_BODY_BYTES),
+	),
 )
 
 export const EventBatchBodyLimitLive = Layer.succeed(EventBatchBodyLimit, (httpEffect) =>

@@ -1,9 +1,20 @@
 import { AgentId } from "@checkfu/agents/Agent/Agent.id"
 import { AgentSnapshot } from "@checkfu/agents/Agent/AgentView.view"
-import { AgentModel, NonEmptyString, PositiveInt } from "@checkfu/agents/AgentTypes"
+import {
+	AgentDescription,
+	AgentModel,
+	AgentName,
+	AgentSystem,
+	NonEmptyString,
+	PositiveInt,
+} from "@checkfu/agents/AgentTypes"
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
 import { EnvironmentSnapshot } from "@checkfu/environments/Environment/EnvironmentView.view"
-import { EnvironmentConfig } from "@checkfu/environments/EnvironmentTypes"
+import {
+	EnvironmentConfig,
+	EnvironmentDescription,
+	EnvironmentName,
+} from "@checkfu/environments/EnvironmentTypes"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { ResourceId, SessionTitle } from "@checkfu/sessions/Session/SessionTypes"
 import { SessionSnapshot } from "@checkfu/sessions/Session/SessionView.view"
@@ -120,6 +131,10 @@ export class RequestValidation extends HttpApiMiddleware.Service<RequestValidati
 	{ error: [ERRORS[400], ERRORS[500]] },
 ) {}
 
+export class AgentBodyLimit extends HttpApiMiddleware.Service<AgentBodyLimit>()(
+	"@checkfu/api/AgentBodyLimit",
+) {}
+
 export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBodyLimit>()(
 	"@checkfu/api/EventBatchBodyLimit",
 ) {}
@@ -127,30 +142,30 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
-	name: NonEmptyString,
+	name: AgentName,
 	model: ModelInput,
-	system: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	description: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	system: Schema.optionalKey(Schema.NullOr(AgentSystem)),
+	description: Schema.optionalKey(Schema.NullOr(AgentDescription)),
 })
 
 export const UpdateAgentBody = Schema.Struct({
 	version: PositiveInt,
-	name: Schema.optionalKey(NonEmptyString),
+	name: Schema.optionalKey(AgentName),
 	model: Schema.optionalKey(ModelInput),
-	system: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	description: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	system: Schema.optionalKey(Schema.NullOr(AgentSystem)),
+	description: Schema.optionalKey(Schema.NullOr(AgentDescription)),
 })
 
 export const CreateEnvironmentBody = Schema.Struct({
-	name: NonEmptyString,
-	description: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	name: EnvironmentName,
+	description: Schema.optionalKey(Schema.NullOr(EnvironmentDescription)),
 	config: Schema.optionalKey(EnvironmentConfig),
 })
 
 export const UpdateEnvironmentBody = Schema.Struct({
 	version: PositiveInt,
-	name: Schema.optionalKey(NonEmptyString),
-	description: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	name: Schema.optionalKey(EnvironmentName),
+	description: Schema.optionalKey(Schema.NullOr(EnvironmentDescription)),
 	config: Schema.optionalKey(EnvironmentConfig),
 })
 
@@ -428,7 +443,7 @@ const Agents = HttpApiGroup.make("agents")
 				payload: CreateAgentBody,
 				success: [AgentResource.pipe(HttpApiSchema.status(201)), Pending],
 				error: BodyErrors,
-			}),
+			}).middleware(AgentBodyLimit),
 		),
 	)
 	.add(
@@ -444,7 +459,7 @@ const Agents = HttpApiGroup.make("agents")
 			payload: UpdateAgentBody,
 			success: [AgentResource, Pending],
 			error: BodyErrors,
-		}),
+		}).middleware(AgentBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/agents/:agent_id/archive", {

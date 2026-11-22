@@ -1,29 +1,36 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { AgentModel, NonEmptyString, NonNegativeInt, PositiveInt } from "../AgentTypes.ts"
+import {
+	AgentDescription,
+	AgentModel,
+	AgentName,
+	AgentSystem,
+	NonNegativeInt,
+	PositiveInt,
+} from "../AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
 
 export class AgentVersionMinted extends Domain.Event("agent_version.minted", {
 	agent_id: AgentId,
 	version: PositiveInt,
-	name: NonEmptyString,
+	name: AgentName,
 	model: AgentModel,
-	system: Schema.NullOr(Schema.String),
-	description: Schema.NullOr(Schema.String),
+	system: Schema.NullOr(AgentSystem),
+	description: Schema.NullOr(AgentDescription),
 }) {}
 
 export const AgentVersionState = Schema.Struct({
 	minted: Schema.Boolean,
 	agent_id: Schema.String,
 	version: NonNegativeInt,
-	name: Schema.String,
+	name: Schema.Union([Schema.Literal(""), AgentName]),
 	model_id: Schema.String,
 	has_system: Schema.Boolean,
-	system: Schema.String,
+	system: AgentSystem,
 	has_description: Schema.Boolean,
-	description: Schema.String,
+	description: AgentDescription,
 })
 export type AgentVersionState = typeof AgentVersionState.Type
 

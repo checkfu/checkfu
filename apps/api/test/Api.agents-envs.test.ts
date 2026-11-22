@@ -8,11 +8,20 @@ import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
 import { UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
+import {
+	MAX_AGENT_DESCRIPTION_LENGTH,
+	MAX_AGENT_NAME_LENGTH,
+	MAX_AGENT_SYSTEM_LENGTH,
+} from "@checkfu/agents/AgentTypes"
 import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
 import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
 import { UpdateEnvironment } from "@checkfu/environments/Environment/UpdateEnvironment.command"
+import {
+	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
+	MAX_ENVIRONMENT_NAME_LENGTH,
+} from "@checkfu/environments/EnvironmentTypes"
 import { ModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
@@ -32,6 +41,7 @@ import {
 	IsSupportedAgentModel,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
+import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHelpers.ts"
 import {
 	AgentVersionLookupTimeout,
 	HarnessCallFailed,
@@ -2607,6 +2617,232 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						type: "error",
 						error: { type: "conflict_error" },
 					})
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+})
+
+describe("Agent and environment field length limits", () => {
+	const cases = [
+		{
+			label: "agent name",
+			path: "/v1/agents",
+			field: "name",
+			limit: MAX_AGENT_NAME_LENGTH,
+			makeCreateBody: (value: string) => ({ name: value, model: "gpt-4o-mini" }),
+			makeUpdateBody: (value: string) => ({ version: 1, name: value }),
+		},
+		{
+			label: "agent description",
+			path: "/v1/agents",
+			field: "description",
+			limit: MAX_AGENT_DESCRIPTION_LENGTH,
+			makeCreateBody: (value: string) => ({
+				name: "Agent",
+				model: "gpt-4o-mini",
+				description: value,
+			}),
+			makeUpdateBody: (value: string) => ({ version: 1, description: value }),
+		},
+		{
+			label: "agent system",
+			path: "/v1/agents",
+			field: "system",
+			limit: MAX_AGENT_SYSTEM_LENGTH,
+			makeCreateBody: (value: string) => ({
+				name: "Agent",
+				model: "gpt-4o-mini",
+				system: value,
+			}),
+			makeUpdateBody: (value: string) => ({ version: 1, system: value }),
+		},
+		{
+			label: "environment name",
+			path: "/v1/environments",
+			field: "name",
+			limit: MAX_ENVIRONMENT_NAME_LENGTH,
+			makeCreateBody: (value: string) => ({ name: value }),
+			makeUpdateBody: (value: string) => ({ version: 1, name: value }),
+		},
+		{
+			label: "environment description",
+			path: "/v1/environments",
+			field: "description",
+			limit: MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
+			makeCreateBody: (value: string) => ({ name: "Environment", description: value }),
+			makeUpdateBody: (value: string) => ({ version: 1, description: value }),
+		},
+	] as const
+
+	for (const testCase of cases) {
+		it(`enforces the ${testCase.limit}-character limit on ${testCase.label}`, async () => {
+			const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+				makeAssistantReply(model, null, "ok", 1, 1),
+			)
+			try {
+				await Effect.runPromise(
+					Effect.gen(function* () {
+						const { fetch: apiFetch } = yield* makeApiHandler
+						const atLimit = "😀".repeat(testCase.limit)
+						const overLimit = "😀".repeat(testCase.limit + 1)
+						expect(atLimit.length).toBe(testCase.limit * 2)
+
+						const createOk = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: testCase.path,
+							headers: AUTH_HEADERS,
+							body: testCase.makeCreateBody(atLimit),
+						})
+						expect(createOk.status).toBe(201)
+						const created = (yield* Effect.promise(() => createOk.json())) as Record<
+							string,
+							unknown
+						>
+						expect(created[testCase.field]).toBe(atLimit)
+
+						const createTooLong = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: testCase.path,
+							headers: AUTH_HEADERS,
+							body: testCase.makeCreateBody(overLimit),
+						})
+						expect(createTooLong.status).toBe(400)
+						const createErr = (yield* Effect.promise(() => createTooLong.json())) as {
+							type: string
+							error: { type: string; message: string }
+						}
+						expect(createErr.type).toBe("error")
+						expect(createErr.error.type).toBe("invalid_request_error")
+						expect(createErr.error.message).toContain(testCase.field)
+						expect(createErr.error.message).toContain(String(testCase.limit))
+
+						const updatedAtLimit = "🚀".repeat(testCase.limit)
+						const updatedOverLimit = "🚀".repeat(testCase.limit + 1)
+						const resourceId = created.id as string
+
+						const updateTooLong = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: `${testCase.path}/${resourceId}`,
+							headers: AUTH_HEADERS,
+							body: testCase.makeUpdateBody(updatedOverLimit),
+						})
+						expect(updateTooLong.status).toBe(400)
+						const updateErr = (yield* Effect.promise(() => updateTooLong.json())) as {
+							type: string
+							error: { type: string; message: string }
+						}
+						expect(updateErr.type).toBe("error")
+						expect(updateErr.error.type).toBe("invalid_request_error")
+						expect(updateErr.error.message).toContain(testCase.field)
+						expect(updateErr.error.message).toContain(String(testCase.limit))
+
+						const updateOk = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: `${testCase.path}/${resourceId}`,
+							headers: AUTH_HEADERS,
+							body: testCase.makeUpdateBody(updatedAtLimit),
+						})
+						expect(updateOk.status).toBe(200)
+						const updated = (yield* Effect.promise(() => updateOk.json())) as Record<
+							string,
+							unknown
+						>
+						expect(updated[testCase.field]).toBe(updatedAtLimit)
+					}).pipe(Effect.scoped, Effect.provide(layer)),
+				)
+			} finally {
+				await closeAll()
+			}
+		})
+	}
+
+	it("accepts a full-size non-ASCII agent payload past 160 KiB and advertises every limit in OpenAPI", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const body = {
+						name: "😀".repeat(MAX_AGENT_NAME_LENGTH),
+						model: "gpt-4o-mini",
+						description: "😀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+						system: "😀".repeat(MAX_AGENT_SYSTEM_LENGTH),
+					}
+					const bodyBytes = new TextEncoder().encode(JSON.stringify(body)).length
+					expect(bodyBytes).toBeGreaterThan(MAX_REQUEST_BODY_BYTES)
+					expect(bodyBytes).toBeLessThan(MAX_AGENT_BODY_BYTES)
+
+					const createdRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents/",
+						headers: AUTH_HEADERS,
+						body,
+					})
+					expect(createdRes.status).toBe(201)
+					const created = (yield* Effect.promise(() => createdRes.json())) as {
+						id: string
+						name: string
+						description: string
+						system: string
+					}
+					expect(created.name).toBe(body.name)
+					expect(created.description).toBe(body.description)
+					expect(created.system).toBe(body.system)
+
+					const tooLargeRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${created.id}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, system: "x".repeat(MAX_AGENT_BODY_BYTES + 1) },
+					})
+					expect(tooLargeRes.status).toBe(413)
+
+					const specRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
+					expect(specRes.status).toBe(200)
+					const spec = (yield* Effect.promise(() => specRes.json())) as {
+						paths: Record<
+							string,
+							Record<
+								string,
+								{
+									requestBody?: { content?: { "application/json"?: { schema?: unknown } } }
+									responses?: Record<
+										string,
+										{ content?: { "application/json"?: { schema?: unknown } } }
+									>
+								}
+							>
+						>
+					}
+					const schemaJson = (path: string, method: string, status?: string) =>
+						JSON.stringify(
+							status === undefined
+								? spec.paths[path]?.[method]?.requestBody?.content?.["application/json"]?.schema
+								: spec.paths[path]?.[method]?.responses?.[status]?.content?.["application/json"]
+										?.schema,
+						)
+					for (const json of [
+						schemaJson("/v1/agents", "post"),
+						schemaJson("/v1/agents/{agent_id}", "post"),
+						schemaJson("/v1/agents/{agent_id}", "get", "200"),
+					]) {
+						expect(json).toContain(`"maxLength":${MAX_AGENT_NAME_LENGTH}`)
+						expect(json).toContain(`"maxLength":${MAX_AGENT_DESCRIPTION_LENGTH}`)
+						expect(json).toContain(`"maxLength":${MAX_AGENT_SYSTEM_LENGTH}`)
+					}
+					for (const json of [
+						schemaJson("/v1/environments", "post"),
+						schemaJson("/v1/environments/{environment_id}", "post"),
+						schemaJson("/v1/environments/{environment_id}", "get", "200"),
+					]) {
+						expect(json).toContain(`"maxLength":${MAX_ENVIRONMENT_NAME_LENGTH}`)
+						expect(json).toContain(`"maxLength":${MAX_ENVIRONMENT_DESCRIPTION_LENGTH}`)
+					}
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

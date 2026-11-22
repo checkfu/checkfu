@@ -1,6 +1,11 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { EnvironmentConfig, NonEmptyString, PositiveInt } from "../EnvironmentTypes.ts"
+import {
+	EnvironmentConfig,
+	EnvironmentDescription,
+	EnvironmentName,
+	PositiveInt,
+} from "../EnvironmentTypes.ts"
 import { Environment } from "./Environment.aggregate.ts"
 import { EnvironmentId } from "./Environment.id.ts"
 
@@ -8,8 +13,8 @@ export const EnvironmentSnapshot = Schema.Struct({
 	id: EnvironmentId,
 	type: Schema.Literal("environment"),
 	version: PositiveInt,
-	name: NonEmptyString,
-	description: Schema.NullOr(Schema.String),
+	name: EnvironmentName,
+	description: Schema.NullOr(EnvironmentDescription),
 	config: EnvironmentConfig,
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,

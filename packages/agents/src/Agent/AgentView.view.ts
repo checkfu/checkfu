@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { AgentModel, NonEmptyString, PositiveInt } from "../AgentTypes.ts"
+import { AgentDescription, AgentModel, AgentName, AgentSystem, PositiveInt } from "../AgentTypes.ts"
 import { Agent } from "./Agent.aggregate.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
@@ -10,10 +10,10 @@ export const AgentSnapshot = Schema.Struct({
 	type: Schema.Literal("agent"),
 	version: PositiveInt,
 	current_version_id: AgentVersionId,
-	name: NonEmptyString,
+	name: AgentName,
 	model: AgentModel,
-	system: Schema.NullOr(Schema.String),
-	description: Schema.NullOr(Schema.String),
+	system: Schema.NullOr(AgentSystem),
+	description: Schema.NullOr(AgentDescription),
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),

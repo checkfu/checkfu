@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { NonNegativeInt } from "../AgentTypes.ts"
+import { AgentDescription, AgentName, AgentSystem, NonNegativeInt } from "../AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
 import { AgentArchived, ArchiveAgent } from "./ArchiveAgent.command.ts"
@@ -12,12 +12,12 @@ export const AgentState = Schema.Struct({
 	status: Schema.String,
 	version: NonNegativeInt,
 	current_version_id: Schema.String,
-	name: Schema.String,
+	name: Schema.Union([Schema.Literal(""), AgentName]),
 	model_id: Schema.String,
 	has_system: Schema.Boolean,
-	system: Schema.String,
+	system: AgentSystem,
 	has_description: Schema.Boolean,
-	description: Schema.String,
+	description: AgentDescription,
 })
 export type AgentState = typeof AgentState.Type
 
