@@ -72,7 +72,7 @@ export class IdempotencyKeyConflict extends Domain.Rejection(
 	{ batch_id: EventBatchId },
 	{
 		httpApiStatus: 409,
-		description: "Idempotency-Key was already used for a different event batch.",
+		description: "Idempotency-Key was already used for a different request.",
 	},
 ) {}
 
@@ -86,9 +86,9 @@ export class ClaimEventBatch extends Domain.Command("ClaimEventBatch", {
 }) {}
 
 /**
- * Durably binds a `(session_id, Idempotency-Key)` pair to the exact batch
- * fingerprint before any event commands run, preventing reuse of a batch key
- * with additional or altered events while allowing identical retries to resume.
+ * Durably binds a scoped idempotency key to a request fingerprint before write
+ * commands run, rejecting mismatched retries with 409 while allowing identical
+ * retries to resume.
  */
 export class EventBatch extends Domain.Aggregate("EventBatch", {
 	id: EventBatchId,

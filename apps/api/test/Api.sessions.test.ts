@@ -42,7 +42,7 @@ import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { AdmitSession, AdmitSessionDecision } from "../src/Checkfu.model.ts"
-import { SessionEvent } from "../src/Http/Api.ts"
+import { SessionEvent, withIdempotencyKey } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
 	SSE_CATCHUP_PAGE_SIZE,
@@ -56,6 +56,7 @@ import {
 	AUTH_HEADERS,
 	createIdleSession,
 	extractLastUserText,
+	makeApiTestClient,
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	readSseUntil,
@@ -2447,5 +2448,401 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				}),
 			),
 		)
+	})
+
+	it("enforces Idempotency-Key deduplication and payload conflict checks on session creates", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const realAdmit = yield* AdmitSessionDecision
+					const realSessions = yield* Session
+					const sessionViews = yield* SessionView
+
+					const admittedSessionIds: Array<string> = []
+					const sentUserMessages: Array<string> = []
+					let lastUserMessageCommit:
+						| { readonly stream: string; readonly version: number }
+						| undefined
+					let dropNextAdmitReceipt = false
+					let dropNextUserMessageReceipt = false
+
+					const wrappedAdmit = new Proxy(realAdmit, {
+						get: (target, property, receiver) =>
+							property === "send"
+								? (
+										command: Parameters<typeof realAdmit.send>[0],
+										options?: Parameters<typeof realAdmit.send>[1],
+									) => {
+										admittedSessionIds.push(command.session_id)
+										const call = target.send(command, options)
+										if (dropNextAdmitReceipt) {
+											dropNextAdmitReceipt = false
+											return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
+										}
+										return call
+									}
+								: (Reflect.get(target, property, receiver) as unknown),
+					})
+
+					const wrappedSessions = new Proxy(realSessions, {
+						get: (target, property, receiver) =>
+							property === "send"
+								? (
+										command: Parameters<typeof realSessions.send>[0],
+										options?: Parameters<typeof realSessions.send>[1],
+									) => {
+										const call = target.send(command, options).pipe(
+											Effect.tap((receipt) =>
+												Effect.sync(() => {
+													if (command._tag === "SendUserMessage") {
+														sentUserMessages.push(command.text)
+														lastUserMessageCommit = receipt.commits[0]
+													}
+												}),
+											),
+										)
+										if (command._tag === "SendUserMessage" && dropNextUserMessageReceipt) {
+											dropNextUserMessageReceipt = false
+											return call.pipe(
+												Effect.andThen(Effect.die(new Error("message receipt lost"))),
+											)
+										}
+										return call
+									}
+								: (Reflect.get(target, property, receiver) as unknown),
+					})
+
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(AdmitSessionDecision, wrappedAdmit),
+						Effect.provideService(Session, wrappedSessions),
+					)
+
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Session Agent", model: "gpt-4o-mini" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Session Env" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+
+					const invalidRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: { agent: agent.id, agent_id: "agent_other", environment_id: env.id },
+					})
+					expect(invalidRes.status).toBe(400)
+					expect(admittedSessionIds).toHaveLength(0)
+
+					const sessionPayload = {
+						agent: agent.id,
+						environment_id: env.id,
+						title: "Idempotent Session",
+					}
+					dropNextAdmitReceipt = true
+					const lostSessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: sessionPayload,
+					})
+					expect(lostSessRes.status).toBe(500)
+
+					const retrySessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: sessionPayload,
+					})
+					expect(retrySessRes.status).toBe(201)
+					const sess1 = (yield* Effect.promise(() => retrySessRes.json())) as {
+						id: string
+						agent: { id: string; version: number }
+						created_at: string
+					}
+					expect(sess1.id).toMatch(/^sess_/)
+					expect(sess1.agent).toEqual({ id: agent.id, version: 1 })
+
+					const updateAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${agent.id}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, name: "Session Agent v2" },
+					})
+					expect(updateAgentRes.status).toBe(200)
+
+					const repeatSessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: sessionPayload,
+					})
+					expect(repeatSessRes.status).toBe(201)
+					expect(yield* Effect.promise(() => repeatSessRes.json())).toEqual(sess1)
+					expect(new Set(admittedSessionIds)).toEqual(new Set([sess1.id]))
+					expect((yield* realSessions.get(SessionId.make(sess1.id)))._tag).toBe("Idle")
+
+					const eventsWithSameKeyRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${sess1.id}/events`,
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "hi" }] }],
+						},
+					})
+					expect(eventsWithSameKeyRes.status).toBe(200)
+					for (let attempt = 0; attempt < 400; attempt++) {
+						const res = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${sess1.id}`,
+							headers: AUTH_HEADERS,
+						})
+						const current = (yield* Effect.promise(() => res.json())) as {
+							status: string
+							turn: number
+						}
+						if (current.status === "idle" && current.turn === 1) break
+						yield* Effect.sleep("5 millis")
+					}
+					const archiveSessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${sess1.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveSessRes.status).toBe(200)
+					const archivedSess = (yield* Effect.promise(() => archiveSessRes.json())) as {
+						status: string
+						turn: number
+						usage: { input_tokens: number; output_tokens: number }
+						archived_at: string | null
+					}
+					expect(archivedSess.status).toBe("terminated")
+					expect(archivedSess.turn).toBe(1)
+					expect(archivedSess.usage).toEqual({ input_tokens: 1, output_tokens: 1 })
+					expect(archivedSess.archived_at).not.toBeNull()
+
+					const retryAfterArchiveRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: sessionPayload,
+					})
+					expect(retryAfterArchiveRes.status).toBe(201)
+					expect(yield* Effect.promise(() => retryAfterArchiveRes.json())).toEqual(sess1)
+					expect(new Set(admittedSessionIds)).toEqual(new Set([sess1.id]))
+
+					const admitsBeforeConflict = admittedSessionIds.length
+					const conflictSessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "sess-key-1" },
+						body: { ...sessionPayload, title: "Different Title" },
+					})
+					expect(conflictSessRes.status).toBe(409)
+					expect(yield* Effect.promise(() => conflictSessRes.json())).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+					expect(admittedSessionIds).toHaveLength(admitsBeforeConflict)
+
+					const unkeyed1Res = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: sessionPayload,
+					})
+					const unkeyed2Res = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: sessionPayload,
+					})
+					expect(unkeyed1Res.status).toBe(201)
+					expect(unkeyed2Res.status).toBe(201)
+					const unkeyed1 = (yield* Effect.promise(() => unkeyed1Res.json())) as { id: string }
+					const unkeyed2 = (yield* Effect.promise(() => unkeyed2Res.json())) as { id: string }
+					expect(unkeyed1.id).not.toBe(unkeyed2.id)
+					expect(unkeyed1.id).not.toBe(sess1.id)
+
+					const generatedClient = yield* makeApiTestClient(apiFetch)
+					const clientUnkeyedSess = yield* generatedClient.sessions.create({
+						payload: { agent: agent.id, environment_id: env.id, title: "Client Unkeyed Session" },
+					})
+					expect("pending" in clientUnkeyedSess).toBe(false)
+					expect(clientUnkeyedSess.id).toMatch(/^sess_/)
+
+					const sessCountBeforeClientKey = new Set(admittedSessionIds).size
+					dropNextAdmitReceipt = true
+					const lostClientSess = yield* generatedClient.sessions
+						.create({
+							payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
+						})
+						.pipe(withIdempotencyKey("client-sess-key-1"), Effect.flip)
+					expect(lostClientSess).toMatchObject({
+						type: "error",
+						error: { type: "internal_error" },
+					})
+					const clientKeyedSess1 = yield* generatedClient.sessions
+						.create({
+							payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
+						})
+						.pipe(withIdempotencyKey("client-sess-key-1"))
+					const clientKeyedSess2 = yield* generatedClient.sessions
+						.create({
+							payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
+						})
+						.pipe(withIdempotencyKey("client-sess-key-1"))
+					expect(clientKeyedSess2).toEqual(clientKeyedSess1)
+					expect(new Set(admittedSessionIds).size).toBe(sessCountBeforeClientKey + 1)
+					const clientKeyedSessConflict = yield* generatedClient.sessions
+						.create({
+							payload: {
+								agent: agent.id,
+								environment_id: env.id,
+								title: "Different Client Keyed Session",
+							},
+						})
+						.pipe(withIdempotencyKey("client-sess-key-1"), Effect.flip)
+					expect(clientKeyedSessConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+
+					const sessCountBeforeInlineHeaders = new Set(admittedSessionIds).size
+					const clientInlineSess1 = yield* generatedClient.sessions.create({
+						payload: {
+							agent: agent.id,
+							environment_id: env.id,
+							title: "Client Inline Headers Session",
+						},
+						headers: { "idempotency-key": "client-sess-inline-key-1" },
+					})
+					const clientInlineSess2 = yield* generatedClient.sessions
+						.create({
+							payload: {
+								agent: agent.id,
+								environment_id: env.id,
+								title: "Client Inline Headers Session",
+							},
+							headers: { "idempotency-key": "client-sess-inline-key-1" },
+						})
+						.pipe(withIdempotencyKey("client-sess-key-1"))
+					expect(clientInlineSess2).toEqual(clientInlineSess1)
+					expect(new Set(admittedSessionIds).size).toBe(sessCountBeforeInlineHeaders + 1)
+					const clientInlineSessConflict = yield* generatedClient.sessions
+						.create({
+							payload: {
+								agent: agent.id,
+								environment_id: env.id,
+								title: "Different Inline Headers Session",
+							},
+							headers: { "idempotency-key": "client-sess-inline-key-1" },
+						})
+						.pipe(Effect.flip)
+					expect(clientInlineSessConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+
+					const eventsSessionId = SessionId.make(clientInlineSess1.id)
+					dropNextUserMessageReceipt = true
+					const lostContextualBatch = yield* generatedClient.sessions
+						.sendEvents({
+							params: { session_id: eventsSessionId },
+							headers: {},
+							payload: {
+								events: [
+									{ type: "user.message", content: [{ type: "text", text: "contextual batch" }] },
+								],
+							},
+						})
+						.pipe(withIdempotencyKey("client-events-ctx-key-1"), Effect.flip)
+					expect(lostContextualBatch).toMatchObject({
+						type: "error",
+						error: { type: "internal_error" },
+					})
+					const retriedContextualBatch = yield* generatedClient.sessions
+						.sendEvents({
+							params: { session_id: eventsSessionId },
+							headers: {},
+							payload: {
+								events: [
+									{ type: "user.message", content: [{ type: "text", text: "contextual batch" }] },
+								],
+							},
+						})
+						.pipe(withIdempotencyKey("client-events-ctx-key-1"))
+					expect(retriedContextualBatch.data).toHaveLength(1)
+					const contextualBatchConflict = yield* generatedClient.sessions
+						.sendEvents({
+							params: { session_id: eventsSessionId },
+							headers: {},
+							payload: {
+								events: [
+									{ type: "user.message", content: [{ type: "text", text: "different batch" }] },
+								],
+							},
+						})
+						.pipe(withIdempotencyKey("client-events-ctx-key-1"), Effect.flip)
+					expect(contextualBatchConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+
+					const explicitOverridesContextual = yield* generatedClient.sessions
+						.sendEvents({
+							params: { session_id: eventsSessionId },
+							headers: { "idempotency-key": "client-events-explicit-key-1" },
+							payload: {
+								events: [
+									{ type: "user.message", content: [{ type: "text", text: "explicit batch" }] },
+								],
+							},
+						})
+						.pipe(withIdempotencyKey("client-events-ctx-key-1"))
+					expect(explicitOverridesContextual.data).toHaveLength(1)
+					const explicitRetry = yield* generatedClient.sessions.sendEvents({
+						params: { session_id: eventsSessionId },
+						headers: { "idempotency-key": "client-events-explicit-key-1" },
+						payload: {
+							events: [
+								{ type: "user.message", content: [{ type: "text", text: "explicit batch" }] },
+							],
+						},
+					})
+					expect(explicitRetry).toEqual(explicitOverridesContextual)
+
+					if (lastUserMessageCommit !== undefined) {
+						yield* sessionViews.get(Session.ref(eventsSessionId), {
+							atLeast: lastUserMessageCommit,
+						})
+					}
+					const listedEvents = yield* generatedClient.sessions.listEvents({
+						params: { session_id: eventsSessionId },
+						query: {},
+					})
+					const userMessages = listedEvents.data.filter((event) => event.type === "user.message")
+					expect(userMessages.map((event) => event.content[0]?.text)).toEqual([
+						"contextual batch",
+						"explicit batch",
+					])
+					expect(sentUserMessages).toContain("contextual batch")
+					expect(sentUserMessages).toContain("explicit batch")
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
 	})
 })

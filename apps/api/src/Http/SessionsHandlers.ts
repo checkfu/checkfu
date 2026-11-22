@@ -1,5 +1,4 @@
 import type * as Domain from "@alchemy.run/domain"
-import { createHash } from "node:crypto"
 import { AgentId } from "@checkfu/agents/Agent/Agent.id"
 import {
 	AgentVersionByNumberView,
@@ -23,25 +22,25 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import {
-	AdmitSession,
-	AdmitSessionDecision,
-	ClaimEventBatch,
-	EventBatch,
-	EventBatchId,
-} from "../Checkfu.model.ts"
+import { AdmitSession, AdmitSessionDecision, EventBatch } from "../Checkfu.model.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, SessionEvent, statusOf } from "./Api.ts"
 import {
+	claimCreate,
+	claimIdempotency,
 	commitForStream,
 	currentRequestId,
 	handled,
+	idempotencyClaimId,
+	idempotentCommandId,
+	idempotentId,
 	isPending,
 	orPending,
 	present,
 	randomId,
 	reject,
 	settled,
+	sha256Json,
 	toApiError,
 } from "./HttpHelpers.ts"
 
@@ -72,40 +71,28 @@ const sessionEventCommandId = (
 	scope:
 		| { readonly kind: "event"; readonly eventId: string }
 		| { readonly kind: "batch"; readonly key: string; readonly index: number },
-): string => {
-	const tuple =
+): string =>
+	idempotentCommandId(
+		"evt",
 		scope.kind === "event"
 			? [sessionId, "event", scope.eventId]
-			: [sessionId, "batch", scope.key, scope.index]
-	return `evt:${createHash("sha256").update(JSON.stringify(tuple)).digest("hex")}`
-}
-
-const sessionEventBatchId = (sessionId: SessionId, idempotencyKey: string): EventBatchId =>
-	EventBatchId.make(
-		`eb_${createHash("sha256")
-			.update(JSON.stringify([sessionId, "batch", idempotencyKey]))
-			.digest("hex")}`,
+			: [sessionId, "batch", scope.key, scope.index],
 	)
 
-const sessionEventClaimId = (sessionId: SessionId, eventId: string): EventBatchId =>
-	EventBatchId.make(
-		`ev_${createHash("sha256")
-			.update(JSON.stringify([sessionId, "event", eventId]))
-			.digest("hex")}`,
-	)
+const sessionEventBatchId = (sessionId: SessionId, idempotencyKey: string) =>
+	idempotencyClaimId("eb", [sessionId, "batch", idempotencyKey])
+
+const sessionEventClaimId = (sessionId: SessionId, eventId: string) =>
+	idempotencyClaimId("ev", [sessionId, "event", eventId])
 
 const singleEventFingerprint = (
 	item:
 		| { readonly type: "user.interrupt" }
 		| { readonly type: "user.message"; readonly text: string },
 ): string =>
-	createHash("sha256")
-		.update(
-			JSON.stringify(
-				item.type === "user.interrupt" ? { type: item.type } : { type: item.type, text: item.text },
-			),
-		)
-		.digest("hex")
+	sha256Json(
+		item.type === "user.interrupt" ? { type: item.type } : { type: item.type, text: item.text },
+	)
 
 const eventBatchFingerprint = (
 	items: ReadonlyArray<
@@ -117,21 +104,17 @@ const eventBatchFingerprint = (
 		  }
 	>,
 ): string =>
-	createHash("sha256")
-		.update(
-			JSON.stringify(
-				items.map((item) =>
-					item.type === "user.interrupt"
-						? { type: item.type, ...(item.eventId === undefined ? {} : { id: item.eventId }) }
-						: {
-								type: item.type,
-								...(item.eventId === undefined ? {} : { id: item.eventId }),
-								text: item.text,
-							},
-				),
-			),
-		)
-		.digest("hex")
+	sha256Json(
+		items.map((item) =>
+			item.type === "user.interrupt"
+				? { type: item.type, ...(item.eventId === undefined ? {} : { id: item.eventId }) }
+				: {
+						type: item.type,
+						...(item.eventId === undefined ? {} : { id: item.eventId }),
+						text: item.text,
+					},
+		),
+	)
 
 const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnapshot) => ({
 	...snapshot,
@@ -262,8 +245,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			})
 
 		return handlers
-			.handle("create", ({ payload }) =>
+			.handle("create", ({ payload, request }) =>
 				Effect.gen(function* () {
+					const idempotencyKey = request.headers["idempotency-key"]
 					const nested = payload.agent
 					const nestedAgentId = typeof nested === "string" ? nested : nested?.id
 					if (
@@ -289,15 +273,31 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const agentId = AgentId.make(rawAgentId)
 					const explicitVersion = nestedVersion ?? payload.agent_version
 					const environmentId = EnvironmentId.make(payload.environment_id)
-					const id = SessionId.make(yield* randomId(random, "sess"))
+					const agentVersion = explicitVersion ?? null
+					const title = payload.title ?? null
+					let id: SessionId
+					let sendOptions: { readonly commandId: string } | undefined
+					if (idempotencyKey !== undefined) {
+						const commandId = yield* claimCreate(eventBatches, "session", idempotencyKey, {
+							agent_id: agentId,
+							agent_version: agentVersion,
+							environment_id: environmentId,
+							title,
+						})
+						id = SessionId.make(idempotentId("sess", ["create", "session", "id", idempotencyKey]))
+						sendOptions = { commandId }
+					} else {
+						id = SessionId.make(yield* randomId(random, "sess"))
+					}
 					const receipt = yield* admitSession.send(
 						new AdmitSession({
 							session_id: id,
 							agent_id: agentId,
-							agent_version: explicitVersion ?? null,
+							agent_version: agentVersion,
 							environment_id: environmentId,
-							title: payload.title ?? null,
+							title,
 						}),
+						sendOptions,
 					)
 					const pinnedVersion = receipt.reply.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
@@ -312,7 +312,23 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
 						.pipe(orPending(id, "session"))
 					if (isPending(result)) return result
-					return serializeSession(yield* present(result, 500, "Failed to load created session."))
+					const snapshot = yield* present(result, 500, "Failed to load created session.")
+					return {
+						id,
+						type: "session" as const,
+						status: "idle" as const,
+						agent: { id: agentId, version: pinnedVersion },
+						environment_id: environmentId,
+						title,
+						turn: 0,
+						usage: {
+							input_tokens: 0,
+							output_tokens: 0,
+						},
+						created_at: snapshot.created_at,
+						updated_at: snapshot.created_at,
+						archived_at: null,
+					}
 				}).pipe(handled),
 			)
 			.handle("get", ({ params }) =>
@@ -404,9 +420,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (idempotencyKey !== undefined) {
 						const batchId = sessionEventBatchId(id, idempotencyKey)
 						const fingerprint = eventBatchFingerprint(prepared)
-						yield* eventBatches.send(new ClaimEventBatch({ batch_id: batchId, fingerprint }), {
-							commandId: `claim:${batchId}:${fingerprint}`,
-						})
+						yield* claimIdempotency(eventBatches, batchId, fingerprint)
 					}
 
 					const accepted: Array<unknown> = []
@@ -419,14 +433,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								: Effect.suspend(() => {
 										const claimId = sessionEventClaimId(id, item.eventId!)
 										const fingerprint = singleEventFingerprint(item)
-										return eventBatches
-											.send(new ClaimEventBatch({ batch_id: claimId, fingerprint }), {
-												commandId: `claim:${claimId}:${fingerprint}`,
-											})
-											.pipe(
-												Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
-												Effect.asVoid,
-											)
+										return claimIdempotency(eventBatches, claimId, fingerprint).pipe(
+											Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
+											Effect.asVoid,
+										)
 									})
 						const outcome =
 							item.type === "user.interrupt"
