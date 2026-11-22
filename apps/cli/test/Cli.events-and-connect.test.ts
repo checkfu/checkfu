@@ -1217,4 +1217,178 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 	})
+
+	it("interrupts accepted turns before SSE catches up, retries/reports idempotency keys on unconfirmed sends, and preserves matching historical messages", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Starting from idle, pressing Ctrl-C right after POST acceptance (before SSE delivers
+					//    session.status_running) must still interrupt the accepted turn rather than disconnecting
+					const idleCtrlCSigint = makeSigintController()
+					const idleTurnStarted = yield* Deferred.make<void>()
+					const idleTurnInterrupted = yield* Deferred.make<void>()
+					const idleCtrlCCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(idleTurnStarted, undefined)
+								yield* Deferred.await(idleTurnInterrupted)
+								return yield* Effect.fail({
+									_tag: "ModelRequestInterrupted" as const,
+									model_usage: { input_tokens: 2, output_tokens: 0 },
+								})
+							}),
+						interrupt: () => Deferred.succeed(idleTurnInterrupted, undefined).pipe(Effect.asVoid),
+					})
+					const idleCtrlCSessionId = yield* createReadySession(idleCtrlCCli)
+					let releaseIdleSse: (() => void) | undefined
+					const idleSseGate = new Promise<void>((resolve) => {
+						releaseIdleSse = resolve
+					})
+					let sigintBeforeRunningConsumed = false
+					const idleCtrlCRes = yield* idleCtrlCCli.run(
+						["sessions", "connect", "--session-id", idleCtrlCSessionId],
+						{
+							stdinIsTerminal: true,
+							sigintController: idleCtrlCSigint,
+							interceptFetch: async (next, request) => {
+								if (request.url.includes("/events/stream")) {
+									await idleSseGate
+								}
+								return next(request)
+							},
+							terminalReads: [
+								Effect.succeed("start from idle"),
+								Deferred.await(idleTurnStarted).pipe(
+									Effect.andThen(
+										Effect.sync(() => {
+											sigintBeforeRunningConsumed = idleCtrlCSigint.handleSigint()
+										}),
+									),
+									Effect.andThen(Deferred.await(idleTurnInterrupted)),
+									Effect.andThen(Effect.sync(() => releaseIdleSse?.())),
+									Effect.andThen(Effect.sleep("25 millis")),
+									Effect.as("/exit"),
+								),
+							],
+						},
+					)
+					expect(idleCtrlCRes.exitCode).toBe(0)
+					expect(sigintBeforeRunningConsumed).toBe(true)
+					expect(idleCtrlCRes.stderr).toContain("Interrupt requested.")
+
+					// 2a) Lost response after server commits message retries with the exact same Idempotency-Key
+					//     without duplicating the turn
+					let retryGenerateCalls = 0
+					const retrySendCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.sync(() => {
+								retryGenerateCalls++
+								return {
+									thinking: null,
+									text: `Ack:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const retrySessionId = yield* createReadySession(retrySendCli)
+					const retryKeys: Array<string | null> = []
+					const retryRes = yield* retrySendCli.run(
+						["sessions", "connect", "--session-id", retrySessionId],
+						{
+							stdin: "only once\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									retryKeys.push(request.headers.get("idempotency-key"))
+									const res = await next(request)
+									if (retryKeys.length === 1) {
+										throw new TypeError("simulated dropped response after commit")
+									}
+									return res
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(retryRes.exitCode).toBe(0)
+					expect(retryKeys).toHaveLength(2)
+					expect(retryKeys[0]).toMatch(/^cli_[0-9a-f]{24}$/)
+					expect(retryKeys[1]).toBe(retryKeys[0])
+					expect(retryGenerateCalls).toBe(1)
+					expect(retryRes.stdout).toContain("Ack:only once")
+
+					// 2b) Persistent ambiguous send failure exposes the exact Idempotency-Key in stderr
+					const unconfirmedKeys: Array<string | null> = []
+					const unconfirmedRes = yield* retrySendCli.run(
+						["sessions", "connect", "--session-id", retrySessionId],
+						{
+							stdin: "unconfirmed line\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									unconfirmedKeys.push(request.headers.get("idempotency-key"))
+									throw new TypeError("simulated persistent network drop")
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(unconfirmedRes.exitCode).toBe(1)
+					expect(unconfirmedKeys.length).toBe(3)
+					expect(new Set(unconfirmedKeys).size).toBe(1)
+					const usedKey = unconfirmedKeys[0] ?? ""
+					expect(usedKey).toMatch(/^cli_[0-9a-f]{24}$/)
+					expect(unconfirmedRes.stderr).toContain(`Idempotency-Key: ${usedKey}`)
+
+					// 3) Sending the same text as an earlier historical message before replay reaches it must
+					//    NOT suppress the historical message or echo the new local message as remote
+					const echoCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `Reply-${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const echoSessionId = yield* createReadySession(echoCli)
+					const firstSend = yield* echoCli.run(
+						["sessions", "connect", "--session-id", echoSessionId],
+						{ stdin: "same text\n" },
+					)
+					expect(firstSend.exitCode).toBe(0)
+
+					let releaseHistoryReplay: (() => void) | undefined
+					const historyReplayGate = new Promise<void>((resolve) => {
+						releaseHistoryReplay = resolve
+					})
+					const secondSend = yield* echoCli.run(
+						["sessions", "connect", "--session-id", echoSessionId],
+						{
+							stdin: "same text\n",
+							interceptFetch: async (next, request) => {
+								if (request.url.includes("/events/stream")) {
+									await historyReplayGate
+									return next(request)
+								}
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									const res = await next(request)
+									releaseHistoryReplay?.()
+									return res
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(secondSend.exitCode).toBe(0)
+					expect(secondSend.stdout.trim().split("\n")).toEqual([
+						"[you] same text",
+						"Reply-1:same text",
+						"Reply-2:same text",
+					])
+				}),
+			),
+		)
+	})
 })

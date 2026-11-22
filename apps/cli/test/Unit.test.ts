@@ -12,6 +12,7 @@ import * as YAML from "yaml"
 import { makeCheckfuClient, normalizeApiUrl, resolveBaseUrl } from "../src/Client.ts"
 import {
 	escapeTerminalControlCharacters,
+	hasUnsafeTerminalCodePoint,
 	stringifyTerminalSafeJson,
 } from "../src/TerminalOutput.ts"
 import { evaluateTransform, formatOutput } from "../src/Transform.ts"
@@ -440,5 +441,82 @@ describe("Transform and formatOutput", () => {
 			expect(doc.errors).toEqual([])
 		}
 		expect(docs.map((doc) => doc.toJS())).toEqual(events)
+	})
+
+	it("honors the selected output format for non-string values with --raw-output and round-trips terminal-safe YAML", () => {
+		// --format yaml -r on streaming objects preserves YAML document separators instead of emitting JSONL
+		const streamedEvents = [
+			{ id: "evt_1", type: "user.message" },
+			{ id: "evt_2", type: "agent.message" },
+		]
+		const yamlRawStream = streamedEvents
+			.map(
+				(event) =>
+					`${formatOutput(event, {
+						format: "yaml",
+						transform: Option.none(),
+						rawOutput: true,
+						isTerminal: false,
+						streaming: true,
+					})}\n`,
+			)
+			.join("")
+		expect(yamlRawStream).toContain("---\n")
+		const parsedStreamDocs = YAML.parseAllDocuments(yamlRawStream)
+		expect(parsedStreamDocs).toHaveLength(2)
+		expect(parsedStreamDocs.map((doc) => doc.toJS())).toEqual(streamedEvents)
+
+		// --format yaml -r on a string still outputs the raw unquoted string
+		expect(
+			formatOutput(sample, {
+				format: "yaml",
+				transform: Option.some("id"),
+				rawOutput: true,
+				isTerminal: false,
+			}),
+		).toBe("agt_123")
+
+		// --format pretty -r on an object preserves pretty JSON formatting
+		expect(
+			formatOutput(
+				{ a: 1 },
+				{
+					format: "pretty",
+					transform: Option.none(),
+					rawOutput: true,
+					isTerminal: false,
+				},
+			),
+		).toBe('{\n  "a": 1\n}')
+
+		// Terminal-safe YAML uses YAML double-quoted escapes so values & keys remain both safe and lossless
+		const tricky = {
+			name: "evil\u202ename",
+			controls: "hi\x1b[31m\x07\u009b\u2028\u2029\u2066there",
+			backslashAdjacent: "foo\\\u202ebar",
+			crlf: "a\r\nb",
+			["key\u202ename"]: "val\u200f",
+		}
+		const ttyYaml = formatOutput(tricky, {
+			format: "yaml",
+			transform: Option.none(),
+			rawOutput: false,
+			isTerminal: true,
+		})
+		expect(hasUnsafeTerminalCodePoint(ttyYaml)).toBe(false)
+		for (const forbidden of [
+			"\u202e",
+			"\x1b",
+			"\x07",
+			"\u009b",
+			"\u2028",
+			"\u2029",
+			"\u2066",
+			"\u200f",
+			"\r",
+		]) {
+			expect(ttyYaml).not.toContain(forbidden)
+		}
+		expect(YAML.parse(`${ttyYaml}\n`)).toEqual(tricky)
 	})
 })

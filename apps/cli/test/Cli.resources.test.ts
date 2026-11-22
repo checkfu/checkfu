@@ -386,6 +386,51 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(createdSession.exitCode).toBe(0)
 					const session = JSON.parse(createdSession.stdout) as { agent: { id: string } }
 					expect(session.agent.id).toBe(agent.id)
+
+					// Single-line YAML mappings with quoted keys work for --model, --agent, and @file
+					const quotedModelAgent = yield* cli.run([
+						"agents",
+						"create",
+						"--name",
+						"QuotedYamlModel",
+						"--model",
+						'"id": gpt-6.2-sol',
+					])
+					expect(quotedModelAgent.exitCode).toBe(0)
+					expect((JSON.parse(quotedModelAgent.stdout) as { model: { id: string } }).model.id).toBe(
+						"gpt-6.2-sol",
+					)
+
+					const quotedModelFileAgent = yield* cli.run(
+						["agents", "create", "--name", "QuotedYamlModelFile", "--model", "@model.yaml"],
+						{ files: { "model.yaml": "'id': gpt-6.2-sol\n" } },
+					)
+					expect(quotedModelFileAgent.exitCode).toBe(0)
+					expect(
+						(JSON.parse(quotedModelFileAgent.stdout) as { model: { id: string } }).model.id,
+					).toBe("gpt-6.2-sol")
+
+					const quotedAgentSession = yield* cli.run([
+						"sessions",
+						"create",
+						"--agent",
+						`"id": ${agent.id}`,
+						"--environment-id",
+						envId,
+					])
+					expect(quotedAgentSession.exitCode).toBe(0)
+					expect(
+						(JSON.parse(quotedAgentSession.stdout) as { agent: { id: string } }).agent.id,
+					).toBe(agent.id)
+
+					const quotedAgentFileSession = yield* cli.run(
+						["sessions", "create", "--agent", "@agent.yaml", "--environment-id", envId],
+						{ files: { "agent.yaml": `"id": ${agent.id}\n` } },
+					)
+					expect(quotedAgentFileSession.exitCode).toBe(0)
+					expect(
+						(JSON.parse(quotedAgentFileSession.stdout) as { agent: { id: string } }).agent.id,
+					).toBe(agent.id)
 				}),
 			),
 		)

@@ -1,7 +1,12 @@
 import * as DateTime from "effect/DateTime"
 import * as Option from "effect/Option"
 import * as YAML from "yaml"
-import { escapeTerminalControlCharacters, stringifyTerminalSafeJson } from "./TerminalOutput.ts"
+import {
+	escapeQuotedTerminalCodePoints,
+	escapeTerminalControlCharacters,
+	hasUnsafeTerminalCodePoint,
+	stringifyTerminalSafeJson,
+} from "./TerminalOutput.ts"
 
 export const OUTPUT_FORMATS = ["auto", "json", "jsonl", "yaml", "pretty", "raw"] as const
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number]
@@ -233,7 +238,11 @@ export const formatOutput = (value: unknown, options: FormatOptions): string => 
 					: "json"
 			: options.format
 
-	if (options.rawOutput || effectiveFormat === "raw") {
+	if (options.rawOutput && typeof transformed === "string") {
+		return options.isTerminal ? escapeTerminalControlCharacters(transformed) : transformed
+	}
+
+	if (effectiveFormat === "raw") {
 		if (typeof transformed === "string") {
 			return options.isTerminal ? escapeTerminalControlCharacters(transformed) : transformed
 		}
@@ -251,8 +260,15 @@ export const formatOutput = (value: unknown, options: FormatOptions): string => 
 		if (options.streaming === true && doc.directives !== undefined) {
 			doc.directives.docStart = true
 		}
+		YAML.visit(doc, {
+			Scalar(_key, node) {
+				if (typeof node.value === "string" && hasUnsafeTerminalCodePoint(node.value)) {
+					node.type = YAML.Scalar.QUOTE_DOUBLE
+				}
+			},
+		})
 		const rendered = doc.toString().replace(/\r?\n$/, "")
-		return options.isTerminal ? escapeTerminalControlCharacters(rendered) : rendered
+		return escapeQuotedTerminalCodePoints(rendered)
 	}
 	if (effectiveFormat === "pretty") {
 		return stringifyTerminalSafeJson(serializable, 2)

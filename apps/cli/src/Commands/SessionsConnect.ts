@@ -16,7 +16,7 @@ import * as Stream from "effect/Stream"
 import * as Terminal from "effect/Terminal"
 import type { CheckfuClient, SessionStreamEvent } from "../Client.ts"
 import {
-	type CliFailure,
+	CliFailure,
 	formatClientError,
 	isApiErrorEnvelope,
 	isTransientHttpError,
@@ -49,10 +49,18 @@ const extractContentText = (data: Record<string, unknown>): string => {
 	return parts.join("\n")
 }
 
+interface LocalSentMessage {
+	readonly id: string
+	readonly text: string
+	readonly minSeq: number
+}
+
 interface ConnectState {
 	readonly status: "idle" | "running" | "terminated"
 	readonly liveStatus: "idle" | "running" | "terminated"
 	readonly liveTurn: number
+	readonly connectHeadSeq: number
+	readonly lastObservedSeq: number
 	readonly observedTurn: number
 	readonly settledTurn: number
 	readonly latestSettledStopReason: string | undefined
@@ -61,11 +69,13 @@ interface ConnectState {
 	readonly latestTurnError: { readonly turn: number; readonly message: string } | undefined
 	readonly failedTurnErrors: ReadonlyMap<number, string>
 	readonly ended: boolean
-	readonly localSentTexts: ReadonlyArray<string>
+	readonly localSentMessages: ReadonlyArray<LocalSentMessage>
 }
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
+const MAX_CONNECT_SEND_RETRIES = 2
+const CONNECT_SEND_RETRY_BASE_MS = 100
 
 const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
 	if (HttpClientError.isHttpClientError(err)) return isTransientHttpError(err)
@@ -75,6 +85,46 @@ const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): b
 	}
 	return false
 }
+
+const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): boolean => {
+	if (HttpClientError.isHttpClientError(err)) return isTransientHttpError(err)
+	if (isApiErrorEnvelope(err)) {
+		const status = statusOf(err)
+		return err.unconfirmed_index !== undefined || status === 429 || status >= 500
+	}
+	return false
+}
+
+const formatUnconfirmedSendError = (
+	err: Parameters<typeof formatClientError>[0],
+	idempotencyKey: string,
+): CliFailure => {
+	const formatted = formatClientError(err)
+	if (!isUnconfirmedSendError(err)) return formatted
+	return new CliFailure({
+		message: `${formatted.message} (delivery unconfirmed; retry safely with Idempotency-Key: ${idempotencyKey})`,
+		exitCode: formatted.exitCode,
+	})
+}
+
+const sendConnectEventsWithRetry = <A>(
+	send: Effect.Effect<A, Parameters<typeof formatClientError>[0]>,
+	idempotencyKey: string,
+): Effect.Effect<A, CliFailure> =>
+	Effect.gen(function* () {
+		for (let attempt = 0; ; attempt++) {
+			const res = yield* Effect.result(send)
+			if (res._tag === "Success") {
+				return res.success
+			}
+			const err = res.failure
+			if (isUnconfirmedSendError(err) && attempt < MAX_CONNECT_SEND_RETRIES) {
+				yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
+				continue
+			}
+			return yield* formatUnconfirmedSendError(err, idempotencyKey)
+		}
+	})
 
 const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId) =>
 	Effect.gen(function* () {
@@ -138,6 +188,13 @@ const renderConnectEvent = (
 	Effect.gen(function* () {
 		const data = event.data
 		const eventType = typeof data["type"] === "string" ? data["type"] : event.event
+		const eventSeq = event.seq
+
+		if (eventSeq !== undefined) {
+			yield* Ref.update(stateRef, (state) =>
+				eventSeq > state.lastObservedSeq ? { ...state, lastObservedSeq: eventSeq } : state,
+			)
+		}
 
 		if (rawStructuredMode) {
 			yield* renderOutput(data, { streaming: true })
@@ -147,13 +204,15 @@ const renderConnectEvent = (
 			case "user.message": {
 				const text = extractContentText(data)
 				const wasLocal = yield* Ref.modify(stateRef, (state) => {
-					const idx = state.localSentTexts.indexOf(text)
+					const idx = state.localSentMessages.findIndex(
+						(entry) => entry.text === text && (eventSeq === undefined || eventSeq > entry.minSeq),
+					)
 					if (idx === -1) return [false, state] as const
 					const next = [
-						...state.localSentTexts.slice(0, idx),
-						...state.localSentTexts.slice(idx + 1),
+						...state.localSentMessages.slice(0, idx),
+						...state.localSentMessages.slice(idx + 1),
 					]
-					return [true, { ...state, localSentTexts: next }] as const
+					return [true, { ...state, localSentMessages: next }] as const
 				})
 				if (!rawStructuredMode && !wasLocal && text.length > 0) {
 					yield* writeStdoutLine(`[you] ${escapeTerminalControlCharacters(text)}`)
@@ -309,18 +368,20 @@ const dispatchUserLine = (
 		if (trimmed === "/interrupt") {
 			const key = yield* client.generateIdempotencyKey()
 			const res = yield* Effect.result(
-				client.api.sessions.sendEvents({
-					params: { session_id: sessionId },
-					headers: { "idempotency-key": key },
-					payload: { events: [{ type: "user.interrupt" }] },
-				}),
+				sendConnectEventsWithRetry(
+					client.api.sessions.sendEvents({
+						params: { session_id: sessionId },
+						headers: { "idempotency-key": key },
+						payload: { events: [{ type: "user.interrupt" }] },
+					}),
+					key,
+				),
 			)
 			if (res._tag === "Failure") {
-				const err = formatClientError(res.failure)
 				if (options?.failOnInterruptError === true) {
-					return yield* err
+					return yield* res.failure
 				}
-				yield* writeStderrLine(`Interrupt failed: ${err.message}`)
+				yield* writeStderrLine(`Interrupt failed: ${res.failure.message}`)
 			} else {
 				yield* writeStderrLine("Interrupt requested.")
 			}
@@ -330,30 +391,33 @@ const dispatchUserLine = (
 		const key = yield* client.generateIdempotencyKey()
 		yield* Ref.update(stateRef, (state) => ({
 			...state,
-			localSentTexts: [...state.localSentTexts, line],
+			localSentMessages: [
+				...state.localSentMessages,
+				{
+					id: key,
+					text: line,
+					minSeq: Math.max(state.connectHeadSeq, state.lastObservedSeq),
+				},
+			],
 		}))
 		const res = yield* Effect.result(
-			client.api.sessions.sendEvents({
-				params: { session_id: sessionId },
-				headers: { "idempotency-key": key },
-				payload: {
-					events: [{ type: "user.message", content: [{ type: "text", text: line }] }],
-				},
-			}),
+			sendConnectEventsWithRetry(
+				client.api.sessions.sendEvents({
+					params: { session_id: sessionId },
+					headers: { "idempotency-key": key },
+					payload: {
+						events: [{ type: "user.message", content: [{ type: "text", text: line }] }],
+					},
+				}),
+				key,
+			),
 		)
 		if (res._tag === "Failure") {
-			yield* Ref.update(stateRef, (state) => {
-				const idx = state.localSentTexts.indexOf(line)
-				if (idx === -1) return state
-				return {
-					...state,
-					localSentTexts: [
-						...state.localSentTexts.slice(0, idx),
-						...state.localSentTexts.slice(idx + 1),
-					],
-				}
-			})
-			return yield* formatClientError(res.failure)
+			yield* Ref.update(stateRef, (state) => ({
+				...state,
+				localSentMessages: state.localSentMessages.filter((entry) => entry.id !== key),
+			}))
+			return yield* res.failure
 		}
 		const first = res.success.data[0]
 		const turn =
@@ -366,10 +430,13 @@ const dispatchUserLine = (
 			yield* Ref.update(stateRef, (state) => {
 				const nextSubmitted = new Set(state.submittedTurns)
 				nextSubmitted.add(turn)
+				const startedFromIdle = state.liveStatus === "idle" && turn > state.liveTurn
 				return {
 					...state,
 					targetTurn: Math.max(state.targetTurn, turn),
 					submittedTurns: nextSubmitted,
+					liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
+					liveTurn: startedFromIdle ? state.liveTurn + 1 : state.liveTurn,
 				}
 			})
 		}
@@ -519,6 +586,20 @@ export const sessionsConnectCommand = Command.make(
 				}
 			}
 
+			let connectHeadSeq = after ?? 0
+			if (!initiallyEnded) {
+				const latestPage = yield* client.api.sessions
+					.listEvents({
+						params: { session_id: sessionId },
+						query: { limit: "1", order: "desc" },
+					})
+					.pipe(Effect.mapError(formatClientError))
+				const latestEntry = latestPage.data[0]
+				if (latestEntry !== undefined && typeof latestEntry["seq"] === "number") {
+					connectHeadSeq = Math.max(connectHeadSeq, latestEntry["seq"])
+				}
+			}
+
 			yield* writeStderrLine(
 				`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
 			)
@@ -527,6 +608,8 @@ export const sessionsConnectCommand = Command.make(
 				status: baseline.status,
 				liveStatus: session.status,
 				liveTurn: session.turn,
+				connectHeadSeq,
+				lastObservedSeq: after ?? 0,
 				observedTurn: baseline.observedTurn,
 				settledTurn: baseline.settledTurn,
 				latestSettledStopReason: undefined,
@@ -535,7 +618,7 @@ export const sessionsConnectCommand = Command.make(
 				latestTurnError: undefined,
 				failedTurnErrors: new Map<number, string>(),
 				ended: initiallyEnded,
-				localSentTexts: [],
+				localSentMessages: [],
 			})
 
 			const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())

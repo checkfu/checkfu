@@ -90,8 +90,20 @@ const parseTextOrObjectFlag = (
 		const isFile = raw.startsWith("@") && !raw.startsWith("@@") && raw.length > 1
 		const text = yield* resolveTextOrFile(raw)
 		const trimmed = text.trim()
-		if (trimmed.startsWith("{") || trimmed.includes("\n") || /^id\s*:/.test(trimmed)) {
-			return yield* parseJsonOrYaml(trimmed, `--${flagName}`)
+		const structuredSyntax =
+			trimmed.startsWith("{") || trimmed.includes("\n") || /:(?:\s|$)/.test(trimmed)
+		const parsedResult = yield* Effect.result(parseJsonOrYaml(trimmed, `--${flagName}`))
+		if (parsedResult._tag === "Success") {
+			if (isPlainRecord(parsedResult.success)) {
+				return parsedResult.success
+			}
+			if (trimmed.startsWith("{") || trimmed.includes("\n")) {
+				return parsedResult.success
+			}
+			return isFile ? trimmed : text
+		}
+		if (structuredSyntax) {
+			return yield* parsedResult.failure
 		}
 		return isFile ? trimmed : text
 	})

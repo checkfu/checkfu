@@ -25,6 +25,28 @@ const formatHexEscape = (code: number): string =>
 		? `\\x${code.toString(16).padStart(2, "0")}`
 		: `\\u${code.toString(16).padStart(4, "0")}`
 
+export const hasUnsafeTerminalCodePoint = (value: string): boolean => {
+	for (let i = 0; i < value.length; i++) {
+		if (isUnsafeHumanCodePoint(value.charCodeAt(i))) {
+			return true
+		}
+	}
+	return false
+}
+
+export const escapeQuotedTerminalCodePoints = (value: string): string => {
+	let out = ""
+	for (let i = 0; i < value.length; i++) {
+		const code = value.charCodeAt(i)
+		if (isUnsafeHumanCodePoint(code)) {
+			out += `\\u${code.toString(16).padStart(4, "0")}`
+		} else {
+			out += value[i] ?? ""
+		}
+	}
+	return out
+}
+
 export const escapeTerminalControlCharacters = (value: string): string => {
 	const normalized = value.replaceAll("\r\n", "\n")
 	let out = ""
