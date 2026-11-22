@@ -1,3 +1,4 @@
+import type * as Domain from "@alchemy.run/domain"
 import { createHash } from "node:crypto"
 import { AgentId } from "@checkfu/agents/Agent/Agent.id"
 import {
@@ -14,7 +15,7 @@ import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/sessions/Session/
 import { type SessionSnapshot, SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
-import * as DateTime from "effect/DateTime"
+import type * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
@@ -30,7 +31,7 @@ import {
 	EventBatchId,
 } from "../Checkfu.model.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
-import { CheckfuApi, statusOf } from "./Api.ts"
+import { CheckfuApi, SessionEvent, statusOf } from "./Api.ts"
 import {
 	commitForStream,
 	currentRequestId,
@@ -137,17 +138,87 @@ const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnaps
 	agent: { id: agent_id, version: agent_version },
 })
 
-const serializeSessionEvent = <E extends { readonly _tag: string }>(entry: {
+export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
+
+export interface SessionEventEntry {
 	readonly envelope: { readonly seq: number; readonly at: DateTime.Utc }
-	readonly event: E
-}) => {
-	const { _tag, ...rest } = entry.event
-	return {
-		id: `evt_${entry.envelope.seq}`,
-		seq: entry.envelope.seq,
-		type: _tag,
-		created_at: DateTime.formatIso(entry.envelope.at),
-		...rest,
+	readonly event: DomainSessionEvent
+}
+
+const encodeSessionEventJson = Schema.encodeSync(
+	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
+)
+
+const sessionEventEnvelope = <const T extends SessionEvent["type"]>(
+	entry: SessionEventEntry,
+	type: T,
+) => ({
+	id: `evt_${entry.envelope.seq}`,
+	seq: entry.envelope.seq,
+	type,
+	created_at: entry.envelope.at,
+})
+
+export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent => {
+	const { event } = entry
+	switch (event._tag) {
+		case "user.message":
+			return {
+				...sessionEventEnvelope(entry, "user.message"),
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+			}
+		case "user.interrupt":
+			return sessionEventEnvelope(entry, "user.interrupt")
+		case "session.status_running":
+			return sessionEventEnvelope(entry, "session.status_running")
+		case "span.model_request_start":
+			return {
+				...sessionEventEnvelope(entry, "span.model_request_start"),
+				model_request_start_id: event.model_request_start_id,
+			}
+		case "agent.thinking":
+			return {
+				...sessionEventEnvelope(entry, "agent.thinking"),
+				thinking: event.thinking,
+			}
+		case "agent.message":
+			return {
+				...sessionEventEnvelope(entry, "agent.message"),
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
+		case "span.model_request_end":
+			return {
+				...sessionEventEnvelope(entry, "span.model_request_end"),
+				model_request_start_id: event.model_request_start_id,
+				model_usage: {
+					input_tokens: event.model_usage.input_tokens,
+					output_tokens: event.model_usage.output_tokens,
+				},
+				is_error: event.is_error,
+			}
+		case "session.status_idle":
+			return {
+				...sessionEventEnvelope(entry, "session.status_idle"),
+				stop_reason: { type: event.stop_reason.type },
+			}
+		case "session.error":
+			return {
+				...sessionEventEnvelope(entry, "session.error"),
+				error: {
+					type: event.error.type,
+					message: event.error.message,
+					retry_status: { type: event.error.retry_status.type },
+				},
+			}
+		case "session.status_terminated":
+			return sessionEventEnvelope(entry, "session.status_terminated")
+		case "session.archived":
+			return sessionEventEnvelope(entry, "session.archived")
+		default: {
+			const exhaustive: never = event
+			throw new Error(`Unhandled session event: ${JSON.stringify(exhaustive)}`)
+		}
 	}
 }
 
@@ -515,7 +586,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						Stream.map((entry) => {
 							const payload = serializeSessionEvent(entry)
 							return encodeUtf8(
-								`id: ${entry.envelope.seq}\nevent: ${payload.type}\ndata: ${JSON.stringify(payload)}\n\n`,
+								`id: ${entry.envelope.seq}\nevent: ${payload.type}\ndata: ${encodeSessionEventJson(payload)}\n\n`,
 							)
 						}),
 						Stream.interruptWhen(Effect.sleep(Duration.millis(sseMaxConnectionMs))),

@@ -12,17 +12,37 @@ import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
 import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
 import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { RecordSessionError } from "@checkfu/sessions/Session/RecordSessionError.command"
+import {
+	SessionArchived,
+	SessionStatusTerminated,
+} from "@checkfu/sessions/Session/ArchiveSession.command"
+import { SessionStatusIdle } from "@checkfu/sessions/Session/CompleteTurn.command"
+import { AgentMessage } from "@checkfu/sessions/Session/RecordAgentMessage.command"
+import { AgentThinking } from "@checkfu/sessions/Session/RecordAgentThinking.command"
+import { SpanModelRequestEnd } from "@checkfu/sessions/Session/RecordModelRequestEnd.command"
+import { SpanModelRequestStart } from "@checkfu/sessions/Session/RecordModelRequestStart.command"
+import {
+	RecordSessionError,
+	SessionErrorEvent,
+} from "@checkfu/sessions/Session/RecordSessionError.command"
+import { UserInterrupt } from "@checkfu/sessions/Session/SendUserInterrupt.command"
+import {
+	SessionStatusRunning,
+	UserMessage,
+} from "@checkfu/sessions/Session/SendUserMessage.command"
 import { Session } from "@checkfu/sessions/Session/Session.aggregate"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import { describe, expect, it } from "@effect/vitest"
+import * as Arbitrary from "effect/Arbitrary"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { AdmitSession, AdmitSessionDecision } from "../src/Checkfu.model.ts"
+import { SessionEvent } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
 	SSE_CATCHUP_PAGE_SIZE,
@@ -31,6 +51,7 @@ import {
 	SseMaxConnectionMs,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
+import { type DomainSessionEvent, serializeSessionEvent } from "../src/Http/SessionsHandlers.ts"
 import {
 	AUTH_HEADERS,
 	createIdleSession,
@@ -2139,5 +2160,292 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		} finally {
 			await closeAll()
 		}
+	})
+
+	it("maps every emitted session event type to the exact public JSON on list and SSE endpoints", async () => {
+		const at = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
+		const samples: ReadonlyArray<{
+			readonly event: DomainSessionEvent
+			readonly expectedJson: Record<string, unknown>
+		}> = [
+			{
+				event: new UserMessage({ content: [{ type: "text", text: "Hello" }] }),
+				expectedJson: {
+					id: "evt_1",
+					seq: 1,
+					type: "user.message",
+					created_at: "2026-01-01T00:00:00.000Z",
+					content: [{ type: "text", text: "Hello" }],
+				},
+			},
+			{
+				event: new UserInterrupt(),
+				expectedJson: {
+					id: "evt_2",
+					seq: 2,
+					type: "user.interrupt",
+					created_at: "2026-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				event: new SessionStatusRunning(),
+				expectedJson: {
+					id: "evt_3",
+					seq: 3,
+					type: "session.status_running",
+					created_at: "2026-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				event: new SpanModelRequestStart({ model_request_start_id: "sess_1:turn:1:req:1" }),
+				expectedJson: {
+					id: "evt_4",
+					seq: 4,
+					type: "span.model_request_start",
+					created_at: "2026-01-01T00:00:00.000Z",
+					model_request_start_id: "sess_1:turn:1:req:1",
+				},
+			},
+			{
+				event: new AgentThinking({ thinking: "Let me think" }),
+				expectedJson: {
+					id: "evt_5",
+					seq: 5,
+					type: "agent.thinking",
+					created_at: "2026-01-01T00:00:00.000Z",
+					thinking: "Let me think",
+				},
+			},
+			{
+				event: new AgentMessage({ content: [{ type: "text", text: "Hi there" }] }),
+				expectedJson: {
+					id: "evt_6",
+					seq: 6,
+					type: "agent.message",
+					created_at: "2026-01-01T00:00:00.000Z",
+					content: [{ type: "text", text: "Hi there" }],
+				},
+			},
+			{
+				event: new AgentMessage({
+					content: [{ type: "text", text: "Hi..." }],
+					truncated: true,
+				}),
+				expectedJson: {
+					id: "evt_7",
+					seq: 7,
+					type: "agent.message",
+					created_at: "2026-01-01T00:00:00.000Z",
+					content: [{ type: "text", text: "Hi..." }],
+					truncated: true,
+				},
+			},
+			{
+				event: new SpanModelRequestEnd({
+					model_request_start_id: "sess_1:turn:1:req:1",
+					model_usage: { input_tokens: 10, output_tokens: 5 },
+					is_error: false,
+				}),
+				expectedJson: {
+					id: "evt_8",
+					seq: 8,
+					type: "span.model_request_end",
+					created_at: "2026-01-01T00:00:00.000Z",
+					model_request_start_id: "sess_1:turn:1:req:1",
+					model_usage: { input_tokens: 10, output_tokens: 5 },
+					is_error: false,
+				},
+			},
+			{
+				event: new SpanModelRequestEnd({
+					model_request_start_id: "sess_1:turn:1:req:1",
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: null,
+				}),
+				expectedJson: {
+					id: "evt_9",
+					seq: 9,
+					type: "span.model_request_end",
+					created_at: "2026-01-01T00:00:00.000Z",
+					model_request_start_id: "sess_1:turn:1:req:1",
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: null,
+				},
+			},
+			{
+				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+				expectedJson: {
+					id: "evt_10",
+					seq: 10,
+					type: "session.status_idle",
+					created_at: "2026-01-01T00:00:00.000Z",
+					stop_reason: { type: "end_turn" },
+				},
+			},
+			{
+				event: new SessionErrorEvent({
+					error: {
+						type: "provider_error",
+						message: "boom",
+						retry_status: { type: "exhausted" },
+					},
+				}),
+				expectedJson: {
+					id: "evt_11",
+					seq: 11,
+					type: "session.error",
+					created_at: "2026-01-01T00:00:00.000Z",
+					error: {
+						type: "provider_error",
+						message: "boom",
+						retry_status: { type: "exhausted" },
+					},
+				},
+			},
+			{
+				event: new SessionStatusTerminated(),
+				expectedJson: {
+					id: "evt_12",
+					seq: 12,
+					type: "session.status_terminated",
+					created_at: "2026-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				event: new SessionArchived(),
+				expectedJson: {
+					id: "evt_13",
+					seq: 13,
+					type: "session.archived",
+					created_at: "2026-01-01T00:00:00.000Z",
+				},
+			},
+		]
+
+		const viewTags = (SessionView.definition.events ?? []).map((event) => event.tag).toSorted()
+		expect([...new Set(samples.map((sample) => sample.event._tag))].toSorted()).toEqual(viewTags)
+
+		const encodeEvent = Schema.encodeSync(Schema.toCodecJson(SessionEvent))
+		const sessionId = SessionId.make("sess_capture")
+		const entries = samples.map((sample, index) => ({
+			event: sample.event,
+			state: null,
+			envelope: {
+				id: sessionId,
+				stream: `SessionView/${sessionId}`,
+				seq: index + 1,
+				at,
+				commandId: `cmd_${index + 1}`,
+				correlationId: `corr_${index + 1}`,
+			},
+		}))
+
+		for (const [index, entry] of entries.entries()) {
+			const expected = samples[index]!.expectedJson
+			const encoded = encodeEvent(serializeSessionEvent(entry))
+			expect(encoded).toEqual(expected)
+			expect(JSON.stringify(encoded)).toBe(JSON.stringify(expected))
+		}
+
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const real = yield* SessionView
+					const snapshot = {
+						id: sessionId,
+						type: "session" as const,
+						status: "terminated" as const,
+						agent_id: "agent_1",
+						agent_version: 1,
+						environment_id: "env_1",
+						title: null,
+						turn: 1,
+						usage: { input_tokens: 10, output_tokens: 5 },
+						created_at: at,
+						updated_at: at,
+						archived_at: at,
+					}
+					const stubbed: typeof real = {
+						...real,
+						get: () => Effect.succeed(Option.some(snapshot)),
+						snapshot: () => Effect.succeed({ state: snapshot, cursor: entries.length }),
+						list: () => Effect.succeed({ entries, cursor: null }),
+					}
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(SessionView, stubbed),
+					)
+
+					const listRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${sessionId}/events`,
+						headers: AUTH_HEADERS,
+					})
+					expect(listRes.status).toBe(200)
+					const listText = yield* Effect.promise(() => listRes.text())
+					expect(listText).toBe(
+						JSON.stringify({
+							data: samples.map((sample) => sample.expectedJson),
+							has_more: false,
+							next_cursor: null,
+						}),
+					)
+
+					const sseRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${sessionId}/events/stream`,
+						headers: AUTH_HEADERS,
+					})
+					expect(sseRes.status).toBe(200)
+					const sseText = yield* Effect.promise(() => sseRes.text())
+					const expectedSse = samples
+						.map(
+							(sample, index) =>
+								`id: ${index + 1}\nevent: ${sample.event._tag}\ndata: ${JSON.stringify(sample.expectedJson)}\n\n`,
+						)
+						.join("")
+					expect(sseText).toBe(expectedSse)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("maps every event declared by SessionView.definition.events", async () => {
+		const viewEvents = SessionView.definition.events ?? []
+		expect(viewEvents.length).toBeGreaterThan(0)
+		expect(SessionEvent.members).toHaveLength(viewEvents.length)
+
+		const at = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
+		const eventCodec = Schema.toCodecJson(SessionEvent)
+		const encodeEvent = Schema.encodeSync(eventCodec)
+		const decodeEvent = Schema.decodeUnknownSync(eventCodec)
+
+		await Effect.runPromise(
+			Effect.forEach(viewEvents, (eventSchema, index) =>
+				Effect.gen(function* () {
+					const [generated] = yield* Arbitrary.sampleEffect(Arbitrary.schema(eventSchema), {
+						count: 1,
+						seed: eventSchema.tag,
+					})
+					const seq = index + 1
+					const mapped = serializeSessionEvent({
+						envelope: { seq, at },
+						event: generated as DomainSessionEvent,
+					})
+					const encoded = encodeEvent(mapped)
+					expect(encoded).toMatchObject({
+						id: `evt_${seq}`,
+						seq,
+						type: eventSchema.tag,
+						created_at: "2026-01-01T00:00:00.000Z",
+					})
+					expect(decodeEvent(encoded)).toEqual(mapped)
+				}),
+			),
+		)
 	})
 })
