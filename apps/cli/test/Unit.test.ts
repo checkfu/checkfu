@@ -15,12 +15,12 @@ describe("normalizeApiUrl", () => {
 	it("accepts https URLs and loopback http URLs and strips trailing / and /v1", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				expect(yield* normalizeApiUrl("https://api.checkfu.dev/")).toBe("https://api.checkfu.dev")
-				expect(yield* normalizeApiUrl("https://api.checkfu.dev/v1/")).toBe(
-					"https://api.checkfu.dev",
+				expect(yield* normalizeApiUrl("https://api.checkfu.com/")).toBe("https://api.checkfu.com")
+				expect(yield* normalizeApiUrl("https://api.checkfu.com/v1/")).toBe(
+					"https://api.checkfu.com",
 				)
-				expect(yield* normalizeApiUrl("https://api.checkfu.dev/prefix/v1")).toBe(
-					"https://api.checkfu.dev/prefix",
+				expect(yield* normalizeApiUrl("https://api.checkfu.com/prefix/v1")).toBe(
+					"https://api.checkfu.com/prefix",
 				)
 				expect(yield* normalizeApiUrl("http://localhost:1337/v1")).toBe("http://localhost:1337")
 				expect(yield* normalizeApiUrl("http://127.0.0.1:8080/")).toBe("http://127.0.0.1:8080")
@@ -55,12 +55,12 @@ describe("normalizeApiUrl", () => {
 			Effect.gen(function* () {
 				const envLayer = ConfigProvider.layer(
 					ConfigProvider.fromUnknown({
-						CHECKFU_API_URL: "https://prod.checkfu.dev",
-						CHECKFU_URL: "https://staging.checkfu.dev",
+						CHECKFU_API_URL: "https://api.checkfu.com",
+						CHECKFU_URL: "https://staging.checkfu.com",
 					}),
 				)
 				expect(yield* resolveBaseUrl(Option.none()).pipe(Effect.provide(envLayer))).toBe(
-					"https://prod.checkfu.dev",
+					"https://api.checkfu.com",
 				)
 				for (const blank of ["", "   "]) {
 					const err = yield* Effect.flip(
