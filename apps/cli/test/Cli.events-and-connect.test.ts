@@ -1387,6 +1387,153 @@ describe("CLI sessions:events and sessions connect", () => {
 						"Reply-1:same text",
 						"Reply-2:same text",
 					])
+
+					// 4a) Dropped/truncated 200 response body after commit (DecodeError) retries with the same
+					//     Idempotency-Key without duplicating the turn
+					let decodeRetryGenerates = 0
+					const decodeRetryCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.sync(() => {
+								decodeRetryGenerates++
+								return {
+									thinking: null,
+									text: `Decoded:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const decodeRetrySessionId = yield* createReadySession(decodeRetryCli)
+					const decodeRetryKeys: Array<string | null> = []
+					const decodeRetryRes = yield* decodeRetryCli.run(
+						["sessions", "connect", "--session-id", decodeRetrySessionId],
+						{
+							stdin: "truncated body retry\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									decodeRetryKeys.push(request.headers.get("idempotency-key"))
+									const real = await next(request)
+									if (decodeRetryKeys.length === 1) {
+										return new Response('{"data":[{"type":"user.', {
+											status: 200,
+											headers: { "content-type": "application/json" },
+										})
+									}
+									return real
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(decodeRetryRes.exitCode).toBe(0)
+					expect(decodeRetryKeys).toHaveLength(2)
+					expect(decodeRetryKeys[1]).toBe(decodeRetryKeys[0])
+					expect(decodeRetryGenerates).toBe(1)
+					expect(decodeRetryRes.stdout).toContain("Decoded:truncated body retry")
+
+					// 4a-2) Mid-body stream read error on HTTP 200 after commit (HttpClientError DecodeError)
+					//       retries with the same Idempotency-Key without duplicating the turn
+					const bodyDropKeys: Array<string | null> = []
+					const bodyDropRes = yield* decodeRetryCli.run(
+						["sessions", "connect", "--session-id", decodeRetrySessionId],
+						{
+							stdin: "dropped body stream\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									bodyDropKeys.push(request.headers.get("idempotency-key"))
+									const real = await next(request)
+									if (bodyDropKeys.length === 1) {
+										const failingBody = new ReadableStream<Uint8Array>({
+											pull(controller) {
+												controller.error(new TypeError("connection reset mid-body"))
+											},
+										})
+										return new Response(failingBody, {
+											status: 200,
+											headers: { "content-type": "application/json" },
+										})
+									}
+									return real
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(bodyDropRes.exitCode).toBe(0)
+					expect(bodyDropKeys).toHaveLength(2)
+					expect(bodyDropKeys[1]).toBe(bodyDropKeys[0])
+					expect(decodeRetryGenerates).toBe(2)
+					expect(bodyDropRes.stdout).toContain("Decoded:dropped body stream")
+
+					// 4b) Persistent undeclared 502 Bad Gateway (DecodeError in HttpApiClient) retries with the
+					//     same key and reports Idempotency-Key on stderr
+					const gateway502Keys: Array<string | null> = []
+					const gateway502Res = yield* decodeRetryCli.run(
+						["sessions", "connect", "--session-id", decodeRetrySessionId],
+						{
+							stdin: "gateway 502 line\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									gateway502Keys.push(request.headers.get("idempotency-key"))
+									return new Response("Bad Gateway", {
+										status: 502,
+										headers: { "content-type": "text/plain" },
+									})
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(gateway502Res.exitCode).toBe(1)
+					expect(gateway502Keys).toHaveLength(3)
+					expect(new Set(gateway502Keys).size).toBe(1)
+					const key502 = gateway502Keys[0] ?? ""
+					expect(key502).toMatch(/^cli_[0-9a-f]{24}$/)
+					expect(gateway502Res.stderr).toContain(`Idempotency-Key: ${key502}`)
+
+					// 5) Failed archive status lookup after session.status_terminated propagates error
+					//    instead of silently treating the stream as cleanly terminated
+					const archiveLookupCli = yield* makeTestServer()
+					const archiveLookupSessionId = yield* createReadySession(archiveLookupCli)
+					const archiveLookupConnected = yield* Deferred.make<void>()
+					const liveArchiver = yield* Deferred.await(archiveLookupConnected).pipe(
+						Effect.andThen(Effect.sleep("20 millis")),
+						Effect.andThen(
+							archiveLookupCli.run(["sessions", "archive", "--session-id", archiveLookupSessionId]),
+						),
+						Effect.forkChild,
+					)
+					let sessionGetCount = 0
+					const archiveLookupRes = yield* archiveLookupCli.run(
+						["--format", "jsonl", "sessions", "connect", "--session-id", archiveLookupSessionId],
+						{
+							stdin: Stream.never,
+							interceptFetch: async (next, request) => {
+								if (request.url.includes("/events/stream")) {
+									await Effect.runPromise(Deferred.succeed(archiveLookupConnected, undefined))
+									return next(request)
+								}
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${archiveLookupSessionId}`)
+								) {
+									sessionGetCount++
+									if (sessionGetCount > 1) {
+										return new Response("Bad Gateway", {
+											status: 502,
+											headers: { "content-type": "text/plain" },
+										})
+									}
+								}
+								return next(request)
+							},
+						},
+					)
+					yield* Fiber.await(liveArchiver)
+					expect(archiveLookupRes.exitCode).toBe(1)
+					expect(sessionGetCount).toBe(4)
+					expect(archiveLookupRes.stderr.length).toBeGreaterThan(0)
 				}),
 			),
 		)

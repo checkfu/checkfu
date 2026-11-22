@@ -199,7 +199,9 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 		}
 
 		if (typeof current === "object") {
-			current = (current as Record<string, unknown>)[segment]
+			current = Object.hasOwn(current, segment)
+				? (current as Record<string, unknown>)[segment]
+				: undefined
 			continue
 		}
 

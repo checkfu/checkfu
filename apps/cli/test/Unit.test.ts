@@ -271,6 +271,68 @@ describe("normalizeApiUrl", () => {
 				expect(Array.from(rotEvents).map((e) => e.seq)).toEqual(
 					Array.from({ length: 50 }, (_, idx) => idx + 1),
 				)
+
+				// 4) SSE non-200 error envelopes validate known types & fields and fall back to HTTP status
+				const sseErrorCases: ReadonlyArray<{
+					readonly status: number
+					readonly body: string
+					readonly expectContains: string
+				}> = [
+					{
+						status: 403,
+						body: JSON.stringify({
+							type: "error",
+							error: { type: "custom_gateway_error", message: "blocked" },
+						}),
+						expectContains: "HTTP 403",
+					},
+					{
+						status: 400,
+						body: JSON.stringify({
+							type: "error",
+							error: { type: "invalid_request_error", message: "bad" },
+							accepted: null,
+						}),
+						expectContains: "HTTP 400",
+					},
+					{
+						status: 400,
+						body: JSON.stringify({
+							type: "error",
+							error: { type: "toString", message: "proto" },
+						}),
+						expectContains: "HTTP 400",
+					},
+					{
+						status: 400,
+						body: JSON.stringify({
+							type: "error",
+							error: { type: "invalid_request_error", message: "Cursor invalid" },
+							request_id: "req_1",
+						}),
+						expectContains: "API error (400 invalid_request_error): Cursor invalid",
+					},
+				]
+				for (const testCase of sseErrorCases) {
+					const errFetch = (async () =>
+						new Response(testCase.body, {
+							status: testCase.status,
+							headers: { "content-type": "application/json" },
+						})) as unknown as typeof globalThis.fetch
+					const err = yield* Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Effect.flip(
+							Stream.runDrain(
+								client.streamSessionEvents("sess_err", {
+									maxReconnectAttempts: 0,
+									baseReconnectDelayMs: 1,
+								}),
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(errFetch)))
+					expect(err.message).toContain(testCase.expectContains)
+					expect(err.message).not.toContain("undefined")
+				}
 			}),
 		)
 	})
@@ -354,6 +416,17 @@ describe("Transform and formatOutput", () => {
 		expect(evaluateTransform(sample, "[id,name].[0]")).toEqual(["agt_123"])
 		expect(evaluateTransform(sample, "[id,name].1")).toBe("Helper")
 		expect(evaluateTransform(sample, "missing.path")).toBeUndefined()
+		expect(evaluateTransform(sample, "constructor")).toBeUndefined()
+		expect(evaluateTransform(sample, "toString")).toBeUndefined()
+		expect(evaluateTransform(sample, "hasOwnProperty")).toBeUndefined()
+		expect(
+			formatOutput(sample, {
+				format: "yaml",
+				transform: Option.some("constructor"),
+				rawOutput: false,
+				isTerminal: false,
+			}),
+		).toBe("null")
 	})
 
 	it("formats auto, json, pretty, yaml, raw, and DateTime.Utc cleanly", () => {

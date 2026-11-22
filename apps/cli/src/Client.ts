@@ -266,7 +266,7 @@ export const makeCheckfuClient = (
 							}
 							loopState.done = true
 							if (isApiErrorEnvelope(parsedError)) {
-								return Stream.fail(formatApiErrorEnvelope(parsedError))
+								return Stream.fail(formatApiErrorEnvelope(parsedError, response.status))
 							}
 							return Stream.fail(
 								networkFailure(

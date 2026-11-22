@@ -26,25 +26,51 @@ export const apiFailure = (status: number, type: string, message: string): CliFa
 	new CliFailure({ message: `API error (${status} ${type}): ${message}`, exitCode: 1 })
 
 export const isApiErrorEnvelope = (value: unknown): value is ApiError => {
-	if (typeof value !== "object" || value === null) return false
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false
 	const record = value as Record<string, unknown>
 	if (record["type"] !== "error") return false
 	const inner = record["error"]
-	if (typeof inner !== "object" || inner === null) return false
+	if (typeof inner !== "object" || inner === null || Array.isArray(inner)) return false
 	const innerRecord = inner as Record<string, unknown>
-	return typeof innerRecord["type"] === "string" && typeof innerRecord["message"] === "string"
+	if (typeof innerRecord["type"] !== "string" || typeof innerRecord["message"] !== "string") {
+		return false
+	}
+	if (typeof statusOf(record as unknown as ApiError) !== "number") {
+		return false
+	}
+	if (record["request_id"] !== undefined && typeof record["request_id"] !== "string") {
+		return false
+	}
+	if (record["accepted"] !== undefined && !Array.isArray(record["accepted"])) {
+		return false
+	}
+	if (
+		record["failed_index"] !== undefined &&
+		(typeof record["failed_index"] !== "number" || !Number.isFinite(record["failed_index"]))
+	) {
+		return false
+	}
+	if (
+		record["unconfirmed_index"] !== undefined &&
+		(typeof record["unconfirmed_index"] !== "number" ||
+			!Number.isFinite(record["unconfirmed_index"]))
+	) {
+		return false
+	}
+	return true
 }
 
-export const formatApiErrorEnvelope = (error: ApiError): CliFailure => {
-	const status = statusOf(error)
+export const formatApiErrorEnvelope = (error: ApiError, fallbackStatus?: number): CliFailure => {
+	const knownStatus = statusOf(error)
+	const status = typeof knownStatus === "number" ? knownStatus : (fallbackStatus ?? 500)
 	const parts: Array<string> = []
-	if (error.accepted !== undefined && error.accepted.length > 0) {
+	if (Array.isArray(error.accepted) && error.accepted.length > 0) {
 		parts.push(`${error.accepted.length} event(s) accepted`)
 	}
-	if (error.failed_index !== undefined) {
+	if (typeof error.failed_index === "number") {
 		parts.push(`failed_index=${error.failed_index}`)
 	}
-	if (error.unconfirmed_index !== undefined) {
+	if (typeof error.unconfirmed_index === "number") {
 		parts.push(`unconfirmed_index=${error.unconfirmed_index}`)
 	}
 	const detail = parts.length > 0 ? ` (${parts.join(", ")})` : ""
@@ -54,9 +80,13 @@ export const formatApiErrorEnvelope = (error: ApiError): CliFailure => {
 export const isTransientHttpError = (error: HttpClientError.HttpClientError): boolean => {
 	const reason = error.reason
 	if (reason._tag === "TransportError") return true
-	if (reason._tag === "StatusCodeError") {
+	if (
+		reason._tag === "StatusCodeError" ||
+		reason._tag === "DecodeError" ||
+		reason._tag === "EmptyBodyError"
+	) {
 		const status = reason.response.status
-		return status === 429 || status >= 500
+		return status === 408 || status === 429 || status >= 500
 	}
 	return false
 }

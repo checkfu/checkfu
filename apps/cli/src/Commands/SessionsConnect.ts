@@ -11,6 +11,7 @@ import * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
+import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import * as Terminal from "effect/Terminal"
@@ -77,8 +78,18 @@ const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
 const MAX_CONNECT_SEND_RETRIES = 2
 const CONNECT_SEND_RETRY_BASE_MS = 100
 
+const isAmbiguousResponseStatus = (status: number): boolean =>
+	status < 400 || status === 408 || status === 429 || status >= 500
+
 const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
-	if (HttpClientError.isHttpClientError(err)) return isTransientHttpError(err)
+	if (HttpClientError.isHttpClientError(err)) {
+		if (isTransientHttpError(err)) return true
+		const reason = err.reason
+		if (reason._tag === "DecodeError" || reason._tag === "EmptyBodyError") {
+			return isAmbiguousResponseStatus(reason.response.status)
+		}
+		return false
+	}
 	if (isApiErrorEnvelope(err)) {
 		const status = statusOf(err)
 		return status === 429 || status >= 500
@@ -87,12 +98,19 @@ const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): b
 }
 
 const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): boolean => {
-	if (HttpClientError.isHttpClientError(err)) return isTransientHttpError(err)
+	if (HttpClientError.isHttpClientError(err)) {
+		if (isTransientHttpError(err)) return true
+		const reason = err.reason
+		if (reason._tag === "DecodeError" || reason._tag === "EmptyBodyError") {
+			return isAmbiguousResponseStatus(reason.response.status)
+		}
+		return false
+	}
 	if (isApiErrorEnvelope(err)) {
 		const status = statusOf(err)
 		return err.unconfirmed_index !== undefined || status === 429 || status >= 500
 	}
-	return false
+	return Schema.isSchemaError(err)
 }
 
 const formatUnconfirmedSendError = (
@@ -310,15 +328,6 @@ const renderConnectEvent = (
 			}
 			case "session.status_terminated":
 			case "session.archived": {
-				const isLiveArchive =
-					eventType === "session.status_terminated"
-						? expectArchivedEvent ||
-							(yield* Effect.result(fetchSessionStatusWithRetry(client, sessionId)).pipe(
-								Effect.map((res) => res._tag === "Success" && res.success.archived_at !== null),
-							))
-						: false
-				const shouldStopNow = eventType === "session.archived" || !isLiveArchive
-
 				yield* Ref.update(stateRef, (state) => {
 					let failedTurnErrors = state.failedTurnErrors
 					if (
@@ -333,7 +342,6 @@ const renderConnectEvent = (
 						...state,
 						status: "terminated" as const,
 						liveStatus: "terminated" as const,
-						ended: shouldStopNow ? true : state.ended,
 						failedTurnErrors,
 					}
 				})
@@ -342,7 +350,20 @@ const renderConnectEvent = (
 						eventType === "session.archived" ? "[session archived]" : "[session terminated]",
 					)
 				}
+
+				let isLiveArchive = false
+				if (eventType === "session.status_terminated") {
+					if (expectArchivedEvent) {
+						isLiveArchive = true
+					} else {
+						const latest = yield* fetchSessionStatusWithRetry(client, sessionId)
+						isLiveArchive = latest.archived_at !== null
+					}
+				}
+				const shouldStopNow = eventType === "session.archived" || !isLiveArchive
+
 				if (shouldStopNow) {
+					yield* Ref.update(stateRef, (state) => ({ ...state, ended: true }))
 					yield* Deferred.succeed(settleDeferred, undefined)
 					yield* Deferred.succeed(stopConnectDeferred, undefined)
 				}
