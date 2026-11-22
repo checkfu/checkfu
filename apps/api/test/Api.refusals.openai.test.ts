@@ -2,6 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { ModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -17,15 +18,21 @@ import {
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableModelProvider.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
-import { PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
+import {
+	DEFAULT_REFUSAL_TEXT,
+	PROVIDER_FAILURE_MESSAGE,
+	rejectRefusalCompactions,
+} from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
 	extractLastUserText,
 	makeAssistantReply,
 	makePiDurableTestLayer,
+	makeScriptedPiModels,
 	providerError,
 	readSseUntil,
+	sendAndSettle,
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
@@ -1235,7 +1242,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				ok: true,
 				reply: {
 					thinking: null,
-					text: "Response incomplete: content_filter",
+					text: DEFAULT_REFUSAL_TEXT,
 					stop_reason: { type: "refusal" },
 				},
 			})
@@ -1250,7 +1257,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			})
 			expect(turn2).toMatchObject({ ok: true, reply: { text: "Safe follow-up" } })
 			const turn2Payload = JSON.stringify(filteredSentBodies.at(-1))
-			expect(turn2Payload).toContain("Response incomplete: content_filter")
+			expect(turn2Payload).toContain(DEFAULT_REFUSAL_TEXT)
+			expect(turn2Payload).not.toContain("Response incomplete: content_filter")
 			expect(turn2Payload).not.toContain("PARTIAL_FILTERED_LEAK_SHOULD_NOT_PUBLISH")
 		} finally {
 			globalThis.fetch = originalFetch
@@ -1415,6 +1423,342 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		} finally {
 			globalThis.fetch = originalFetch
 			await mixedBackend.close()
+		}
+	})
+
+	it("keeps provider errorMessage out of session events for all three OpenAI refusal fallback paths", async () => {
+		const secretDetail = "secret upstream detail"
+		const warnCalls: Array<ReadonlyArray<unknown>> = []
+		const originalWarn = console.warn
+		console.warn = (...args: ReadonlyArray<unknown>) => {
+			warnCalls.push(args)
+		}
+
+		const closeables: Array<() => Promise<void>> = []
+
+		try {
+			const normalizedHarness = makePiDurableTestLayer(async (model, context) => {
+				const text = extractLastUserText(context)
+				return {
+					...makeAssistantReply(model, null, "", 12, 4),
+					content: [],
+					stopReason: "error",
+					rawStopReason: text === "filter" ? "incomplete.content_filter" : "refusal",
+					errorMessage: secretDetail,
+				}
+			})
+			closeables.push(normalizedHarness.closeAll)
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "OpenAI Fallback 1", model: "gpt-4o-mini" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Env 1" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+
+					for (const prompt of ["refusal", "filter"]) {
+						const sessRes = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: AUTH_HEADERS,
+							body: { agent: agent.id, environment_id: env.id },
+						})
+						const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+						const streamRes = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${session.id}/events/stream`,
+							headers: AUTH_HEADERS,
+						})
+						yield* sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/sessions/${session.id}/events`,
+							headers: AUTH_HEADERS,
+							body: {
+								events: [{ type: "user.message", content: [{ type: "text", text: prompt }] }],
+							},
+						})
+						const frames = yield* Effect.promise(() =>
+							readSseUntil(streamRes, (evt) => evt.type === "session.status_idle"),
+						)
+						const listedRes = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${session.id}/events`,
+							headers: AUTH_HEADERS,
+						})
+						const listed = (yield* Effect.promise(() => listedRes.json())) as {
+							data: ReadonlyArray<{ type: string; content?: unknown; stop_reason?: unknown }>
+						}
+						expect(listed.data.find((e) => e.type === "agent.message")?.content).toEqual([
+							{ type: "text", text: DEFAULT_REFUSAL_TEXT },
+						])
+						expect(listed.data.at(-1)).toMatchObject({
+							type: "session.status_idle",
+							stop_reason: { type: "refusal" },
+						})
+						expect(JSON.stringify(frames)).not.toContain(secretDetail)
+						expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
+					}
+				}).pipe(Effect.scoped, Effect.provide(normalizedHarness.layer)),
+			)
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "refusal" },
+			])
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "incomplete.content_filter" },
+			])
+			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+
+			for (const stopReason of ["stop", "error"] as const) {
+				warnCalls.length = 0
+				const wrappedCompactionModels = rejectRefusalCompactions(
+					makeScriptedPiModels(async (model) => ({
+						...makeAssistantReply(model, null, "", 20, 4),
+						content: [],
+						stopReason,
+						rawStopReason: "refusal",
+						errorMessage: secretDetail,
+					})),
+				)
+				const gptModel = wrappedCompactionModels.getModel("openai", "gpt-4o-mini")
+				if (gptModel === undefined) throw new Error("expected gpt-4o-mini")
+				const rejectedDirect = await wrappedCompactionModels.completeSimple(gptModel, {
+					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
+				})
+				expect(rejectedDirect.stopReason).toBe("error")
+				expect(rejectedDirect.errorMessage).toBe(DEFAULT_REFUSAL_TEXT)
+				expect(JSON.stringify(rejectedDirect)).not.toContain(secretDetail)
+				expect(warnCalls).toContainEqual([
+					"pi refusal fallback",
+					{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "refusal" },
+				])
+				expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+			}
+
+			warnCalls.length = 0
+			let compactionCalls = 0
+			let normalTurns = 0
+			const compactionHarness = makePiDurableTestLayer(async (model, context) => {
+				const lastText = extractLastUserText(context)
+				if (lastText.startsWith("<conversation>")) {
+					compactionCalls += 1
+					return {
+						...makeAssistantReply(model, null, "", 200, 12),
+						content: [],
+						stopReason: "stop",
+						rawStopReason: "refusal",
+						errorMessage: secretDetail,
+					}
+				}
+				normalTurns += 1
+				return makeAssistantReply(
+					model,
+					null,
+					"r".repeat(6_000),
+					normalTurns === 2 ? 7_000 : 2_000,
+					1_500,
+				)
+			})
+			closeables.push(compactionHarness.closeAll)
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "OpenAI Fallback 2", model: "gpt-4" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Env 2" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+					const sessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+
+					for (let turn = 1; turn <= 2; turn++) {
+						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${"u".repeat(6_000)}`], turn)
+					}
+					yield* sendAndSettle(apiFetch, session.id, ["trigger-compaction-refusal"], 3)
+
+					const listedRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const listed = (yield* Effect.promise(() => listedRes.json())) as {
+						data: ReadonlyArray<{ type: string; error?: { message: string } }>
+					}
+					expect(compactionCalls).toBe(1)
+					expect(listed.data.find((e) => e.type === "session.error")?.error?.message).toBe(
+						PROVIDER_FAILURE_MESSAGE,
+					)
+					expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
+				}).pipe(Effect.scoped, Effect.provide(compactionHarness.layer)),
+			)
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "openai", model: "gpt-4", rawStopReason: "refusal" },
+			])
+			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+
+			warnCalls.length = 0
+			const unnormalizedBackends = new Map<
+				string,
+				Promise<Awaited<ReturnType<typeof createInMemoryPiDurableBackend>>>
+			>()
+			const getUnnormalizedBackend = (conversation: string) => {
+				let existing = unnormalizedBackends.get(conversation)
+				if (existing === undefined) {
+					existing = createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) => ({
+							...makeAssistantReply(model, null, "", 10, 2),
+							content: [],
+							stopReason: "stop",
+							rawStopReason: "refusal",
+							errorMessage: secretDetail,
+						})),
+						1,
+						createRegistry(),
+					)
+					unnormalizedBackends.set(conversation, existing)
+				}
+				return existing
+			}
+			closeables.push(async () => {
+				for (const backend of unnormalizedBackends.values()) {
+					await (await backend).close()
+				}
+			})
+			const unnormalizedExecutor = makePiTurnExecutorLayer({
+				recoverTurn: (conversation, operationId) =>
+					!unnormalizedBackends.has(conversation)
+						? Effect.succeed(null)
+						: Effect.promise(async (signal) =>
+								recoverPiDurableTurn(
+									await getUnnormalizedBackend(conversation),
+									operationId,
+									signal,
+								),
+							),
+				runTurn: (conversation, request) =>
+					Effect.promise(async (signal) =>
+						runPiDurableTurn(await getUnnormalizedBackend(conversation), request, signal),
+					),
+				abortTurn: (conversation, operationId) =>
+					Effect.promise(async () => {
+						const backend = unnormalizedBackends.get(conversation)
+						if (backend !== undefined) await (await backend).abort(operationId)
+					}),
+			})
+			const unnormalizedLayer = Checkfu.layer(
+				SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			).pipe(
+				Layer.provide(unnormalizedExecutor),
+				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(SecureRandom.layerWebCrypto),
+				Layer.provideMerge(
+					ConfigProvider.layer(
+						ConfigProvider.fromUnknown({
+							CHECKFU_API_KEY: TEST_API_KEY,
+							OPENAI_API_KEY: "sk-openai-test",
+						}),
+					),
+				),
+			)
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "OpenAI Fallback 3", model: "gpt-4o-mini" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Env 3" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+					const sessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+
+					const streamRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream`,
+						headers: AUTH_HEADERS,
+					})
+					yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+						body: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "refuse-stop" }] }],
+						},
+					})
+					const frames = yield* Effect.promise(() =>
+						readSseUntil(streamRes, (evt) => evt.type === "session.status_idle"),
+					)
+					const listedRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const listed = (yield* Effect.promise(() => listedRes.json())) as {
+						data: ReadonlyArray<{ type: string; content?: unknown; stop_reason?: unknown }>
+					}
+					expect(listed.data.find((e) => e.type === "agent.message")?.content).toEqual([
+						{ type: "text", text: DEFAULT_REFUSAL_TEXT },
+					])
+					expect(listed.data.at(-1)).toMatchObject({
+						type: "session.status_idle",
+						stop_reason: { type: "refusal" },
+					})
+					expect(JSON.stringify(frames)).not.toContain(secretDetail)
+					expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
+				}).pipe(Effect.scoped, Effect.provide(unnormalizedLayer)),
+			)
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "refusal" },
+			])
+			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+		} finally {
+			console.warn = originalWarn
+			for (const close of closeables) {
+				await close()
+			}
 		}
 	})
 })

@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -15,10 +16,18 @@ import {
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableModelProvider.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
-import { PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
+import {
+	DEFAULT_REFUSAL_TEXT,
+	PROVIDER_FAILURE_MESSAGE,
+	rejectRefusalCompactions,
+} from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
+	extractLastUserText,
+	makeAssistantReply,
+	makePiDurableTestLayer,
+	makeScriptedPiModels,
 	readSseUntil,
 	sendAndSettle,
 	sendRequest,
@@ -249,8 +258,9 @@ describe("Anthropic Messages refusals and stream errors", () => {
 						readSseUntil(streamRes, (evt) => evt.type === "session.status_idle"),
 					)
 					expect(turn1Frames.find((f) => f.event === "agent.message")?.data.content).toEqual([
-						{ type: "text", text: "Safety policy refusal." },
+						{ type: "text", text: DEFAULT_REFUSAL_TEXT },
 					])
+					expect(JSON.stringify(turn1Frames)).not.toContain("Safety policy refusal.")
 					expect(
 						turn1Frames.find((f) => f.event === "session.status_idle")?.data.stop_reason,
 					).toEqual({ type: "refusal" })
@@ -287,7 +297,8 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					const turn2Messages = sentRequests[1]?.messages ?? []
 					const assistantTurn1 = turn2Messages.find((m) => m.role === "assistant")
 					expect(assistantTurn1).toBeDefined()
-					expect(JSON.stringify(assistantTurn1?.content)).toContain("Safety policy refusal.")
+					expect(JSON.stringify(assistantTurn1?.content)).toContain(DEFAULT_REFUSAL_TEXT)
+					expect(JSON.stringify(assistantTurn1?.content)).not.toContain("Safety policy refusal.")
 					expect(turn2Messages.map((m) => m.role)).toEqual(["user", "assistant", "user"])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
@@ -536,7 +547,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					expect(fetchCalls).toBe(2)
 					const turn2Messages = sentRequests[1]?.messages ?? []
 					expect(turn2Messages.map((m) => m.role)).toEqual(["user", "assistant", "user"])
-					expect(JSON.stringify(turn2Messages[1]?.content)).toContain("sensitive")
+					expect(JSON.stringify(turn2Messages[1]?.content)).toContain(DEFAULT_REFUSAL_TEXT)
+					expect(JSON.stringify(turn2Messages[1]?.content)).not.toContain(
+						"Provider stopped with: sensitive",
+					)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -868,6 +882,410 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			} finally {
 				globalThis.fetch = originalFetch
 				await backend.close()
+			}
+		}
+	})
+
+	it("keeps provider errorMessage out of session events for all three Anthropic refusal fallback paths", async () => {
+		const secretDetail = "secret upstream detail"
+		const warnCalls: Array<ReadonlyArray<unknown>> = []
+		const originalWarn = console.warn
+		console.warn = (...args: ReadonlyArray<unknown>) => {
+			warnCalls.push(args)
+		}
+
+		const originalFetch = globalThis.fetch
+		const closeables: Array<() => Promise<void>> = []
+
+		try {
+			const realModels = createPiModels({
+				openai: null,
+				anthropic: Redacted.make("sk-ant-test"),
+			})
+			globalThis.fetch = (async () =>
+				new Response(
+					[
+						`event: message_start\ndata: ${JSON.stringify({
+							type: "message_start",
+							message: {
+								id: "msg_secret_refusal",
+								type: "message",
+								role: "assistant",
+								model: "claude-sonnet-4-6",
+								content: [],
+								stop_reason: null,
+								stop_sequence: null,
+								usage: { input_tokens: 10, output_tokens: 0 },
+							},
+						})}\n\n`,
+						`event: message_delta\ndata: ${JSON.stringify({
+							type: "message_delta",
+							delta: {
+								stop_reason: "refusal",
+								stop_sequence: null,
+								stop_details: { explanation: secretDetail },
+							},
+							usage: { input_tokens: 10, output_tokens: 2 },
+						})}\n\n`,
+						`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+					].join(""),
+					{ status: 200, headers: { "content-type": "text/event-stream" } },
+				)) as unknown as typeof fetch
+
+			const normalizedBackends = new Map<
+				string,
+				Promise<Awaited<ReturnType<typeof createInMemoryPiDurableBackend>>>
+			>()
+			const getNormalizedBackend = (conversation: string) => {
+				let existing = normalizedBackends.get(conversation)
+				if (existing === undefined) {
+					existing = createInMemoryPiDurableBackend(realModels)
+					normalizedBackends.set(conversation, existing)
+				}
+				return existing
+			}
+			closeables.push(async () => {
+				for (const backend of normalizedBackends.values()) {
+					await (await backend).close()
+				}
+			})
+			const normalizedExecutor = makePiTurnExecutorLayer({
+				recoverTurn: (conversation, operationId) =>
+					!normalizedBackends.has(conversation)
+						? Effect.succeed(null)
+						: Effect.promise(async (signal) =>
+								recoverPiDurableTurn(await getNormalizedBackend(conversation), operationId, signal),
+							),
+				runTurn: (conversation, request) =>
+					Effect.promise(async (signal) =>
+						runPiDurableTurn(await getNormalizedBackend(conversation), request, signal),
+					),
+				abortTurn: (conversation, operationId) =>
+					Effect.promise(async () => {
+						const backend = normalizedBackends.get(conversation)
+						if (backend !== undefined) await (await backend).abort(operationId)
+					}),
+			})
+			const normalizedLayer = Checkfu.layer(
+				SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			).pipe(
+				Layer.provide(normalizedExecutor),
+				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(SecureRandom.layerWebCrypto),
+				Layer.provideMerge(
+					ConfigProvider.layer(
+						ConfigProvider.fromUnknown({
+							CHECKFU_API_KEY: TEST_API_KEY,
+							ANTHROPIC_API_KEY: "sk-ant-test",
+						}),
+					),
+				),
+			)
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Anthropic Fallback 1", model: "claude-sonnet-4-6" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Env 1" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+					const sessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+
+					const streamRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream`,
+						headers: AUTH_HEADERS,
+					})
+					yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+						body: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "refuse-me" }] }],
+						},
+					})
+					const frames = yield* Effect.promise(() =>
+						readSseUntil(streamRes, (evt) => evt.type === "session.status_idle"),
+					)
+					const listedRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const listed = (yield* Effect.promise(() => listedRes.json())) as {
+						data: ReadonlyArray<{ type: string; content?: unknown; stop_reason?: unknown }>
+					}
+					expect(listed.data.find((e) => e.type === "agent.message")?.content).toEqual([
+						{ type: "text", text: DEFAULT_REFUSAL_TEXT },
+					])
+					expect(listed.data.at(-1)).toMatchObject({
+						type: "session.status_idle",
+						stop_reason: { type: "refusal" },
+					})
+					expect(JSON.stringify(frames)).not.toContain(secretDetail)
+					expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
+				}).pipe(Effect.scoped, Effect.provide(normalizedLayer)),
+			)
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "anthropic", model: "claude-sonnet-4-6", rawStopReason: "refusal" },
+			])
+			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+
+			for (const stopReason of ["stop", "error"] as const) {
+				warnCalls.length = 0
+				const wrappedCompactionModels = rejectRefusalCompactions(
+					makeScriptedPiModels(async (model) => ({
+						...makeAssistantReply(model, null, "", 20, 4),
+						content: [],
+						stopReason,
+						rawStopReason: "refusal",
+						errorMessage: secretDetail,
+					})),
+				)
+				const claudeModel = wrappedCompactionModels.getModel("anthropic", "claude-sonnet-4-6")
+				if (claudeModel === undefined) throw new Error("expected claude-sonnet-4-6")
+				const rejectedDirect = await wrappedCompactionModels.completeSimple(claudeModel, {
+					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
+				})
+				expect(rejectedDirect.stopReason).toBe("error")
+				expect(rejectedDirect.errorMessage).toBe(DEFAULT_REFUSAL_TEXT)
+				expect(JSON.stringify(rejectedDirect)).not.toContain(secretDetail)
+				expect(warnCalls).toContainEqual([
+					"pi refusal fallback",
+					{ provider: "anthropic", model: "claude-sonnet-4-6", rawStopReason: "refusal" },
+				])
+				expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+			}
+
+			warnCalls.length = 0
+			let compactionCalls = 0
+			let normalTurns = 0
+			const compactionHarness = makePiDurableTestLayer(async (model, context) => {
+				const lastText = extractLastUserText(context)
+				if (lastText.startsWith("<conversation>")) {
+					compactionCalls += 1
+					return {
+						...makeAssistantReply(model, null, "", 200, 12),
+						content: [],
+						stopReason: "stop",
+						rawStopReason: "refusal",
+						errorMessage: secretDetail,
+					}
+				}
+				normalTurns += 1
+				return makeAssistantReply(
+					model,
+					null,
+					"a".repeat(12_000),
+					normalTurns === 4 ? 190_000 : 6_000,
+					3_000,
+				)
+			})
+			closeables.push(compactionHarness.closeAll)
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Anthropic Fallback 2", model: "claude-sonnet-4-5" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Env 2" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+					const sessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+
+					for (let turn = 1; turn <= 4; turn++) {
+						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${"u".repeat(12_000)}`], turn)
+					}
+					yield* sendAndSettle(apiFetch, session.id, ["trigger-compaction-refusal"], 5)
+
+					const listedRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const listed = (yield* Effect.promise(() => listedRes.json())) as {
+						data: ReadonlyArray<{ type: string; error?: { message: string } }>
+					}
+					expect(compactionCalls).toBe(1)
+					expect(listed.data.find((e) => e.type === "session.error")?.error?.message).toBe(
+						PROVIDER_FAILURE_MESSAGE,
+					)
+					expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
+				}).pipe(Effect.scoped, Effect.provide(compactionHarness.layer)),
+			)
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "anthropic", model: "claude-sonnet-4-5", rawStopReason: "refusal" },
+			])
+			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+
+			warnCalls.length = 0
+			const unnormalizedBackends = new Map<
+				string,
+				Promise<Awaited<ReturnType<typeof createInMemoryPiDurableBackend>>>
+			>()
+			const getUnnormalizedBackend = (conversation: string) => {
+				let existing = unnormalizedBackends.get(conversation)
+				if (existing === undefined) {
+					existing = createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) => ({
+							...makeAssistantReply(model, null, "", 10, 2),
+							content: [],
+							stopReason: "stop",
+							rawStopReason: "refusal",
+							errorMessage: secretDetail,
+						})),
+						1,
+						createRegistry(),
+					)
+					unnormalizedBackends.set(conversation, existing)
+				}
+				return existing
+			}
+			closeables.push(async () => {
+				for (const backend of unnormalizedBackends.values()) {
+					await (await backend).close()
+				}
+			})
+			const unnormalizedExecutor = makePiTurnExecutorLayer({
+				recoverTurn: (conversation, operationId) =>
+					!unnormalizedBackends.has(conversation)
+						? Effect.succeed(null)
+						: Effect.promise(async (signal) =>
+								recoverPiDurableTurn(
+									await getUnnormalizedBackend(conversation),
+									operationId,
+									signal,
+								),
+							),
+				runTurn: (conversation, request) =>
+					Effect.promise(async (signal) =>
+						runPiDurableTurn(await getUnnormalizedBackend(conversation), request, signal),
+					),
+				abortTurn: (conversation, operationId) =>
+					Effect.promise(async () => {
+						const backend = unnormalizedBackends.get(conversation)
+						if (backend !== undefined) await (await backend).abort(operationId)
+					}),
+			})
+			const unnormalizedLayer = Checkfu.layer(
+				SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			).pipe(
+				Layer.provide(unnormalizedExecutor),
+				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(SecureRandom.layerWebCrypto),
+				Layer.provideMerge(
+					ConfigProvider.layer(
+						ConfigProvider.fromUnknown({
+							CHECKFU_API_KEY: TEST_API_KEY,
+							ANTHROPIC_API_KEY: "sk-ant-test",
+						}),
+					),
+				),
+			)
+
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Anthropic Fallback 3", model: "claude-sonnet-4-6" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Env 3" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+					const sessRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+
+					const streamRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream`,
+						headers: AUTH_HEADERS,
+					})
+					yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+						body: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "refuse-stop" }] }],
+						},
+					})
+					const frames = yield* Effect.promise(() =>
+						readSseUntil(streamRes, (evt) => evt.type === "session.status_idle"),
+					)
+					const listedRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const listed = (yield* Effect.promise(() => listedRes.json())) as {
+						data: ReadonlyArray<{ type: string; content?: unknown; stop_reason?: unknown }>
+					}
+					expect(listed.data.find((e) => e.type === "agent.message")?.content).toEqual([
+						{ type: "text", text: DEFAULT_REFUSAL_TEXT },
+					])
+					expect(listed.data.at(-1)).toMatchObject({
+						type: "session.status_idle",
+						stop_reason: { type: "refusal" },
+					})
+					expect(JSON.stringify(frames)).not.toContain(secretDetail)
+					expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
+				}).pipe(Effect.scoped, Effect.provide(unnormalizedLayer)),
+			)
+			expect(warnCalls).toContainEqual([
+				"pi refusal fallback",
+				{ provider: "anthropic", model: "claude-sonnet-4-6", rawStopReason: "refusal" },
+			])
+			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
+		} finally {
+			console.warn = originalWarn
+			globalThis.fetch = originalFetch
+			for (const close of closeables) {
+				await close()
 			}
 		}
 	})
