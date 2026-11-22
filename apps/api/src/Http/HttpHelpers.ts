@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
+import { ClaimEventBatch, type EventBatch, EventBatchId } from "../Checkfu.model.ts"
 import { optionalSecret } from "../Secrets.ts"
 import {
 	type ApiError,
@@ -209,6 +210,65 @@ export const randomId = (random: SecureRandom.SecureRandom["Service"], prefix: s
 	Effect.map(
 		random.randomBytes(12),
 		(bytes) => `${prefix}_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`,
+	)
+
+const canonicalize = (value: unknown): unknown => {
+	if (Array.isArray(value)) return value.map(canonicalize)
+	if (value !== null && typeof value === "object") {
+		const entries = Object.entries(value)
+			.filter(([, entry]) => entry !== undefined)
+			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+		return Object.fromEntries(entries.map(([key, entry]) => [key, canonicalize(entry)]))
+	}
+	return value
+}
+
+export const sha256Json = (value: unknown): string =>
+	createHash("sha256").update(JSON.stringify(value)).digest("hex")
+
+export const idempotencyClaimId = (prefix: string, scope: ReadonlyArray<unknown>): EventBatchId =>
+	EventBatchId.make(`${prefix}_${sha256Json(scope)}`)
+
+export const idempotentId = (prefix: string, scope: ReadonlyArray<unknown>): string =>
+	`${prefix}_${sha256Json(scope)}`
+
+export const idempotentCommandId = (prefix: string, scope: ReadonlyArray<unknown>): string =>
+	`${prefix}:${sha256Json(scope)}`
+
+export const createClaimId = (
+	resource: "agent" | "environment" | "session",
+	idempotencyKey: string,
+) => idempotencyClaimId("cr", ["create", resource, idempotencyKey])
+
+export const createFingerprint = (payload: unknown) => sha256Json(canonicalize(payload))
+
+export const createCommandId = (
+	resource: "agent" | "environment" | "session",
+	idempotencyKey: string,
+) => idempotentCommandId(`create-${resource}`, ["create", resource, idempotencyKey])
+
+export const claimIdempotency = (
+	eventBatches: Effect.Success<typeof EventBatch>,
+	batchId: EventBatchId,
+	fingerprint: string,
+) =>
+	eventBatches.send(new ClaimEventBatch({ batch_id: batchId, fingerprint }), {
+		commandId: `claim:${batchId}:${fingerprint}`,
+	})
+
+export const claimCreate = (
+	eventBatches: Effect.Success<typeof EventBatch>,
+	resource: "agent" | "environment" | "session",
+	idempotencyKey: string,
+	payload: unknown,
+) =>
+	Effect.as(
+		claimIdempotency(
+			eventBatches,
+			createClaimId(resource, idempotencyKey),
+			createFingerprint(payload),
+		),
+		createCommandId(resource, idempotencyKey),
 	)
 
 const tokenDigest = (token: string) => createHash("sha256").update(token).digest()

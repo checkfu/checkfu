@@ -21,12 +21,15 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { Checkfu } from "../src/Checkfu.model.ts"
+import { CheckfuApi, withIdempotencyKey } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
 	EnvironmentPartialUpdateWaitTimeout,
+	IsSupportedAgentModel,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
 import {
@@ -46,6 +49,8 @@ import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
 	extractLastUserText,
+	makeApiTestClient,
+	makeApiTestHttpClient,
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	makeScriptedPiModels,
@@ -2032,6 +2037,580 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			for (const b of backends.values()) {
 				await (await b).close()
 			}
+		}
+	})
+
+	it("enforces Idempotency-Key deduplication and payload conflict checks on agent and environment creates", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const realCreateAgent = yield* CreateAgentDecision
+					const realEnvironments = yield* Environment
+					const agents = yield* Agent
+
+					const sentAgentIds: Array<string> = []
+					const sentEnvironmentIds: Array<string> = []
+					let dropNextAgentReceipt = false
+					let failNextAgentBeforeCommit = false
+					let dropNextEnvReceipt = false
+
+					const wrappedCreateAgent = new Proxy(realCreateAgent, {
+						get: (target, property, receiver) =>
+							property === "send"
+								? (
+										command: Parameters<typeof realCreateAgent.send>[0],
+										options?: Parameters<typeof realCreateAgent.send>[1],
+									) => {
+										if (failNextAgentBeforeCommit) {
+											failNextAgentBeforeCommit = false
+											return Effect.die(new Error("failed before commit"))
+										}
+										sentAgentIds.push(command.agent_id)
+										const call = target.send(command, options)
+										if (dropNextAgentReceipt) {
+											dropNextAgentReceipt = false
+											return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
+										}
+										return call
+									}
+								: (Reflect.get(target, property, receiver) as unknown),
+					})
+
+					const wrappedEnvironments = new Proxy(realEnvironments, {
+						get: (target, property, receiver) =>
+							property === "send"
+								? (
+										command: Parameters<typeof realEnvironments.send>[0],
+										options?: Parameters<typeof realEnvironments.send>[1],
+									) => {
+										if (command._tag === "CreateEnvironment") {
+											sentEnvironmentIds.push(command.environment_id)
+											const call = target.send(command, options)
+											if (dropNextEnvReceipt) {
+												dropNextEnvReceipt = false
+												return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
+											}
+											return call
+										}
+										return target.send(command, options)
+									}
+								: (Reflect.get(target, property, receiver) as unknown),
+					})
+
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(CreateAgentDecision, wrappedCreateAgent),
+						Effect.provideService(Environment, wrappedEnvironments),
+					)
+
+					const openapiRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
+					expect(openapiRes.status).toBe(200)
+					const spec = (yield* Effect.promise(() => openapiRes.json())) as {
+						paths: Record<
+							string,
+							{
+								post?: {
+									parameters?: ReadonlyArray<{
+										readonly name: string
+										readonly in: string
+										readonly required?: boolean
+									}>
+								}
+							}
+						>
+					}
+					const eventsIdempotencyParam = spec.paths[
+						"/v1/sessions/{session_id}/events"
+					]?.post?.parameters?.find((p) => p.name === "idempotency-key" && p.in === "header")
+					expect(eventsIdempotencyParam).toBeDefined()
+					for (const path of ["/v1/agents", "/v1/environments", "/v1/sessions"]) {
+						const param = spec.paths[path]?.post?.parameters?.find(
+							(p) => p.name === "idempotency-key" && p.in === "header",
+						)
+						expect(param).toEqual(eventsIdempotencyParam)
+					}
+
+					const badKeyRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "   " },
+						body: { name: "Bad Key", model: "gpt-4o-mini" },
+					})
+					expect(badKeyRes.status).toBe(400)
+					expect(sentAgentIds).toHaveLength(0)
+
+					const badModelRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: { name: "Bad Model", model: "unsupported/model" },
+					})
+					expect(badModelRes.status).toBe(400)
+					expect(sentAgentIds).toHaveLength(0)
+
+					const agentPayload = {
+						name: "Idempotent Agent",
+						model: "gpt-4o-mini",
+						system: "Stay deterministic.",
+					}
+					dropNextAgentReceipt = true
+					const lostAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: agentPayload,
+					})
+					expect(lostAgentRes.status).toBe(500)
+
+					const retryAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: agentPayload,
+					})
+					expect(retryAgentRes.status).toBe(201)
+					const agent1 = (yield* Effect.promise(() => retryAgentRes.json())) as {
+						id: string
+						version: number
+						created_at: string
+					}
+					expect(agent1.id).toMatch(/^agent_/)
+					expect(agent1.version).toBe(1)
+
+					const repeatAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: agentPayload,
+					})
+					expect(repeatAgentRes.status).toBe(201)
+					const agent1Repeat = (yield* Effect.promise(() => repeatAgentRes.json())) as {
+						id: string
+						version: number
+						created_at: string
+					}
+					expect(agent1Repeat.id).toBe(agent1.id)
+					expect(agent1Repeat.version).toBe(1)
+					expect(agent1Repeat.created_at).toBe(agent1.created_at)
+					expect(new Set(sentAgentIds)).toEqual(new Set([agent1.id]))
+					expect((yield* agents.get(AgentId.make(agent1.id))).version).toBe(1)
+
+					const updatedAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${agent1.id}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, name: "Idempotent Agent v2" },
+					})
+					expect(updatedAgentRes.status).toBe(200)
+
+					const archiveAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${agent1.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveAgentRes.status).toBe(200)
+
+					const retryAfterUpdateRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: agentPayload,
+					})
+					expect(retryAfterUpdateRes.status).toBe(201)
+					expect(yield* Effect.promise(() => retryAfterUpdateRes.json())).toEqual(agent1)
+					expect(new Set(sentAgentIds)).toEqual(new Set([agent1.id]))
+
+					failNextAgentBeforeCommit = true
+					const uncommittedAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-uncommitted" },
+						body: agentPayload,
+					})
+					expect(uncommittedAgentRes.status).toBe(500)
+
+					const { fetch: retiredCatalogFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(CreateAgentDecision, wrappedCreateAgent),
+						Effect.provideService(IsSupportedAgentModel, (modelId) => modelId !== "gpt-4o-mini"),
+					)
+
+					const retryAfterCatalogRemovalRes = yield* sendRequest(retiredCatalogFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: agentPayload,
+					})
+					expect(retryAfterCatalogRemovalRes.status).toBe(201)
+					expect(yield* Effect.promise(() => retryAfterCatalogRemovalRes.json())).toEqual(agent1)
+					expect(new Set(sentAgentIds)).toEqual(new Set([agent1.id]))
+
+					const retiredConflictRes = yield* sendRequest(retiredCatalogFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: { ...agentPayload, name: "Mismatched Retired" },
+					})
+					expect(retiredConflictRes.status).toBe(409)
+
+					const uncommittedRetiredRes = yield* sendRequest(retiredCatalogFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-uncommitted" },
+						body: agentPayload,
+					})
+					expect(uncommittedRetiredRes.status).toBe(400)
+
+					const newRetiredKeyedRes = yield* sendRequest(retiredCatalogFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-retired-new" },
+						body: agentPayload,
+					})
+					expect(newRetiredKeyedRes.status).toBe(400)
+
+					const newRetiredUnkeyedRes = yield* sendRequest(retiredCatalogFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: agentPayload,
+					})
+					expect(newRetiredUnkeyedRes.status).toBe(400)
+					expect(new Set(sentAgentIds)).toEqual(new Set([agent1.id]))
+
+					const recoveredRetiredKeyRes = yield* sendRequest(retiredCatalogFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-retired-new" },
+						body: { ...agentPayload, model: "gpt-4o" },
+					})
+					expect(recoveredRetiredKeyRes.status).toBe(201)
+
+					const sendsBeforeConflict = sentAgentIds.length
+					const conflictAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: { ...agentPayload, name: "Different Agent Name" },
+					})
+					expect(conflictAgentRes.status).toBe(409)
+					expect(yield* Effect.promise(() => conflictAgentRes.json())).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+					expect(sentAgentIds).toHaveLength(sendsBeforeConflict)
+
+					const unkeyedAgent1Res = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: agentPayload,
+					})
+					const unkeyedAgent2Res = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: agentPayload,
+					})
+					expect(unkeyedAgent1Res.status).toBe(201)
+					expect(unkeyedAgent2Res.status).toBe(201)
+					const unkeyedAgent1 = (yield* Effect.promise(() => unkeyedAgent1Res.json())) as {
+						id: string
+					}
+					const unkeyedAgent2 = (yield* Effect.promise(() => unkeyedAgent2Res.json())) as {
+						id: string
+					}
+					expect(unkeyedAgent1.id).not.toBe(unkeyedAgent2.id)
+					expect(unkeyedAgent1.id).not.toBe(agent1.id)
+
+					const envPayload = {
+						name: "Idempotent Env",
+						description: "Scoped env",
+						config: {
+							type: "cloud",
+							networking: {
+								type: "limited",
+								allow_mcp_servers: false,
+								allow_package_managers: true,
+								allowed_hosts: ["api.openai.com"],
+							},
+						},
+					}
+					dropNextEnvReceipt = true
+					const lostEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: envPayload,
+					})
+					expect(lostEnvRes.status).toBe(500)
+
+					const retryEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: {
+							name: "Idempotent Env",
+							description: "Scoped env",
+							config: {
+								networking: {
+									allowed_hosts: ["api.openai.com"],
+									allow_package_managers: true,
+									allow_mcp_servers: false,
+									type: "limited",
+								},
+								type: "cloud",
+							},
+						},
+					})
+					expect(retryEnvRes.status).toBe(201)
+					const env1 = (yield* Effect.promise(() => retryEnvRes.json())) as {
+						id: string
+						version: number
+						created_at: string
+					}
+					expect(env1.id).toMatch(/^env_/)
+					expect(env1.version).toBe(1)
+
+					const repeatEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: envPayload,
+					})
+					expect(repeatEnvRes.status).toBe(201)
+					expect(yield* Effect.promise(() => repeatEnvRes.json())).toEqual(env1)
+					expect(new Set(sentEnvironmentIds)).toEqual(new Set([env1.id]))
+					expect((yield* realEnvironments.get(EnvironmentId.make(env1.id))).version).toBe(1)
+
+					const updatedEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/environments/${env1.id}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, name: "Mutated Env v2" },
+					})
+					expect(updatedEnvRes.status).toBe(200)
+
+					const archiveEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/environments/${env1.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveEnvRes.status).toBe(200)
+
+					const deleteEnvRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: `/v1/environments/${env1.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(deleteEnvRes.status).toBe(200)
+
+					const getDeletedEnvRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/environments/${env1.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(getDeletedEnvRes.status).toBe(404)
+
+					const retryAfterDeleteEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: envPayload,
+					})
+					expect(retryAfterDeleteEnvRes.status).toBe(201)
+					expect(yield* Effect.promise(() => retryAfterDeleteEnvRes.json())).toEqual(env1)
+					expect(new Set(sentEnvironmentIds)).toEqual(new Set([env1.id]))
+
+					const stillDeletedEnvRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/environments/${env1.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(stillDeletedEnvRes.status).toBe(404)
+
+					const envSendsBeforeConflict = sentEnvironmentIds.length
+					const conflictEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "agent-key-1" },
+						body: { ...envPayload, name: "Different Env Name" },
+					})
+					expect(conflictEnvRes.status).toBe(409)
+					expect(yield* Effect.promise(() => conflictEnvRes.json())).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+					expect(sentEnvironmentIds).toHaveLength(envSendsBeforeConflict)
+
+					const unkeyedEnv1Res = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: envPayload,
+					})
+					const unkeyedEnv2Res = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: envPayload,
+					})
+					expect(unkeyedEnv1Res.status).toBe(201)
+					expect(unkeyedEnv2Res.status).toBe(201)
+					const unkeyedEnv1 = (yield* Effect.promise(() => unkeyedEnv1Res.json())) as {
+						id: string
+					}
+					const unkeyedEnv2 = (yield* Effect.promise(() => unkeyedEnv2Res.json())) as {
+						id: string
+					}
+					expect(unkeyedEnv1.id).not.toBe(unkeyedEnv2.id)
+					expect(unkeyedEnv1.id).not.toBe(env1.id)
+
+					const generatedClient = yield* makeApiTestClient(apiFetch)
+					const clientAgent = yield* generatedClient.agents.create({
+						payload: { name: "Generated Client Agent", model: "gpt-4o-mini" },
+					})
+					expect("pending" in clientAgent).toBe(false)
+					expect(clientAgent.id).toMatch(/^agent_/)
+					const directRawClient = yield* HttpApiClient.makeWith(CheckfuApi, {
+						baseUrl: "http://localhost",
+						httpClient: makeApiTestHttpClient(apiFetch),
+					})
+					const clientAgentUnkeyed2 = yield* directRawClient.agents.create({
+						payload: { name: "Generated Client Agent", model: "gpt-4o-mini" },
+					})
+					expect(clientAgentUnkeyed2.id).not.toBe(clientAgent.id)
+
+					const clientEnv = yield* directRawClient.environments.create({
+						payload: { name: "Generated Client Env" },
+					})
+					expect("pending" in clientEnv).toBe(false)
+					expect(clientEnv.id).toMatch(/^env_/)
+					const clientSession = yield* directRawClient.sessions.create({
+						payload: { agent: clientAgent.id, environment_id: clientEnv.id },
+					})
+					expect("pending" in clientSession).toBe(false)
+					expect(clientSession.id).toMatch(/^sess_/)
+
+					const agentCountBeforeClientKey = new Set(sentAgentIds).size
+					dropNextAgentReceipt = true
+					const lostClientAgent = yield* generatedClient.agents
+						.create({ payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" } })
+						.pipe(withIdempotencyKey("client-agent-key-1"), Effect.flip)
+					expect(lostClientAgent).toMatchObject({
+						type: "error",
+						error: { type: "internal_error" },
+					})
+					const clientKeyedAgent1 = yield* generatedClient.agents
+						.create({ payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" } })
+						.pipe(withIdempotencyKey("client-agent-key-1"))
+					const clientKeyedAgent2 = yield* generatedClient.agents
+						.create({ payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" } })
+						.pipe(withIdempotencyKey("client-agent-key-1"))
+					expect(clientKeyedAgent2).toEqual(clientKeyedAgent1)
+					expect(new Set(sentAgentIds).size).toBe(agentCountBeforeClientKey + 1)
+					const clientKeyedAgentConflict = yield* generatedClient.agents
+						.create({ payload: { name: "Different Client Keyed Agent", model: "gpt-4o-mini" } })
+						.pipe(withIdempotencyKey("client-agent-key-1"), Effect.flip)
+					expect(clientKeyedAgentConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+
+					const agentSendsBeforeBadClientKey = sentAgentIds.length
+					const invalidClientKey = yield* generatedClient.agents
+						.create({ payload: { name: "Invalid Client Key Agent", model: "gpt-4o-mini" } })
+						.pipe(withIdempotencyKey("  bad  "), Effect.flip)
+					expect(invalidClientKey).toMatchObject({ _tag: "SchemaError" })
+					const invalidResponseOnlyKey = yield* generatedClient.agents
+						.create({
+							payload: { name: "Invalid Response-Only Key Agent", model: "gpt-4o-mini" },
+							headers: { "idempotency-key": "  bad  " },
+							responseMode: "response-only",
+						})
+						.pipe(Effect.catchTag("SchemaError", (error) => Effect.succeed(error._tag)))
+					expect(invalidResponseOnlyKey).toBe("SchemaError")
+					expect(sentAgentIds).toHaveLength(agentSendsBeforeBadClientKey)
+
+					const agentCountBeforeInlineHeaders = new Set(sentAgentIds).size
+					const [clientInlineAgent1, clientInlineAgentRes] = yield* generatedClient.agents.create({
+						payload: { name: "Client Inline Headers Agent", model: "gpt-4o-mini" },
+						headers: { "idempotency-key": "client-agent-inline-key-1" },
+						responseMode: "decoded-and-response",
+					})
+					expect(clientInlineAgentRes.status).toBe(201)
+					const clientInlineAgent2 = yield* generatedClient.agents
+						.create({
+							payload: { name: "Client Inline Headers Agent", model: "gpt-4o-mini" },
+							headers: { "idempotency-key": "client-agent-inline-key-1" },
+						})
+						.pipe(withIdempotencyKey("client-agent-key-1"))
+					expect(clientInlineAgent2).toEqual(clientInlineAgent1)
+					expect(new Set(sentAgentIds).size).toBe(agentCountBeforeInlineHeaders + 1)
+					const clientInlineAgentConflict = yield* generatedClient.agents
+						.create({
+							payload: { name: "Different Inline Headers Agent", model: "gpt-4o-mini" },
+							headers: { "idempotency-key": "client-agent-inline-key-1" },
+						})
+						.pipe(Effect.flip)
+					expect(clientInlineAgentConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+
+					const envCountBeforeClientKey = new Set(sentEnvironmentIds).size
+					dropNextEnvReceipt = true
+					const lostClientEnv = yield* generatedClient.environments
+						.create({ payload: { name: "Client Keyed Env" } })
+						.pipe(withIdempotencyKey("client-env-key-1"), Effect.flip)
+					expect(lostClientEnv).toMatchObject({
+						type: "error",
+						error: { type: "internal_error" },
+					})
+					const clientKeyedEnv1 = yield* generatedClient.environments
+						.create({ payload: { name: "Client Keyed Env" } })
+						.pipe(withIdempotencyKey("client-env-key-1"))
+					const clientKeyedEnv2 = yield* generatedClient.environments
+						.create({ payload: { name: "Client Keyed Env" } })
+						.pipe(withIdempotencyKey("client-env-key-1"))
+					expect(clientKeyedEnv2).toEqual(clientKeyedEnv1)
+					expect(new Set(sentEnvironmentIds).size).toBe(envCountBeforeClientKey + 1)
+					const clientKeyedEnvConflict = yield* generatedClient.environments
+						.create({ payload: { name: "Different Client Keyed Env" } })
+						.pipe(withIdempotencyKey("client-env-key-1"), Effect.flip)
+					expect(clientKeyedEnvConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+
+					const envCountBeforeInlineHeaders = new Set(sentEnvironmentIds).size
+					const clientInlineEnv1 = yield* generatedClient.environments.create({
+						payload: { name: "Client Inline Headers Env" },
+						headers: { "idempotency-key": "client-env-inline-key-1" },
+					})
+					const clientInlineEnv2 = yield* generatedClient.environments
+						.create({
+							payload: { name: "Client Inline Headers Env" },
+							headers: { "idempotency-key": "client-env-inline-key-1" },
+						})
+						.pipe(withIdempotencyKey("client-env-key-1"))
+					expect(clientInlineEnv2).toEqual(clientInlineEnv1)
+					expect(new Set(sentEnvironmentIds).size).toBe(envCountBeforeInlineHeaders + 1)
+					const clientInlineEnvConflict = yield* generatedClient.environments
+						.create({
+							payload: { name: "Different Inline Headers Env" },
+							headers: { "idempotency-key": "client-env-inline-key-1" },
+						})
+						.pipe(Effect.flip)
+					expect(clientInlineEnvConflict).toMatchObject({
+						type: "error",
+						error: { type: "conflict_error" },
+					})
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
 		}
 	})
 })

@@ -10,10 +10,13 @@ import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import { Checkfu } from "../../src/Checkfu.model.ts"
+import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import {
 	type PiTurnRequest,
 	recoverPiDurableTurn,
@@ -278,6 +281,48 @@ export const sendRequest = (
 		)
 		return HttpServerResponse.toWeb(response)
 	})
+
+export const makeApiTestClient = (
+	fetchEffect: Effect.Effect<
+		HttpServerResponse.HttpServerResponse,
+		never,
+		HttpServerRequest.HttpServerRequest
+	>,
+) =>
+	makeCheckfuClientWith({
+		baseUrl: "http://localhost",
+		httpClient: makeApiTestHttpClient(fetchEffect),
+	})
+
+export const makeApiTestHttpClient = (
+	fetchEffect: Effect.Effect<
+		HttpServerResponse.HttpServerResponse,
+		never,
+		HttpServerRequest.HttpServerRequest
+	>,
+) =>
+	HttpClient.make((request, url) =>
+		Effect.gen(function* () {
+			const headers = new Headers(request.headers)
+			if (!headers.has("authorization") && !headers.has("x-api-key")) {
+				headers.set("authorization", `Bearer ${TEST_API_KEY}`)
+			}
+			const body =
+				request.body._tag === "Uint8Array" ? new Uint8Array(request.body.body) : undefined
+			const webRequest = new Request(url.toString(), {
+				method: request.method,
+				headers,
+				...(body === undefined ? {} : { body }),
+			})
+			const response = yield* fetchEffect.pipe(
+				Effect.provideService(
+					HttpServerRequest.HttpServerRequest,
+					HttpServerRequest.fromWeb(webRequest),
+				),
+			)
+			return HttpClientResponse.fromWeb(request, HttpServerResponse.toWeb(response))
+		}),
+	)
 
 export const readSseUntil = async (
 	response: Response,

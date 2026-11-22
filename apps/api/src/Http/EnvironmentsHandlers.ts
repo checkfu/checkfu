@@ -11,12 +11,15 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import { EventBatch } from "../Checkfu.model.ts"
 import { CheckfuApi } from "./Api.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,
 	bestEffortAfterCommit,
+	claimCreate,
 	handled,
 	hasTag,
+	idempotentId,
 	isPending,
 	orPending,
 	present,
@@ -33,14 +36,30 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 	Effect.gen(function* () {
 		const environments = yield* Environment
 		const environmentViews = yield* EnvironmentView
+		const eventBatches = yield* EventBatch
 		const random = yield* SecureRandom.SecureRandom
 
 		return handlers
-			.handle("create", ({ payload }) =>
+			.handle("create", ({ payload, request }) =>
 				Effect.gen(function* () {
-					const id = EnvironmentId.make(yield* randomId(random, "env"))
+					const idempotencyKey = request.headers["idempotency-key"]
 					const description = payload.description ?? null
 					const config = payload.config ?? DEFAULT_ENVIRONMENT_CONFIG
+					let id: EnvironmentId
+					let sendOptions: { readonly commandId: string } | undefined
+					if (idempotencyKey !== undefined) {
+						const commandId = yield* claimCreate(eventBatches, "environment", idempotencyKey, {
+							name: payload.name,
+							description,
+							config,
+						})
+						id = EnvironmentId.make(
+							idempotentId("env", ["create", "environment", "id", idempotencyKey]),
+						)
+						sendOptions = { commandId }
+					} else {
+						id = EnvironmentId.make(yield* randomId(random, "env"))
+					}
 					const receipt = yield* environments.send(
 						new CreateEnvironment({
 							environment_id: id,
@@ -48,6 +67,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 							description,
 							config,
 						}),
+						sendOptions,
 					)
 					const result = yield* environmentViews
 						.get(Environment.ref(id), { atLeast: receipt })
@@ -74,6 +94,29 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					}
 					const latest = yield* environments.get(id)
 					if (latest.status === "deleted") {
+						if (idempotencyKey !== undefined) {
+							const page = yield* environmentViews
+								.list(Environment.ref(id), { take: 1, order: "asc" })
+								.pipe(orPending(id, "environment"))
+							if (isPending(page)) return page
+							const created = page.entries[0]
+							if (created !== undefined && created.event._tag === "environment.created") {
+								return (
+									created.state ?? {
+										id,
+										type: "environment" as const,
+										version: receipt.reply.version,
+										name: payload.name,
+										description,
+										config,
+										created_at: created.envelope.at,
+										updated_at: created.envelope.at,
+										archived_at: null,
+									}
+								)
+							}
+							return yield* reject(500, "Failed to load created environment.")
+						}
 						return yield* reject(404, `Environment ${id} was deleted after creation committed.`)
 					}
 					return yield* reject(500, "Failed to load created environment.")

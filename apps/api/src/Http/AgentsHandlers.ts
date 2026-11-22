@@ -19,10 +19,16 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { createPiModels, resolveCatalogModel } from "../Pi/PiModels.ts"
+import { EventBatch } from "../Checkfu.model.ts"
 import { CheckfuApi } from "./Api.ts"
 import {
+	claimIdempotency,
 	commitForStream,
+	createClaimId,
+	createCommandId,
+	createFingerprint,
 	handled,
+	idempotentId,
 	isPending,
 	normalizeModel,
 	orPending,
@@ -36,6 +42,13 @@ export const AgentVersionWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
+const defaultCatalog = createPiModels({ openai: null, anthropic: null })
+
+export const IsSupportedAgentModel = Context.Reference<(modelId: string) => boolean>(
+	"@checkfu/api/IsSupportedAgentModel",
+	{ defaultValue: () => (modelId) => resolveCatalogModel(defaultCatalog, modelId) !== null },
+)
+
 export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) =>
 	Effect.gen(function* () {
 		const agents = yield* Agent
@@ -43,12 +56,12 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const updateAgent = yield* UpdateAgentDecision
 		const agentViews = yield* AgentView
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
+		const eventBatches = yield* EventBatch
 		const random = yield* SecureRandom.SecureRandom
-		const catalog = createPiModels({ openai: null, anthropic: null })
+		const isSupportedModel = yield* IsSupportedAgentModel
+		const unsupportedModel = (model: AgentModel) => reject(400, `Unsupported model "${model.id}".`)
 		const supported = (model: AgentModel) =>
-			resolveCatalogModel(catalog, model.id) === null
-				? reject(400, `Unsupported model "${model.id}".`)
-				: Effect.void
+			isSupportedModel(model.id) ? Effect.void : unsupportedModel(model)
 
 		const loadCommittedAgentVersion = (
 			id: AgentId,
@@ -102,21 +115,58 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			})
 
 		return handlers
-			.handle("create", ({ payload }) =>
+			.handle("create", ({ payload, request }) =>
 				Effect.gen(function* () {
+					const idempotencyKey = request.headers["idempotency-key"]
 					const model = normalizeModel(payload.model)
-					yield* supported(model)
-					const id = AgentId.make(yield* randomId(random, "agent"))
-					const versionId = AgentVersionId.make(yield* randomId(random, "aver"))
+					const system = payload.system ?? null
+					const description = payload.description ?? null
+					let id: AgentId
+					let versionId: AgentVersionId
+					let sendOptions: { readonly commandId: string } | undefined
+					if (idempotencyKey !== undefined) {
+						id = AgentId.make(idempotentId("agent", ["create", "agent", "id", idempotencyKey]))
+						versionId = AgentVersionId.make(
+							idempotentId("aver", ["create", "agent", "version", idempotencyKey]),
+						)
+						const batchId = createClaimId("agent", idempotencyKey)
+						const fingerprint = createFingerprint({
+							name: payload.name,
+							model,
+							system,
+							description,
+						})
+						if (!isSupportedModel(model.id)) {
+							const claim = yield* eventBatches.get(batchId)
+							if (claim._tag === "Unclaimed") {
+								return yield* unsupportedModel(model)
+							}
+							if (claim.fingerprint !== fingerprint) {
+								yield* claimIdempotency(eventBatches, batchId, fingerprint)
+							}
+							const committed = yield* agents.get(id)
+							if (committed.status === "") {
+								return yield* unsupportedModel(model)
+							}
+						} else {
+							yield* claimIdempotency(eventBatches, batchId, fingerprint)
+						}
+						sendOptions = { commandId: createCommandId("agent", idempotencyKey) }
+					} else {
+						yield* supported(model)
+						id = AgentId.make(yield* randomId(random, "agent"))
+						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
+					}
 					const receipt = yield* createAgent.send(
 						new CreateAgent({
 							agent_id: id,
 							version_id: versionId,
 							name: payload.name,
 							model,
-							system: payload.system ?? null,
-							description: payload.description ?? null,
+							system,
+							description,
 						}),
+						sendOptions,
 					)
 					return yield* loadCommittedAgentVersion(
 						id,

@@ -7,14 +7,22 @@ import { EnvironmentConfig } from "@checkfu/environments/EnvironmentTypes"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { ResourceId, SessionTitle } from "@checkfu/sessions/Session/SessionTypes"
 import { SessionSnapshot } from "@checkfu/sessions/Session/SessionView.view"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Function from "effect/Function"
 import * as HttpApi from "effect/http-api/HttpApi"
+import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup"
 import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware"
 import * as HttpApiSchema from "effect/http-api/HttpApiSchema"
 import * as HttpApiSecurity from "effect/http-api/HttpApiSecurity"
+import type * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientError from "effect/http/HttpClientError"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 import * as Struct from "effect/Struct"
+import type { Simplify } from "effect/Types"
 
 export const REQUEST_ID_HEADER = "request-id"
 
@@ -170,7 +178,7 @@ export const CreateSessionBody = Schema.Union([
 	}),
 ])
 
-const ClientEventId = Schema.String.check(
+export const ClientEventId = Schema.String.check(
 	Schema.isTrimmed(),
 	Schema.isMinLength(1),
 	Schema.isMaxLength(128),
@@ -326,6 +334,86 @@ const agentParams = { agent_id: AgentId }
 const environmentParams = { environment_id: EnvironmentId }
 const sessionParams = { session_id: SessionId }
 
+export const IdempotencyKey = Context.Reference<string | undefined>("@checkfu/api/IdempotencyKey", {
+	defaultValue: () => undefined,
+})
+
+export const withIdempotencyKey: {
+	(key: string): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+	<A, E, R>(effect: Effect.Effect<A, E, R>, key: string): Effect.Effect<A, E, R>
+} = Function.dual(
+	2,
+	<A, E, R>(effect: Effect.Effect<A, E, R>, key: string): Effect.Effect<A, E, R> =>
+		Effect.provideService(effect, IdempotencyKey, key),
+)
+
+const IdempotencyHeaders = Schema.Struct({
+	"idempotency-key": Schema.optionalKey(ClientEventId),
+})
+
+const IdempotencyHeadersInput = Schema.Struct({
+	"idempotency-key": Schema.optional(ClientEventId),
+})
+
+export type OptionalIdempotencyHeadersInput = typeof IdempotencyHeadersInput.Type
+
+const encodeIdempotencyHeaders = SchemaGetter.transformEffect(
+	(value: OptionalIdempotencyHeadersInput | undefined) =>
+		Effect.gen(function* () {
+			const explicit = value?.["idempotency-key"]
+			if (explicit !== undefined) return { "idempotency-key": explicit }
+			const contextual = yield* IdempotencyKey
+			return contextual === undefined ? {} : { "idempotency-key": contextual }
+		}),
+)
+
+const ContextualIdempotencyHeaders = IdempotencyHeaders.pipe(
+	Schema.decodeTo(IdempotencyHeadersInput, {
+		decode: SchemaGetter.passthrough(),
+		encode: encodeIdempotencyHeaders,
+	}),
+)
+
+const OptionalIdempotencyHeaders = IdempotencyHeaders.pipe(
+	Schema.decodeTo(Schema.UndefinedOr(IdempotencyHeadersInput), {
+		decode: SchemaGetter.passthrough(),
+		encode: encodeIdempotencyHeaders,
+	}),
+)
+
+type WithoutClientHeaders<Endpoint> =
+	Endpoint extends HttpApiEndpoint.HttpApiEndpoint<
+		infer Identifier,
+		infer Method,
+		infer Path,
+		infer Params,
+		infer Query,
+		infer Payload,
+		infer _Headers,
+		infer Success,
+		infer Error,
+		infer Middleware,
+		infer MiddlewareServices
+	>
+		? HttpApiEndpoint.HttpApiEndpoint<
+				Identifier,
+				Method,
+				Path,
+				Params,
+				Query,
+				Payload,
+				never,
+				Success,
+				Error,
+				Middleware,
+				MiddlewareServices
+			>
+		: never
+
+const withOptionalIdempotencyHeaders = <Endpoint extends HttpApiEndpoint.Constraint>(
+	endpoint: Endpoint,
+): WithoutClientHeaders<Endpoint> => endpoint as unknown as WithoutClientHeaders<Endpoint>
+
 const Health = HttpApiGroup.make("health").add(
 	HttpApiEndpoint.get("health", "/health", {
 		success: Schema.Struct({ status: Schema.Literal("ok") }),
@@ -334,11 +422,14 @@ const Health = HttpApiGroup.make("health").add(
 
 const Agents = HttpApiGroup.make("agents")
 	.add(
-		HttpApiEndpoint.post("create", "/v1/agents", {
-			payload: CreateAgentBody,
-			success: [AgentResource.pipe(HttpApiSchema.status(201)), Pending],
-			error: BodyErrors,
-		}),
+		withOptionalIdempotencyHeaders(
+			HttpApiEndpoint.post("create", "/v1/agents", {
+				headers: OptionalIdempotencyHeaders,
+				payload: CreateAgentBody,
+				success: [AgentResource.pipe(HttpApiSchema.status(201)), Pending],
+				error: BodyErrors,
+			}),
+		),
 	)
 	.add(
 		HttpApiEndpoint.get("get", "/v1/agents/:agent_id", {
@@ -366,11 +457,14 @@ const Agents = HttpApiGroup.make("agents")
 
 const Environments = HttpApiGroup.make("environments")
 	.add(
-		HttpApiEndpoint.post("create", "/v1/environments", {
-			payload: CreateEnvironmentBody,
-			success: [EnvironmentSnapshot.pipe(HttpApiSchema.status(201)), Pending],
-			error: BodyErrors,
-		}),
+		withOptionalIdempotencyHeaders(
+			HttpApiEndpoint.post("create", "/v1/environments", {
+				headers: OptionalIdempotencyHeaders,
+				payload: CreateEnvironmentBody,
+				success: [EnvironmentSnapshot.pipe(HttpApiSchema.status(201)), Pending],
+				error: BodyErrors,
+			}),
+		),
 	)
 	.add(
 		HttpApiEndpoint.get("get", "/v1/environments/:environment_id", {
@@ -405,11 +499,14 @@ const Environments = HttpApiGroup.make("environments")
 
 const Sessions = HttpApiGroup.make("sessions")
 	.add(
-		HttpApiEndpoint.post("create", "/v1/sessions", {
-			payload: CreateSessionBody,
-			success: [SessionResource.pipe(HttpApiSchema.status(201)), Pending],
-			error: BodyErrors,
-		}),
+		withOptionalIdempotencyHeaders(
+			HttpApiEndpoint.post("create", "/v1/sessions", {
+				headers: OptionalIdempotencyHeaders,
+				payload: CreateSessionBody,
+				success: [SessionResource.pipe(HttpApiSchema.status(201)), Pending],
+				error: BodyErrors,
+			}),
+		),
 	)
 	.add(
 		HttpApiEndpoint.get("get", "/v1/sessions/:session_id", {
@@ -428,7 +525,7 @@ const Sessions = HttpApiGroup.make("sessions")
 	.add(
 		HttpApiEndpoint.post("sendEvents", "/v1/sessions/:session_id/events", {
 			params: sessionParams,
-			headers: { "idempotency-key": Schema.optionalKey(ClientEventId) },
+			headers: ContextualIdempotencyHeaders,
 			payload: SendSessionEventsBody,
 			success: Schema.Struct({ data: Schema.Array(Schema.Unknown) }),
 			error: BodyErrors,
@@ -466,3 +563,98 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Environments)
 	.add(Sessions)
 	.middleware(RequestValidation)
+
+type OptionalIdempotencyCreateMethod<Endpoint extends HttpApiEndpoint.ConstraintRequest, E, R> = <
+	Mode extends HttpApiClient.Client.ResponseMode = "decoded-only",
+>(
+	request: Simplify<
+		HttpApiEndpoint.ClientRequest<
+			Endpoint["~Params"],
+			Endpoint["~Query"],
+			Endpoint["~Payload"],
+			never,
+			Mode,
+			never
+		> & {
+			readonly headers?: OptionalIdempotencyHeadersInput | undefined
+		}
+	>,
+) => Effect.Effect<
+	HttpApiClient.Client.Response<HttpApiClient.SuccessType<Endpoint["~Success"]>, Mode>,
+	| HttpApiMiddleware.Error<Endpoint["~Middleware"]>
+	| HttpApiMiddleware.ClientError<Endpoint["~Middleware"]>
+	| E
+	| HttpClientError.HttpClientError
+	| Schema.SchemaError
+	| ([Mode] extends ["response-only"] ? never : Endpoint["~Error"]["Type"]),
+	| R
+	| Endpoint["~Params"]["EncodingServices"]
+	| Endpoint["~Query"]["EncodingServices"]
+	| Endpoint["~Payload"]["EncodingServices"]
+	| ([Mode] extends ["response-only"]
+			? never
+			: Endpoint["~Success"]["DecodingServices"] | Endpoint["~Error"]["DecodingServices"])
+>
+
+type GeneratedCheckfuClient<E = never, R = never> = HttpApiClient.ForApi<typeof CheckfuApi, E, R>
+
+type CheckfuEndpoint<
+	GroupId extends keyof (typeof CheckfuApi)["groups"],
+	EndpointId extends keyof (typeof CheckfuApi)["groups"][GroupId]["endpoints"],
+> = (typeof CheckfuApi)["groups"][GroupId]["endpoints"][EndpointId]
+
+export type CheckfuClient<E = never, R = never> = Simplify<
+	Omit<GeneratedCheckfuClient<E, R>, "agents" | "environments" | "sessions"> & {
+		readonly agents: Simplify<
+			Omit<GeneratedCheckfuClient<E, R>["agents"], "create"> & {
+				readonly create: OptionalIdempotencyCreateMethod<CheckfuEndpoint<"agents", "create">, E, R>
+			}
+		>
+		readonly environments: Simplify<
+			Omit<GeneratedCheckfuClient<E, R>["environments"], "create"> & {
+				readonly create: OptionalIdempotencyCreateMethod<
+					CheckfuEndpoint<"environments", "create">,
+					E,
+					R
+				>
+			}
+		>
+		readonly sessions: Simplify<
+			Omit<GeneratedCheckfuClient<E, R>["sessions"], "create"> & {
+				readonly create: OptionalIdempotencyCreateMethod<
+					CheckfuEndpoint<"sessions", "create">,
+					E,
+					R
+				>
+			}
+		>
+	}
+>
+
+export const makeCheckfuClient = (options?: {
+	readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
+	readonly transformResponse?:
+		| ((
+				effect: Effect.Effect<unknown, unknown, unknown>,
+		  ) => Effect.Effect<unknown, unknown, unknown>)
+		| undefined
+	readonly baseUrl?: URL | string | undefined
+}): Effect.Effect<CheckfuClient, never, HttpClient.HttpClient> =>
+	HttpApiClient.make(CheckfuApi, options) as unknown as Effect.Effect<
+		CheckfuClient,
+		never,
+		HttpClient.HttpClient
+	>
+
+export const makeCheckfuClientWith = <E, R>(options: {
+	readonly httpClient: HttpClient.HttpClient.With<E, R>
+	readonly transformResponse?:
+		| ((
+				effect: Effect.Effect<unknown, unknown, unknown>,
+		  ) => Effect.Effect<unknown, unknown, unknown>)
+		| undefined
+	readonly baseUrl?: URL | string | undefined
+}): Effect.Effect<CheckfuClient<Exclude<E, HttpClientError.HttpClientError>, R>> =>
+	HttpApiClient.makeWith(CheckfuApi, options) as unknown as Effect.Effect<
+		CheckfuClient<Exclude<E, HttpClientError.HttpClientError>, R>
+	>

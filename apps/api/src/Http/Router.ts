@@ -31,7 +31,7 @@ import {
 } from "./HttpHelpers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
 
-export { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
+export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
 export { EnvironmentPartialUpdateWaitTimeout } from "./EnvironmentsHandlers.ts"
 export {
 	DEFAULT_SSE_KEEPALIVE_MS,
