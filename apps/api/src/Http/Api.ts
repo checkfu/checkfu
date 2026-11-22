@@ -207,7 +207,118 @@ const Pending = Schema.Struct({
 	pending: Schema.Literal(true),
 }).pipe(HttpApiSchema.status(202))
 
-const SessionEvent = Schema.Record(Schema.String, Schema.Unknown)
+const EventNonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const EventPositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+const EventNonEmptyString = Schema.String.check(Schema.isMinLength(1))
+
+const SessionEventTextBlock = Schema.Struct({
+	type: Schema.Literal("text"),
+	text: Schema.String,
+})
+
+const SessionEventContent = Schema.Array(SessionEventTextBlock).check(Schema.isMinLength(1))
+
+const SessionEventModelUsage = Schema.Struct({
+	input_tokens: EventNonNegativeInt,
+	output_tokens: EventNonNegativeInt,
+})
+
+const SessionEventStopReason = Schema.Struct({
+	type: Schema.Literals([
+		"end_turn",
+		"interrupted",
+		"retries_exhausted",
+		"budget_reached",
+		"refusal",
+	]),
+})
+
+const SessionEventRetryStatus = Schema.Struct({
+	type: Schema.Literals(["retrying", "exhausted", "terminal"]),
+})
+
+const SessionEventErrorBody = Schema.Struct({
+	type: Schema.String,
+	message: Schema.String,
+	retry_status: SessionEventRetryStatus,
+})
+
+const sessionEventBase = <const T extends string>(type: T) => ({
+	id: Schema.String,
+	seq: EventPositiveInt,
+	type: Schema.Literal(type),
+	created_at: Schema.DateTimeUtc,
+})
+
+export const UserMessageSessionEvent = Schema.Struct({
+	...sessionEventBase("user.message"),
+	content: SessionEventContent,
+})
+
+export const UserInterruptSessionEvent = Schema.Struct({
+	...sessionEventBase("user.interrupt"),
+})
+
+export const SessionStatusRunningEvent = Schema.Struct({
+	...sessionEventBase("session.status_running"),
+})
+
+export const SpanModelRequestStartEvent = Schema.Struct({
+	...sessionEventBase("span.model_request_start"),
+	model_request_start_id: EventNonEmptyString,
+})
+
+export const AgentThinkingSessionEvent = Schema.Struct({
+	...sessionEventBase("agent.thinking"),
+	thinking: Schema.String,
+})
+
+export const AgentMessageSessionEvent = Schema.Struct({
+	...sessionEventBase("agent.message"),
+	content: SessionEventContent,
+	truncated: Schema.optionalKey(Schema.Literal(true)),
+})
+
+export const SpanModelRequestEndEvent = Schema.Struct({
+	...sessionEventBase("span.model_request_end"),
+	model_request_start_id: EventNonEmptyString,
+	model_usage: SessionEventModelUsage,
+	is_error: Schema.NullOr(Schema.Boolean),
+})
+
+export const SessionStatusIdleEvent = Schema.Struct({
+	...sessionEventBase("session.status_idle"),
+	stop_reason: SessionEventStopReason,
+})
+
+export const SessionErrorSessionEvent = Schema.Struct({
+	...sessionEventBase("session.error"),
+	error: SessionEventErrorBody,
+})
+
+export const SessionStatusTerminatedEvent = Schema.Struct({
+	...sessionEventBase("session.status_terminated"),
+})
+
+export const SessionArchivedEvent = Schema.Struct({
+	...sessionEventBase("session.archived"),
+})
+
+export const SessionEvent = Schema.Union([
+	UserMessageSessionEvent,
+	UserInterruptSessionEvent,
+	SessionStatusRunningEvent,
+	SpanModelRequestStartEvent,
+	AgentThinkingSessionEvent,
+	AgentMessageSessionEvent,
+	SpanModelRequestEndEvent,
+	SessionStatusIdleEvent,
+	SessionErrorSessionEvent,
+	SessionStatusTerminatedEvent,
+	SessionArchivedEvent,
+]).annotate({ identifier: "SessionEvent" })
+
+export type SessionEvent = typeof SessionEvent.Type
 
 const Digits = Schema.String.check(Schema.isPattern(/^\d{1,15}$/))
 
@@ -343,10 +454,7 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("streamEvents", "/v1/sessions/:session_id/events/stream", {
 			params: sessionParams,
 			query: { after: Schema.optionalKey(Schema.String) },
-			success: [
-				HttpApiSchema.StreamUint8Array({ contentType: "text/event-stream" }),
-				HttpApiSchema.NoContent,
-			],
+			success: [HttpApiSchema.StreamSse({ data: SessionEvent }), HttpApiSchema.NoContent],
 			error: HandlerErrors,
 		}),
 	)
