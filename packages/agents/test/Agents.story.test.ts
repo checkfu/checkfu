@@ -1,14 +1,9 @@
 import * as Domain from "@alchemy.run/domain"
 import { Story } from "@alchemy.run/domain/Story"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import {
-	MAX_AGENT_DESCRIPTION_LENGTH,
-	MAX_AGENT_NAME_LENGTH,
-	MAX_AGENT_SYSTEM_LENGTH,
-} from "../src/AgentTypes.ts"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentArchivedError } from "../src/Agent/AgentArchived.rejection.ts"
 import { AgentNotFound } from "../src/Agent/AgentNotFound.rejection.ts"
@@ -450,62 +445,5 @@ describe("Agents", () => {
 				archived_at: t2,
 			}),
 		)
-	})
-
-	it("keeps worst-case JSON-escaped agent state, event, and view rows well below 2 MiB", () => {
-		const DO_ROW_LIMIT_BYTES = 2 * 1024 * 1024
-		const ENVELOPE_HEADROOM_BYTES = 64 * 1024
-		const MAX_ROW_BYTES = DO_ROW_LIMIT_BYTES - ENVELOPE_HEADROOM_BYTES
-		const utf8Bytes = (value: string): number => {
-			let bytes = 0
-			for (let i = 0; i < value.length; i++) {
-				const code = value.charCodeAt(i)
-				if (code < 0x80) bytes += 1
-				else if (code < 0x800) bytes += 2
-				else if (code >= 0xd800 && code <= 0xdbff) {
-					bytes += 4
-					i++
-				} else bytes += 3
-			}
-			return bytes
-		}
-		for (const char of ["\u0000", "😀"]) {
-			const worstName = char.repeat(MAX_AGENT_NAME_LENGTH)
-			const worstDescription = char.repeat(MAX_AGENT_DESCRIPTION_LENGTH)
-			const worstSystem = char.repeat(MAX_AGENT_SYSTEM_LENGTH)
-			const stateBytes = utf8Bytes(
-				JSON.stringify({
-					_v: 1,
-					state: {
-						status: "active",
-						version: 1,
-						current_version_id: "aver_001_1",
-						name: worstName,
-						model_id: "anthropic/claude-sonnet-4-5",
-						has_system: true,
-						system: worstSystem,
-						has_description: true,
-						description: worstDescription,
-					},
-				}),
-			)
-			const viewBytes = utf8Bytes(
-				JSON.stringify({
-					id: "agent_001",
-					type: "agent",
-					version: 1,
-					current_version_id: "aver_001_1",
-					name: worstName,
-					model: { id: "anthropic/claude-sonnet-4-5" },
-					system: worstSystem,
-					description: worstDescription,
-					created_at: "2026-01-01T00:00:00.000Z",
-					updated_at: "2026-01-01T00:00:00.000Z",
-					archived_at: null,
-				}),
-			)
-			expect(stateBytes).toBeLessThan(MAX_ROW_BYTES)
-			expect(viewBytes).toBeLessThan(MAX_ROW_BYTES)
-		}
 	})
 })

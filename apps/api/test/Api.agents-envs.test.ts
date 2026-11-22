@@ -1,23 +1,33 @@
+import * as v8 from "node:v8"
 import * as Domain from "@alchemy.run/domain"
+import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import { Agent } from "@checkfu/agents/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/agents/Agent/Agent.id"
+import { AgentVersion } from "@checkfu/agents/Agent/AgentVersion.aggregate"
 import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
-import { AgentVersionByNumberView } from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
+import {
+	AgentVersionByNumberView,
+	agentVersionLookupKey,
+} from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
+import { AgentVersionView } from "@checkfu/agents/Agent/AgentVersionView.view"
 import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
 import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
 import { UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
+import { Agents } from "@checkfu/agents/Agents.model"
 import {
 	MAX_AGENT_DESCRIPTION_LENGTH,
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/agents/AgentTypes"
+import { CreateEnvironment } from "@checkfu/environments/Environment/CreateEnvironment.command"
 import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
 import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
 import { UpdateEnvironment } from "@checkfu/environments/Environment/UpdateEnvironment.command"
+import { Environments } from "@checkfu/environments/Environments.model"
 import {
 	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
 	MAX_ENVIRONMENT_NAME_LENGTH,
@@ -27,12 +37,17 @@ import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
+import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
+import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Scope from "effect/Scope"
+import * as Semaphore from "effect/Semaphore"
 import { Checkfu } from "../src/Checkfu.model.ts"
 import { CheckfuApi, withIdempotencyKey } from "../src/Http/Api.ts"
 import {
@@ -2848,5 +2863,314 @@ describe("Agent and environment field length limits", () => {
 		} finally {
 			await closeAll()
 		}
+	})
+
+	it("keeps every persisted Durable Object value for worst-case agent decisions and environment commands below 2 MiB in V8 structured clone", async () => {
+		const DO_ROW_LIMIT_BYTES = 2 * 1024 * 1024
+		const ENVELOPE_HEADROOM_BYTES = 64 * 1024
+		const MAX_ROW_BYTES = DO_ROW_LIMIT_BYTES - ENVELOPE_HEADROOM_BYTES
+		const writes: Array<{
+			readonly className: string
+			readonly objectId: string
+			readonly key: string
+			readonly bytes: number
+		}> = []
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const testScope = yield* Scope.Scope
+
+					const makeStorage = (
+						className: string,
+						objectId: string,
+					): DurableObjects.ObjectStorage => {
+						const data = new Map<string, Uint8Array>()
+						const recordWrite = (key: string, value: unknown) => {
+							const encoded = v8.serialize(value)
+							writes.push({ className, objectId, key, bytes: encoded.byteLength })
+							data.set(key, encoded)
+						}
+						return {
+							get: <T>(key: string) =>
+								Effect.sync(() => {
+									const raw = data.get(key)
+									return raw === undefined ? undefined : (v8.deserialize(raw) as T)
+								}),
+							put: ((keyOrEntries: string | Record<string, unknown>, value?: unknown) =>
+								Effect.sync(() => {
+									if (typeof keyOrEntries === "string") {
+										recordWrite(keyOrEntries, value)
+									} else {
+										for (const [key, entry] of Object.entries(keyOrEntries)) {
+											recordWrite(key, entry)
+										}
+									}
+								})) as DurableObjects.ObjectStorage["put"],
+							delete: ((keyOrKeys: string | ReadonlyArray<string>) =>
+								Effect.sync(() => {
+									if (typeof keyOrKeys === "string") {
+										return data.delete(keyOrKeys)
+									}
+									let removed = 0
+									for (const key of keyOrKeys) {
+										if (data.delete(key)) removed += 1
+									}
+									return removed
+								})) as DurableObjects.ObjectStorage["delete"],
+							list: <T>(options?: DurableObjects.ListOptions) =>
+								Effect.sync(() => {
+									let keys = [...data.keys()].sort()
+									if (options?.prefix !== undefined) {
+										keys = keys.filter((key) => key.startsWith(options.prefix!))
+									}
+									if (options?.start !== undefined) {
+										keys = keys.filter((key) => key >= options.start!)
+									}
+									if (options?.startAfter !== undefined) {
+										keys = keys.filter((key) => key > options.startAfter!)
+									}
+									if (options?.end !== undefined) {
+										keys = keys.filter((key) => key < options.end!)
+									}
+									if (options?.reverse) keys.reverse()
+									if (options?.limit !== undefined) keys = keys.slice(0, options.limit)
+									return new Map(keys.map((key) => [key, v8.deserialize(data.get(key)!) as T]))
+								}),
+							transaction: (effect) => effect,
+						}
+					}
+
+					const host: DurableObjects.Host = {
+						claimKey: Effect.succeed({}),
+						declare: (_model, className, impl) =>
+							Effect.sync((): DurableObjects.Namespace => {
+								const instances = new Map<
+									string,
+									Effect.Effect<Record<string, unknown>, never, never>
+								>()
+								const getInstance = (objectId: string) => {
+									let existing = instances.get(objectId)
+									if (existing === undefined) {
+										const storage = makeStorage(className, objectId)
+										const gate = Semaphore.makeUnsafe(1)
+										let alarmAt: number | null = null
+										let fireAlarm: Effect.Effect<void> = Effect.void
+										const { callbacks, fire } = DurableObjects.alarmCallbacks(storage, {
+											get: Effect.sync(() => alarmAt),
+											set: (at) =>
+												Effect.gen(function* () {
+													alarmAt = at
+													const delay = Math.max(0, at - (yield* Clock.currentTimeMillis))
+													yield* Effect.forkIn(
+														Effect.sleep(Duration.millis(delay)).pipe(
+															Effect.andThen(
+																Effect.suspend(() => {
+																	alarmAt = null
+																	return fireAlarm
+																}),
+															),
+														),
+														testScope,
+													)
+												}),
+										})
+										fireAlarm = fire
+										const runtimeContext: BaseRuntimeContext = {
+											Type: "Test",
+											id: `${className}:${objectId}`,
+											env: {},
+											get: () => Effect.succeed(undefined),
+											set: (id) => Effect.succeed(id),
+										}
+										const objectState: DurableObjects.ObjectStateShape = {
+											storage,
+											exclusive: (effect) => gate.withPermit(effect),
+											waitUntil: (effect) => Effect.forkIn(effect, testScope).pipe(Effect.asVoid),
+										}
+										const built = impl.pipe(
+											Effect.provideService(DurableObjects.ObjectState, objectState),
+											Effect.provideService(RuntimeContext, runtimeContext),
+											Effect.provide(callbacks),
+											Effect.provideService(Scope.Scope, testScope),
+										)
+										existing = Effect.runSync(Effect.cached(built))
+										instances.set(objectId, existing)
+									}
+									return existing
+								}
+								return {
+									getByName: (objectId) =>
+										new Proxy({} as DurableObjects.Stub, {
+											get:
+												(_target, prop) =>
+												(...args: ReadonlyArray<unknown>) =>
+													Effect.flatMap(getInstance(objectId), (methods) => {
+														const fn = methods[String(prop)] as (
+															...callArgs: ReadonlyArray<unknown>
+														) => Effect.Effect<unknown>
+														return fn(...args)
+													}),
+										}),
+								}
+							}),
+					}
+
+					const platform = DurableObjects.makePlatform(host).pipe(
+						Layer.provide(SecureRandom.layerWebCrypto),
+					)
+					const layer = Layer.mergeAll(
+						Agents.layer(Layer.empty),
+						Environments.layer(Layer.empty),
+					).pipe(Layer.provide(platform), Layer.provide(SecureRandom.layerWebCrypto))
+
+					yield* Effect.gen(function* () {
+						const createAgent = yield* CreateAgentDecision
+						const updateAgent = yield* UpdateAgentDecision
+						const agentViews = yield* AgentView
+						const versionViews = yield* AgentVersionView
+						const byNumberViews = yield* AgentVersionByNumberView
+						const environments = yield* Environment
+						const envViews = yield* EnvironmentView
+
+						const commitFor = (
+							commits: ReadonlyArray<{ readonly stream: string; readonly version: number }>,
+							stream: string,
+						) => commits.find((commit) => commit.stream === stream)!
+
+						const agentId = AgentId.make("agent_do_size_emoji")
+						const v1Id = AgentVersionId.make("aver_do_size_emoji_1")
+						const v2Id = AgentVersionId.make("aver_do_size_emoji_2")
+
+						const createReceipt = yield* createAgent.send(
+							new CreateAgent({
+								agent_id: agentId,
+								version_id: v1Id,
+								name: "😀".repeat(MAX_AGENT_NAME_LENGTH),
+								model: { id: "anthropic/claude-sonnet-4-5" },
+								system: "😀".repeat(MAX_AGENT_SYSTEM_LENGTH),
+								description: "😀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+							}),
+						)
+						expect(
+							Option.isSome(
+								yield* agentViews.get(Agent.ref(agentId), {
+									atLeast: commitFor(createReceipt.commits, `Agent/${agentId}`),
+								}),
+							),
+						).toBe(true)
+						expect(
+							Option.isSome(
+								yield* versionViews.get(AgentVersion.ref(v1Id), {
+									atLeast: commitFor(createReceipt.commits, `AgentVersion/${v1Id}`),
+								}),
+							),
+						).toBe(true)
+						expect(
+							Option.isSome(
+								yield* byNumberViews.get(agentVersionLookupKey(agentId, 1), {
+									atLeast: commitFor(createReceipt.commits, `AgentVersion/${v1Id}`),
+								}),
+							),
+						).toBe(true)
+
+						const updateReceipt = yield* updateAgent.send(
+							new UpdateAgent({
+								agent_id: agentId,
+								expected_version: 1,
+								next_version_id: v2Id,
+								name: "🚀".repeat(MAX_AGENT_NAME_LENGTH),
+								model: { id: "anthropic/claude-sonnet-4-5" },
+								system: "🚀".repeat(MAX_AGENT_SYSTEM_LENGTH),
+								description: "🚀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+							}),
+						)
+						expect(
+							Option.isSome(
+								yield* agentViews.get(Agent.ref(agentId), {
+									atLeast: commitFor(updateReceipt.commits, `Agent/${agentId}`),
+								}),
+							),
+						).toBe(true)
+
+						for (const [suffix, char] of [
+							["bmp", "漢"],
+							["nul", "\u0000"],
+						] as const) {
+							const id = AgentId.make(`agent_do_size_${suffix}`)
+							const versionId = AgentVersionId.make(`aver_do_size_${suffix}_1`)
+							const receipt = yield* createAgent.send(
+								new CreateAgent({
+									agent_id: id,
+									version_id: versionId,
+									name: char.repeat(MAX_AGENT_NAME_LENGTH),
+									model: { id: "anthropic/claude-sonnet-4-5" },
+									system: char.repeat(MAX_AGENT_SYSTEM_LENGTH),
+									description: char.repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+								}),
+							)
+							expect(
+								Option.isSome(
+									yield* agentViews.get(Agent.ref(id), {
+										atLeast: commitFor(receipt.commits, `Agent/${id}`),
+									}),
+								),
+							).toBe(true)
+						}
+
+						const envId = EnvironmentId.make("env_do_size_emoji")
+						const envCreateReceipt = yield* environments.send(
+							new CreateEnvironment({
+								environment_id: envId,
+								name: "😀".repeat(MAX_ENVIRONMENT_NAME_LENGTH),
+								description: "😀".repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH),
+								config: {
+									type: "cloud",
+									networking: {
+										type: "limited",
+										allow_mcp_servers: false,
+										allow_package_managers: true,
+										allowed_hosts: ["api.openai.com"],
+									},
+								},
+							}),
+						)
+						expect(
+							Option.isSome(
+								yield* envViews.get(Environment.ref(envId), { atLeast: envCreateReceipt }),
+							),
+						).toBe(true)
+
+						const envUpdateReceipt = yield* environments.send(
+							new UpdateEnvironment({
+								environment_id: envId,
+								expected_version: 1,
+								name: "🚀".repeat(MAX_ENVIRONMENT_NAME_LENGTH),
+								description: "🚀".repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH),
+								config: { type: "cloud", networking: { type: "unrestricted" } },
+							}),
+						)
+						expect(
+							Option.isSome(
+								yield* envViews.get(Environment.ref(envId), { atLeast: envUpdateReceipt }),
+							),
+						).toBe(true)
+					}).pipe(Effect.provide(layer))
+				}),
+			),
+		)
+
+		const primaryIntents = writes.filter(
+			(write) => write.className === "AgentAggregate" && write.key === "intent",
+		)
+		expect(primaryIntents.length).toBeGreaterThanOrEqual(4)
+		expect(Math.max(...primaryIntents.map((write) => write.bytes))).toBeGreaterThan(1_500_000)
+		expect(writes.some((write) => write.key.startsWith("decided:"))).toBe(true)
+		expect(writes.some((write) => write.key.startsWith("receipt:"))).toBe(true)
+		expect(writes.some((write) => write.key.startsWith("event:"))).toBe(true)
+		expect(writes.some((write) => write.key === "meta")).toBe(true)
+		expect(writes.some((write) => write.key === "snapshot")).toBe(true)
+		const largest = Math.max(...writes.map((write) => write.bytes))
+		expect(largest).toBeLessThan(MAX_ROW_BYTES)
 	})
 })
