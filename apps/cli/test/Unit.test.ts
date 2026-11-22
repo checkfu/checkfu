@@ -1,10 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
-import { normalizeApiUrl, resolveBaseUrl } from "../src/Client.ts"
+import { makeCheckfuClient, normalizeApiUrl, resolveBaseUrl } from "../src/Client.ts"
 import {
 	escapeTerminalControlCharacters,
 	stringifyTerminalSafeJson,
@@ -46,6 +50,52 @@ describe("normalizeApiUrl", () => {
 					expect(err._tag).toBe("CliFailure")
 					expect(err.exitCode).toBe(1)
 				}
+
+				const malformedWithCreds = yield* Effect.flip(
+					normalizeApiUrl("https://alice:supersecret@badhost:99999"),
+				)
+				expect(malformedWithCreds.exitCode).toBe(1)
+				expect(malformedWithCreds.message).not.toContain("alice")
+				expect(malformedWithCreds.message).not.toContain("supersecret")
+				expect(malformedWithCreds.message).not.toContain("badhost")
+			}),
+		)
+	})
+
+	it("backs off and fails after bounded retries when an SSE stream repeatedly closes mid-frame", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				let requests = 0
+				const fakeFetch = (async () => {
+					requests++
+					return new Response('id: 1\nevent: user.message\ndata: {"partial', {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+
+				const layer = Layer.mergeAll(
+					FetchHttpClient.layer.pipe(
+						Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fakeFetch)),
+					),
+					SecureRandom.layerWebCrypto,
+					ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: "ck_test" })),
+				)
+
+				const err = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_test", {
+								maxReconnectAttempts: 2,
+								baseReconnectDelayMs: 5,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(layer))
+
+				expect(requests).toBe(3)
+				expect(err.message).toContain("incomplete SSE frame")
 			}),
 		)
 	})
@@ -123,7 +173,11 @@ describe("Transform and formatOutput", () => {
 			id: "agt_123",
 			model: "gpt-6.2-sol",
 		})
+		expect(evaluateTransform(sample, "{id}.{id}")).toEqual({ id: "agt_123" })
+		expect(evaluateTransform(sample, "{id,name}.id")).toBe("agt_123")
 		expect(evaluateTransform(sample, "[id,name]")).toEqual(["agt_123", "Helper"])
+		expect(evaluateTransform(sample, "[id,name].[0]")).toEqual(["agt_123"])
+		expect(evaluateTransform(sample, "[id,name].1")).toBe("Helper")
 		expect(evaluateTransform(sample, "missing.path")).toBeUndefined()
 	})
 

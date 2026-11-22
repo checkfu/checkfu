@@ -41,7 +41,8 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
 		}
 		const parsed = yield* Effect.try({
 			try: () => new URL(trimmed),
-			catch: () => configError(`Invalid API base URL "${raw}".`),
+			catch: () =>
+				configError("Invalid API base URL. Expected an http(s) URL without credentials."),
 		})
 		if (parsed.username.length > 0 || parsed.password.length > 0) {
 			return yield* configError("API base URL must not contain credentials.")
@@ -204,8 +205,10 @@ export const makeCheckfuClient = (
 							const lastSeqRef = yield* Ref.make<number | undefined>(cursor)
 							const archivedRef = yield* Ref.make(false)
 							const sawEventRef = yield* Ref.make(false)
-							const sawChunkRef = yield* Ref.make(false)
+							const sawKeepaliveRef = yield* Ref.make(false)
 							const recoveredRef = yield* Ref.make(false)
+							let frameBuffer = ""
+							let trailingCr = false
 							const streamUrl =
 								!useHeader && cursor !== undefined
 									? `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream?after=${cursor}`
@@ -276,11 +279,34 @@ export const makeCheckfuClient = (
 
 							const eventsStream: Stream.Stream<SessionStreamEvent, CliFailure> =
 								response.stream.pipe(
-									Stream.tap((chunk) =>
-										chunk.byteLength > 0 ? Ref.set(sawChunkRef, true) : Effect.void,
-									),
 									Stream.mapError((error) => new StreamBodyReadError({ error })),
 									Stream.decodeText(),
+									Stream.tap((chunk) =>
+										Effect.gen(function* () {
+											let text = chunk
+											if (trailingCr) {
+												if (text.startsWith("\n")) {
+													text = text.slice(1)
+												}
+												trailingCr = false
+											}
+											if (text.endsWith("\r")) {
+												trailingCr = true
+												text = text.slice(0, -1)
+											}
+											frameBuffer += text.replaceAll("\r\n", "\n").replaceAll("\r", "\n")
+											let boundary = frameBuffer.indexOf("\n\n")
+											while (boundary !== -1) {
+												const frame = frameBuffer.slice(0, boundary)
+												frameBuffer = frameBuffer.slice(boundary + 2)
+												const lines = frame.split("\n").filter((line) => line.length > 0)
+												if (lines.length > 0 && lines.every((line) => line.startsWith(":"))) {
+													yield* Ref.set(sawKeepaliveRef, true)
+												}
+												boundary = frameBuffer.indexOf("\n\n")
+											}
+										}),
+									),
 									Stream.pipeThroughChannel(Sse.decode()),
 									Stream.mapEffect((sseEvent) =>
 										Effect.gen(function* () {
@@ -335,15 +361,30 @@ export const makeCheckfuClient = (
 									}
 									const lastSeq = yield* Ref.get(lastSeqRef)
 									const sawEvent = yield* Ref.get(sawEventRef)
-									const sawChunk = yield* Ref.get(sawChunkRef)
-									if (sawEvent || sawChunk) {
-										// Healthy server rotation (including keepalive-only idle windows):
-										// resume immediately without burning the error retry budget.
+									const sawKeepalive = yield* Ref.get(sawKeepaliveRef)
+									const hasIncompleteFrame = frameBuffer.trim().length > 0 || trailingCr
+
+									if (hasIncompleteFrame) {
+										const nextAttempt = sawEvent ? 0 : attempt + 1
+										if (nextAttempt > maxReconnects) {
+											return Stream.fail(
+												networkFailure("Event stream closed with an incomplete SSE frame."),
+											)
+										}
+										yield* Effect.sleep(
+											Duration.millis(baseDelayMs * 2 ** Math.max(0, nextAttempt - 1)),
+										)
+										return connect(lastSeq, true, nextAttempt)
+									}
+									if (sawEvent) {
 										return connect(lastSeq, true, 0)
 									}
-									// Clean HTTP 200 close with zero bytes: wait briefly to avoid a tight spin,
-									// while keeping the session stream alive without spending error retries.
-									yield* Effect.sleep(Duration.millis(baseDelayMs))
+									// Clean close without advancing the cursor (e.g., healthy keepalive rotation
+									// or empty HTTP 200 close): keep listening without spending error retries,
+									// but apply a minimum delay so no-progress reconnects cannot spin tightly.
+									yield* Effect.sleep(
+										Duration.millis(sawKeepalive ? Math.min(baseDelayMs, 50) : baseDelayMs),
+									)
 									return connect(lastSeq, true, 0)
 								}),
 							)

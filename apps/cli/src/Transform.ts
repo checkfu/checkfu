@@ -153,22 +153,24 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 	for (let i = 0; i < segments.length; i++) {
 		if (current === null || current === undefined) return undefined
 		const rawSegment = segments[i] ?? ""
-		const segment = unescapeSegment(rawSegment)
+		const rawTrimmed = rawSegment.trim()
 		const rest = segments.slice(i + 1)
 
-		if (segment === "@this" || segment.length === 0) continue
+		if (rawTrimmed === "@this" || rawTrimmed.length === 0) continue
 
-		if (segment.startsWith("{") && segment.endsWith("}")) {
-			current = evaluateObjectLiteral(current, segment.slice(1, -1))
+		if (rawTrimmed.startsWith("{") && rawTrimmed.endsWith("}")) {
+			current = evaluateObjectLiteral(current, rawTrimmed.slice(1, -1))
 			continue
 		}
-		if (segment.startsWith("[") && segment.endsWith("]")) {
-			current = splitTopLevel(segment.slice(1, -1), ",")
+		if (rawTrimmed.startsWith("[") && rawTrimmed.endsWith("]")) {
+			current = splitTopLevel(rawTrimmed.slice(1, -1), ",")
 				.map((item) => item.trim())
 				.filter((item) => item.length > 0)
 				.map((item) => evaluateTransform(current, item))
 			continue
 		}
+
+		const segment = unescapeSegment(rawTrimmed)
 
 		if (segment === "#") {
 			if (!Array.isArray(current)) return undefined
@@ -204,15 +206,6 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 export const evaluateTransform = (value: unknown, expression: string): unknown => {
 	const trimmed = expression.trim()
 	if (trimmed.length === 0) return value
-	if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-		return evaluateObjectLiteral(value, trimmed.slice(1, -1))
-	}
-	if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-		return splitTopLevel(trimmed.slice(1, -1), ",")
-			.map((item) => item.trim())
-			.filter((item) => item.length > 0)
-			.map((item) => evaluateTransform(value, item))
-	}
 	const segments = splitTopLevel(trimmed, ".")
 	return evaluateSegments(value, segments)
 }

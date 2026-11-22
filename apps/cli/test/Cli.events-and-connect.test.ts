@@ -940,4 +940,122 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 	})
+
+	it("preserves indented message whitespace and interrupts an already-running session on Ctrl-C during history replay", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Indented code lines preserve leading/trailing whitespace and suppress local echo
+					const receivedInputs: Array<string> = []
+					const wsCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.sync(() => {
+								receivedInputs.push(...args.input)
+								return {
+									thinking: null,
+									text: `Got:[${args.input.join("|")}]`,
+									input_tokens: 4,
+									output_tokens: 4,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const wsSessionId = yield* createReadySession(wsCli)
+					const indented = "    const x = 1  "
+					const wsResult = yield* wsCli.run(["sessions", "connect", "--session-id", wsSessionId], {
+						stdin: `${indented}\n`,
+					})
+					expect(wsResult.exitCode).toBe(0)
+					expect(receivedInputs).toEqual([indented])
+					expect(wsResult.stdout).toContain(`Got:[${indented}]`)
+					expect(wsResult.stdout).not.toContain("[you]")
+
+					// 2) Connecting to an already-running session and pressing Ctrl-C before SSE replay catches up
+					//    must still send user.interrupt based on liveStatus rather than replay baseline idle status
+					const turn2Started = yield* Deferred.make<void>()
+					const turn2Interrupted = yield* Deferred.make<void>()
+					const sigintController = makeSigintController()
+
+					const replayCtrlCCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									return {
+										thinking: null,
+										text: "Turn 1 done",
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "end_turn" as const },
+									}
+								}
+								yield* Deferred.succeed(turn2Started, undefined)
+								yield* Deferred.await(turn2Interrupted)
+								return yield* Effect.fail({
+									_tag: "ModelRequestInterrupted" as const,
+									model_usage: { input_tokens: 2, output_tokens: 0 },
+								})
+							}),
+						interrupt: () => Deferred.succeed(turn2Interrupted, undefined).pipe(Effect.asVoid),
+					})
+					const runningSessionId = yield* createReadySession(replayCtrlCCli)
+
+					// Complete turn 1 so replay has historical idle events before turn 2
+					const t1 = yield* replayCtrlCCli.run(
+						["sessions", "connect", "--session-id", runningSessionId],
+						{ stdin: "finish turn 1\n" },
+					)
+					expect(t1.exitCode).toBe(0)
+
+					// Start turn 2 asynchronously without waiting for it to settle
+					yield* replayCtrlCCli.run([
+						"sessions:events",
+						"send",
+						"--session-id",
+						runningSessionId,
+						"--event",
+						'{"type":"user.message","content":[{"type":"text","text":"long turn 2"}]}',
+					])
+					yield* Deferred.await(turn2Started)
+
+					// Hold the SSE response so replay has NOT delivered turn 2's status_running when Ctrl-C arrives
+					let releaseReplay: (() => void) | undefined
+					const replayGate = new Promise<void>((resolve) => {
+						releaseReplay = resolve
+					})
+					let firstSigintConsumed = false
+
+					const ttyRes = yield* replayCtrlCCli.run(
+						["sessions", "connect", "--session-id", runningSessionId],
+						{
+							stdinIsTerminal: true,
+							sigintController,
+							interceptFetch: async (next, request) => {
+								if (request.url.includes("/events/stream")) {
+									await replayGate
+								}
+								return next(request)
+							},
+							terminalReads: [
+								Effect.sleep("25 millis").pipe(
+									Effect.andThen(
+										Effect.sync(() => {
+											firstSigintConsumed = sigintController.handleSigint()
+										}),
+									),
+									Effect.andThen(Deferred.await(turn2Interrupted)),
+									Effect.andThen(Effect.sync(() => releaseReplay?.())),
+									Effect.andThen(Effect.sleep("25 millis")),
+									Effect.andThen(Effect.succeed("/exit")),
+								),
+							],
+						},
+					)
+
+					expect(ttyRes.exitCode).toBe(0)
+					expect(firstSigintConsumed).toBe(true)
+					expect(ttyRes.stderr).toContain("Interrupt requested.")
+				}),
+			),
+		)
+	})
 })

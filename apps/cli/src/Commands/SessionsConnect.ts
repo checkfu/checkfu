@@ -51,6 +51,8 @@ const extractContentText = (data: Record<string, unknown>): string => {
 
 interface ConnectState {
 	readonly status: "idle" | "running" | "terminated"
+	readonly liveStatus: "idle" | "running" | "terminated"
+	readonly liveTurn: number
 	readonly observedTurn: number
 	readonly settledTurn: number
 	readonly latestSettledStopReason: string | undefined
@@ -157,11 +159,17 @@ const renderConnectEvent = (
 				break
 			}
 			case "session.status_running": {
-				yield* Ref.update(stateRef, (state) => ({
-					...state,
-					status: "running" as const,
-					observedTurn: state.observedTurn + 1,
-				}))
+				yield* Ref.update(stateRef, (state) => {
+					const nextObserved = state.observedTurn + 1
+					const reachedLive = nextObserved > state.liveTurn
+					return {
+						...state,
+						status: "running" as const,
+						observedTurn: nextObserved,
+						liveStatus: reachedLive ? ("running" as const) : state.liveStatus,
+						liveTurn: reachedLive ? nextObserved : state.liveTurn,
+					}
+				})
 				break
 			}
 			case "agent.thinking": {
@@ -222,6 +230,7 @@ const renderConnectEvent = (
 					return {
 						...state,
 						status: "idle" as const,
+						liveStatus: turn >= state.liveTurn ? ("idle" as const) : state.liveStatus,
 						settledTurn: Math.max(state.settledTurn, turn),
 						latestSettledStopReason,
 						failedTurnErrors,
@@ -253,6 +262,7 @@ const renderConnectEvent = (
 					return {
 						...state,
 						status: "terminated" as const,
+						liveStatus: "terminated" as const,
 						ended: true,
 						failedTurnErrors,
 					}
@@ -309,20 +319,20 @@ const dispatchUserLine = (
 		const key = yield* client.generateIdempotencyKey()
 		yield* Ref.update(stateRef, (state) => ({
 			...state,
-			localSentTexts: [...state.localSentTexts, trimmed],
+			localSentTexts: [...state.localSentTexts, line],
 		}))
 		const res = yield* Effect.result(
 			client.api.sessions.sendEvents({
 				params: { session_id: sessionId },
 				headers: { "idempotency-key": key },
 				payload: {
-					events: [{ type: "user.message", content: [{ type: "text", text: trimmed }] }],
+					events: [{ type: "user.message", content: [{ type: "text", text: line }] }],
 				},
 			}),
 		)
 		if (res._tag === "Failure") {
 			yield* Ref.update(stateRef, (state) => {
-				const idx = state.localSentTexts.indexOf(trimmed)
+				const idx = state.localSentTexts.indexOf(line)
 				if (idx === -1) return state
 				return {
 					...state,
@@ -345,10 +355,13 @@ const dispatchUserLine = (
 			yield* Ref.update(stateRef, (state) => {
 				const nextSubmitted = new Set(state.submittedTurns)
 				nextSubmitted.add(turn)
+				const advancesLive = turn > state.liveTurn
 				return {
 					...state,
 					targetTurn: Math.max(state.targetTurn, turn),
 					submittedTurns: nextSubmitted,
+					liveStatus: advancesLive ? ("running" as const) : state.liveStatus,
+					liveTurn: advancesLive ? turn : state.liveTurn,
 				}
 			})
 		}
@@ -504,6 +517,8 @@ export const sessionsConnectCommand = Command.make(
 
 			const stateRef = yield* Ref.make<ConnectState>({
 				status: baseline.status,
+				liveStatus: session.status,
+				liveTurn: session.turn,
 				observedTurn: baseline.observedTurn,
 				settledTurn: baseline.settledTurn,
 				latestSettledStopReason: undefined,
@@ -568,7 +583,6 @@ export const sessionsConnectCommand = Command.make(
 
 				if (isInteractiveTty) {
 					let interruptRequestedOnce = false
-					let cachedStatus: ConnectState["status"] = session.status
 					const interruptQueue = yield* Queue.unbounded<void>()
 
 					const interruptWorker = yield* Effect.forever(
@@ -581,7 +595,6 @@ export const sessionsConnectCommand = Command.make(
 					const ttyLoop = Effect.gen(function* () {
 						while (true) {
 							const state = yield* Ref.get(stateRef)
-							cachedStatus = state.status
 							if (state.ended) break
 							const nextEvent = yield* Effect.race(
 								Effect.result(terminal.readLine).pipe(
@@ -606,8 +619,7 @@ export const sessionsConnectCommand = Command.make(
 
 					yield* withSigintHandler(() => {
 						const current = Ref.getUnsafe(stateRef)
-						cachedStatus = current.status
-						if (cachedStatus === "running" && !interruptRequestedOnce) {
+						if (current.liveStatus === "running" && !interruptRequestedOnce) {
 							interruptRequestedOnce = true
 							Queue.offerUnsafe(interruptQueue, undefined)
 							return true
