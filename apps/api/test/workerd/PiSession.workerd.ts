@@ -49,6 +49,27 @@ const waitForExit = (child: ChildProcess, timeoutMs: number): Promise<boolean> =
 	})
 }
 
+const killProcessTree = (pid: number, signal: NodeJS.Signals): void => {
+	if (process.platform !== "win32") {
+		try {
+			process.kill(-pid, signal)
+			return
+		} catch {
+			try {
+				process.kill(pid, signal)
+			} catch {
+				return
+			}
+			return
+		}
+	}
+	try {
+		process.kill(pid, signal)
+	} catch {
+		return
+	}
+}
+
 const stopProcessByPid = async (child: ChildProcess): Promise<void> => {
 	const pid = child.pid
 	if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return
@@ -59,11 +80,7 @@ const stopProcessByPid = async (child: ChildProcess): Promise<void> => {
 	}
 	const exited = await waitForExit(child, 10_000)
 	if (!exited) {
-		try {
-			process.kill(pid, "SIGKILL")
-		} catch {
-			return
-		}
+		killProcessTree(pid, "SIGKILL")
 		await waitForExit(child, 5_000)
 	}
 }
@@ -138,6 +155,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.OPENAI_API_KEY
 	delete childEnv.ANTHROPIC_API_KEY
 	delete childEnv.CHECKFU_OPENAI_BASE_URL
+	delete childEnv.CHECKFU_LOCAL_DEV
 	delete childEnv.ALCHEMY_STAGE
 	delete childEnv.ALCHEMY_PROFILE
 
@@ -147,6 +165,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		child = spawn(alchemyBin, ["dev", "--stage", stage, "--no-input", "--env-file", envFile], {
 			cwd: REPO_ROOT,
 			env: childEnv,
+			detached: process.platform !== "win32",
 			stdio: ["ignore", "pipe", "pipe"],
 		})
 	} catch (error) {
@@ -300,34 +319,92 @@ describe("PiSession real Durable Object under workerd", () => {
 		return { status: res.status, body }
 	}
 
-	const createSession = async (): Promise<SessionResource> => {
-		const res = await apiJson<SessionResource>("/v1/sessions", {
-			method: "POST",
-			body: { agent: agentId, environment_id: environmentId },
-		})
-		expect(res.status).toBe(201)
-		return res.body
+	const parseResponseJson = <T>(method: string, path: string, status: number, raw: string): T => {
+		try {
+			return JSON.parse(raw) as T
+		} catch {
+			throw new Error(`${method} ${path} returned non-JSON body (status=${status}): ${raw}`)
+		}
 	}
 
-	const waitForSession = async (
-		sessionId: string,
-		predicate: (session: SessionResource) => boolean,
-		timeoutMs = 20_000,
-	): Promise<SessionResource> => {
+	const pollResourceReady = async <T>(
+		resourcePath: string,
+		predicate?: (resource: T) => boolean,
+		timeoutMs = 15_000,
+	): Promise<T> => {
 		const deadline = Date.now() + timeoutMs
-		let last: SessionResource | undefined
+		let lastStatus = 0
+		let lastRaw = ""
 		while (Date.now() < deadline) {
-			const res = await apiJson<SessionResource>(`/v1/sessions/${sessionId}`)
+			const res = await apiFetch(resourcePath)
+			lastStatus = res.status
+			lastRaw = await res.text()
 			if (res.status === 200) {
-				last = res.body
-				if (predicate(last)) return last
+				const parsed = parseResponseJson<T>("GET", resourcePath, res.status, lastRaw)
+				if (predicate === undefined || predicate(parsed)) return parsed
+			} else if (res.status !== 404 && res.status !== 503) {
+				throw new Error(`GET ${resourcePath} failed (status=${res.status}): ${lastRaw}`)
 			}
 			await sleep(100)
 		}
-		throw new Error(
-			`Timed out waiting for session ${sessionId}; last state: ${JSON.stringify(last)}`,
-		)
+		throw new Error(`Timed out waiting for ${resourcePath} (lastStatus=${lastStatus}): ${lastRaw}`)
 	}
+
+	const createResource = async <T extends { readonly id: string }>(
+		collectionPath: string,
+		body: unknown,
+		options?: { readonly retryTransient503?: boolean; readonly timeoutMs?: number },
+	): Promise<T> => {
+		const maxAttempts = options?.retryTransient503 === true ? 10 : 1
+		let lastError = ""
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			const res = await apiFetch(collectionPath, { method: "POST", body })
+			const raw = await res.text()
+			if (res.status === 201) {
+				return parseResponseJson<T>("POST", collectionPath, res.status, raw)
+			}
+			if (res.status === 202) {
+				const pending = parseResponseJson<{ readonly id?: unknown }>(
+					"POST",
+					collectionPath,
+					res.status,
+					raw,
+				)
+				if (typeof pending.id !== "string" || pending.id.length === 0) {
+					throw new Error(`POST ${collectionPath} returned 202 without id: ${raw}`)
+				}
+				return pollResourceReady<T>(
+					`${collectionPath}/${encodeURIComponent(pending.id)}`,
+					undefined,
+					options?.timeoutMs,
+				)
+			}
+			lastError = `POST ${collectionPath} failed (status=${res.status}): ${raw}`
+			if (res.status === 503 && attempt + 1 < maxAttempts) {
+				await sleep(200)
+				continue
+			}
+			throw new Error(lastError)
+		}
+		throw new Error(lastError)
+	}
+
+	const createSession = (): Promise<SessionResource> =>
+		createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+		})
+
+	const waitForSession = (
+		sessionId: string,
+		predicate: (session: SessionResource) => boolean,
+		timeoutMs = 20_000,
+	): Promise<SessionResource> =>
+		pollResourceReady<SessionResource>(
+			`/v1/sessions/${encodeURIComponent(sessionId)}`,
+			predicate,
+			timeoutMs,
+		)
 
 	const listAllEvents = async (sessionId: string): Promise<ReadonlyArray<SessionEventItem>> => {
 		const res = await apiJson<{ readonly data: ReadonlyArray<SessionEventItem> }>(
@@ -349,33 +426,21 @@ describe("PiSession real Durable Object under workerd", () => {
 		baseUrl = worker.baseUrl
 		stopWorker = worker.stop
 
-		let createdAgent: { readonly id: string } | null = null
-		for (let attempt = 0; attempt < 10; attempt++) {
-			const res = await apiFetch("/v1/agents", {
-				method: "POST",
-				body: {
-					name: "Workerd Test Agent",
-					model: "gpt-4o-mini",
-					system: "Remember facts from earlier turns.",
-				},
-			})
-			if (res.status === 201) {
-				createdAgent = (await res.json()) as { readonly id: string }
-				break
-			}
-			await sleep(200)
-		}
-		if (createdAgent === null) throw new Error("Failed to create test agent")
+		const createdAgent = await createResource<{ readonly id: string }>(
+			"/v1/agents",
+			{
+				name: "Workerd Test Agent",
+				model: "gpt-4o-mini",
+				system: "Remember facts from earlier turns.",
+			},
+			{ retryTransient503: true },
+		)
 		agentId = createdAgent.id
 
-		const envRes = await apiJson<{ readonly id: string }>("/v1/environments", {
-			method: "POST",
-			body: { name: "Workerd Test Env" },
+		const createdEnv = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Workerd Test Env",
 		})
-		if (envRes.status !== 201) {
-			throw new Error(`Failed to create test environment (status=${envRes.status})`)
-		}
-		environmentId = envRes.body.id
+		environmentId = createdEnv.id
 	}, 90_000)
 
 	afterAll(async () => {
@@ -606,12 +671,30 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		const heldRequest = await fakeOpenAI.waitForRequest((req) => req.lastUserText === holdPrompt)
 
-		const archiveRes = await apiJson<SessionResource>(`/v1/sessions/${session.id}/archive`, {
+		const archiveRes = await apiFetch(`/v1/sessions/${session.id}/archive`, {
 			method: "POST",
 		})
-		expect(archiveRes.status).toBe(200)
-		expect(archiveRes.body.status).toBe("terminated")
-		expect(archiveRes.body.archived_at).not.toBeNull()
+		const archiveRaw = await archiveRes.text()
+		const archived =
+			archiveRes.status === 200
+				? parseResponseJson<SessionResource>(
+						"POST",
+						`/v1/sessions/${session.id}/archive`,
+						archiveRes.status,
+						archiveRaw,
+					)
+				: archiveRes.status === 202
+					? await waitForSession(
+							session.id,
+							(s) => s.status === "terminated" && s.archived_at !== null,
+						)
+					: (() => {
+							throw new Error(
+								`POST /v1/sessions/${session.id}/archive failed (status=${archiveRes.status}): ${archiveRaw}`,
+							)
+						})()
+		expect(archived.status).toBe("terminated")
+		expect(archived.archived_at).not.toBeNull()
 
 		await Promise.race([
 			heldRequest.waitAborted,

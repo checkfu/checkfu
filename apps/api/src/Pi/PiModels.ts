@@ -6,6 +6,8 @@ import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.mode
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
 import { AlchemyContext } from "alchemy/AlchemyContext"
+import * as Output from "alchemy/Output"
+import { CurrentRuntimeContext } from "alchemy/RuntimeContext"
 import { Stage } from "alchemy/Stage"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
@@ -23,6 +25,8 @@ export const PROVIDER_API_KEY_ENV: Readonly<Record<SupportedProvider, string>> =
 }
 
 export const OPENAI_BASE_URL_ENV = "CHECKFU_OPENAI_BASE_URL"
+export const LOCAL_DEV_SIGNAL_ENV = "CHECKFU_LOCAL_DEV"
+export const LOCAL_DEV_SIGNAL_VALUE = "local-dev"
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 export const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 
@@ -87,10 +91,20 @@ export const providerBaseUrls = Effect.gen(function* () {
 		if (!alchemyContext.value.dev) return { openai: null }
 		const stage = yield* Effect.serviceOption(Stage)
 		if (Option.isSome(stage) && stage.value === "production") return { openai: null }
-	} else {
-		const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
-		if (runtimeStage === "production") return { openai: null }
+		const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
+		if (rawOpenAI === null) return { openai: null }
+		const openai = parseLoopbackBaseUrl(rawOpenAI)
+		const runtimeContext = yield* CurrentRuntimeContext
+		yield* (
+			runtimeContext?.set(LOCAL_DEV_SIGNAL_ENV, Output.literal(LOCAL_DEV_SIGNAL_VALUE)) ??
+			Effect.void
+		)
+		return { openai }
 	}
+	const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
+	if (runtimeStage === "production") return { openai: null }
+	const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
+	if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) return { openai: null }
 	const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
 	return {
 		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),

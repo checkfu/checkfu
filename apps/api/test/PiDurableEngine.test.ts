@@ -9,6 +9,7 @@ import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import { AlchemyContext } from "alchemy/AlchemyContext"
+import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
 import { Stage } from "alchemy/Stage"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
@@ -24,6 +25,8 @@ import {
 import {
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
+	LOCAL_DEV_SIGNAL_ENV,
+	LOCAL_DEV_SIGNAL_VALUE,
 	OPENAI_BASE_URL_ENV,
 	createNoRedirectProviderFetch,
 	createPiModels,
@@ -1157,18 +1160,37 @@ describe("turn engine", () => {
 		expect(await runWithConfig({})).toEqual({ openai: null })
 		expect(
 			await runWithConfig({
+				ALCHEMY_STAGE: "staging",
+				[OPENAI_BASE_URL_ENV]: "http://127.0.0.1:4321/v1/",
+			}),
+		).toEqual({ openai: null })
+		expect(
+			await runWithConfig({
 				ALCHEMY_STAGE: "dev-local",
+				[LOCAL_DEV_SIGNAL_ENV]: LOCAL_DEV_SIGNAL_VALUE,
 				[OPENAI_BASE_URL_ENV]: "http://127.0.0.1:4321/v1/",
 			}),
 		).toEqual({ openai: "http://127.0.0.1:4321/v1" })
 		expect(
 			await runWithConfig({
 				ALCHEMY_STAGE: "production",
+				[LOCAL_DEV_SIGNAL_ENV]: LOCAL_DEV_SIGNAL_VALUE,
 				[OPENAI_BASE_URL_ENV]: "https://evil.example/v1",
 			}),
 		).toEqual({ openai: null })
 
 		const readKeys: Array<string> = []
+		const boundSignals: Array<string> = []
+		const trackingRuntimeContext: BaseRuntimeContext = {
+			Type: "test",
+			id: "test",
+			env: {},
+			get: () => Effect.succeed(undefined),
+			set: (key, _output) => {
+				boundSignals.push(key)
+				return Effect.succeed(key)
+			},
+		}
 		const trackingConfig = ConfigProvider.make((path) => {
 			readKeys.push(path.join("_"))
 			return Effect.succeed(
@@ -1185,11 +1207,13 @@ describe("turn engine", () => {
 					adopt: false,
 				}),
 				Effect.provideService(Stage, "staging"),
+				Effect.provideService(RuntimeContext, trackingRuntimeContext),
 				Effect.provide(ConfigProvider.layer(trackingConfig)),
 			),
 		)
 		expect(deployPlanResult).toEqual({ openai: null })
 		expect(readKeys).toEqual([])
+		expect(boundSignals).toEqual([])
 
 		const devProdStageResult = await Effect.runPromise(
 			providerBaseUrls.pipe(
@@ -1199,11 +1223,13 @@ describe("turn engine", () => {
 					adopt: false,
 				}),
 				Effect.provideService(Stage, "production"),
+				Effect.provideService(RuntimeContext, trackingRuntimeContext),
 				Effect.provide(ConfigProvider.layer(trackingConfig)),
 			),
 		)
 		expect(devProdStageResult).toEqual({ openai: null })
 		expect(readKeys).toEqual([])
+		expect(boundSignals).toEqual([])
 
 		const devStageResult = await Effect.runPromise(
 			providerBaseUrls.pipe(
@@ -1213,11 +1239,13 @@ describe("turn engine", () => {
 					adopt: false,
 				}),
 				Effect.provideService(Stage, "workerd-test"),
+				Effect.provideService(RuntimeContext, trackingRuntimeContext),
 				Effect.provide(ConfigProvider.layer(trackingConfig)),
 			),
 		)
 		expect(devStageResult).toEqual({ openai: "http://127.0.0.1:4321/v1" })
 		expect(readKeys).toEqual([OPENAI_BASE_URL_ENV])
+		expect(boundSignals).toEqual([LOCAL_DEV_SIGNAL_ENV])
 
 		const overridden = createPiModels(
 			{ openai: Redacted.make("sk-test"), anthropic: null },
@@ -1230,6 +1258,7 @@ describe("turn engine", () => {
 
 		const port80BaseUrls = await runWithConfig({
 			ALCHEMY_STAGE: "dev-local",
+			[LOCAL_DEV_SIGNAL_ENV]: LOCAL_DEV_SIGNAL_VALUE,
 			[OPENAI_BASE_URL_ENV]: "http://127.0.0.1:80/v1",
 		})
 		expect(port80BaseUrls).toEqual({ openai: "http://127.0.0.1:80/v1" })
@@ -1250,6 +1279,7 @@ describe("turn engine", () => {
 				CHECKFU_API_KEY: TEST_API_KEY,
 				OPENAI_API_KEY: "sk-openai-test",
 				ANTHROPIC_API_KEY: "sk-anthropic-test",
+				[LOCAL_DEV_SIGNAL_ENV]: LOCAL_DEV_SIGNAL_VALUE,
 				[OPENAI_BASE_URL_ENV]: "http://[::1]:4321/v1",
 			},
 		)
