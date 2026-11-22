@@ -1,16 +1,16 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
-import { TimeoutModelProvider } from "./Session/ModelProvider.external.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
-import { SessionTranscript } from "./Session/SessionTranscript.view.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
+import { StopModelRequest, StopModelRequestLive } from "./Session/StopModelRequest.policy.ts"
+import { TurnInput } from "./Session/TurnInput.view.ts"
 
 export class Sessions extends Domain.Model("Sessions", {
 	aggregates: [Session],
-	views: [SessionView, SessionTranscript],
-	policies: [StartTurn],
+	views: [SessionView, TurnInput],
+	policies: [StartTurn, StopModelRequest],
 	sagas: [RunTurn],
 	sometimes: {
 		ASessionCompletesATurn: (m) =>
@@ -28,7 +28,4 @@ export class SessionsApi extends Domain.Api("SessionsApi", {
 	views: ["SessionView"],
 }) {}
 
-export const SessionsHandlersLive = Layer.mergeAll(
-	StartTurnLive,
-	RunTurnLive.pipe(Layer.provide(TimeoutModelProvider)),
-)
+export const SessionsHandlersLive = Layer.mergeAll(StartTurnLive, StopModelRequestLive, RunTurnLive)

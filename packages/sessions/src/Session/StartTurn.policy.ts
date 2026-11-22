@@ -1,54 +1,60 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Effect from "effect/Effect"
-import { RecordSessionError } from "./RecordSessionError.command.ts"
+import { AbandonTurn } from "./AbandonTurn.command.ts"
+import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
+import { SessionStatusIdle } from "./CompleteTurn.command.ts"
+import {
+	DEFAULT_MODEL_TIMEOUT_MS,
+	TURN_TIMEOUT,
+	TURN_TIMEOUT_MESSAGE,
+} from "./ModelProvider.external.ts"
 import { RunTurn, turnKey } from "./RunTurn.saga.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
-import { SessionTranscript } from "./SessionTranscript.view.ts"
+import { TurnInput } from "./TurnInput.view.ts"
+
+// The session policy handles running, idle and terminated in stream order.
+const TURN_DEADLINE = "turn-deadline"
 
 export class StartTurn extends Domain.Policy("StartTurn", {
-	from: SessionTranscript,
-	on: [SessionStatusRunning],
+	from: TurnInput,
+	on: [SessionStatusRunning, SessionStatusIdle, SessionStatusTerminated],
 }) {}
 
 export const StartTurnLive = StartTurn.toLayer(
 	Effect.gen(function* () {
-		const sessions = yield* Session
 		const runs = yield* RunTurn
-		return Effect.fn(function* ({ source, state }) {
+		const sessions = yield* Session
+		return Effect.fn(function* ({ source, state, event }) {
 			if (state === null || state.turn < 1) {
 				return
 			}
-			if (state.agent_id === "" || state.environment_id === "") {
-				yield* sessions
-					.send(
-						new RecordSessionError({
-							session_id: source.id,
-							turn: state.turn,
-							error: {
-								type: "invalid_session_configuration",
-								message: "Session is missing an agent or environment identifier.",
-								retry_status: { type: "terminal" },
-							},
-						}),
-					)
-					.pipe(
-						Effect.asVoid,
-						Effect.catchTag("SessionNotFound", () => Effect.void),
-						Effect.catchTag("SessionNotRunning", () => Effect.void),
-						Effect.catchTag("SessionTerminated", () => Effect.void),
-						Effect.catchTag("StaleTurn", () => Effect.void),
-						Effect.catchTag("OpenModelRequests", () => Effect.void),
-					)
+			if (event._tag !== "session.status_running") {
+				// An expired, previously cancelled or absent deadline needs no further work.
+				yield* sessions.unschedule(source.id, TURN_DEADLINE).pipe(
+					Effect.catchTag("AlreadyExecuted", () => Effect.void),
+					Effect.catchTag("AlreadyCancelled", () => Effect.void),
+					Effect.catchTag("NotScheduled", () => Effect.void),
+				)
 				return
 			}
+			yield* sessions.schedule(
+				new AbandonTurn({
+					session_id: source.id,
+					turn: state.turn,
+					error_type: TURN_TIMEOUT,
+					message: TURN_TIMEOUT_MESSAGE,
+				}),
+				{ after: DEFAULT_MODEL_TIMEOUT_MS, commandId: TURN_DEADLINE },
+			)
 			yield* runs.start(turnKey(source.id, state.turn), {
 				session_id: source.id,
 				agent_id: state.agent_id,
 				agent_version: state.agent_version,
 				environment_id: state.environment_id,
 				turn: state.turn,
-				messages: state.messages,
+				generation: state.harness_generation,
+				input: state.input,
 			})
 		})
 	}),

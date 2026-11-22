@@ -3,14 +3,11 @@ import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
-import { RunTurnLive } from "../src/Session/RunTurn.saga.ts"
-import { StartTurnLive } from "../src/Session/StartTurn.policy.ts"
-import { Sessions, SessionsApi } from "../src/Sessions.model.ts"
+import { Sessions, SessionsApi, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
 const story = Story.make(Sessions, {
-	layer: Layer.mergeAll(StartTurnLive, RunTurnLive),
+	layer: SessionsHandlersLive,
 	stub: [ModelProvider],
 })
 

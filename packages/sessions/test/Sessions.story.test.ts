@@ -1,15 +1,16 @@
+import { AbandonTurn, TurnAbandoned } from "../src/Session/AbandonTurn.command.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
+import * as InMemory from "@alchemy.run/domain/InMemory"
 import { Story } from "@alchemy.run/domain/Story"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
-import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import {
@@ -24,13 +25,11 @@ import {
 	SessionCreated,
 } from "../src/Session/CreateSession.command.ts"
 import {
-	DEFAULT_MODEL_TIMEOUT_MS,
-	ModelCancellationPollInterval,
-	ModelGenerationTimeout,
 	ModelProvider,
-	TimeoutModelProvider,
 	boundedModelProvider,
+	clampModelReply,
 } from "../src/Session/ModelProvider.external.ts"
+import { InterruptModelRequest } from "../src/Session/InterruptModelRequest.command.ts"
 import { OpenModelRequests } from "../src/Session/OpenModelRequests.rejection.ts"
 import { AgentMessage, RecordAgentMessage } from "../src/Session/RecordAgentMessage.command.ts"
 import { AgentThinking, RecordAgentThinking } from "../src/Session/RecordAgentThinking.command.ts"
@@ -63,12 +62,6 @@ import { SessionNotFound } from "../src/Session/SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "../src/Session/SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "../src/Session/SessionTerminated.rejection.ts"
 import {
-	MAX_TRANSCRIPT_CHARS,
-	MAX_TRANSCRIPT_MESSAGES,
-	OVERSIZED_MESSAGE_PLACEHOLDER,
-	SessionTranscript,
-} from "../src/Session/SessionTranscript.view.ts"
-import {
 	MAX_ERROR_MESSAGE_LENGTH,
 	MAX_ERROR_TYPE_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
@@ -77,11 +70,16 @@ import {
 } from "../src/Session/SessionTypes.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { StaleTurn } from "../src/Session/StaleTurn.rejection.ts"
+import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModelRequest.policy.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
-import { snapshotVersion, versionedSnapshot } from "../src/Session/VersionedSnapshot.ts"
+import { TurnInput } from "../src/Session/TurnInput.view.ts"
+import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { Sessions, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
-const StartTurnNoopLayer = StartTurn.toLayer(Effect.succeed(() => Effect.void))
+const StartTurnNoopLayer = Layer.mergeAll(
+	StartTurn.toLayer(Effect.succeed(() => Effect.void)),
+	StopModelRequest.toLayer(Effect.succeed(() => Effect.void)),
+)
 const aggregateStory = Story.make(Sessions, {
 	layer: Layer.mergeAll(StartTurnNoopLayer, RunTurnLive),
 	stub: [ModelProvider],
@@ -89,12 +87,23 @@ const aggregateStory = Story.make(Sessions, {
 const story = aggregateStory
 
 const fullStory = Story.make(Sessions, {
-	layer: Layer.mergeAll(StartTurnLive, RunTurnLive),
+	layer: SessionsHandlersLive,
+	stub: [ModelProvider],
+})
+
+// The DO inbox redelivers failed rows. Request one redelivery here since
+// Story's in-memory host surfaces an unhandled policy failure immediately.
+const retryCleanup = StopModelRequest.toLayer(StopModelRequest, {
+	retry: Schedule.recurs(1),
+}).pipe(Layer.provide(StopModelRequestLive))
+const redeliveryStory = Story.make(Sessions, {
+	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, retryCleanup),
 	stub: [ModelProvider],
 })
 
 const ModelProviderNoopLayer = ModelProvider.toLayer(
 	Effect.succeed({
+		interrupt: () => Effect.void,
 		generate: () =>
 			Effect.succeed({
 				thinking: null,
@@ -568,7 +577,7 @@ describe("Sessions", () => {
 			),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Second" })),
 			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Second" }] })),
-			Story.replied({ turn: 1 }),
+			Story.replied({ turn: 2 }),
 			Story.state(session, {
 				_tag: "Running",
 				turn: 1,
@@ -579,30 +588,64 @@ describe("Sessions", () => {
 		)
 	})
 
-	it.effect("atomically interrupts a running turn and refuses interrupt when idle", () => {
-		const session = Session.ref("sess_003")
-		return story(
-			Story.given(session, createdEvent),
-			Story.when(new SendUserInterrupt({ session_id: session.id })),
-			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
-			Story.when(new SendUserMessage({ session_id: session.id, text: "Run" })),
-			Story.then(
-				session,
-				new UserMessage({ content: [{ type: "text", text: "Run" }] }),
-				new SessionStatusRunning(),
-			),
-			Story.replied({ turn: 1 }),
-			Story.when(new SendUserInterrupt({ session_id: session.id })),
-			Story.then(
-				session,
-				new UserInterrupt(),
-				new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
-			),
-			Story.state(session, { _tag: "Idle", turn: 1 }),
-			Story.when(new SendUserInterrupt({ session_id: session.id })),
-			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
-		)
-	})
+	it.effect(
+		"records an interrupt request without ending the turn, and ends it when the harness reports it",
+		() => {
+			const session = Session.ref("sess_003")
+			const req1 = "sess_003:turn:1:req:1"
+			return story(
+				Story.given(session, createdEvent),
+				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Run" })),
+				Story.then(
+					session,
+					new UserMessage({ content: [{ type: "text", text: "Run" }] }),
+					new SessionStatusRunning(),
+				),
+				Story.replied({ turn: 1 }),
+				Story.when(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: req1,
+					}),
+				),
+				Story.then(session, new SpanModelRequestStart({ model_request_start_id: req1 })),
+				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.then(session, new UserInterrupt()),
+				Story.state(session, {
+					_tag: "Running",
+					turn: 1,
+					open_model_request_id: req1,
+					model_requests_started: 1,
+					pending_user_messages: 0,
+				}),
+				Story.when(
+					new InterruptModelRequest({
+						session_id: session.id,
+						turn: 1,
+						model_usage: { input_tokens: 3, output_tokens: 2 },
+						request_seq: 1,
+						model_request_start_id: req1,
+					}),
+				),
+				Story.then(
+					session,
+					new SpanModelRequestEnd({
+						model_request_start_id: req1,
+						model_usage: { input_tokens: 3, output_tokens: 2 },
+						is_error: true,
+					}),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
+				),
+				Story.state(session, { _tag: "Idle", turn: 1 }),
+				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
+			)
+		},
+	)
 
 	it.effect("distinguishes retrying, exhausted, and terminal session.error transitions", () => {
 		const session = Session.ref("sess_004")
@@ -907,8 +950,6 @@ describe("Sessions", () => {
 					agent_version: 2,
 					environment_id: "env_001",
 					turn: 1,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [{ role: "user", text: "Hi" }],
 				}),
 				Story.succeed(ModelProvider.generate, {
 					thinking: "Greeting the user",
@@ -974,12 +1015,6 @@ describe("Sessions", () => {
 					agent_version: 2,
 					environment_id: "env_001",
 					turn: 2,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [
-						{ role: "user", text: "Hi" },
-						{ role: "assistant", text: "Hello!" },
-						{ role: "user", text: "Follow up" },
-					],
 				}),
 				Story.succeed(ModelProvider.generate, {
 					thinking: null,
@@ -1051,8 +1086,6 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 1,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [{ role: "user", text: "First" }],
 			}),
 			Story.fail(ModelProvider.generate, {
 				_tag: "ModelProviderError",
@@ -1094,11 +1127,6 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 2,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [
-					{ role: "user", text: "First" },
-					{ role: "user", text: "Second" },
-				],
 			}),
 			Story.fail(ModelProvider.generate, {
 				_tag: "ModelProviderError",
@@ -1122,6 +1150,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusTerminated(),
 			),
+			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 2 }),
+			Story.succeed(ModelProvider.interrupt, undefined),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
 				result: { status: "failed" },
@@ -1228,12 +1258,10 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 1,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [{ role: "user", text: "First" }],
 			}),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Second" })),
 			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Second" }] })),
-			Story.replied({ turn: 1 }),
+			Story.replied({ turn: 2 }),
 			Story.succeed(ModelProvider.generate, {
 				thinking: null,
 				text: "Reply 1",
@@ -1263,12 +1291,6 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 2,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [
-					{ role: "user", text: "First" },
-					{ role: "assistant", text: "Reply 1" },
-					{ role: "user", text: "Second" },
-				],
 			}),
 			Story.succeed(ModelProvider.generate, {
 				thinking: null,
@@ -1296,7 +1318,7 @@ describe("Sessions", () => {
 	})
 
 	it.effect(
-		"honors user.interrupt immediately even while ModelProvider is hung and aborts late replies",
+		"forwards user.interrupt to the harness and ends the turn only when the harness reports it",
 		() => {
 			const session = Session.ref("sess_e2e_interrupt")
 			const turn1Key = turnKey(session.id, 1)
@@ -1326,13 +1348,21 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [{ role: "user", text: "Long task" }],
 				}),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.then(session, new UserInterrupt()),
+				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1 }),
+				Story.succeed(ModelProvider.interrupt, undefined),
+				Story.state(session, {
+					_tag: "Running",
+					turn: 1,
+					open_model_request_id: req1,
+					model_requests_started: 1,
+					pending_user_messages: 0,
+				}),
+				Story.fail(ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
 				Story.then(
 					session,
-					new UserInterrupt(),
 					new SpanModelRequestEnd({
 						model_request_start_id: req1,
 						model_usage: { input_tokens: 0, output_tokens: 0 },
@@ -1340,33 +1370,113 @@ describe("Sessions", () => {
 					}),
 					new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
 				),
-				Story.state(session, { _tag: "Idle", turn: 1 }),
-				Story.succeed(ModelProvider.generate, {
-					thinking: "Should not be published",
-					text: "Should not be published",
-					input_tokens: 12,
-					output_tokens: 6,
-					stop_reason: { type: "end_turn" },
-				}),
-				Story.then(session),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
-					result: { status: "aborted" },
+					result: { status: "interrupted" },
 				}),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
 			)
 		},
 	)
 
+	it.effect("runs queued prompts once the harness reports the interrupted turn", () => {
+		const session = Session.ref("sess_e2e_replace_after_interrupt")
+		const turn1Key = turnKey(session.id, 1)
+		const req1 = `${turn1Key}:req:1`
+		const turn2Key = turnKey(session.id, 2)
+		const req2 = `${turn2Key}:req:1`
+		return fullStory(
+			Story.clock(t0),
+			Story.when(
+				new CreateSession({
+					session_id: session.id,
+					agent_id: "agent_001",
+					agent_version: 1,
+					environment_id: "env_001",
+					title: null,
+				}),
+			),
+			Story.then(session, createdEvent),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Wrong prompt" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "Wrong prompt" }] }),
+				new SessionStatusRunning(),
+				new SpanModelRequestStart({ model_request_start_id: req1 }),
+			),
+			Story.call("turn-1", ModelProvider.generate, {
+				session_id: session.id,
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 1,
+				input: ["Wrong prompt"],
+			}),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Actual prompt" })),
+			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Actual prompt" }] })),
+			Story.replied({ turn: 2 }),
+			Story.when(new SendUserInterrupt({ session_id: session.id })),
+			Story.then(session, new UserInterrupt()),
+			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1 }),
+			Story.succeed(ModelProvider.interrupt, undefined),
+			Story.fail("turn-1", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+			Story.then(
+				session,
+				new SpanModelRequestEnd({
+					model_request_start_id: req1,
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
+				new SessionStatusRunning(),
+				new SpanModelRequestStart({ model_request_start_id: req2 }),
+			),
+			Story.saga(RunTurn, turn1Key, {
+				_tag: "Completed",
+				result: { status: "interrupted" },
+			}),
+			Story.call("turn-2", ModelProvider.generate, {
+				session_id: session.id,
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 2,
+				input: ["Actual prompt"],
+			}),
+			Story.succeed("turn-2", ModelProvider.generate, {
+				thinking: null,
+				text: "Answer to actual prompt",
+				input_tokens: 9,
+				output_tokens: 5,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Answer to actual prompt" }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: req2,
+					model_usage: { input_tokens: 9, output_tokens: 5 },
+					is_error: false,
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+			),
+			Story.saga(RunTurn, turn2Key, {
+				_tag: "Completed",
+				result: { status: "completed" },
+			}),
+			Story.state(session, { _tag: "Idle", turn: 2 }),
+		)
+	})
+
 	it.effect(
-		"drops canceled queued prompts on interrupt and starts a replacement turn immediately without waiting for the stalled provider",
+		"fails a turn whose harness cannot be reached and moves the session to a fresh conversation",
 		() => {
-			const session = Session.ref("sess_e2e_replace_after_interrupt")
+			const session = Session.ref("sess_e2e_unreachable")
 			const turn1Key = turnKey(session.id, 1)
 			const turn2Key = turnKey(session.id, 2)
 			const req1 = `${turn1Key}:req:1`
 			const req2 = `${turn2Key}:req:1`
-			return fullStory(
+			return redeliveryStory(
 				Story.clock(t0),
 				Story.when(
 					new CreateSession({
@@ -1378,99 +1488,134 @@ describe("Sessions", () => {
 					}),
 				),
 				Story.then(session, createdEvent),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Wrong prompt" })),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "First" })),
 				Story.then(
 					session,
-					new UserMessage({ content: [{ type: "text", text: "Wrong prompt" }] }),
+					new UserMessage({ content: [{ type: "text", text: "First" }] }),
 					new SessionStatusRunning(),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call("turn-1", ModelProvider.generate, {
-					session_id: session.id,
-					agent_id: "agent_001",
-					agent_version: 1,
-					environment_id: "env_001",
-					turn: 1,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [{ role: "user", text: "Wrong prompt" }],
-				}),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Canceled follow-up" })),
+				Story.call(ModelProvider.generate, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(ModelProvider.generate, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
-					new UserMessage({ content: [{ type: "text", text: "Canceled follow-up" }] }),
-				),
-				Story.when(new SendUserInterrupt({ session_id: session.id })),
-				Story.then(
-					session,
-					new UserInterrupt(),
 					new SpanModelRequestEnd({
 						model_request_start_id: req1,
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
+					new SessionErrorEvent({
+						error: {
+							type: "harness_unavailable",
+							message: "The agent runtime could not be reached.",
+							retry_status: { type: "exhausted" },
+						},
+					}),
+					new TurnAbandoned(),
+					new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
 				),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Actual prompt" })),
+				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
+				Story.state(session, { _tag: "Idle", turn: 1 }),
+				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.call("cleanup", ModelProvider.interrupt, {
+					session_id: session.id,
+					turn: 1,
+					generation: 0,
+				}),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Second" })),
 				Story.then(
 					session,
-					new UserMessage({ content: [{ type: "text", text: "Actual prompt" }] }),
+					new UserMessage({ content: [{ type: "text", text: "Second" }] }),
 					new SessionStatusRunning(),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
-				Story.call("turn-2", ModelProvider.generate, {
+				Story.call(ModelProvider.generate, {
 					session_id: session.id,
-					agent_id: "agent_001",
-					agent_version: 1,
-					environment_id: "env_001",
 					turn: 2,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [
-						{ role: "user", text: "Wrong prompt" },
-						{ role: "user", text: "Actual prompt" },
-					],
+					generation: 1,
+					input: ["Second"],
 				}),
-				Story.succeed("turn-2", ModelProvider.generate, {
-					thinking: null,
-					text: "Answer to actual prompt",
-					input_tokens: 9,
-					output_tokens: 5,
-					stop_reason: { type: "end_turn" },
-				}),
+				Story.succeed("cleanup", ModelProvider.interrupt, undefined),
+				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.then(session, new UserInterrupt()),
+				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 2, generation: 1 }),
+				Story.succeed(ModelProvider.interrupt, undefined),
+				Story.fail(ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
 				Story.then(
 					session,
-					new AgentMessage({ content: [{ type: "text", text: "Answer to actual prompt" }] }),
 					new SpanModelRequestEnd({
 						model_request_start_id: req2,
-						model_usage: { input_tokens: 9, output_tokens: 5 },
-						is_error: false,
+						model_usage: { input_tokens: 0, output_tokens: 0 },
+						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
 				),
-				Story.saga(RunTurn, turn2Key, {
-					_tag: "Completed",
-					result: { status: "completed" },
-				}),
-				Story.succeed("turn-1", ModelProvider.generate, {
-					thinking: null,
-					text: "Late ignored reply",
-					input_tokens: 7,
-					output_tokens: 3,
-					stop_reason: { type: "end_turn" },
-				}),
-				Story.then(session),
-				Story.saga(RunTurn, turn1Key, {
-					_tag: "Completed",
-					result: { status: "aborted" },
-				}),
+				Story.saga(RunTurn, turn2Key, { _tag: "Completed", result: { status: "interrupted" } }),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 			)
 		},
 	)
 
+	it.each(["defect", "self-interrupt", "synchronous throw"] as const)(
+		"fails the turn with a generic message when the provider ends in a %s, without exposing the cause",
+		async (mode) => {
+			const error = await Effect.runPromise(
+				Effect.gen(function* () {
+					const sessions = yield* Session
+					const runs = yield* RunTurn
+					const views = yield* SessionView
+					const session = Session.ref(`sess_provider_${mode}`)
+					yield* sessions.send(
+						new CreateSession({
+							session_id: session.id,
+							agent_id: "agent_001",
+							agent_version: 1,
+							environment_id: "env_001",
+							title: null,
+						}),
+					)
+					yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Go" }))
+					yield* runs.get(turnKey(session.id, 1)).result
+					yield* views.waitFor(session, { status: "idle", turn: 1 }, { timeout: "5 seconds" })
+					const page = yield* views.list(session)
+					const failed = page.entries.find((entry) => entry.event._tag === "session.error")
+					return failed?.event._tag === "session.error" ? failed.event.error : null
+				}).pipe(
+					Effect.provide(
+						Sessions.layer(SessionsHandlersLive).pipe(
+							Layer.provide(
+								Layer.mergeAll(
+									Domain.InMemory,
+									boundedModelProvider(
+										Effect.succeed({
+											interrupt: () => Effect.void,
+											generate: () => {
+												if (mode === "synchronous throw") throw new Error("secret adapter failure")
+												return mode === "defect"
+													? Effect.die(new Error("secret internal sdk failure"))
+													: Effect.interrupt
+											},
+										}),
+									),
+								),
+							),
+						),
+					),
+				),
+			)
+			expect(error).toEqual({
+				type: "provider_internal_error",
+				message: "Model provider failed unexpectedly.",
+				retry_status: { type: "exhausted" },
+			})
+		},
+	)
+
 	it.effect(
-		"honors user.interrupt when ModelProvider fails late with a terminal error without terminating the session",
+		"ends the turn as unreachable when an interrupt cannot be delivered to the harness",
 		() => {
-			const session = Session.ref("sess_e2e_interrupt_fail")
+			const session = Session.ref("sess_e2e_interrupt_undelivered")
 			const turn1Key = turnKey(session.id, 1)
 			const req1 = `${turn1Key}:req:1`
 			return fullStory(
@@ -1485,48 +1630,464 @@ describe("Sessions", () => {
 					}),
 				),
 				Story.then(session, createdEvent),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Abort me" })),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Long task" })),
 				Story.then(
 					session,
-					new UserMessage({ content: [{ type: "text", text: "Abort me" }] }),
+					new UserMessage({ content: [{ type: "text", text: "Long task" }] }),
 					new SessionStatusRunning(),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, {
-					session_id: session.id,
-					agent_id: "agent_001",
-					agent_version: 1,
-					environment_id: "env_001",
-					turn: 1,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [{ role: "user", text: "Abort me" }],
-				}),
+				Story.call(ModelProvider.generate, { session_id: session.id, turn: 1, generation: 0 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.then(session, new UserInterrupt()),
+				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
-					new UserInterrupt(),
 					new SpanModelRequestEnd({
 						model_request_start_id: req1,
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
+					new SessionErrorEvent({
+						error: {
+							type: "harness_unavailable",
+							message: "The agent runtime could not be reached.",
+							retry_status: { type: "exhausted" },
+						},
+					}),
+					new TurnAbandoned(),
+					new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
 				),
-				Story.fail(ModelProvider.generate, {
-					_tag: "ModelProviderError",
-					error_type: "invalid_api_key_error",
-					message: "aborted upstream",
-					terminal: true,
+				Story.state(session, { _tag: "Idle", turn: 1 }),
+				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.succeed(ModelProvider.interrupt, undefined),
+				Story.succeed(ModelProvider.generate, {
+					thinking: null,
+					text: "Too late to publish",
+					input_tokens: 4,
+					output_tokens: 2,
+					stop_reason: { type: "end_turn" },
 				}),
 				Story.then(session),
-				Story.saga(RunTurn, turn1Key, {
-					_tag: "Completed",
-					result: { status: "aborted" },
-				}),
+				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "aborted" } }),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
 			)
 		},
 	)
+
+	it.effect("keeps a retrying diagnostic on the current generation", () => {
+		const session = Session.ref("sess_retry_diagnostic")
+		const request = new SpanModelRequestStart({
+			model_request_start_id: turnKey(session.id, 1) + ":req:1",
+		})
+		const diagnostic = {
+			type: "harness_unavailable",
+			message: "Retrying the connection.",
+			retry_status: { type: "retrying" as const },
+		}
+		return fullStory(
+			Story.given(session, createdEvent),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "First" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "First" }] }),
+				new SessionStatusRunning(),
+				request,
+			),
+			Story.call(ModelProvider.generate, { turn: 1, generation: 0 }),
+			Story.when(new RecordSessionError({ session_id: session.id, turn: 1, error: diagnostic })),
+			Story.then(session, new SessionErrorEvent({ error: diagnostic })),
+			Story.view(TurnInput, session, {
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 1,
+				harness_generation: 0,
+				input: ["First"],
+				unsent: [],
+			}),
+			Story.succeed(ModelProvider.generate, {
+				thinking: null,
+				text: "Done",
+				input_tokens: 1,
+				output_tokens: 1,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: request.model_request_start_id,
+					model_usage: { input_tokens: 1, output_tokens: 1 },
+					is_error: false,
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+			),
+			Story.state(session, { _tag: "Idle", turn: 1 }),
+		)
+	})
+
+	it.effect(
+		"starts the successor and fires its deadline while an older interrupt is outstanding",
+		() => {
+			const session = Session.ref("sess_blocked_interrupt")
+			const firstRequest = turnKey(session.id, 1) + ":req:1"
+			const secondRequest = turnKey(session.id, 2) + ":req:1"
+			return fullStory(
+				Story.clock(t0),
+				Story.given(session, createdEvent),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "First" })),
+				Story.then(
+					session,
+					new UserMessage({ content: [{ type: "text", text: "First" }] }),
+					new SessionStatusRunning(),
+					new SpanModelRequestStart({ model_request_start_id: firstRequest }),
+				),
+				Story.call("first", ModelProvider.generate, { turn: 1, generation: 0 }),
+				Story.when(new SendUserInterrupt({ session_id: session.id })),
+				Story.then(session, new UserInterrupt()),
+				Story.call("slow-interrupt", ModelProvider.interrupt, { turn: 1, generation: 0 }),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
+				Story.then(session, new UserMessage({ content: [{ type: "text", text: "Next" }] })),
+				Story.fail("first", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.then(
+					session,
+					new SpanModelRequestEnd({
+						model_request_start_id: firstRequest,
+						model_usage: { input_tokens: 0, output_tokens: 0 },
+						is_error: true,
+					}),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" } }),
+					new SessionStatusRunning(),
+					new SpanModelRequestStart({ model_request_start_id: secondRequest }),
+				),
+				Story.call("second", ModelProvider.generate, { turn: 2, generation: 0, input: ["Next"] }),
+				Story.advance("10 minutes"),
+				Story.then(
+					session,
+					new SpanModelRequestEnd({
+						model_request_start_id: secondRequest,
+						model_usage: { input_tokens: 0, output_tokens: 0 },
+						is_error: true,
+					}),
+					new SessionErrorEvent({
+						error: {
+							type: "model_request_timeout",
+							message: "Model request timed out.",
+							retry_status: { type: "exhausted" },
+						},
+					}),
+					new TurnAbandoned(),
+					new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
+				),
+				Story.state(session, { _tag: "Idle", turn: 2 }),
+				Story.call("deadline", ModelProvider.interrupt, { turn: 2, generation: 0 }),
+				Story.succeed("deadline", ModelProvider.interrupt, undefined),
+				Story.fail("slow-interrupt", ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.fail("second", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.state(session, { _tag: "Idle", turn: 2 }),
+			)
+		},
+	)
+
+	it.effect("abandons a running turn whether or not its model request has opened", () => {
+		const unopened = Session.ref("sess_abandon_unopened")
+		const opened = Session.ref("sess_abandon_opened")
+		const req1 = "sess_abandon_opened:turn:1:req:1"
+		const error = new SessionErrorEvent({
+			error: {
+				type: "operator_abandonment",
+				message: "The agent runtime could not be reached.",
+				retry_status: { type: "exhausted" },
+			},
+		})
+		const abandon = (session_id: typeof unopened.id) =>
+			new AbandonTurn({
+				session_id,
+				turn: 1,
+				error_type: "operator_abandonment",
+				message: "The agent runtime could not be reached.",
+			})
+		return story(
+			Story.given(unopened, createdEvent),
+			Story.when(new SendUserMessage({ session_id: unopened.id, text: "Run" })),
+			Story.then(
+				unopened,
+				new UserMessage({ content: [{ type: "text", text: "Run" }] }),
+				new SessionStatusRunning(),
+			),
+			Story.when(abandon(unopened.id)),
+			Story.then(
+				unopened,
+				error,
+				new TurnAbandoned(),
+				new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
+			),
+			Story.when(
+				new RecordModelRequestStart({
+					session_id: unopened.id,
+					turn: 1,
+					request_seq: 1,
+					model_request_start_id: "late",
+				}),
+			),
+			Story.rejected(new SessionNotRunning({ session_id: unopened.id, status: "idle" })),
+
+			Story.given(opened, createdEvent),
+			Story.when(new SendUserMessage({ session_id: opened.id, text: "Run" })),
+			Story.then(
+				opened,
+				new UserMessage({ content: [{ type: "text", text: "Run" }] }),
+				new SessionStatusRunning(),
+			),
+			Story.when(
+				new RecordModelRequestStart({
+					session_id: opened.id,
+					turn: 1,
+					request_seq: 1,
+					model_request_start_id: req1,
+				}),
+			),
+			Story.then(opened, new SpanModelRequestStart({ model_request_start_id: req1 })),
+			Story.when(abandon(opened.id)),
+			Story.then(
+				opened,
+				new SpanModelRequestEnd({
+					model_request_start_id: req1,
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				error,
+				new TurnAbandoned(),
+				new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
+			),
+			Story.state(opened, { _tag: "Idle", turn: 1 }),
+		)
+	})
+
+	it.effect(
+		"settles a timed-out turn, runs its successor during the outage, and retries the original abort",
+		() => {
+			const session = Session.ref("sess_e2e_deadline")
+			const turn1Key = turnKey(session.id, 1)
+			const turn2Key = turnKey(session.id, 2)
+			const req1 = `${turn1Key}:req:1`
+			const req2 = `${turn2Key}:req:1`
+			return redeliveryStory(
+				Story.clock(t0),
+				Story.when(
+					new CreateSession({
+						session_id: session.id,
+						agent_id: "agent_001",
+						agent_version: 1,
+						environment_id: "env_001",
+						title: null,
+					}),
+				),
+				Story.then(session, createdEvent),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Slow" })),
+				Story.then(
+					session,
+					new UserMessage({ content: [{ type: "text", text: "Slow" }] }),
+					new SessionStatusRunning(),
+					new SpanModelRequestStart({ model_request_start_id: req1 }),
+				),
+				Story.call("turn-1", ModelProvider.generate, {
+					session_id: session.id,
+					turn: 1,
+					generation: 0,
+				}),
+				Story.advance("10 minutes"),
+				Story.then(
+					session,
+					new SpanModelRequestEnd({
+						model_request_start_id: req1,
+						model_usage: { input_tokens: 0, output_tokens: 0 },
+						is_error: true,
+					}),
+					new SessionErrorEvent({
+						error: {
+							type: "model_request_timeout",
+							message: "Model request timed out.",
+							retry_status: { type: "exhausted" },
+						},
+					}),
+					new TurnAbandoned(),
+					new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
+				),
+				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.call("redelivery", ModelProvider.interrupt, {
+					session_id: session.id,
+					turn: 1,
+					generation: 0,
+				}),
+				Story.state(session, { _tag: "Idle", turn: 1 }),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
+				Story.then(
+					session,
+					new UserMessage({ content: [{ type: "text", text: "Next" }] }),
+					new SessionStatusRunning(),
+					new SpanModelRequestStart({ model_request_start_id: req2 }),
+				),
+				Story.call("turn-2", ModelProvider.generate, {
+					session_id: session.id,
+					turn: 2,
+					generation: 1,
+				}),
+				Story.succeed("turn-2", ModelProvider.generate, {
+					thinking: null,
+					text: "Fresh",
+					input_tokens: 3,
+					output_tokens: 1,
+					stop_reason: { type: "end_turn" },
+				}),
+				Story.then(
+					session,
+					new AgentMessage({ content: [{ type: "text", text: "Fresh" }] }),
+					new SpanModelRequestEnd({
+						model_request_start_id: req2,
+						model_usage: { input_tokens: 3, output_tokens: 1 },
+						is_error: false,
+					}),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+				),
+				Story.state(session, { _tag: "Idle", turn: 2 }),
+				Story.succeed("redelivery", ModelProvider.interrupt, undefined),
+				Story.succeed("turn-1", ModelProvider.generate, {
+					thinking: null,
+					text: "Too late",
+					input_tokens: 4,
+					output_tokens: 2,
+					stop_reason: { type: "end_turn" },
+				}),
+				Story.then(session),
+				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "aborted" } }),
+				Story.state(session, { _tag: "Idle", turn: 2 }),
+			)
+		},
+	)
+
+	it("cancels the active deadline on completion and archive before it fires", async () => {
+		const memory = InMemory.make({ manual: true })
+		const handlers = Layer.mergeAll(
+			StartTurnLive,
+			StopModelRequestLive,
+			RunTurn.toLayer(Effect.succeed(() => Effect.succeed({ status: "completed" as const }))),
+		)
+		const state = await Effect.runPromise(
+			Effect.gen(function* () {
+				const sessions = yield* Session
+				const session = Session.ref("sess_deadline_cleanup")
+				yield* sessions.send(
+					new CreateSession({
+						session_id: session.id,
+						agent_id: "agent_001",
+						agent_version: 1,
+						environment_id: "env_001",
+						title: null,
+					}),
+				)
+				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Quick" }))
+				yield* memory.control.drain
+				yield* sessions.send(
+					new CompleteTurn({ session_id: session.id, turn: 1, stop_reason: { type: "end_turn" } }),
+				)
+				yield* memory.control.drain
+				const completed = yield* sessions.get(session)
+				const afterCompletion = yield* Effect.match(sessions.unschedule(session, "turn-deadline"), {
+					onSuccess: () => "WasPending",
+					onFailure: (err) => err._tag,
+				})
+				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Another" }))
+				yield* sessions.send(new ArchiveSession({ session_id: session.id }))
+				yield* memory.control.drain
+				const archived = yield* sessions.get(session)
+				const afterArchive = yield* Effect.match(sessions.unschedule(session, "turn-deadline"), {
+					onSuccess: () => "WasPending",
+					onFailure: (err) => err._tag,
+				})
+				return {
+					completed,
+					archived,
+					afterCompletion,
+					afterArchive,
+				}
+			}).pipe(
+				Effect.provide(
+					Sessions.layer(handlers).pipe(
+						Layer.provide(Layer.mergeAll(memory.layer, ModelProviderNoopLayer)),
+					),
+				),
+			),
+		)
+		expect(state).toEqual({
+			completed: { _tag: "Idle", turn: 1 },
+			archived: { _tag: "Terminated", archived: true },
+			afterCompletion: "AlreadyCancelled",
+			afterArchive: "AlreadyCancelled",
+		})
+	})
+
+	it.effect("publishes a reply the harness finished before the interrupt took effect", () => {
+		const session = Session.ref("sess_e2e_interrupt_late")
+		const turn1Key = turnKey(session.id, 1)
+		const req1 = `${turn1Key}:req:1`
+		return fullStory(
+			Story.clock(t0),
+			Story.when(
+				new CreateSession({
+					session_id: session.id,
+					agent_id: "agent_001",
+					agent_version: 1,
+					environment_id: "env_001",
+					title: null,
+				}),
+			),
+			Story.then(session, createdEvent),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Almost done" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "Almost done" }] }),
+				new SessionStatusRunning(),
+				new SpanModelRequestStart({ model_request_start_id: req1 }),
+			),
+			Story.call(ModelProvider.generate, {
+				session_id: session.id,
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 1,
+			}),
+			Story.when(new SendUserInterrupt({ session_id: session.id })),
+			Story.then(session, new UserInterrupt()),
+			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1 }),
+			Story.succeed(ModelProvider.interrupt, undefined),
+			Story.succeed(ModelProvider.generate, {
+				thinking: null,
+				text: "Finished anyway",
+				input_tokens: 12,
+				output_tokens: 6,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Finished anyway" }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: req1,
+					model_usage: { input_tokens: 12, output_tokens: 6 },
+					is_error: false,
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+			),
+			Story.saga(RunTurn, turn1Key, {
+				_tag: "Completed",
+				result: { status: "completed" },
+			}),
+			Story.state(session, { _tag: "Idle", turn: 1 }),
+		)
+	})
 
 	it.effect("rejects queued user messages beyond the 8-message pending queue limit", () => {
 		const session = Session.ref("sess_queue_limit")
@@ -1578,8 +2139,6 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 1,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [{ role: "user", text: "First" }],
 			}),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Queued during error" })),
 			Story.then(
@@ -1620,11 +2179,6 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 2,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [
-					{ role: "user", text: "First" },
-					{ role: "user", text: "Queued during error" },
-				],
 			}),
 			Story.succeed(ModelProvider.generate, {
 				thinking: null,
@@ -1682,7 +2236,8 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					messages: [{ role: "user", text: "Hello" }],
+					generation: 0,
+					input: ["Hello"],
 				})
 				return yield* run.result
 			}).pipe(
@@ -1693,6 +2248,7 @@ describe("Sessions", () => {
 								Domain.InMemory,
 								ModelProvider.toLayer(
 									Effect.succeed({
+										interrupt: () => Effect.void,
 										generate: () => Effect.die("ModelProvider.generate must not be called"),
 									}),
 								),
@@ -1754,7 +2310,8 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					messages: [{ role: "user", text: "Hello" }],
+					generation: 0,
+					input: ["Hello"],
 				})
 				return yield* run.result
 			}).pipe(
@@ -1765,6 +2322,7 @@ describe("Sessions", () => {
 								Domain.InMemory,
 								ModelProvider.toLayer(
 									Effect.succeed({
+										interrupt: () => Effect.void,
 										generate: () => Effect.die("ModelProvider.generate must not be called"),
 									}),
 								),
@@ -1777,11 +2335,11 @@ describe("Sessions", () => {
 		expect(result).toEqual({ status: "aborted" })
 	})
 
-	it.effect("aborts an in-flight RunTurn cleanly when the session is archived mid-request", () => {
+	it.effect("retries cancellation of the archived request when the harness is unavailable", () => {
 		const session = Session.ref("sess_e2e_archive")
 		const turn1Key = turnKey(session.id, 1)
 		const req1 = `${turn1Key}:req:1`
-		return fullStory(
+		return redeliveryStory(
 			Story.clock(t0),
 			Story.when(
 				new CreateSession({
@@ -1806,8 +2364,6 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 1,
-				timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-				messages: [{ role: "user", text: "Work" }],
 			}),
 			Story.clock(t1),
 			Story.when(new ArchiveSession({ session_id: session.id })),
@@ -1821,6 +2377,11 @@ describe("Sessions", () => {
 				new SessionStatusTerminated(),
 				new SessionArchived(),
 			),
+			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+			Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
+			Story.state(session, { _tag: "Terminated", archived: true }),
+			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+			Story.succeed(ModelProvider.interrupt, undefined),
 			Story.succeed(ModelProvider.generate, {
 				thinking: null,
 				text: "Late reply",
@@ -1893,8 +2454,6 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [{ role: "user", text: "Race" }],
 				}),
 				Story.when(
 					new RecordModelRequestEnd({
@@ -1945,69 +2504,6 @@ describe("Sessions", () => {
 		},
 	)
 
-	it("enforces the model deadline independently of slow provider cleanup in SessionsHandlersLive", async () => {
-		const startedAt = Date.now()
-		const outcome = await Effect.runPromise(
-			Effect.gen(function* () {
-				const sessions = yield* Session
-				const runs = yield* RunTurn
-				const views = yield* SessionView
-				const session = Session.ref("sess_e2e_timeout")
-				yield* sessions.send(
-					new CreateSession({
-						session_id: session.id,
-						agent_id: "agent_001",
-						agent_version: 1,
-						environment_id: "env_001",
-						title: null,
-					}),
-				)
-				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Hang" }))
-				const result = yield* runs.get(turnKey(session.id, 1)).result
-				const state = yield* views.waitFor(session, { status: "idle" }, { timeout: "5 seconds" })
-				const page = yield* views.list(session)
-				return {
-					result,
-					status: state?.status,
-					turn: state?.turn,
-					tags: page.entries.map((entry) => entry.event._tag),
-				}
-			}).pipe(
-				Effect.provide(
-					Sessions.layer(SessionsHandlersLive).pipe(
-						Layer.provide(
-							Layer.mergeAll(
-								Domain.InMemory,
-								ModelProvider.toLayer(
-									Effect.succeed({
-										generate: () =>
-											Effect.never.pipe(Effect.onInterrupt(() => Effect.sleep("5 seconds"))),
-									}),
-								),
-								Layer.succeed(ModelGenerationTimeout, 25),
-							),
-						),
-					),
-				),
-			),
-		)
-		const elapsedMs = Date.now() - startedAt
-		expect(elapsedMs).toBeLessThan(1_500)
-		expect(outcome).toEqual({
-			result: { status: "failed" },
-			status: "idle",
-			turn: 1,
-			tags: [
-				"user.message",
-				"session.status_running",
-				"span.model_request_start",
-				"span.model_request_end",
-				"session.error",
-				"session.status_idle",
-			],
-		})
-	})
-
 	it.effect(
 		"preserves non-end_turn provider stop reasons like refusal without auto-draining queued messages",
 		() => {
@@ -2039,8 +2535,6 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-					messages: [{ role: "user", text: "Disallowed" }],
 				}),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Queued after refusal" })),
 				Story.then(
@@ -2105,111 +2599,6 @@ describe("Sessions", () => {
 		)
 	})
 
-	it("settles the open request with a generic public message when ModelProvider dies with a defect", async () => {
-		const outcome = await Effect.runPromise(
-			Effect.gen(function* () {
-				const sessions = yield* Session
-				const runs = yield* RunTurn
-				const views = yield* SessionView
-				const session = Session.ref("sess_e2e_defect")
-				yield* sessions.send(
-					new CreateSession({
-						session_id: session.id,
-						agent_id: "agent_001",
-						agent_version: 1,
-						environment_id: "env_001",
-						title: null,
-					}),
-				)
-				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Crash" }))
-				const result = yield* runs.get(turnKey(session.id, 1)).result
-				const state = yield* views.waitFor(session, { status: "idle" }, { timeout: "5 seconds" })
-				const page = yield* views.list(session)
-				const errorEntry = page.entries.find((entry) => entry.event._tag === "session.error")
-				return {
-					result,
-					status: state?.status,
-					errorMessage:
-						errorEntry && errorEntry.event._tag === "session.error"
-							? errorEntry.event.error.message
-							: null,
-					tags: page.entries.map((entry) => entry.event._tag),
-				}
-			}).pipe(
-				Effect.provide(
-					Sessions.layer(SessionsHandlersLive).pipe(
-						Layer.provide(
-							Layer.mergeAll(
-								Domain.InMemory,
-								ModelProvider.toLayer(
-									Effect.succeed({
-										generate: () => Effect.die(new Error("secret internal sdk failure")),
-									}),
-								),
-							),
-						),
-					),
-				),
-			),
-		)
-		expect(outcome).toEqual({
-			result: { status: "failed" },
-			status: "idle",
-			errorMessage: "Model provider failed unexpectedly.",
-			tags: [
-				"user.message",
-				"session.status_running",
-				"span.model_request_start",
-				"span.model_request_end",
-				"session.error",
-				"session.status_idle",
-			],
-		})
-	})
-
-	it("settles the open request when ModelProvider interrupts itself", async () => {
-		const outcome = await Effect.runPromise(
-			Effect.gen(function* () {
-				const sessions = yield* Session
-				const runs = yield* RunTurn
-				const views = yield* SessionView
-				const session = Session.ref("sess_e2e_self_interrupt")
-				yield* sessions.send(
-					new CreateSession({
-						session_id: session.id,
-						agent_id: "agent_001",
-						agent_version: 1,
-						environment_id: "env_001",
-						title: null,
-					}),
-				)
-				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Interrupt" }))
-				const result = yield* runs.get(turnKey(session.id, 1)).result
-				const state = yield* views.waitFor(session, { status: "idle" }, { timeout: "5 seconds" })
-				return { result, status: state?.status }
-			}).pipe(
-				Effect.provide(
-					Sessions.layer(SessionsHandlersLive).pipe(
-						Layer.provide(
-							Layer.mergeAll(
-								Domain.InMemory,
-								ModelProvider.toLayer(
-									Effect.succeed({
-										generate: () => Effect.interrupt,
-									}),
-								),
-							),
-						),
-					),
-				),
-			),
-		)
-		expect(outcome).toEqual({
-			result: { status: "failed" },
-			status: "idle",
-		})
-	})
-
 	it("encodes and decodes SessionState snapshots at explicit schema_version 1 and rejects unknown versions", () => {
 		const encode = Schema.encodeSync(SessionStateSnapshot)
 		const decode = Schema.decodeUnknownSync(SessionStateSnapshot)
@@ -2247,370 +2636,44 @@ describe("Sessions", () => {
 		).toBe(true)
 	})
 
-	it.effect(
-		"settles legacy sessions with empty agent and environment ids when a message is sent",
-		() => {
-			const session = Session.ref("sess_legacy_created")
-			return fullStory(
-				Story.clock(t0),
-				Story.given(
-					session,
-					new SessionCreated({
-						agent_id: "",
-						agent_version: 1,
-						environment_id: "",
-						title: null,
-					}),
-				),
-				Story.view(SessionView, session, {
-					id: session.id,
-					type: "session",
-					status: "idle",
-					agent_id: "",
-					agent_version: 1,
-					environment_id: "",
-					title: null,
-					turn: 0,
-					usage: { input_tokens: 0, output_tokens: 0 },
-					created_at: t0,
-					updated_at: t0,
-					archived_at: null,
-				}),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Hello" })),
-				Story.then(
-					session,
-					new UserMessage({ content: [{ type: "text", text: "Hello" }] }),
-					new SessionStatusRunning(),
-					new SessionErrorEvent({
-						error: {
-							type: "invalid_session_configuration",
-							message: "Session is missing an agent or environment identifier.",
-							retry_status: { type: "terminal" },
-						},
-					}),
-					new SessionStatusTerminated(),
-				),
-				Story.state(session, { _tag: "Terminated", archived: false }),
-			)
-		},
-	)
-
-	it.effect(
-		"skips empty legacy text blocks and bounds oversized and queued legacy messages in SessionTranscript",
-		() => {
-			const session = Session.ref("sess_legacy_transcript")
-			const oversized = "x".repeat(MAX_TRANSCRIPT_CHARS + 32)
-			const legacyQueued = Array.from(
-				{ length: MAX_TRANSCRIPT_MESSAGES + 5 },
-				(_, idx) => new UserMessage({ content: [{ type: "text", text: `Q${idx + 1}` }] }),
-			)
-			const expectedPending = Array.from({ length: MAX_TRANSCRIPT_MESSAGES }, (_, idx) => ({
-				role: "user" as const,
-				text: `Q${idx + 6}`,
-			}))
-			return story(
-				Story.clock(t0),
-				Story.given(
-					session,
-					createdEvent,
-					new UserMessage({
-						content: [
-							{ type: "text", text: "" },
-							{ type: "text", text: oversized },
-						],
-					}),
-					new SessionStatusRunning(),
-					...legacyQueued,
-				),
-				Story.state(session, {
-					_tag: "Running",
-					turn: 1,
-					open_model_request_id: null,
-					model_requests_started: 0,
-					pending_user_messages: 8,
-				}),
-				Story.view(SessionTranscript, session, {
-					agent_id: "agent_001",
-					agent_version: 1,
-					environment_id: "env_001",
-					turn: 1,
-					running: true,
-					messages: [{ role: "user", text: OVERSIZED_MESSAGE_PLACEHOLDER }],
-					pending_messages: expectedPending,
-				}),
-			)
-		},
-	)
-
-	it("cancels the detached provider fiber when the caller waiting on TimeoutModelProvider is interrupted", async () => {
-		const interrupted = await Effect.runPromise(
-			Effect.gen(function* () {
-				const started = yield* Deferred.make<void>()
-				const providerInterrupted = yield* Deferred.make<boolean>()
-				const sessionLayer = Sessions.layer(Layer.mergeAll(StartTurnNoopLayer, RunTurnLive)).pipe(
-					Layer.provide(Layer.mergeAll(Domain.InMemory, ModelProviderNoopLayer)),
-				)
-				const providerLayer = TimeoutModelProvider.pipe(
-					Layer.provide(
-						Layer.mergeAll(
-							sessionLayer,
-							ModelProvider.toLayer(
-								Effect.succeed({
-									generate: () =>
-										Deferred.succeed(started, undefined).pipe(
-											Effect.andThen(Effect.never),
-											Effect.onInterrupt(() =>
-												Deferred.succeed(providerInterrupted, true).pipe(Effect.asVoid),
-											),
-										),
-								}),
-							),
-						),
-					),
-				)
-				return yield* Effect.gen(function* () {
-					const provider = yield* ModelProvider
-					const caller = yield* Effect.forkDetach(
-						provider.generate({
-							session_id: Session.ref("sess_cancel").id,
-							agent_id: "agent_001",
-							agent_version: 1,
-							environment_id: "env_001",
-							turn: 1,
-							timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-							messages: [{ role: "user", text: "Hi" }],
-						}),
-					)
-					yield* Deferred.await(started)
-					yield* Fiber.interrupt(caller)
-					return yield* Deferred.await(providerInterrupted)
-				}).pipe(Effect.provide(providerLayer))
+	it.effect("hands each turn the user messages no earlier turn was given", () => {
+		const session = Session.ref("sess_turn_input")
+		const text = (value: string) => new UserMessage({ content: [{ type: "text", text: value }] })
+		return story(
+			Story.clock(t0),
+			Story.given(session, createdEvent, text("First"), new SessionStatusRunning()),
+			Story.view(TurnInput, session, {
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 1,
+				input: ["First"],
+				unsent: [],
+			}),
+			Story.given(session, text("Queued A"), text("Queued B")),
+			Story.view(TurnInput, session, {
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 1,
+				input: ["First"],
+				unsent: ["Queued A", "Queued B"],
+			}),
+			Story.given(
+				session,
+				new SessionStatusIdle({ stop_reason: { type: "refusal" } }),
+				text("After refusal"),
+				new SessionStatusRunning(),
+			),
+			Story.view(TurnInput, session, {
+				agent_id: "agent_001",
+				agent_version: 1,
+				environment_id: "env_001",
+				turn: 2,
+				input: ["Queued A", "Queued B", "After refusal"],
+				unsent: [],
 			}),
 		)
-		expect(interrupted).toBe(true)
-	})
-
-	it("cancels an in-flight provider fiber immediately on SendUserInterrupt and ArchiveSession", async () => {
-		const runCancellationCase = (action: "interrupt" | "archive") =>
-			Effect.runPromise(
-				Effect.gen(function* () {
-					const started = yield* Deferred.make<void>()
-					const providerInterrupted = yield* Deferred.make<boolean>()
-					const liveLayer = Sessions.layer(SessionsHandlersLive).pipe(
-						Layer.provide(
-							Layer.mergeAll(
-								Domain.InMemory,
-								Layer.succeed(ModelCancellationPollInterval, 10),
-								ModelProvider.toLayer(
-									Effect.succeed({
-										generate: () =>
-											Deferred.succeed(started, undefined).pipe(
-												Effect.andThen(Effect.never),
-												Effect.onInterrupt(() =>
-													Deferred.succeed(providerInterrupted, true).pipe(Effect.asVoid),
-												),
-											),
-									}),
-								),
-							),
-						),
-					)
-					return yield* Effect.gen(function* () {
-						const sessions = yield* Session
-						const runs = yield* RunTurn
-						const session = Session.ref(`sess_cancel_${action}`)
-						yield* sessions.send(
-							new CreateSession({
-								session_id: session.id,
-								agent_id: "agent_001",
-								agent_version: 1,
-								environment_id: "env_001",
-								title: null,
-							}),
-						)
-						yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Run" }))
-						yield* Deferred.await(started)
-						if (action === "interrupt") {
-							yield* sessions.send(new SendUserInterrupt({ session_id: session.id }))
-						} else {
-							yield* sessions.send(new ArchiveSession({ session_id: session.id }))
-						}
-						const wasInterrupted = yield* Deferred.await(providerInterrupted)
-						const result = yield* runs.get(turnKey(session.id, 1)).result
-						return { wasInterrupted, result }
-					}).pipe(Effect.provide(liveLayer))
-				}),
-			)
-
-		const startedAt = Date.now()
-		const [interruptOutcome, archiveOutcome] = await Promise.all([
-			runCancellationCase("interrupt"),
-			runCancellationCase("archive"),
-		])
-		expect(Date.now() - startedAt).toBeLessThan(2_000)
-		expect(interruptOutcome).toEqual({
-			wasInterrupted: true,
-			result: { status: "aborted" },
-		})
-		expect(archiveOutcome).toEqual({
-			wasInterrupted: true,
-			result: { status: "aborted" },
-		})
-	})
-
-	it("cleans up a hung provider and settles the open request when SessionView.get dies", async () => {
-		const outcome = await Effect.runPromise(
-			Effect.gen(function* () {
-				const providerInterrupted = yield* Deferred.make<boolean>()
-				const failingGet = Layer.effect(
-					SessionView,
-					Effect.gen(function* () {
-						const real = yield* SessionView
-						return {
-							...real,
-							get: () => Effect.die(new Error("view read storage defect")),
-						}
-					}),
-				)
-				const handlers = Layer.mergeAll(
-					StartTurnLive,
-					RunTurnLive.pipe(Layer.provide(TimeoutModelProvider.pipe(Layer.provide(failingGet)))),
-				)
-				const liveLayer = Sessions.layer(handlers).pipe(
-					Layer.provide(
-						Layer.mergeAll(
-							Domain.InMemory,
-							Layer.succeed(ModelCancellationPollInterval, 5),
-							ModelProvider.toLayer(
-								Effect.succeed({
-									generate: () =>
-										Effect.never.pipe(
-											Effect.onInterrupt(() =>
-												Deferred.succeed(providerInterrupted, true).pipe(Effect.asVoid),
-											),
-										),
-								}),
-							),
-							Layer.succeed(ModelGenerationTimeout, 30),
-						),
-					),
-				)
-				return yield* Effect.gen(function* () {
-					const sessions = yield* Session
-					const runs = yield* RunTurn
-					const views = yield* SessionView
-					const session = Session.ref("sess_watch_defect")
-					yield* sessions.send(
-						new CreateSession({
-							session_id: session.id,
-							agent_id: "agent_001",
-							agent_version: 1,
-							environment_id: "env_001",
-							title: null,
-						}),
-					)
-					yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Watch fails" }))
-					const result = yield* runs.get(turnKey(session.id, 1)).result
-					const wasInterrupted = yield* Deferred.await(providerInterrupted)
-					const state = yield* views.waitFor(session, { status: "idle" }, { timeout: "5 seconds" })
-					const page = yield* views.list(session)
-					return {
-						result,
-						wasInterrupted,
-						status: state?.status,
-						tags: page.entries.map((entry) => entry.event._tag),
-					}
-				}).pipe(Effect.provide(liveLayer))
-			}),
-		)
-		expect(outcome).toEqual({
-			result: { status: "failed" },
-			wasInterrupted: true,
-			status: "idle",
-			tags: [
-				"user.message",
-				"session.status_running",
-				"span.model_request_start",
-				"span.model_request_end",
-				"session.error",
-				"session.status_idle",
-			],
-		})
-	})
-
-	it("resumes cancellation polling after a transient SessionView.get failure and cancels on interrupt", async () => {
-		let reads = 0
-		const outcome = await Effect.runPromise(
-			Effect.gen(function* () {
-				const started = yield* Deferred.make<void>()
-				const providerInterrupted = yield* Deferred.make<boolean>()
-				const flakyGet = Layer.effect(
-					SessionView,
-					Effect.gen(function* () {
-						const real = yield* SessionView
-						return {
-							...real,
-							get: (ref) => {
-								reads += 1
-								if (reads === 1) {
-									return Effect.die(new Error("transient view read defect"))
-								}
-								return real.get(ref)
-							},
-						}
-					}),
-				)
-				const handlers = Layer.mergeAll(
-					StartTurnLive,
-					RunTurnLive.pipe(Layer.provide(TimeoutModelProvider.pipe(Layer.provide(flakyGet)))),
-				)
-				const liveLayer = Sessions.layer(handlers).pipe(
-					Layer.provide(
-						Layer.mergeAll(
-							Domain.InMemory,
-							Layer.succeed(ModelCancellationPollInterval, 10),
-							ModelProvider.toLayer(
-								Effect.succeed({
-									generate: () =>
-										Deferred.succeed(started, undefined).pipe(
-											Effect.andThen(Effect.never),
-											Effect.onInterrupt(() =>
-												Deferred.succeed(providerInterrupted, true).pipe(Effect.asVoid),
-											),
-										),
-								}),
-							),
-						),
-					),
-				)
-				return yield* Effect.gen(function* () {
-					const sessions = yield* Session
-					const runs = yield* RunTurn
-					const session = Session.ref("sess_flaky_poll")
-					yield* sessions.send(
-						new CreateSession({
-							session_id: session.id,
-							agent_id: "agent_001",
-							agent_version: 1,
-							environment_id: "env_001",
-							title: null,
-						}),
-					)
-					yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Wait" }))
-					yield* Deferred.await(started)
-					yield* Effect.sleep("25 millis")
-					yield* sessions.send(new SendUserInterrupt({ session_id: session.id }))
-					const wasInterrupted = yield* Deferred.await(providerInterrupted)
-					const result = yield* runs.get(turnKey(session.id, 1)).result
-					return { wasInterrupted, result }
-				}).pipe(Effect.provide(liveLayer))
-			}),
-		)
-		expect(reads).toBeGreaterThanOrEqual(2)
-		expect(outcome).toEqual({
-			wasInterrupted: true,
-			result: { status: "aborted" },
-		})
 	})
 
 	it("lazily upgrades a v1 snapshot to v2 through the real DurableObjects storage adapter, skips migration on reopen, and rejects future versions", async () => {
@@ -2936,6 +2999,7 @@ describe("Sessions", () => {
 					turn2,
 					turn3,
 					agentMessageCount: agentMessages.length,
+					usage: page.entries.at(-1)?.state?.usage,
 					thinkingLength:
 						thinkingEvent?.event._tag === "agent.thinking"
 							? thinkingEvent.event.thinking.length
@@ -2955,6 +3019,7 @@ describe("Sessions", () => {
 								Domain.InMemory,
 								boundedModelProvider(
 									Effect.succeed({
+										interrupt: () => Effect.void,
 										generate: () => {
 											callCount += 1
 											if (callCount === 1) {
@@ -2995,6 +3060,7 @@ describe("Sessions", () => {
 			turn2: { status: "failed" },
 			turn3: { status: "failed" },
 			agentMessageCount: 1,
+			usage: { input_tokens: 14, output_tokens: 5 },
 			thinkingLength: MAX_THINKING_TEXT_LENGTH,
 			errorTypeLength: MAX_ERROR_TYPE_LENGTH,
 			errorMessageLength: MAX_ERROR_MESSAGE_LENGTH,
@@ -3002,7 +3068,7 @@ describe("Sessions", () => {
 		})
 	})
 
-	it("keeps worst-case JSON-escaped control-character transcript, workflow input, and activity checkpoints strictly below 2 MiB", () => {
+	it("keeps the worst-case JSON-escaped turn input row, workflow input, and activity checkpoints below 2 MiB", () => {
 		const DO_ROW_LIMIT_BYTES = 2 * 1024 * 1024
 		const WORKFLOW_ENVELOPE_HEADROOM_BYTES = 64 * 1024
 		const MAX_CHECKPOINT_BYTES = DO_ROW_LIMIT_BYTES - WORKFLOW_ENVELOPE_HEADROOM_BYTES
@@ -3021,10 +3087,8 @@ describe("Sessions", () => {
 		}
 		const worstCaseId = "\u0000".repeat(MAX_IDENTIFIER_LENGTH)
 		const worstCaseText = "\u0000".repeat(MAX_MESSAGE_TEXT_LENGTH)
-		const fullQueue = Array.from({ length: 8 }, () => ({
-			role: "user" as const,
-			text: worstCaseText,
-		}))
+		const queued = Array.from({ length: 8 }, () => worstCaseText)
+		const turnInput = [...queued, worstCaseText]
 		const runTurnPayloadBytes = utf8Bytes(
 			JSON.stringify({
 				session_id: worstCaseId,
@@ -3032,18 +3096,17 @@ describe("Sessions", () => {
 				agent_version: 1,
 				environment_id: worstCaseId,
 				turn: 1,
-				messages: fullQueue,
+				input: turnInput,
 			}),
 		)
-		const transcriptRowBytes = utf8Bytes(
+		const turnInputRowBytes = utf8Bytes(
 			JSON.stringify({
 				agent_id: worstCaseId,
 				agent_version: 1,
 				environment_id: worstCaseId,
 				turn: 1,
-				running: true,
-				messages: fullQueue,
-				pending_messages: fullQueue,
+				input: turnInput,
+				unsent: queued,
 			}),
 		)
 		const successCheckpointBytes = utf8Bytes(
@@ -3070,10 +3133,33 @@ describe("Sessions", () => {
 				},
 			}),
 		)
-		expect(8 * MAX_MESSAGE_TEXT_LENGTH).toBeLessThanOrEqual(MAX_TRANSCRIPT_CHARS)
 		expect(runTurnPayloadBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
-		expect(transcriptRowBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
+		expect(turnInputRowBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
 		expect(successCheckpointBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
 		expect(failureCheckpointBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
+	})
+
+	it("reports a reply cut to the message limit as budget_reached, never as a clean end_turn", async () => {
+		const oversized = {
+			thinking: null,
+			text: "x".repeat(MAX_MESSAGE_TEXT_LENGTH + 1),
+			input_tokens: 1,
+			output_tokens: 1,
+		}
+		const cut = await Effect.runPromise(
+			clampModelReply({ ...oversized, stop_reason: { type: "end_turn" } }),
+		)
+		expect(cut.text.length).toBe(MAX_MESSAGE_TEXT_LENGTH)
+		expect(cut.stop_reason).toEqual({ type: "budget_reached" })
+
+		const refusal = await Effect.runPromise(
+			clampModelReply({ ...oversized, stop_reason: { type: "refusal" } }),
+		)
+		expect(refusal.stop_reason).toEqual({ type: "refusal" })
+
+		const whole = await Effect.runPromise(
+			clampModelReply({ ...oversized, text: "short", stop_reason: { type: "end_turn" } }),
+		)
+		expect(whole.stop_reason).toEqual({ type: "end_turn" })
 	})
 })

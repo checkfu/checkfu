@@ -26,6 +26,7 @@ export class CommitModelReply extends Domain.Command("CommitModelReply", {
 		model_request_start_id: NonEmptyString,
 		thinking: Schema.NullOr(ThinkingText),
 		text: MessageText,
+		truncated: Schema.optional(Schema.Literal(true)),
 		model_usage: ModelUsage,
 		stop_reason: StopReason,
 	},

@@ -3,10 +3,11 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Activity } from "effect/workflow"
 import { CommitModelReply } from "./CommitModelReply.command.ts"
-import { FailModelRequest } from "./FailModelRequest.command.ts"
+import { FailModelRequest, RequestFailureDisposition } from "./FailModelRequest.command.ts"
+import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
 import {
-	ConversationMessage,
-	DEFAULT_MODEL_TIMEOUT_MS,
+	HARNESS_UNAVAILABLE,
+	HARNESS_UNAVAILABLE_MESSAGE,
 	ModelProvider,
 	type ModelProviderError,
 	ModelStopReason,
@@ -18,6 +19,7 @@ import {
 	ErrorMessage,
 	ErrorType,
 	MessageText,
+	ModelUsage,
 	NonNegativeInt,
 	PositiveInt,
 	ResourceId,
@@ -30,7 +32,7 @@ export type TurnId = typeof TurnId.Type
 export const turnKey = (session_id: SessionId, turn: number): TurnId =>
 	TurnId.make(`${session_id}:turn:${turn}`)
 
-const StepOutcome = Schema.Struct({
+export const StepOutcome = Schema.Struct({
 	status: Schema.Literals(["proceed", "aborted"]),
 })
 
@@ -39,15 +41,23 @@ export const GenerateOutcome = Schema.Union([
 		ok: Schema.Literal(true),
 		thinking: Schema.NullOr(ThinkingText),
 		text: MessageText,
+		truncated: Schema.optional(Schema.Literal(true)),
 		input_tokens: NonNegativeInt,
 		output_tokens: NonNegativeInt,
 		stop_reason: ModelStopReason,
 	}),
 	Schema.Struct({
 		ok: Schema.Literal(false),
+		interrupted: Schema.Literal(true),
+		model_usage: ModelUsage,
+	}),
+	Schema.Struct({
+		ok: Schema.Literal(false),
+		interrupted: Schema.Literal(false),
+		model_usage: ModelUsage,
 		error_type: ErrorType,
 		message: ErrorMessage,
-		terminal: Schema.Boolean,
+		disposition: RequestFailureDisposition,
 	}),
 ])
 
@@ -62,10 +72,11 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		agent_version: PositiveInt,
 		environment_id: ResourceId,
 		turn: PositiveInt,
-		messages: Schema.Array(ConversationMessage),
+		generation: NonNegativeInt,
+		input: Schema.Array(MessageText),
 	},
 	result: {
-		status: Schema.Literals(["completed", "failed", "aborted"]),
+		status: Schema.Literals(["completed", "failed", "interrupted", "aborted"]),
 	},
 }) {}
 
@@ -113,14 +124,15 @@ export const RunTurnLive = RunTurn.toLayer(
 						agent_version: payload.agent_version,
 						environment_id: payload.environment_id,
 						turn: payload.turn,
-						timeout_ms: DEFAULT_MODEL_TIMEOUT_MS,
-						messages: payload.messages,
+						generation: payload.generation,
+						input: payload.input,
 					})
 					.pipe(
 						Effect.map((reply) => ({
 							ok: true as const,
 							thinking: reply.thinking,
 							text: reply.text,
+							truncated: reply.truncated,
 							input_tokens: reply.input_tokens,
 							output_tokens: reply.output_tokens,
 							stop_reason: reply.stop_reason,
@@ -128,13 +140,60 @@ export const RunTurnLive = RunTurn.toLayer(
 						Effect.catchTag("ModelProviderError", (err: ModelProviderError) =>
 							Effect.succeed({
 								ok: false as const,
+								interrupted: false as const,
+								model_usage: err.model_usage ?? { input_tokens: 0, output_tokens: 0 },
 								error_type: err.error_type,
 								message: err.message,
-								terminal: err.terminal,
+								disposition: err.terminal ? ("terminal" as const) : ("exhausted" as const),
+							}),
+						),
+						Effect.catchTag("HarnessUnavailable", () =>
+							Effect.succeed({
+								ok: false as const,
+								interrupted: false as const,
+								model_usage: { input_tokens: 0, output_tokens: 0 },
+								error_type: HARNESS_UNAVAILABLE,
+								message: HARNESS_UNAVAILABLE_MESSAGE,
+								disposition: "abandoned" as const,
+							}),
+						),
+						Effect.catchTag("ModelRequestInterrupted", (err) =>
+							Effect.succeed({
+								ok: false as const,
+								interrupted: true as const,
+								model_usage: err.model_usage ?? { input_tokens: 0, output_tokens: 0 },
 							}),
 						),
 					),
 			})
+
+			if (!generated.ok && generated.interrupted) {
+				const interrupted = yield* Activity.make({
+					name: "interrupt-model-request",
+					success: StepOutcome,
+					execute: sessions
+						.send(
+							new InterruptModelRequest({
+								model_usage: generated.model_usage,
+								session_id: payload.session_id,
+								turn: payload.turn,
+								request_seq: 1,
+								model_request_start_id: requestId,
+							}),
+						)
+						.pipe(
+							Effect.map(() => PROCEED),
+							Effect.catchTag("UnknownModelRequest", () => Effect.succeed(ABORTED)),
+							Effect.catchTag("SessionNotFound", () => Effect.succeed(ABORTED)),
+							Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
+							Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
+						),
+				})
+
+				return interrupted.status === "aborted"
+					? { status: "aborted" as const }
+					: { status: "interrupted" as const }
+			}
 
 			if (!generated.ok) {
 				const failed = yield* Activity.make({
@@ -143,13 +202,14 @@ export const RunTurnLive = RunTurn.toLayer(
 					execute: sessions
 						.send(
 							new FailModelRequest({
+								model_usage: generated.model_usage,
 								session_id: payload.session_id,
 								turn: payload.turn,
 								request_seq: 1,
 								model_request_start_id: requestId,
 								error_type: generated.error_type,
 								message: generated.message,
-								terminal: generated.terminal,
+								disposition: generated.disposition,
 							}),
 						)
 						.pipe(
@@ -178,6 +238,7 @@ export const RunTurnLive = RunTurn.toLayer(
 							model_request_start_id: requestId,
 							thinking: generated.thinking,
 							text: generated.text,
+							truncated: generated.truncated,
 							model_usage: {
 								input_tokens: generated.input_tokens,
 								output_tokens: generated.output_tokens,

@@ -1,12 +1,8 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Cause from "effect/Cause"
-import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { Session } from "./Session.aggregate.ts"
 import { SessionId } from "./Session.id.ts"
 import {
 	ErrorMessage,
@@ -16,44 +12,39 @@ import {
 	MAX_MESSAGE_TEXT_LENGTH,
 	MAX_THINKING_TEXT_LENGTH,
 	MessageText,
-	NonEmptyString,
+	ModelUsage,
 	NonNegativeInt,
 	PositiveInt,
 	ResourceId,
 	ThinkingText,
 } from "./SessionTypes.ts"
-import { type SessionSnapshot, SessionView } from "./SessionView.view.ts"
 
-export const DEFAULT_MODEL_TIMEOUT_MS = 60_000
-export const DEFAULT_CANCELLATION_POLL_MS = 2_000
-
-export const ModelGenerationTimeout = Context.Reference<number>(
-	"@checkfu/sessions/ModelGenerationTimeout",
-	{ defaultValue: () => DEFAULT_MODEL_TIMEOUT_MS },
-)
-
-export const ModelCancellationPollInterval = Context.Reference<number>(
-	"@checkfu/sessions/ModelCancellationPollInterval",
-	{ defaultValue: () => DEFAULT_CANCELLATION_POLL_MS },
-)
+export const DEFAULT_MODEL_TIMEOUT_MS = 600_000
 
 export const ModelStopReason = Schema.Struct({
 	type: Schema.Literals(["end_turn", "budget_reached", "refusal"]),
 })
 export type ModelStopReason = typeof ModelStopReason.Type
 
-export const ConversationMessage = Schema.Struct({
-	role: Schema.Literals(["user", "assistant"]),
-	text: NonEmptyString,
-})
-export type ConversationMessage = typeof ConversationMessage.Type
-
 export const ModelProviderError = Schema.TaggedStruct("ModelProviderError", {
 	error_type: ErrorType,
 	message: ErrorMessage,
 	terminal: Schema.Boolean,
+	model_usage: Schema.optionalKey(ModelUsage),
 })
 export type ModelProviderError = typeof ModelProviderError.Type
+
+export const ModelRequestInterrupted = Schema.TaggedStruct("ModelRequestInterrupted", {
+	model_usage: Schema.optionalKey(ModelUsage),
+})
+export type ModelRequestInterrupted = typeof ModelRequestInterrupted.Type
+
+export const HARNESS_UNAVAILABLE = "harness_unavailable"
+export const HARNESS_UNAVAILABLE_MESSAGE = "The agent runtime could not be reached."
+export const TURN_TIMEOUT = "model_request_timeout"
+export const TURN_TIMEOUT_MESSAGE = "Model request timed out."
+export const HarnessUnavailable = Schema.TaggedStruct("HarnessUnavailable", {})
+export type HarnessUnavailable = typeof HarnessUnavailable.Type
 
 export class ModelProvider extends Domain.ExternalSystem("ModelProvider", {
 	generate: {
@@ -63,17 +54,26 @@ export class ModelProvider extends Domain.ExternalSystem("ModelProvider", {
 			agent_version: PositiveInt,
 			environment_id: ResourceId,
 			turn: PositiveInt,
-			timeout_ms: PositiveInt,
-			messages: Schema.Array(ConversationMessage),
+			generation: NonNegativeInt,
+			input: Schema.Array(MessageText),
 		},
 		success: {
 			thinking: Schema.NullOr(ThinkingText),
 			text: MessageText,
+			truncated: Schema.optional(Schema.Literal(true)),
 			input_tokens: NonNegativeInt,
 			output_tokens: NonNegativeInt,
 			stop_reason: ModelStopReason,
 		},
-		error: ModelProviderError,
+		error: [ModelProviderError, ModelRequestInterrupted, HarnessUnavailable],
+	},
+	interrupt: {
+		args: {
+			session_id: SessionId,
+			turn: PositiveInt,
+			generation: NonNegativeInt,
+		},
+		error: HarnessUnavailable,
 	},
 }) {}
 
@@ -99,22 +99,28 @@ const EMPTY_REPLY_ERROR: ModelProviderError = {
 
 export const clampModelReply = (
 	reply: ModelProviderReply,
-): Effect.Effect<ModelProviderReply, ModelProviderError> => {
+): Effect.Effect<ModelProviderReply & { readonly truncated?: true }, ModelProviderError> => {
 	if (reply.text.length === 0) {
-		return Effect.fail(EMPTY_REPLY_ERROR)
+		return Effect.fail({
+			...EMPTY_REPLY_ERROR,
+			model_usage: { input_tokens: reply.input_tokens, output_tokens: reply.output_tokens },
+		})
 	}
+	const truncated = reply.text.length > MAX_MESSAGE_TEXT_LENGTH
 	return Effect.succeed({
 		...reply,
+		...(truncated ? { truncated: true as const } : {}),
 		thinking:
 			reply.thinking === null || reply.thinking.length === 0
 				? null
 				: reply.thinking.length > MAX_THINKING_TEXT_LENGTH
 					? reply.thinking.slice(0, MAX_THINKING_TEXT_LENGTH)
 					: reply.thinking,
-		text:
-			reply.text.length > MAX_MESSAGE_TEXT_LENGTH
-				? reply.text.slice(0, MAX_MESSAGE_TEXT_LENGTH)
-				: reply.text,
+		text: truncated ? reply.text.slice(0, MAX_MESSAGE_TEXT_LENGTH) : reply.text,
+		stop_reason:
+			truncated && reply.stop_reason.type === "end_turn"
+				? { type: "budget_reached" as const }
+				: reply.stop_reason,
 	})
 }
 
@@ -123,6 +129,13 @@ export const clampModelProviderError = (err: ModelProviderError): ModelProviderE
 	error_type: clampText(err.error_type, MAX_ERROR_TYPE_LENGTH, "provider_error"),
 	message: clampText(err.message, MAX_ERROR_MESSAGE_LENGTH, "Model provider failed."),
 })
+
+const INTERNAL_PROVIDER_ERROR: ModelProviderError = {
+	_tag: "ModelProviderError",
+	error_type: "provider_internal_error",
+	message: "Model provider failed unexpectedly.",
+	terminal: false,
+}
 
 /**
  * Wraps a raw model adapter so oversized reasoning traces, replies, or error
@@ -138,9 +151,17 @@ export const boundedModelProvider = <R = never>(
 				readonly agent_version: number
 				readonly environment_id: string
 				readonly turn: number
-				readonly timeout_ms: number
-				readonly messages: ReadonlyArray<ConversationMessage>
-			}) => Effect.Effect<ModelProviderReply, ModelProviderError>
+				readonly generation: number
+				readonly input: ReadonlyArray<string>
+			}) => Effect.Effect<
+				ModelProviderReply,
+				ModelProviderError | ModelRequestInterrupted | HarnessUnavailable
+			>
+			readonly interrupt: (args: {
+				readonly session_id: SessionId
+				readonly turn: number
+				readonly generation: number
+			}) => Effect.Effect<void, HarnessUnavailable>
 		},
 		never,
 		R
@@ -149,105 +170,23 @@ export const boundedModelProvider = <R = never>(
 	ModelProvider.toLayer(
 		Effect.map(impl, (adapter) => ({
 			generate: (args) =>
-				adapter
-					.generate(args)
-					.pipe(Effect.mapError(clampModelProviderError), Effect.flatMap(clampModelReply)),
+				Effect.exit(Effect.suspend(() => adapter.generate(args))).pipe(
+					Effect.flatMap((exit) =>
+						Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+							? Effect.die("the provider interrupted itself")
+							: exit,
+					),
+					Effect.catchDefect((defect) =>
+						Effect.andThen(
+							Effect.logError("ModelProvider failed unexpectedly", defect),
+							Effect.fail(INTERNAL_PROVIDER_ERROR),
+						),
+					),
+					Effect.mapError((error) =>
+						error._tag === "ModelProviderError" ? clampModelProviderError(error) : error,
+					),
+					Effect.flatMap(clampModelReply),
+				),
+			interrupt: adapter.interrupt,
 		})),
 	)
-
-const INTERNAL_PROVIDER_ERROR: ModelProviderError = {
-	_tag: "ModelProviderError",
-	error_type: "provider_internal_error",
-	message: "Model provider failed unexpectedly.",
-	terminal: false,
-}
-
-const TURN_CANCELLED_ERROR: ModelProviderError = {
-	_tag: "ModelProviderError",
-	error_type: "turn_cancelled",
-	message: "Turn was cancelled.",
-	terminal: false,
-}
-
-export const TimeoutModelProvider = ModelProvider.toLayer(
-	Effect.gen(function* () {
-		const inner = yield* ModelProvider
-		const views = yield* SessionView
-		return {
-			generate: (args) =>
-				Effect.gen(function* () {
-					const configuredMs = yield* ModelGenerationTimeout
-					const pollIntervalMs = yield* ModelCancellationPollInterval
-					const effectiveMs = Math.min(args.timeout_ms, configuredMs)
-					const fiber = yield* Effect.forkDetach(inner.generate(args))
-
-					const isCancelledSnapshot = (opt: Option.Option<SessionSnapshot | null>): boolean =>
-						Option.isSome(opt) &&
-						opt.value !== null &&
-						(opt.value.status === "terminated" ||
-							opt.value.turn > args.turn ||
-							(opt.value.turn === args.turn && opt.value.status === "idle"))
-
-					const waitForCancellation = Effect.gen(function* () {
-						while (true) {
-							yield* Effect.sleep(`${pollIntervalMs} millis`)
-							const snapshot = yield* views
-								.get(Session.ref(args.session_id))
-								.pipe(
-									Effect.catchCause((cause) =>
-										Cause.hasInterruptsOnly(cause)
-											? Effect.interrupt
-											: Effect.logError(
-													"SessionView.get failed during cancellation check",
-													cause,
-												).pipe(Effect.as(Option.none<SessionSnapshot | null>())),
-									),
-								)
-							if (isCancelledSnapshot(snapshot)) {
-								return { _tag: "Cancelled" as const }
-							}
-						}
-					})
-
-					const waitForProvider = Fiber.await(fiber).pipe(
-						Effect.map((exit) => ({ _tag: "Done" as const, exit })),
-					)
-
-					const raceOutcome = yield* Effect.raceFirst(waitForProvider, waitForCancellation).pipe(
-						Effect.timeoutOption(`${effectiveMs} millis`),
-						Effect.onExit((exit) =>
-							Exit.isFailure(exit)
-								? Effect.forkDetach(Fiber.interrupt(fiber)).pipe(Effect.asVoid)
-								: Effect.void,
-						),
-					)
-
-					if (Option.isNone(raceOutcome)) {
-						yield* Effect.forkDetach(Fiber.interrupt(fiber))
-						return yield* Effect.fail({
-							_tag: "ModelProviderError" as const,
-							error_type: "model_request_timeout",
-							message: "Model request timed out.",
-							terminal: false,
-						})
-					}
-
-					if (raceOutcome.value._tag === "Cancelled") {
-						yield* Effect.forkDetach(Fiber.interrupt(fiber))
-						return yield* Effect.fail(TURN_CANCELLED_ERROR)
-					}
-
-					const exit = raceOutcome.value.exit
-					if (Exit.isSuccess(exit)) {
-						return yield* clampModelReply(exit.value)
-					}
-					const typedError = Cause.findErrorOption(exit.cause)
-					if (Option.isSome(typedError)) {
-						return yield* Effect.fail(clampModelProviderError(typedError.value))
-					}
-					yield* Effect.logError("ModelProvider failed unexpectedly", exit.cause)
-					return yield* Effect.fail(INTERNAL_PROVIDER_ERROR)
-				}),
-		}
-	}),
-)

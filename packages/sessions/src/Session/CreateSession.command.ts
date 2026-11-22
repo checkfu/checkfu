@@ -4,9 +4,9 @@ import { SessionId } from "./Session.id.ts"
 import { PositiveInt, ResourceId, SessionTitle } from "./SessionTypes.ts"
 
 export class SessionCreated extends Domain.Event("session.created", {
-	agent_id: Schema.String,
+	agent_id: ResourceId,
 	agent_version: PositiveInt,
-	environment_id: Schema.String,
+	environment_id: ResourceId,
 	title: Schema.NullOr(Schema.String),
 }) {}
 

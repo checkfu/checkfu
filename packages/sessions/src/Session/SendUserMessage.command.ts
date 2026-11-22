@@ -2,10 +2,13 @@ import * as Domain from "@alchemy.run/domain"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
-import { MessageText, PositiveInt, TextBlocks } from "./SessionTypes.ts"
+import * as Schema from "effect/Schema"
+import { MessageText, PositiveInt } from "./SessionTypes.ts"
 
 export class UserMessage extends Domain.Event("user.message", {
-	content: TextBlocks,
+	content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: MessageText })).check(
+		Schema.isMinLength(1),
+	),
 }) {}
 
 export class SessionStatusRunning extends Domain.Event("session.status_running") {}
