@@ -16,10 +16,16 @@ import * as HttpApiSecurity from "effect/http-api/HttpApiSecurity"
 import * as Schema from "effect/Schema"
 import * as Struct from "effect/Struct"
 
+export const REQUEST_ID_HEADER = "request-id"
+
+export const RequestId = NonEmptyString.pipe(Schema.brand("RequestId"))
+export type RequestId = typeof RequestId.Type
+
 const errorEnvelope = <const T extends string>(status: number, type: T) =>
 	Schema.Struct({
 		type: Schema.Literal("error"),
 		error: Schema.Struct({ type: Schema.Literal(type), message: Schema.String }),
+		request_id: RequestId,
 		accepted: Schema.optionalKey(Schema.Array(Schema.Unknown)),
 		failed_index: Schema.optionalKey(Schema.Number),
 		unconfirmed_index: Schema.optionalKey(Schema.Number),
@@ -55,6 +61,7 @@ const ERROR_TYPES: Readonly<Record<ErrorStatus, ApiError["error"]["type"]>> = {
 export const apiError = <S extends ErrorStatus>(
 	status: S,
 	message: string,
+	request_id: RequestId,
 	extra?: {
 		readonly accepted?: ReadonlyArray<unknown>
 		readonly failed_index?: number
@@ -64,6 +71,7 @@ export const apiError = <S extends ErrorStatus>(
 	({
 		type: "error",
 		error: { type: ERROR_TYPES[status], message },
+		request_id: RequestId.make(request_id),
 		...extra,
 	}) as (typeof ERRORS)[S]["Type"]
 

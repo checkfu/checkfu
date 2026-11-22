@@ -583,6 +583,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							type: "not_found_error",
 							message: `Environment ${env.id} was deleted after the update committed.`,
 						},
+						request_id: updateRes.headers.get("request-id"),
 					})
 					const finalState = yield* environments.get(EnvironmentId.make(env.id))
 					expect(finalState.status).toBe("deleted")
@@ -668,6 +669,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							type: "not_found_error",
 							message: `Environment ${env.id} not found.`,
 						},
+						request_id: updateRes.headers.get("request-id"),
 					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)

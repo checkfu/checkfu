@@ -30,9 +30,10 @@ import {
 	EventBatchId,
 } from "../Checkfu.model.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
-import { CheckfuApi, apiError, statusOf } from "./Api.ts"
+import { CheckfuApi, statusOf } from "./Api.ts"
 import {
 	commitForStream,
+	currentRequestId,
 	handled,
 	isPending,
 	orPending,
@@ -312,8 +313,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						}
 						const joined = event.content.map((block) => block.text).join("\n")
 						const text = yield* Schema.decodeUnknownEffect(MessageText)(joined).pipe(
-							Effect.mapError(() =>
-								apiError(
+							Effect.catch(() =>
+								reject(
 									400,
 									`events[${index}] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
 								),
@@ -352,7 +353,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 												commandId: `claim:${claimId}:${fingerprint}`,
 											})
 											.pipe(
-												Effect.mapError(() => apiError(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
+												Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
 												Effect.asVoid,
 											)
 									})
@@ -405,7 +406,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									)
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure
-							const mapped = toApiError(error)
+							const mapped = toApiError(error, yield* currentRequestId)
 							const isUnconfirmed = !confirmed || statusOf(mapped) >= 500
 							if (isUnconfirmed) {
 								return yield* Effect.fail({
