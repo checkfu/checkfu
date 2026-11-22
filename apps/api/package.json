@@ -10,7 +10,8 @@
 	},
 	"scripts": {
 		"typecheck": "effect-tsgo tsc --noEmit",
-		"test": "vitest run --pool=threads --no-allowOnly"
+		"test": "vitest run --pool=threads --no-allowOnly",
+		"test:workerd": "vitest run --config test/workerd/vitest.config.ts --no-allowOnly"
 	},
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",

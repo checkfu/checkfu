@@ -5,8 +5,11 @@ import { type MutableModels, createModels, createProvider } from "@earendil-work
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
-
+import { AlchemyContext } from "alchemy/AlchemyContext"
+import { Stage } from "alchemy/Stage"
+import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import { optionalSecret } from "../Secrets.ts"
 import { isRefusalAssistantMessage } from "./PiRefusals.ts"
@@ -19,9 +22,79 @@ export const PROVIDER_API_KEY_ENV: Readonly<Record<SupportedProvider, string>> =
 	anthropic: "ANTHROPIC_API_KEY",
 }
 
+export const OPENAI_BASE_URL_ENV = "CHECKFU_OPENAI_BASE_URL"
+export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+export const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+
 export const providerApiKeys = Effect.all({
 	openai: optionalSecret(PROVIDER_API_KEY_ENV.openai),
 	anthropic: optionalSecret(PROVIDER_API_KEY_ENV.anthropic),
+})
+
+export interface ProviderBaseUrlOverrides {
+	readonly openai?: string | null
+}
+
+const optionalConfigString = (name: string) =>
+	Config.option(Config.String(name)).pipe(
+		Effect.map(Option.map((value) => value.trim())),
+		Effect.map(Option.filter((value) => value.length > 0)),
+		Effect.map(Option.getOrNull),
+		Effect.orDie,
+	)
+
+const EXPLICIT_LOOPBACK_PORT = /^http:\/\/(?:127\.0\.0\.1|\[::1\]):(\d+)(?:\/|$)/i
+
+export const parseLoopbackBaseUrl = (raw: string): string => {
+	let parsed: URL
+	try {
+		parsed = new URL(raw)
+	} catch {
+		throw new TypeError(`Invalid ${OPENAI_BASE_URL_ENV}: must be a valid URL.`)
+	}
+	const portMatch = EXPLICIT_LOOPBACK_PORT.exec(raw)
+	const portNumber = portMatch?.[1] === undefined ? Number.NaN : Number(portMatch[1])
+	const isLoopbackHost = parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]"
+	if (
+		parsed.protocol !== "http:" ||
+		!isLoopbackHost ||
+		!Number.isInteger(portNumber) ||
+		portNumber < 1 ||
+		portNumber > 65535 ||
+		parsed.username.length > 0 ||
+		parsed.password.length > 0 ||
+		parsed.search.length > 0 ||
+		parsed.hash.length > 0 ||
+		raw.includes("?") ||
+		raw.includes("#")
+	) {
+		throw new TypeError(
+			`Refusing non-loopback ${OPENAI_BASE_URL_ENV}: only http://127.0.0.1:<port> or http://[::1]:<port> URLs are allowed.`,
+		)
+	}
+	const pathname = parsed.pathname.replace(/\/+$/, "")
+	return `${parsed.protocol}//${parsed.hostname}:${portNumber}${pathname}`
+}
+
+const resolveOpenAIBaseUrl = (override?: string | null): string =>
+	override === undefined || override === null
+		? DEFAULT_OPENAI_BASE_URL
+		: parseLoopbackBaseUrl(override)
+
+export const providerBaseUrls = Effect.gen(function* () {
+	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
+	if (Option.isSome(alchemyContext)) {
+		if (!alchemyContext.value.dev) return { openai: null }
+		const stage = yield* Effect.serviceOption(Stage)
+		if (Option.isSome(stage) && stage.value === "production") return { openai: null }
+	} else {
+		const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
+		if (runtimeStage === "production") return { openai: null }
+	}
+	const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
+	return {
+		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),
+	}
 })
 
 const isSupportedProvider = (value: string): value is SupportedProvider =>
@@ -315,26 +388,32 @@ const wrapAnthropicMessagesStream =
  * aborted Durable Object request can never leave a dynamic import pending
  * across the isolate.
  */
-export const createOpenAIProvider = (): Provider<"openai-responses"> =>
-	createProvider({
+export const createOpenAIProvider = (baseUrl?: string | null): Provider<"openai-responses"> => {
+	const resolvedBaseUrl = resolveOpenAIBaseUrl(baseUrl)
+	const models =
+		resolvedBaseUrl === DEFAULT_OPENAI_BASE_URL
+			? Object.values(OPENAI_MODELS)
+			: Object.values(OPENAI_MODELS).map((model) => ({ ...model, baseUrl: resolvedBaseUrl }))
+	return createProvider({
 		id: "openai",
 		name: "OpenAI",
-		baseUrl: "https://api.openai.com/v1",
+		baseUrl: resolvedBaseUrl,
 		auth: {
 			apiKey: staticEnvApiKeyAuth("OpenAI API key", PROVIDER_API_KEY_ENV.openai),
 		},
-		models: Object.values(OPENAI_MODELS),
+		models,
 		api: {
 			stream: wrapOpenAIResponsesStream(openAIResponses.stream),
 			streamSimple: wrapOpenAIResponsesStream(openAIResponses.streamSimple),
 		},
 	})
+}
 
 export const createAnthropicProvider = (): Provider<"anthropic-messages"> =>
 	createProvider({
 		id: "anthropic",
 		name: "Anthropic",
-		baseUrl: "https://api.anthropic.com",
+		baseUrl: DEFAULT_ANTHROPIC_BASE_URL,
 		auth: {
 			apiKey: staticEnvApiKeyAuth("Anthropic API key", PROVIDER_API_KEY_ENV.anthropic),
 		},
@@ -345,7 +424,10 @@ export const createAnthropicProvider = (): Provider<"anthropic-messages"> =>
 		},
 	})
 
-export const createPiModels = (apiKeys: Effect.Success<typeof providerApiKeys>): MutableModels => {
+export const createPiModels = (
+	apiKeys: Effect.Success<typeof providerApiKeys>,
+	baseUrls?: ProviderBaseUrlOverrides,
+): MutableModels => {
 	const models = createModels({
 		authContext: {
 			env: (name) => {
@@ -364,7 +446,7 @@ export const createPiModels = (apiKeys: Effect.Success<typeof providerApiKeys>):
 			fileExists: () => Promise.resolve(false),
 		},
 	})
-	models.setProvider(createOpenAIProvider())
+	models.setProvider(createOpenAIProvider(baseUrls?.openai))
 	models.setProvider(createAnthropicProvider())
 	return models
 }

@@ -8,6 +8,9 @@ import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
+import { AlchemyContext } from "alchemy/AlchemyContext"
+import { Stage } from "alchemy/Stage"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import { makeApiHandler } from "../src/Http/Router.ts"
@@ -18,7 +21,15 @@ import {
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
-import { createNoRedirectProviderFetch, createPiModels } from "../src/Pi/PiModels.ts"
+import {
+	DEFAULT_ANTHROPIC_BASE_URL,
+	DEFAULT_OPENAI_BASE_URL,
+	OPENAI_BASE_URL_ENV,
+	createNoRedirectProviderFetch,
+	createPiModels,
+	parseLoopbackBaseUrl,
+	providerBaseUrls,
+} from "../src/Pi/PiModels.ts"
 import {
 	DEFAULT_REFUSAL_TEXT,
 	PROVIDER_FAILURE_MESSAGE,
@@ -1106,6 +1117,296 @@ describe("turn engine", () => {
 		} finally {
 			releaseLockStep()
 			await rawBackend.close()
+		}
+	})
+
+	it("restricts CHECKFU_OPENAI_BASE_URL to loopback URLs and disables it in production and non-dev plans", async () => {
+		expect(parseLoopbackBaseUrl("http://127.0.0.1:4321/v1/")).toBe("http://127.0.0.1:4321/v1")
+		expect(parseLoopbackBaseUrl("http://[::1]:4321/v1")).toBe("http://[::1]:4321/v1")
+		expect(parseLoopbackBaseUrl("http://127.0.0.1:80/v1/")).toBe("http://127.0.0.1:80/v1")
+		expect(parseLoopbackBaseUrl("http://[::1]:80/v1")).toBe("http://[::1]:80/v1")
+		expect(parseLoopbackBaseUrl(parseLoopbackBaseUrl("http://127.0.0.1:80/v1"))).toBe(
+			"http://127.0.0.1:80/v1",
+		)
+
+		for (const rejected of [
+			"not-a-url",
+			"https://api.openai.com/v1",
+			"https://127.0.0.1:4321/v1",
+			"http://example.com:4321/v1",
+			"http://localhost:4321/v1",
+			"http://127.0.0.1/v1",
+			"http://[::1]/v1",
+			"http://127.0.0.1:0/v1",
+			"http://user:pass@127.0.0.1:4321/v1",
+			"http://127.0.0.1:4321/v1?",
+			"http://127.0.0.1:4321/v1?x=1",
+			"http://127.0.0.1:4321/v1#",
+			"http://127.0.0.1:4321/v1#frag",
+		]) {
+			expect(() => parseLoopbackBaseUrl(rejected)).toThrow(TypeError)
+		}
+
+		const runWithConfig = (env: Record<string, string>) =>
+			Effect.runPromise(
+				providerBaseUrls.pipe(
+					Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
+				),
+			)
+
+		expect(await runWithConfig({})).toEqual({ openai: null })
+		expect(
+			await runWithConfig({
+				ALCHEMY_STAGE: "dev-local",
+				[OPENAI_BASE_URL_ENV]: "http://127.0.0.1:4321/v1/",
+			}),
+		).toEqual({ openai: "http://127.0.0.1:4321/v1" })
+		expect(
+			await runWithConfig({
+				ALCHEMY_STAGE: "production",
+				[OPENAI_BASE_URL_ENV]: "https://evil.example/v1",
+			}),
+		).toEqual({ openai: null })
+
+		const readKeys: Array<string> = []
+		const trackingConfig = ConfigProvider.make((path) => {
+			readKeys.push(path.join("_"))
+			return Effect.succeed(
+				path[0] === OPENAI_BASE_URL_ENV
+					? ConfigProvider.makeValue("http://127.0.0.1:4321/v1")
+					: undefined,
+			)
+		})
+		const deployPlanResult = await Effect.runPromise(
+			providerBaseUrls.pipe(
+				Effect.provideService(AlchemyContext, {
+					dotAlchemy: ".alchemy",
+					dev: false,
+					adopt: false,
+				}),
+				Effect.provideService(Stage, "staging"),
+				Effect.provide(ConfigProvider.layer(trackingConfig)),
+			),
+		)
+		expect(deployPlanResult).toEqual({ openai: null })
+		expect(readKeys).toEqual([])
+
+		const devProdStageResult = await Effect.runPromise(
+			providerBaseUrls.pipe(
+				Effect.provideService(AlchemyContext, {
+					dotAlchemy: ".alchemy",
+					dev: true,
+					adopt: false,
+				}),
+				Effect.provideService(Stage, "production"),
+				Effect.provide(ConfigProvider.layer(trackingConfig)),
+			),
+		)
+		expect(devProdStageResult).toEqual({ openai: null })
+		expect(readKeys).toEqual([])
+
+		const devStageResult = await Effect.runPromise(
+			providerBaseUrls.pipe(
+				Effect.provideService(AlchemyContext, {
+					dotAlchemy: ".alchemy",
+					dev: true,
+					adopt: false,
+				}),
+				Effect.provideService(Stage, "workerd-test"),
+				Effect.provide(ConfigProvider.layer(trackingConfig)),
+			),
+		)
+		expect(devStageResult).toEqual({ openai: "http://127.0.0.1:4321/v1" })
+		expect(readKeys).toEqual([OPENAI_BASE_URL_ENV])
+
+		const overridden = createPiModels(
+			{ openai: Redacted.make("sk-test"), anthropic: null },
+			{ openai: "http://127.0.0.1:4321/v1" },
+		)
+		expect(overridden.getModel("openai", "gpt-4o-mini")?.baseUrl).toBe("http://127.0.0.1:4321/v1")
+		expect(overridden.getModel("anthropic", "claude-sonnet-4-5")?.baseUrl).toBe(
+			DEFAULT_ANTHROPIC_BASE_URL,
+		)
+
+		const port80BaseUrls = await runWithConfig({
+			ALCHEMY_STAGE: "dev-local",
+			[OPENAI_BASE_URL_ENV]: "http://127.0.0.1:80/v1",
+		})
+		expect(port80BaseUrls).toEqual({ openai: "http://127.0.0.1:80/v1" })
+		const port80Models = createPiModels(
+			{ openai: Redacted.make("sk-test"), anthropic: null },
+			port80BaseUrls,
+		)
+		expect(port80Models.getModel("openai", "gpt-4o-mini")?.baseUrl).toBe("http://127.0.0.1:80/v1")
+
+		const defaults = createPiModels({ openai: null, anthropic: null })
+		expect(defaults.getModel("openai", "gpt-4o-mini")?.baseUrl).toBe(DEFAULT_OPENAI_BASE_URL)
+	})
+
+	it("honors host-only and port-matched bracketed IPv6 allowed_hosts for loopback OpenAI overrides", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(
+			async (model) => makeAssistantReply(model, null, "IPv6 ok", 4, 2),
+			{
+				CHECKFU_API_KEY: TEST_API_KEY,
+				OPENAI_API_KEY: "sk-openai-test",
+				ANTHROPIC_API_KEY: "sk-anthropic-test",
+				[OPENAI_BASE_URL_ENV]: "http://[::1]:4321/v1",
+			},
+		)
+
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const provider = yield* ModelProvider
+
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "IPv6 Agent", model: "gpt-4o-mini" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+
+					const createLimitedEnv = (name: string, allowedHosts: ReadonlyArray<string>) =>
+						Effect.gen(function* () {
+							const res = yield* sendRequest(apiFetch, {
+								method: "POST",
+								path: "/v1/environments",
+								headers: AUTH_HEADERS,
+								body: {
+									name,
+									config: {
+										type: "cloud",
+										networking: {
+											type: "limited",
+											allow_mcp_servers: false,
+											allow_package_managers: false,
+											allowed_hosts: [...allowedHosts],
+										},
+									},
+								},
+							})
+							expect(res.status).toBe(201)
+							return ((yield* Effect.promise(() => res.json())) as { id: string }).id
+						})
+
+					const hostOnlyEnvId = yield* createLimitedEnv("IPv6 Host Only", ["[::1]"])
+					const matchingPortEnvId = yield* createLimitedEnv("IPv6 Matching Port", ["[::1]:4321"])
+					const wrongPortEnvId = yield* createLimitedEnv("IPv6 Wrong Port", ["[::1]:9999"])
+					const wrongHostEnvId = yield* createLimitedEnv("IPv4 Only", ["127.0.0.1"])
+
+					const hostOnlyReply = yield* provider.generate({
+						session_id: SessionId.make("sess_ipv6_host_only"),
+						agent_id: agent.id,
+						agent_version: 1,
+						environment_id: hostOnlyEnvId,
+						turn: 1,
+						generation: 0,
+						input: ["hello"],
+					})
+					expect(hostOnlyReply.text).toBe("IPv6 ok")
+
+					const matchingPortReply = yield* provider.generate({
+						session_id: SessionId.make("sess_ipv6_port_match"),
+						agent_id: agent.id,
+						agent_version: 1,
+						environment_id: matchingPortEnvId,
+						turn: 1,
+						generation: 0,
+						input: ["hello"],
+					})
+					expect(matchingPortReply.text).toBe("IPv6 ok")
+
+					const wrongPortErr = yield* Effect.flip(
+						provider.generate({
+							session_id: SessionId.make("sess_ipv6_port_mismatch"),
+							agent_id: agent.id,
+							agent_version: 1,
+							environment_id: wrongPortEnvId,
+							turn: 1,
+							generation: 0,
+							input: ["hello"],
+						}),
+					)
+					expect(providerError(wrongPortErr).error_type).toBe("environment_network_blocked")
+
+					const wrongHostErr = yield* Effect.flip(
+						provider.generate({
+							session_id: SessionId.make("sess_ipv6_host_mismatch"),
+							agent_id: agent.id,
+							agent_version: 1,
+							environment_id: wrongHostEnvId,
+							turn: 1,
+							generation: 0,
+							input: ["hello"],
+						}),
+					)
+					expect(providerError(wrongHostErr).error_type).toBe("environment_network_blocked")
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+
+		const { layer: defaultLayer, closeAll: closeDefault } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "should not run", 4, 2),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const provider = yield* ModelProvider
+
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Default OpenAI Agent", model: "gpt-4o-mini" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: {
+							name: "Malformed Bracketed Rules",
+							config: {
+								type: "cloud",
+								networking: {
+									type: "limited",
+									allow_mcp_servers: false,
+									allow_package_managers: false,
+									allowed_hosts: [
+										"[a@api.openai.com#]",
+										"[a@api.openai.com?]",
+										"[api.openai.com]",
+										"[::1@api.openai.com]",
+									],
+								},
+							},
+						},
+					})
+					expect(envRes.status).toBe(201)
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+
+					const err = yield* Effect.flip(
+						provider.generate({
+							session_id: SessionId.make("sess_malformed_bracket_rule"),
+							agent_id: agent.id,
+							agent_version: 1,
+							environment_id: env.id,
+							turn: 1,
+							generation: 0,
+							input: ["hello"],
+						}),
+					)
+					expect(providerError(err).error_type).toBe("environment_network_blocked")
+				}).pipe(Effect.scoped, Effect.provide(defaultLayer)),
+			)
+		} finally {
+			await closeDefault()
 		}
 	})
 })

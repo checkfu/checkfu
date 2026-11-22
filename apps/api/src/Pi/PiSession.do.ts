@@ -19,7 +19,7 @@ import {
 	restoreRefusalEntryInStorage,
 	runPiDurableTurn,
 } from "./PiDurableEngine.ts"
-import { providerApiKeys, createPiModels } from "./PiModels.ts"
+import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
 import {
 	type PiTurnOutcome,
 	createCheckfuRegistry,
@@ -141,8 +141,9 @@ export class PiSession extends Cloudflare.DurableObject<PiSession>()(
 		Effect.all({
 			state: Cloudflare.DurableObjectState,
 			apiKeys: providerApiKeys,
+			baseUrls: providerBaseUrls,
 		}),
-		({ state, apiKeys }) =>
+		({ state, apiKeys, baseUrls }) =>
 			Effect.promise(async () => {
 				// Load workerd-only modules after Alchemy has evaluated the stack.
 				const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
@@ -153,7 +154,7 @@ export class PiSession extends Cloudflare.DurableObject<PiSession>()(
 				// PiHarness calls this factory again when it reopens after a storage error.
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
-						const models = createPiModels(apiKeys)
+						const models = createPiModels(apiKeys, baseUrls)
 						return Harness.open(
 							storage,
 							{
