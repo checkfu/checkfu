@@ -12,8 +12,9 @@ import * as Stream from "effect/Stream"
 import { type CliFailure, formatClientError, isApiErrorEnvelope, usageError } from "./Errors.ts"
 import { diagnoseSessionCreateNotFound, ensureIdempotencyKeyHeader } from "./Hooks.ts"
 import {
+	emitYamlWarnings,
 	isPlainRecord,
-	parseJsonOrYaml,
+	parseJsonOrYamlDocument,
 	readPipedStdin,
 	readPipedStdinRecord,
 	resolveStructuredInput,
@@ -104,20 +105,23 @@ const decodeWithTop = (
 const parseTextOrObjectFlag = (
 	raw: string,
 	flagName: string,
-): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem> =>
+): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const isFile = raw.startsWith("@") && !raw.startsWith("@@") && raw.length > 1
 		const text = yield* resolveTextOrFile(raw)
 		const trimmed = text.trim()
 		const structuredSyntax =
 			trimmed.startsWith("{") || trimmed.includes("\n") || /:(?:\s|$)/.test(trimmed)
-		const parsedResult = yield* Effect.result(parseJsonOrYaml(trimmed, `--${flagName}`))
+		const parsedResult = yield* Effect.result(parseJsonOrYamlDocument(trimmed, `--${flagName}`))
 		if (parsedResult._tag === "Success") {
-			if (isPlainRecord(parsedResult.success)) {
-				return parsedResult.success
+			const parsed = parsedResult.success
+			if (isPlainRecord(parsed.value)) {
+				yield* emitYamlWarnings(`--${flagName}`, parsed.warnings)
+				return parsed.value
 			}
 			if (trimmed.startsWith("{") || trimmed.includes("\n")) {
-				return parsedResult.success
+				yield* emitYamlWarnings(`--${flagName}`, parsed.warnings)
+				return parsed.value
 			}
 			return isFile ? trimmed : text
 		}

@@ -70,6 +70,7 @@ interface ConnectState {
 	readonly latestSettledStopReason: string | undefined
 	readonly targetTurn: number
 	readonly submittedTurns: ReadonlySet<number>
+	readonly queuedTurns: ReadonlySet<number>
 	readonly latestTurnError: { readonly turn: number; readonly message: string } | undefined
 	readonly failedTurnErrors: ReadonlyMap<number, string>
 	readonly ended: boolean
@@ -128,9 +129,10 @@ const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): b
 const formatUnconfirmedSendError = (
 	err: Parameters<typeof formatClientError>[0],
 	idempotencyKey: string,
+	hadUnconfirmedAttempt: boolean,
 ): CliFailure => {
 	const formatted = formatClientError(err)
-	if (!isUnconfirmedSendError(err)) return formatted
+	if (!hadUnconfirmedAttempt && !isUnconfirmedSendError(err)) return formatted
 	return new CliFailure({
 		message: `${formatted.message} (delivery unconfirmed; retry safely with Idempotency-Key: ${idempotencyKey})`,
 		exitCode: formatted.exitCode,
@@ -142,17 +144,21 @@ const sendConnectEventsWithRetry = <A>(
 	idempotencyKey: string,
 ): Effect.Effect<A, CliFailure> =>
 	Effect.gen(function* () {
+		let hadUnconfirmedAttempt = false
 		for (let attempt = 0; ; attempt++) {
 			const res = yield* Effect.result(send)
 			if (res._tag === "Success") {
 				return res.success
 			}
 			const err = res.failure
-			if (isUnconfirmedSendError(err) && attempt < MAX_CONNECT_SEND_RETRIES) {
-				yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
-				continue
+			if (isUnconfirmedSendError(err)) {
+				hadUnconfirmedAttempt = true
+				if (attempt < MAX_CONNECT_SEND_RETRIES) {
+					yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
+					continue
+				}
 			}
-			return yield* formatUnconfirmedSendError(err, idempotencyKey)
+			return yield* formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt)
 		}
 	})
 
@@ -184,48 +190,53 @@ const splitBoundedLines = (
 		const lineTooLongError = () =>
 			usageError(`Input line exceeds maximum message length of ${maxLineChars} characters.`)
 
-		const processChunk = (chunk: string): Effect.Effect<ReadonlyArray<string>, CliFailure> =>
-			Effect.suspend(() => {
-				const lines: Array<string> = []
-				let pos = 0
-				const len = chunk.length
-				while (pos < len) {
-					if (discardLeadingLf) {
-						discardLeadingLf = false
-						if (chunk.charCodeAt(pos) === 10) {
-							pos += 1
-							continue
+		const processChunk = (chunk: string): Stream.Stream<string, CliFailure> =>
+			Stream.unwrap(
+				Effect.sync(() => {
+					const lines: Array<string> = []
+					let pos = 0
+					const len = chunk.length
+					let overflowed = false
+					while (pos < len) {
+						if (discardLeadingLf) {
+							discardLeadingLf = false
+							if (chunk.charCodeAt(pos) === 10) {
+								pos += 1
+								continue
+							}
 						}
+						let lineEnd = pos
+						while (lineEnd < len) {
+							const code = chunk.charCodeAt(lineEnd)
+							if (code === 13 || code === 10) break
+							lineEnd += 1
+						}
+						const segLen = lineEnd - pos
+						if (pending.length + segLen > maxLineChars) {
+							overflowed = true
+							break
+						}
+						if (lineEnd === len) {
+							pending += chunk.slice(pos)
+							break
+						}
+						discardLeadingLf = chunk.charCodeAt(lineEnd) === 13
+						lines.push(
+							pending.length > 0 ? pending + chunk.slice(pos, lineEnd) : chunk.slice(pos, lineEnd),
+						)
+						pending = ""
+						pos = lineEnd + 1
 					}
-					let lineEnd = pos
-					while (lineEnd < len) {
-						const code = chunk.charCodeAt(lineEnd)
-						if (code === 13 || code === 10) break
-						lineEnd += 1
-					}
-					const segLen = lineEnd - pos
-					if (pending.length + segLen > maxLineChars) {
-						return Effect.fail(lineTooLongError())
-					}
-					if (lineEnd === len) {
-						pending += chunk.slice(pos)
-						break
-					}
-					discardLeadingLf = chunk.charCodeAt(lineEnd) === 13
-					lines.push(
-						pending.length > 0 ? pending + chunk.slice(pos, lineEnd) : chunk.slice(pos, lineEnd),
-					)
-					pending = ""
-					pos = lineEnd + 1
-				}
-				return Effect.succeed(lines)
-			})
+					const emitted =
+						lines.length > 0 ? Stream.fromIterable(lines).pipe(Stream.rechunk(1)) : Stream.empty
+					return overflowed ? Stream.concat(emitted, Stream.fail(lineTooLongError())) : emitted
+				}),
+			)
 
 		const body = stdin.pipe(
 			Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
 			Stream.decodeText(),
-			Stream.mapEffect(processChunk),
-			Stream.flatMap((batch) => (batch.length > 0 ? Stream.fromIterable(batch) : Stream.empty)),
+			Stream.flatMap(processChunk),
 		)
 
 		const flushTrailing = Stream.unwrap(
@@ -400,7 +411,9 @@ const renderConnectEvent = (
 				}
 				if (
 					(next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
-					(next.targetTurn > next.settledTurn && isQueueHaltingStopReason(stopReason))
+					(next.queuedTurns.has(next.targetTurn) &&
+						next.settledTurn === next.targetTurn - 1 &&
+						isQueueHaltingStopReason(stopReason))
 				) {
 					yield* Deferred.succeed(settleDeferred, undefined)
 				}
@@ -572,15 +585,21 @@ const dispatchUserLine = (
 		yield* Ref.update(stateRef, (state) => {
 			const nextSubmitted = new Set(state.submittedTurns)
 			nextSubmitted.add(turn)
+			const initiatedFromIdle =
+				sendSnapshot.liveStatus === "idle" && turn === sendSnapshot.liveTurn + 1
+			const nextQueued = new Set(state.queuedTurns)
+			if (!initiatedFromIdle) {
+				nextQueued.add(turn)
+			}
 			const startedFromIdle =
-				sendSnapshot.liveStatus === "idle" &&
+				initiatedFromIdle &&
 				state.liveStateVersion === sendSnapshot.liveStateVersion &&
-				state.liveStatus === "idle" &&
-				turn === sendSnapshot.liveTurn + 1
+				state.liveStatus === "idle"
 			return {
 				...state,
 				targetTurn: Math.max(state.targetTurn, turn),
 				submittedTurns: nextSubmitted,
+				queuedTurns: nextQueued,
 				liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
 				liveTurn: startedFromIdle ? turn : state.liveTurn,
 			}
@@ -899,6 +918,7 @@ export const sessionsConnectCommand = Command.make(
 				latestSettledStopReason: undefined,
 				targetTurn: 0,
 				submittedTurns: new Set<number>(),
+				queuedTurns: new Set<number>(),
 				latestTurnError: undefined,
 				failedTurnErrors: new Map<number, string>(),
 				ended: initiallyEnded,
@@ -1030,13 +1050,13 @@ export const sessionsConnectCommand = Command.make(
 								break
 							}
 							interruptRequestedOnce = false
-							const action = yield* dispatchUserLine(
-								client,
-								sessionId,
-								nextEvent.outcome.success,
-								stateRef,
+							const dispatchOutcome = yield* Effect.raceFirst(
+								dispatchUserLine(client, sessionId, nextEvent.outcome.success, stateRef, {
+									onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
+								}).pipe(Effect.map((action) => ({ _tag: "action" as const, action }))),
+								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
 							)
-							if (action === "exit") break
+							if (dispatchOutcome._tag === "ended" || dispatchOutcome.action === "exit") break
 						}
 					})
 
@@ -1101,7 +1121,9 @@ export const sessionsConnectCommand = Command.make(
 						const lastStopReason = state.latestSettledStopReason
 						if (
 							state.status === "idle" &&
-							state.targetTurn > state.settledTurn &&
+							state.queuedTurns.has(state.targetTurn) &&
+							state.settledTurn === state.targetTurn - 1 &&
+							state.observedTurn < state.targetTurn &&
 							isQueueHaltingStopReason(lastStopReason)
 						) {
 							const latestRes = yield* Effect.result(fetchSessionStatusWithRetry(client, sessionId))

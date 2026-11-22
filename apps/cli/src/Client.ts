@@ -342,18 +342,23 @@ export const makeCheckfuClient = (
 						let discardLeadingLf = false
 						let pendingLine = ""
 						let hasPendingEventFields = false
-						const parsedEvents: Array<Sse.Event> = []
+						let hasPendingFrameId = false
+						let pendingFrameId: string | undefined
+						type ParsedFrameItem =
+							| { readonly _tag: "Event"; readonly event: Sse.Event }
+							| { readonly _tag: "CursorUpdate"; readonly id: string }
+						const parsedItems: Array<ParsedFrameItem> = []
 
 						const parser = Sse.makeParser((event) => {
 							if (event._tag === "Retry") {
 								loopState.retryDelayMs = Math.max(0, Duration.toMillis(event.duration))
 							} else {
-								parsedEvents.push(event)
+								parsedItems.push({ _tag: "Event", event })
 							}
 						})
 
-						const trackSseTextChunk = (rawChunk: string): void => {
-							if (rawChunk.length === 0) return
+						const feedChunkOrdered = (rawChunk: string): Sse.SseError | undefined => {
+							if (rawChunk.length === 0) return undefined
 							let chunk = rawChunk
 							if (isFirstChunk && chunk.startsWith("\uFEFF")) {
 								chunk = chunk.slice(1)
@@ -361,6 +366,7 @@ export const makeCheckfuClient = (
 							isFirstChunk = false
 							const length = chunk.length
 							let position = 0
+							let sliceStart = 0
 							while (position < length) {
 								if (discardLeadingLf) {
 									discardLeadingLf = false
@@ -379,25 +385,58 @@ export const makeCheckfuClient = (
 									pendingLine += chunk.slice(position)
 									break
 								}
-								discardLeadingLf = chunk.charCodeAt(lineEnd) === 13
+								const endedWithCr = chunk.charCodeAt(lineEnd) === 13
+								discardLeadingLf = endedWithCr
 								const line =
 									pendingLine.length > 0
 										? pendingLine + chunk.slice(position, lineEnd)
 										: chunk.slice(position, lineEnd)
 								pendingLine = ""
+								position = lineEnd + 1
 								if (line.length === 0) {
 									hasPendingEventFields = false
+									// Include the following LF in the same slice if CRLF is contiguous in this chunk
+									if (endedWithCr && position < length && chunk.charCodeAt(position) === 10) {
+										discardLeadingLf = false
+										position += 1
+									}
+									const itemsBefore = parsedItems.length
+									const parseErr = parser.feed(chunk.slice(sliceStart, position))
+									sliceStart = position
+									if (parseErr !== undefined) {
+										return parseErr
+									}
+									const emittedDataEvent = parsedItems.length > itemsBefore
+									if (!emittedDataEvent && hasPendingFrameId && pendingFrameId !== undefined) {
+										parsedItems.push({ _tag: "CursorUpdate", id: pendingFrameId })
+									}
+									hasPendingFrameId = false
+									pendingFrameId = undefined
 								} else if (line.startsWith(":")) {
 									sawKeepalive = true
 								} else {
 									const colon = line.indexOf(":")
 									const field = colon >= 0 ? line.slice(0, colon) : line
+									const value =
+										colon >= 0
+											? line.slice(line.charCodeAt(colon + 1) === 32 ? colon + 2 : colon + 1)
+											: ""
+									if (field === "id" && !value.includes("\u0000")) {
+										hasPendingFrameId = true
+										pendingFrameId = value
+									}
 									if (field !== "retry") {
 										hasPendingEventFields = true
 									}
 								}
-								position = lineEnd + 1
 							}
+							if (sliceStart < length) {
+								const parseErr = parser.feed(chunk.slice(sliceStart))
+								if (parseErr !== undefined) {
+									return parseErr
+								}
+							}
+							return undefined
 						}
 
 						const eventsStream: Stream.Stream<SessionStreamEvent, CliFailure> =
@@ -407,9 +446,8 @@ export const makeCheckfuClient = (
 								Stream.flatMap((chunk) =>
 									Stream.unwrap(
 										Effect.sync(() => {
-											trackSseTextChunk(chunk)
-											const parseErr = parser.feed(chunk)
-											const batch = parsedEvents.splice(0, parsedEvents.length)
+											const parseErr = feedChunkOrdered(chunk)
+											const batch = parsedItems.splice(0, parsedItems.length)
 											const batchStream =
 												batch.length > 0 ? Stream.fromIterable(batch) : Stream.empty
 											return parseErr !== undefined
@@ -419,8 +457,14 @@ export const makeCheckfuClient = (
 									),
 								),
 								Stream.rechunk(1),
-								Stream.mapEffect((sseEvent) =>
+								Stream.mapEffect((item) =>
 									Effect.gen(function* () {
+										if (item._tag === "CursorUpdate") {
+											loopState.cursor = item.id === "" ? undefined : item.id
+											sawKeepalive = true
+											return Option.none<SessionStreamEvent>()
+										}
+										const sseEvent = item.event
 										const data = yield* parseSseData(sseEvent.data)
 										const seq = parseSeq(sseEvent.id, data)
 										if (sseEvent.id === "") {
@@ -435,15 +479,18 @@ export const makeCheckfuClient = (
 											terminalReached = true
 											loopState.done = true
 										}
-										return {
+										return Option.some({
 											id: sseEvent.id,
 											event: sseEvent.event,
 											seq,
 											data,
-										} satisfies SessionStreamEvent
+										} satisfies SessionStreamEvent)
 									}),
 								),
 								Stream.takeUntil(() => terminalReached),
+								Stream.flatMap((maybeEvent) =>
+									Option.isSome(maybeEvent) ? Stream.make(maybeEvent.value) : Stream.empty,
+								),
 								Stream.catch((err) => {
 									if (err instanceof StreamBodyReadError) {
 										const nextAttempt = (sawEvent ? 0 : loopState.attempt) + 1

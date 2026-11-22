@@ -6,6 +6,7 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
 import { type CliFailure, usageError } from "./Errors.ts"
+import { writeStderrLine } from "./TerminalOutput.ts"
 
 const MAX_STDIN_BYTES = 2 * 1024 * 1024
 
@@ -29,14 +30,31 @@ export const resolveTextOrFile = (
 		return raw
 	})
 
-export const parseJsonOrYaml = (raw: string, label: string): Effect.Effect<unknown, CliFailure> =>
+export interface ParsedStructuredInput {
+	readonly value: unknown
+	readonly warnings: ReadonlyArray<string>
+}
+
+export const parseJsonOrYamlDocument = (
+	raw: string,
+	label: string,
+): Effect.Effect<ParsedStructuredInput, CliFailure> =>
 	Effect.try({
-		try: () => JSON.parse(raw) as unknown,
+		try: () => ({ value: JSON.parse(raw) as unknown, warnings: [] as ReadonlyArray<string> }),
 		catch: () => undefined,
 	}).pipe(
 		Effect.catch(() =>
 			Effect.try({
-				try: () => YAML.parse(raw) as unknown,
+				try: () => {
+					const doc = YAML.parseDocument(raw, { logLevel: "silent" })
+					if (doc.errors.length > 0) {
+						throw doc.errors[0]
+					}
+					return {
+						value: doc.toJS() as unknown,
+						warnings: doc.warnings.map((warning) => warning.message),
+					}
+				},
 				catch: (err) =>
 					usageError(
 						`Invalid JSON or YAML for ${label}: ${err instanceof Error ? err.message : String(err)}`,
@@ -45,10 +63,28 @@ export const parseJsonOrYaml = (raw: string, label: string): Effect.Effect<unkno
 		),
 	)
 
+export const emitYamlWarnings = (
+	label: string,
+	warnings: ReadonlyArray<string>,
+): Effect.Effect<void, CliFailure, Stdio.Stdio> =>
+	Effect.forEach(warnings, (warning) => writeStderrLine(`Warning (${label}): ${warning}`), {
+		discard: true,
+	})
+
+export const parseJsonOrYaml = (
+	raw: string,
+	label: string,
+): Effect.Effect<unknown, CliFailure, Stdio.Stdio> =>
+	Effect.gen(function* () {
+		const parsed = yield* parseJsonOrYamlDocument(raw, label)
+		yield* emitYamlWarnings(label, parsed.warnings)
+		return parsed.value
+	})
+
 export const resolveStructuredInput = (
 	raw: string,
 	label: string,
-): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem> =>
+): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	resolveTextOrFile(raw).pipe(Effect.flatMap((text) => parseJsonOrYaml(text, label)))
 
 export const readPipedStdin = (): Effect.Effect<Option.Option<unknown>, CliFailure, Stdio.Stdio> =>

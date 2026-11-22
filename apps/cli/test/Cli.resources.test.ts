@@ -460,6 +460,26 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(typoNested.exitCode).toBe(1)
 					expect(typoNested.stdout).toBe("")
 					expect(typoNested.stderr).toContain("netwroking")
+
+					// YAML parser warnings route through sanitized stderr instead of raw process.emitWarning
+					const leakedWarnings: Array<string> = []
+					const onWarning = (warning: Error) => {
+						leakedWarnings.push(warning.message)
+					}
+					process.on("warning", onWarning)
+					try {
+						const warnedYaml = yield* cli.run(["agents", "create"], {
+							stdin: "name: !custom_tag Safe\x1b]52;c;evil\x07Name\nmodel: gpt-6.2-sol\n",
+						})
+						expect(warnedYaml.exitCode).toBe(0)
+						expect(leakedWarnings).toEqual([])
+						expect(warnedYaml.stderr).toContain("Warning (stdin):")
+						expect(warnedYaml.stderr).toContain("Unresolved tag")
+						expect(warnedYaml.stderr).not.toContain("\x1b")
+						expect(warnedYaml.stderr).not.toContain("\x07")
+					} finally {
+						process.off("warning", onWarning)
+					}
 				}),
 			),
 		)

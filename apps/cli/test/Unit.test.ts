@@ -628,6 +628,43 @@ describe("normalizeApiUrl", () => {
 				}).pipe(Effect.provide(makeLayer(resetIdFetch)))
 				expect(Array.from(resetEvents).map((e) => e.seq)).toEqual([1, 2])
 				expect(resetLastIds).toEqual([null, null])
+
+				// 10) ID-only SSE frames advance and clear the reconnect cursor without emitting data events
+				const idOnlyLastIds: Array<string | null> = []
+				const idOnlyFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					idOnlyLastIds.push(headers.get("last-event-id"))
+					if (idOnlyLastIds.length === 1) {
+						return new Response('id: cur_1\nevent: custom.ping\ndata: {"seq":1}\n\nid: cur_2\n\n', {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (idOnlyLastIds.length === 2) {
+						return new Response("id:\n\n", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const idOnlyEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamEndpointEvents(
+							{
+								method: "GET",
+								path: "/v1/custom/id-only/stream",
+								query: { after: "0" },
+								initialCursor: "0",
+								cursorQueryParam: "after",
+							},
+							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(idOnlyFetch)))
+				expect(Array.from(idOnlyEvents).map((e) => e.seq)).toEqual([1])
+				expect(idOnlyLastIds).toEqual([null, "cur_2", null])
 			}),
 		)
 	})

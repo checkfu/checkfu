@@ -1945,4 +1945,170 @@ describe("CLI sessions:events and sessions connect", () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()))
 		}
 	})
+
+	it("handles replayed refusal before a fresh turn, preserves uncertainty across retry errors, stops stalled TTY sends on archive, and flushes valid lines before chunk overflow", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) After turn 1 stops with refusal, sending turn 2 from idle while replaying turn 1
+					//    must NOT fail turn 2 even if sessions.get temporarily reports stale idle at turn 1
+					const replayRefusalCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: args.turn === 1 ? "Refused-1" : "Accepted-2",
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason:
+									args.turn === 1
+										? ({ type: "refusal" } as const)
+										: ({ type: "end_turn" } as const),
+							}),
+					})
+					const replayRefusalSessionId = yield* createReadySession(replayRefusalCli)
+					const turn1Refusal = yield* replayRefusalCli.run(
+						["sessions", "connect", "--session-id", replayRefusalSessionId],
+						{ stdin: "first turn\n" },
+					)
+					expect(turn1Refusal.exitCode).toBe(0)
+
+					let releaseRefusalReplay: (() => void) | undefined
+					const refusalReplayGate = new Promise<void>((resolve) => {
+						releaseRefusalReplay = resolve
+					})
+					let sessionGets = 0
+					let staleSnapshotBody = ""
+					const turn2AfterRefusal = yield* replayRefusalCli.run(
+						["sessions", "connect", "--session-id", replayRefusalSessionId],
+						{
+							stdin: "second turn\n",
+							interceptFetch: async (next, request) => {
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${replayRefusalSessionId}`)
+								) {
+									sessionGets++
+									const real = await next(request)
+									if (sessionGets === 1) {
+										staleSnapshotBody = await real.clone().text()
+										return real
+									}
+									return new Response(staleSnapshotBody, {
+										status: 200,
+										headers: { "content-type": "application/json" },
+									})
+								}
+								if (request.url.includes("/events/stream")) {
+									await refusalReplayGate
+									return next(request)
+								}
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									const res = await next(request)
+									releaseRefusalReplay?.()
+									return res
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(turn2AfterRefusal.exitCode).toBe(0)
+					expect(turn2AfterRefusal.stdout).toContain("Accepted-2")
+
+					// 2) Ambiguous attempt 1 followed by definitive 401 on retry still reports Idempotency-Key
+					const rotatedKeys: Array<string> = []
+					const rotatedRes = yield* replayRefusalCli.run(
+						["sessions", "connect", "--session-id", replayRefusalSessionId],
+						{
+							stdin: "ambiguous then 401\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									rotatedKeys.push(request.headers.get("idempotency-key") ?? "")
+									if (rotatedKeys.length === 1) {
+										throw new TypeError("lost response after commit")
+									}
+									return new Response(
+										JSON.stringify({
+											type: "error",
+											error: { type: "authentication_error", message: "key rotated" },
+											request_id: "req_401",
+										}),
+										{ status: 401, headers: { "content-type": "application/json" } },
+									)
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(rotatedRes.exitCode).toBe(1)
+					expect(rotatedKeys).toHaveLength(2)
+					expect(rotatedKeys[1]).toBe(rotatedKeys[0])
+					expect(rotatedRes.stderr).toContain(`Idempotency-Key: ${rotatedKeys[0]}`)
+
+					// 3) Stalled TTY dispatchUserLine is interrupted when SSE reports archival and exposes key
+					const stalledTtySessionId = yield* createReadySession(replayRefusalCli)
+					const ttyPostStalled = yield* Deferred.make<void>()
+					let ttyInterruptedKey = ""
+					const ttyArchiver = yield* Deferred.await(ttyPostStalled).pipe(
+						Effect.andThen(
+							replayRefusalCli.run(["sessions", "archive", "--session-id", stalledTtySessionId]),
+						),
+						Effect.forkChild,
+					)
+					const stalledTtyRes = yield* replayRefusalCli.run(
+						["sessions", "connect", "--session-id", stalledTtySessionId],
+						{
+							stdinIsTerminal: true,
+							terminalReads: [Effect.succeed("stalled tty send")],
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									ttyInterruptedKey = request.headers.get("idempotency-key") ?? ""
+									await Effect.runPromise(Deferred.succeed(ttyPostStalled, undefined))
+									return await new Promise<Response>((_resolve, reject) => {
+										const abort = () => reject(new DOMException("Aborted", "AbortError"))
+										if (request.signal.aborted) {
+											abort()
+											return
+										}
+										request.signal.addEventListener("abort", abort, { once: true })
+									})
+								}
+								return next(request)
+							},
+						},
+					)
+					yield* Fiber.await(ttyArchiver)
+					expect(stalledTtyRes.exitCode).toBe(1)
+					expect(ttyInterruptedKey).toMatch(/^cli_[0-9a-f]{24}$/)
+					expect(stalledTtyRes.stderr).toContain(`Idempotency-Key: ${ttyInterruptedKey}`)
+
+					// 4) Completed lines earlier in the same chunk are emitted before failing on a later
+					//    oversized line (so /exit\n + oversized tail exits 0, and valid line is sent first)
+					const chunkExitSessId = yield* createReadySession(replayRefusalCli)
+					const exitBeforeOverflow = yield* replayRefusalCli.run(
+						["sessions", "connect", "--session-id", chunkExitSessId],
+						{ stdin: `/exit\n${"a".repeat(20_000)}` },
+					)
+					expect(exitBeforeOverflow.exitCode).toBe(0)
+
+					const sentPayloads: Array<string> = []
+					const validBeforeOverflow = yield* replayRefusalCli.run(
+						["sessions", "connect", "--session-id", chunkExitSessId],
+						{
+							stdin: `valid first line\n${"a".repeat(20_000)}`,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									sentPayloads.push(await request.clone().text())
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(validBeforeOverflow.exitCode).toBe(1)
+					expect(validBeforeOverflow.stderr).toContain("exceeds maximum message length")
+					expect(sentPayloads).toHaveLength(1)
+					expect(sentPayloads[0]).toContain("valid first line")
+				}),
+			),
+		)
+	})
 })
