@@ -14,7 +14,6 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
-import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import {
 	type CliFailure,
@@ -191,213 +190,290 @@ export const makeCheckfuClient = (
 			sessionId: string,
 			options?: StreamSessionEventsOptions,
 		): Stream.Stream<SessionStreamEvent, CliFailure> => {
-			const maxReconnects = options?.maxReconnectAttempts ?? DEFAULT_MAX_SSE_RECONNECTS
-			const baseDelayMs = options?.baseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS
-
-			const connect = (
-				cursor: number | undefined,
-				useHeader: boolean,
-				attempt: number,
-			): Stream.Stream<SessionStreamEvent, CliFailure> =>
-				Stream.suspend(() =>
-					Stream.unwrap(
-						Effect.gen(function* () {
-							const lastSeqRef = yield* Ref.make<number | undefined>(cursor)
-							const archivedRef = yield* Ref.make(false)
-							const sawEventRef = yield* Ref.make(false)
-							const sawKeepaliveRef = yield* Ref.make(false)
-							const recoveredRef = yield* Ref.make(false)
-							let frameBuffer = ""
-							let trailingCr = false
-							const streamUrl =
-								!useHeader && cursor !== undefined
-									? `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream?after=${cursor}`
-									: `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream`
-							let req = HttpClientRequest.get(streamUrl).pipe(
-								HttpClientRequest.setHeader("accept", "text/event-stream"),
-							)
-							if (useHeader && cursor !== undefined) {
-								req = HttpClientRequest.setHeader(req, "last-event-id", String(cursor))
-							}
-
-							const responseResult = yield* Effect.result(authedHttpClient.execute(req))
-							if (responseResult._tag === "Failure") {
-								const err = responseResult.failure
-								if (isTransientHttpError(err) && attempt < maxReconnects) {
-									yield* Effect.sleep(Duration.millis(baseDelayMs * 2 ** attempt))
-									return connect(cursor, true, attempt + 1)
-								}
-								return Stream.fail(formatClientError(err))
-							}
-
-							const response = responseResult.success
-							if (response.status === 204) {
-								return Stream.empty
-							}
-							if (response.status !== 200) {
-								const bodyText = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")))
-								const parsedError = yield* Effect.try({
-									try: () => JSON.parse(bodyText) as unknown,
-									catch: () => undefined,
-								}).pipe(Effect.catch(() => Effect.succeed(undefined)))
-
-								if (
-									(response.status === 429 || response.status >= 500) &&
-									attempt < maxReconnects
-								) {
-									yield* Effect.sleep(Duration.millis(baseDelayMs * 2 ** attempt))
-									return connect(cursor, true, attempt + 1)
-								}
-								if (isApiErrorEnvelope(parsedError)) {
-									return Stream.fail(formatApiErrorEnvelope(parsedError))
-								}
-								return Stream.fail(
-									networkFailure(
-										`Event stream request failed with HTTP ${response.status}${bodyText.trim().length > 0 ? `: ${bodyText.trim()}` : ""}`,
-									),
-								)
-							}
-
-							const contentType = response.headers["content-type"] ?? ""
-							const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? ""
-							if (mediaType !== "text/event-stream") {
-								const webResponse = HttpClientResponse.toWeb(response)
-								if (Option.isSome(webResponse) && webResponse.value.body !== null) {
-									const body = webResponse.value.body
-									yield* Effect.ignore(Effect.promise(() => body.cancel()))
-								}
-								return Stream.fail(
-									networkFailure(
-										`Expected text/event-stream response from event stream, received ${
-											contentType.trim().length > 0
-												? `"${contentType.trim()}"`
-												: "missing Content-Type"
-										}.`,
-									),
-								)
-							}
-
-							const eventsStream: Stream.Stream<SessionStreamEvent, CliFailure> =
-								response.stream.pipe(
-									Stream.mapError((error) => new StreamBodyReadError({ error })),
-									Stream.decodeText(),
-									Stream.tap((chunk) =>
-										Effect.gen(function* () {
-											let text = chunk
-											if (trailingCr) {
-												if (text.startsWith("\n")) {
-													text = text.slice(1)
-												}
-												trailingCr = false
-											}
-											if (text.endsWith("\r")) {
-												trailingCr = true
-												text = text.slice(0, -1)
-											}
-											frameBuffer += text.replaceAll("\r\n", "\n").replaceAll("\r", "\n")
-											let boundary = frameBuffer.indexOf("\n\n")
-											while (boundary !== -1) {
-												const frame = frameBuffer.slice(0, boundary)
-												frameBuffer = frameBuffer.slice(boundary + 2)
-												const lines = frame.split("\n").filter((line) => line.length > 0)
-												if (lines.length > 0 && lines.every((line) => line.startsWith(":"))) {
-													yield* Ref.set(sawKeepaliveRef, true)
-												}
-												boundary = frameBuffer.indexOf("\n\n")
-											}
-										}),
-									),
-									Stream.pipeThroughChannel(Sse.decode()),
-									Stream.mapEffect((sseEvent) =>
-										Effect.gen(function* () {
-											const data = yield* parseSseData(sseEvent.data)
-											const seq = parseSeq(sseEvent.id, data)
-											if (seq !== undefined) {
-												yield* Ref.set(lastSeqRef, seq)
-											}
-											yield* Ref.set(sawEventRef, true)
-											if (data["type"] === "session.archived") {
-												yield* Ref.set(archivedRef, true)
-											}
-											return {
-												id: sseEvent.id,
-												event: sseEvent.event,
-												seq,
-												data,
-											} satisfies SessionStreamEvent
-										}),
-									),
-									Stream.catch((err) =>
-										Stream.unwrap(
-											Effect.gen(function* () {
-												const lastSeq = yield* Ref.get(lastSeqRef)
-												const sawEvent = yield* Ref.get(sawEventRef)
-												const nextAttempt = sawEvent ? 0 : attempt + 1
-												if (Sse.Retry.is(err)) {
-													yield* Ref.set(recoveredRef, true)
-													yield* Effect.sleep(err.duration)
-													return connect(lastSeq, true, 0)
-												}
-												if (err instanceof StreamBodyReadError) {
-													if (nextAttempt <= maxReconnects) {
-														yield* Ref.set(recoveredRef, true)
-														yield* Effect.sleep(
-															Duration.millis(baseDelayMs * 2 ** Math.max(0, nextAttempt - 1)),
-														)
-														return connect(lastSeq, true, nextAttempt)
-													}
-													return Stream.fail(formatClientError(err.error))
-												}
-												return Stream.fail(formatClientError(err))
-											}),
-										),
-									),
-								)
-
-							const continuation = Stream.unwrap(
-								Effect.gen(function* () {
-									if ((yield* Ref.get(archivedRef)) || (yield* Ref.get(recoveredRef))) {
-										return Stream.empty
-									}
-									const lastSeq = yield* Ref.get(lastSeqRef)
-									const sawEvent = yield* Ref.get(sawEventRef)
-									const sawKeepalive = yield* Ref.get(sawKeepaliveRef)
-									const hasIncompleteFrame = frameBuffer.trim().length > 0 || trailingCr
-
-									if (hasIncompleteFrame) {
-										const nextAttempt = sawEvent ? 0 : attempt + 1
-										if (nextAttempt > maxReconnects) {
-											return Stream.fail(
-												networkFailure("Event stream closed with an incomplete SSE frame."),
-											)
-										}
-										yield* Effect.sleep(
-											Duration.millis(baseDelayMs * 2 ** Math.max(0, nextAttempt - 1)),
-										)
-										return connect(lastSeq, true, nextAttempt)
-									}
-									if (sawEvent) {
-										return connect(lastSeq, true, 0)
-									}
-									// Clean close without advancing the cursor (e.g., healthy keepalive rotation
-									// or empty HTTP 200 close): keep listening without spending error retries,
-									// but apply a minimum delay so no-progress reconnects cannot spin tightly.
-									yield* Effect.sleep(
-										Duration.millis(sawKeepalive ? Math.min(baseDelayMs, 50) : baseDelayMs),
-									)
-									return connect(lastSeq, true, 0)
-								}),
-							)
-
-							return Stream.concat(eventsStream, continuation)
-						}),
-					),
-				)
-
 			if (options?.after !== undefined && (!Number.isInteger(options.after) || options.after < 0)) {
 				return Stream.fail(usageError("--after must be a non-negative integer."))
 			}
-			return connect(options?.after, false, 0)
+
+			const maxReconnects = options?.maxReconnectAttempts ?? DEFAULT_MAX_SSE_RECONNECTS
+			const baseDelayMs = options?.baseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS
+
+			interface LoopState {
+				cursor: number | undefined
+				useHeader: boolean
+				attempt: number
+				retryDelayMs: number | undefined
+				pendingDelayMs: number
+				done: boolean
+			}
+
+			const openConnection = (
+				loopState: LoopState,
+			): Stream.Stream<SessionStreamEvent, CliFailure> =>
+				Stream.unwrap(
+					Effect.gen(function* () {
+						if (loopState.pendingDelayMs > 0) {
+							const delayMs = loopState.pendingDelayMs
+							loopState.pendingDelayMs = 0
+							yield* Effect.sleep(Duration.millis(delayMs))
+						}
+
+						const streamUrl =
+							!loopState.useHeader && loopState.cursor !== undefined
+								? `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream?after=${loopState.cursor}`
+								: `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream`
+						let req = HttpClientRequest.get(streamUrl).pipe(
+							HttpClientRequest.setHeader("accept", "text/event-stream"),
+						)
+						if (loopState.useHeader && loopState.cursor !== undefined) {
+							req = HttpClientRequest.setHeader(req, "last-event-id", String(loopState.cursor))
+						}
+
+						const responseResult = yield* Effect.result(authedHttpClient.execute(req))
+						if (responseResult._tag === "Failure") {
+							const err = responseResult.failure
+							if (isTransientHttpError(err) && loopState.attempt < maxReconnects) {
+								loopState.useHeader = true
+								loopState.pendingDelayMs =
+									(loopState.retryDelayMs ?? baseDelayMs) * 2 ** loopState.attempt
+								loopState.attempt += 1
+								return Stream.empty
+							}
+							loopState.done = true
+							return Stream.fail(formatClientError(err))
+						}
+
+						const response = responseResult.success
+						if (response.status === 204) {
+							loopState.done = true
+							return Stream.empty
+						}
+						if (response.status !== 200) {
+							const bodyText = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")))
+							const parsedError = yield* Effect.try({
+								try: () => JSON.parse(bodyText) as unknown,
+								catch: () => undefined,
+							}).pipe(Effect.catch(() => Effect.succeed(undefined)))
+
+							if (
+								(response.status === 429 || response.status >= 500) &&
+								loopState.attempt < maxReconnects
+							) {
+								loopState.useHeader = true
+								loopState.pendingDelayMs =
+									(loopState.retryDelayMs ?? baseDelayMs) * 2 ** loopState.attempt
+								loopState.attempt += 1
+								return Stream.empty
+							}
+							loopState.done = true
+							if (isApiErrorEnvelope(parsedError)) {
+								return Stream.fail(formatApiErrorEnvelope(parsedError))
+							}
+							return Stream.fail(
+								networkFailure(
+									`Event stream request failed with HTTP ${response.status}${bodyText.trim().length > 0 ? `: ${bodyText.trim()}` : ""}`,
+								),
+							)
+						}
+
+						const contentType = response.headers["content-type"] ?? ""
+						const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? ""
+						if (mediaType !== "text/event-stream") {
+							const webResponse = HttpClientResponse.toWeb(response)
+							if (Option.isSome(webResponse) && webResponse.value.body !== null) {
+								const body = webResponse.value.body
+								yield* Effect.ignore(Effect.promise(() => body.cancel()))
+							}
+							loopState.done = true
+							return Stream.fail(
+								networkFailure(
+									`Expected text/event-stream response from event stream, received ${
+										contentType.trim().length > 0
+											? `"${contentType.trim()}"`
+											: "missing Content-Type"
+									}.`,
+								),
+							)
+						}
+
+						let sawEvent = false
+						let sawKeepalive = false
+						let archived = false
+						let handledError = false
+						let isFirstChunk = true
+						let discardLeadingLf = false
+						let pendingLine = ""
+						let hasPendingEventFields = false
+						const parsedEvents: Array<Sse.Event> = []
+
+						const parser = Sse.makeParser((event) => {
+							if (event._tag === "Retry") {
+								loopState.retryDelayMs = Math.max(0, Duration.toMillis(event.duration))
+							} else {
+								parsedEvents.push(event)
+							}
+						})
+
+						const trackSseTextChunk = (rawChunk: string): void => {
+							if (rawChunk.length === 0) return
+							let chunk = rawChunk
+							if (isFirstChunk && chunk.startsWith("\uFEFF")) {
+								chunk = chunk.slice(1)
+							}
+							isFirstChunk = false
+							const length = chunk.length
+							let position = 0
+							while (position < length) {
+								if (discardLeadingLf) {
+									discardLeadingLf = false
+									if (chunk.charCodeAt(position) === 10) {
+										position += 1
+										continue
+									}
+								}
+								let lineEnd = position
+								while (lineEnd < length) {
+									const code = chunk.charCodeAt(lineEnd)
+									if (code === 13 || code === 10) break
+									lineEnd += 1
+								}
+								if (lineEnd === length) {
+									pendingLine += chunk.slice(position)
+									break
+								}
+								discardLeadingLf = chunk.charCodeAt(lineEnd) === 13
+								const line =
+									pendingLine.length > 0
+										? pendingLine + chunk.slice(position, lineEnd)
+										: chunk.slice(position, lineEnd)
+								pendingLine = ""
+								if (line.length === 0) {
+									hasPendingEventFields = false
+								} else if (line.startsWith(":")) {
+									sawKeepalive = true
+								} else {
+									const colon = line.indexOf(":")
+									const field = colon >= 0 ? line.slice(0, colon) : line
+									if (field !== "retry") {
+										hasPendingEventFields = true
+									}
+								}
+								position = lineEnd + 1
+							}
+						}
+
+						const eventsStream: Stream.Stream<SessionStreamEvent, CliFailure> =
+							response.stream.pipe(
+								Stream.mapError((error) => new StreamBodyReadError({ error })),
+								Stream.decodeText(),
+								Stream.flatMap((chunk) =>
+									Stream.unwrap(
+										Effect.sync(() => {
+											trackSseTextChunk(chunk)
+											const parseErr = parser.feed(chunk)
+											const batch = parsedEvents.splice(0, parsedEvents.length)
+											const batchStream =
+												batch.length > 0 ? Stream.fromIterable(batch) : Stream.empty
+											return parseErr !== undefined
+												? Stream.concat(batchStream, Stream.fail(parseErr))
+												: batchStream
+										}),
+									),
+								),
+								Stream.mapEffect((sseEvent) =>
+									Effect.gen(function* () {
+										const data = yield* parseSseData(sseEvent.data)
+										const seq = parseSeq(sseEvent.id, data)
+										if (seq !== undefined) {
+											loopState.cursor = seq
+										}
+										sawEvent = true
+										if (data["type"] === "session.archived") {
+											archived = true
+										}
+										return {
+											id: sseEvent.id,
+											event: sseEvent.event,
+											seq,
+											data,
+										} satisfies SessionStreamEvent
+									}),
+								),
+								Stream.catch((err) => {
+									if (err instanceof StreamBodyReadError) {
+										const nextAttempt = sawEvent ? 0 : loopState.attempt + 1
+										if (nextAttempt <= maxReconnects) {
+											handledError = true
+											loopState.useHeader = true
+											loopState.attempt = nextAttempt
+											loopState.pendingDelayMs =
+												(loopState.retryDelayMs ?? baseDelayMs) * 2 ** Math.max(0, nextAttempt - 1)
+											return Stream.empty
+										}
+										loopState.done = true
+										return Stream.fail(formatClientError(err.error))
+									}
+									loopState.done = true
+									return Stream.fail(formatClientError(err))
+								}),
+							)
+
+						const finalizeConnection = Stream.unwrap(
+							Effect.sync(() => {
+								if (archived || handledError || loopState.done) {
+									if (archived) {
+										loopState.done = true
+									}
+									return Stream.empty
+								}
+								const hasIncompleteFrame = pendingLine.length > 0 || hasPendingEventFields
+								loopState.useHeader = true
+								if (hasIncompleteFrame) {
+									const nextAttempt = sawEvent ? 0 : loopState.attempt + 1
+									if (nextAttempt > maxReconnects) {
+										loopState.done = true
+										return Stream.fail(
+											networkFailure("Event stream closed with an incomplete SSE frame."),
+										)
+									}
+									loopState.attempt = nextAttempt
+									loopState.pendingDelayMs =
+										(loopState.retryDelayMs ?? baseDelayMs) * 2 ** Math.max(0, nextAttempt - 1)
+									return Stream.empty
+								}
+								if (sawEvent) {
+									loopState.attempt = 0
+									loopState.pendingDelayMs = loopState.retryDelayMs ?? 0
+									return Stream.empty
+								}
+								// Clean close without advancing the cursor (e.g., healthy keepalive rotation
+								// or empty HTTP 200 close): keep listening without spending error retries,
+								// applying a minimum delay (or the server's advertised retry: delay).
+								loopState.attempt = 0
+								loopState.pendingDelayMs =
+									loopState.retryDelayMs ?? (sawKeepalive ? Math.min(baseDelayMs, 50) : baseDelayMs)
+								return Stream.empty
+							}),
+						)
+
+						return Stream.concat(eventsStream, finalizeConnection)
+					}),
+				)
+
+			return Stream.suspend(() => {
+				const loopState: LoopState = {
+					cursor: options?.after,
+					useHeader: false,
+					attempt: 0,
+					retryDelayMs: undefined,
+					pendingDelayMs: 0,
+					done: false,
+				}
+				return Stream.unfold(loopState, (state) =>
+					state.done
+						? Effect.succeed(undefined)
+						: Effect.succeed([openConnection(state), state] as const),
+				).pipe(Stream.flatten)
+			})
 		}
 
 		return {

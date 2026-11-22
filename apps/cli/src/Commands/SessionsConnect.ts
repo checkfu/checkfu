@@ -126,6 +126,8 @@ const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
 	stopReason !== "retries_exhausted"
 
 const renderConnectEvent = (
+	client: CheckfuClient,
+	sessionId: SessionId,
 	event: SessionStreamEvent,
 	stateRef: Ref.Ref<ConnectState>,
 	settleDeferred: Deferred.Deferred<void>,
@@ -249,6 +251,15 @@ const renderConnectEvent = (
 			}
 			case "session.status_terminated":
 			case "session.archived": {
+				const isLiveArchive =
+					eventType === "session.status_terminated"
+						? expectArchivedEvent ||
+							(yield* Effect.result(fetchSessionStatusWithRetry(client, sessionId)).pipe(
+								Effect.map((res) => res._tag === "Success" && res.success.archived_at !== null),
+							))
+						: false
+				const shouldStopNow = eventType === "session.archived" || !isLiveArchive
+
 				yield* Ref.update(stateRef, (state) => {
 					let failedTurnErrors = state.failedTurnErrors
 					if (
@@ -263,7 +274,7 @@ const renderConnectEvent = (
 						...state,
 						status: "terminated" as const,
 						liveStatus: "terminated" as const,
-						ended: true,
+						ended: shouldStopNow ? true : state.ended,
 						failedTurnErrors,
 					}
 				})
@@ -272,8 +283,8 @@ const renderConnectEvent = (
 						eventType === "session.archived" ? "[session archived]" : "[session terminated]",
 					)
 				}
-				yield* Deferred.succeed(settleDeferred, undefined)
-				if (eventType === "session.archived" || !expectArchivedEvent) {
+				if (shouldStopNow) {
+					yield* Deferred.succeed(settleDeferred, undefined)
 					yield* Deferred.succeed(stopConnectDeferred, undefined)
 				}
 				break
@@ -355,13 +366,10 @@ const dispatchUserLine = (
 			yield* Ref.update(stateRef, (state) => {
 				const nextSubmitted = new Set(state.submittedTurns)
 				nextSubmitted.add(turn)
-				const advancesLive = turn > state.liveTurn
 				return {
 					...state,
 					targetTurn: Math.max(state.targetTurn, turn),
 					submittedTurns: nextSubmitted,
-					liveStatus: advancesLive ? ("running" as const) : state.liveStatus,
-					liveTurn: advancesLive ? turn : state.liveTurn,
 				}
 			})
 		}
@@ -545,6 +553,8 @@ export const sessionsConnectCommand = Command.make(
 						Effect.gen(function* () {
 							const settleDeferred = yield* Ref.get(settleDeferredRef)
 							yield* renderConnectEvent(
+								client,
+								sessionId,
 								event,
 								stateRef,
 								settleDeferred,

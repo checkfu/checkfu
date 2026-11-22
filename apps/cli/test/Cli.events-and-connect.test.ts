@@ -1054,6 +1054,165 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(ttyRes.exitCode).toBe(0)
 					expect(firstSigintConsumed).toBe(true)
 					expect(ttyRes.stderr).toContain("Interrupt requested.")
+
+					// 3) Queued turn 2 receipt while turn 1 stops with refusal must NOT stick liveStatus as running:
+					//    pressing Ctrl-C after turn 1 returns to idle must fall through (disconnect), not interrupt
+					const queuedSigintController = makeSigintController()
+					const turn1QueuedGate = yield* Deferred.make<void>()
+					const releaseRefusalTurn1 = yield* Deferred.make<void>()
+					const idleFrameDelivered = yield* Deferred.make<void>()
+					const queuedCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(turn1QueuedGate, undefined)
+								yield* Deferred.await(releaseRefusalTurn1)
+								return {
+									thinking: null,
+									text: "Refused turn 1",
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "refusal" as const },
+								}
+							}),
+					})
+					const queuedSessionId = yield* createReadySession(queuedCli)
+					let sigintAfterRefusalConsumed = true
+					let queuedTurnReceipt: number | undefined
+					const queuedTtyRes = yield* queuedCli.run(
+						["sessions", "connect", "--session-id", queuedSessionId],
+						{
+							stdinIsTerminal: true,
+							sigintController: queuedSigintController,
+							interceptFetch: async (next, request) => {
+								const res = await next(request)
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									const clone = res.clone()
+									try {
+										const parsed = (await clone.json()) as { data?: Array<{ turn?: number }> }
+										const turn = parsed.data?.[0]?.turn
+										if (turn !== undefined) {
+											queuedTurnReceipt = turn
+										}
+									} catch {
+										// ignore non-json error bodies
+									}
+									return res
+								}
+								if (
+									!request.url.includes("/events/stream") ||
+									res.status !== 200 ||
+									res.body === null
+								) {
+									return res
+								}
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								let idleSignaled = false
+								const observed = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										const text = decoder.decode(chunk.value, { stream: true })
+										controller.enqueue(chunk.value)
+										if (!idleSignaled && text.includes("session.status_idle")) {
+											idleSignaled = true
+											await Effect.runPromise(Deferred.succeed(idleFrameDelivered, undefined))
+										}
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(observed, { status: 200, headers: res.headers })
+							},
+							terminalReads: [
+								Effect.succeed("start turn 1"),
+								Deferred.await(turn1QueuedGate).pipe(Effect.as("queue turn 2")),
+								Deferred.succeed(releaseRefusalTurn1, undefined).pipe(
+									Effect.andThen(Deferred.await(idleFrameDelivered)),
+									Effect.andThen(Effect.sleep("30 millis")),
+									Effect.andThen(
+										Effect.sync(() => {
+											sigintAfterRefusalConsumed = queuedSigintController.handleSigint()
+										}),
+									),
+									Effect.as("/exit"),
+								),
+							],
+						},
+					)
+					expect(queuedTtyRes.exitCode).toBe(0)
+					expect(queuedTurnReceipt).toBe(2)
+					expect(sigintAfterRefusalConsumed).toBe(false)
+					expect(queuedTtyRes.stderr).toContain("[status: idle (refusal)]")
+					expect(queuedTtyRes.stderr).not.toContain("Interrupt requested.")
+
+					// 4) Live archive emitting session.status_terminated and session.archived in separate chunks
+					//    must drain and emit session.archived in structured output before disconnecting
+					const liveArchiveCli = yield* makeTestServer()
+					const liveArchiveSessionId = yield* createReadySession(liveArchiveCli)
+					const streamConnected = yield* Deferred.make<void>()
+					const archiver = yield* Deferred.await(streamConnected).pipe(
+						Effect.andThen(Effect.sleep("20 millis")),
+						Effect.andThen(
+							liveArchiveCli.run(["sessions", "archive", "--session-id", liveArchiveSessionId]),
+						),
+						Effect.forkChild,
+					)
+					const liveArchiveRes = yield* liveArchiveCli.run(
+						["--format", "jsonl", "sessions", "connect", "--session-id", liveArchiveSessionId],
+						{
+							stdin: Stream.never,
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								await Effect.runPromise(Deferred.succeed(streamConnected, undefined))
+								const real = await next(request)
+								if (real.status !== 200 || real.body === null) return real
+								const reader = real.body.getReader()
+								const decoder = new TextDecoder()
+								const encoder = new TextEncoder()
+								let buf = ""
+								const spaced = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										while (true) {
+											const boundary = buf.indexOf("\n\n")
+											if (boundary !== -1) {
+												const frame = buf.slice(0, boundary + 2)
+												buf = buf.slice(boundary + 2)
+												if (frame.includes("session.archived")) {
+													await new Promise((resolve) => setTimeout(resolve, 40))
+												}
+												controller.enqueue(encoder.encode(frame))
+												return
+											}
+											const chunk = await reader.read()
+											if (chunk.done) {
+												if (buf.length > 0) {
+													controller.enqueue(encoder.encode(buf))
+													buf = ""
+												}
+												controller.close()
+												return
+											}
+											buf += decoder.decode(chunk.value, { stream: true })
+										}
+									},
+								})
+								return new Response(spaced, { status: 200, headers: real.headers })
+							},
+						},
+					)
+					yield* Fiber.await(archiver)
+					expect(liveArchiveRes.exitCode).toBe(0)
+					const emittedTypes = liveArchiveRes.stdout
+						.trim()
+						.split("\n")
+						.map((line) => (JSON.parse(line) as { type: string }).type)
+					expect(emittedTypes).toContain("session.status_terminated")
+					expect(emittedTypes).toContain("session.archived")
 				}),
 			),
 		)

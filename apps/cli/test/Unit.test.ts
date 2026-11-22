@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
@@ -96,6 +97,179 @@ describe("normalizeApiUrl", () => {
 
 				expect(requests).toBe(3)
 				expect(err.message).toContain("incomplete SSE frame")
+			}),
+		)
+	})
+
+	it("handles SSE retry directives without disconnecting, preserves split CRLF keepalives, and rotates iteratively", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				// 1) Server advertises retry: at start of connection and delivers events on the same response
+				let retryRequests = 0
+				const retryFetch = (async () => {
+					retryRequests++
+					return new Response(
+						'retry: 25\n\nid: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\nid: 2\nevent: session.archived\ndata: {"seq":2,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+
+				const makeLayer = (fetchFn: typeof globalThis.fetch) =>
+					Layer.mergeAll(
+						FetchHttpClient.layer.pipe(
+							Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
+						),
+						SecureRandom.layerWebCrypto,
+						ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: "ck_test" })),
+					)
+
+				const retryEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_retry", {
+							maxReconnectAttempts: 2,
+							baseReconnectDelayMs: 5,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(retryFetch)))
+
+				expect(retryRequests).toBe(1)
+				expect(Array.from(retryEvents).map((e) => e.seq)).toEqual([1, 2])
+
+				// 1b) Advertised retry: delay overrides baseReconnectDelayMs when a connection drops
+				let retryDropRequests = 0
+				const retryDropLastIds: Array<string | null> = []
+				const encoder = new TextEncoder()
+				const retryDropFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					retryDropRequests++
+					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					retryDropLastIds.push(headers.get("last-event-id"))
+					if (retryDropRequests === 1) {
+						let pullCount = 0
+						const body = new ReadableStream<Uint8Array>({
+							pull(controller) {
+								if (pullCount === 0) {
+									pullCount = 1
+									controller.enqueue(
+										encoder.encode(
+											'retry: 10\n\nid: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
+										),
+									)
+								} else {
+									controller.error(new Error("simulated disconnect"))
+								}
+							},
+						})
+						return new Response(body, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(
+						'id: 2\nevent: session.archived\ndata: {"seq":2,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+
+				const [retryDropDuration, retryDropEvents] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Stream.runCollect(
+							client.streamSessionEvents("sess_retry_drop", {
+								maxReconnectAttempts: 2,
+								baseReconnectDelayMs: 5000,
+							}),
+						)
+					}).pipe(Effect.provide(makeLayer(retryDropFetch))),
+				)
+				const retryDropElapsedMs = Duration.toMillis(retryDropDuration)
+
+				expect(retryDropRequests).toBe(2)
+				expect(retryDropLastIds).toEqual([null, "1"])
+				expect(Array.from(retryDropEvents).map((e) => e.seq)).toEqual([1, 2])
+				expect(retryDropElapsedMs).toBeLessThan(1500)
+
+				// 2) Keepalive and event frames with \r\n\r + \n split across chunk boundaries are treated as complete
+				let splitRequests = 0
+				const splitFetch = (async () => {
+					splitRequests++
+					if (splitRequests <= 8) {
+						const body = new ReadableStream<Uint8Array>({
+							start(controller) {
+								controller.enqueue(encoder.encode(": keepalive\r\n\r"))
+								controller.enqueue(encoder.encode("\n"))
+								controller.close()
+							},
+						})
+						return new Response(body, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					const body = new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(
+								encoder.encode(
+									'id: 1\r\nevent: session.archived\r\ndata: {"seq":1,"type":"session.archived"}\r\n\r',
+								),
+							)
+							controller.enqueue(encoder.encode("\n"))
+							controller.close()
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+
+				const splitEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_split", {
+							maxReconnectAttempts: 2,
+							baseReconnectDelayMs: 2,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(splitFetch)))
+
+				expect(splitRequests).toBe(9)
+				expect(Array.from(splitEvents).map((e) => e.seq)).toEqual([1])
+
+				// 3) Iterative reconnection over 50 consecutive rotations delivers all events cleanly in order
+				let rotSeq = 0
+				const rotFetch = (async () => {
+					rotSeq++
+					const type = rotSeq === 50 ? "session.archived" : "user.message"
+					return new Response(
+						`id: ${rotSeq}\nevent: ${type}\ndata: {"seq":${rotSeq},"type":"${type}"}\n\n`,
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+
+				const rotEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_rot", {
+							maxReconnectAttempts: 2,
+							baseReconnectDelayMs: 1,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(rotFetch)))
+
+				expect(rotSeq).toBe(50)
+				expect(Array.from(rotEvents).map((e) => e.seq)).toEqual(
+					Array.from({ length: 50 }, (_, idx) => idx + 1),
+				)
 			}),
 		)
 	})
