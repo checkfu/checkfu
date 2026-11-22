@@ -18,9 +18,12 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
+import * as References from "effect/References"
 import * as Scope from "effect/Scope"
-import { apiError, statusOf } from "../src/Http/Api.ts"
+import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
+import { toApiError } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableModelProvider.ts"
 import {
@@ -932,10 +935,38 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
-	it("maps every error envelope to its numeric HTTP status", () => {
+	it("maps every error envelope to its numeric HTTP status and rejects empty request IDs", () => {
+		const requestId = RequestId.make("req_test_status_map")
 		for (const status of [400, 401, 404, 409, 413, 415, 429, 500, 503] as const) {
-			expect(statusOf(apiError(status, "message"))).toBe(status)
+			const envelope = apiError(status, "message", requestId)
+			expect(statusOf(envelope)).toBe(status)
+			expect(envelope.request_id).toBe(requestId)
 		}
+		expect(() => RequestId.make("")).toThrow(/Schema validation failed/)
+		expect(
+			toApiError(
+				{ type: "error", error: { type: "conflict_error", message: "Conflict." } },
+				requestId,
+			),
+		).toEqual({
+			type: "error",
+			error: { type: "conflict_error", message: "Conflict." },
+			request_id: requestId,
+		})
+		expect(
+			toApiError(
+				{
+					type: "error",
+					error: { type: "conflict_error", message: "Conflict." },
+					request_id: "req_stale_other_request",
+				},
+				requestId,
+			),
+		).toEqual({
+			type: "error",
+			error: { type: "conflict_error", message: "Conflict." },
+			request_id: requestId,
+		})
 	})
 
 	it("routes stored resource IDs according to each resource's advertised ID schema", async () => {
@@ -1105,6 +1136,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const body = (yield* Effect.promise(() => res.json())) as {
 						type: string
 						error: { type: string; message: string }
+						request_id: string
 					}
 					expect(body).toEqual({
 						type: "error",
@@ -1112,6 +1144,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							type: "internal_error",
 							message: "Internal server error.",
 						},
+						request_id: res.headers.get(REQUEST_ID_HEADER),
 					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
@@ -1141,6 +1174,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							type: "not_found_error",
 							message: "Route GET // not found.",
 						},
+						request_id: doubleSlash.headers.get(REQUEST_ID_HEADER),
 					})
 
 					const authorityLike = yield* sendRequest(apiFetch, {
@@ -1155,6 +1189,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							type: "not_found_error",
 							message: "Route GET //evil.example/v1/unknown not found.",
 						},
+						request_id: authorityLike.headers.get(REQUEST_ID_HEADER),
 					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
@@ -1283,6 +1318,369 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(streamRes.headers.get("cache-control")).toContain("no-store")
 					yield* Effect.promise(() => streamRes.body?.cancel() ?? Promise.resolve())
 				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("returns a unique request-id header on every response, echoes it in error bodies and /openapi.json, and ignores caller-supplied IDs", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const realAgentViews = yield* AgentView
+					let failMode: "none" | "defect" | "error" = "none"
+					const flakyAgentViews = {
+						...realAgentViews,
+						get: (
+							ref: Parameters<typeof realAgentViews.get>[0],
+							options?: Parameters<typeof realAgentViews.get>[1],
+						) =>
+							failMode === "defect"
+								? Effect.die(new Error("simulated agent view crash"))
+								: failMode === "error"
+									? Effect.fail(new Error("simulated agent view failure") as unknown as never)
+									: realAgentViews.get(ref, options),
+					} as unknown as typeof realAgentViews
+
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(AgentView, flakyAgentViews),
+					)
+
+					const seenIds = new Set<string>()
+					const expectRequestId = (res: Response): string => {
+						const id = res.headers.get(REQUEST_ID_HEADER)
+						expect(id).toMatch(/^req_[0-9a-f]{24}$/)
+						expect(seenIds.has(id!)).toBe(false)
+						seenIds.add(id!)
+						return id!
+					}
+
+					const health1 = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/health",
+						headers: { [REQUEST_ID_HEADER]: "req_caller_supplied", "x-request-id": "req_caller_x" },
+					})
+					expect(health1.status).toBe(200)
+					const healthId1 = expectRequestId(health1)
+					expect(healthId1).not.toBe("req_caller_supplied")
+					expect(healthId1).not.toBe("req_caller_x")
+
+					const health2 = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
+					expect(health2.status).toBe(200)
+					expectRequestId(health2)
+
+					const openapi1 = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
+					expect(openapi1.status).toBe(200)
+					expectRequestId(openapi1)
+					const spec = (yield* Effect.promise(() => openapi1.json())) as {
+						paths: Record<
+							string,
+							Record<
+								string,
+								{
+									responses?: Record<
+										string,
+										{
+											content?: {
+												"application/json"?: {
+													schema?: {
+														properties?: Record<string, unknown>
+														required?: ReadonlyArray<string>
+													}
+												}
+											}
+										}
+									>
+								}
+							>
+						>
+					}
+					const agentGetResponses = spec.paths["/v1/agents/{agent_id}"]?.get?.responses
+					for (const status of ["400", "401", "404", "500"]) {
+						const errorSchema = agentGetResponses?.[status]?.content?.["application/json"]?.schema
+						expect(errorSchema?.properties).toHaveProperty("request_id")
+						expect(errorSchema?.required).toContain("request_id")
+					}
+
+					const openapi2 = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
+					expect(openapi2.status).toBe(200)
+					expectRequestId(openapi2)
+
+					const unauthedRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_missing",
+					})
+					expect(unauthedRes.status).toBe(401)
+					const unauthedId = expectRequestId(unauthedRes)
+					const unauthedBody = (yield* Effect.promise(() => unauthedRes.json())) as {
+						request_id: string
+					}
+					expect(unauthedBody.request_id).toBe(unauthedId)
+
+					const missingRouteRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/does-not-exist",
+						headers: AUTH_HEADERS,
+					})
+					expect(missingRouteRes.status).toBe(404)
+					const missingRouteId = expectRequestId(missingRouteRes)
+					const missingRouteBody = (yield* Effect.promise(() => missingRouteRes.json())) as {
+						request_id: string
+					}
+					expect(missingRouteBody.request_id).toBe(missingRouteId)
+
+					const missingAgentRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_missing",
+						headers: AUTH_HEADERS,
+					})
+					expect(missingAgentRes.status).toBe(404)
+					const missingAgentId = expectRequestId(missingAgentRes)
+					const missingAgentBody = (yield* Effect.promise(() => missingAgentRes.json())) as {
+						request_id: string
+					}
+					expect(missingAgentBody.request_id).toBe(missingAgentId)
+
+					const badMediaRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: { ...AUTH_HEADERS, "content-type": "text/plain" },
+						body: { name: "Agent", model: "gpt-4o-mini" },
+					})
+					expect(badMediaRes.status).toBe(415)
+					const badMediaId = expectRequestId(badMediaRes)
+					const badMediaBody = (yield* Effect.promise(() => badMediaRes.json())) as {
+						request_id: string
+					}
+					expect(badMediaBody.request_id).toBe(badMediaId)
+
+					failMode = "defect"
+					const defectRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_boom",
+						headers: AUTH_HEADERS,
+					})
+					expect(defectRes.status).toBe(500)
+					const defectId = expectRequestId(defectRes)
+					const defectBody = (yield* Effect.promise(() => defectRes.json())) as {
+						request_id: string
+					}
+					expect(defectBody.request_id).toBe(defectId)
+
+					failMode = "error"
+					const errorRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_boom",
+						headers: AUTH_HEADERS,
+					})
+					expect(errorRes.status).toBe(500)
+					const errorId = expectRequestId(errorRes)
+					const errorBody = (yield* Effect.promise(() => errorRes.json())) as {
+						request_id: string
+					}
+					expect(errorBody.request_id).toBe(errorId)
+					failMode = "none"
+
+					const session = yield* createIdleSession(apiFetch)
+					const streamRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream`,
+						headers: AUTH_HEADERS,
+					})
+					expect(streamRes.status).toBe(200)
+					expect(streamRes.headers.get("content-type")).toContain("text/event-stream")
+					expectRequestId(streamRes)
+					yield* Effect.promise(() => streamRes.body?.cancel() ?? Promise.resolve())
+
+					const archiveRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveRes.status).toBe(200)
+					expectRequestId(archiveRes)
+
+					const noContentRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream?after=999`,
+						headers: AUTH_HEADERS,
+					})
+					expect(noContentRes.status).toBe(204)
+					expectRequestId(noContentRes)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("attaches the request_id annotation to every log line emitted while handling a request", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		const logs: Array<{
+			readonly message: unknown
+			readonly annotations: Readonly<Record<string, unknown>>
+		}> = []
+		const captureLogger = Logger.layer([
+			Logger.make(({ message, fiber }) => {
+				logs.push({
+					message,
+					annotations: fiber.getRef(References.CurrentLogAnnotations),
+				})
+			}),
+		])
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const realAgentViews = yield* AgentView
+					let mode:
+						| "normal"
+						| "router-defect"
+						| "handler-error"
+						| "conflict-without-request-id"
+						| "conflict-with-stale-request-id"
+						| "read-after-commit-defect" = "normal"
+					const instrumentedAgentViews = {
+						...realAgentViews,
+						get: (
+							ref: Parameters<typeof realAgentViews.get>[0],
+							options?: Parameters<typeof realAgentViews.get>[1],
+						) => {
+							if (mode === "router-defect") return Effect.die(new Error("router defect"))
+							if (mode === "handler-error") {
+								return Effect.fail(new Error("handler error") as unknown as never)
+							}
+							if (mode === "conflict-without-request-id") {
+								return Effect.fail({
+									type: "error",
+									error: { type: "conflict_error", message: "Version conflict." },
+								} as unknown as never)
+							}
+							if (mode === "conflict-with-stale-request-id") {
+								return Effect.fail({
+									type: "error",
+									error: { type: "conflict_error", message: "Stale version conflict." },
+									request_id: "req_stale_other_request",
+								} as unknown as never)
+							}
+							if (mode === "read-after-commit-defect") {
+								return Effect.die(new Error("read after commit crash"))
+							}
+							return realAgentViews.get(ref, options)
+						},
+					} as unknown as typeof realAgentViews
+
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(AgentView, instrumentedAgentViews),
+						Effect.annotateLogs({ service: "checkfu-api", request_id: "req_build_stale" }),
+					)
+
+					mode = "router-defect"
+					logs.length = 0
+					const routerCrash = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_crash",
+						headers: AUTH_HEADERS,
+					})
+					expect(routerCrash.status).toBe(500)
+					const routerCrashId = routerCrash.headers.get(REQUEST_ID_HEADER)
+					expect(routerCrashId).toMatch(/^req_[0-9a-f]{24}$/)
+					expect(routerCrashId).not.toBe("req_build_stale")
+					expect(
+						logs.some((entry) => JSON.stringify(entry.message).includes("Unhandled API failure")),
+					).toBe(true)
+					expect(
+						logs.every(
+							(entry) =>
+								entry.annotations.request_id === routerCrashId &&
+								entry.annotations.service === "checkfu-api",
+						),
+					).toBe(true)
+
+					mode = "handler-error"
+					logs.length = 0
+					const handlerCrash = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_err",
+						headers: AUTH_HEADERS,
+					}).pipe(Effect.annotateLogs({ caller: "edge", request_id: "req_caller_stale" }))
+					expect(handlerCrash.status).toBe(500)
+					const handlerCrashId = handlerCrash.headers.get(REQUEST_ID_HEADER)
+					expect(handlerCrashId).toMatch(/^req_[0-9a-f]{24}$/)
+					expect(handlerCrashId).not.toBe(routerCrashId)
+					expect(handlerCrashId).not.toBe("req_caller_stale")
+					expect(
+						logs.some((entry) => JSON.stringify(entry.message).includes("Unhandled API failure")),
+					).toBe(true)
+					expect(
+						logs.every(
+							(entry) =>
+								entry.annotations.request_id === handlerCrashId &&
+								entry.annotations.service === "checkfu-api" &&
+								entry.annotations.caller === "edge",
+						),
+					).toBe(true)
+
+					mode = "conflict-without-request-id"
+					const conflictRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_conflict",
+						headers: AUTH_HEADERS,
+					})
+					expect(conflictRes.status).toBe(409)
+					const conflictId = conflictRes.headers.get(REQUEST_ID_HEADER)
+					expect(conflictId).toMatch(/^req_[0-9a-f]{24}$/)
+					expect(yield* Effect.promise(() => conflictRes.json())).toEqual({
+						type: "error",
+						error: { type: "conflict_error", message: "Version conflict." },
+						request_id: conflictId,
+					})
+
+					mode = "conflict-with-stale-request-id"
+					const staleConflictRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/agents/agent_conflict_stale",
+						headers: AUTH_HEADERS,
+					})
+					expect(staleConflictRes.status).toBe(409)
+					const staleConflictId = staleConflictRes.headers.get(REQUEST_ID_HEADER)
+					expect(staleConflictId).toMatch(/^req_[0-9a-f]{24}$/)
+					expect(staleConflictId).not.toBe("req_stale_other_request")
+					expect(yield* Effect.promise(() => staleConflictRes.json())).toEqual({
+						type: "error",
+						error: { type: "conflict_error", message: "Stale version conflict." },
+						request_id: staleConflictId,
+					})
+
+					mode = "read-after-commit-defect"
+					logs.length = 0
+					const pendingRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Pending Agent", model: "gpt-4o-mini" },
+					})
+					expect(pendingRes.status).toBe(202)
+					const pendingId = pendingRes.headers.get(REQUEST_ID_HEADER)
+					expect(pendingId).toMatch(/^req_[0-9a-f]{24}$/)
+					expect(
+						logs.some((entry) =>
+							JSON.stringify(entry.message).includes("Read after commit failed"),
+						),
+					).toBe(true)
+					expect(
+						logs.every(
+							(entry) =>
+								entry.annotations.request_id === pendingId &&
+								entry.annotations.service === "checkfu-api",
+						),
+					).toBe(true)
+				}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layer, captureLogger))),
 			)
 		} finally {
 			await closeAll()

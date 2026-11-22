@@ -11,6 +11,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as References from "effect/References"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
 import { optionalSecret } from "../Secrets.ts"
 import {
@@ -21,6 +22,7 @@ import {
 	EventBatchBodyLimit,
 	type HandlerError,
 	type HandlerErrorStatus,
+	RequestId,
 	RequestValidation,
 	apiError,
 	statusOf,
@@ -43,8 +45,18 @@ const ERROR_STATUS_OF_REJECTION: Readonly<Record<number, HandlerErrorStatus>> = 
 export const hasTag = (err: unknown, tag: string): boolean =>
 	typeof err === "object" && err !== null && "_tag" in err && err._tag === tag
 
-const isApiError = (err: unknown): err is HandlerError =>
-	typeof err === "object" && err !== null && "type" in err && err.type === "error" && "error" in err
+type ApiErrorLike = Omit<HandlerError, "request_id"> & { readonly request_id?: unknown }
+
+const isApiErrorLike = (err: unknown): err is ApiErrorLike =>
+	typeof err === "object" &&
+	err !== null &&
+	"type" in err &&
+	err.type === "error" &&
+	"error" in err &&
+	typeof err.error === "object" &&
+	err.error !== null &&
+	"type" in err.error &&
+	"message" in err.error
 
 const rejectionAnnotations = (
 	err: unknown,
@@ -56,8 +68,18 @@ const rejectionAnnotations = (
 			})
 		: undefined
 
-export const toApiError = (err: unknown): HandlerError => {
-	if (isApiError(err)) return err
+export const currentRequestId: Effect.Effect<RequestId> = Effect.flatMap(
+	References.CurrentLogAnnotations,
+	(annotations) =>
+		typeof annotations.request_id === "string" && annotations.request_id.length > 0
+			? Effect.succeed(RequestId.make(annotations.request_id))
+			: Effect.die(new Error("Missing request_id in log annotations.")),
+)
+
+export const toApiError = (err: unknown, request_id: RequestId): HandlerError => {
+	if (isApiErrorLike(err)) {
+		return { ...err, request_id: RequestId.make(request_id) } as HandlerError
+	}
 	const annotations = rejectionAnnotations(err)
 	const status =
 		typeof annotations?.httpApiStatus === "number"
@@ -67,16 +89,19 @@ export const toApiError = (err: unknown): HandlerError => {
 		return apiError(
 			status,
 			typeof annotations?.description === "string" ? annotations.description : "Request rejected.",
+			request_id,
 		)
 	}
 	if (hasTag(err, "ConsistencyTimeout") || hasTag(err, "WaitTimeout")) {
-		return apiError(503, "Timed out waiting for view consistency.")
+		return apiError(503, "Timed out waiting for view consistency.", request_id)
 	}
-	return apiError(500, "Internal server error.")
+	return apiError(500, "Internal server error.", request_id)
 }
 
 export const reject = <S extends ErrorStatus>(status: S, message: string) =>
-	Effect.fail(apiError(status, message))
+	Effect.flatMap(currentRequestId, (request_id) =>
+		Effect.fail(apiError(status, message, request_id)),
+	)
 
 export const present = <A, S extends HandlerErrorStatus>(
 	result: Option.Option<A | null>,
@@ -88,7 +113,7 @@ export const present = <A, S extends HandlerErrorStatus>(
 }
 
 const loggableFailure = (err: unknown): unknown => {
-	if (!isApiError(err)) return err
+	if (!isApiErrorLike(err)) return err
 	return {
 		error_type: err.error.type,
 		...(err.accepted === undefined ? {} : { accepted_count: err.accepted.length }),
@@ -101,15 +126,17 @@ export const handled = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, HandlerError, R> =>
 	effect.pipe(
-		Effect.catch((err) => {
-			const mapped = toApiError(err)
-			return statusOf(mapped) === 500
-				? Effect.andThen(
-						Effect.logError("Unhandled API failure", loggableFailure(err)),
-						Effect.fail(mapped),
-					)
-				: Effect.fail(mapped)
-		}),
+		Effect.catch((err) =>
+			Effect.flatMap(currentRequestId, (request_id) => {
+				const mapped = toApiError(err, request_id)
+				return statusOf(mapped) === 500
+					? Effect.andThen(
+							Effect.logError("Unhandled API failure", loggableFailure(err)),
+							Effect.fail(mapped),
+						)
+					: Effect.fail(mapped)
+			}),
+		),
 	)
 
 export interface Pending {
@@ -159,10 +186,12 @@ export const settled = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 			Effect.catchDefect((defect) =>
 				Effect.andThen(
 					Effect.logError("Command failed unexpectedly", defect),
-					Effect.fail<SettledFailure<E>>({
-						confirmed: false,
-						error: apiError(500, "Internal server error."),
-					}),
+					Effect.flatMap(currentRequestId, (request_id) =>
+						Effect.fail<SettledFailure<E>>({
+							confirmed: false,
+							error: apiError(500, "Internal server error.", request_id),
+						}),
+					),
 				),
 			),
 		),
