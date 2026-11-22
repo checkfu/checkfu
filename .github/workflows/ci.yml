@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TURBO_CACHE_DIR: .turbo/cache
+      TURBO_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - id: node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-
+
+      - run: bun run check
+
+      - name: Fail if the check changed any tracked file
+        run: git diff --exit-code
