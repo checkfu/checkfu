@@ -1,6 +1,12 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { EnvironmentConfig, NonEmptyString, PositiveInt } from "../EnvironmentTypes.ts"
+import {
+	EnvironmentConfig,
+	EnvironmentDescription,
+	EnvironmentName,
+	NonEmptyString,
+	PositiveInt,
+} from "../EnvironmentTypes.ts"
 import { EnvironmentId } from "./Environment.id.ts"
 
 export class EnvironmentCreated extends Domain.Event("environment.created", {
@@ -19,8 +25,8 @@ export class EnvironmentAlreadyExists extends Domain.Rejection(
 export class CreateEnvironment extends Domain.Command("CreateEnvironment", {
 	input: {
 		environment_id: EnvironmentId,
-		name: NonEmptyString,
-		description: Schema.NullOr(Schema.String),
+		name: EnvironmentName,
+		description: Schema.NullOr(EnvironmentDescription),
 		config: EnvironmentConfig,
 	},
 	events: [EnvironmentCreated],

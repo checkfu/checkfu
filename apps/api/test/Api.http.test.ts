@@ -23,7 +23,7 @@ import * as Option from "effect/Option"
 import * as References from "effect/References"
 import * as Scope from "effect/Scope"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
-import { toApiError } from "../src/Http/HttpHelpers.ts"
+import { MAX_AGENT_BODY_BYTES, toApiError } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableModelProvider.ts"
 import {
@@ -393,6 +393,17 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const provider = yield* ModelProvider
 
+					const hugeEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: {
+							name: "Huge Env",
+							description: "x".repeat(200_000),
+						},
+					})
+					expect(hugeEnvRes.status).toBe(413)
+
 					const hugeAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -400,7 +411,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						body: {
 							name: "Huge Agent",
 							model: "gpt-4o-mini",
-							system: "x".repeat(200_000),
+							system: "x".repeat(MAX_AGENT_BODY_BYTES + 1),
 						},
 					})
 					expect(hugeAgentRes.status).toBe(413)

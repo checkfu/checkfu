@@ -21,6 +21,7 @@ import { AgentsLive } from "./AgentsHandlers.ts"
 import { CheckfuApi, REQUEST_ID_HEADER, RequestId, apiError } from "./Api.ts"
 import { EnvironmentsLive } from "./EnvironmentsHandlers.ts"
 import {
+	AgentBodyLimitLive,
 	AuthenticationLive,
 	EventBatchBodyLimitLive,
 	MAX_REQUEST_BODY_BYTES,
@@ -61,7 +62,12 @@ const withCachePolicy = (path: string, response: HttpServerResponse.HttpServerRe
 
 const ApiLive = HttpApiBuilder.layer(CheckfuApi, { openapiPath: "/openapi.json" }).pipe(
 	Layer.provide([HealthLive, AgentsLive, EnvironmentsLive, SessionsLive]),
-	Layer.provide([AuthenticationLive, RequestValidationLive, EventBatchBodyLimitLive]),
+	Layer.provide([
+		AuthenticationLive,
+		RequestValidationLive,
+		AgentBodyLimitLive,
+		EventBatchBodyLimitLive,
+	]),
 	Layer.provide(HttpPlatform.layer),
 	Layer.provide([Etag.layerWeak, FileSystem.layerNoop({}), Path.layer]),
 )

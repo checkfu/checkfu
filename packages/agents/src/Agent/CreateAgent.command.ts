@@ -1,6 +1,13 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { AgentModel, NonEmptyString, PositiveInt } from "../AgentTypes.ts"
+import {
+	AgentDescription,
+	AgentModel,
+	AgentName,
+	AgentSystem,
+	NonEmptyString,
+	PositiveInt,
+} from "../AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionMinted } from "./AgentVersion.aggregate.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
@@ -25,10 +32,10 @@ export class CreateAgent extends Domain.Command("CreateAgent", {
 	input: {
 		agent_id: AgentId,
 		version_id: AgentVersionId,
-		name: NonEmptyString,
+		name: AgentName,
 		model: AgentModel,
-		system: Schema.NullOr(Schema.String),
-		description: Schema.NullOr(Schema.String),
+		system: Schema.NullOr(AgentSystem),
+		description: Schema.NullOr(AgentDescription),
 	},
 	events: [AgentCreated, AgentVersionMinted],
 	rejects: [AgentAlreadyExists, AgentVersionAlreadyExists],
