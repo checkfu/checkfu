@@ -33,6 +33,7 @@
 		"destroy": "alchemy destroy",
 		"typecheck": "turbo run typecheck && effect-tsgo tsc --noEmit -p tsconfig.stack.json",
 		"test": "turbo run test",
+		"test:workerd": "bun --cwd apps/api test:workerd",
 		"lint": "oxlint -c .oxlintrc.jsonc --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives .",
 		"format": "oxfmt .",
 		"format:check": "oxfmt --check .",

@@ -35,6 +35,7 @@ import {
 	PROVIDER_API_KEY_ENV,
 	createPiModels,
 	providerApiKeys,
+	providerBaseUrls,
 	resolveCatalogModel,
 } from "./PiModels.ts"
 import type { PiTurnOutcome } from "./PiRefusals.ts"
@@ -131,6 +132,58 @@ const HISTORY_UNAVAILABLE: ModelProviderError = {
 const normalizeHost = (host: string): string =>
 	host.endsWith(".") ? host.slice(0, -1).toLowerCase() : host.toLowerCase()
 
+const IPV6_LITERAL_INNER = /^[0-9a-fA-F:.]+$/
+
+const parseAllowedHostEntry = (
+	trimmed: string,
+): { readonly host: string; readonly port: string | null } | null => {
+	if (trimmed.length === 0 || trimmed.includes("/") || trimmed.includes("://")) return null
+	if (trimmed.startsWith("[")) {
+		const closeBracket = trimmed.indexOf("]")
+		if (closeBracket === -1) return null
+		const inner = trimmed.slice(1, closeBracket)
+		if (!inner.includes(":") || !IPV6_LITERAL_INNER.test(inner)) return null
+		const bracketedHost = trimmed.slice(0, closeBracket + 1)
+		const rest = trimmed.slice(closeBracket + 1)
+		let port: string | null = null
+		if (rest.length > 0) {
+			if (!rest.startsWith(":")) return null
+			port = rest.slice(1)
+			if (!/^\d+$/.test(port)) return null
+		}
+		try {
+			const parsed = new URL(`http://${bracketedHost}`)
+			if (
+				parsed.username.length > 0 ||
+				parsed.password.length > 0 ||
+				parsed.port.length > 0 ||
+				parsed.pathname !== "/" ||
+				parsed.search.length > 0 ||
+				parsed.hash.length > 0 ||
+				!parsed.hostname.startsWith("[") ||
+				!parsed.hostname.endsWith("]")
+			) {
+				return null
+			}
+			return { host: parsed.hostname.toLowerCase(), port }
+		} catch {
+			return null
+		}
+	}
+	if (trimmed.includes("[") || trimmed.includes("]")) return null
+	const colonIndex = trimmed.lastIndexOf(":")
+	let hostPattern = trimmed
+	let port: string | null = null
+	if (colonIndex !== -1) {
+		port = trimmed.slice(colonIndex + 1)
+		if (!/^\d+$/.test(port)) return null
+		hostPattern = trimmed.slice(0, colonIndex)
+		if (hostPattern.includes(":")) return null
+	}
+	const host = normalizeHost(hostPattern)
+	return host.length === 0 ? null : { host, port }
+}
+
 const isAllowedHost = (targetUrl: URL, allowedHosts: ReadonlyArray<string>): boolean => {
 	if (targetUrl.protocol !== "https:" && targetUrl.protocol !== "http:") return false
 	const targetHost = normalizeHost(targetUrl.hostname)
@@ -138,17 +191,10 @@ const isAllowedHost = (targetUrl: URL, allowedHosts: ReadonlyArray<string>): boo
 	const targetPort = targetUrl.port || (targetUrl.protocol === "https:" ? "443" : "80")
 
 	return allowedHosts.some((rawEntry) => {
-		const trimmed = rawEntry.trim()
-		if (trimmed.length === 0 || trimmed.includes("/") || trimmed.includes("://")) return false
-		const colonIndex = trimmed.lastIndexOf(":")
-		let hostPattern = trimmed
-		if (colonIndex !== -1) {
-			const port = trimmed.slice(colonIndex + 1)
-			if (!/^\d+$/.test(port) || port !== targetPort) return false
-			hostPattern = trimmed.slice(0, colonIndex)
-		}
-		const rule = normalizeHost(hostPattern)
-		if (rule.length === 0) return false
+		const parsed = parseAllowedHostEntry(rawEntry.trim())
+		if (parsed === null) return false
+		if (parsed.port !== null && parsed.port !== targetPort) return false
+		const rule = parsed.host
 		if (rule === targetHost) return true
 		if (rule.startsWith("*.")) {
 			const suffix = rule.slice(1)
@@ -170,7 +216,8 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 		const sessionViews = yield* SessionView
 		const executor = yield* PiTurnExecutor
 		const apiKeys = yield* providerApiKeys
-		const catalog = createPiModels(apiKeys)
+		const baseUrls = yield* providerBaseUrls
+		const catalog = createPiModels(apiKeys, baseUrls)
 
 		const enforceEnvironmentNetworking = Effect.fnUntraced(function* (
 			rawEnvironmentId: string,
