@@ -8,9 +8,17 @@
 			"packages/*"
 		],
 		"catalog": {
+			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d8128ecf06280fbd65b849e2275d598c1e1c656195747840cb59ec82edac4d85.tgz",
 			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/e85b3a6a00e28386e60e208e52f03d66b08cbfcd275db59b83ef83f8730df7f9.tgz",
+			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/370bac4b59419be26db7b46d7a15e7cd575b964388c39ac4416984aa4c950adf.tgz",
+			"@earendil-works/chord": "1.6.0",
+			"@earendil-works/pi-ai": "1.6.0",
+			"@earendil-works/pi-durable": "1.6.0",
+			"@earendil-works/pi-schema": "1.6.0",
+			"@effect/platform-bun": "4.1.5",
 			"@effect/platform-node": "4.1.5",
 			"@effect/vitest": "4.1.5",
+			"agents": "0.34.0",
 			"alchemy": "https://pkg.alchemy.run/alchemy/-/76bc7521b3b218d6de95626c9bed1e2107937587092c5c27c9afa41371225228.tgz",
 			"effect": "4.1.5",
 			"typescript": "7.0.2",
@@ -24,7 +32,17 @@
 		"lint": "oxlint -c .oxlintrc.jsonc --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives .",
 		"format": "oxfmt .",
 		"format:check": "oxfmt --check .",
-		"check": "bun run format:check && bun run lint && bun run typecheck && bun run test"
+		"check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
+		"persisted:cut": "bun apps/api/test/persisted/cut.ts"
+	},
+	"dependencies": {
+		"@alchemy.run/cloudflare": "catalog:",
+		"@alchemy.run/domain": "catalog:",
+		"@checkfu/api": "workspace:*",
+		"@distilled.cloud/cloudflare": "catalog:",
+		"@effect/platform-bun": "catalog:",
+		"alchemy": "catalog:",
+		"effect": "catalog:"
 	},
 	"devDependencies": {
 		"@effect/tsgo": "0.73.2",

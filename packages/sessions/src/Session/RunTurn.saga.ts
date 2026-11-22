@@ -61,6 +61,14 @@ export const GenerateOutcome = Schema.Union([
 	}),
 ])
 
+export const RUN_TURN_ACTIVITIES = {
+	startModelRequest: { name: "start-model-request", success: StepOutcome },
+	generateModelReply: { name: "generate-model-reply", success: GenerateOutcome },
+	interruptModelRequest: { name: "interrupt-model-request", success: StepOutcome },
+	failModelRequest: { name: "fail-model-request", success: StepOutcome },
+	commitModelReply: { name: "commit-model-reply", success: StepOutcome },
+} as const
+
 const PROCEED = { status: "proceed" as const }
 const ABORTED = { status: "aborted" as const }
 
@@ -89,8 +97,7 @@ export const RunTurnLive = RunTurn.toLayer(
 			const requestId = `${payload.key}:req:1`
 
 			const started = yield* Activity.make({
-				name: "start-model-request",
-				success: StepOutcome,
+				...RUN_TURN_ACTIVITIES.startModelRequest,
 				execute: sessions
 					.send(
 						new RecordModelRequestStart({
@@ -115,8 +122,7 @@ export const RunTurnLive = RunTurn.toLayer(
 			}
 
 			const generated = yield* Activity.make({
-				name: "generate-model-reply",
-				success: GenerateOutcome,
+				...RUN_TURN_ACTIVITIES.generateModelReply,
 				execute: provider
 					.generate({
 						session_id: payload.session_id,
@@ -169,8 +175,7 @@ export const RunTurnLive = RunTurn.toLayer(
 
 			if (!generated.ok && generated.interrupted) {
 				const interrupted = yield* Activity.make({
-					name: "interrupt-model-request",
-					success: StepOutcome,
+					...RUN_TURN_ACTIVITIES.interruptModelRequest,
 					execute: sessions
 						.send(
 							new InterruptModelRequest({
@@ -197,8 +202,7 @@ export const RunTurnLive = RunTurn.toLayer(
 
 			if (!generated.ok) {
 				const failed = yield* Activity.make({
-					name: "fail-model-request",
-					success: StepOutcome,
+					...RUN_TURN_ACTIVITIES.failModelRequest,
 					execute: sessions
 						.send(
 							new FailModelRequest({
@@ -227,8 +231,7 @@ export const RunTurnLive = RunTurn.toLayer(
 			}
 
 			const committed = yield* Activity.make({
-				name: "commit-model-reply",
-				success: StepOutcome,
+				...RUN_TURN_ACTIVITIES.commitModelReply,
 				execute: sessions
 					.send(
 						new CommitModelReply({

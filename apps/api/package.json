@@ -1,0 +1,35 @@
+{
+	"name": "@checkfu/api",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"@alchemy.run/cloudflare": "catalog:",
+		"@alchemy.run/domain": "catalog:",
+		"@checkfu/agents": "workspace:*",
+		"@checkfu/environments": "workspace:*",
+		"@checkfu/sessions": "workspace:*",
+		"@checkfu/snapshots": "workspace:*",
+		"@distilled.cloud/cloudflare": "catalog:",
+		"@earendil-works/chord": "catalog:",
+		"@earendil-works/pi-ai": "catalog:",
+		"@earendil-works/pi-durable": "catalog:",
+		"@earendil-works/pi-schema": "catalog:",
+		"agents": "catalog:",
+		"alchemy": "catalog:",
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@effect/vitest": "catalog:",
+		"vitest": "catalog:"
+	}
+}

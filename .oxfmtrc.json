@@ -2,5 +2,5 @@
 	"$schema": "./node_modules/oxfmt/configuration_schema.json",
 	"useTabs": true,
 	"semi": false,
-	"ignorePatterns": [".turbo", "node_modules", "bun.lock", "**/*.md"]
+	"ignorePatterns": [".turbo", "node_modules", "bun.lock", "**/*.md", "**/Persisted.lock.json"]
 }
