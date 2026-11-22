@@ -20,6 +20,7 @@ import {
 } from "../src/Pi/PiDurableEngine.ts"
 import { createNoRedirectProviderFetch, createPiModels } from "../src/Pi/PiModels.ts"
 import {
+	DEFAULT_REFUSAL_TEXT,
 	PROVIDER_FAILURE_MESSAGE,
 	classifyUnansweredCategory,
 	isProviderRefusalStopReason,
@@ -799,13 +800,13 @@ describe("turn engine", () => {
 
 		const expectedContext = [
 			{ role: "user", text: "disallowed request" },
-			{ role: "assistant", text: "Refused for safety reasons." },
+			{ role: "assistant", text: DEFAULT_REFUSAL_TEXT },
 			{ role: "user", text: "why did you refuse?" },
 		]
 		const expectedRefusal = {
 			ok: true,
 			reply: {
-				text: "Refused for safety reasons.",
+				text: DEFAULT_REFUSAL_TEXT,
 				stop_reason: { type: "refusal" },
 			},
 		}
@@ -941,7 +942,7 @@ describe("turn engine", () => {
 
 		const expectedContext = [
 			{ role: "user", text: "filtered prompt" },
-			{ role: "assistant", text: "Response incomplete: content_filter" },
+			{ role: "assistant", text: DEFAULT_REFUSAL_TEXT },
 			{ role: "user", text: "after filter" },
 		]
 
@@ -950,7 +951,7 @@ describe("turn engine", () => {
 			ok: true,
 			reply: {
 				thinking: null,
-				text: "Response incomplete: content_filter",
+				text: DEFAULT_REFUSAL_TEXT,
 				stop_reason: { type: "refusal" },
 			},
 		})

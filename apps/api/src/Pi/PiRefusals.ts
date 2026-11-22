@@ -26,7 +26,7 @@ export interface UnansweredSubmissionInfo {
 }
 
 export const PROVIDER_FAILURE_MESSAGE = "The model provider returned an error."
-const DEFAULT_REFUSAL_TEXT = "The model refused to complete the request."
+export const DEFAULT_REFUSAL_TEXT = "The model refused to complete the request."
 
 const ABORTED_ERROR: ModelProviderError = {
 	_tag: "ModelProviderError",
@@ -59,10 +59,17 @@ export const isProviderRefusalStopReason = (
 export const isRefusalAssistantMessage = (message: AssistantMessage): boolean =>
 	isProviderRefusalStopReason(message.api, message.provider, message.rawStopReason)
 
-const refusalFallbackText = (message: AssistantMessage): string =>
-	message.errorMessage !== undefined && message.errorMessage.trim().length > 0
-		? message.errorMessage.trim()
-		: DEFAULT_REFUSAL_TEXT
+const refusalFallbackText = (message: AssistantMessage): string => {
+	const detail = message.errorMessage?.trim()
+	if (detail !== undefined && detail.length > 0 && detail !== DEFAULT_REFUSAL_TEXT) {
+		console.warn("pi refusal fallback", {
+			provider: message.provider,
+			model: message.model,
+			rawStopReason: message.rawStopReason,
+		})
+	}
+	return DEFAULT_REFUSAL_TEXT
+}
 
 /**
  * Only completed OpenAI Responses `refusal` parts contain provider-authored
@@ -107,7 +114,7 @@ export const normalizeRefusalAssistantMessage = (message: AssistantMessage): Ass
  */
 export const rejectRefusalCompactions = <M extends Models>(models: M): M => {
 	const rejectRefusal = (message: AssistantMessage): AssistantMessage =>
-		isRefusalAssistantMessage(message) && message.stopReason !== "error"
+		isRefusalAssistantMessage(message) && message.stopReason !== "aborted"
 			? {
 					...message,
 					stopReason: "error",
