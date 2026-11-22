@@ -1,5 +1,6 @@
 import { statusOf } from "@checkfu/api/Http/Api"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
+import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
@@ -173,15 +174,78 @@ const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId
 		}
 	})
 
+const splitBoundedLines = (
+	stdin: Stdio.Stdio["stdin"],
+	maxLineChars: number,
+): Stream.Stream<string, CliFailure> =>
+	Stream.suspend(() => {
+		let pending = ""
+		let discardLeadingLf = false
+		const lineTooLongError = () =>
+			usageError(`Input line exceeds maximum message length of ${maxLineChars} characters.`)
+
+		const processChunk = (chunk: string): Effect.Effect<ReadonlyArray<string>, CliFailure> =>
+			Effect.suspend(() => {
+				const lines: Array<string> = []
+				let pos = 0
+				const len = chunk.length
+				while (pos < len) {
+					if (discardLeadingLf) {
+						discardLeadingLf = false
+						if (chunk.charCodeAt(pos) === 10) {
+							pos += 1
+							continue
+						}
+					}
+					let lineEnd = pos
+					while (lineEnd < len) {
+						const code = chunk.charCodeAt(lineEnd)
+						if (code === 13 || code === 10) break
+						lineEnd += 1
+					}
+					const segLen = lineEnd - pos
+					if (pending.length + segLen > maxLineChars) {
+						return Effect.fail(lineTooLongError())
+					}
+					if (lineEnd === len) {
+						pending += chunk.slice(pos)
+						break
+					}
+					discardLeadingLf = chunk.charCodeAt(lineEnd) === 13
+					lines.push(
+						pending.length > 0 ? pending + chunk.slice(pos, lineEnd) : chunk.slice(pos, lineEnd),
+					)
+					pending = ""
+					pos = lineEnd + 1
+				}
+				return Effect.succeed(lines)
+			})
+
+		const body = stdin.pipe(
+			Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
+			Stream.decodeText(),
+			Stream.mapEffect(processChunk),
+			Stream.flatMap((batch) => (batch.length > 0 ? Stream.fromIterable(batch) : Stream.empty)),
+		)
+
+		const flushTrailing = Stream.unwrap(
+			Effect.sync(() => {
+				if (pending.length === 0) return Stream.empty
+				const last = pending
+				pending = ""
+				return Stream.make(last)
+			}),
+		)
+
+		return Stream.concat(body, flushTrailing)
+	})
+
 const findFirstSendablePipedLine = (
 	stdio: Stdio.Stdio,
 ): Effect.Effect<Option.Option<string>, CliFailure> =>
 	Effect.gen(function* () {
 		let firstSendable: Option.Option<string> = Option.none()
-		yield* stdio.stdin.pipe(
-			Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
-			Stream.decodeText(),
-			Stream.splitLines,
+		yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH).pipe(
 			Stream.takeUntil((line) => {
 				const trimmed = line.trim()
 				return trimmed.length > 0
@@ -396,7 +460,10 @@ const dispatchUserLine = (
 	sessionId: SessionId,
 	line: string,
 	stateRef: Ref.Ref<ConnectState>,
-	options?: { readonly failOnInterruptError?: boolean },
+	options?: {
+		readonly failOnInterruptError?: boolean
+		readonly onInterruptedSend?: (failure: CliFailure) => Effect.Effect<void>
+	},
 ): Effect.Effect<"continue" | "exit", CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const trimmed = line.trim()
@@ -413,6 +480,16 @@ const dispatchUserLine = (
 						payload: { events: [{ type: "user.interrupt" }] },
 					}),
 					key,
+				).pipe(
+					Effect.onInterrupt(() => {
+						const msg = `Interrupted while sending /interrupt (delivery unconfirmed; retry safely with Idempotency-Key: ${key}).`
+						return Effect.all([
+							writeStderrLine(msg).pipe(Effect.ignore),
+							options?.onInterruptedSend !== undefined
+								? options.onInterruptedSend(networkFailure(msg))
+								: Effect.void,
+						])
+					}),
 				),
 			)
 			if (res._tag === "Failure") {
@@ -459,6 +536,20 @@ const dispatchUserLine = (
 					},
 				}),
 				key,
+			).pipe(
+				Effect.onInterrupt(() => {
+					const msg = `Interrupted while sending message (delivery unconfirmed; retry safely with Idempotency-Key: ${key}).`
+					return Effect.all([
+						Ref.update(stateRef, (state) => ({
+							...state,
+							localSentMessages: state.localSentMessages.filter((entry) => entry.id !== key),
+						})),
+						writeStderrLine(msg).pipe(Effect.ignore),
+						options?.onInterruptedSend !== undefined
+							? options.onInterruptedSend(networkFailure(msg))
+							: Effect.void,
+					])
+				}),
 			),
 		)
 		if (res._tag === "Failure") {
@@ -738,6 +829,18 @@ export const sessionsConnectCommand = Command.make(
 				return yield* usageError("--after must be a non-negative integer.")
 			}
 
+			if (
+				rawSessionId.length === 0 ||
+				rawSessionId === "." ||
+				rawSessionId === ".." ||
+				rawSessionId.includes("/") ||
+				rawSessionId.includes("\\")
+			) {
+				return yield* usageError(
+					'Invalid --session-id: must be a single non-empty path segment (not "." or "..").',
+				)
+			}
+
 			const sessionId = yield* decodePayload(SessionId, rawSessionId, "--session-id")
 			const root = yield* RootCommand
 			const stdio = yield* Stdio.Stdio
@@ -950,15 +1053,11 @@ export const sessionsConnectCommand = Command.make(
 				}
 
 				let explicitExit = false
-				yield* stdio.stdin.pipe(
-					Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
-					Stream.decodeText(),
-					Stream.splitLines,
+				const pipedInputEffect = splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH).pipe(
 					Stream.takeUntil((line) => {
 						const trimmed = line.trim()
 						return trimmed === "/exit" || trimmed === "/quit"
 					}),
-					Stream.interruptWhen(Deferred.await(stopConnectDeferred)),
 					Stream.runForEach((line) =>
 						Effect.gen(function* () {
 							if (explicitExit) return
@@ -978,6 +1077,7 @@ export const sessionsConnectCommand = Command.make(
 							yield* Ref.set(settleDeferredRef, nextDeferred)
 							const action = yield* dispatchUserLine(client, sessionId, line, stateRef, {
 								failOnInterruptError: true,
+								onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
 							})
 							if (action === "exit") {
 								explicitExit = true
@@ -985,6 +1085,7 @@ export const sessionsConnectCommand = Command.make(
 						}),
 					),
 				)
+				yield* Effect.raceFirst(pipedInputEffect, Deferred.await(stopConnectDeferred))
 
 				if (!explicitExit) {
 					while (true) {

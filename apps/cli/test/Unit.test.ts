@@ -594,6 +594,40 @@ describe("normalizeApiUrl", () => {
 				}).pipe(Effect.provide(makeLayer(openAfterArchiveFetch)))
 				expect(Array.from(archivedImmediate).map((e) => e.seq)).toEqual([1])
 				expect(openBodyCanceled).toBe(true)
+
+				// 9) Explicitly empty SSE id: clears the reconnect cursor instead of keeping prior id or JSON seq
+				const resetLastIds: Array<string | null> = []
+				const resetIdFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					resetLastIds.push(headers.get("last-event-id"))
+					if (resetLastIds.length === 1) {
+						return new Response(
+							'id: cur_1\nevent: custom.ping\ndata: {"seq":1}\n\nid:\nevent: custom.ping\ndata: {"seq":2}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const resetEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamEndpointEvents(
+							{
+								method: "GET",
+								path: "/v1/custom/reset/stream",
+								query: { after: "0" },
+								initialCursor: "0",
+								cursorQueryParam: "after",
+							},
+							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(resetIdFetch)))
+				expect(Array.from(resetEvents).map((e) => e.seq)).toEqual([1, 2])
+				expect(resetLastIds).toEqual([null, null])
 			}),
 		)
 	})

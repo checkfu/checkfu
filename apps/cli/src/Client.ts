@@ -423,7 +423,9 @@ export const makeCheckfuClient = (
 									Effect.gen(function* () {
 										const data = yield* parseSseData(sseEvent.data)
 										const seq = parseSeq(sseEvent.id, data)
-										if (sseEvent.id !== undefined && sseEvent.id.length > 0) {
+										if (sseEvent.id === "") {
+											loopState.cursor = undefined
+										} else if (sseEvent.id !== undefined) {
 											loopState.cursor = sseEvent.id
 										} else if (seq !== undefined) {
 											loopState.cursor = String(seq)
@@ -524,6 +526,19 @@ export const makeCheckfuClient = (
 			sessionId: string,
 			options?: StreamSessionEventsOptions,
 		): Stream.Stream<SessionStreamEvent, CliFailure> => {
+			if (
+				sessionId.length === 0 ||
+				sessionId === "." ||
+				sessionId === ".." ||
+				sessionId.includes("/") ||
+				sessionId.includes("\\")
+			) {
+				return Stream.fail(
+					usageError(
+						'Invalid --session-id: must be a single non-empty path segment (not "." or "..").',
+					),
+				)
+			}
 			if (options?.after !== undefined && (!Number.isInteger(options.after) || options.after < 0)) {
 				return Stream.fail(usageError("--after must be a non-negative integer."))
 			}

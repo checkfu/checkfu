@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process"
+import * as Http from "node:http"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -1722,5 +1725,224 @@ describe("CLI sessions:events and sessions connect", () => {
 				}),
 			),
 		)
+	})
+
+	it("reports idempotency keys on interrupted sends, bounds oversized piped lines while streaming, and exits a real Bun subprocess on /exit with open stdin", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Interrupted piped send (e.g. session archived mid-POST) prints the generated
+					//    Idempotency-Key to stderr and exits non-zero
+					const intCli = yield* makeTestServer()
+					const intSessionId = yield* createReadySession(intCli)
+					const postInFlight = yield* Deferred.make<void>()
+					let interruptedKey = ""
+					const archiverFiber = yield* Deferred.await(postInFlight).pipe(
+						Effect.andThen(intCli.run(["sessions", "archive", "--session-id", intSessionId])),
+						Effect.forkChild,
+					)
+					const intRes = yield* intCli.run(["sessions", "connect", "--session-id", intSessionId], {
+						stdin: "in flight message\n",
+						interceptFetch: async (next, request) => {
+							if (request.method === "POST" && request.url.endsWith("/events")) {
+								interruptedKey = request.headers.get("idempotency-key") ?? ""
+								await Effect.runPromise(Deferred.succeed(postInFlight, undefined))
+								return await new Promise<Response>((_resolve, reject) => {
+									const abort = () => reject(new DOMException("Aborted", "AbortError"))
+									if (request.signal.aborted) {
+										abort()
+										return
+									}
+									request.signal.addEventListener("abort", abort, { once: true })
+								})
+							}
+							return next(request)
+						},
+					})
+					yield* Fiber.await(archiverFiber)
+					expect(intRes.exitCode).toBe(1)
+					expect(interruptedKey).toMatch(/^cli_[0-9a-f]{24}$/)
+					expect(intRes.stderr).toContain(`Idempotency-Key: ${interruptedKey}`)
+
+					// 2) Oversized single-line piped input is rejected while streaming chunks (never buffered
+					//    until EOF), for both active and ended sessions
+					const encoder = new TextEncoder()
+					const chunk1k = encoder.encode("a".repeat(1024))
+					let activeChunksPulled = 0
+					const hugeActiveStdin = Stream.unfold(0, (count) =>
+						Effect.sync(() => {
+							activeChunksPulled++
+							return [chunk1k, count + 1] as const
+						}),
+					)
+					const activeSessId = yield* createReadySession(intCli)
+					const hugeActiveRes = yield* intCli.run(
+						["sessions", "connect", "--session-id", activeSessId],
+						{ stdin: hugeActiveStdin },
+					)
+					expect(hugeActiveRes.exitCode).toBe(1)
+					expect(hugeActiveRes.stderr).toContain("exceeds maximum message length")
+					expect(activeChunksPulled).toBeLessThanOrEqual(20)
+
+					let endedChunksPulled = 0
+					const hugeEndedStdin = Stream.unfold(0, (count) =>
+						Effect.sync(() => {
+							endedChunksPulled++
+							return [chunk1k, count + 1] as const
+						}),
+					)
+					const hugeEndedRes = yield* intCli.run(
+						["sessions", "connect", "--session-id", intSessionId],
+						{ stdin: hugeEndedStdin },
+					)
+					expect(hugeEndedRes.exitCode).toBe(1)
+					expect(hugeEndedRes.stderr).toContain("exceeds maximum message length")
+					expect(endedChunksPulled).toBeLessThanOrEqual(20)
+				}),
+			),
+		)
+
+		// 3) Real Bun subprocess running src/main.ts exits cleanly with code 0 on /exit\n even
+		//    while the parent keeps stdin open, and reports path-segment errors on stderr
+		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
+		const openSseResponses: Array<Http.ServerResponse> = []
+		const server = Http.createServer((req, res) => {
+			const url = new URL(req.url ?? "/", "http://127.0.0.1")
+			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_subproc") {
+				res.writeHead(200, { "content-type": "application/json" })
+				res.end(
+					JSON.stringify({
+						id: "sess_subproc",
+						type: "session",
+						status: "idle",
+						agent: { id: "agent_1", version: 1 },
+						environment_id: "env_1",
+						title: null,
+						turn: 0,
+						usage: { input_tokens: 0, output_tokens: 0 },
+						created_at: "2026-11-22T00:00:00.000Z",
+						updated_at: "2026-11-22T00:00:00.000Z",
+						archived_at: null,
+					}),
+				)
+				return
+			}
+			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_subproc/events") {
+				res.writeHead(200, { "content-type": "application/json" })
+				res.end(JSON.stringify({ data: [], has_more: false, next_cursor: null }))
+				return
+			}
+			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_subproc/events/stream") {
+				res.writeHead(200, {
+					"content-type": "text/event-stream; charset=utf-8",
+					"cache-control": "no-cache",
+				})
+				res.write(": keepalive\n\n")
+				openSseResponses.push(res)
+				return
+			}
+			res.writeHead(404, { "content-type": "application/json" })
+			res.end(
+				JSON.stringify({
+					type: "error",
+					error: { type: "not_found_error", message: "not found" },
+					request_id: "req_subproc",
+				}),
+			)
+		})
+
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+		try {
+			const addr = server.address()
+			const port = typeof addr === "object" && addr !== null ? addr.port : 0
+
+			const exitCode = await new Promise<number | null>((resolve, reject) => {
+				const child = spawn(
+					"bun",
+					[
+						mainPath,
+						"sessions",
+						"connect",
+						"--session-id",
+						"sess_subproc",
+						"--base-url",
+						`http://127.0.0.1:${port}`,
+					],
+					{
+						env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+						stdio: ["pipe", "pipe", "pipe"],
+					},
+				)
+				let stderr = ""
+				let sentExit = false
+				const timer = setTimeout(() => {
+					child.kill("SIGKILL")
+					reject(new Error(`Subprocess hung with open stdin. stderr=${stderr}`))
+				}, 3000)
+
+				child.stderr.setEncoding("utf8")
+				child.stderr.on("data", (chunk: string) => {
+					stderr += chunk
+					if (!sentExit && stderr.includes("Connected to sess_subproc")) {
+						sentExit = true
+						// Write /exit\n WITHOUT closing child.stdin!
+						child.stdin.write("/exit\n")
+					}
+				})
+				child.on("error", (err) => {
+					clearTimeout(timer)
+					reject(err)
+				})
+				child.on("close", (code) => {
+					clearTimeout(timer)
+					child.stdin.end()
+					resolve(code)
+				})
+			})
+			expect(exitCode).toBe(0)
+
+			const badDotSubproc = await new Promise<{
+				readonly code: number | null
+				readonly stdout: string
+				readonly stderr: string
+			}>((resolve, reject) => {
+				const child = spawn(
+					"bun",
+					[
+						mainPath,
+						"agents",
+						"retrieve",
+						"--agent-id",
+						"..",
+						"--base-url",
+						`http://127.0.0.1:${port}`,
+					],
+					{
+						env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+						stdio: ["ignore", "pipe", "pipe"],
+					},
+				)
+				let stdout = ""
+				let stderr = ""
+				child.stdout.setEncoding("utf8")
+				child.stdout.on("data", (c: string) => {
+					stdout += c
+				})
+				child.stderr.setEncoding("utf8")
+				child.stderr.on("data", (c: string) => {
+					stderr += c
+				})
+				child.on("error", reject)
+				child.on("close", (code) => resolve({ code, stdout, stderr }))
+			})
+			expect(badDotSubproc.code).toBe(1)
+			expect(badDotSubproc.stdout).toBe("")
+			expect(badDotSubproc.stderr).toContain("Invalid --agent-id")
+		} finally {
+			for (const res of openSseResponses) {
+				res.end()
+			}
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+		}
 	})
 })

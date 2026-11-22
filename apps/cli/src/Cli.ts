@@ -98,5 +98,21 @@ export const runCli = (
 				return yield* error
 			}),
 		),
+		Effect.catchDefect((defect) =>
+			Effect.gen(function* () {
+				const detail =
+					defect instanceof Error
+						? defect.message
+						: typeof defect === "string"
+							? defect
+							: String(defect)
+				const failure = new CliFailure({
+					message: `Unexpected error: ${detail}`,
+					exitCode: 1,
+				})
+				yield* writeStderrLine(`Error: ${failure.message}`)
+				return yield* failure
+			}),
+		),
 	)
 }

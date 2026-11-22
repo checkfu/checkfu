@@ -75,6 +75,21 @@ const lookupEndpoint = (
 	return Effect.succeed(endpoint)
 }
 
+const validatePathSegment = (value: string, label: string): Effect.Effect<string, CliFailure> => {
+	if (
+		value.length === 0 ||
+		value === "." ||
+		value === ".." ||
+		value.includes("/") ||
+		value.includes("\\")
+	) {
+		return Effect.fail(
+			usageError(`Invalid ${label}: must be a single non-empty path segment (not "." or "..").`),
+		)
+	}
+	return Effect.succeed(value)
+}
+
 const decodeWithTop = (
 	schema: Schema.Top,
 	raw: unknown,
@@ -194,7 +209,7 @@ const collectRequestParts = (
 			}
 
 			if (fl.location === "path") {
-				params[fl.wireName] = value
+				params[fl.wireName] = yield* validatePathSegment(String(value), `--${fl.flagName}`)
 				continue
 			}
 			if (fl.location === "query") {
@@ -314,17 +329,28 @@ const resolveEndpointPath = (
 	label: string,
 ): Effect.Effect<string, CliFailure> =>
 	Effect.gen(function* () {
-		let invalidParam: string | undefined
+		let invalidReason: string | undefined
 		const resolved = template.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
 			const value = params[name]
 			if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-				invalidParam = name
+				invalidReason = `Missing required path parameter "${name}" for ${label}.`
 				return ""
 			}
-			return encodeURIComponent(String(value))
+			const str = String(value)
+			if (
+				str.length === 0 ||
+				str === "." ||
+				str === ".." ||
+				str.includes("/") ||
+				str.includes("\\")
+			) {
+				invalidReason = `Invalid path parameter "${name}" for ${label}: must be a single non-empty path segment (not "." or "..").`
+				return ""
+			}
+			return encodeURIComponent(str)
 		})
-		if (invalidParam !== undefined) {
-			return yield* usageError(`Missing required path parameter "${invalidParam}" for ${label}.`)
+		if (invalidReason !== undefined) {
+			return yield* usageError(invalidReason)
 		}
 		return resolved
 	})

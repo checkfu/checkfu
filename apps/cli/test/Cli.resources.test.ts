@@ -79,6 +79,19 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(blankUrl.exitCode).toBe(1)
 					expect(blankUrl.stdout).toBe("")
 					expect(blankUrl.stderr).toContain("API base URL must not be empty")
+
+					// Dot-segment or slash path parameters fail cleanly as usage errors on stderr
+					for (const badId of [".", "..", "foo/bar"]) {
+						const badAgentPath = yield* cli.run(["agents", "retrieve", "--agent-id", badId])
+						expect(badAgentPath.exitCode).toBe(1)
+						expect(badAgentPath.stdout).toBe("")
+						expect(badAgentPath.stderr).toContain("Invalid --agent-id")
+
+						const badSessionPath = yield* cli.run(["sessions", "connect", "--session-id", badId])
+						expect(badSessionPath.exitCode).toBe(1)
+						expect(badSessionPath.stdout).toBe("")
+						expect(badSessionPath.stderr).toContain("Invalid --session-id")
+					}
 				}),
 			),
 		)
