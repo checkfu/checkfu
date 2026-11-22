@@ -1,13 +1,20 @@
 import { readFileSync } from "node:fs"
 import { AgentState } from "@checkfu/agents/Agent/Agent.aggregate"
 import { AbandonTurn } from "@checkfu/sessions/Session/AbandonTurn.command"
-import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { RUN_TURN_ACTIVITIES, RunTurn } from "@checkfu/sessions/Session/RunTurn.saga"
 import { UserMessage } from "@checkfu/sessions/Session/SendUserMessage.command"
+import { NonNegativeInt } from "@checkfu/sessions/Session/SessionTypes"
 import { TurnInputState } from "@checkfu/sessions/Session/TurnInput.view"
+import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
+import type { DocumentId } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import { createPiModels } from "../src/Pi/PiModels.ts"
+import { CHECKFU_PI_DOCS, SettledUsage, SettledUsageState } from "../src/Pi/PiTurnUsage.ts"
+import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import {
 	LOCK_FILE_URL,
 	type PersistedLock,
@@ -22,6 +29,8 @@ import {
 import {
 	type PersistedShape,
 	persistedShapes,
+	piDocPersistedSchema,
+	piDocShapeId,
 	policyDeliveryShapeId,
 	registryProblems,
 	viewShapeId,
@@ -64,10 +73,21 @@ const lockWith = (
 })
 
 describe("persisted shapes", () => {
-	it("finds every event, state, view and saga shape the hosted models declare", () => {
+	it("finds every event, state, view, saga, and Pi document shape the hosted models declare", () => {
 		expect(registryProblems()).toEqual([])
-		expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(4)
-		expect(persistedShapes.map((shape) => shape.id)).toContain("saga-input:Sessions.RunTurn")
+		expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(5)
+		expect(persistedShapes.map((shape) => shape.id)).toEqual(
+			expect.arrayContaining([
+				"saga-input:Checkfu.RunTurn",
+				"command-reply:Checkfu/AdmitSession",
+				"state:Checkfu.EventBatch",
+				"event:Checkfu.EventBatch/event_batch.claimed",
+				"command-reply:Checkfu/ClaimEventBatch",
+				"pi-doc:checkfu.active-usage",
+				"pi-doc:checkfu.settled-usage",
+				"pi-doc:checkfu.seed-state",
+			]),
+		)
 	})
 
 	it("writes every shape in a JSON form the same code reads back", () =>
@@ -141,7 +161,7 @@ describe("persisted shape lock", () => {
 	it("fails a saga input that gains a required field or breaks __cause, and passes an optional one", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const id = "saga-input:Sessions.RunTurn"
+				const id = "saga-input:Checkfu.RunTurn"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
 				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
 				const payloadFields = (
@@ -207,7 +227,7 @@ describe("persisted shape lock", () => {
 	it("blocks a release that cannot deliver an already-armed turn deadline", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const id = "scheduled-command:Sessions.Session/AbandonTurn"
+				const id = "scheduled-command:Checkfu.Session/AbandonTurn"
 				// The Durable Object stores this JSON as the alarm job's command.
 				const lock = lockWith({
 					[id]: [
@@ -238,9 +258,9 @@ describe("persisted shape lock", () => {
 	it("blocks unreadable receipt replies from aggregates and decisions, including previously empty replies", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const sessionReply = "command-reply:Sessions/SendUserMessage"
-				const agentReply = "command-reply:Agents/CreateAgent"
-				const emptyReply = "command-reply:Sessions/SendUserInterrupt"
+				const sessionReply = "command-reply:Checkfu/SendUserMessage"
+				const agentReply = "command-reply:Checkfu/CreateAgent"
+				const emptyReply = "command-reply:Checkfu/SendUserInterrupt"
 				const shipped = lockWith({
 					[sessionReply]: [{ turn: 1 }],
 					[agentReply]: [{ version: 1, version_id: "aver_001_1" }],
@@ -266,7 +286,7 @@ describe("persisted shape lock", () => {
 	it("rehearses adding a field to a shipped event", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const id = "event:Sessions.Session/user.message"
+				const id = "event:Checkfu.Session/user.message"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
 				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
 
@@ -295,7 +315,7 @@ describe("persisted shape lock", () => {
 	it("rehearses changing a shipped aggregate state with a migration step", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const id = "state:Agents.Agent"
+				const id = "state:Checkfu.Agent"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
 				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
 				const AgentStateV2 = Schema.Struct({ ...AgentState.fields, tier: Schema.String })
@@ -345,10 +365,10 @@ describe("persisted shape lock", () => {
 	it("lets a view change shape only when its version increased", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const id = "view:Sessions.TurnInput@v1"
+				const id = "view:Checkfu.TurnInput@v1"
 				expect(persistedShapes.map((shape) => shape.id)).toContain(id)
-				const earlier = viewShapeId("Sessions", "TurnInput", 0)
-				const later = viewShapeId("Sessions", "TurnInput", 2)
+				const earlier = viewShapeId("Checkfu", "TurnInput", 0)
+				const later = viewShapeId("Checkfu", "TurnInput", 2)
 
 				expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
 
@@ -382,9 +402,9 @@ describe("persisted shape lock", () => {
 	it("blocks a view version bump whose new state breaks queued policy deliveries", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const viewId = "view:Sessions.TurnInput@v1"
-				const startDeliveryId = policyDeliveryShapeId("Sessions", "StartTurn", "TurnInput")
-				const stopDeliveryId = policyDeliveryShapeId("Sessions", "StopModelRequest", "TurnInput")
+				const viewId = "view:Checkfu.TurnInput@v1"
+				const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
+				const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([viewId, startDeliveryId, stopDeliveryId]),
 				)
@@ -397,7 +417,7 @@ describe("persisted shape lock", () => {
 						if (shape.id === viewId) {
 							return {
 								...shape,
-								id: viewShapeId("Sessions", "TurnInput", 2),
+								id: viewShapeId("Checkfu", "TurnInput", 2),
 								schema: nextState as unknown as PersistedShape["schema"],
 							}
 						}
@@ -447,12 +467,12 @@ describe("persisted shape lock", () => {
 				expect(yield* lockProblems(reviewedLock, compatible)).toEqual([])
 
 				// A view with no policy consumers can still break shape freely on a version bump.
-				const agentViewId = viewShapeId("Agents", "AgentView", 0)
+				const agentViewId = viewShapeId("Checkfu", "AgentView", 0)
 				const upgradedAgentView = persistedShapes.map((shape) =>
 					shape.id === agentViewId
 						? {
 								...shape,
-								id: viewShapeId("Agents", "AgentView", 1),
+								id: viewShapeId("Checkfu", "AgentView", 1),
 								schema: Schema.NullOr(
 									Schema.Struct({ rebuilt_v1: Schema.String }),
 								) as unknown as PersistedShape["schema"],
@@ -468,28 +488,15 @@ describe("persisted shape lock", () => {
 			.filter((shape) => shape.kind === "saga-step")
 			.map((shape) => shape.id)
 		const declared = Object.values(RUN_TURN_ACTIVITIES).map(
-			(activity) => `saga-step:Sessions.RunTurn/${activity.name}`,
+			(activity) => `saga-step:Checkfu.RunTurn/${activity.name}`,
 		)
 		expect(steps.toSorted()).toEqual(declared.toSorted())
-
-		// Guard against adding or renaming an Activity.make call in RunTurn without RUN_TURN_ACTIVITIES.
-		const runTurnSource = readFileSync(
-			new URL("../../../packages/sessions/src/Session/RunTurn.saga.ts", import.meta.url),
-			"utf8",
-		)
-		const activityCalls = [...runTurnSource.matchAll(/Activity\.make\(\{([\s\S]*?)\}\)/g)]
-		expect(activityCalls.length).toBe(Object.keys(RUN_TURN_ACTIVITIES).length)
-		const referencedKeys = activityCalls.flatMap((match) => {
-			const ref = /\.\.\.RUN_TURN_ACTIVITIES\.([A-Za-z0-9_]+)/.exec(match[1] ?? "")
-			return ref?.[1] === undefined ? [] : [ref[1]]
-		})
-		expect(referencedKeys.toSorted()).toEqual(Object.keys(RUN_TURN_ACTIVITIES).toSorted())
 	})
 
 	it("locks a saga's completed result", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const id = "saga-result:Sessions.RunTurn"
+				const id = "saga-result:Checkfu.RunTurn"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
 				const changed = persistedShapes.map((shape) =>
 					shape.id === id
@@ -558,6 +565,663 @@ describe("persisted shape lock", () => {
 				expect(blockers.length).toBe(1)
 				expect(blockers[0]).toContain(shape.id)
 				expect(blockers[0]).toContain("has not been reviewed")
+			}),
+		))
+
+	it("locks every Checkfu Pi document in CHECKFU_PI_DOCS independent of import order and rejects unregistered persisted docs at runtime", async () => {
+		const registered = persistedShapes
+			.filter((shape) => shape.kind === "pi-doc")
+			.map((shape) => shape.id)
+		const declaredBeforeWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
+			piDocShapeId(spec.token.definition.kind),
+		)
+		expect(Object.isFrozen(CHECKFU_PI_DOCS)).toBe(true)
+		expect(registered.toSorted()).toEqual(declaredBeforeWorkerImport.toSorted())
+		expect(new Set(declaredBeforeWorkerImport).size).toBe(declaredBeforeWorkerImport.length)
+
+		// Importing the deploy entry point (ApiWorker -> PiSession -> PiDurableEngine) MUST
+		// enumerate the exact same Pi document IDs as the standalone persisted:cut / persisted:check
+		// entry point (Shapes.ts -> PiDocRegistry.ts).
+		await import("../src/ApiWorker.ts")
+		const declaredAfterWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
+			piDocShapeId(spec.token.definition.kind),
+		)
+		expect(declaredAfterWorkerImport).toEqual(declaredBeforeWorkerImport)
+		expect(registered.toSorted()).toEqual(declaredAfterWorkerImport.toSorted())
+
+		// Runtime guard: persisting any non-pi.* document kind not in CHECKFU_PI_DOCS fails at storage commit.
+		const backend = await createInMemoryPiDurableBackend(
+			createPiModels({ openai: Redacted.make("sk-test"), anthropic: null }),
+		)
+		try {
+			await expect(
+				backend.storage.commit(
+					[
+						[
+							{
+								type: "document.create",
+								record: {
+									id: 9999 as DocumentId,
+									kind: "checkfu.unregistered-secret-doc",
+									scope: { kind: "session" },
+								},
+								content: { kind: "base", version: 1, value: { ok: true } },
+							},
+						],
+					],
+					() => undefined,
+					BACKGROUND_CONTEXT,
+				),
+			).rejects.toThrow(/Unregistered Pi durable document/)
+		} finally {
+			await backend.close()
+		}
+	})
+
+	it("blocks incompatible changes to Checkfu-owned Pi documents unless versioned with a working migration", () =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const id = piDocShapeId(SettledUsage.definition.kind)
+				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
+
+				const SettledUsageV2 = Schema.Struct({
+					prompt_tokens: NonNegativeInt,
+					output_tokens: NonNegativeInt,
+				})
+
+				// 1. Renaming a field in place (v1) without a migration breaks replay of old receipts.
+				const renamedInPlace = replacing(
+					id,
+					piDocPersistedSchema({
+						token: SettledUsage,
+						schema: SettledUsageV2,
+					}),
+				)
+				const inPlaceBlockers = yield* shipBlockers(lock, renamedInPlace)
+				expect(inPlaceBlockers).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+				expect(inPlaceBlockers[0]).toContain("Pi durable documents survive deployments")
+
+				// 2. Bumping version to 2 without a migrate handler still fails on shipped v1 receipts.
+				const unmigratedV2 = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: { ...SettledUsage.definition, version: 2 },
+						},
+						schema: SettledUsageV2,
+					}),
+				)
+				expect(yield* shipBlockers(lock, unmigratedV2)).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+
+				// 3. A broken migrate() that forgets to map input_tokens -> prompt_tokens fails decode.
+				const brokenMigrate = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => value,
+							},
+						},
+						schema: SettledUsageV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					}),
+				)
+				expect(yield* shipBlockers(lock, brokenMigrate)).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+
+				// 4. Changing scope or family breaks stored documents and is blocked.
+				const changedFamily = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								kind: SettledUsage.definition.kind,
+								version: SettledUsage.definition.version,
+								scope: SettledUsage.definition.scope,
+							},
+						},
+						schema: SettledUsageState,
+					}),
+				)
+				expect(yield* shipBlockers(lock, changedFamily)).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+
+				// 5. Bumping version to 2 with a working migrate() + previous v1 schema passes once reviewed.
+				const migratedV2 = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => ({
+									prompt_tokens: value.input_tokens ?? 0,
+									output_tokens: value.output_tokens ?? 0,
+								}),
+							},
+						},
+						schema: SettledUsageV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					}),
+				)
+				const unreviewed = yield* lockProblems(lock, migratedV2)
+				expect(unreviewed.length).toBe(1)
+				expect(unreviewed[0]).toContain("has not been reviewed")
+				expect(yield* lockProblems(reviewing(lock, id, migratedV2), migratedV2)).toEqual([])
+
+				// 6. A v1 schema cut using Schema.toType (e.g. storing numeric count for NumberFromString
+				//    or a required defaulted_weight) MUST remain readable when that same schema moves
+				//    into `previous` for v2, while still passing the untouched raw JSON to migrate().
+				const V1WithTransformAndDefault = Schema.Struct({
+					input_tokens: NonNegativeInt,
+					output_tokens: NonNegativeInt,
+					count: Schema.NumberFromString,
+					defaulted_weight: Schema.Finite.pipe(Schema.withDecodingDefaultKey(Effect.succeed(42))),
+				})
+				const v1Shape: PersistedShape = {
+					id,
+					kind: "pi-doc",
+					schema: piDocPersistedSchema({
+						token: SettledUsage,
+						schema: V1WithTransformAndDefault,
+					}),
+				}
+				const v1StoredSample = {
+					version: 1,
+					scope: "session",
+					family: true,
+					value: {
+						input_tokens: 10,
+						output_tokens: 5,
+						count: 7,
+						defaulted_weight: 42,
+					},
+				}
+				expect(yield* decodeFailure(v1Shape, v1StoredSample)).toBeNull()
+				const cutV1Samples = yield* sampleEncoded(v1Shape, 4)
+				const v1CutLock = lockWith({ [id]: [v1StoredSample, ...cutV1Samples] })
+
+				// Moving V1WithTransformAndDefault into `previous` with an identity migration MUST pass
+				// on both the explicit { count: 7 } sample and every baseline sample cut from v1.
+				const identityV2 = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => value,
+							},
+						},
+						schema: V1WithTransformAndDefault,
+						previous: [{ version: 1, schema: V1WithTransformAndDefault }],
+					}),
+				)
+				expect(yield* lockProblems(v1CutLock, identityV2)).toEqual([])
+
+				// 6b. Migrations must also receive untouched raw stored JSON (e.g. absent optionalKey
+				//     fields stay absent, string fields stay strings) rather than decoded/mutated copies.
+				const V1OptionalString = Schema.Struct({
+					input_tokens: NonNegativeInt,
+					output_tokens: NonNegativeInt,
+					count_str: Schema.String,
+					optional_weight: Schema.optionalKey(NonNegativeInt),
+				})
+				const NewDocV2 = Schema.Struct({
+					prompt_tokens: NonNegativeInt,
+					output_tokens: NonNegativeInt,
+					count: NonNegativeInt,
+					weight: NonNegativeInt,
+				})
+				const rawV1Lock = lockWith({
+					[id]: [
+						{
+							version: 1,
+							scope: "session",
+							family: true,
+							value: {
+								input_tokens: 10,
+								output_tokens: 5,
+								count_str: "7",
+							},
+						},
+					],
+				})
+				const assumesMutated = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => ({
+									prompt_tokens: value.input_tokens ?? 0,
+									output_tokens: value.output_tokens ?? 0,
+									count: value.count_str ?? 0,
+									weight: value.optional_weight ?? -1,
+								}),
+							},
+						},
+						schema: NewDocV2,
+						previous: [{ version: 1, schema: V1OptionalString }],
+					}),
+				)
+				expect(yield* shipBlockers(rawV1Lock, assumesMutated)).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+				const handlesRawJson = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => ({
+									prompt_tokens: value.input_tokens ?? 0,
+									output_tokens: value.output_tokens ?? 0,
+									count: Number(value.count_str),
+									weight: typeof value.optional_weight === "number" ? value.optional_weight : 0,
+								}),
+							},
+						},
+						schema: NewDocV2,
+						previous: [{ version: 1, schema: V1OptionalString }],
+					}),
+				)
+				expect(yield* lockProblems(rawV1Lock, handlesRawJson)).toEqual([])
+
+				// 7. Pi's materializeDocumentValue returns stored/migrated JSON directly without
+				//    running an Effect codec, so the lock MUST validate the runtime value shape
+				//    without applying decoding defaults or wire-to-runtime transforms.
+				const CurrentTransformedV2 = Schema.Struct({
+					count: Schema.NumberFromString,
+					output_tokens: NonNegativeInt,
+				})
+				const transformedBadMigrate: PersistedShape = {
+					id,
+					kind: "pi-doc",
+					schema: piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								// Returns a string for `count`; Pi does NOT run NumberFromString at runtime.
+								migrate: (value) => ({
+									count: typeof value.input_tokens === "number" ? String(value.input_tokens) : "0",
+									output_tokens: value.output_tokens ?? 0,
+								}),
+							},
+						},
+						schema: CurrentTransformedV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					}),
+				}
+				expect(
+					yield* decodeFailure(transformedBadMigrate, {
+						version: 1,
+						scope: "session",
+						family: true,
+						value: { input_tokens: 7, output_tokens: 5 },
+					}),
+				).not.toBeNull()
+				expect(
+					yield* decodeFailure(transformedBadMigrate, {
+						version: 2,
+						scope: "session",
+						family: true,
+						value: { count: "7", output_tokens: 5 },
+					}),
+				).not.toBeNull()
+
+				const transformedRuntimeShape: PersistedShape = {
+					id,
+					kind: "pi-doc",
+					schema: piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => ({
+									count: typeof value.input_tokens === "number" ? value.input_tokens : 0,
+									output_tokens: value.output_tokens ?? 0,
+								}),
+							},
+						},
+						schema: CurrentTransformedV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					}),
+				}
+				expect(
+					yield* decodeFailure(transformedRuntimeShape, {
+						version: 2,
+						scope: "session",
+						family: true,
+						value: { count: 7, output_tokens: 5 },
+					}),
+				).toBeNull()
+				const generatedV2Samples = yield* sampleEncoded(transformedRuntimeShape, 4)
+				expect(generatedV2Samples).toHaveLength(4)
+				const v2RoundTripFailures: Array<string> = []
+				for (const sample of generatedV2Samples) {
+					const failure = yield* decodeFailure(transformedRuntimeShape, sample)
+					if (failure !== null) v2RoundTripFailures.push(failure)
+				}
+				expect(v2RoundTripFailures).toEqual([])
+
+				// 7b. A migration (or unversioned schema change) that omits a field with a decoding
+				//     default MUST fail because Pi does not apply Effect defaults at runtime.
+				const WithDefaultedFieldV2 = Schema.Struct({
+					prompt_tokens: NonNegativeInt,
+					output_tokens: NonNegativeInt,
+					cached_tokens: NonNegativeInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+				})
+				const omittedDefaultMigrate = piDocPersistedSchema({
+					token: {
+						definition: {
+							...SettledUsage.definition,
+							version: 2,
+							migrate: (value) => ({
+								prompt_tokens: value.input_tokens ?? 0,
+								output_tokens: value.output_tokens ?? 0,
+							}),
+						},
+					},
+					schema: WithDefaultedFieldV2,
+					previous: [{ version: 1, schema: SettledUsageState }],
+				})
+				expect(
+					yield* decodeFailure(
+						{ id, kind: "pi-doc", schema: omittedDefaultMigrate },
+						{
+							version: 1,
+							scope: "session",
+							family: true,
+							value: { input_tokens: 10, output_tokens: 5 },
+						},
+					),
+				).not.toBeNull()
+				expect(yield* shipBlockers(lock, replacing(id, omittedDefaultMigrate))).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+
+				const unversionedDefaultAdded = piDocPersistedSchema({
+					token: SettledUsage,
+					schema: Schema.Struct({
+						input_tokens: NonNegativeInt,
+						output_tokens: NonNegativeInt,
+						cached_tokens: NonNegativeInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+					}),
+				})
+				expect(yield* shipBlockers(lock, replacing(id, unversionedDefaultAdded))).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+
+				const populatedDefaultMigrate = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => ({
+									prompt_tokens: value.input_tokens ?? 0,
+									output_tokens: value.output_tokens ?? 0,
+									cached_tokens: 0,
+								}),
+							},
+						},
+						schema: WithDefaultedFieldV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					}),
+				)
+				expect(
+					yield* lockProblems(
+						reviewing(lock, id, populatedDefaultMigrate),
+						populatedDefaultMigrate,
+					),
+				).toEqual([])
+
+				// 7c. JSON-codec coercions (e.g. Effect's Schema.toCodecJson(Schema.Number) decoding
+				//     "NaN" / "Infinity" / "-Infinity" strings into numbers) MUST NOT mask a migration
+				//     or stored value that leaves a Schema.Number field as a string at runtime.
+				const NumberFieldV2 = Schema.Struct({
+					n: Schema.Number,
+				})
+				for (const coercedString of ["NaN", "Infinity", "-Infinity"] as const) {
+					const coercedMigrateSchema = piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: () => ({ n: coercedString }),
+							},
+						},
+						schema: NumberFieldV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					})
+					const coercedShape: PersistedShape = { id, kind: "pi-doc", schema: coercedMigrateSchema }
+					expect(
+						yield* decodeFailure(coercedShape, {
+							version: 1,
+							scope: "session",
+							family: true,
+							value: { input_tokens: 10, output_tokens: 5 },
+						}),
+						`expected migrated { n: ${JSON.stringify(coercedString)} } to fail runtime validation`,
+					).not.toBeNull()
+					expect(
+						yield* decodeFailure(coercedShape, {
+							version: 2,
+							scope: "session",
+							family: true,
+							value: { n: coercedString },
+						}),
+						`expected stored v2 { n: ${JSON.stringify(coercedString)} } to fail runtime validation`,
+					).not.toBeNull()
+					expect(yield* shipBlockers(lock, replacing(id, coercedMigrateSchema))).toEqual([
+						expect.stringContaining(`${id} can no longer read a value written by baseline`),
+					])
+				}
+				const unversionedNumberShape: PersistedShape = {
+					id,
+					kind: "pi-doc",
+					schema: piDocPersistedSchema({
+						token: SettledUsage,
+						schema: NumberFieldV2,
+					}),
+				}
+				expect(
+					yield* decodeFailure(unversionedNumberShape, {
+						version: 1,
+						scope: "session",
+						family: true,
+						value: { n: "NaN" },
+					}),
+				).not.toBeNull()
+				expect(
+					yield* decodeFailure(unversionedNumberShape, {
+						version: 1,
+						scope: "session",
+						family: true,
+						value: { n: 42 },
+					}),
+				).toBeNull()
+
+				// 8. Undeclared properties in a stored v1 object MUST reach migrate() untouched,
+				//    matching Pi's runtime behavior instead of being stripped by Struct decoding.
+				const V1PartialSchema = Schema.Struct({
+					input_tokens: NonNegativeInt,
+				})
+				const V2RequiresNoExtraLeak = Schema.Struct({
+					prompt_tokens: NonNegativeInt,
+					extra_seen: Schema.Literal("stored"),
+				})
+				const extraKeyLock = lockWith({
+					[id]: [
+						{
+							version: 1,
+							scope: "session",
+							family: true,
+							value: { input_tokens: 10, legacy_extra: "stored" },
+						},
+					],
+				})
+				const breaksOnExtraKey = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								// Copies every stored property; if legacy_extra were stripped, this would
+								// falsely pass a schema that expects `extra_seen` only when absent.
+								migrate: (value) => ({
+									prompt_tokens: value.input_tokens ?? 0,
+									extra_seen: "legacy_extra" in value ? "unexpected_extra" : "stored",
+								}),
+							},
+						},
+						schema: V2RequiresNoExtraLeak,
+						previous: [{ version: 1, schema: V1PartialSchema }],
+					}),
+				)
+				expect(yield* shipBlockers(extraKeyLock, breaksOnExtraKey)).toEqual([
+					expect.stringContaining(`${id} can no longer read a value written by baseline`),
+				])
+				const readsExtraKey = replacing(
+					id,
+					piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) => ({
+									prompt_tokens: value.input_tokens ?? 0,
+									extra_seen: value.legacy_extra ?? null,
+								}),
+							},
+						},
+						schema: V2RequiresNoExtraLeak,
+						previous: [{ version: 1, schema: V1PartialSchema }],
+					}),
+				)
+				expect(yield* lockProblems(extraKeyLock, readsExtraKey)).toEqual([])
+
+				// 9. Migrations must satisfy Pi's strict JSON copy (`copyJson` in materializeDocumentValue),
+				//    rejecting undeclared NaN / Infinity / undefined / non-plain objects that Struct decoding
+				//    would otherwise strip silently.
+				const nonStrictCases: ReadonlyArray<readonly [string, unknown]> = [
+					["NaN", Number.NaN],
+					["Infinity", Number.POSITIVE_INFINITY],
+					["undefined", undefined],
+					["Map", new Map([["a", 1]])],
+				]
+				for (const [label, badExtra] of nonStrictCases) {
+					const badSchema = piDocPersistedSchema({
+						token: {
+							definition: {
+								...SettledUsage.definition,
+								version: 2,
+								migrate: (value) =>
+									({
+										prompt_tokens: value.input_tokens ?? 0,
+										output_tokens: value.output_tokens ?? 0,
+										undeclared_bad: badExtra,
+									}) as unknown as Record<string, never>,
+							},
+						},
+						schema: SettledUsageV2,
+						previous: [{ version: 1, schema: SettledUsageState }],
+					})
+					const badShape: PersistedShape = { id, kind: "pi-doc", schema: badSchema }
+					const failure = yield* decodeFailure(badShape, {
+						version: 1,
+						scope: "session",
+						family: true,
+						value: { input_tokens: 10, output_tokens: 5 },
+					})
+					expect(
+						failure,
+						`expected ${label} migration output to fail strict JSON check`,
+					).not.toBeNull()
+					expect(yield* shipBlockers(lock, replacing(id, badSchema))).toEqual([
+						expect.stringContaining(`${id} can no longer read a value written by baseline`),
+					])
+				}
+
+				// 10. Conversation-scoped Pi documents fingerprint and check `history` and `fork`
+				//     semantics in both current and previous wire envelopes because Pi's
+				//     `checkRecordScope` rejects changes before migration runs.
+				const convKind = "checkfu.conversation-note"
+				const convId = piDocShapeId(convKind)
+				const ConvV1 = Schema.Struct({ note: Schema.String })
+				const ConvV2 = Schema.Struct({ summary: Schema.String })
+				const makeConvShape = (
+					history: "latest" | "rewindable",
+					fork: "asOf" | "current" | "initial",
+					version = 1,
+				): PersistedShape => ({
+					id: convId,
+					kind: "pi-doc",
+					schema: piDocPersistedSchema({
+						token: {
+							definition: {
+								kind: convKind,
+								version,
+								scope: "conversation",
+								history,
+								fork,
+								...(version === 2
+									? {
+											migrate: (value) => ({
+												summary: typeof value.note === "string" ? value.note : "",
+											}),
+										}
+									: {}),
+							},
+						},
+						schema: version === 2 ? ConvV2 : ConvV1,
+						...(version === 2 ? { previous: [{ version: 1, schema: ConvV1 }] } : {}),
+					}),
+				})
+				const convBase = makeConvShape("latest", "current")
+				const convBaseline = yield* cutBaseline("conv-shipped", "2026-01-01T00:00:00.000Z", [
+					convBase,
+				])
+				const convLock: PersistedLock = {
+					version: 1,
+					retired: {},
+					reviewed: {},
+					baselines: [convBaseline],
+				}
+				const changedHistory = makeConvShape("rewindable", "current")
+				const changedFork = makeConvShape("latest", "initial")
+				expect(schemaFingerprint(changedHistory)).not.toBe(schemaFingerprint(convBase))
+				expect(schemaFingerprint(changedFork)).not.toBe(schemaFingerprint(convBase))
+				expect(yield* shipBlockers(convLock, [changedHistory])).toEqual([
+					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
+				])
+				expect(yield* shipBlockers(convLock, [changedFork])).toEqual([
+					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
+				])
+				// Migrating v1 -> v2 while changing history/fork is still blocked on the previous envelope.
+				expect(yield* shipBlockers(convLock, [makeConvShape("rewindable", "current", 2)])).toEqual([
+					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
+				])
+				// Migrating v1 -> v2 while preserving history & fork succeeds once reviewed.
+				const validConvV2 = [makeConvShape("latest", "current", 2)]
+				expect(yield* lockProblems(reviewing(convLock, convId, validConvV2), validConvV2)).toEqual(
+					[],
+				)
 			}),
 		))
 })

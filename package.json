@@ -27,12 +27,17 @@
 	},
 	"type": "module",
 	"scripts": {
-		"typecheck": "turbo run typecheck",
+		"dev": "alchemy dev",
+		"deploy": "alchemy deploy",
+		"deploy:production": "bun run persisted:check && alchemy deploy --stage production",
+		"destroy": "alchemy destroy",
+		"typecheck": "turbo run typecheck && effect-tsgo tsc --noEmit -p tsconfig.stack.json",
 		"test": "turbo run test",
 		"lint": "oxlint -c .oxlintrc.jsonc --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives .",
 		"format": "oxfmt .",
 		"format:check": "oxfmt --check .",
 		"check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
+		"persisted:check": "bun apps/api/test/persisted/check.ts",
 		"persisted:cut": "bun apps/api/test/persisted/cut.ts"
 	},
 	"dependencies": {

@@ -1,73 +1,33 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { Activity } from "effect/workflow"
 import { CommitModelReply } from "./CommitModelReply.command.ts"
-import { FailModelRequest, RequestFailureDisposition } from "./FailModelRequest.command.ts"
+import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
 import {
 	HARNESS_UNAVAILABLE,
 	HARNESS_UNAVAILABLE_MESSAGE,
 	ModelProvider,
 	type ModelProviderError,
-	ModelStopReason,
 } from "./ModelProvider.external.ts"
 import { RecordModelRequestStart } from "./RecordModelRequestStart.command.ts"
+import {
+	GenerateOutcome,
+	RUN_TURN_ACTIVITIES,
+	StepOutcome,
+	runTurnActivity,
+} from "./RunTurnActivities.ts"
 import { Session } from "./Session.aggregate.ts"
 import { SessionId } from "./Session.id.ts"
-import {
-	ErrorMessage,
-	ErrorType,
-	MessageText,
-	ModelUsage,
-	NonNegativeInt,
-	PositiveInt,
-	ResourceId,
-	ThinkingText,
-} from "./SessionTypes.ts"
+import { MessageText, NonNegativeInt, PositiveInt, ResourceId } from "./SessionTypes.ts"
+
+export { GenerateOutcome, RUN_TURN_ACTIVITIES, StepOutcome }
 
 export const TurnId = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("TurnId"))
 export type TurnId = typeof TurnId.Type
 
 export const turnKey = (session_id: SessionId, turn: number): TurnId =>
 	TurnId.make(`${session_id}:turn:${turn}`)
-
-export const StepOutcome = Schema.Struct({
-	status: Schema.Literals(["proceed", "aborted"]),
-})
-
-export const GenerateOutcome = Schema.Union([
-	Schema.Struct({
-		ok: Schema.Literal(true),
-		thinking: Schema.NullOr(ThinkingText),
-		text: MessageText,
-		truncated: Schema.optional(Schema.Literal(true)),
-		input_tokens: NonNegativeInt,
-		output_tokens: NonNegativeInt,
-		stop_reason: ModelStopReason,
-	}),
-	Schema.Struct({
-		ok: Schema.Literal(false),
-		interrupted: Schema.Literal(true),
-		model_usage: ModelUsage,
-	}),
-	Schema.Struct({
-		ok: Schema.Literal(false),
-		interrupted: Schema.Literal(false),
-		model_usage: ModelUsage,
-		error_type: ErrorType,
-		message: ErrorMessage,
-		disposition: RequestFailureDisposition,
-	}),
-])
-
-export const RUN_TURN_ACTIVITIES = {
-	startModelRequest: { name: "start-model-request", success: StepOutcome },
-	generateModelReply: { name: "generate-model-reply", success: GenerateOutcome },
-	interruptModelRequest: { name: "interrupt-model-request", success: StepOutcome },
-	failModelRequest: { name: "fail-model-request", success: StepOutcome },
-	commitModelReply: { name: "commit-model-reply", success: StepOutcome },
-} as const
 
 const PROCEED = { status: "proceed" as const }
 const ABORTED = { status: "aborted" as const }
@@ -96,9 +56,9 @@ export const RunTurnLive = RunTurn.toLayer(
 		return Effect.fn(function* (payload) {
 			const requestId = `${payload.key}:req:1`
 
-			const started = yield* Activity.make({
-				...RUN_TURN_ACTIVITIES.startModelRequest,
-				execute: sessions
+			const started = yield* runTurnActivity(
+				"startModelRequest",
+				sessions
 					.send(
 						new RecordModelRequestStart({
 							session_id: payload.session_id,
@@ -115,15 +75,15 @@ export const RunTurnLive = RunTurn.toLayer(
 						Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
 						Effect.catchTag("OutOfOrderModelRequest", () => Effect.succeed(ABORTED)),
 					),
-			})
+			)
 
 			if (started.status === "aborted") {
 				return { status: "aborted" as const }
 			}
 
-			const generated = yield* Activity.make({
-				...RUN_TURN_ACTIVITIES.generateModelReply,
-				execute: provider
+			const generated = yield* runTurnActivity(
+				"generateModelReply",
+				provider
 					.generate({
 						session_id: payload.session_id,
 						agent_id: payload.agent_id,
@@ -171,12 +131,12 @@ export const RunTurnLive = RunTurn.toLayer(
 							}),
 						),
 					),
-			})
+			)
 
 			if (!generated.ok && generated.interrupted) {
-				const interrupted = yield* Activity.make({
-					...RUN_TURN_ACTIVITIES.interruptModelRequest,
-					execute: sessions
+				const interrupted = yield* runTurnActivity(
+					"interruptModelRequest",
+					sessions
 						.send(
 							new InterruptModelRequest({
 								model_usage: generated.model_usage,
@@ -193,7 +153,7 @@ export const RunTurnLive = RunTurn.toLayer(
 							Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
 							Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
 						),
-				})
+				)
 
 				return interrupted.status === "aborted"
 					? { status: "aborted" as const }
@@ -201,9 +161,9 @@ export const RunTurnLive = RunTurn.toLayer(
 			}
 
 			if (!generated.ok) {
-				const failed = yield* Activity.make({
-					...RUN_TURN_ACTIVITIES.failModelRequest,
-					execute: sessions
+				const failed = yield* runTurnActivity(
+					"failModelRequest",
+					sessions
 						.send(
 							new FailModelRequest({
 								model_usage: generated.model_usage,
@@ -223,16 +183,16 @@ export const RunTurnLive = RunTurn.toLayer(
 							Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
 							Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
 						),
-				})
+				)
 
 				return failed.status === "aborted"
 					? { status: "aborted" as const }
 					: { status: "failed" as const }
 			}
 
-			const committed = yield* Activity.make({
-				...RUN_TURN_ACTIVITIES.commitModelReply,
-				execute: sessions
+			const committed = yield* runTurnActivity(
+				"commitModelReply",
+				sessions
 					.send(
 						new CommitModelReply({
 							session_id: payload.session_id,
@@ -256,7 +216,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
 						Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
 					),
-			})
+			)
 
 			return committed.status === "aborted"
 				? { status: "aborted" as const }
