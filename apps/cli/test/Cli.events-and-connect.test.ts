@@ -1534,6 +1534,44 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(archiveLookupRes.exitCode).toBe(1)
 					expect(sessionGetCount).toBe(4)
 					expect(archiveLookupRes.stderr.length).toBeGreaterThan(0)
+
+					// 6) Ended session replay with an open piped stdin (Stream.never) completes immediately
+					//    without hanging waiting for stdin EOF
+					const openStdinRes = yield* archiveLookupCli.run(
+						["--format", "jsonl", "sessions", "connect", "--session-id", archiveLookupSessionId],
+						{ stdin: Stream.never },
+					)
+					expect(openStdinRes.exitCode).toBe(0)
+					const openStdinTypes = openStdinRes.stdout
+						.trim()
+						.split("\n")
+						.map((line) => (JSON.parse(line) as { type: string }).type)
+					expect(openStdinTypes).toContain("session.archived")
+
+					// 7) Message receipts with empty data or missing numeric turn fail as unconfirmed
+					//    delivery with the generated Idempotency-Key instead of silently exiting 0
+					for (const badBody of [{ data: [] }, { data: [{ type: "user.message" }] }]) {
+						let capturedKey = ""
+						const badReceiptRes = yield* decodeRetryCli.run(
+							["sessions", "connect", "--session-id", decodeRetrySessionId],
+							{
+								stdin: "missing turn receipt\n",
+								interceptFetch: async (next, request) => {
+									if (request.method === "POST" && request.url.endsWith("/events")) {
+										capturedKey = request.headers.get("idempotency-key") ?? ""
+										return new Response(JSON.stringify(badBody), {
+											status: 200,
+											headers: { "content-type": "application/json" },
+										})
+									}
+									return next(request)
+								},
+							},
+						)
+						expect(badReceiptRes.exitCode).toBe(1)
+						expect(capturedKey).toMatch(/^cli_[0-9a-f]{24}$/)
+						expect(badReceiptRes.stderr).toContain(`Idempotency-Key: ${capturedKey}`)
+					}
 				}),
 			),
 		)

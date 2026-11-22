@@ -21,6 +21,7 @@ import {
 	formatClientError,
 	isApiErrorEnvelope,
 	isTransientHttpError,
+	isTransientHttpStatus,
 	networkFailure,
 	usageError,
 } from "../Errors.ts"
@@ -79,7 +80,16 @@ const MAX_CONNECT_SEND_RETRIES = 2
 const CONNECT_SEND_RETRY_BASE_MS = 100
 
 const isAmbiguousResponseStatus = (status: number): boolean =>
-	status < 400 || status === 408 || status === 429 || status >= 500
+	status < 400 || isTransientHttpStatus(status)
+
+const extractSubmittedTurn = (data: ReadonlyArray<unknown>): number | undefined => {
+	const first = data[0]
+	if (typeof first !== "object" || first === null) return undefined
+	const record = first as Record<string, unknown>
+	if (record["type"] !== undefined && record["type"] !== "user.message") return undefined
+	const turn = record["turn"]
+	return typeof turn === "number" && Number.isInteger(turn) && turn >= 1 ? turn : undefined
+}
 
 const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
 	if (HttpClientError.isHttpClientError(err)) {
@@ -440,27 +450,28 @@ const dispatchUserLine = (
 			}))
 			return yield* res.failure
 		}
-		const first = res.success.data[0]
-		const turn =
-			typeof first === "object" &&
-			first !== null &&
-			typeof (first as Record<string, unknown>)["turn"] === "number"
-				? ((first as Record<string, unknown>)["turn"] as number)
-				: undefined
-		if (turn !== undefined) {
-			yield* Ref.update(stateRef, (state) => {
-				const nextSubmitted = new Set(state.submittedTurns)
-				nextSubmitted.add(turn)
-				const startedFromIdle = state.liveStatus === "idle" && turn > state.liveTurn
-				return {
-					...state,
-					targetTurn: Math.max(state.targetTurn, turn),
-					submittedTurns: nextSubmitted,
-					liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
-					liveTurn: startedFromIdle ? state.liveTurn + 1 : state.liveTurn,
-				}
-			})
+		const turn = extractSubmittedTurn(res.success.data)
+		if (turn === undefined) {
+			yield* Ref.update(stateRef, (state) => ({
+				...state,
+				localSentMessages: state.localSentMessages.filter((entry) => entry.id !== key),
+			}))
+			return yield* networkFailure(
+				`Message response did not confirm a valid turn (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
+			)
 		}
+		yield* Ref.update(stateRef, (state) => {
+			const nextSubmitted = new Set(state.submittedTurns)
+			nextSubmitted.add(turn)
+			const startedFromIdle = state.liveStatus === "idle" && turn > state.liveTurn
+			return {
+				...state,
+				targetTurn: Math.max(state.targetTurn, turn),
+				submittedTurns: nextSubmitted,
+				liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
+				liveTurn: startedFromIdle ? state.liveTurn + 1 : state.liveTurn,
+			}
+		})
 		return "continue" as const
 	})
 
@@ -598,15 +609,6 @@ export const sessionsConnectCommand = Command.make(
 			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
 			const isInteractiveTty = yield* stdio.stdinIsTerminal
 
-			if (initiallyEnded && !isInteractiveTty) {
-				const unsentLine = yield* findFirstSendablePipedLine(stdio)
-				if (Option.isSome(unsentLine)) {
-					return yield* networkFailure(
-						`Cannot send input: session ${session.id} is already ${session.archived_at !== null ? "archived" : "terminated"}.`,
-					)
-				}
-			}
-
 			let connectHeadSeq = after ?? 0
 			if (!initiallyEnded) {
 				const latestPage = yield* client.api.sessions
@@ -650,6 +652,11 @@ export const sessionsConnectCommand = Command.make(
 			const stopConnectDeferred = yield* Deferred.make<void>()
 			const expectArchivedEvent = session.archived_at !== null
 
+			const stdinCheckFiber =
+				initiallyEnded && !isInteractiveTty
+					? yield* Effect.result(findFirstSendablePipedLine(stdio)).pipe(Effect.forkChild)
+					: undefined
+
 			const streamFiber = yield* client
 				.streamSessionEvents(sessionId, after === undefined ? undefined : { after })
 				.pipe(
@@ -687,11 +694,52 @@ export const sessionsConnectCommand = Command.make(
 			const runInputLoop = Effect.gen(function* () {
 				const initialState = yield* Ref.get(stateRef)
 				if (initialState.ended) {
-					if (session.archived_at !== null) {
-						yield* Deferred.await(streamEndedDeferred)
-					} else if (baseline.status !== "terminated") {
-						yield* Deferred.await(stopConnectDeferred)
+					const replayDone =
+						session.archived_at !== null
+							? Deferred.await(streamEndedDeferred)
+							: baseline.status !== "terminated"
+								? Deferred.await(stopConnectDeferred)
+								: Effect.void
+
+					if (stdinCheckFiber === undefined) {
+						yield* replayDone
+						return
 					}
+
+					const unsentInputError = networkFailure(
+						`Cannot send input: session ${session.id} is already ${session.archived_at !== null ? "archived" : "terminated"}.`,
+					)
+					const handleStdinOutcome = (
+						outcome:
+							| { readonly _tag: "Success"; readonly success: Option.Option<string> }
+							| { readonly _tag: "Failure"; readonly failure: CliFailure },
+					): Effect.Effect<void, CliFailure> =>
+						outcome._tag === "Failure"
+							? Effect.fail(outcome.failure)
+							: Option.isSome(outcome.success)
+								? Effect.fail(unsentInputError)
+								: Effect.void
+
+					yield* Effect.gen(function* () {
+						const first = yield* Effect.race(
+							Fiber.join(stdinCheckFiber).pipe(
+								Effect.map((outcome) => ({ _tag: "stdin" as const, outcome })),
+							),
+							replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
+						)
+						if (first._tag === "stdin") {
+							yield* handleStdinOutcome(first.outcome)
+							yield* replayDone
+						} else {
+							const lateStdin = yield* Effect.race(
+								Fiber.join(stdinCheckFiber).pipe(Effect.map(Option.some)),
+								Effect.sleep("20 millis").pipe(Effect.as(Option.none())),
+							)
+							if (Option.isSome(lateStdin)) {
+								yield* handleStdinOutcome(lateStdin.value)
+							}
+						}
+					}).pipe(Effect.ensuring(Fiber.interrupt(stdinCheckFiber)))
 					return
 				}
 

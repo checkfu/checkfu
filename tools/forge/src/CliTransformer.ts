@@ -510,6 +510,11 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 			const flags = collectMethodFlags(method, cliExt)
 			const varName = methodVarName(group, method)
 			const streaming = isSseMethod(method)
+			if (streaming && (method.httpMethod.toUpperCase() !== "GET" || method.body !== undefined)) {
+				throw new Error(
+					`Unsupported SSE endpoint ${endpointRef.group}.${endpointRef.endpoint}: generated streaming commands only support GET endpoints without a request body.`,
+				)
+			}
 			const descriptorVar = `${varName}Spec`
 			methodVars.push(varName)
 

@@ -22,6 +22,7 @@ import {
 	formatClientError,
 	isApiErrorEnvelope,
 	isTransientHttpError,
+	isTransientHttpStatus,
 	networkFailure,
 	usageError,
 } from "./Errors.ts"
@@ -116,15 +117,32 @@ export interface SessionStreamEvent {
 	readonly data: Record<string, unknown>
 }
 
-export interface StreamSessionEventsOptions {
-	readonly after?: number | undefined
+export interface StreamSseOptions {
 	readonly maxReconnectAttempts?: number | undefined
 	readonly baseReconnectDelayMs?: number | undefined
+}
+
+export interface StreamSessionEventsOptions extends StreamSseOptions {
+	readonly after?: number | undefined
+}
+
+export interface EndpointSseRequest {
+	readonly method: string
+	readonly path: string
+	readonly query?: Readonly<Record<string, string>> | undefined
+	readonly headers?: Readonly<Record<string, string>> | undefined
+	readonly initialCursor?: string | undefined
+	readonly cursorQueryParam?: string | undefined
+	readonly isTerminalEvent?: ((data: Record<string, unknown>) => boolean) | undefined
 }
 
 export interface CheckfuClient {
 	readonly baseUrl: string
 	readonly api: ApiCheckfuClient
+	readonly streamEndpointEvents: (
+		request: EndpointSseRequest,
+		options?: StreamSseOptions,
+	) => Stream.Stream<SessionStreamEvent, CliFailure>
 	readonly streamSessionEvents: (
 		sessionId: string,
 		options?: StreamSessionEventsOptions,
@@ -186,19 +204,21 @@ export const makeCheckfuClient = (
 				(bytes) => `cli_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`,
 			)
 
-		const streamSessionEvents = (
-			sessionId: string,
-			options?: StreamSessionEventsOptions,
+		const streamEndpointEvents = (
+			requestSpec: EndpointSseRequest,
+			options?: StreamSseOptions,
 		): Stream.Stream<SessionStreamEvent, CliFailure> => {
-			if (options?.after !== undefined && (!Number.isInteger(options.after) || options.after < 0)) {
-				return Stream.fail(usageError("--after must be a non-negative integer."))
+			if (requestSpec.method.toUpperCase() !== "GET") {
+				return Stream.fail(
+					usageError(`Unsupported SSE HTTP method "${requestSpec.method}". Expected GET.`),
+				)
 			}
 
 			const maxReconnects = options?.maxReconnectAttempts ?? DEFAULT_MAX_SSE_RECONNECTS
 			const baseDelayMs = options?.baseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS
 
 			interface LoopState {
-				cursor: number | undefined
+				cursor: string | undefined
 				useHeader: boolean
 				attempt: number
 				retryDelayMs: number | undefined
@@ -217,15 +237,37 @@ export const makeCheckfuClient = (
 							yield* Effect.sleep(Duration.millis(delayMs))
 						}
 
+						const searchParams = new URLSearchParams()
+						if (requestSpec.query !== undefined) {
+							for (const [key, value] of Object.entries(requestSpec.query)) {
+								if (
+									loopState.useHeader &&
+									requestSpec.cursorQueryParam !== undefined &&
+									key === requestSpec.cursorQueryParam
+								) {
+									continue
+								}
+								searchParams.append(key, value)
+							}
+						}
+						const queryString = searchParams.toString()
+						const normalizedPath = requestSpec.path.startsWith("/")
+							? requestSpec.path
+							: `/${requestSpec.path}`
 						const streamUrl =
-							!loopState.useHeader && loopState.cursor !== undefined
-								? `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream?after=${loopState.cursor}`
-								: `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/events/stream`
-						let req = HttpClientRequest.get(streamUrl).pipe(
-							HttpClientRequest.setHeader("accept", "text/event-stream"),
-						)
+							queryString.length > 0
+								? `${baseUrl}${normalizedPath}?${queryString}`
+								: `${baseUrl}${normalizedPath}`
+
+						let req = HttpClientRequest.get(streamUrl)
+						if (requestSpec.headers !== undefined) {
+							for (const [key, value] of Object.entries(requestSpec.headers)) {
+								req = HttpClientRequest.setHeader(req, key, value)
+							}
+						}
+						req = HttpClientRequest.setHeader(req, "accept", "text/event-stream")
 						if (loopState.useHeader && loopState.cursor !== undefined) {
-							req = HttpClientRequest.setHeader(req, "last-event-id", String(loopState.cursor))
+							req = HttpClientRequest.setHeader(req, "last-event-id", loopState.cursor)
 						}
 
 						const responseResult = yield* Effect.result(authedHttpClient.execute(req))
@@ -254,10 +296,7 @@ export const makeCheckfuClient = (
 								catch: () => undefined,
 							}).pipe(Effect.catch(() => Effect.succeed(undefined)))
 
-							if (
-								(response.status === 429 || response.status >= 500) &&
-								loopState.attempt < maxReconnects
-							) {
+							if (isTransientHttpStatus(response.status) && loopState.attempt < maxReconnects) {
 								loopState.useHeader = true
 								loopState.pendingDelayMs =
 									(loopState.retryDelayMs ?? baseDelayMs) * 2 ** loopState.attempt
@@ -297,7 +336,7 @@ export const makeCheckfuClient = (
 
 						let sawEvent = false
 						let sawKeepalive = false
-						let archived = false
+						let terminalReached = false
 						let handledError = false
 						let isFirstChunk = true
 						let discardLeadingLf = false
@@ -384,11 +423,13 @@ export const makeCheckfuClient = (
 										const data = yield* parseSseData(sseEvent.data)
 										const seq = parseSeq(sseEvent.id, data)
 										if (seq !== undefined) {
-											loopState.cursor = seq
+											loopState.cursor = String(seq)
+										} else if (sseEvent.id !== undefined && sseEvent.id.length > 0) {
+											loopState.cursor = sseEvent.id
 										}
 										sawEvent = true
-										if (data["type"] === "session.archived") {
-											archived = true
+										if (requestSpec.isTerminalEvent?.(data) === true) {
+											terminalReached = true
 										}
 										return {
 											id: sseEvent.id,
@@ -400,13 +441,13 @@ export const makeCheckfuClient = (
 								),
 								Stream.catch((err) => {
 									if (err instanceof StreamBodyReadError) {
-										const nextAttempt = sawEvent ? 0 : loopState.attempt + 1
+										const nextAttempt = (sawEvent ? 0 : loopState.attempt) + 1
 										if (nextAttempt <= maxReconnects) {
 											handledError = true
 											loopState.useHeader = true
 											loopState.attempt = nextAttempt
 											loopState.pendingDelayMs =
-												(loopState.retryDelayMs ?? baseDelayMs) * 2 ** Math.max(0, nextAttempt - 1)
+												(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
 											return Stream.empty
 										}
 										loopState.done = true
@@ -419,8 +460,8 @@ export const makeCheckfuClient = (
 
 						const finalizeConnection = Stream.unwrap(
 							Effect.sync(() => {
-								if (archived || handledError || loopState.done) {
-									if (archived) {
+								if (terminalReached || handledError || loopState.done) {
+									if (terminalReached) {
 										loopState.done = true
 									}
 									return Stream.empty
@@ -428,7 +469,7 @@ export const makeCheckfuClient = (
 								const hasIncompleteFrame = pendingLine.length > 0 || hasPendingEventFields
 								loopState.useHeader = true
 								if (hasIncompleteFrame) {
-									const nextAttempt = sawEvent ? 0 : loopState.attempt + 1
+									const nextAttempt = (sawEvent ? 0 : loopState.attempt) + 1
 									if (nextAttempt > maxReconnects) {
 										loopState.done = true
 										return Stream.fail(
@@ -437,7 +478,7 @@ export const makeCheckfuClient = (
 									}
 									loopState.attempt = nextAttempt
 									loopState.pendingDelayMs =
-										(loopState.retryDelayMs ?? baseDelayMs) * 2 ** Math.max(0, nextAttempt - 1)
+										(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
 									return Stream.empty
 								}
 								if (sawEvent) {
@@ -461,7 +502,7 @@ export const makeCheckfuClient = (
 
 			return Stream.suspend(() => {
 				const loopState: LoopState = {
-					cursor: options?.after,
+					cursor: requestSpec.initialCursor,
 					useHeader: false,
 					attempt: 0,
 					retryDelayMs: undefined,
@@ -476,9 +517,34 @@ export const makeCheckfuClient = (
 			})
 		}
 
+		const streamSessionEvents = (
+			sessionId: string,
+			options?: StreamSessionEventsOptions,
+		): Stream.Stream<SessionStreamEvent, CliFailure> => {
+			if (options?.after !== undefined && (!Number.isInteger(options.after) || options.after < 0)) {
+				return Stream.fail(usageError("--after must be a non-negative integer."))
+			}
+			return streamEndpointEvents(
+				{
+					method: "GET",
+					path: `/v1/sessions/${encodeURIComponent(sessionId)}/events/stream`,
+					...(options?.after !== undefined
+						? {
+								query: { after: String(options.after) },
+								initialCursor: String(options.after),
+								cursorQueryParam: "after",
+							}
+						: {}),
+					isTerminalEvent: (data) => data["type"] === "session.archived",
+				},
+				options,
+			)
+		}
+
 		return {
 			baseUrl,
 			api,
+			streamEndpointEvents,
 			streamSessionEvents,
 			generateIdempotencyKey,
 		}

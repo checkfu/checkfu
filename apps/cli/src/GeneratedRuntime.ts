@@ -49,6 +49,8 @@ export interface GeneratedOperationDescriptor {
 }
 
 interface RuntimeEndpoint {
+	readonly method: string
+	readonly path: string
 	readonly params: Schema.Top | undefined
 	readonly query: Schema.Top | undefined
 	readonly headers: Schema.Top | undefined
@@ -302,6 +304,27 @@ export const invokeGeneratedOperation = (
 		yield* renderOutput(result)
 	})
 
+const resolveEndpointPath = (
+	template: string,
+	params: Readonly<Record<string, unknown>>,
+	label: string,
+): Effect.Effect<string, CliFailure> =>
+	Effect.gen(function* () {
+		let invalidParam: string | undefined
+		const resolved = template.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
+			const value = params[name]
+			if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+				invalidParam = name
+				return ""
+			}
+			return encodeURIComponent(String(value))
+		})
+		if (invalidParam !== undefined) {
+			return yield* usageError(`Missing required path parameter "${invalidParam}" for ${label}.`)
+		}
+		return resolved
+	})
+
 export const invokeGeneratedStream = (
 	spec: GeneratedOperationDescriptor,
 	rawFlags: Readonly<Record<string, unknown>>,
@@ -324,14 +347,28 @@ export const invokeGeneratedStream = (
 		if (endpoint.query !== undefined) {
 			yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
 		}
+		if (endpoint.headers !== undefined) {
+			yield* decodeWithTop(endpoint.headers, parts.headers, `${spec.cliLabel} headers`)
+		}
 
-		const rawSessionId = parts.params["session_id"]
-		const sessionId = typeof rawSessionId === "string" ? rawSessionId : ""
+		const resolvedPath = yield* resolveEndpointPath(endpoint.path, parts.params, spec.cliLabel)
 		const afterRaw = parts.query["after"]
-		const after = afterRaw === undefined ? undefined : Number(afterRaw)
+		const isSessionStream = spec.apiGroup === "sessions" && spec.apiEndpoint === "streamEvents"
 
 		const client = yield* getClient()
 		yield* client
-			.streamSessionEvents(sessionId, after === undefined ? undefined : { after })
+			.streamEndpointEvents({
+				method: endpoint.method,
+				path: resolvedPath,
+				query: parts.query,
+				headers: parts.headers,
+				...(afterRaw !== undefined ? { initialCursor: afterRaw, cursorQueryParam: "after" } : {}),
+				...(isSessionStream
+					? {
+							isTerminalEvent: (data: Record<string, unknown>) =>
+								data["type"] === "session.archived",
+						}
+					: {}),
+			})
 			.pipe(Stream.runForEach((event) => renderOutput(event.data, { streaming: true })))
 	})

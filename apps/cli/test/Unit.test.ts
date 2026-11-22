@@ -333,6 +333,212 @@ describe("normalizeApiUrl", () => {
 					expect(err.message).toContain(testCase.expectContains)
 					expect(err.message).not.toContain("undefined")
 				}
+
+				// 5) HTTP 408 on SSE open/reconnect is retried and resumes from cursor
+				let timeout408Requests = 0
+				const timeout408LastIds: Array<string | null> = []
+				const timeout408Fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					timeout408Requests++
+					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					timeout408LastIds.push(headers.get("last-event-id"))
+					if (timeout408Requests === 1) {
+						let step = 0
+						const body = new ReadableStream<Uint8Array>({
+							pull(controller) {
+								if (step === 0) {
+									step = 1
+									controller.enqueue(
+										encoder.encode(
+											'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
+										),
+									)
+								} else {
+									controller.error(new Error("drop after event 1"))
+								}
+							},
+						})
+						return new Response(body, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (timeout408Requests === 2) {
+						return new Response("Request Timeout", { status: 408 })
+					}
+					return new Response(
+						'id: 2\nevent: session.archived\ndata: {"seq":2,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+
+				const timeout408Events = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_408", {
+							maxReconnectAttempts: 2,
+							baseReconnectDelayMs: 2,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(timeout408Fetch)))
+				expect(timeout408Requests).toBe(3)
+				expect(timeout408LastIds).toEqual([null, "1", "1"])
+				expect(Array.from(timeout408Events).map((e) => e.seq)).toEqual([1, 2])
+
+				// 6) First reconnect after sawEvent counts toward maxReconnectAttempts (body error & incomplete frame)
+				let zeroRetryBodyCalls = 0
+				const zeroRetryBodyFetch = (async () => {
+					zeroRetryBodyCalls++
+					let step = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (step === 0) {
+								step = 1
+								controller.enqueue(
+									encoder.encode(
+										'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
+									),
+								)
+							} else {
+								controller.error(new Error("mid-stream failure"))
+							}
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+				yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_zero_body", {
+								maxReconnectAttempts: 0,
+								baseReconnectDelayMs: 1,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(zeroRetryBodyFetch)))
+				expect(zeroRetryBodyCalls).toBe(1)
+
+				let zeroRetryFrameCalls = 0
+				const zeroRetryFrameFetch = (async () => {
+					zeroRetryFrameCalls++
+					return new Response(
+						'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\nid: 2\ndata: {"partial',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+				const zeroFrameErr = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_zero_frame", {
+								maxReconnectAttempts: 0,
+								baseReconnectDelayMs: 1,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(zeroRetryFrameFetch)))
+				expect(zeroRetryFrameCalls).toBe(1)
+				expect(zeroFrameErr.message).toContain("incomplete SSE frame")
+
+				let boundedAfterEventCalls = 0
+				const boundedAfterEventFetch = (async () => {
+					boundedAfterEventCalls++
+					if (boundedAfterEventCalls === 1) {
+						let step = 0
+						const body = new ReadableStream<Uint8Array>({
+							pull(controller) {
+								if (step === 0) {
+									step = 1
+									controller.enqueue(
+										encoder.encode(
+											'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
+										),
+									)
+								} else {
+									controller.error(new Error("drop after event"))
+								}
+							},
+						})
+						return new Response(body, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response("Unavailable", { status: 503 })
+				}) as unknown as typeof globalThis.fetch
+				yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_bounded_after", {
+								maxReconnectAttempts: 2,
+								baseReconnectDelayMs: 1,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(boundedAfterEventFetch)))
+				expect(boundedAfterEventCalls).toBe(3)
+
+				// 7) streamEndpointEvents dispatches to arbitrary declared GET SSE paths with query & headers
+				const seenCustomRequests: Array<{
+					readonly url: string
+					readonly trace: string | null
+					readonly lastEventId: string | null
+				}> = []
+				const customSseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url = input instanceof Request ? input.url : String(input)
+					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					seenCustomRequests.push({
+						url,
+						trace: headers.get("x-trace"),
+						lastEventId: headers.get("last-event-id"),
+					})
+					if (seenCustomRequests.length === 1) {
+						return new Response('id: cur_1\nevent: custom.ping\ndata: {"ok":true}\n\n', {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const customEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamEndpointEvents(
+							{
+								method: "GET",
+								path: "/v1/custom/abc/stream",
+								query: { filter: "live", after: "0" },
+								headers: { "x-trace": "t1" },
+								initialCursor: "0",
+								cursorQueryParam: "after",
+							},
+							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(customSseFetch)))
+				expect(seenCustomRequests).toEqual([
+					{
+						url: "http://localhost:1337/v1/custom/abc/stream?filter=live&after=0",
+						trace: "t1",
+						lastEventId: null,
+					},
+					{
+						url: "http://localhost:1337/v1/custom/abc/stream?filter=live",
+						trace: "t1",
+						lastEventId: "cur_1",
+					},
+				])
+				expect(Array.from(customEvents).map((e) => e.data)).toEqual([{ ok: true }])
 			}),
 		)
 	})

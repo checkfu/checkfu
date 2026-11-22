@@ -77,6 +77,9 @@ export const formatApiErrorEnvelope = (error: ApiError, fallbackStatus?: number)
 	return apiFailure(status, error.error.type, `${error.error.message}${detail}`)
 }
 
+export const isTransientHttpStatus = (status: number): boolean =>
+	status === 408 || status === 429 || status >= 500
+
 export const isTransientHttpError = (error: HttpClientError.HttpClientError): boolean => {
 	const reason = error.reason
 	if (reason._tag === "TransportError") return true
@@ -85,8 +88,7 @@ export const isTransientHttpError = (error: HttpClientError.HttpClientError): bo
 		reason._tag === "DecodeError" ||
 		reason._tag === "EmptyBodyError"
 	) {
-		const status = reason.response.status
-		return status === 408 || status === 429 || status >= 500
+		return isTransientHttpStatus(reason.response.status)
 	}
 	return false
 }
