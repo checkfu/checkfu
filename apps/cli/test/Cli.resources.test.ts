@@ -54,6 +54,31 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(badKey.exitCode).toBe(1)
 					expect(badKey.stdout).toBe("")
 					expect(badKey.stderr).toContain("401 authentication_error")
+
+					// TTY invalid invocation must not display literal escaped ANSI codes around ERROR,
+					// while still escaping untrusted control characters from the argument itself
+					const ttyInvalid = yield* cli.run(["agents", "bad\x1b]52;c;evil\x07cmd"], {
+						stderrIsTerminal: true,
+					})
+					expect(ttyInvalid.exitCode).toBe(1)
+					expect(ttyInvalid.stdout).toBe("")
+					expect(ttyInvalid.stderr).toContain("ERROR")
+					expect(ttyInvalid.stderr).not.toContain("\\x1b[1m")
+					expect(ttyInvalid.stderr).not.toContain("\x1b")
+					expect(ttyInvalid.stderr).not.toContain("\x07")
+
+					// Explicitly blank --base-url must fail rather than falling back to CHECKFU_API_URL
+					const blankUrl = yield* cli.run([
+						"environments",
+						"delete",
+						"--base-url",
+						"",
+						"--environment-id",
+						"env_123",
+					])
+					expect(blankUrl.exitCode).toBe(1)
+					expect(blankUrl.stdout).toBe("")
+					expect(blankUrl.stderr).toContain("API base URL must not be empty")
 				}),
 			),
 		)

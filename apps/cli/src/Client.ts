@@ -80,7 +80,7 @@ export const resolveBaseUrl = (
 	baseUrlFlag: Option.Option<string>,
 ): Effect.Effect<string, CliFailure> =>
 	Effect.gen(function* () {
-		if (Option.isSome(baseUrlFlag) && baseUrlFlag.value.trim().length > 0) {
+		if (Option.isSome(baseUrlFlag)) {
 			return yield* normalizeApiUrl(baseUrlFlag.value)
 		}
 		const apiUrl = yield* optionalConfigString("CHECKFU_API_URL")

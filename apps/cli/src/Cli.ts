@@ -34,7 +34,6 @@ export const StdioPresenterLive = Layer.effect(
 			present: (event) =>
 				Effect.gen(function* () {
 					const stdoutIsTty = yield* stdio.stdoutIsTerminal
-					const stderrIsTty = yield* stdio.stderrIsTerminal
 					switch (event._tag) {
 						case "Help": {
 							const formatter = CliOutput.defaultFormatter({ colors: stdoutIsTty })
@@ -53,7 +52,7 @@ export const StdioPresenterLive = Layer.effect(
 							return
 						}
 						case "InvalidInvocation": {
-							const formatter = CliOutput.defaultFormatter({ colors: stderrIsTty })
+							const formatter = CliOutput.defaultFormatter({ colors: false })
 							yield* writeToSink(
 								stdio.stderr({ endOnDone: false }),
 								`${escapeTerminalControlCharacters(formatter.formatErrors(event.errors))}\n`,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
 import { makeSigintController } from "../src/Signals.ts"
@@ -737,6 +738,204 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(recoveredAfterZero.exitCode).toBe(0)
 					expect(recoveredAfterZero.stdout).toContain("Recovered on turn 2")
+				}),
+			),
+		)
+	})
+
+	it("handles queued turns halted by refusal/budget_reached, mid-turn archival, and rejected piped interrupts", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Two piped messages where turn 1 finishes with refusal (does not drain queue):
+					//    must not hang waiting for turn 2, and must exit non-zero reporting queued turn 2 did not start.
+					//    A subsequent piped message starting turn 2 cleanly on --after 0 must still succeed.
+					const turn1Started = yield* Deferred.make<void>()
+					const releaseTurn1 = yield* Deferred.make<void>()
+					const refusalCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(turn1Started, undefined)
+									yield* Deferred.await(releaseTurn1)
+									return {
+										thinking: null,
+										text: "I cannot comply.",
+										input_tokens: 4,
+										output_tokens: 4,
+										stop_reason: { type: "refusal" as const },
+									}
+								}
+								return {
+									thinking: null,
+									text: `Turn ${args.turn} ok`,
+									input_tokens: 4,
+									output_tokens: 4,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const refusalSessionId = yield* createReadySession(refusalCli)
+
+					const queuedRefusal = yield* refusalCli.run(
+						["sessions", "connect", "--session-id", refusalSessionId],
+						{
+							stdin: "first prompt\nqueued second prompt\n",
+							interceptFetch: async (next, request) => {
+								const res = await next(request)
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									// Release turn 1 once the second message has been queued
+									const cloned = res.clone()
+									const body = (await cloned.json().catch(() => null)) as {
+										data?: Array<{ turn?: number }>
+									} | null
+									if (body?.data?.[0]?.turn === 2) {
+										await Effect.runPromise(Deferred.succeed(releaseTurn1, undefined))
+									}
+								}
+								return res
+							},
+						},
+					)
+					expect(queuedRefusal.exitCode).toBe(1)
+					expect(queuedRefusal.stderr).toContain("[status: idle (refusal)]")
+					expect(queuedRefusal.stderr).toContain(
+						"Queued turn 2 did not start because turn 1 stopped with refusal.",
+					)
+
+					// Replaying historical refusal with --after 0 while a fresh message starts turn 2 must succeed
+					const afterHistoricalRefusal = yield* refusalCli.run(
+						["sessions", "connect", "--session-id", refusalSessionId, "--after", "0"],
+						{ stdin: "fresh prompt after refusal\n" },
+					)
+					expect(afterHistoricalRefusal.exitCode).toBe(0)
+					expect(afterHistoricalRefusal.stdout).toContain("Turn 2 ok")
+
+					// 2) Archiving a session externally after a piped message was accepted but before it completes
+					//    must fail with exit code 1, while reconnecting only to replay the archived session succeeds.
+					const midTurnStarted = yield* Deferred.make<void>()
+					const archiveCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(midTurnStarted, undefined)
+								return yield* Effect.never
+							}),
+					})
+					const archiveSessionId = yield* createReadySession(archiveCli)
+
+					const archiverFiber = yield* Deferred.await(midTurnStarted).pipe(
+						Effect.andThen(Effect.sleep("20 millis")),
+						Effect.andThen(
+							archiveCli.run(["sessions", "archive", "--session-id", archiveSessionId]),
+						),
+						Effect.forkChild,
+					)
+					const archivedMidTurn = yield* archiveCli.run(
+						["sessions", "connect", "--session-id", archiveSessionId],
+						{ stdin: "in-flight message\n" },
+					)
+					yield* Fiber.await(archiverFiber)
+					expect(archivedMidTurn.exitCode).toBe(1)
+					expect(archivedMidTurn.stderr).toContain("Session terminated before turn 1 completed.")
+
+					const replayArchived = yield* archiveCli.run([
+						"sessions",
+						"connect",
+						"--session-id",
+						archiveSessionId,
+					])
+					expect(replayArchived.exitCode).toBe(0)
+					expect(replayArchived.stderr).toContain("[session archived]")
+
+					// Piping a message into an already-archived session must fail rather than returning success
+					const pipedToArchived = yield* archiveCli.run(
+						["sessions", "connect", "--session-id", archiveSessionId],
+						{ stdin: "message to dead session\n" },
+					)
+					expect(pipedToArchived.exitCode).toBe(1)
+					expect(pipedToArchived.stdout).toBe("")
+					expect(pipedToArchived.stderr).toContain("already archived")
+
+					// Failure during queued-turn status verification must propagate rather than hanging
+					const lookupFailRelease = yield* Deferred.make<void>()
+					const lookupFailCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.await(lookupFailRelease)
+								return {
+									thinking: null,
+									text: "Refused",
+									input_tokens: 4,
+									output_tokens: 4,
+									stop_reason: { type: "refusal" as const },
+								}
+							}),
+					})
+					const lookupFailSessionId = yield* createReadySession(lookupFailCli)
+					let statusGetsAfterStart = 0
+					let sawQueuedSecond = false
+					const lookupFailed = yield* lookupFailCli.run(
+						["sessions", "connect", "--session-id", lookupFailSessionId],
+						{
+							stdin: "first\nqueued\n",
+							interceptFetch: async (next, request) => {
+								if (
+									sawQueuedSecond &&
+									request.method === "GET" &&
+									request.url.endsWith(`/v1/sessions/${lookupFailSessionId}`)
+								) {
+									statusGetsAfterStart++
+									return new Response(
+										JSON.stringify({
+											type: "error",
+											error: { type: "service_unavailable", message: "Backend unavailable" },
+											request_id: "req_test",
+										}),
+										{ status: 503, headers: { "content-type": "application/json" } },
+									)
+								}
+								const res = await next(request)
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									const body = (await res
+										.clone()
+										.json()
+										.catch(() => null)) as {
+										data?: Array<{ turn?: number }>
+									} | null
+									if (body?.data?.[0]?.turn === 2) {
+										sawQueuedSecond = true
+										await Effect.runPromise(Deferred.succeed(lookupFailRelease, undefined))
+									}
+								}
+								return res
+							},
+						},
+					)
+					expect(lookupFailed.exitCode).toBe(1)
+					expect(statusGetsAfterStart).toBe(3)
+					expect(lookupFailed.stderr).toContain("503")
+
+					// 3) Rejected /interrupt fails piped connect with exit code 1,
+					//    but interactive TTY mode reports the error and allows continuing until /exit
+					const idleCli = yield* makeTestServer()
+					const idleSessionId = yield* createReadySession(idleCli)
+
+					const pipedInterrupt = yield* idleCli.run(
+						["sessions", "connect", "--session-id", idleSessionId],
+						{ stdin: "/interrupt\n" },
+					)
+					expect(pipedInterrupt.exitCode).toBe(1)
+					expect(pipedInterrupt.stderr).toContain("409 conflict_error")
+
+					const ttyInterrupt = yield* idleCli.run(
+						["sessions", "connect", "--session-id", idleSessionId],
+						{
+							stdinIsTerminal: true,
+							terminalReads: [Effect.succeed("/interrupt"), Effect.succeed("/exit")],
+						},
+					)
+					expect(ttyInterrupt.exitCode).toBe(0)
+					expect(ttyInterrupt.stderr).toContain("Interrupt failed:")
 				}),
 			),
 		)

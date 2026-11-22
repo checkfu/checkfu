@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as YAML from "yaml"
-import { normalizeApiUrl } from "../src/Client.ts"
+import { normalizeApiUrl, resolveBaseUrl } from "../src/Client.ts"
 import {
 	escapeTerminalControlCharacters,
 	stringifyTerminalSafeJson,
@@ -44,6 +45,29 @@ describe("normalizeApiUrl", () => {
 					const err = yield* Effect.flip(normalizeApiUrl(bad))
 					expect(err._tag).toBe("CliFailure")
 					expect(err.exitCode).toBe(1)
+				}
+			}),
+		)
+	})
+
+	it("rejects explicitly blank --base-url instead of falling back to env vars or localhost", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const envLayer = ConfigProvider.layer(
+					ConfigProvider.fromUnknown({
+						CHECKFU_API_URL: "https://prod.checkfu.dev",
+						CHECKFU_URL: "https://staging.checkfu.dev",
+					}),
+				)
+				expect(yield* resolveBaseUrl(Option.none()).pipe(Effect.provide(envLayer))).toBe(
+					"https://prod.checkfu.dev",
+				)
+				for (const blank of ["", "   "]) {
+					const err = yield* Effect.flip(
+						resolveBaseUrl(Option.some(blank)).pipe(Effect.provide(envLayer)),
+					)
+					expect(err._tag).toBe("CliFailure")
+					expect(err.message).toContain("must not be empty")
 				}
 			}),
 		)

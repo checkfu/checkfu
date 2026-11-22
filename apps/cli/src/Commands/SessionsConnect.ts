@@ -1,10 +1,13 @@
+import { statusOf } from "@checkfu/api/Http/Api"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
@@ -12,7 +15,14 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import * as Terminal from "effect/Terminal"
 import type { CheckfuClient, SessionStreamEvent } from "../Client.ts"
-import { type CliFailure, formatClientError, networkFailure, usageError } from "../Errors.ts"
+import {
+	type CliFailure,
+	formatClientError,
+	isApiErrorEnvelope,
+	isTransientHttpError,
+	networkFailure,
+	usageError,
+} from "../Errors.ts"
 import { decodePayload } from "../Input.ts"
 import { RootCommand, getClient, renderOutput } from "../RootCommand.ts"
 import { withSigintHandler } from "../Signals.ts"
@@ -43,13 +53,75 @@ interface ConnectState {
 	readonly status: "idle" | "running" | "terminated"
 	readonly observedTurn: number
 	readonly settledTurn: number
+	readonly latestSettledStopReason: string | undefined
 	readonly targetTurn: number
 	readonly submittedTurns: ReadonlySet<number>
-	readonly turnErrors: ReadonlyMap<number, string>
+	readonly latestTurnError: { readonly turn: number; readonly message: string } | undefined
 	readonly failedTurnErrors: ReadonlyMap<number, string>
 	readonly ended: boolean
 	readonly localSentTexts: ReadonlyArray<string>
 }
+
+const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
+const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
+
+const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
+	if (HttpClientError.isHttpClientError(err)) return isTransientHttpError(err)
+	if (isApiErrorEnvelope(err)) {
+		const status = statusOf(err)
+		return status === 429 || status >= 500
+	}
+	return false
+}
+
+const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId) =>
+	Effect.gen(function* () {
+		for (let attempt = 0; ; attempt++) {
+			const res = yield* Effect.result(
+				client.api.sessions.get({ params: { session_id: sessionId } }),
+			)
+			if (res._tag === "Success") {
+				return res.success
+			}
+			const err = res.failure
+			if (isRetryableLookupError(err) && attempt < MAX_SESSION_STATUS_LOOKUP_RETRIES) {
+				yield* Effect.sleep(Duration.millis(SESSION_STATUS_LOOKUP_RETRY_BASE_MS * 2 ** attempt))
+				continue
+			}
+			return yield* formatClientError(err)
+		}
+	})
+
+const findFirstSendablePipedLine = (
+	stdio: Stdio.Stdio,
+): Effect.Effect<Option.Option<string>, CliFailure> =>
+	Effect.gen(function* () {
+		let firstSendable: Option.Option<string> = Option.none()
+		yield* stdio.stdin.pipe(
+			Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
+			Stream.decodeText(),
+			Stream.splitLines,
+			Stream.takeUntil((line) => {
+				const trimmed = line.trim()
+				return trimmed.length > 0
+			}),
+			Stream.runForEach((line) =>
+				Effect.sync(() => {
+					const trimmed = line.trim()
+					if (trimmed.length > 0 && trimmed !== "/exit" && trimmed !== "/quit") {
+						firstSendable = Option.some(trimmed)
+					}
+				}),
+			),
+		)
+		return firstSendable
+	})
+
+const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
+	stopReason !== undefined &&
+	stopReason !== "end_turn" &&
+	stopReason !== "interrupted" &&
+	stopReason !== "retries_exhausted"
 
 const renderConnectEvent = (
 	event: SessionStreamEvent,
@@ -120,40 +192,48 @@ const renderConnectEvent = (
 				const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
 				const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
 				const formattedError = `${errType}: ${errMsg}`
-				yield* Ref.update(stateRef, (state) => {
-					const nextErrors = new Map(state.turnErrors)
-					nextErrors.set(state.observedTurn, formattedError)
-					return { ...state, turnErrors: nextErrors }
-				})
+				yield* Ref.update(stateRef, (state) => ({
+					...state,
+					latestTurnError: { turn: state.observedTurn, message: formattedError },
+				}))
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(`[error] ${formattedError}`)
 				}
 				break
 			}
 			case "session.status_idle": {
-				const stopReason =
+				const rawStopReason =
 					typeof data["stop_reason"] === "object" && data["stop_reason"] !== null
 						? (data["stop_reason"] as Record<string, unknown>)["type"]
 						: undefined
+				const stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined
 				const next = yield* Ref.updateAndGet(stateRef, (state) => {
 					const turn = state.observedTurn
+					const latestSettledStopReason =
+						turn >= state.settledTurn ? stopReason : state.latestSettledStopReason
 					let failedTurnErrors = state.failedTurnErrors
 					if (stopReason === "retries_exhausted") {
+						const turnError =
+							state.latestTurnError?.turn === turn ? state.latestTurnError.message : undefined
 						const nextFailed = new Map(state.failedTurnErrors)
-						nextFailed.set(turn, state.turnErrors.get(turn) ?? "Model retries exhausted.")
+						nextFailed.set(turn, turnError ?? "Model retries exhausted.")
 						failedTurnErrors = nextFailed
 					}
 					return {
 						...state,
 						status: "idle" as const,
 						settledTurn: Math.max(state.settledTurn, turn),
+						latestSettledStopReason,
 						failedTurnErrors,
 					}
 				})
-				if (!rawStructuredMode && typeof stopReason === "string" && stopReason !== "end_turn") {
+				if (!rawStructuredMode && stopReason !== undefined && stopReason !== "end_turn") {
 					yield* writeStderrLine(`[status: idle (${stopReason})]`)
 				}
-				if (next.targetTurn > 0 && next.settledTurn >= next.targetTurn) {
+				if (
+					(next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
+					(next.targetTurn > next.settledTurn && isQueueHaltingStopReason(stopReason))
+				) {
 					yield* Deferred.succeed(settleDeferred, undefined)
 				}
 				break
@@ -162,13 +242,13 @@ const renderConnectEvent = (
 			case "session.archived": {
 				yield* Ref.update(stateRef, (state) => {
 					let failedTurnErrors = state.failedTurnErrors
-					if (eventType === "session.status_terminated") {
-						const turnError = state.turnErrors.get(state.observedTurn)
-						if (turnError !== undefined) {
-							const nextFailed = new Map(state.failedTurnErrors)
-							nextFailed.set(state.observedTurn, turnError)
-							failedTurnErrors = nextFailed
-						}
+					if (
+						eventType === "session.status_terminated" &&
+						state.latestTurnError?.turn === state.observedTurn
+					) {
+						const nextFailed = new Map(state.failedTurnErrors)
+						nextFailed.set(state.observedTurn, state.latestTurnError.message)
+						failedTurnErrors = nextFailed
 					}
 					return {
 						...state,
@@ -198,6 +278,7 @@ const dispatchUserLine = (
 	sessionId: SessionId,
 	line: string,
 	stateRef: Ref.Ref<ConnectState>,
+	options?: { readonly failOnInterruptError?: boolean },
 ): Effect.Effect<"continue" | "exit", CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const trimmed = line.trim()
@@ -214,7 +295,11 @@ const dispatchUserLine = (
 				}),
 			)
 			if (res._tag === "Failure") {
-				yield* writeStderrLine(`Interrupt failed: ${formatClientError(res.failure).message}`)
+				const err = formatClientError(res.failure)
+				if (options?.failOnInterruptError === true) {
+					return yield* err
+				}
+				yield* writeStderrLine(`Interrupt failed: ${err.message}`)
 			} else {
 				yield* writeStderrLine("Interrupt requested.")
 			}
@@ -401,6 +486,17 @@ export const sessionsConnectCommand = Command.make(
 
 			const after = Option.getOrUndefined(input.after)
 			const baseline = yield* resolveCursorBaseline(client, sessionId, after)
+			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
+			const isInteractiveTty = yield* stdio.stdinIsTerminal
+
+			if (initiallyEnded && !isInteractiveTty) {
+				const unsentLine = yield* findFirstSendablePipedLine(stdio)
+				if (Option.isSome(unsentLine)) {
+					return yield* networkFailure(
+						`Cannot send input: session ${session.id} is already ${session.archived_at !== null ? "archived" : "terminated"}.`,
+					)
+				}
+			}
 
 			yield* writeStderrLine(
 				`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
@@ -410,11 +506,12 @@ export const sessionsConnectCommand = Command.make(
 				status: baseline.status,
 				observedTurn: baseline.observedTurn,
 				settledTurn: baseline.settledTurn,
+				latestSettledStopReason: undefined,
 				targetTurn: 0,
 				submittedTurns: new Set<number>(),
-				turnErrors: new Map<number, string>(),
+				latestTurnError: undefined,
 				failedTurnErrors: new Map<number, string>(),
-				ended: session.status === "terminated" || session.archived_at !== null,
+				ended: initiallyEnded,
 				localSentTexts: [],
 			})
 
@@ -469,7 +566,6 @@ export const sessionsConnectCommand = Command.make(
 					return
 				}
 
-				const isInteractiveTty = yield* stdio.stdinIsTerminal
 				if (isInteractiveTty) {
 					let interruptRequestedOnce = false
 					let cachedStatus: ConnectState["status"] = session.status
@@ -534,14 +630,23 @@ export const sessionsConnectCommand = Command.make(
 					Stream.runForEach((line) =>
 						Effect.gen(function* () {
 							if (explicitExit) return
-							const state = yield* Ref.get(stateRef)
-							if (state.ended) {
+							const trimmed = line.trim()
+							if (trimmed.length === 0) return
+							if (trimmed === "/exit" || trimmed === "/quit") {
 								explicitExit = true
 								return
 							}
+							const state = yield* Ref.get(stateRef)
+							if (state.ended) {
+								return yield* networkFailure(
+									`Cannot send input: session ${session.id} has already ended.`,
+								)
+							}
 							const nextDeferred = yield* Deferred.make<void>()
 							yield* Ref.set(settleDeferredRef, nextDeferred)
-							const action = yield* dispatchUserLine(client, sessionId, line, stateRef)
+							const action = yield* dispatchUserLine(client, sessionId, line, stateRef, {
+								failOnInterruptError: true,
+							})
 							if (action === "exit") {
 								explicitExit = true
 							}
@@ -559,6 +664,30 @@ export const sessionsConnectCommand = Command.make(
 						}
 						if (state.targetTurn > 0 && state.settledTurn >= state.targetTurn) {
 							break
+						}
+						const lastStopReason = state.latestSettledStopReason
+						if (
+							state.status === "idle" &&
+							state.targetTurn > state.settledTurn &&
+							isQueueHaltingStopReason(lastStopReason)
+						) {
+							const latestRes = yield* Effect.result(fetchSessionStatusWithRetry(client, sessionId))
+							if (latestRes._tag === "Failure") {
+								yield* Ref.set(incompleteTurnRef, latestRes.failure)
+								break
+							}
+							if (
+								latestRes.success.status !== "running" &&
+								latestRes.success.turn < state.targetTurn
+							) {
+								yield* Ref.set(
+									incompleteTurnRef,
+									networkFailure(
+										`Queued turn ${state.targetTurn} did not start because turn ${state.settledTurn} stopped with ${lastStopReason}.`,
+									),
+								)
+								break
+							}
 						}
 						if (yield* Deferred.isDone(streamEndedDeferred)) {
 							if (state.targetTurn > 0) {
@@ -610,6 +739,17 @@ export const sessionsConnectCommand = Command.make(
 						const turnFailure = finalState.failedTurnErrors.get(turn)
 						if (turnFailure !== undefined) {
 							yield* Ref.set(failedTurnRef, networkFailure(`Turn ${turn} failed: ${turnFailure}`))
+							break
+						}
+						if (finalState.settledTurn < turn) {
+							yield* Ref.set(
+								failedTurnRef,
+								networkFailure(
+									finalState.ended
+										? `Session terminated before turn ${turn} completed.`
+										: `Turn ${turn} did not complete.`,
+								),
+							)
 							break
 						}
 					}
