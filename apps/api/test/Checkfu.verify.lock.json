@@ -1,0 +1,199 @@
+{
+	"version": 1,
+	"rules": {
+		"Checkfu": {
+			"Agent.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"active\", s.status === \"archived\"].some((ok) => ok)"
+			},
+			"Agent.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\ts.status === \"\",\n\t\t\t\t\ts.version === 0,\n\t\t\t\t\ts.current_version_id === \"\",\n\t\t\t\t\ts.name === \"\",\n\t\t\t\t\ts.model_id === \"\",\n\t\t\t\t\t!s.has_system,\n\t\t\t\t\ts.system === \"\",\n\t\t\t\t\t!s.has_description,\n\t\t\t\t\ts.description === \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.status !== \"\",\n\t\t\t\t\ts.version >= 1,\n\t\t\t\t\ts.current_version_id !== \"\",\n\t\t\t\t\ts.name !== \"\",\n\t\t\t\t\ts.model_id !== \"\",\n\t\t\t\t\t[s.has_system, s.system === \"\"].some((ok) => ok),\n\t\t\t\t\t[s.has_description, s.description === \"\"].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.CreatedAgentNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Agent.ArchivedAgentStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"archived\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"archived\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.current_version_id === before.current_version_id,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Agent.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"AgentVersion.MintedExactlyWhenNumbered": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\t!s.minted,\n\t\t\t\t\ts.agent_id === \"\",\n\t\t\t\t\ts.version === 0,\n\t\t\t\t\ts.name === \"\",\n\t\t\t\t\ts.model_id === \"\",\n\t\t\t\t\t!s.has_system,\n\t\t\t\t\ts.system === \"\",\n\t\t\t\t\t!s.has_description,\n\t\t\t\t\ts.description === \"\",\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\ts.minted,\n\t\t\t\t\ts.agent_id !== \"\",\n\t\t\t\t\ts.version >= 1,\n\t\t\t\t\ts.name !== \"\",\n\t\t\t\t\ts.model_id !== \"\",\n\t\t\t\t\t[s.has_system, s.system === \"\"].some((ok) => ok),\n\t\t\t\t\t[s.has_description, s.description === \"\"].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"AgentVersion.MintedVersionNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t!before.minted,\n\t\t\t\t[\n\t\t\t\t\tafter.minted,\n\t\t\t\t\tafter.agent_id === before.agent_id,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.model_id === before.model_id,\n\t\t\t\t\tafter.has_system === before.has_system,\n\t\t\t\t\tafter.system === before.system,\n\t\t\t\t\tafter.has_description === before.has_description,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"archived\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.version === 0, s.name === \"\"].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.version >= 1, s.name !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.CreatedEnvironmentNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Environment.ArchivedNeverReactivates": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"archived\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"archived\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"deleted\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Environment.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tbefore.status === \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.status === \"\", after.version === 0].every((ok) => ok),\n\t\t\t\t\t\t[after.status === \"active\", after.version === 1].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.status !== \"\",\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.version === before.version, after.name === before.name].every((ok) => ok),\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Session.RunningTurnIsPositive": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || s.turn >= 1"
+			},
+			"Session.IdleTurnIsNonNegative": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Idle\" || s.turn >= 0"
+			},
+			"Session.ModelRequestsStartedNonNegative": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
+			},
+			"Session.PendingUserMessagesWithinBounds": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8)"
+			},
+			"Session.OpenModelRequestRequiresStartedCount": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || s.open_model_request_id === null || s.model_requests_started >= 1"
+			},
+			"Session.TerminatedSessionStaysTerminated": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" || after._tag === \"Terminated\""
+			},
+			"Session.ArchivedSessionStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" ||\n\t\t\t!before.archived ||\n\t\t\t(after._tag === \"Terminated\" && after.archived)"
+			},
+			"Session.CreatedSessionNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag === \"Uninitialized\" || after._tag !== \"Uninitialized\""
+			},
+			"Session.TurnNeverDecreases": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.turn >= before.turn"
+			},
+			"Session.TurnAdvancesByAtMostOne": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.turn <= before.turn + 1"
+			},
+			"Session.ModelRequestsStartedNeverDecreasesWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started >= before.model_requests_started"
+			},
+			"Session.ModelRequestsStartedGrowsByAtMostOneWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started <= before.model_requests_started + 1"
+			},
+			"Session.PendingUserMessagesGrowsByAtMostOneWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.pending_user_messages <= before.pending_user_messages + 1"
+			},
+			"Session.OnlySendUserMessageAddsPendingMessages": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.pending_user_messages <= before.pending_user_messages ||\n\t\t\tcommand._tag === \"SendUserMessage\""
+			},
+			"Session.OnlyArchiveSessionSetsArchivedFlag": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tafter._tag !== \"Terminated\" ||\n\t\t\t!after.archived ||\n\t\t\t(before._tag === \"Terminated\" && before.archived) ||\n\t\t\tcommand._tag === \"ArchiveSession\""
+			},
+			"Session.OpenModelRequestClosedBeforeLeavingRunning": {
+				"kind": "transition",
+				"source": "({ before, after, events }) => {\n\t\t\tif (\n\t\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t\tbefore.open_model_request_id === null ||\n\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn)\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tconst endIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"span.model_request_end\" &&\n\t\t\t\t\tevent.model_request_start_id === before.open_model_request_id,\n\t\t\t)\n\t\t\tconst leaveIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.status_idle\" || event._tag === \"session.status_terminated\",\n\t\t\t)\n\t\t\treturn endIndex >= 0 && (leaveIndex < 0 || endIndex < leaveIndex)\n\t\t}"
+			},
+			"EventBatch.ClaimedBatchNeverReturnsToUnclaimed": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" || after._tag === \"Claimed\""
+			},
+			"EventBatch.ClaimedFingerprintNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" ||\n\t\t\t(after._tag === \"Claimed\" && after.fingerprint === before.fingerprint)"
+			},
+			"EventBatch.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": {
+				"kind": "transition",
+				"source": "({ before, after, command, events }) => {\n\t\t\tif (before._tag !== \"Unclaimed\" || after._tag !== \"Claimed\") {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.fingerprint === command.fingerprint,\n\t\t\t\tevents.length === 1,\n\t\t\t\tevents.every((event) => event.fingerprint === command.fingerprint),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"CreateAgent.NewAgentStartsAtVersionOne": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"\",\n\t\t\t\t!before.version.minted,\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === 1,\n\t\t\t\tafter.agent.current_version_id === command.version_id,\n\t\t\t\tafter.version.minted,\n\t\t\t\tafter.version.version === 1,\n\t\t\t\tafter.version.agent_id === command.agent_id,\n\t\t\t].every((ok) => ok)"
+			},
+			"UpdateAgent.ChangeMintsNextVersionOrNoOps": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tconst hasSystem = command.system !== null\n\t\t\tconst system = command.system ?? \"\"\n\t\t\tconst hasDescription = command.description !== null\n\t\t\tconst description = command.description ?? \"\"\n\t\t\tconst unchanged = [\n\t\t\t\tcommand.name === before.agent.name,\n\t\t\t\tcommand.model.id === before.agent.model_id,\n\t\t\t\thasSystem === before.agent.has_system,\n\t\t\t\tsystem === before.agent.system,\n\t\t\t\thasDescription === before.agent.has_description,\n\t\t\t\tdescription === before.agent.description,\n\t\t\t].every((same) => same)\n\t\t\treturn [\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\t[\n\t\t\t\t\t[\n\t\t\t\t\t\tunchanged,\n\t\t\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\t\t\tafter.agent.current_version_id === before.agent.current_version_id,\n\t\t\t\t\t\tafter.version.minted === before.version.minted,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\t!unchanged,\n\t\t\t\t\t\tafter.agent.version === before.agent.version + 1,\n\t\t\t\t\t\tafter.agent.current_version_id === command.next_version_id,\n\t\t\t\t\t\tafter.agent.name === command.name,\n\t\t\t\t\t\tafter.agent.model_id === command.model.id,\n\t\t\t\t\t\tafter.agent.has_system === hasSystem,\n\t\t\t\t\t\tafter.agent.system === system,\n\t\t\t\t\t\tafter.agent.has_description === hasDescription,\n\t\t\t\t\t\tafter.agent.description === description,\n\t\t\t\t\t\t!before.version.minted,\n\t\t\t\t\t\tafter.version.minted,\n\t\t\t\t\t\tafter.version.version === after.agent.version,\n\t\t\t\t\t\tafter.version.agent_id === command.agent_id,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t].some((ok) => ok),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"UpdateAgent.UnchangedConfigMintsNothing": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tconst hasSystem = command.system !== null\n\t\t\tconst system = command.system ?? \"\"\n\t\t\tconst hasDescription = command.description !== null\n\t\t\tconst description = command.description ?? \"\"\n\t\t\treturn [\n\t\t\t\tbefore.agent.status !== \"active\",\n\t\t\t\tcommand.name !== before.agent.name,\n\t\t\t\tcommand.model.id !== before.agent.model_id,\n\t\t\t\thasSystem !== before.agent.has_system,\n\t\t\t\tsystem !== before.agent.system,\n\t\t\t\thasDescription !== before.agent.has_description,\n\t\t\t\tdescription !== before.agent.description,\n\t\t\t\t[\n\t\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\t\tafter.agent.current_version_id === before.agent.current_version_id,\n\t\t\t\t\tafter.version.minted === before.version.minted,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.agent.status === \"active\" &&\n\t\t\tbefore.environment.status === \"active\" &&\n\t\t\tbefore.session._tag === \"Uninitialized\" &&\n\t\t\tafter.session._tag === \"Idle\" &&\n\t\t\tafter.session.turn === 0"
+			},
+			"AdmitSession.PinnedVersionWithinAgentHead": {
+				"kind": "transition",
+				"source": "({ before, command, events }) => {\n\t\t\tconst pinned = command.agent_version ?? before.agent.version\n\t\t\treturn (\n\t\t\t\tbefore.agent.version >= 1 &&\n\t\t\t\tpinned >= 1 &&\n\t\t\t\tpinned <= before.agent.version &&\n\t\t\t\tevents.length === 1 &&\n\t\t\t\tevents.every(\n\t\t\t\t\t(event) =>\n\t\t\t\t\t\tevent.agent_id === command.agent_id &&\n\t\t\t\t\t\tevent.agent_version === pinned &&\n\t\t\t\t\t\tevent.environment_id === command.environment_id,\n\t\t\t\t)\n\t\t\t)\n\t\t}"
+			},
+			"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.agent.current_version_id === before.agent.current_version_id,\n\t\t\t\tafter.agent.name === before.agent.name,\n\t\t\t\tafter.agent.model_id === before.agent.model_id,\n\t\t\t\tafter.agent.has_system === before.agent.has_system,\n\t\t\t\tafter.agent.system === before.agent.system,\n\t\t\t\tafter.agent.has_description === before.agent.has_description,\n\t\t\t\tafter.agent.description === before.agent.description,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t\tafter.environment.name === before.environment.name,\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.EverySessionReferencesExistingAgentVersion": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.SessionView.every((sv) =>\n\t\t\t\t[\n\t\t\t\t\tm.Agent.some((a) =>\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\ta.id === sv.state.agent_id,\n\t\t\t\t\t\t\ta.state.status !== \"\",\n\t\t\t\t\t\t\tsv.state.agent_version <= a.state.version,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t\tm.AgentVersionByNumberView.some((av) =>\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tav.id === `${sv.state.agent_id}@${sv.state.agent_version}`,\n\t\t\t\t\t\t\tav.state.agent_id === sv.state.agent_id,\n\t\t\t\t\t\t\tav.state.version === sv.state.agent_version,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t].every((ok) => ok),\n\t\t\t)"
+			},
+			"Checkfu.EverySessionReferencesKnownEnvironment": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.SessionView.every((sv) =>\n\t\t\t\tm.Environment.some((e) =>\n\t\t\t\t\t[e.id === sv.state.environment_id, e.state.status !== \"\"].every((ok) => ok),\n\t\t\t\t),\n\t\t\t)"
+			},
+			"Checkfu.HostedViewsMatchAggregates": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Agent.every((a) => {\n\t\t\t\t\tconst view = m.AgentView.find((v) => v.id === a.id)\n\t\t\t\t\tif (a.state.status === \"\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === a.id,\n\t\t\t\t\t\tview.state.version === a.state.version,\n\t\t\t\t\t\tview.state.current_version_id === a.state.current_version_id,\n\t\t\t\t\t\tview.state.name === a.state.name,\n\t\t\t\t\t\tview.state.model.id === a.state.model_id,\n\t\t\t\t\t\t(view.state.system !== null) === a.state.has_system,\n\t\t\t\t\t\t(view.state.system ?? \"\") === a.state.system,\n\t\t\t\t\t\t(view.state.description !== null) === a.state.has_description,\n\t\t\t\t\t\t(view.state.description ?? \"\") === a.state.description,\n\t\t\t\t\t\t!!view.state.archived_at === (a.state.status === \"archived\"),\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.AgentView.every((v) =>\n\t\t\t\t\tm.Agent.some((a) => [a.id === v.id, a.state.status !== \"\"].every((ok) => ok)),\n\t\t\t\t),\n\t\t\t\tm.AgentVersion.every((av) => {\n\t\t\t\t\tconst view = m.AgentVersionView.find((v) => v.id === av.id)\n\t\t\t\t\tif (!av.state.minted) {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tconst byNumber = m.AgentVersionByNumberView.find(\n\t\t\t\t\t\t(v) => v.id === `${av.state.agent_id}@${av.state.version}`,\n\t\t\t\t\t)\n\t\t\t\t\tif (view === undefined || byNumber === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === av.id,\n\t\t\t\t\t\tview.state.agent_id === av.state.agent_id,\n\t\t\t\t\t\tview.state.version === av.state.version,\n\t\t\t\t\t\tview.state.name === av.state.name,\n\t\t\t\t\t\tview.state.model.id === av.state.model_id,\n\t\t\t\t\t\t(view.state.system !== null) === av.state.has_system,\n\t\t\t\t\t\t(view.state.system ?? \"\") === av.state.system,\n\t\t\t\t\t\t(view.state.description !== null) === av.state.has_description,\n\t\t\t\t\t\t(view.state.description ?? \"\") === av.state.description,\n\t\t\t\t\t\tbyNumber.state.id === av.id,\n\t\t\t\t\t\tbyNumber.state.agent_id === av.state.agent_id,\n\t\t\t\t\t\tbyNumber.state.version === av.state.version,\n\t\t\t\t\t\tbyNumber.state.name === av.state.name,\n\t\t\t\t\t\tbyNumber.state.model.id === av.state.model_id,\n\t\t\t\t\t\t(byNumber.state.system !== null) === av.state.has_system,\n\t\t\t\t\t\t(byNumber.state.system ?? \"\") === av.state.system,\n\t\t\t\t\t\t(byNumber.state.description !== null) === av.state.has_description,\n\t\t\t\t\t\t(byNumber.state.description ?? \"\") === av.state.description,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.AgentVersionView.every((v) =>\n\t\t\t\t\tm.AgentVersion.some((av) => [av.id === v.id, av.state.minted].every((ok) => ok)),\n\t\t\t\t),\n\t\t\t\tm.AgentVersionByNumberView.every((v) =>\n\t\t\t\t\tm.AgentVersion.some((av) =>\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tav.state.minted,\n\t\t\t\t\t\t\tav.id === v.state.id,\n\t\t\t\t\t\t\tv.id === `${av.state.agent_id}@${av.state.version}`,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t\tm.Environment.every((e) => {\n\t\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\t\tif (e.state.status === \"\" || e.state.status === \"deleted\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === e.id,\n\t\t\t\t\t\tview.state.version === e.state.version,\n\t\t\t\t\t\tview.state.name === e.state.name,\n\t\t\t\t\t\t!!view.state.archived_at === (e.state.status === \"archived\"),\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.EnvironmentView.every((v) =>\n\t\t\t\t\tm.Environment.some((e) =>\n\t\t\t\t\t\t[e.id === v.id, e.state.status !== \"\", e.state.status !== \"deleted\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t\tm.Session.every((s) => {\n\t\t\t\t\tconst view = m.SessionView.find((v) => v.id === s.id)\n\t\t\t\t\tconst input = m.TurnInput.find((v) => v.id === s.id)\n\t\t\t\t\tif (s.state._tag === \"Uninitialized\") {\n\t\t\t\t\t\treturn view === undefined && input === undefined\n\t\t\t\t\t}\n\t\t\t\t\tconst created = s.events.find((event) => event._tag === \"session.created\")\n\t\t\t\t\tif (view === undefined || input === undefined || created === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\tconst identity = [\n\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\tview.state.agent_id === created.agent_id,\n\t\t\t\t\t\tview.state.agent_version === created.agent_version,\n\t\t\t\t\t\tview.state.environment_id === created.environment_id,\n\t\t\t\t\t\tinput.state.agent_id === created.agent_id,\n\t\t\t\t\t\tinput.state.agent_version === created.agent_version,\n\t\t\t\t\t\tinput.state.environment_id === created.environment_id,\n\t\t\t\t\t\tinput.state.turn === view.state.turn,\n\t\t\t\t\t]\n\t\t\t\t\tif (s.state._tag === \"Idle\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...identity,\n\t\t\t\t\t\t\tview.state.status === \"idle\",\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\t!view.state.archived_at,\n\t\t\t\t\t\t\tinput.state.turn === s.state.turn,\n\t\t\t\t\t\t\tinput.state.input.length === 0,\n\t\t\t\t\t\t\tinput.state.unsent.length <= 8,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Running\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...identity,\n\t\t\t\t\t\t\tview.state.status === \"running\",\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\t!view.state.archived_at,\n\t\t\t\t\t\t\tinput.state.turn === s.state.turn,\n\t\t\t\t\t\t\tinput.state.input.length >= 1,\n\t\t\t\t\t\t\tinput.state.unsent.length === s.state.pending_user_messages,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tconst startedTurns = s.events.filter(\n\t\t\t\t\t\t(event) => event._tag === \"session.status_running\",\n\t\t\t\t\t).length\n\t\t\t\t\treturn [\n\t\t\t\t\t\t...identity,\n\t\t\t\t\t\tview.state.status === \"terminated\",\n\t\t\t\t\t\tview.state.turn === startedTurns,\n\t\t\t\t\t\tinput.state.turn === startedTurns,\n\t\t\t\t\t\t!!view.state.archived_at === s.state.archived,\n\t\t\t\t\t\tinput.state.input.length === 0,\n\t\t\t\t\t\tinput.state.unsent.length === 0,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.SessionView.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t\tm.TurnInput.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.EveryTurnSettles": {
+				"kind": "eventually",
+				"source": "(m) => m.Session.every((s) => s.state._tag !== \"Running\")"
+			},
+			"Checkfu.AnEventBatchIsClaimed": {
+				"kind": "sometimes",
+				"source": "(m) => m.EventBatch.some((b) => b.state._tag === \"Claimed\")"
+			},
+			"Checkfu.ASessionIsAdmitted": {
+				"kind": "sometimes",
+				"source": "(m) => m.Session.some((s) => s.state._tag === \"Idle\")"
+			},
+			"Checkfu.AnAdmittedSessionCompletesATurn": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Session.some((s) => s.state._tag === \"Idle\" && s.state.turn >= 1)"
+			},
+			"Checkfu.AMintedVersionBelongsToItsAgent": {
+				"kind": "relation",
+				"source": "({ version, agent }) =>\n\t\t\t\t[\n\t\t\t\t\t!version.state.minted,\n\t\t\t\t\tversion.state.agent_id !== agent.id,\n\t\t\t\t\t[agent.state.status !== \"\", version.state.version <= agent.state.version].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t),\n\t\t\t\t].some((ok) => ok)"
+			},
+			"Checkfu.AnAgentsHeadIsItsLatestVersion": {
+				"kind": "relation",
+				"source": "({ agent, version }) =>\n\t\t\t\t[\n\t\t\t\t\tagent.state.status === \"\",\n\t\t\t\t\tagent.state.current_version_id !== version.id,\n\t\t\t\t\t[\n\t\t\t\t\t\tversion.state.minted,\n\t\t\t\t\t\tversion.state.agent_id === agent.id,\n\t\t\t\t\t\tversion.state.version === agent.state.version,\n\t\t\t\t\t\tversion.state.name === agent.state.name,\n\t\t\t\t\t\tversion.state.model_id === agent.state.model_id,\n\t\t\t\t\t\tversion.state.has_system === agent.state.has_system,\n\t\t\t\t\t\tversion.state.system === agent.state.system,\n\t\t\t\t\t\tversion.state.has_description === agent.state.has_description,\n\t\t\t\t\t\tversion.state.description === agent.state.description,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t].some((ok) => ok)"
+			},
+			"Checkfu.VersionNumbersAreDistinct": {
+				"kind": "relation",
+				"source": "({ a, b }) =>\n\t\t\t\t[\n\t\t\t\t\ta.id === b.id,\n\t\t\t\t\t!a.state.minted,\n\t\t\t\t\t!b.state.minted,\n\t\t\t\t\ta.state.agent_id !== b.state.agent_id,\n\t\t\t\t\ta.state.version !== b.state.version,\n\t\t\t\t].some((ok) => ok)"
+			}
+		}
+	}
+}
