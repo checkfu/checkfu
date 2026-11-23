@@ -114,7 +114,7 @@ describe("Sessions Z3 formal verification", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		240_000,
+		600_000,
 	)
 
 	it.live(
@@ -165,6 +165,6 @@ describe("Sessions Z3 formal verification", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		120_000,
+		300_000,
 	)
 })

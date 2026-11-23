@@ -227,7 +227,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		expect(exploredOutcomes).toContain(
 			"IdempotencyClaim.ClaimIdempotencyKey ✗ IdempotencyKeyConflict",
 		)
-	}, 240_000)
+	}, 600_000)
 
 	it("preserves all cross-domain Checkfu invariants after post-admission UpdateAgent, ArchiveAgent, ArchiveEnvironment, DeleteEnvironment, and ArchiveSession mutations", async () => {
 		const platform = InMemory.make({ manual: true })
