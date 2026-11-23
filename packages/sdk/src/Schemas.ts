@@ -1,0 +1,266 @@
+import * as Schema from "effect/Schema"
+
+// ---------------------------------------------------------------------------
+// Shared limits & primitive schemas
+// ---------------------------------------------------------------------------
+
+export const MAX_AGENT_NAME_LENGTH = 256
+export const MAX_AGENT_DESCRIPTION_LENGTH = 2048
+export const MAX_AGENT_SYSTEM_LENGTH = 100_000
+
+export const MAX_ENVIRONMENT_NAME_LENGTH = 256
+export const MAX_ENVIRONMENT_DESCRIPTION_LENGTH = 1024
+
+export const MAX_IDENTIFIER_LENGTH = 256
+export const MAX_TITLE_LENGTH = 1024
+export const MAX_MESSAGE_TEXT_LENGTH = 16_384
+export const MAX_THINKING_TEXT_LENGTH = 16_384
+export const MAX_ERROR_TYPE_LENGTH = 128
+export const MAX_ERROR_MESSAGE_LENGTH = 4096
+
+export const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
+export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
+export const SINGLE_PATH_SEGMENT_MESSAGE =
+	'must be a single non-empty path segment (not "." or "..")'
+
+export const isSinglePathSegment = (value: string): boolean =>
+	value.length > 0 &&
+	value !== "." &&
+	value !== ".." &&
+	!value.includes("/") &&
+	!value.includes("\\")
+
+export const SinglePathSegmentCheck = Schema.isPattern(/^(?!\.\.?$)[^/\\]+$/, {
+	message: SINGLE_PATH_SEGMENT_MESSAGE,
+})
+
+export const ResourceId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+)
+
+// ---------------------------------------------------------------------------
+// Branded resource IDs
+// ---------------------------------------------------------------------------
+
+export const AgentId = Schema.String.check(Schema.isMinLength(1), SinglePathSegmentCheck).pipe(
+	Schema.brand("AgentId"),
+)
+export type AgentId = typeof AgentId.Type
+
+export const AgentVersionId = Schema.String.check(
+	Schema.isMinLength(1),
+	SinglePathSegmentCheck,
+).pipe(Schema.brand("AgentVersionId"))
+export type AgentVersionId = typeof AgentVersionId.Type
+
+export const EnvironmentId = Schema.String.check(
+	Schema.isMinLength(1),
+	SinglePathSegmentCheck,
+).pipe(Schema.brand("EnvironmentId"))
+export type EnvironmentId = typeof EnvironmentId.Type
+
+export const SessionId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+	SinglePathSegmentCheck,
+).pipe(Schema.brand("SessionId"))
+export type SessionId = typeof SessionId.Type
+
+// ---------------------------------------------------------------------------
+// Agent schemas
+// ---------------------------------------------------------------------------
+
+export const AgentName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_AGENT_NAME_LENGTH),
+)
+export const AgentDescription = Schema.String.check(
+	Schema.isMaxCodePoints(MAX_AGENT_DESCRIPTION_LENGTH),
+)
+export const AgentSystem = Schema.String.check(Schema.isMaxCodePoints(MAX_AGENT_SYSTEM_LENGTH))
+
+export const AgentModel = Schema.Struct({
+	id: NonEmptyString,
+})
+export type AgentModel = typeof AgentModel.Type
+
+export const AgentSnapshot = Schema.Struct({
+	id: AgentId,
+	type: Schema.Literal("agent"),
+	version: PositiveInt,
+	current_version_id: AgentVersionId,
+	name: NonEmptyString,
+	model: AgentModel,
+	system: Schema.NullOr(Schema.String),
+	description: Schema.NullOr(Schema.String),
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type AgentSnapshot = typeof AgentSnapshot.Type
+
+// ---------------------------------------------------------------------------
+// Environment schemas
+// ---------------------------------------------------------------------------
+
+export const EnvironmentName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_ENVIRONMENT_NAME_LENGTH),
+)
+export const EnvironmentDescription = Schema.String.check(
+	Schema.isMaxCodePoints(MAX_ENVIRONMENT_DESCRIPTION_LENGTH),
+)
+
+export const EnvironmentNetworking = Schema.Union([
+	Schema.Struct({
+		type: Schema.Literal("unrestricted"),
+	}),
+	Schema.Struct({
+		type: Schema.Literal("limited"),
+		allow_mcp_servers: Schema.Boolean,
+		allow_package_managers: Schema.Boolean,
+		allowed_hosts: Schema.Array(NonEmptyString),
+	}),
+])
+export type EnvironmentNetworking = typeof EnvironmentNetworking.Type
+
+export const EnvironmentConfig = Schema.Struct({
+	type: Schema.Literal("cloud"),
+	networking: EnvironmentNetworking,
+})
+export type EnvironmentConfig = typeof EnvironmentConfig.Type
+
+export const EnvironmentSnapshot = Schema.Struct({
+	id: EnvironmentId,
+	type: Schema.Literal("environment"),
+	version: PositiveInt,
+	name: NonEmptyString,
+	description: Schema.NullOr(Schema.String),
+	config: EnvironmentConfig,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type EnvironmentSnapshot = typeof EnvironmentSnapshot.Type
+
+// ---------------------------------------------------------------------------
+// Session schemas
+// ---------------------------------------------------------------------------
+
+export const SessionTitle = Schema.String.check(Schema.isMaxLength(MAX_TITLE_LENGTH))
+export const MessageText = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MESSAGE_TEXT_LENGTH),
+)
+export const ThinkingText = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_THINKING_TEXT_LENGTH),
+)
+export const ErrorType = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_ERROR_TYPE_LENGTH),
+)
+export const ErrorMessage = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_ERROR_MESSAGE_LENGTH),
+)
+
+export const TextBlock = Schema.Struct({
+	type: Schema.Literal("text"),
+	text: Schema.String,
+})
+export type TextBlock = typeof TextBlock.Type
+
+export const TextBlocks = Schema.Array(TextBlock).check(Schema.isMinLength(1))
+export type TextBlocks = typeof TextBlocks.Type
+
+export const StopReason = Schema.Struct({
+	type: Schema.Literals([
+		"end_turn",
+		"interrupted",
+		"retries_exhausted",
+		"budget_reached",
+		"refusal",
+	]),
+})
+export type StopReason = typeof StopReason.Type
+
+export const RetryStatus = Schema.Struct({
+	type: Schema.Literals(["retrying", "exhausted", "terminal"]),
+})
+export type RetryStatus = typeof RetryStatus.Type
+
+export const SessionErrorBody = Schema.Struct({
+	type: Schema.String,
+	message: Schema.String,
+	retry_status: RetryStatus,
+})
+export type SessionErrorBody = typeof SessionErrorBody.Type
+
+export const ModelUsage = Schema.Struct({
+	input_tokens: NonNegativeInt,
+	output_tokens: NonNegativeInt,
+})
+export type ModelUsage = typeof ModelUsage.Type
+
+export const SessionStatus = Schema.Literals(["idle", "running", "terminated"])
+export type SessionStatus = typeof SessionStatus.Type
+
+/**
+ * Canonical payload field definitions for every public session event, shared
+ * between `@checkfu/domain` event classes and the wire `SessionEvent` union.
+ */
+export const SessionEventFields = {
+	"user.message": {
+		content: TextBlocks,
+	},
+	"user.interrupt": {},
+	"session.status_running": {
+		turn: PositiveInt,
+	},
+	"span.model_request_start": {
+		model_request_start_id: NonEmptyString,
+	},
+	"agent.thinking": {
+		thinking: Schema.String,
+	},
+	"agent.message": {
+		content: TextBlocks,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"span.model_request_end": {
+		model_request_start_id: NonEmptyString,
+		model_usage: ModelUsage,
+		is_error: Schema.NullOr(Schema.Boolean),
+	},
+	"session.status_idle": {
+		stop_reason: StopReason,
+		turn: PositiveInt,
+	},
+	"session.error": {
+		error: SessionErrorBody,
+	},
+	"session.status_terminated": {},
+	"session.archived": {},
+} as const
+
+export type SessionEventType = keyof typeof SessionEventFields
+
+export const SessionSnapshot = Schema.Struct({
+	id: SessionId,
+	type: Schema.Literal("session"),
+	status: SessionStatus,
+	agent_id: Schema.String,
+	agent_version: PositiveInt,
+	environment_id: Schema.String,
+	title: Schema.NullOr(Schema.String),
+	turn: NonNegativeInt,
+	usage: ModelUsage,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type SessionSnapshot = typeof SessionSnapshot.Type

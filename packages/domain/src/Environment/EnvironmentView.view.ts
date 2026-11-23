@@ -1,21 +1,9 @@
 import * as Domain from "@alchemy.run/domain"
+import { EnvironmentSnapshot } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
-import { EnvironmentConfig, NonEmptyString, PositiveInt } from "./EnvironmentTypes.ts"
 import { Environment } from "./Environment.aggregate.ts"
-import { EnvironmentId } from "./Environment.id.ts"
 
-export const EnvironmentSnapshot = Schema.Struct({
-	id: EnvironmentId,
-	type: Schema.Literal("environment"),
-	version: PositiveInt,
-	name: NonEmptyString,
-	description: Schema.NullOr(Schema.String),
-	config: EnvironmentConfig,
-	created_at: Schema.DateTimeUtc,
-	updated_at: Schema.DateTimeUtc,
-	archived_at: Schema.NullOr(Schema.DateTimeUtc),
-})
-export type EnvironmentSnapshot = typeof EnvironmentSnapshot.Type
+export { EnvironmentSnapshot }
 
 export class EnvironmentView extends Domain.View("EnvironmentView", {
 	from: [Environment],

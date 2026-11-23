@@ -39,7 +39,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
-import { SessionEvent, withIdempotencyKey } from "../src/Http/Api.ts"
+import { SessionEvent } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
 	SSE_CATCHUP_PAGE_SIZE,
@@ -2222,6 +2222,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					seq: 3,
 					type: "session.status_running",
 					created_at: "2026-01-01T00:00:00.000Z",
+					turn: 1,
 				},
 			},
 			{
@@ -2308,6 +2309,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					type: "session.status_idle",
 					created_at: "2026-01-01T00:00:00.000Z",
 					stop_reason: { type: "end_turn" },
+					turn: 1,
 				},
 			},
 			{
@@ -2700,6 +2702,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 
 					const generatedClient = yield* makeApiTestClient(apiFetch)
 					const clientUnkeyedSess = yield* generatedClient.sessions.create({
+						headers: {},
 						payload: { agent: agent.id, environment_id: env.id, title: "Client Unkeyed Session" },
 					})
 					expect("pending" in clientUnkeyedSess).toBe(false)
@@ -2709,132 +2712,90 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					dropNextAdmitReceipt = true
 					const lostClientSess = yield* generatedClient.sessions
 						.create({
+							headers: { "idempotency-key": "client-sess-key-1" },
 							payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
 						})
-						.pipe(withIdempotencyKey("client-sess-key-1"), Effect.flip)
+						.pipe(Effect.flip)
 					expect(lostClientSess).toMatchObject({
 						type: "error",
 						error: { type: "internal_error" },
 					})
-					const clientKeyedSess1 = yield* generatedClient.sessions
-						.create({
-							payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
-						})
-						.pipe(withIdempotencyKey("client-sess-key-1"))
-					const clientKeyedSess2 = yield* generatedClient.sessions
-						.create({
-							payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
-						})
-						.pipe(withIdempotencyKey("client-sess-key-1"))
+					const clientKeyedSess1 = yield* generatedClient.sessions.create({
+						headers: { "idempotency-key": "client-sess-key-1" },
+						payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
+					})
+					const clientKeyedSess2 = yield* generatedClient.sessions.create({
+						headers: { "idempotency-key": "client-sess-key-1" },
+						payload: { agent: agent.id, environment_id: env.id, title: "Client Keyed Session" },
+					})
 					expect(clientKeyedSess2).toEqual(clientKeyedSess1)
 					expect(new Set(admittedSessionIds).size).toBe(sessCountBeforeClientKey + 1)
 					const clientKeyedSessConflict = yield* generatedClient.sessions
 						.create({
+							headers: { "idempotency-key": "client-sess-key-1" },
 							payload: {
 								agent: agent.id,
 								environment_id: env.id,
 								title: "Different Client Keyed Session",
 							},
 						})
-						.pipe(withIdempotencyKey("client-sess-key-1"), Effect.flip)
+						.pipe(Effect.flip)
 					expect(clientKeyedSessConflict).toMatchObject({
 						type: "error",
 						error: { type: "conflict_error" },
 					})
 
-					const sessCountBeforeInlineHeaders = new Set(admittedSessionIds).size
-					const clientInlineSess1 = yield* generatedClient.sessions.create({
-						payload: {
-							agent: agent.id,
-							environment_id: env.id,
-							title: "Client Inline Headers Session",
-						},
-						headers: { "idempotency-key": "client-sess-inline-key-1" },
-					})
-					const clientInlineSess2 = yield* generatedClient.sessions
-						.create({
-							payload: {
-								agent: agent.id,
-								environment_id: env.id,
-								title: "Client Inline Headers Session",
-							},
-							headers: { "idempotency-key": "client-sess-inline-key-1" },
-						})
-						.pipe(withIdempotencyKey("client-sess-key-1"))
-					expect(clientInlineSess2).toEqual(clientInlineSess1)
-					expect(new Set(admittedSessionIds).size).toBe(sessCountBeforeInlineHeaders + 1)
-					const clientInlineSessConflict = yield* generatedClient.sessions
-						.create({
-							payload: {
-								agent: agent.id,
-								environment_id: env.id,
-								title: "Different Inline Headers Session",
-							},
-							headers: { "idempotency-key": "client-sess-inline-key-1" },
-						})
-						.pipe(Effect.flip)
-					expect(clientInlineSessConflict).toMatchObject({
-						type: "error",
-						error: { type: "conflict_error" },
-					})
-
-					const eventsSessionId = SessionId.make(clientInlineSess1.id)
+					const eventsSessionId = SessionId.make(clientKeyedSess1.id)
 					dropNextUserMessageReceipt = true
-					const lostContextualBatch = yield* generatedClient.sessions
+					const lostKeyedBatch = yield* generatedClient.sessions
 						.sendEvents({
 							params: { session_id: eventsSessionId },
-							headers: {},
+							headers: { "idempotency-key": "client-events-key-1" },
 							payload: {
 								events: [
-									{ type: "user.message", content: [{ type: "text", text: "contextual batch" }] },
+									{ type: "user.message", content: [{ type: "text", text: "keyed batch" }] },
 								],
 							},
 						})
-						.pipe(withIdempotencyKey("client-events-ctx-key-1"), Effect.flip)
-					expect(lostContextualBatch).toMatchObject({
+						.pipe(Effect.flip)
+					expect(lostKeyedBatch).toMatchObject({
 						type: "error",
 						error: { type: "internal_error" },
 					})
-					const retriedContextualBatch = yield* generatedClient.sessions
+					const retriedKeyedBatch = yield* generatedClient.sessions.sendEvents({
+						params: { session_id: eventsSessionId },
+						headers: { "idempotency-key": "client-events-key-1" },
+						payload: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "keyed batch" }] }],
+						},
+					})
+					expect(retriedKeyedBatch.data).toHaveLength(1)
+					const keyedBatchConflict = yield* generatedClient.sessions
 						.sendEvents({
 							params: { session_id: eventsSessionId },
-							headers: {},
-							payload: {
-								events: [
-									{ type: "user.message", content: [{ type: "text", text: "contextual batch" }] },
-								],
-							},
-						})
-						.pipe(withIdempotencyKey("client-events-ctx-key-1"))
-					expect(retriedContextualBatch.data).toHaveLength(1)
-					const contextualBatchConflict = yield* generatedClient.sessions
-						.sendEvents({
-							params: { session_id: eventsSessionId },
-							headers: {},
+							headers: { "idempotency-key": "client-events-key-1" },
 							payload: {
 								events: [
 									{ type: "user.message", content: [{ type: "text", text: "different batch" }] },
 								],
 							},
 						})
-						.pipe(withIdempotencyKey("client-events-ctx-key-1"), Effect.flip)
-					expect(contextualBatchConflict).toMatchObject({
+						.pipe(Effect.flip)
+					expect(keyedBatchConflict).toMatchObject({
 						type: "error",
 						error: { type: "conflict_error" },
 					})
 
-					const explicitOverridesContextual = yield* generatedClient.sessions
-						.sendEvents({
-							params: { session_id: eventsSessionId },
-							headers: { "idempotency-key": "client-events-explicit-key-1" },
-							payload: {
-								events: [
-									{ type: "user.message", content: [{ type: "text", text: "explicit batch" }] },
-								],
-							},
-						})
-						.pipe(withIdempotencyKey("client-events-ctx-key-1"))
-					expect(explicitOverridesContextual.data).toHaveLength(1)
+					const explicitBatch = yield* generatedClient.sessions.sendEvents({
+						params: { session_id: eventsSessionId },
+						headers: { "idempotency-key": "client-events-explicit-key-1" },
+						payload: {
+							events: [
+								{ type: "user.message", content: [{ type: "text", text: "explicit batch" }] },
+							],
+						},
+					})
+					expect(explicitBatch.data).toHaveLength(1)
 					const explicitRetry = yield* generatedClient.sessions.sendEvents({
 						params: { session_id: eventsSessionId },
 						headers: { "idempotency-key": "client-events-explicit-key-1" },
@@ -2844,7 +2805,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							],
 						},
 					})
-					expect(explicitRetry).toEqual(explicitOverridesContextual)
+					expect(explicitRetry).toEqual(explicitBatch)
 
 					if (lastUserMessageCommit !== undefined) {
 						yield* sessionViews.get(Session.ref(eventsSessionId), {
@@ -2857,10 +2818,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const userMessages = listedEvents.data.filter((event) => event.type === "user.message")
 					expect(userMessages.map((event) => event.content[0]?.text)).toEqual([
-						"contextual batch",
+						"keyed batch",
 						"explicit batch",
 					])
-					expect(sentUserMessages).toContain("contextual batch")
+					expect(sentUserMessages).toContain("keyed batch")
 					expect(sentUserMessages).toContain("explicit batch")
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)

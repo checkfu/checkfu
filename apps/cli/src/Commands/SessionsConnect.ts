@@ -1,5 +1,4 @@
-import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
+import { MAX_MESSAGE_TEXT_LENGTH, SessionId } from "@checkfu/sdk/Schemas"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
@@ -51,24 +50,6 @@ import {
 	shouldInterruptOnCtrlC,
 } from "./SessionsConnectState.ts"
 import type { ConnectState } from "./SessionsConnectState.ts"
-
-const isJsonObject = Schema.is(Schema.JsonObject)
-const isJsonArray = (value: Schema.Json | undefined): value is ReadonlyArray<Schema.Json> =>
-	Array.isArray(value)
-
-const extractContentText = (data: Schema.JsonObject): string => {
-	const content = data["content"]
-	if (!isJsonArray(content)) {
-		return ""
-	}
-	const parts: Array<string> = []
-	for (const block of content) {
-		if (isJsonObject(block) && block["type"] === "text" && typeof block["text"] === "string") {
-			parts.push(block["text"])
-		}
-	}
-	return parts.join("\n")
-}
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
@@ -354,62 +335,40 @@ const renderConnectEvent = (
 	rawStructuredMode: boolean,
 ): Effect.Effect<void, CliFailure, Command.CommandContext<"checkfu"> | Stdio.Stdio> =>
 	Effect.gen(function* () {
-		const data = event.data
-		const rawSeq = data["seq"]
-		const eventSeq = typeof rawSeq === "number" && Number.isInteger(rawSeq) ? rawSeq : undefined
-		const eventType = typeof data["type"] === "string" ? data["type"] : event.event
-
-		let formattedError: string | undefined
-		let errorRetryStatus: string | undefined
-		if (eventType === "session.error") {
-			const errObj = isJsonObject(data["error"]) ? data["error"] : undefined
-			const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
-			const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
-			const retryStatusObj = isJsonObject(errObj?.["retry_status"])
-				? errObj["retry_status"]
-				: undefined
-			errorRetryStatus =
-				typeof retryStatusObj?.["type"] === "string" ? retryStatusObj["type"] : undefined
-			formattedError = `${errType}: ${errMsg}`
-		}
-
-		let stopReason: string | undefined
-		if (eventType === "session.status_idle") {
-			const rawStopReason = isJsonObject(data["stop_reason"])
-				? data["stop_reason"]["type"]
-				: undefined
-			stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined
-		}
+		const eventSeq = event.seq
+		const eventType = event.type
 
 		// Check duplicate before emitting output so replayed frames never render twice.
-		if (eventSeq !== undefined) {
-			const current = yield* Ref.get(stateRef)
-			if (eventSeq <= current.lastProcessedSeq) {
-				return
-			}
+		const current = yield* Ref.get(stateRef)
+		if (eventSeq <= current.lastProcessedSeq) {
+			return
 		}
 
 		if (rawStructuredMode) {
-			yield* renderOutput(data, { streaming: true })
+			yield* renderOutput(event, { streaming: true })
 		}
 
-		switch (eventType) {
+		let formattedError: string | undefined
+		let errorRetryStatus: string | undefined
+		let stopReason: string | undefined
+		let eventTurn: number | undefined
+
+		switch (event.type) {
 			case "user.message": {
-				const text = extractContentText(data)
+				const text = event.content.map((block) => block.text).join("\n")
 				if (!rawStructuredMode && text.length > 0) {
 					yield* writeStdoutLine(`[user] ${escapeTerminalControlCharacters(text)}`)
 				}
 				break
 			}
 			case "agent.thinking": {
-				const thinking = typeof data["thinking"] === "string" ? data["thinking"] : ""
-				if (!rawStructuredMode && thinking.length > 0) {
-					yield* writeStderrLine(`[thinking] ${thinking}`)
+				if (!rawStructuredMode && event.thinking.length > 0) {
+					yield* writeStderrLine(`[thinking] ${event.thinking}`)
 				}
 				break
 			}
 			case "agent.message": {
-				const text = extractContentText(data)
+				const text = event.content.map((block) => block.text).join("\n")
 				if (!rawStructuredMode && text.length > 0) {
 					yield* writeStdoutLine(escapeTerminalControlCharacters(text))
 				}
@@ -422,13 +381,21 @@ const renderConnectEvent = (
 				break
 			}
 			case "session.error": {
-				if (!rawStructuredMode && formattedError !== undefined) {
+				formattedError = `${event.error.type}: ${event.error.message}`
+				errorRetryStatus = event.error.retry_status.type
+				if (!rawStructuredMode) {
 					yield* writeStderrLine(`[error] ${formattedError}`)
 				}
 				break
 			}
+			case "session.status_running": {
+				eventTurn = event.turn
+				break
+			}
 			case "session.status_idle": {
-				if (!rawStructuredMode && stopReason !== undefined && stopReason !== "end_turn") {
+				eventTurn = event.turn
+				stopReason = event.stop_reason.type
+				if (!rawStructuredMode && stopReason !== "end_turn") {
 					yield* writeStderrLine(`[status: idle (${stopReason})]`)
 				}
 				break
@@ -437,7 +404,7 @@ const renderConnectEvent = (
 			case "session.archived": {
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(
-						eventType === "session.archived" ? "[session archived]" : "[session terminated]",
+						event.type === "session.archived" ? "[session archived]" : "[session terminated]",
 					)
 				}
 				break
@@ -450,6 +417,7 @@ const renderConnectEvent = (
 			const res = applySessionEvent(state, {
 				seq: eventSeq,
 				type: eventType,
+				...(eventTurn !== undefined ? { turn: eventTurn } : {}),
 				...(stopReason !== undefined ? { stopReason } : {}),
 				...(formattedError !== undefined
 					? { error: { message: formattedError, retryStatus: errorRetryStatus } }
@@ -597,8 +565,6 @@ const dispatchUserLine = (
 
 type SessionSnapshotResponse = Effect.Success<ReturnType<typeof fetchSessionStatusWithRetry>>
 
-const MAX_SUFFIX_CONSISTENCY_ATTEMPTS = 3
-
 const resolveCursorBaselineFromPrefix = (
 	client: CheckfuClient,
 	sessionId: SessionId,
@@ -630,22 +596,23 @@ const resolveCursorBaselineFromPrefix = (
 				.pipe(Effect.mapError(formatClientError))
 			let reachedCursor = false
 			for (const entry of page.data) {
-				const seq = typeof entry["seq"] === "number" ? entry["seq"] : undefined
-				if (seq !== undefined) {
-					lastSeenSeq = Math.max(lastSeenSeq, seq)
-				}
-				if (seq !== undefined && seq > after) {
+				lastSeenSeq = Math.max(lastSeenSeq, entry.seq)
+				if (entry.seq > after) {
 					reachedCursor = true
 					break
 				}
-				const eventType = typeof entry["type"] === "string" ? entry["type"] : undefined
-				if (eventType === "session.status_running") {
-					observedTurn += 1
+				if (entry.type === "session.status_running") {
+					observedTurn = entry.turn ?? observedTurn + 1
 					status = "running"
-				} else if (eventType === "session.status_idle") {
-					settledTurn = Math.max(settledTurn, observedTurn)
+				} else if (entry.type === "session.status_idle") {
+					const idleTurn = entry.turn ?? observedTurn
+					observedTurn = Math.max(observedTurn, idleTurn)
+					settledTurn = Math.max(settledTurn, idleTurn)
 					status = "idle"
-				} else if (eventType === "session.status_terminated" || eventType === "session.archived") {
+				} else if (
+					entry.type === "session.status_terminated" ||
+					entry.type === "session.archived"
+				) {
 					status = "terminated"
 				}
 			}
@@ -699,131 +666,62 @@ const resolveCursorBaseline = (
 		)
 	}
 	return Effect.gen(function* () {
-		// Derive the cursor baseline from the shorter side: when resuming near the head,
-		// scan only the bounded suffix (after, targetHeadSeq] and reconcile against a
-		// consistent head snapshot, falling back to the fixed prefix scan if the head moves.
-		if (headSeq - after <= after) {
-			let before = initialSession
-			let targetHeadSeq = headSeq
-			for (let attempt = 0; attempt < MAX_SUFFIX_CONSISTENCY_ATTEMPTS; attempt++) {
-				let pageCursor = after
-				let runningAfter = 0
-				let firstStatusAfter:
-					| "session.status_running"
-					| "session.status_idle"
-					| "session.status_terminated"
-					| "session.archived"
-					| undefined
-				let headMovedPastBoundary = false
-
-				while (true) {
-					const page = yield* client.api.sessions
-						.listEvents({
-							params: { session_id: sessionId },
-							query: {
-								after: pageCursor,
-								limit: 100,
-								order: "asc",
-							},
-						})
-						.pipe(Effect.mapError(formatClientError))
-					let reachedBoundary = false
-					let lastPageSeq: number | undefined
-					for (const entry of page.data) {
-						const seq = typeof entry["seq"] === "number" ? entry["seq"] : undefined
-						if (seq !== undefined) {
-							lastPageSeq = seq
-							if (seq > targetHeadSeq) {
-								headMovedPastBoundary = true
-								reachedBoundary = true
-								break
-							}
-						}
-						const eventType = typeof entry["type"] === "string" ? entry["type"] : undefined
-						if (eventType === "session.status_running") {
-							runningAfter += 1
-							firstStatusAfter ??= eventType
-						} else if (
-							eventType === "session.status_idle" ||
-							eventType === "session.status_terminated" ||
-							eventType === "session.archived"
-						) {
-							firstStatusAfter ??= eventType
-						}
-					}
-					if (
-						!reachedBoundary &&
-						page.has_more &&
-						((lastPageSeq !== undefined && lastPageSeq >= targetHeadSeq) ||
-							(page.next_cursor !== null && page.next_cursor >= targetHeadSeq))
-					) {
-						headMovedPastBoundary = true
-						reachedBoundary = true
-					}
-					if (
-						reachedBoundary ||
-						!page.has_more ||
-						page.next_cursor === null ||
-						page.next_cursor <= pageCursor ||
-						page.next_cursor >= targetHeadSeq ||
-						(lastPageSeq !== undefined && lastPageSeq >= targetHeadSeq)
-					) {
-						break
-					}
-					pageCursor = page.next_cursor
+		// Walk backwards from `after` (`order: "desc"` with `after: cursor` yields `seq < cursor`):
+		// the nearest `session.status_running` or `session.status_idle` carries `turn` directly
+		// on updated servers; if talking to an older /v1 server that omits `turn`, fall back to
+		// an ascending prefix scan up to `after`.
+		let cursor = after + 1
+		let status: ConnectState["status"] | undefined
+		let sawMissingTurn = false
+		while (true) {
+			const page = yield* client.api.sessions
+				.listEvents({
+					params: { session_id: sessionId },
+					query: { after: cursor, limit: 100, order: "desc" },
+				})
+				.pipe(Effect.mapError(formatClientError))
+			for (const entry of page.data) {
+				if (entry.type === "session.status_terminated" || entry.type === "session.archived") {
+					status ??= "terminated"
+					continue
 				}
-
-				const afterSnap = yield* fetchSessionStatusWithRetry(client, sessionId)
-				const consistent =
-					!headMovedPastBoundary &&
-					before.turn === afterSnap.turn &&
-					before.status === afterSnap.status &&
-					(before.archived_at === null) === (afterSnap.archived_at === null)
-				if (consistent) {
-					const observedTurn = Math.max(0, afterSnap.turn - runningAfter)
-					let status: ConnectState["status"]
-					let settledTurn: number
-					if (firstStatusAfter === "session.status_running") {
-						status = "idle"
-						settledTurn = observedTurn
-					} else if (firstStatusAfter === "session.status_idle") {
-						status = "running"
-						settledTurn = Math.max(0, observedTurn - 1)
-					} else if (firstStatusAfter === "session.archived") {
-						status = "terminated"
-						settledTurn = observedTurn
-					} else if (firstStatusAfter === "session.status_terminated") {
-						status = observedTurn > 0 ? "running" : "idle"
-						settledTurn = observedTurn
-					} else {
-						status = afterSnap.status
-						settledTurn =
-							afterSnap.status === "running" ? Math.max(0, observedTurn - 1) : observedTurn
+				if (entry.type === "session.status_running") {
+					if (entry.turn === undefined) {
+						sawMissingTurn = true
+						break
 					}
 					return {
-						status,
-						observedTurn,
-						settledTurn,
-						latestSession: afterSnap,
+						status: status ?? "running",
+						observedTurn: entry.turn,
+						settledTurn: Math.max(0, entry.turn - 1),
+						latestSession: initialSession,
 					}
 				}
-				if (attempt + 1 < MAX_SUFFIX_CONSISTENCY_ATTEMPTS) {
-					const latestPage = yield* client.api.sessions
-						.listEvents({
-							params: { session_id: sessionId },
-							query: { limit: 1, order: "desc" },
-						})
-						.pipe(Effect.mapError(formatClientError))
-					const latestEntry = latestPage.data[0]
-					if (latestEntry !== undefined && typeof latestEntry["seq"] === "number") {
-						targetHeadSeq = Math.max(targetHeadSeq, latestEntry["seq"])
-					}
-					before = afterSnap
-					if (targetHeadSeq - after > after) {
+				if (entry.type === "session.status_idle") {
+					if (entry.turn === undefined) {
+						sawMissingTurn = true
 						break
+					}
+					return {
+						status: status ?? "idle",
+						observedTurn: entry.turn,
+						settledTurn: entry.turn,
+						latestSession: initialSession,
 					}
 				}
 			}
+			if (sawMissingTurn) {
+				break
+			}
+			if (!page.has_more || page.next_cursor === null || page.next_cursor >= cursor) {
+				return {
+					status: status ?? "idle",
+					observedTurn: 0,
+					settledTurn: 0,
+					latestSession: initialSession,
+				}
+			}
+			cursor = page.next_cursor
 		}
 
 		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after)
@@ -872,18 +770,6 @@ export const sessionsConnectCommand = Command.make(
 
 			if (Option.isSome(input.after) && input.after.value < 0) {
 				return yield* usageError("--after must be a non-negative integer.")
-			}
-
-			if (
-				rawSessionId.length === 0 ||
-				rawSessionId === "." ||
-				rawSessionId === ".." ||
-				rawSessionId.includes("/") ||
-				rawSessionId.includes("\\")
-			) {
-				return yield* usageError(
-					'Invalid --session-id: must be a single non-empty path segment (not "." or "..").',
-				)
 			}
 
 			const sessionId = yield* decodePayload(SessionId, rawSessionId, "--session-id")

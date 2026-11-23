@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { SessionSnapshot } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 import { SessionErrorEvent } from "./AbandonTurn.command.ts"
 import { SessionArchived, SessionStatusTerminated } from "./ArchiveSession.command.ts"
@@ -12,27 +13,8 @@ import { SpanModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
-import { SessionId } from "./Session.id.ts"
-import { NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
 
-export const SessionSnapshot = Schema.Struct({
-	id: SessionId,
-	type: Schema.Literal("session"),
-	status: Schema.Literals(["idle", "running", "terminated"]),
-	agent_id: Schema.String,
-	agent_version: PositiveInt,
-	environment_id: Schema.String,
-	title: Schema.NullOr(Schema.String),
-	turn: NonNegativeInt,
-	usage: Schema.Struct({
-		input_tokens: NonNegativeInt,
-		output_tokens: NonNegativeInt,
-	}),
-	created_at: Schema.DateTimeUtc,
-	updated_at: Schema.DateTimeUtc,
-	archived_at: Schema.NullOr(Schema.DateTimeUtc),
-})
-export type SessionSnapshot = typeof SessionSnapshot.Type
+export { SessionSnapshot }
 
 export class SessionView extends Domain.View("SessionView", {
 	version: 2,

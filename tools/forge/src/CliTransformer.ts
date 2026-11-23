@@ -1,15 +1,21 @@
-import type { Field, Forge, Group, Json, Method, Type } from "@cloudflare/forge"
-import { PREAMBLE, file, module } from "@cloudflare/forge/ts"
+import type { Field, Forge, Group, Method } from "@cloudflare/forge"
+import { file, module } from "@cloudflare/forge/ts"
+import {
+	cleanGeneratedHeader,
+	collectFieldsFromType,
+	extractArrayMaxItems,
+	extractStringLiterals,
+	isBooleanScalar,
+	isIntegerScalar,
+	isJsonArray,
+	isJsonRecord,
+	isObjectOrComplexUnion,
+	isSseMethod,
+	readEndpointRef,
+} from "./SurfaceCatalog.ts"
+import type { GeneratedFile } from "./SurfaceCatalog.ts"
 
-export interface GeneratedFile {
-	readonly path: string
-	readonly content: string
-}
-
-interface EndpointRef {
-	readonly group: string
-	readonly endpoint: string
-}
+export type { GeneratedFile }
 
 interface IntQuerySpec {
 	readonly min?: number
@@ -58,26 +64,6 @@ interface FlagSpec {
 	readonly literals?: ReadonlyArray<string>
 	readonly min?: number
 	readonly max?: number
-}
-
-const isJsonRecord = (value: Json | undefined): value is Readonly<Record<string, Json>> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
-
-const isJsonArray = (value: Json | undefined): value is ReadonlyArray<Json> => Array.isArray(value)
-
-const readEndpointRef = (method: Method): EndpointRef => {
-	const ext = method.extension("x-checkfu-endpoint")
-	if (
-		isJsonRecord(ext) &&
-		typeof ext["group"] === "string" &&
-		typeof ext["endpoint"] === "string"
-	) {
-		return { group: ext["group"], endpoint: ext["endpoint"] }
-	}
-	return {
-		group: method.group.path[0]?.camel() ?? "root",
-		endpoint: method.name.camel(),
-	}
 }
 
 const readCliExtension = (method: Method): CliExtension => {
@@ -151,93 +137,6 @@ const readCliExtension = (method: Method): CliExtension => {
 		...(intQueryParams !== undefined ? { intQueryParams } : {}),
 		...(examples !== undefined ? { examples } : {}),
 	}
-}
-
-const unwrapNullableType = (ty: Type): Type => {
-	if (ty.kind === "union") {
-		const nonNull = ty.members.filter(
-			(member) => !(member.kind === "scalar" && member.scalar === "null"),
-		)
-		if (nonNull.length === 1 && nonNull[0] !== undefined) {
-			return nonNull[0]
-		}
-	}
-	return ty
-}
-
-const collectFieldsFromType = (ty: Type | undefined, out: Map<string, Field>): void => {
-	if (ty === undefined) {
-		return
-	}
-	switch (ty.kind) {
-		case "object": {
-			for (const field of ty.fields) {
-				if (!out.has(field.wireName)) {
-					out.set(field.wireName, field)
-				}
-			}
-			return
-		}
-		case "intersection":
-		case "union": {
-			for (const member of ty.members) {
-				collectFieldsFromType(member, out)
-			}
-			return
-		}
-		case "model": {
-			collectFieldsFromType(ty.model.type, out)
-			return
-		}
-		default:
-			return
-	}
-}
-
-const isIntegerScalar = (ty: Type): boolean => {
-	const unwrapped = unwrapNullableType(ty)
-	if (unwrapped.kind === "scalar" && unwrapped.scalar === "number") {
-		return unwrapped.number !== "float" && unwrapped.number !== "double"
-	}
-	return false
-}
-
-const isBooleanScalar = (ty: Type): boolean => {
-	const unwrapped = unwrapNullableType(ty)
-	return unwrapped.kind === "scalar" && unwrapped.scalar === "boolean"
-}
-
-const extractStringLiterals = (ty: Type): ReadonlyArray<string> | undefined => {
-	const unwrapped = unwrapNullableType(ty)
-	if (unwrapped.kind === "enum" && unwrapped.values.every((v) => typeof v === "string")) {
-		return unwrapped.values
-	}
-	return undefined
-}
-
-const extractArrayMaxItems = (ty: Type): number | undefined => {
-	const unwrapped = unwrapNullableType(ty)
-	if (unwrapped.kind === "array") {
-		return unwrapped.maxItems
-	}
-	if (unwrapped.kind === "model") {
-		return extractArrayMaxItems(unwrapped.model.type)
-	}
-	return undefined
-}
-
-const isObjectOrComplexUnion = (ty: Type): boolean => {
-	const unwrapped = unwrapNullableType(ty)
-	if (unwrapped.kind === "object" || unwrapped.kind === "array") {
-		return true
-	}
-	if (unwrapped.kind === "model") {
-		return isObjectOrComplexUnion(unwrapped.model.type)
-	}
-	if (unwrapped.kind === "union") {
-		return unwrapped.members.some((m) => isObjectOrComplexUnion(m))
-	}
-	return false
 }
 
 const RESERVED_GLOBAL_FLAG_NAMES = new Set([
@@ -540,9 +439,6 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	return flags
 }
 
-const isSseMethod = (method: Method): boolean =>
-	method.responses.some((res) => res.contents.some((c) => c.mediaType === "text/event-stream"))
-
 const cliGroupName = (group: Group): string => group.path.map((part) => part.kebab()).join(":")
 
 const groupExtrasTypeParam = (group: Group): string =>
@@ -550,43 +446,6 @@ const groupExtrasTypeParam = (group: Group): string =>
 
 const methodVarName = (group: Group, method: Method): string =>
 	`${group.path.map((part, idx) => (idx === 0 ? part.camel() : part.pascal())).join("")}${method.name.pascal()}Command`
-
-const splitInlineTypeImports = (content: string): string =>
-	content.replaceAll(
-		/^import\s*\{([^}]+)\}\s*from\s*("[^"]+")/gm,
-		(fullMatch, specifiers: string, source: string) => {
-			const parts = specifiers
-				.split(",")
-				.map((part) => part.trim())
-				.filter((part) => part.length > 0)
-			const typeSpecs: Array<string> = []
-			const valueSpecs: Array<string> = []
-			for (const part of parts) {
-				if (part.startsWith("type ")) {
-					typeSpecs.push(part.slice("type ".length).trim())
-				} else {
-					valueSpecs.push(part)
-				}
-			}
-			if (typeSpecs.length === 0) {
-				return fullMatch
-			}
-			const lines: Array<string> = []
-			if (valueSpecs.length > 0) {
-				lines.push(`import { ${valueSpecs.join(", ")} } from ${source}`)
-			}
-			lines.push(`import type { ${typeSpecs.join(", ")} } from ${source}`)
-			return lines.join("\n")
-		},
-	)
-
-const cleanGeneratedHeader = (content: string): string => {
-	const header = "// Code generated by @cloudflare/forge. DO NOT EDIT.\n\n"
-	const withHeader = content.startsWith(PREAMBLE)
-		? `${header}${content.slice(PREAMBLE.length)}`
-		: content
-	return splitInlineTypeImports(withHeader)
-}
 
 export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => {
 	const commandMod = module("effect/cli/Command")

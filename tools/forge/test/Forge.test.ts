@@ -13,6 +13,8 @@ import * as Schema from "effect/Schema"
 import { generateCliFiles } from "../src/CliTransformer.ts"
 import { REPO_ROOT } from "../src/Generate.ts"
 import { exportDeterministicOpenApiJson } from "../src/OpenApiExport.ts"
+import { generateSdkFiles } from "../src/SdkTransformer.ts"
+import { buildSurfaceCatalog } from "../src/SurfaceCatalog.ts"
 
 describe("Cloudflare Forge pipeline", () => {
 	it("exports a deterministic OpenAPI document that Forge resolves cleanly with no beta prefix", () => {
@@ -150,7 +152,7 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(invocation).toBe(2)
 	})
 
-	it("automatically emits a CLI command when a new endpoint is added to the OpenAPI spec", () => {
+	it("automatically emits CLI and SDK methods when a new endpoint is added to the OpenAPI spec", () => {
 		const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
 			paths: Record<string, Record<string, Json>>
 		}
@@ -182,12 +184,176 @@ describe("Cloudflare Forge pipeline", () => {
 		}
 
 		using forge = parse(JSON.stringify(spec))
-		const files = generateCliFiles(forge)
-		const commandsFile = files.find((f) => f.path === "Commands.ts")
+		const cliFiles = generateCliFiles(forge)
+		const commandsFile = cliFiles.find((f) => f.path === "Commands.ts")
 		expect(commandsFile).toBeDefined()
 		expect(commandsFile?.content).toContain('"list"')
 		expect(commandsFile?.content).toContain('FlagInt("limit")')
 		expect(commandsFile?.content).toContain('apiEndpoint: "list"')
+
+		const sdkFiles = generateSdkFiles(forge)
+		const resourcesFile = sdkFiles.find((f) => f.path === "Resources.ts")
+		const bindingsFile = sdkFiles.find((f) => f.path === "OperationBindings.ts")
+		expect(resourcesFile?.content).toContain('"agents.list"')
+		expect(resourcesFile?.content).toContain('EndpointSuccess<"agents", "list">')
+		expect(resourcesFile?.content).toContain('EndpointJsonSuccess<"agents", "list">')
+		expect(resourcesFile?.content).toContain("new EffectAgentsResource(effectRuntime).list(")
+		expect(bindingsFile?.content).toContain('operationId: "agents.list"')
+		expect(bindingsFile?.content).toContain('cliCommand: "agents list"')
+	})
+
+	it("maintains 100% 1:1 operation parity across OpenAPI, SDK bindings, and generated CLI commands", () => {
+		interface OpenApiOperationDoc {
+			readonly "x-forge-skip"?: boolean
+			readonly "x-forge-group-name"?: string
+			readonly "x-forge-method-name"?: string
+			readonly "x-checkfu-endpoint"?: {
+				readonly group?: string
+				readonly endpoint?: string
+			}
+		}
+		const openApiJson = exportDeterministicOpenApiJson()
+		const openApiDoc = JSON.parse(openApiJson) as {
+			readonly paths: Readonly<Record<string, Readonly<Record<string, OpenApiOperationDoc>>>>
+		}
+		const HTTP_METHODS = new Set([
+			"get",
+			"post",
+			"put",
+			"patch",
+			"delete",
+			"head",
+			"options",
+			"trace",
+		])
+		const openApiEndpoints: Array<string> = []
+		const openApiOperationIds: Array<string> = []
+		for (const [_path, pathItem] of Object.entries(openApiDoc.paths)) {
+			for (const [httpMethod, rawOp] of Object.entries(pathItem)) {
+				if (
+					!HTTP_METHODS.has(httpMethod.toLowerCase()) ||
+					typeof rawOp !== "object" ||
+					rawOp === null
+				) {
+					continue
+				}
+				if (rawOp["x-forge-skip"] === true) {
+					continue
+				}
+				const endpointMeta = rawOp["x-checkfu-endpoint"]
+				expect(typeof endpointMeta?.group).toBe("string")
+				expect(typeof endpointMeta?.endpoint).toBe("string")
+				openApiEndpoints.push(`${String(endpointMeta?.group)}.${String(endpointMeta?.endpoint)}`)
+
+				const groupName = rawOp["x-forge-group-name"]
+				const methodName = rawOp["x-forge-method-name"]
+				expect(typeof groupName).toBe("string")
+				expect(typeof methodName).toBe("string")
+				openApiOperationIds.push(`${String(groupName)}.${String(methodName)}`)
+			}
+		}
+		const sortUnique = (values: ReadonlyArray<string>): ReadonlyArray<string> =>
+			[...new Set(values)].sort()
+
+		const expectedEndpoints = sortUnique(openApiEndpoints)
+		const expectedOperationIds = sortUnique(openApiOperationIds)
+		expect(expectedEndpoints.length).toBeGreaterThan(0)
+		expect(expectedEndpoints.length).toBe(openApiEndpoints.length)
+		expect(expectedOperationIds.length).toBe(openApiOperationIds.length)
+
+		using forge = parse(openApiJson)
+		const catalog = buildSurfaceCatalog(forge)
+		const cliCommands = generateCliFiles(forge).find((f) => f.path === "Commands.ts")?.content ?? ""
+		const sdkFiles = generateSdkFiles(forge)
+		const sdkResources = sdkFiles.find((f) => f.path === "Resources.ts")?.content ?? ""
+		const sdkBindings = sdkFiles.find((f) => f.path === "OperationBindings.ts")?.content ?? ""
+
+		// Catalog matches non-skipped OpenAPI operations 1:1
+		expect(sortUnique(catalog.operations.map((op) => `${op.apiGroup}.${op.apiEndpoint}`))).toEqual(
+			expectedEndpoints,
+		)
+		expect(sortUnique(catalog.operations.map((op) => op.operationId))).toEqual(expectedOperationIds)
+
+		// Generated SDK OperationBindings.ts matches non-skipped OpenAPI operations 1:1
+		const bindingOperationIds = Array.from(
+			sdkBindings.matchAll(/operationId:\s*"([^"]+)"/g),
+			(m) => m[1] ?? "",
+		)
+		expect(sortUnique(bindingOperationIds)).toEqual(expectedOperationIds)
+		expect(bindingOperationIds.length).toBe(expectedOperationIds.length)
+
+		// Generated SDK Resources.ts CheckfuOperations map matches non-skipped OpenAPI operations 1:1
+		const resourceOperationIds = Array.from(
+			sdkResources.matchAll(/readonly\s+"([^"]+)":\s*OperationShape</g),
+			(m) => m[1] ?? "",
+		)
+		expect(sortUnique(resourceOperationIds)).toEqual(expectedOperationIds)
+		expect(resourceOperationIds.length).toBe(expectedOperationIds.length)
+
+		// Generated CLI Commands.ts descriptors match non-skipped OpenAPI endpoints 1:1
+		const cliEndpoints = Array.from(
+			cliCommands.matchAll(/apiGroup:\s*"([^"]+)",\s*\n\s*apiEndpoint:\s*"([^"]+)"/g),
+			(m) => `${m[1] ?? ""}.${m[2] ?? ""}`,
+		)
+		expect(sortUnique(cliEndpoints)).toEqual(expectedEndpoints)
+		expect(cliEndpoints.length).toBe(expectedEndpoints.length)
+
+		// Generated relative imports must emit .ts specifiers so native Node ESM resolves directly
+		expect(sdkResources).not.toMatch(/from\s+["']\.{1,2}\/[^"']+\.js["']/)
+		expect(cliCommands).not.toMatch(/from\s+["']\.{1,2}\/[^"']+\.js["']/)
+		expect(sdkResources).toContain('from "../Runtime.ts"')
+		expect(sdkResources).toContain('from "../PromiseRuntime.ts"')
+		expect(cliCommands).toContain('from "../GeneratedRuntime.ts"')
+
+		expect(sdkResources).not.toContain("beta")
+		expect(sdkBindings).not.toContain("beta")
+
+		for (const op of catalog.operations) {
+			expect(cliCommands).toContain(`cliLabel: ${JSON.stringify(op.cliCommand)}`)
+			expect(sdkBindings).toContain(`cliCommand: ${JSON.stringify(op.cliCommand)}`)
+		}
+	})
+
+	it("rejects reserved member names and subgroup/method collisions loudly during surface catalog build", () => {
+		const reservedSpec = JSON.parse(exportDeterministicOpenApiJson()) as {
+			paths: Record<string, Record<string, Json>>
+		}
+		reservedSpec.paths["/v1/agents/then"] = {
+			get: {
+				operationId: "agents.then",
+				"x-forge-group-name": "agents",
+				"x-forge-method-name": "then",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "then" },
+				responses: {
+					"200": {
+						description: "Success",
+						content: { "application/json": { schema: { type: "object" } } },
+					},
+				},
+			},
+		}
+		using reservedForge = parse(JSON.stringify(reservedSpec))
+		expect(() => buildSurfaceCatalog(reservedForge)).toThrow(/Reserved generated member name/)
+
+		const collisionSpec = JSON.parse(exportDeterministicOpenApiJson()) as {
+			paths: Record<string, Record<string, Json>>
+		}
+		collisionSpec.paths["/v1/sessions/events-summary"] = {
+			get: {
+				operationId: "sessions.events",
+				"x-forge-group-name": "sessions",
+				"x-forge-method-name": "events",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "events" },
+				responses: {
+					"200": {
+						description: "Success",
+						content: { "application/json": { schema: { type: "object" } } },
+					},
+				},
+			},
+		}
+		using collisionForge = parse(JSON.stringify(collisionSpec))
+		expect(() => buildSurfaceCatalog(collisionForge)).toThrow(/Collision between subgroup/)
 	})
 
 	it("passes Cloudflare Forge CLI inspect and native TypeScript SDK generation", () => {

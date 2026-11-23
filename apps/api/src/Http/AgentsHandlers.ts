@@ -126,9 +126,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			})
 
 		return handlers
-			.handle("create", ({ payload, request }) =>
+			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
-					const idempotencyKey = request.headers["idempotency-key"]
+					const idempotencyKey = headers["idempotency-key"]
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null

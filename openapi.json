@@ -253,7 +253,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["agent"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -1323,7 +1324,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["agent"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -1951,7 +1953,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["agent"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -2287,7 +2290,8 @@
 				"x-checkfu-endpoint": {
 					"group": "agents",
 					"endpoint": "archive"
-				}
+				},
+				"x-checkfu-idempotent": true
 			}
 		},
 		"/v1/environments": {
@@ -2450,7 +2454,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["environment"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -3605,7 +3610,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["environment"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -4659,7 +4665,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["environment"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -4995,7 +5002,8 @@
 				"x-checkfu-endpoint": {
 					"group": "environments",
 					"endpoint": "archive"
-				}
+				},
+				"x-checkfu-idempotent": true
 			}
 		},
 		"/v1/sessions": {
@@ -5141,7 +5149,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["session"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -6317,7 +6326,8 @@
 											"type": "string"
 										},
 										"type": {
-											"type": "string"
+											"type": "string",
+											"enum": ["session"]
 										},
 										"pending": {
 											"type": "boolean",
@@ -6653,7 +6663,8 @@
 				"x-checkfu-endpoint": {
 					"group": "sessions",
 					"endpoint": "archive"
-				}
+				},
+				"x-checkfu-idempotent": true
 			}
 		},
 		"/v1/sessions/{session_id}/events": {
@@ -6702,7 +6713,10 @@
 									"type": "object",
 									"properties": {
 										"data": {
-											"type": "array"
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/SendSessionEventReceipt"
+											}
 										}
 									},
 									"required": ["data"],
@@ -8211,6 +8225,11 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"turn": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -8406,6 +8425,11 @@
 								},
 								"required": ["type"],
 								"additionalProperties": false
+							},
+							"turn": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "stop_reason"],
@@ -8499,6 +8523,70 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"SendSessionEventReceipt": {
+				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"type": {
+								"type": "string",
+								"enum": ["user.message"]
+							},
+							"id": {
+								"type": "string",
+								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+								"minLength": 1,
+								"maxLength": 128
+							},
+							"turn": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"queued": {
+								"type": "boolean"
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1
+							}
+						},
+						"required": ["type", "turn", "queued", "content"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"type": {
+								"type": "string",
+								"enum": ["user.interrupt"]
+							},
+							"id": {
+								"type": "string",
+								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+								"minLength": 1,
+								"maxLength": 128
+							}
+						},
+						"required": ["type"],
 						"additionalProperties": false
 					}
 				]

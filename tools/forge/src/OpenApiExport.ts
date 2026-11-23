@@ -1,4 +1,4 @@
-import { CheckfuApi } from "@checkfu/api/Http/Api"
+import { CheckfuApi } from "@checkfu/sdk/Api"
 import type * as HttpApi from "effect/http-api/HttpApi"
 import type * as HttpApiGroup from "effect/http-api/HttpApiGroup"
 import * as OpenApi from "effect/http-api/OpenApi"
