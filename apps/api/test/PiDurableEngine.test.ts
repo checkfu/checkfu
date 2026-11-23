@@ -1960,6 +1960,7 @@ describe("turn engine", () => {
 				},
 				isCancelled: (operationId: string) => cancelled.has(operationId),
 			} as unknown as Parameters<typeof makePiHarnessBackend>[2],
+			{ openai: null, anthropic: null },
 		)
 		let markSubmitHeld!: () => void
 		const submitHeld = new Promise<void>((resolve) => {

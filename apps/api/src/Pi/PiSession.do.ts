@@ -36,6 +36,7 @@ export const makePiHarnessBackend = (
 	lifecycle: Lifecycle,
 	harness: PiHarness,
 	fence: SqliteTurnFence,
+	apiKeys: Effect.Success<typeof providerApiKeys>,
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
@@ -43,6 +44,7 @@ export const makePiHarnessBackend = (
 
 	return {
 		withLock,
+		hasApiKey: (provider) => apiKeys[provider] !== null,
 		isCancelled: (operationId) => fence.isCancelled(operationId),
 		beginUsage: async (operationId, finalizedPrevious, hasSeed) =>
 			beginTurnUsage(await harness.pi(), operationId, finalizedPrevious, hasSeed),
@@ -181,7 +183,7 @@ export class PiSession extends Cloudflare.DurableObject<PiSession>()(
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 					transaction: (run) => rawCtx.storage.transactionSync(run),
 				})
-				const backend = makePiHarnessBackend(lifecycle, harness, fence)
+				const backend = makePiHarnessBackend(lifecycle, harness, fence, apiKeys)
 
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),

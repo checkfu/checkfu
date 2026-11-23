@@ -19,7 +19,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
-import { createPiModels, resolveCatalogModel } from "../Pi/PiModels.ts"
+import { resolveCatalogModel } from "../Pi/PiCatalog.ts"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import {
@@ -43,11 +43,9 @@ export const AgentVersionWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
-const defaultCatalog = createPiModels({ openai: null, anthropic: null })
-
 export const IsSupportedAgentModel = Context.Reference<(modelId: string) => boolean>(
 	"@checkfu/api/IsSupportedAgentModel",
-	{ defaultValue: () => (modelId) => resolveCatalogModel(defaultCatalog, modelId) !== null },
+	{ defaultValue: () => (modelId) => resolveCatalogModel(modelId) !== null },
 )
 
 const unsupportedModel = (model: AgentModel) => reject(400, `Unsupported model "${model.id}".`)
