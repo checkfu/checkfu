@@ -41,9 +41,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const random = yield* SecureRandom.SecureRandom
 
 		return handlers
-			.handle("create", ({ payload, request }) =>
+			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
-					const idempotencyKey = request.headers["idempotency-key"]
+					const idempotencyKey = headers["idempotency-key"]
 					const description = payload.description ?? null
 					const config = payload.config ?? DEFAULT_ENVIRONMENT_CONFIG
 					let id: EnvironmentId

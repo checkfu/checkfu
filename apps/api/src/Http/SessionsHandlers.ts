@@ -30,6 +30,7 @@ import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
+import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
 import {
 	claimCreate,
 	claimIdempotency,
@@ -173,7 +174,10 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 		case "user.interrupt":
 			return sessionEventEnvelope(entry, "user.interrupt")
 		case "session.status_running":
-			return sessionEventEnvelope(entry, "session.status_running")
+			return {
+				...sessionEventEnvelope(entry, "session.status_running"),
+				turn: event.turn,
+			}
 		case "span.model_request_start":
 			return {
 				...sessionEventEnvelope(entry, "span.model_request_start"),
@@ -204,6 +208,7 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 			return {
 				...sessionEventEnvelope(entry, "session.status_idle"),
 				stop_reason: { type: event.stop_reason.type },
+				turn: event.turn,
 			}
 		case "session.error":
 			return {
@@ -270,9 +275,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			})
 
 		return handlers
-			.handle("create", ({ payload, request }) =>
+			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
-					const idempotencyKey = request.headers["idempotency-key"]
+					const idempotencyKey = headers["idempotency-key"]
 					const nested = payload.agent
 					const nestedAgentId = typeof nested === "string" ? nested : nested?.id
 					if (
@@ -295,9 +300,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return yield* reject(400, "Either agent or agent_id is required.")
 					}
 
-					const agentId = AgentId.make(rawAgentId)
+					const decodedAgentId = Schema.decodeOption(AgentId)(rawAgentId)
+					if (Option.isNone(decodedAgentId)) {
+						return yield* reject(404, `Agent ${rawAgentId} not found.`)
+					}
+					const decodedEnvironmentId = Schema.decodeOption(EnvironmentId)(payload.environment_id)
+					if (Option.isNone(decodedEnvironmentId)) {
+						return yield* reject(404, `Environment ${payload.environment_id} not found.`)
+					}
+					const agentId = decodedAgentId.value
 					const explicitVersion = nestedVersion ?? payload.agent_version
-					const environmentId = EnvironmentId.make(payload.environment_id)
+					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
 					let id: SessionId
@@ -342,7 +355,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return pinnedReady
 					}
 					if (!pinnedReady) {
-						return { id, type: "session", pending: true as const }
+						return { id, type: "session" as const, pending: true as const }
 					}
 					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
 					const result = yield* sessionViews
@@ -412,12 +425,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const prepared: Array<
 						| {
 								readonly type: "user.interrupt"
-								readonly eventId: string | undefined
+								readonly eventId: ClientEventId | undefined
 								readonly commandId: string | undefined
 						  }
 						| {
 								readonly type: "user.message"
-								readonly eventId: string | undefined
+								readonly eventId: ClientEventId | undefined
 								readonly commandId: string | undefined
 								readonly text: typeof MessageText.Type
 						  }
@@ -468,7 +481,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
 					}
 
-					const accepted: Array<unknown> = []
+					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
 						const sendOptions =
 							item.commandId === undefined ? undefined : { commandId: item.commandId }

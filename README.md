@@ -81,12 +81,16 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 )
 ```
 
+## SDK
+
+`@checkfu/sdk` ([packages/sdk/README.md](packages/sdk/README.md)) provides an Effect-native client (`CheckfuClient` service + `Layer`s + `Stream`s + `Data.TaggedError`s) and a thin Promise / `AsyncIterable` facade (`new Checkfu(...)`) sharing the single-source `CheckfuApi` contract with the server and CLI.
+
 ## Commands
 
 - `bun checkfu --help` (short for `node apps/cli/bin/checkfu.mjs --help`) — run the Checkfu CLI from a **trusted Checkfu source checkout** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
   - **Untrusted checkouts with `CHECKFU_API_KEY` exported:** invoke an independently installed Checkfu launcher using **absolute paths for both Node and `checkfu.mjs`** (e.g., `/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs --help` on POSIX or `C:\Program Files\nodejs\node.exe C:\Users\<user>\checkfu\apps\cli\bin\checkfu.mjs --help` on Windows). Never run a relative `apps/cli/bin/checkfu.mjs` inside an untrusted checkout.
   - **`PATH`-based `checkfu` bin (`#!/usr/bin/env node`):** requires both `checkfu` and `node` on `PATH` to resolve to trusted installations before the launcher starts (do not rely on the `PATH`-based bin when `PATH` may contain `.`, empty entries, or project-local directories). Once started, the launcher resolves Bun only from explicitly trusted installation roots (or `BUN_INSTALL` / `CHECKFU_BUN_PATH` outside the enclosing checkout) and pins `--no-env-file --config=<install>/bunfig.toml`.
-- `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI commands from `CheckfuApi`
+- `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI and SDK artifacts from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
 - `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy

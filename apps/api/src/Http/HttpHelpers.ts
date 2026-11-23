@@ -155,9 +155,11 @@ export const handled = <A, E, R>(
 		),
 	)
 
-export interface Pending {
+export interface Pending<
+	T extends "agent" | "environment" | "session" = "agent" | "environment" | "session",
+> {
 	readonly id: string
-	readonly type: string
+	readonly type: T
 	readonly pending: true
 }
 
@@ -165,8 +167,8 @@ export const isPending = (value: unknown): value is Pending =>
 	typeof value === "object" && value !== null && "pending" in value
 
 export const orPending =
-	(id: string, type: string) =>
-	<A, E, R>(read: Effect.Effect<A, E, R>): Effect.Effect<A | Pending, E, R> =>
+	<const T extends "agent" | "environment" | "session">(id: string, type: T) =>
+	<A, E, R>(read: Effect.Effect<A, E, R>): Effect.Effect<A | Pending<T>, E, R> =>
 		read.pipe(
 			Effect.catchDefect((defect) =>
 				Effect.as(Effect.logError("Read after commit failed", defect), {

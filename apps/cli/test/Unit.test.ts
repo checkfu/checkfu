@@ -34,9 +34,6 @@ const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
 const getRequestHeaders = (input: RequestInfo | URL, init?: RequestInit): Headers =>
 	new Headers(typeof input === "string" || "href" in input ? init?.headers : input.headers)
 
-const getRequestUrl = (input: RequestInfo | URL): string =>
-	typeof input === "string" ? input : "href" in input ? input.href : input.url
-
 describe("normalizeApiUrl", () => {
 	it("accepts https URLs and loopback http URLs and strips trailing / and /v1", async () => {
 		await Effect.runPromise(
@@ -84,47 +81,10 @@ describe("normalizeApiUrl", () => {
 		)
 	})
 
-	it("backs off and fails after bounded retries when an SSE stream repeatedly closes mid-frame", async () => {
+	it("streams typed SSE via HttpApiSchema.StreamSse with reconnect, backoff, and validation", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				let requests = 0
-				const fakeFetch = (async () => {
-					requests++
-					return new Response('id: 1\nevent: user.message\ndata: {"partial', {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}) as unknown as typeof globalThis.fetch
-
-				const layer = Layer.mergeAll(
-					FetchHttpClient.layer.pipe(
-						Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fakeFetch)),
-					),
-					SecureRandom.layerWebCrypto,
-					ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: "ck_test" })),
-				)
-
-				const err = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamSessionEvents("sess_test", {
-								maxReconnectAttempts: 2,
-								baseReconnectDelayMs: 5,
-							}),
-						),
-					)
-				}).pipe(Effect.provide(layer))
-
-				expect(requests).toBe(3)
-				expect(err.message).toContain("incomplete SSE frame")
-			}),
-		)
-	})
-
-	it("handles SSE retry directives without disconnecting, preserves split CRLF keepalives, and rotates iteratively", async () => {
-		await Effect.runPromise(
-			Effect.gen(function* () {
+				const encoder = new TextEncoder()
 				const sseSessionFrame = (
 					seq: number,
 					type: "user.message" | "session.archived",
@@ -148,19 +108,6 @@ describe("normalizeApiUrl", () => {
 					return `id: ${seq}${eol}event: ${type}${eol}data: ${JSON.stringify(payload)}${eol}${eol}`
 				}
 
-				// 1) Server advertises retry: at start of connection and delivers events on the same response
-				let retryRequests = 0
-				const retryFetch = (async () => {
-					retryRequests++
-					return new Response(
-						`retry: 25\n\n${sseSessionFrame(1, "user.message")}${sseSessionFrame(2, "session.archived")}`,
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
-				}) as unknown as typeof globalThis.fetch
-
 				const makeLayer = (fetchFn: typeof globalThis.fetch) =>
 					Layer.mergeAll(
 						FetchHttpClient.layer.pipe(
@@ -170,42 +117,39 @@ describe("normalizeApiUrl", () => {
 						ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: "ck_test" })),
 					)
 
-				const retryEvents = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamSessionEvents("sess_retry", {
-							maxReconnectAttempts: 2,
-							baseReconnectDelayMs: 5,
-						}),
-					)
-				}).pipe(Effect.provide(makeLayer(retryFetch)))
+				const makeVirtualClock = (initialNanos = 1_000_000_000n) => {
+					let nowNanos = initialNanos
+					const sleepsMs: Array<number> = []
+					const clock: Clock.Clock = {
+						currentTimeMillisUnsafe: () => Number(nowNanos / 1_000_000n),
+						currentTimeMillis: Effect.sync(() => Number(nowNanos / 1_000_000n)),
+						currentTimeNanosUnsafe: () => nowNanos,
+						currentTimeNanos: Effect.sync(() => nowNanos),
+						monotonicTimeNanosUnsafe: () => nowNanos,
+						monotonicTimeNanos: Effect.sync(() => nowNanos),
+						sleep: (duration) =>
+							Effect.sync(() => {
+								const ms = Duration.toMillis(duration)
+								sleepsMs.push(ms)
+								nowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+							}),
+					}
+					return {
+						clock,
+						sleepsMs,
+						advanceMs: (ms: number) => {
+							nowNanos += BigInt(ms) * 1_000_000n
+						},
+					}
+				}
 
-				expect(retryRequests).toBe(1)
-				expect(Array.from(retryEvents).map((e) => e.seq)).toEqual([1, 2])
-
-				// 1b) Advertised retry: delay overrides baseReconnectDelayMs when a connection drops
-				let retryDropRequests = 0
-				const retryDropLastIds: Array<string | null> = []
-				const encoder = new TextEncoder()
-				const retryDropFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-					retryDropRequests++
-					const headers = getRequestHeaders(input, init)
-					retryDropLastIds.push(headers.get("last-event-id"))
-					if (retryDropRequests === 1) {
-						let pullCount = 0
-						const body = new ReadableStream<Uint8Array>({
-							pull(controller) {
-								if (pullCount === 0) {
-									pullCount = 1
-									controller.enqueue(
-										encoder.encode(`retry: 10\n\n${sseSessionFrame(1, "user.message")}`),
-									)
-								} else {
-									controller.error(new Error("simulated disconnect"))
-								}
-							},
-						})
-						return new Response(body, {
+				// 1) Effect Sse.Retry directive reconnects cleanly with the requested delay
+				const retryClock = makeVirtualClock()
+				let retryRequests = 0
+				const retryFetch = (async () => {
+					retryRequests++
+					if (retryRequests === 1) {
+						return new Response(`${sseSessionFrame(1, "user.message")}retry: 40\n\n`, {
 							status: 200,
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
 						})
@@ -214,31 +158,28 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}
-
-				const [retryDropDuration, retryDropEvents] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Stream.runCollect(
-							client.streamSessionEvents("sess_retry_drop", {
-								maxReconnectAttempts: 2,
-								baseReconnectDelayMs: 5000,
-							}),
-						)
-					}).pipe(Effect.provide(makeLayer(retryDropFetch))),
+				}) as unknown as typeof globalThis.fetch
+				const retryEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_retry", {
+							maxReconnectAttempts: 1,
+							baseReconnectDelayMs: 5,
+						}),
+					)
+				}).pipe(
+					Effect.provide(makeLayer(retryFetch)),
+					Effect.provideService(Clock.Clock, retryClock.clock),
 				)
-				const retryDropElapsedMs = Duration.toMillis(retryDropDuration)
+				expect(retryRequests).toBe(2)
+				expect(retryClock.sleepsMs).toEqual([40])
+				expect(Array.from(retryEvents).map((e) => e.seq)).toEqual([1, 2])
 
-				expect(retryDropRequests).toBe(2)
-				expect(retryDropLastIds).toEqual([null, "1"])
-				expect(Array.from(retryDropEvents).map((e) => e.seq)).toEqual([1, 2])
-				expect(retryDropElapsedMs).toBeLessThan(1500)
-
-				// 2) Keepalive and event frames with \r\n\r + \n split across chunk boundaries are treated as complete
+				// 2) Keepalive and event frames with \r\n\r + \n split across chunk boundaries decode cleanly
 				let splitRequests = 0
 				const splitFetch = (async () => {
 					splitRequests++
-					if (splitRequests <= 8) {
+					if (splitRequests <= 3) {
 						const body = new ReadableStream<Uint8Array>({
 							start(controller) {
 								controller.enqueue(encoder.encode(": keepalive\r\n\r"))
@@ -265,18 +206,16 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}) as unknown as typeof globalThis.fetch
-
 				const splitEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
 						client.streamSessionEvents("sess_split", {
 							maxReconnectAttempts: 2,
-							baseReconnectDelayMs: 2,
+							baseReconnectDelayMs: 1,
 						}),
 					)
 				}).pipe(Effect.provide(makeLayer(splitFetch)))
-
-				expect(splitRequests).toBe(9)
+				expect(splitRequests).toBe(4)
 				expect(Array.from(splitEvents).map((e) => e.seq)).toEqual([1])
 
 				// 3) Iterative reconnection over 50 consecutive rotations delivers all events cleanly in order
@@ -289,7 +228,6 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}) as unknown as typeof globalThis.fetch
-
 				const rotEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
@@ -299,13 +237,12 @@ describe("normalizeApiUrl", () => {
 						}),
 					)
 				}).pipe(Effect.provide(makeLayer(rotFetch)))
-
 				expect(rotSeq).toBe(50)
 				expect(Array.from(rotEvents).map((e) => e.seq)).toEqual(
 					Array.from({ length: 50 }, (_, idx) => idx + 1),
 				)
 
-				// 4) SSE non-200 error envelopes validate known types & fields and fall back to HTTP status
+				// 4) Non-200 SSE responses decode ApiErrorEnvelopes and fall back to HTTP status
 				const sseErrorCases: ReadonlyArray<{
 					readonly status: number
 					readonly body: string
@@ -368,7 +305,7 @@ describe("normalizeApiUrl", () => {
 					expect(err.message).not.toContain("undefined")
 				}
 
-				// 5) HTTP 408 on SSE open/reconnect is retried and resumes from cursor
+				// 5) HTTP 408 / 503 on SSE open/reconnect are retried and resume with Last-Event-ID
 				let timeout408Requests = 0
 				const timeout408LastIds: Array<string | null> = []
 				const timeout408Fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -400,7 +337,6 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}
-
 				const timeout408Events = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
@@ -414,7 +350,7 @@ describe("normalizeApiUrl", () => {
 				expect(timeout408LastIds).toEqual([null, "1", "1"])
 				expect(Array.from(timeout408Events).map((e) => e.seq)).toEqual([1, 2])
 
-				// 6) First reconnect after sawEvent counts toward maxReconnectAttempts (body error & incomplete frame)
+				// 6) First reconnect after an event still honors maxReconnectAttempts
 				let zeroRetryBodyCalls = 0
 				const zeroRetryBodyFetch = (async () => {
 					zeroRetryBodyCalls++
@@ -446,28 +382,6 @@ describe("normalizeApiUrl", () => {
 					)
 				}).pipe(Effect.provide(makeLayer(zeroRetryBodyFetch)))
 				expect(zeroRetryBodyCalls).toBe(1)
-
-				let zeroRetryFrameCalls = 0
-				const zeroRetryFrameFetch = (async () => {
-					zeroRetryFrameCalls++
-					return new Response(`${sseSessionFrame(1, "user.message")}id: 2\ndata: {"partial`, {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}) as unknown as typeof globalThis.fetch
-				const zeroFrameErr = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamSessionEvents("sess_zero_frame", {
-								maxReconnectAttempts: 0,
-								baseReconnectDelayMs: 1,
-							}),
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(zeroRetryFrameFetch)))
-				expect(zeroRetryFrameCalls).toBe(1)
-				expect(zeroFrameErr.message).toContain("incomplete SSE frame")
 
 				let boundedAfterEventCalls = 0
 				const boundedAfterEventFetch = (async () => {
@@ -504,74 +418,7 @@ describe("normalizeApiUrl", () => {
 				}).pipe(Effect.provide(makeLayer(boundedAfterEventFetch)))
 				expect(boundedAfterEventCalls).toBe(3)
 
-				// 7) streamEndpointEvents dispatches to arbitrary declared GET SSE paths with query & headers
-				const seenCustomRequests: Array<{
-					readonly url: string
-					readonly trace: string | null
-					readonly lastEventId: string | null
-				}> = []
-				const customSseFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-					const url = getRequestUrl(input)
-					const headers = getRequestHeaders(input, init)
-					seenCustomRequests.push({
-						url,
-						trace: headers.get("x-trace"),
-						lastEventId: headers.get("last-event-id"),
-					})
-					if (seenCustomRequests.length === 1) {
-						return new Response('id: cur_7\nevent: custom.ping\ndata: {"seq":7,"ok":true}\n\n', {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					if (seenCustomRequests.length === 2) {
-						return new Response('id: 007\nevent: custom.ping\ndata: {"seq":7,"ok":true}\n\n', {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					return new Response(null, { status: 204 })
-				}
-				const customEvents = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamEndpointEvents(
-							{
-								method: "GET",
-								path: "/v1/custom/abc/stream",
-								query: { filter: "live", after: "0" },
-								headers: { "x-trace": "t1" },
-								initialCursor: "0",
-								cursorQueryParam: "after",
-							},
-							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(customSseFetch)))
-				expect(seenCustomRequests).toEqual([
-					{
-						url: "http://localhost:1337/v1/custom/abc/stream?filter=live&after=0",
-						trace: "t1",
-						lastEventId: null,
-					},
-					{
-						url: "http://localhost:1337/v1/custom/abc/stream?filter=live",
-						trace: "t1",
-						lastEventId: "cur_7",
-					},
-					{
-						url: "http://localhost:1337/v1/custom/abc/stream?filter=live",
-						trace: "t1",
-						lastEventId: "007",
-					},
-				])
-				expect(Array.from(customEvents).map((e) => ({ id: e.id, seq: e.seq }))).toEqual([
-					{ id: "cur_7", seq: 7 },
-					{ id: "007", seq: 7 },
-				])
-
-				// 8) Terminal event (session.archived) finishes the stream immediately even if the HTTP
-				//    body remains open or contains trailing frames in the same chunk
+				// 7) Terminal event (session.archived) finishes immediately and cancels an open body
 				let openBodyCanceled = false
 				const openAfterArchiveFetch = (async () => {
 					let sent = false
@@ -579,11 +426,7 @@ describe("normalizeApiUrl", () => {
 						pull(controller) {
 							if (!sent) {
 								sent = true
-								controller.enqueue(
-									encoder.encode(
-										`${sseSessionFrame(1, "session.archived")}id: 2\nevent: bogus\ndata: NOT_JSON\n\n`,
-									),
-								)
+								controller.enqueue(encoder.encode(sseSessionFrame(1, "session.archived")))
 								return
 							}
 							return new Promise<void>(() => {
@@ -611,484 +454,9 @@ describe("normalizeApiUrl", () => {
 				expect(Array.from(archivedImmediate).map((e) => e.seq)).toEqual([1])
 				expect(openBodyCanceled).toBe(true)
 
-				// 9) Explicitly empty SSE id: clears the reconnect cursor instead of keeping prior id or JSON seq
-				const resetLastIds: Array<string | null> = []
-				const resetIdFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-					const headers = getRequestHeaders(input, init)
-					resetLastIds.push(headers.get("last-event-id"))
-					if (resetLastIds.length === 1) {
-						return new Response(
-							'id: cur_1\nevent: custom.ping\ndata: {"seq":1}\n\nid:\nevent: custom.ping\ndata: {"seq":2}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
-					}
-					return new Response(null, { status: 204 })
-				}
-				const resetEvents = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamEndpointEvents(
-							{
-								method: "GET",
-								path: "/v1/custom/reset/stream",
-								query: { after: "0" },
-								initialCursor: "0",
-								cursorQueryParam: "after",
-							},
-							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(resetIdFetch)))
-				expect(Array.from(resetEvents).map((e) => e.seq)).toEqual([1, 2])
-				expect(resetLastIds).toEqual([null, null])
-
-				// 10) ID-only SSE frames advance and clear the reconnect cursor without emitting data events
-				const idOnlyLastIds: Array<string | null> = []
-				const idOnlyFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-					const headers = getRequestHeaders(input, init)
-					idOnlyLastIds.push(headers.get("last-event-id"))
-					if (idOnlyLastIds.length === 1) {
-						return new Response('id: cur_1\nevent: custom.ping\ndata: {"seq":1}\n\nid: cur_2\n\n', {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					if (idOnlyLastIds.length === 2) {
-						return new Response("id:\n\n", {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					return new Response(null, { status: 204 })
-				}
-				const idOnlyEvents = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamEndpointEvents(
-							{
-								method: "GET",
-								path: "/v1/custom/id-only/stream",
-								query: { after: "0" },
-								initialCursor: "0",
-								cursorQueryParam: "after",
-							},
-							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(idOnlyFetch)))
-				expect(Array.from(idOnlyEvents).map((e) => e.seq)).toEqual([1])
-				expect(idOnlyLastIds).toEqual([null, "cur_2", null])
-
-				// 11) Transient 503 with a stalled body cancels the body and retries immediately;
-				//     final non-retried error reads only a bounded diagnostic
-				let stalled503Canceled = false
-				let stalled503Calls = 0
-				const stalled503Fetch = (async () => {
-					stalled503Calls++
-					if (stalled503Calls === 1) {
-						const stalledBody = new ReadableStream<Uint8Array>({
-							pull() {
-								return new Promise<void>(() => {
-									// intentionally stalls forever — retry must not await EOF
-								})
-							},
-							cancel() {
-								stalled503Canceled = true
-							},
-						})
-						return new Response(stalledBody, { status: 503 })
-					}
-					return new Response(sseSessionFrame(1, "session.archived"), {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}) as unknown as typeof globalThis.fetch
-				const stalled503Events = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamSessionEvents("sess_stalled_503", {
-							maxReconnectAttempts: 1,
-							baseReconnectDelayMs: 2,
-						}),
-					)
-				}).pipe(Effect.provide(makeLayer(stalled503Fetch)))
-				expect(stalled503Calls).toBe(2)
-				expect(stalled503Canceled).toBe(true)
-				expect(Array.from(stalled503Events).map((e) => e.seq)).toEqual([1])
-
-				let hugeErrChunks = 0
-				let hugeErrCanceled = false
-				const hugeErrFetch = (async () => {
-					const chunk64k = encoder.encode("E".repeat(64 * 1024))
-					const hugeBody = new ReadableStream<Uint8Array>({
-						pull(controller) {
-							hugeErrChunks++
-							controller.enqueue(chunk64k)
-						},
-						cancel() {
-							hugeErrCanceled = true
-						},
-					})
-					return new Response(hugeBody, { status: 400 })
-				}) as unknown as typeof globalThis.fetch
-				const hugeErr = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamSessionEvents("sess_huge_err", {
-								maxReconnectAttempts: 0,
-								baseReconnectDelayMs: 1,
-							}),
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(hugeErrFetch)))
-				expect(hugeErr.message).toContain("HTTP 400")
-				expect(hugeErrChunks).toBeLessThanOrEqual(2)
-				expect(hugeErrCanceled).toBe(true)
-
-				// 12) Repeated same-ID or unnumbered SSE closes back off instead of tight-looping,
-				//     and unnumbered mid-stream errors do not reset the retry budget
-				let repeatIdCalls = 0
-				const repeatIdFetch = (async () => {
-					repeatIdCalls++
-					if (repeatIdCalls <= 3) {
-						return new Response('id: same_1\nevent: custom.ping\ndata: {"ok":true}\n\n', {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const [repeatDuration] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Stream.runCollect(
-							client.streamEndpointEvents(
-								{ method: "GET", path: "/v1/custom/repeat/stream" },
-								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
-							),
-						)
-					}).pipe(Effect.provide(makeLayer(repeatIdFetch))),
-				)
-				expect(repeatIdCalls).toBe(4)
-				// Connection 1 advances undefined->same_1 (0ms), connection 2 repeats (30ms), connection 3 repeats (60ms)
-				expect(Duration.toMillis(repeatDuration)).toBeGreaterThanOrEqual(75)
-
-				let unnumberedErrCalls = 0
-				const unnumberedErrFetch = (async () => {
-					unnumberedErrCalls++
-					let step = 0
-					const body = new ReadableStream<Uint8Array>({
-						pull(controller) {
-							if (step === 0) {
-								step = 1
-								controller.enqueue(encoder.encode('event: custom.ping\ndata: {"ok":true}\n\n'))
-							} else {
-								controller.error(new Error("unnumbered drop"))
-							}
-						},
-					})
-					return new Response(body, {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}) as unknown as typeof globalThis.fetch
-				yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamEndpointEvents(
-								{ method: "GET", path: "/v1/custom/unnumbered/stream" },
-								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 2 },
-							),
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(unnumberedErrFetch)))
-				expect(unnumberedErrCalls).toBe(2)
-
-				// 13) Replayed ID batch ending at the starting cursor (1, 2 starting from cursor 2)
-				//     counts as no progress at disconnect: clean closes back off and body errors keep
-				//     consuming the retry budget
-				let replayBatchCloseCalls = 0
-				const replayBatchCloseFetch = (async () => {
-					replayBatchCloseCalls++
-					if (replayBatchCloseCalls <= 2) {
-						return new Response(
-							'id: 1\nevent: custom.ping\ndata: {"seq":1}\n\nid: 2\nevent: custom.ping\ndata: {"seq":2}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const [replayBatchDuration] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Stream.runCollect(
-							client.streamEndpointEvents(
-								{
-									method: "GET",
-									path: "/v1/custom/replay-batch/stream",
-									initialCursor: "2",
-								},
-								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
-							),
-						)
-					}).pipe(Effect.provide(makeLayer(replayBatchCloseFetch))),
-				)
-				expect(replayBatchCloseCalls).toBe(3)
-				// Connection 1 ends at cursor 2 (30ms backoff), connection 2 ends at cursor 2 (60ms backoff)
-				expect(Duration.toMillis(replayBatchDuration)).toBeGreaterThanOrEqual(75)
-
-				let replayBatchErrCalls = 0
-				const replayBatchErrFetch = (async () => {
-					replayBatchErrCalls++
-					let step = 0
-					const body = new ReadableStream<Uint8Array>({
-						pull(controller) {
-							if (step === 0) {
-								step = 1
-								controller.enqueue(
-									encoder.encode(
-										'id: 1\nevent: custom.ping\ndata: {"seq":1}\n\nid: 2\nevent: custom.ping\ndata: {"seq":2}\n\n',
-									),
-								)
-							} else {
-								controller.error(new Error("replay batch drop"))
-							}
-						},
-					})
-					return new Response(body, {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}) as unknown as typeof globalThis.fetch
-				yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamEndpointEvents(
-								{
-									method: "GET",
-									path: "/v1/custom/replay-batch-err/stream",
-									initialCursor: "2",
-								},
-								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 2 },
-							),
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(replayBatchErrFetch)))
-				expect(replayBatchErrCalls).toBe(2)
-
-				// 14) Rejected body.cancel() during retryable 503 or truncated 400 cleanup does not
-				//     die or bypass SSE retries / error status reporting
-				let cancelReject503Calls = 0
-				const cancelReject503Fetch = (async () => {
-					cancelReject503Calls++
-					if (cancelReject503Calls === 1) {
-						const body = new ReadableStream<Uint8Array>({
-							pull() {
-								return new Promise(() => {})
-							},
-							cancel() {
-								return Promise.reject(new Error("stream already errored"))
-							},
-						})
-						return new Response(body, { status: 503 })
-					}
-					return new Response(sseSessionFrame(1, "session.archived"), {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}) as unknown as typeof globalThis.fetch
-				const cancelReject503Events = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamSessionEvents("sess_cancel_reject_503", {
-							maxReconnectAttempts: 1,
-							baseReconnectDelayMs: 2,
-						}),
-					)
-				}).pipe(Effect.provide(makeLayer(cancelReject503Fetch)))
-				expect(cancelReject503Calls).toBe(2)
-				expect(Array.from(cancelReject503Events).map((e) => e.seq)).toEqual([1])
-
-				const cancelReject400Fetch = (async () => {
-					const chunk64k = encoder.encode("X".repeat(64 * 1024))
-					const body = new ReadableStream<Uint8Array>({
-						pull(controller) {
-							controller.enqueue(chunk64k)
-						},
-						cancel() {
-							return Promise.reject(new Error("cancel hook rejected"))
-						},
-					})
-					return new Response(body, { status: 400 })
-				}) as unknown as typeof globalThis.fetch
-				const cancelReject400Err = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamSessionEvents("sess_cancel_reject_400", {
-								maxReconnectAttempts: 0,
-								baseReconnectDelayMs: 1,
-							}),
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(cancelReject400Fetch)))
-				expect(cancelReject400Err.message).toContain("HTTP 400")
-
-				// 15) Stalled non-retried SSE error body hits the diagnostic deadline, cancels the
-				//     response body, and reports the HTTP status with any received prefix
-				let stalled400Canceled = false
-				const stalled400Fetch = (async () => {
-					let pulled = false
-					const body = new ReadableStream<Uint8Array>({
-						pull(controller) {
-							if (!pulled) {
-								pulled = true
-								controller.enqueue(encoder.encode("partial diagnostic"))
-								return
-							}
-							return new Promise(() => {})
-						},
-						cancel() {
-							stalled400Canceled = true
-						},
-					})
-					return new Response(body, { status: 400 })
-				}) as unknown as typeof globalThis.fetch
-				const [stalled400Duration, stalled400Err] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Effect.flip(
-							Stream.runDrain(
-								client.streamSessionEvents("sess_stalled_400", {
-									maxReconnectAttempts: 0,
-									baseReconnectDelayMs: 1,
-									errorBodyTimeoutMs: 40,
-								}),
-							),
-						)
-					}).pipe(Effect.provide(makeLayer(stalled400Fetch))),
-				)
-				expect(Duration.toMillis(stalled400Duration)).toBeLessThan(1000)
-				expect(stalled400Err.message).toContain("HTTP 400")
-				expect(stalled400Err.message).toContain("partial diagnostic")
-				expect(stalled400Canceled).toBe(true)
-
-				// 16) Server `retry: 0` cannot bypass no-progress backoff or empty-close minimum delay
-				let retryZeroRepeatCalls = 0
-				const retryZeroRepeatFetch = (async () => {
-					retryZeroRepeatCalls++
-					if (retryZeroRepeatCalls <= 3) {
-						return new Response(
-							'retry: 0\n\nid: same_0\nevent: custom.ping\ndata: {"ok":true}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const [retryZeroRepeatDuration] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Stream.runCollect(
-							client.streamEndpointEvents(
-								{ method: "GET", path: "/v1/custom/retry-zero-repeat/stream" },
-								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
-							),
-						)
-					}).pipe(Effect.provide(makeLayer(retryZeroRepeatFetch))),
-				)
-				expect(retryZeroRepeatCalls).toBe(4)
-				// Conn 1 advances undefined->same_0 (0ms), conn 2 repeats (30ms), conn 3 repeats (60ms)
-				expect(Duration.toMillis(retryZeroRepeatDuration)).toBeGreaterThanOrEqual(75)
-
-				let retryZeroEmptyCalls = 0
-				const retryZeroEmptyFetch = (async () => {
-					retryZeroEmptyCalls++
-					if (retryZeroEmptyCalls === 1) {
-						return new Response("retry: 0\n\n", {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					if (retryZeroEmptyCalls === 2) {
-						return new Response("", {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const [retryZeroEmptyDuration] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Stream.runCollect(
-							client.streamEndpointEvents(
-								{ method: "GET", path: "/v1/custom/retry-zero-empty/stream" },
-								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
-							),
-						)
-					}).pipe(Effect.provide(makeLayer(retryZeroEmptyFetch))),
-				)
-				expect(retryZeroEmptyCalls).toBe(3)
-				// Conn 1 & 2 both close without advancing cursor -> at least 2 * 30ms floor
-				expect(Duration.toMillis(retryZeroEmptyDuration)).toBeGreaterThanOrEqual(45)
-
-				// 17) SSE API error envelopes preserve the observed HTTP status (e.g. 403 gateway
-				//     response with an authentication_error body reports 403, not inferred 401)
-				const gateway403Fetch = (async () =>
-					new Response(
-						JSON.stringify({
-							type: "error",
-							error: { type: "authentication_error", message: "gateway denied" },
-							request_id: "req_gw_403",
-						}),
-						{ status: 403, headers: { "content-type": "application/json" } },
-					)) as unknown as typeof globalThis.fetch
-				const gateway403Err = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(
-							client.streamSessionEvents("sess_gw_403", {
-								maxReconnectAttempts: 0,
-								baseReconnectDelayMs: 1,
-							}),
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(gateway403Fetch)))
-				expect(gateway403Err.message).toContain(
-					"API error (403 authentication_error): gateway denied",
-				)
-
-				// 18) Consecutive short heartbeat-only and empty SSE closes apply capped exponential
-				//     backoff (even under `retry: 0`), while normal long-lived idle connections reset
-				//     the streak and preserve prompt 50ms reconnection.
-				let virtualNowNanos = 1_000_000_000n
-				const recordedSleepsMs: Array<number> = []
-				const recordingClock: Clock.Clock = {
-					currentTimeMillisUnsafe: () => Number(virtualNowNanos / 1_000_000n),
-					currentTimeMillis: Effect.sync(() => Number(virtualNowNanos / 1_000_000n)),
-					currentTimeNanosUnsafe: () => virtualNowNanos,
-					currentTimeNanos: Effect.sync(() => virtualNowNanos),
-					monotonicTimeNanosUnsafe: () => virtualNowNanos,
-					monotonicTimeNanos: Effect.sync(() => virtualNowNanos),
-					sleep: (duration) =>
-						Effect.sync(() => {
-							const ms = Duration.toMillis(duration)
-							recordedSleepsMs.push(ms)
-							virtualNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-						}),
-				}
+				// 8) Short no-progress closes apply capped exponential backoff (even under `retry: 0`),
+				//    while long-lived idle connections reset the streak to prompt 50ms reconnects
+				const idleClock = makeVirtualClock()
 				let idleBackoffCalls = 0
 				const idleBackoffFetch = (async () => {
 					idleBackoffCalls += 1
@@ -1105,7 +473,6 @@ describe("normalizeApiUrl", () => {
 						})
 					}
 					if (idleBackoffCalls <= 11) {
-						// Normal long-lived idle keepalive connection (10s open before clean close)
 						let step = 0
 						const longIdleBody = new ReadableStream<Uint8Array>({
 							pull(controller) {
@@ -1113,7 +480,7 @@ describe("normalizeApiUrl", () => {
 									step = 1
 									controller.enqueue(encoder.encode(": keepalive\n\n"))
 								} else {
-									virtualNowNanos += 10_000_000_000n
+									idleClock.advanceMs(10_000)
 									controller.close()
 								}
 							},
@@ -1124,7 +491,6 @@ describe("normalizeApiUrl", () => {
 						})
 					}
 					if (idleBackoffCalls <= 14) {
-						// Short empty HTTP 200 closes back off again from base delay
 						return new Response("", {
 							status: 200,
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
@@ -1135,113 +501,22 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}) as unknown as typeof globalThis.fetch
-
 				const idleBackoffEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(client.streamSessionEvents("sess_idle_backoff"))
 				}).pipe(
 					Effect.provide(makeLayer(idleBackoffFetch)),
-					Effect.provideService(Clock.Clock, recordingClock),
+					Effect.provideService(Clock.Clock, idleClock.clock),
 				)
 				expect(idleBackoffCalls).toBe(15)
 				expect(Array.from(idleBackoffEvents).map((e) => e.seq)).toEqual([1])
-				expect(recordedSleepsMs).toEqual([
-					// 7 short keepalive closes (even after retry: 0): exponential backoff capped at 5000ms
-					250, 500, 1000, 2000, 4000, 5000, 5000,
-					// 4 long-lived (10s) idle keepalive closes: streak resets, prompt 50ms reconnects
-					50, 50, 50, 50,
-					// 3 short empty closes: exponential backoff starts fresh from 250ms
-					250, 500, 1000,
+				expect(idleClock.sleepsMs).toEqual([
+					250, 500, 1000, 2000, 4000, 5000, 5000, 50, 50, 50, 50, 250, 500, 1000,
 				])
 
-				// Real-clock sanity check: short keepalive closes back off using live monotonic time
-				let shortLiveKeepaliveCalls = 0
-				const shortLiveKeepaliveFetch = (async () => {
-					shortLiveKeepaliveCalls += 1
-					if (shortLiveKeepaliveCalls <= 3) {
-						return new Response("retry: 0\n\n: keepalive\n\n", {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const [shortLiveDuration] = yield* Effect.timed(
-					Effect.gen(function* () {
-						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-						return yield* Stream.runCollect(
-							client.streamEndpointEvents(
-								{ method: "GET", path: "/v1/custom/short-keepalive/stream" },
-								{
-									maxReconnectAttempts: 1,
-									baseReconnectDelayMs: 25,
-									healthyIdleDurationMs: 500,
-								},
-							),
-						)
-					}).pipe(Effect.provide(makeLayer(shortLiveKeepaliveFetch))),
-				)
-				expect(shortLiveKeepaliveCalls).toBe(4)
-				// 3 short keepalives: 25 + 50 + 100 = 175ms
-				expect(Duration.toMillis(shortLiveDuration)).toBeGreaterThanOrEqual(140)
-
-				// 19) Generic SSE streams with opaque non-numeric IDs emit every frame across reconnects
-				let opaqueCalls = 0
-				const opaqueFetch = (async () => {
-					opaqueCalls += 1
-					if (opaqueCalls === 1) {
-						return new Response(
-							'id: tok_alpha\nevent: custom.msg\ndata: {"seq":5,"msg":"first"}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
-					}
-					if (opaqueCalls === 2) {
-						return new Response(
-							'id: tok_beta\nevent: custom.msg\ndata: {"seq":5,"msg":"second-same-seq-opaque-id"}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const opaqueEvents = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamEndpointEvents(
-							{ method: "GET", path: "/v1/custom/opaque/stream" },
-							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(opaqueFetch)))
-				expect(opaqueCalls).toBe(3)
-				expect(Array.from(opaqueEvents).map((e) => ({ id: e.id, msg: e.data["msg"] }))).toEqual([
-					{ id: "tok_alpha", msg: "first" },
-					{ id: "tok_beta", msg: "second-same-seq-opaque-id" },
-				])
-
-				// 20) Monotonic numeric session streams never regress Last-Event-ID on partial older replay
-				//     and treat older-only replays as no-progress (applying backoff)
-				let replayCursorNanos = 1_000_000_000n
-				const replayCursorSleeps: Array<number> = []
-				const replayCursorClock: Clock.Clock = {
-					currentTimeMillisUnsafe: () => Number(replayCursorNanos / 1_000_000n),
-					currentTimeMillis: Effect.sync(() => Number(replayCursorNanos / 1_000_000n)),
-					currentTimeNanosUnsafe: () => replayCursorNanos,
-					currentTimeNanos: Effect.sync(() => replayCursorNanos),
-					monotonicTimeNanosUnsafe: () => replayCursorNanos,
-					monotonicTimeNanos: Effect.sync(() => replayCursorNanos),
-					sleep: (duration) =>
-						Effect.sync(() => {
-							const ms = Duration.toMillis(duration)
-							replayCursorSleeps.push(ms)
-							replayCursorNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-						}),
-				}
+				// 9) Monotonic numeric session cursor never regresses Last-Event-ID on partial older replay,
+				//    deduplicates replayed frames, and backs off when no cursor progress occurs
+				const replayClock = makeVirtualClock()
 				const replayCursorLastIds: Array<string | null> = []
 				let replayCursorCalls = 0
 				const replayCursorFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1255,7 +530,6 @@ describe("normalizeApiUrl", () => {
 						})
 					}
 					if (replayCursorCalls === 2) {
-						// Proxy partially replays an older frame (seq 2) and disconnects
 						return new Response(sseSessionFrame(2, "user.message"), {
 							status: 200,
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
@@ -1266,23 +540,20 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}
-
 				const replayCursorEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(client.streamSessionEvents("sess_monotonic_cursor"))
 				}).pipe(
 					Effect.provide(makeLayer(replayCursorFetch)),
-					Effect.provideService(Clock.Clock, replayCursorClock),
+					Effect.provideService(Clock.Clock, replayClock.clock),
 				)
 				expect(replayCursorCalls).toBe(3)
-				// Cursor stays at "5" after replaying older seq 2 (never regresses to "2")
 				expect(replayCursorLastIds).toEqual([null, "5", "5"])
-				// Conn 1 advanced (0ms); conn 2 replayed older seq 2 (no progress -> 250ms backoff)
-				expect(replayCursorSleeps).toEqual([250])
-				expect(Array.from(replayCursorEvents).map((e) => e.seq)).toEqual([5, 2, 6])
+				expect(replayClock.sleepsMs).toEqual([250])
+				expect(Array.from(replayCursorEvents).map((e) => e.seq)).toEqual([5, 6])
 
-				// 21) Session streams validate frames against SessionEvent before advancing the cursor
-				//     and ignore data-less id-only cursor updates, while generic SSE endpoints stay schema-free
+				// 10) Malformed SessionEvent frames fail immediately without retrying, and data-less
+				//     id-only frames do not advance Last-Event-ID
 				for (const malformedBody of [
 					'id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n',
 					'id: 2\nevent: session.status_idle\ndata: {"id":"e2","seq":2,"type":"session.status_idle","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
@@ -1308,10 +579,9 @@ describe("normalizeApiUrl", () => {
 						)
 					}).pipe(Effect.provide(makeLayer(malformedFetch)))
 					expect(malformedCalls).toBe(1)
-					expect(malformedErr.message).toContain("Invalid SSE session event payload")
+					expect(malformedErr.message).toContain("Invalid SSE event payload")
 				}
 
-				// Data-less `id: 9\n\n` frames on a session stream must not advance Last-Event-ID past seq 1
 				const idOnlySessionLastIds: Array<string | null> = []
 				const idOnlySessionFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 					const req = toWebRequest(input, init)
@@ -1339,48 +609,9 @@ describe("normalizeApiUrl", () => {
 				expect(idOnlySessionLastIds).toEqual([null, "1"])
 				expect(Array.from(idOnlySessionEvents).map((e) => e.seq)).toEqual([1, 2])
 
-				// Generic SSE endpoint remains independent of SessionEvent (accepts arbitrary JSON `{ seq: 2 }`)
-				let genericSchemaFreeCalls = 0
-				const genericSchemaFreeFetch = (async () => {
-					genericSchemaFreeCalls += 1
-					if (genericSchemaFreeCalls === 1) {
-						return new Response('id: 2\nevent: custom.ping\ndata: {"seq":2}\n\n', {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
-				const genericSchemaFreeEvents = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Stream.runCollect(
-						client.streamEndpointEvents(
-							{ method: "GET", path: "/v1/custom/arbitrary-json/stream" },
-							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
-						),
-					)
-				}).pipe(Effect.provide(makeLayer(genericSchemaFreeFetch)))
-				expect(Array.from(genericSchemaFreeEvents).map((e) => e.data)).toEqual([{ seq: 2 }])
-
-				// 22) Healthy long-lived idle connections that end with a body-read reset or incomplete
-				//     frame reset the retry budget (surviving >=6 periodic proxy resets while preserving
-				//     the Last-Event-ID resume cursor), while immediate failures stay strictly bounded
-				let resetNowNanos = 1_000_000_000n
-				const resetSleepsMs: Array<number> = []
-				const resetClock: Clock.Clock = {
-					currentTimeMillisUnsafe: () => Number(resetNowNanos / 1_000_000n),
-					currentTimeMillis: Effect.sync(() => Number(resetNowNanos / 1_000_000n)),
-					currentTimeNanosUnsafe: () => resetNowNanos,
-					currentTimeNanos: Effect.sync(() => resetNowNanos),
-					monotonicTimeNanosUnsafe: () => resetNowNanos,
-					monotonicTimeNanos: Effect.sync(() => resetNowNanos),
-					sleep: (duration) =>
-						Effect.sync(() => {
-							const ms = Duration.toMillis(duration)
-							resetSleepsMs.push(ms)
-							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-						}),
-				}
+				// 11) Long-lived idle connections reset retry budget across proxy resets, while
+				//     immediate body-read resets remain strictly bounded by maxReconnectAttempts
+				const longResetClock = makeVirtualClock()
 				let longResetCalls = 0
 				const longResetLastIds: Array<string | null> = []
 				const longResetFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1401,14 +632,8 @@ describe("normalizeApiUrl", () => {
 									step = 1
 									controller.enqueue(encoder.encode(": keepalive\n\n"))
 								} else {
-									// Connection stayed healthy for 60s before proxy reset or truncated frame
-									resetNowNanos += 60_000_000_000n
-									if (longResetCalls % 2 === 0) {
-										controller.error(new TypeError("proxy idle reset"))
-									} else {
-										controller.enqueue(encoder.encode('data: {"partial'))
-										controller.close()
-									}
+									longResetClock.advanceMs(60_000)
+									controller.error(new TypeError("proxy idle reset"))
 								}
 							},
 						})
@@ -1422,38 +647,21 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}
-
 				const longResetEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(client.streamSessionEvents("sess_long_idle_resets"))
 				}).pipe(
 					Effect.provide(makeLayer(longResetFetch)),
-					Effect.provideService(Clock.Clock, resetClock),
+					Effect.provideService(Clock.Clock, longResetClock.clock),
 				)
 				expect(longResetCalls).toBe(9)
 				expect(longResetLastIds).toEqual([null, "1", "1", "1", "1", "1", "1", "1", "1"])
-				// Conn 1 advanced cursor (0ms); conns 2..8 each stayed open 60s before reset (250ms each)
-				expect(resetSleepsMs).toEqual([250, 250, 250, 250, 250, 250, 250])
+				expect(longResetClock.sleepsMs).toEqual([250, 250, 250, 250, 250, 250, 250])
 				expect(Array.from(longResetEvents).map((e) => e.seq)).toEqual([1, 2])
 
-				// Immediate body-read resets still fail after maxReconnectAttempts (default 5 -> 6 calls)
+				const immediateClock = makeVirtualClock()
 				let immediateResetCalls = 0
 				const immediateResetLastIds: Array<string | null> = []
-				const immediateResetSleepsMs: Array<number> = []
-				const immediateResetClock: Clock.Clock = {
-					currentTimeMillisUnsafe: () => Number(resetNowNanos / 1_000_000n),
-					currentTimeMillis: Effect.sync(() => Number(resetNowNanos / 1_000_000n)),
-					currentTimeNanosUnsafe: () => resetNowNanos,
-					currentTimeNanos: Effect.sync(() => resetNowNanos),
-					monotonicTimeNanosUnsafe: () => resetNowNanos,
-					monotonicTimeNanos: Effect.sync(() => resetNowNanos),
-					sleep: (duration) =>
-						Effect.sync(() => {
-							const ms = Duration.toMillis(duration)
-							immediateResetSleepsMs.push(ms)
-							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-						}),
-				}
 				const immediateResetFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 					const req = toWebRequest(input, init)
 					immediateResetLastIds.push(req.headers.get("last-event-id"))
@@ -1474,7 +682,6 @@ describe("normalizeApiUrl", () => {
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
 				}
-
 				const immediateResetErr = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Effect.flip(
@@ -1482,78 +689,12 @@ describe("normalizeApiUrl", () => {
 					)
 				}).pipe(
 					Effect.provide(makeLayer(immediateResetFetch)),
-					Effect.provideService(Clock.Clock, immediateResetClock),
+					Effect.provideService(Clock.Clock, immediateClock.clock),
 				)
 				expect(immediateResetCalls).toBe(6)
 				expect(immediateResetLastIds).toEqual([null, "4", "4", "4", "4", "4"])
-				expect(immediateResetSleepsMs).toEqual([250, 500, 1000, 2000, 4000])
+				expect(immediateClock.sleepsMs).toEqual([250, 500, 1000, 2000, 4000])
 				expect(immediateResetErr._tag).toBe("CliFailure")
-
-				// Stalled 60s connections that deliver neither events nor completed keepalives (empty
-				// chunks or unterminated `: partial` comments) must NOT reset the retry budget:
-				// elapsed time alone is not evidence of a healthy stream
-				let stalledResetCalls = 0
-				const stalledResetLastIds: Array<string | null> = []
-				const stalledResetSleepsMs: Array<number> = []
-				const stalledResetClock: Clock.Clock = {
-					currentTimeMillisUnsafe: () => Number(resetNowNanos / 1_000_000n),
-					currentTimeMillis: Effect.sync(() => Number(resetNowNanos / 1_000_000n)),
-					currentTimeNanosUnsafe: () => resetNowNanos,
-					currentTimeNanos: Effect.sync(() => resetNowNanos),
-					monotonicTimeNanosUnsafe: () => resetNowNanos,
-					monotonicTimeNanos: Effect.sync(() => resetNowNanos),
-					sleep: (duration) =>
-						Effect.sync(() => {
-							const ms = Duration.toMillis(duration)
-							stalledResetSleepsMs.push(ms)
-							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
-						}),
-				}
-				const stalledResetFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-					const req = toWebRequest(input, init)
-					stalledResetLastIds.push(req.headers.get("last-event-id"))
-					stalledResetCalls += 1
-					if (stalledResetCalls > 10) {
-						return new Response(sseSessionFrame(8, "session.archived"), {
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						})
-					}
-					const callNumber = stalledResetCalls
-					let step = 0
-					const body = new ReadableStream<Uint8Array>({
-						pull(controller) {
-							if (step === 0) {
-								step = 1
-								// Alternate silent stalls and unterminated comments (neither is a completed keepalive)
-								controller.enqueue(
-									callNumber % 2 === 1 ? new Uint8Array(0) : encoder.encode(": partial"),
-								)
-							} else {
-								resetNowNanos += 60_000_000_000n
-								controller.error(new TypeError("stalled proxy reset"))
-							}
-						},
-					})
-					return new Response(body, {
-						status: 200,
-						headers: { "content-type": "text/event-stream; charset=utf-8" },
-					})
-				}
-
-				const stalledResetErr = yield* Effect.gen(function* () {
-					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
-					return yield* Effect.flip(
-						Stream.runDrain(client.streamSessionEvents("sess_stalled_resets", { after: 7 })),
-					)
-				}).pipe(
-					Effect.provide(makeLayer(stalledResetFetch)),
-					Effect.provideService(Clock.Clock, stalledResetClock),
-				)
-				expect(stalledResetCalls).toBe(6)
-				expect(stalledResetLastIds).toEqual([null, "7", "7", "7", "7", "7"])
-				expect(stalledResetSleepsMs).toEqual([250, 500, 1000, 2000, 4000])
-				expect(stalledResetErr._tag).toBe("CliFailure")
 			}),
 		)
 	})

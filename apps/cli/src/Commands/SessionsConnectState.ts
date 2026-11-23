@@ -76,6 +76,7 @@ export interface SessionSnapshotSummary {
 export interface ConnectSessionEvent {
 	readonly seq: number | undefined
 	readonly type: string
+	readonly turn?: number | undefined
 	readonly stopReason?: string | undefined
 	readonly error?:
 		| {
@@ -299,7 +300,7 @@ export const applySessionEvent = (
 
 	switch (event.type) {
 		case "session.status_running": {
-			const nextObserved = baseState.observedTurn + 1
+			const nextObserved = event.turn ?? baseState.observedTurn + 1
 			const reachedLive = nextObserved > baseState.liveTurn
 			const next: ConnectState = {
 				...baseState,
@@ -335,7 +336,8 @@ export const applySessionEvent = (
 		}
 		case "session.status_idle": {
 			const stopReason = event.stopReason
-			const turn = baseState.observedTurn
+			const turn = event.turn ?? baseState.observedTurn
+			const nextObservedTurn = Math.max(baseState.observedTurn, turn)
 			const nextSettledTurn = Math.max(baseState.settledTurn, turn)
 			const latestSettledStopReason =
 				turn >= baseState.settledTurn ? stopReason : baseState.latestSettledStopReason
@@ -348,6 +350,7 @@ export const applySessionEvent = (
 					state: {
 						...baseState,
 						status: "idle",
+						observedTurn: nextObservedTurn,
 						liveStatus: turn >= baseState.liveTurn ? "idle" : baseState.liveStatus,
 						liveTurn: Math.max(baseState.liveTurn, turn),
 						liveStateVersion: reachedLiveIdle
@@ -383,6 +386,7 @@ export const applySessionEvent = (
 			const next: ConnectState = {
 				...baseState,
 				status: "idle",
+				observedTurn: nextObservedTurn,
 				liveStatus: turn >= baseState.liveTurn ? "idle" : baseState.liveStatus,
 				liveTurn: Math.max(baseState.liveTurn, turn),
 				liveStateVersion: reachedLiveIdle

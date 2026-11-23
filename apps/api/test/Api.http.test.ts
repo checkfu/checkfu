@@ -807,8 +807,11 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"type",
 					])
 					expect(
+						Object.keys(byType.get("session.status_running")?.properties ?? {}).toSorted(),
+					).toEqual(["created_at", "id", "seq", "turn", "type"])
+					expect(
 						Object.keys(byType.get("session.status_idle")?.properties ?? {}).toSorted(),
-					).toEqual(["created_at", "id", "seq", "stop_reason", "type"])
+					).toEqual(["created_at", "id", "seq", "stop_reason", "turn", "type"])
 					expect(Object.keys(byType.get("session.error")?.properties ?? {}).toSorted()).toEqual([
 						"created_at",
 						"error",
@@ -818,7 +821,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					])
 					for (const emptyTag of [
 						"user.interrupt",
-						"session.status_running",
 						"session.status_terminated",
 						"session.archived",
 					]) {

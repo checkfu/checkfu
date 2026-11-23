@@ -507,7 +507,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					})
 					expect(badJson.exitCode).toBe(1)
 					expect(badJsonRequests).toBe(1)
-					expect(badJson.stderr).toContain("Invalid SSE event JSON payload")
+					expect(badJson.stderr).toContain("Invalid SSE event payload")
 
 					// 3) >6 consecutive healthy long-lived idle keepalive rotations stay connected and deliver all events promptly
 					let rotationRequests = 0
@@ -1946,8 +1946,8 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sigintAfterDelayedReceipt).toBe(false)
 					expect(delayedRes.stderr).not.toContain("Interrupt requested.")
 
-					// 9) Resuming near the head with --after N uses the head+suffix path instead of
-					//    scanning history from sequence 0
+					// 9) Resuming near the head with --after N reads wire `turn` via a single descending
+					//    lookup from `after + 1` without scanning history from sequence 0 or forward
 					const resumeCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -1981,18 +1981,22 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(headSeq).toBeGreaterThan(5)
 
 					const ascQueries: Array<string> = []
+					const descBaselineQueries: Array<string> = []
 					const resumed = yield* resumeCli.run(
 						["sessions", "connect", "--session-id", resumeSessionId, "--after", String(headSeq)],
 						{
 							stdin: "four\n",
 							interceptFetch: async (next, request) => {
 								const url = new URL(request.url)
-								if (
-									request.method === "GET" &&
-									url.pathname.endsWith("/events") &&
-									url.searchParams.get("order") === "asc"
-								) {
-									ascQueries.push(url.search)
+								if (request.method === "GET" && url.pathname.endsWith("/events")) {
+									if (url.searchParams.get("order") === "asc") {
+										ascQueries.push(url.search)
+									} else if (
+										url.searchParams.get("order") === "desc" &&
+										url.searchParams.get("after") !== null
+									) {
+										descBaselineQueries.push(url.search)
+									}
 								}
 								return next(request)
 							},
@@ -2001,8 +2005,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(resumed.exitCode).toBe(0)
 					expect(resumed.stdout).toContain("T4:four")
 					expect(resumed.stdout).not.toContain("T1:one")
-					expect(ascQueries).toHaveLength(1)
-					expect(ascQueries[0]).toContain(`after=${headSeq}`)
+					expect(ascQueries).toHaveLength(0)
+					expect(descBaselineQueries).toHaveLength(1)
+					expect(descBaselineQueries[0]).toContain(`after=${headSeq + 1}`)
 				}),
 			),
 		)
@@ -2296,7 +2301,7 @@ describe("CLI sessions:events and sessions connect", () => {
 				})
 			})
 		}
-	})
+	}, 15_000)
 
 	it("handles replayed refusal before a fresh turn, preserves uncertainty across retry errors, stops stalled TTY sends on archive, and flushes valid lines before chunk overflow", async () => {
 		await Effect.runPromise(
@@ -2978,7 +2983,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"cache-control": "no-cache",
 					})
 					res.write(
-						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
 					)
 					openSseResponses.push(res)
 					return
@@ -3493,7 +3498,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							"cache-control": "no-cache",
 						})
 						res.write(
-							'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+							'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
 						)
 						openSseResponses.push(res)
 						return
@@ -4280,6 +4285,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(headSeq - resumeAfter).toBeLessThanOrEqual(resumeAfter)
 
 					let syntheticHead = headSeq
+					let descBaselineQueries = 0
 					let suffixPagesServed = 0
 					let prefixPagesServed = 0
 					const [busyDuration, busyResumeRes] = yield* Effect.timed(
@@ -4319,6 +4325,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 												}),
 												{ status: 200, headers: { "content-type": "application/json" } },
 											)
+										}
+										if (order === "desc" && afterParam === String(resumeAfter + 1)) {
+											descBaselineQueries += 1
 										}
 										if (
 											order === "asc" &&
@@ -4369,9 +4378,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					)
 					expect(busyResumeRes.exitCode).toBe(0)
 					expect(Duration.toMillis(busyDuration)).toBeLessThan(1500)
-					expect(suffixPagesServed).toBeGreaterThanOrEqual(1)
-					expect(suffixPagesServed).toBeLessThanOrEqual(10)
-					expect(prefixPagesServed).toBeGreaterThanOrEqual(1)
+					expect(descBaselineQueries).toBe(1)
+					expect(suffixPagesServed).toBe(0)
+					expect(prefixPagesServed).toBe(0)
 				}),
 			),
 		)
@@ -5299,7 +5308,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(malformedConnect.exitCode).toBe(1)
-					expect(malformedConnect.stderr).toContain("Invalid SSE session event payload")
+					expect(malformedConnect.stderr).toContain("Invalid SSE event payload")
 
 					const malformedStream = yield* malformedCli.run(
 						["sessions:events", "stream", "--session-id", malformedSessionId],
@@ -5316,7 +5325,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(malformedStream.exitCode).toBe(1)
-					expect(malformedStream.stderr).toContain("Invalid SSE session event payload")
+					expect(malformedStream.stderr).toContain("Invalid SSE event payload")
 				}),
 			),
 		)

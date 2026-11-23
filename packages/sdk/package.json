@@ -1,0 +1,34 @@
+{
+	"name": "@checkfu/sdk",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": "./src/index.ts",
+		"./effect": "./src/Effect.ts",
+		"./client": "./src/Checkfu.ts",
+		"./api": "./src/Api.ts",
+		"./Api": "./src/Api.ts",
+		"./Schemas": "./src/Schemas.ts",
+		"./Errors": "./src/Errors.ts",
+		"./Sse": "./src/Sse.ts",
+		"./Transport": "./src/Transport.ts",
+		"./Runtime": "./src/Runtime.ts",
+		"./PromiseRuntime": "./src/PromiseRuntime.ts",
+		"./generated/*": "./src/generated/*.ts",
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@effect/vitest": "catalog:",
+		"vitest": "catalog:"
+	}
+}
