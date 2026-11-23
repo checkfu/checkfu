@@ -47,7 +47,6 @@ import {
 } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import type { BaseRuntimeContext } from "alchemy/RuntimeContext"
@@ -64,7 +63,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { CheckfuApi } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
@@ -1492,7 +1491,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			})
 
 			const CheckfuLive = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
+				CheckfuHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
 			).pipe(Layer.provide(executorLayer))
 			const layer = CheckfuLive.pipe(
 				Layer.provide(Domain.InMemory),
@@ -1700,7 +1699,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
+			CheckfuHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),

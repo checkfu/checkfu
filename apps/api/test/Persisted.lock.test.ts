@@ -78,12 +78,19 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(5)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(7)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
 						"command-reply:Checkfu/AdmitSession",
 						"state:Checkfu.IdempotencyClaim",
+						"state:Checkfu.Automation",
+						"event:Checkfu.Automation/automation.fired",
+						"scheduled-command:Checkfu.Automation/FireAutomation",
+						"command-reply:Checkfu/RunAutomation",
+						"command-reply:Checkfu/AdmitAutomation",
+						"state:Checkfu.AutomationCapacity",
+						"event:Checkfu.AutomationCapacity/automation_slot.reserved",
 						"event:Checkfu.IdempotencyClaim/idempotency_key.claimed",
 						"command-reply:Checkfu/ClaimIdempotencyKey",
 						"pi-doc:checkfu.active-usage",

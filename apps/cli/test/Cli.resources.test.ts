@@ -284,6 +284,94 @@ describe("CLI help, errors, and resource commands", () => {
 		)
 	})
 
+	it("manages an automation with the documented flags: create, pause, run, list runs, archive", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const agent = JSON.parse(
+						(yield* cli.run(["agents", "create", "--name", "Reporter", "--model", "gpt-4o-mini"]))
+							.stdout,
+					) as { id: string }
+					const env = JSON.parse(
+						(yield* cli.run(["environments", "create", "--name", "Cloud"])).stdout,
+					) as { id: string }
+
+					const created = yield* cli.run([
+						"automations",
+						"create",
+						"--name",
+						"Morning report",
+						"--agent",
+						agent.id,
+						"--environment-id",
+						env.id,
+						"--initial-event",
+						'{"type":"user.message","content":[{"type":"text","text":"Write the morning report."}]}',
+						"--schedule",
+						'{"type":"cron","expression":"0 9 * * 1-5","timezone":"America/New_York"}',
+					])
+					expect(created.stderr).toBe("")
+					expect(created.exitCode).toBe(0)
+					const automation = JSON.parse(created.stdout) as {
+						id: string
+						status: string
+						initial_events: ReadonlyArray<{ content: ReadonlyArray<{ text: string }> }>
+						upcoming_runs_at: ReadonlyArray<string>
+					}
+					expect(automation.id).toMatch(/^auto_/)
+					expect(automation.status).toBe("active")
+					expect(automation.initial_events[0]?.content[0]?.text).toBe("Write the morning report.")
+					expect(automation.upcoming_runs_at).toHaveLength(5)
+
+					const twoEvents = yield* cli.run([
+						"automations",
+						"create",
+						"--name",
+						"Two",
+						"--agent",
+						agent.id,
+						"--environment-id",
+						env.id,
+						"--initial-event",
+						'{"type":"user.message","content":[{"type":"text","text":"a"}]}',
+						"--initial-event",
+						'{"type":"user.message","content":[{"type":"text","text":"b"}]}',
+						"--schedule",
+						'{"type":"cron","expression":"0 9 * * *","timezone":"UTC"}',
+					])
+					expect(twoEvents.exitCode).toBe(1)
+					expect(twoEvents.stdout).toBe("")
+
+					const id = ["--automation-id", automation.id]
+					const paused = yield* cli.run(["automations", "pause", ...id])
+					expect(paused.exitCode).toBe(0)
+					expect(JSON.parse(paused.stdout).status).toBe("paused")
+
+					const ran = yield* cli.run(["automations", "run", ...id])
+					expect(ran.exitCode).toBe(0)
+					expect(JSON.parse(ran.stdout)).toMatchObject({
+						run: 1,
+						status: "queued",
+						trigger: { type: "manual" },
+					})
+
+					const runs = yield* cli.run(["automations:runs", "list", ...id, "--limit", "5"])
+					expect(runs.exitCode).toBe(0)
+					expect(JSON.parse(runs.stdout)).toHaveProperty("data")
+
+					const unpaused = yield* cli.run(["automations", "unpause", ...id])
+					expect(JSON.parse(unpaused.stdout).status).toBe("active")
+					const retrieved = yield* cli.run(["automations", "retrieve", ...id])
+					expect(JSON.parse(retrieved.stdout).run_count).toBe(1)
+					const archived = yield* cli.run(["automations", "archive", ...id])
+					expect(archived.exitCode).toBe(0)
+					expect(JSON.parse(archived.stdout).status).toBe("archived")
+				}),
+			),
+		)
+	})
+
 	it("manages sessions and diagnoses missing agent vs missing environment on 404", async () => {
 		await Effect.runPromise(
 			Effect.scoped(

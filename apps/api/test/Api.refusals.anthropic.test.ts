@@ -1,5 +1,4 @@
 import * as Domain from "@alchemy.run/domain"
-import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -8,7 +7,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
-import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
@@ -187,7 +186,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -442,7 +441,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				),
 		})
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
@@ -1001,7 +1000,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					}),
 			})
 			const normalizedLayer = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+				CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 			).pipe(
 				Layer.provide(normalizedExecutor),
 				Layer.provide(Domain.InMemory),
@@ -1241,7 +1240,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+				CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),

@@ -249,6 +249,98 @@
 			"Checkfu.EnvironmentViewConfigMatchesEnvironment": {
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Environment.every((e) => {\n\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\tif (e.state.config === null) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\tconst projected = view.state.config.networking\n\t\t\t\tconst committed = e.state.config.networking\n\t\t\t\treturn [\n\t\t\t\t\tview.state.description === e.state.description,\n\t\t\t\t\tprojected.type === committed.type,\n\t\t\t\t\tprojected.type !== \"limited\" ||\n\t\t\t\t\t\tcommitted.type !== \"limited\" ||\n\t\t\t\t\t\t(projected.allow_mcp_servers === committed.allow_mcp_servers &&\n\t\t\t\t\t\t\tprojected.allow_package_managers === committed.allow_package_managers &&\n\t\t\t\t\t\t\tprojected.allowed_hosts.length === committed.allowed_hosts.length &&\n\t\t\t\t\t\t\tprojected.allowed_hosts.every(\n\t\t\t\t\t\t\t\t(host, index) => host === committed.allowed_hosts[index],\n\t\t\t\t\t\t\t)),\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
+			},
+			"Automation.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"active\", s.status === \"paused\", s.status === \"archived\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Automation.NothingRunsBeforeCreation": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status !== \"\",\n\t\t\t\t[s.runs === 0, s.reported === 0, s.last_scheduled_at === 0, s.activation === 0].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.ReportedNeverExceedsRuns": {
+				"kind": "invariant",
+				"source": "(s) => s.reported <= s.runs"
+			},
+			"Automation.CreatedAutomationNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Automation.ArchivedAutomationStaysArchived": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.status === \"archived\"].some((ok) => ok)"
+			},
+			"Automation.ArchivedAutomationNeverFires": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.runs === before.runs].some((ok) => ok)"
+			},
+			"Automation.OnlyUnpauseResumesAPausedAutomation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"paused\",\n\t\t\t\tafter.status !== \"active\",\n\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.RunsGrowByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[after.runs === before.runs, after.runs === before.runs + 1].some((ok) => ok)"
+			},
+			"Automation.OnlyRunAndFireStartRuns": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tcommand._tag === \"RunAutomation\",\n\t\t\t\tcommand._tag === \"FireAutomation\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.ScheduledFiringNeedsAnActiveAutomationAndALaterInstant": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"FireAutomation\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\tcommand.activation === before.activation,\n\t\t\t\tcommand.scheduled_at > before.last_scheduled_at,\n\t\t\t\tafter.runs === before.runs + 1,\n\t\t\t\tafter.last_scheduled_at === command.scheduled_at,\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"Automation.OnlyAResumeStartsANewActivation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.EveryResumeStartsANewActivation": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"automation.unpaused\" || after.activation === before.activation + 1,\n\t\t\t)"
+			},
+			"Automation.ScheduledInstantNeverGoesBack": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tafter.last_scheduled_at >= before.last_scheduled_at"
+			},
+			"Automation.FiredCarriesTheNewRun": {
+				"kind": "transition",
+				"source": "({ after, events }) =>\n\t\t\tevents.every((event) => event._tag !== \"automation.fired\" || event.run === after.runs)"
+			},
+			"Automation.RunsAreReportedInOrder": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[after.reported === before.reported, after.reported === before.reported + 1].some((ok) => ok)"
+			},
+			"Automation.AFailedRunPausesOnlyAnActiveAutomation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"RecordAutomationRunFailed\",\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.status === \"active\", after.status === \"paused\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"AutomationCapacity.ReservedSlotsStayWithinTheLimit": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.reserved >= 0, s.reserved <= MAX_LIVE_AUTOMATIONS].every((ok) => ok)"
+			},
+			"AutomationCapacity.SlotsChangeOneAtATime": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.reserved === before.reserved,\n\t\t\t\tafter.reserved === before.reserved + 1,\n\t\t\t\tafter.reserved === before.reserved - 1,\n\t\t\t].some((ok) => ok)"
+			},
+			"AdmitAutomation.OnlyActiveAgentAndEnvironmentAdmitAutomation": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t\tbefore.automation.status === \"\",\n\t\t\t\tafter.automation.status === \"active\",\n\t\t\t].every((ok) => ok)"
+			},
+			"AdmitAutomation.PinnedVersionWithinAgentHead": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tcommand.agent_version === null || command.agent_version <= before.agent.version"
+			},
+			"AdmitAutomation.AdmissionTakesOneSlotWithinTheLimit": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.capacity.reserved < MAX_LIVE_AUTOMATIONS,\n\t\t\t\tafter.capacity.reserved === before.capacity.reserved + 1,\n\t\t\t].every((ok) => ok)"
+			},
+			"AdmitAutomation.AdmissionLeavesAgentAndEnvironmentUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.AutomationViewsMatchAutomations": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Automation.every((a) => {\n\t\t\t\t\tconst view = m.AutomationView.find((v) => v.id === a.id)\n\t\t\t\t\tconst runs = m.AutomationRunView.find((v) => v.id === a.id)\n\t\t\t\t\tif (a.state.status === \"\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === a.id,\n\t\t\t\t\t\tview.state.status === a.state.status,\n\t\t\t\t\t\tview.state.runs === a.state.runs,\n\t\t\t\t\t\tview.state.activation === a.state.activation,\n\t\t\t\t\t\t(view.state.pause_reason !== null) === (a.state.status === \"paused\"),\n\t\t\t\t\t\t!!view.state.archived_at === (a.state.status === \"archived\"),\n\t\t\t\t\t\t(runs === undefined ? 0 : runs.state.recorded) === a.state.reported,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.AutomationView.every((v) =>\n\t\t\t\t\tm.Automation.some((a) => [a.id === v.id, a.state.status !== \"\"].every((ok) => ok)),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}

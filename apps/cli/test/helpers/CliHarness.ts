@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
-import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type {
 	HarnessReply,
@@ -9,7 +9,6 @@ import type {
 	TurnInterrupted,
 } from "@checkfu/domain/Session/Harness.external"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
-import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -129,7 +128,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				interrupt: effective.interrupt,
 			}),
 		)
-		const CheckfuLive = Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(HarnessLive)))
+		const CheckfuLive = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive)))
 		const ServerLayer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),

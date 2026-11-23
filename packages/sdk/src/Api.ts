@@ -20,11 +20,19 @@ import {
 	AgentName,
 	AgentSnapshot,
 	AgentSystem,
+	AutomationId,
+	AutomationName,
+	AutomationRunError,
+	AutomationSnapshot,
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
+	HOURLY_CRON_EXPRESSION,
+	MAX_CRON_EXPRESSION_LENGTH,
+	MAX_TIMEZONE_LENGTH,
+	NAMED_TIME_ZONE,
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
@@ -388,6 +396,52 @@ export const CreateSessionBody = Schema.Union([
 ])
 export type CreateSessionBody = typeof CreateSessionBody.Type
 
+export const AutomationScheduleBody = Schema.Struct({
+	type: Schema.Literal("cron"),
+	expression: Schema.String.check(
+		Schema.isMaxLength(MAX_CRON_EXPRESSION_LENGTH),
+		Schema.isPattern(HOURLY_CRON_EXPRESSION, {
+			message:
+				"Expected a five-field cron expression whose minute field is a single number from 0 to 59; an automation fires at most once per clock hour",
+		}),
+	).annotate({
+		description:
+			"Five-field cron expression whose minute field is a single number, so it fires at most once per clock hour in its time zone",
+	}),
+	timezone: Schema.String.check(
+		Schema.isMaxLength(MAX_TIMEZONE_LENGTH),
+		Schema.isPattern(NAMED_TIME_ZONE, {
+			message: "Expected an IANA time zone name such as America/New_York or UTC",
+		}),
+	).annotate({ description: "IANA time zone name the expression is read in" }),
+})
+
+const AutomationInitialEvent = Schema.Struct({
+	type: Schema.Literal("user.message"),
+	content: Schema.Array(
+		Schema.Struct({ type: Schema.Literal("text"), text: NonEmptyString }),
+	).check(Schema.isMinLength(1)),
+})
+
+const AutomationInitialEvents = Schema.Array(AutomationInitialEvent).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(1),
+)
+
+export const CreateAutomationBody = Schema.Struct({
+	name: AutomationName.annotate({ description: "Human-readable automation name" }),
+	agent: AgentReference.annotate({
+		description:
+			"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+	}),
+	environment_id: ResourceId.annotate({ description: "Environment ID each run's session uses" }),
+	initial_events: AutomationInitialEvents.annotate({
+		description: "The one user message each run's session starts with",
+	}),
+	schedule: AutomationScheduleBody.annotate({ description: "When the automation fires" }),
+})
+export type CreateAutomationBody = typeof CreateAutomationBody.Type
+
 export const ClientEventId = Schema.String.check(
 	Schema.isTrimmed(),
 	Schema.isMinLength(1),
@@ -433,7 +487,46 @@ export const SessionResource = Schema.Struct({
 })
 export type Session = typeof SessionResource.Type
 
-export type PendingResourceType = "agent" | "environment" | "session"
+export const AutomationResource = Schema.Struct({
+	...Struct.omit(AutomationSnapshot.fields, [
+		"agent_id",
+		"agent_version",
+		"text",
+		"runs",
+		"activation",
+	]),
+	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
+	initial_events: AutomationInitialEvents,
+	run_count: Schema.Int,
+	upcoming_runs_at: Schema.Array(Schema.DateTimeUtc),
+})
+export type Automation = typeof AutomationResource.Type
+
+export const AutomationRunResource = Schema.Struct({
+	type: Schema.Literal("automation_run"),
+	automation_id: AutomationId,
+	run: PositiveInt,
+	status: Schema.Literals(["started", "failed"]),
+	trigger: Schema.Union([
+		Schema.Struct({ type: Schema.Literal("schedule"), scheduled_at: Schema.DateTimeUtc }),
+		Schema.Struct({ type: Schema.Literal("manual") }),
+	]),
+	session_id: Schema.NullOr(Schema.String),
+	error: Schema.NullOr(AutomationRunError),
+	created_at: Schema.DateTimeUtc,
+})
+export type AutomationRun = typeof AutomationRunResource.Type
+
+export const AutomationRunQueued = Schema.Struct({
+	type: Schema.Literal("automation_run"),
+	automation_id: AutomationId,
+	run: PositiveInt,
+	status: Schema.Literal("queued"),
+	trigger: Schema.Struct({ type: Schema.Literal("manual") }),
+}).pipe(HttpApiSchema.status(202))
+export type AutomationRunQueued = typeof AutomationRunQueued.Type
+
+export type PendingResourceType = "agent" | "environment" | "session" | "automation"
 
 const pendingResource = <const T extends PendingResourceType>(type: T) =>
 	Schema.Struct({
@@ -451,7 +544,15 @@ export type PendingEnvironment = typeof PendingEnvironment.Type
 export const PendingSession = pendingResource("session")
 export type PendingSession = typeof PendingSession.Type
 
-export const PendingResource = Schema.Union([PendingAgent, PendingEnvironment, PendingSession])
+export const PendingAutomation = pendingResource("automation")
+export type PendingAutomation = typeof PendingAutomation.Type
+
+export const PendingResource = Schema.Union([
+	PendingAgent,
+	PendingEnvironment,
+	PendingSession,
+	PendingAutomation,
+])
 export type PendingResource = typeof PendingResource.Type
 
 export const isPendingResource = <T extends { readonly type: string }>(
@@ -565,6 +666,13 @@ export const ListSessionEventsResponse = Schema.Struct({
 })
 export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
 
+export const ListAutomationRunsResponse = Schema.Struct({
+	data: Schema.Array(AutomationRunResource),
+	has_more: Schema.Boolean,
+	next_cursor: Schema.NullOr(Schema.Finite),
+})
+export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
+
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
 	Schema.decodeTo(
 		Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
@@ -604,6 +712,9 @@ const environmentParams = {
 	environment_id: EnvironmentId.annotate({ description: "Environment ID" }),
 }
 const sessionParams = { session_id: SessionId.annotate({ description: "Session ID" }) }
+const automationParams = {
+	automation_id: AutomationId.annotate({ description: "Automation ID" }),
+}
 
 const IdempotencyHeaders = Schema.Struct({
 	"idempotency-key": Schema.optionalKey(
@@ -984,17 +1095,167 @@ const Sessions = HttpApiGroup.make("sessions")
 	.annotate(OpenApi.Description, "Manage sessions")
 	.middleware(Authentication)
 
+const Automations = HttpApiGroup.make("automations")
+	.add(
+		HttpApiEndpoint.post("create", "/v1/automations", {
+			headers: IdempotencyHeaders,
+			payload: CreateAutomationBody,
+			success: [AutomationResource.pipe(HttpApiSchema.status(201)), PendingAutomation],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create an automation")
+			.annotate(
+				OpenApi.Description,
+				"Create an automation that opens a new session with its message every time its schedule fires",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "create" },
+				"x-checkfu-cli": {
+					textOrObjectFields: ["agent"],
+					repeatArrayField: {
+						field: "initial_events",
+						flag: "initial-event",
+						description: "The user message each run starts with, as JSON, YAML, or @file",
+					},
+					examples: [
+						{
+							command:
+								'checkfu automations create --name "Morning report" --agent agent_123 --environment-id env_456 --initial-event \'{"type":"user.message","content":[{"type":"text","text":"Write the morning report."}]}\' --schedule \'{"type":"cron","expression":"0 9 * * 1-5","timezone":"America/New_York"}\'',
+							description: "Run an agent at 09:00 New York time on weekdays",
+						},
+					],
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/automations/:automation_id", {
+			params: automationParams,
+			success: AutomationResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve an automation")
+			.annotate(OpenApi.Description, "Retrieve an automation by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "get" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("pause", "/v1/automations/:automation_id/pause", {
+			params: automationParams,
+			success: [AutomationResource, PendingAutomation],
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Pause an automation")
+			.annotate(
+				OpenApi.Description,
+				"Stop an automation's schedule until it is unpaused; it can still be run on request",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "pause",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "pause" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("unpause", "/v1/automations/:automation_id/unpause", {
+			params: automationParams,
+			success: [AutomationResource, PendingAutomation],
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Unpause an automation")
+			.annotate(
+				OpenApi.Description,
+				"Resume an automation's schedule from now, without running the occurrences it missed",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "unpause",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "unpause" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("archive", "/v1/automations/:automation_id/archive", {
+			params: automationParams,
+			success: [AutomationResource, PendingAutomation],
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Archive an automation")
+			.annotate(OpenApi.Description, "Archive an automation so it never runs again")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "archive" },
+				"x-checkfu-idempotent": true,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("run", "/v1/automations/:automation_id/run", {
+			params: automationParams,
+			success: AutomationRunQueued,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Run an automation now")
+			.annotate(
+				OpenApi.Description,
+				"Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "run",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "run" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listRuns", "/v1/automations/:automation_id/runs", {
+			params: automationParams,
+			query: {
+				after: Schema.optionalKey(EventListAfterFromString),
+				limit: Schema.optionalKey(EventListLimitFromString),
+				order: Schema.optionalKey(
+					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
+				),
+			},
+			success: ListAutomationRunsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List automation runs")
+			.annotate(
+				OpenApi.Description,
+				"List the runs of an automation that have started or failed, newest first by default",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations.runs",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "listRuns" },
+				"x-checkfu-cli": {
+					intQueryParams: {
+						after: { min: 0, metavar: "SEQ" },
+						limit: { min: 1, max: 100, metavar: "N" },
+					},
+				},
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage automations")
+	.middleware(Authentication)
+
 export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
 	.add(Auth)
 	.add(Agents)
 	.add(Environments)
 	.add(Sessions)
+	.add(Automations)
 	.annotate(OpenApi.Title, "Checkfu API")
 	.annotate(OpenApi.Version, "0.0.1")
 	.annotate(
 		OpenApi.Description,
-		"Managed agents API for managing agents, environments, and sessions.",
+		"Managed agents API for managing agents, environments, sessions, and automations.",
 	)
 	// The published schemas forbid unknown body fields, so a misspelled field is refused rather
 	// than dropped.

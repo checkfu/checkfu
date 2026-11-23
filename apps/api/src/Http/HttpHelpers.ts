@@ -36,7 +36,14 @@ import {
 	redactApiErrorEnvelope,
 	statusOf,
 } from "./Api.ts"
-import type { ApiError, ERRORS, ErrorStatus, HandlerError, HandlerErrorStatus } from "./Api.ts"
+import type {
+	ApiError,
+	ERRORS,
+	ErrorStatus,
+	HandlerError,
+	HandlerErrorStatus,
+	PendingResourceType,
+} from "./Api.ts"
 
 export const MAX_REQUEST_BODY_BYTES = 160 * 1024
 export const MAX_AGENT_BODY_BYTES =
@@ -50,6 +57,8 @@ export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
 
 const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined => {
 	switch (status) {
+		case 400:
+			return 400
 		case 404:
 			return 404
 		case 409:
@@ -155,9 +164,7 @@ export const handled = <A, E, R>(
 		),
 	)
 
-export interface Pending<
-	T extends "agent" | "environment" | "session" = "agent" | "environment" | "session",
-> {
+export interface Pending<T extends PendingResourceType = PendingResourceType> {
 	readonly id: string
 	readonly type: T
 	readonly pending: true
@@ -167,7 +174,7 @@ export const isPending = (value: unknown): value is Pending =>
 	typeof value === "object" && value !== null && "pending" in value
 
 export const orPending =
-	<const T extends "agent" | "environment" | "session">(id: string, type: T) =>
+	<const T extends PendingResourceType>(id: string, type: T) =>
 	<A, E, R>(read: Effect.Effect<A, E, R>): Effect.Effect<A | Pending<T>, E, R> =>
 		read.pipe(
 			Effect.catchDefect((defect) =>
@@ -268,7 +275,7 @@ export const idempotentCommandId = (
 
 export const createClaimId = (
 	digest: Digest.Digest["Service"],
-	resource: "agent" | "environment" | "session",
+	resource: PendingResourceType,
 	idempotencyKey: string,
 ) => idempotencyClaimId(digest, "cr", ["create", resource, idempotencyKey])
 
@@ -277,7 +284,7 @@ export const createFingerprint = (digest: Digest.Digest["Service"], payload: unk
 
 export const createCommandId = (
 	digest: Digest.Digest["Service"],
-	resource: "agent" | "environment" | "session",
+	resource: PendingResourceType,
 	idempotencyKey: string,
 ) => idempotentCommandId(digest, `create-${resource}`, ["create", resource, idempotencyKey])
 
@@ -293,7 +300,7 @@ export const claimIdempotency = (
 export const claimCreate = (
 	idempotencyClaims: Effect.Success<typeof IdempotencyClaim>,
 	digest: Digest.Digest["Service"],
-	resource: "agent" | "environment" | "session",
+	resource: PendingResourceType,
 	idempotencyKey: string,
 	payload: unknown,
 ) =>

@@ -49,13 +49,12 @@ import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
-import { SessionsHandlersLive } from "../src/Sessions.model.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Arbitrary from "effect/Arbitrary"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { Checkfu } from "../src/Checkfu.model.ts"
+import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import {
 	RequestFingerprint,
 	ClaimIdempotencyKey,
@@ -72,7 +71,7 @@ import {
 } from "../src/Session/AdmitSession.command.ts"
 
 const story = Story.make(Checkfu, {
-	layer: SessionsHandlersLive,
+	layer: CheckfuHandlersLive,
 	stub: [Harness],
 })
 
@@ -95,7 +94,7 @@ const t0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
 describe("Checkfu unified hosted model stories", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(
-			Layer.build(Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(HarnessStubLayer)))),
+			Layer.build(Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessStubLayer)))),
 		).pipe(Effect.provide(Domain.InMemory)),
 	)
 

@@ -253,6 +253,341 @@ const agentsUpdateCommand = CommandMake(
 	),
 )
 
+const automationsArchiveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations archive",
+	apiGroup: "automations",
+	apiEndpoint: "archive",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsArchiveCommand = CommandMake(
+	"archive",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsArchiveCommandSpec, flags),
+).pipe(CommandWithDescription("Archive an automation so it never runs again"))
+
+const automationsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations create",
+	apiGroup: "automations",
+	apiEndpoint: "create",
+	hasBody: true,
+	flags: [
+		{
+			propName: "name",
+			flagName: "name",
+			wireName: "name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "agent",
+			flagName: "agent",
+			wireName: "agent",
+			location: "body",
+			kind: "text-or-object",
+			required: false,
+		},
+		{
+			propName: "environmentId",
+			flagName: "environment-id",
+			wireName: "environment_id",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "initialEvents",
+			flagName: "initial-event",
+			wireName: "initial_events",
+			location: "body",
+			kind: "repeat-structured",
+			required: false,
+			min: 0,
+			max: 1,
+		},
+		{
+			propName: "schedule",
+			flagName: "schedule",
+			wireName: "schedule",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const automationsCreateCommand = CommandMake(
+	"create",
+	{
+		name: FlagString("name").pipe(
+			FlagWithDescription("Human-readable automation name"),
+			FlagOptional,
+		),
+		agent: FlagString("agent").pipe(
+			FlagWithMetavar("VALUE|JSON|@FILE"),
+			FlagWithDescription(
+				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one (accepts value, JSON/YAML object, or @file)",
+			),
+			FlagOptional,
+		),
+		environmentId: FlagString("environment-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Environment ID each run's session uses"),
+			FlagOptional,
+		),
+		initialEvents: FlagString("initial-event").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("The user message each run starts with, as JSON, YAML, or @file"),
+			FlagBetween(0, 1),
+		),
+		schedule: FlagString("schedule").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("When the automation fires (JSON, YAML, or @file)"),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Create an automation that opens a new session with its message every time its schedule fires (accepts flags and/or JSON/YAML on stdin)",
+	),
+	CommandWithExamples([
+		{
+			command:
+				'checkfu automations create --name "Morning report" --agent agent_123 --environment-id env_456 --initial-event \'{"type":"user.message","content":[{"type":"text","text":"Write the morning report."}]}\' --schedule \'{"type":"cron","expression":"0 9 * * 1-5","timezone":"America/New_York"}\'',
+			description: "Run an agent at 09:00 New York time on weekdays",
+		},
+	]),
+)
+
+const automationsPauseCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations pause",
+	apiGroup: "automations",
+	apiEndpoint: "pause",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsPauseCommand = CommandMake(
+	"pause",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsPauseCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Stop an automation's schedule until it is unpaused; it can still be run on request",
+	),
+)
+
+const automationsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations retrieve",
+	apiGroup: "automations",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve an automation by ID"))
+
+const automationsRunCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations run",
+	apiGroup: "automations",
+	apiEndpoint: "run",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsRunCommand = CommandMake(
+	"run",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsRunCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+	),
+)
+
+const automationsUnpauseCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations unpause",
+	apiGroup: "automations",
+	apiEndpoint: "unpause",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsUnpauseCommand = CommandMake(
+	"unpause",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsUnpauseCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Resume an automation's schedule from now, without running the occurrences it missed",
+	),
+)
+
+const automationsRunsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations:runs list",
+	apiGroup: "automations",
+	apiEndpoint: "listRuns",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 0,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const automationsRunsListCommand = CommandMake(
+	"list",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+		after: FlagInt("after").pipe(
+			FlagWithMetavar("SEQ"),
+			FlagWithDescription(
+				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of events to return (1-100)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order: asc or desc"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsRunsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List the runs of an automation that have started or failed, newest first by default",
+	),
+)
+
 const environmentsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "environments archive",
 	apiGroup: "environments",
@@ -843,11 +1178,15 @@ const sessionsEventsStreamCommand = CommandMake(
 
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const AutomationsRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
+	readonly automations?: AutomationsExtras
+	readonly "automations:runs"?: AutomationsRunsExtras
 	readonly environments?: EnvironmentsExtras
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
@@ -861,6 +1200,25 @@ export const buildGeneratedResourceCommands = <
 				agentsRetrieveCommand,
 				agentsUpdateCommand,
 				...(extras?.["agents"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("automations").pipe(
+			CommandWithDescription("Manage automations"),
+			CommandWithSubcommands([
+				automationsArchiveCommand,
+				automationsCreateCommand,
+				automationsPauseCommand,
+				automationsRetrieveCommand,
+				automationsRunCommand,
+				automationsUnpauseCommand,
+				...(extras?.["automations"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("automations:runs").pipe(
+			CommandWithDescription("Manage automations:runs"),
+			CommandWithSubcommands([
+				automationsRunsListCommand,
+				...(extras?.["automations:runs"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("environments").pipe(

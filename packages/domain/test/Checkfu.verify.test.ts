@@ -17,6 +17,12 @@ import { CreateAgent } from "../src/Agent/CreateAgent.command.ts"
 import { CreateAgentDecision } from "../src/Agent/CreateAgent.decision.ts"
 import { UpdateAgent } from "../src/Agent/UpdateAgent.command.ts"
 import { UpdateAgentDecision } from "../src/Agent/UpdateAgent.decision.ts"
+import { Automation } from "../src/Automation/Automation.aggregate.ts"
+import { sessionIdOfNextRun } from "../src/Automation/Automation.id.ts"
+import { AutomationCapacity } from "../src/Automation/AutomationCapacity.aggregate.ts"
+import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
+import { AutomationView } from "../src/Automation/AutomationView.view.ts"
+import { isUsableSchedule } from "../src/Automation/Schedule.ts"
 import { ArchiveEnvironment } from "../src/Environment/ArchiveEnvironment.command.ts"
 import { CreateEnvironment } from "../src/Environment/CreateEnvironment.command.ts"
 import { DeleteEnvironment } from "../src/Environment/DeleteEnvironment.command.ts"
@@ -30,12 +36,11 @@ import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
-import { SessionsHandlersLive } from "../src/Sessions.model.ts"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { Checkfu, CheckfuDomainApi } from "../src/Checkfu.model.ts"
+import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { IdempotencyClaim } from "../src/IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import {
 	AdmitSession,
@@ -115,12 +120,34 @@ const STANDING = {
 	"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": "proved",
 	"IdempotencyClaim.ClaimedFingerprintNeverChanges": "proved",
 	"IdempotencyClaim.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": "proved",
+	"Automation.StatusIsKnown": "proved",
+	"Automation.NothingRunsBeforeCreation": "proved",
+	"Automation.ReportedNeverExceedsRuns": "proved",
+	"Automation.CreatedAutomationNeverReturnsToUninitialized": "proved",
+	"Automation.ArchivedAutomationStaysArchived": "proved",
+	"Automation.ArchivedAutomationNeverFires": "proved",
+	"Automation.OnlyUnpauseResumesAPausedAutomation": "proved",
+	"Automation.RunsGrowByOneOrNotAtAll": "proved",
+	"Automation.OnlyRunAndFireStartRuns": "proved",
+	"Automation.ScheduledFiringNeedsAnActiveAutomationAndALaterInstant": "proved",
+	"Automation.OnlyAResumeStartsANewActivation": "proved",
+	"Automation.EveryResumeStartsANewActivation": "proved",
+	"Automation.ScheduledInstantNeverGoesBack": "proved",
+	"Automation.FiredCarriesTheNewRun": "proved",
+	"Automation.RunsAreReportedInOrder": "proved",
+	"Automation.AFailedRunPausesOnlyAnActiveAutomation": "proved",
+	"AutomationCapacity.ReservedSlotsStayWithinTheLimit": "proved",
+	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
 	"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
 	"AdmitSession.PinnedVersionWithinAgentHead": "proved",
 	"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"AdmitAutomation.OnlyActiveAgentAndEnvironmentAdmitAutomation": "proved",
+	"AdmitAutomation.PinnedVersionWithinAgentHead": "proved",
+	"AdmitAutomation.AdmissionTakesOneSlotWithinTheLimit": "proved",
+	"AdmitAutomation.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
 	"Checkfu.AMintedVersionBelongsToItsAgent": "proved",
 	"Checkfu.AnAgentsHeadIsItsLatestVersion": "proved",
 	"Checkfu.VersionNumbersAreDistinct": "proved",
@@ -128,6 +155,7 @@ const STANDING = {
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
 	"Checkfu.TurnInputGenerationMatchesSession": "checked",
+	"Checkfu.AutomationViewsMatchAutomations": "checked",
 	"Checkfu.AnIdempotencyKeyIsClaimed": "reached",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
@@ -184,8 +212,14 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"SendUserInterrupt",
 			"ArchiveSession",
 			"ClaimIdempotencyKey",
+			"AdmitAutomation",
+			"PauseAutomation",
+			"UnpauseAutomation",
+			"ArchiveAutomation",
+			"RunAutomation",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
+		expect(hostedCommands).not.toContain("CreateAutomation")
 		expect(
 			CheckfuDomainApi.serves.flatMap((entry) => (entry.kind === "View" ? [entry.viewName] : [])),
 		).toEqual([
@@ -194,6 +228,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"AgentVersionByNumberView",
 			"EnvironmentView",
 			"SessionView",
+			"AutomationView",
+			"AutomationRunView",
 		])
 		const report = await Effect.runPromise(
 			Verify.model(Checkfu, {
@@ -203,6 +239,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 120, length: 8 },
+				opaque: [sessionIdOfNextRun, isUsableSchedule],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),
@@ -217,6 +254,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		expect(report.explored.disagreements).toEqual([])
 		expect(report.explored.agreement.compared).toBeGreaterThan(0)
 		expect(report.explored.decisions).toContain("AdmitSession")
+		expect(report.explored.decisions).toContain("AdmitAutomation")
 		const exploredOutcomes = report.explored.outcomes.map(
 			(outcome) =>
 				`${outcome.aggregate === undefined ? "" : `${outcome.aggregate}.`}${outcome.command} ${outcome.kind === "records" ? "→" : "✗"} ${outcome.tag}`,
@@ -233,7 +271,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const platform = InMemory.make({ manual: true })
 		const observedAggregateIds = new Map<string, Set<string>>()
 		const observedViewKeys = new Map<string, Set<string>>()
-		const layer = Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(HarnessStubLayer))).pipe(
+		const layer = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessStubLayer))).pipe(
 			Layer.updateService(Domain.Platform, (base) =>
 				Domain.Platform.of({
 					model: (hosted) =>
@@ -411,6 +449,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							EnvironmentView: yield* readView(EnvironmentView),
 							SessionView: yield* readView(SessionView),
 							TurnInput: yield* readView(TurnInput),
+							Automation: yield* readAggregate(Automation),
+							AutomationCapacity: yield* readAggregate(AutomationCapacity),
+							AutomationView: yield* readView(AutomationView),
+							AutomationRunView: yield* readView(AutomationRunView),
 						}
 					})
 
@@ -541,6 +583,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				HostedViewsMatchAggregates: true,
 				TurnInputGenerationMatchesSession: true,
 				EnvironmentViewConfigMatchesEnvironment: true,
+				AutomationViewsMatchAutomations: true,
 			})
 		}
 
@@ -622,6 +665,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
+			AutomationViewsMatchAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -636,6 +680,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
+			AutomationViewsMatchAutomations: true,
 		})
 		const v2LookupRow = results.finalWorld.AgentVersionByNumberView.find(
 			(row) => row.state.version === 2,
@@ -657,6 +702,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
+			AutomationViewsMatchAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -669,6 +715,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: true,
 			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
+			AutomationViewsMatchAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -686,6 +733,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
+			AutomationViewsMatchAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -702,6 +750,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: true,
 			TurnInputGenerationMatchesSession: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
+			AutomationViewsMatchAutomations: true,
 		})
 	})
 })
