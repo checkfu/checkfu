@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { once } from "node:events"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -104,7 +105,10 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 		expect(build.status, build.stderr).toBe(0)
 
 		// A server that accepts the request and never answers keeps the command pending.
+		// Its first request is also the signal that the CLI is up and has its handlers
+		// installed, so the interrupt is not sent into a process that is still starting.
 		const server = createServer(() => undefined)
+		const requested = once(server, "request")
 		await new Promise<void>((resolve) => {
 			server.listen(0, "127.0.0.1", resolve)
 		})
@@ -124,7 +128,9 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 					resolve(code)
 				})
 			})
-			await sleep(1500)
+			expect(await Promise.race([requested.then(() => "requested"), sleep(30_000)])).toBe(
+				"requested",
+			)
 			child.kill("SIGINT")
 			const outcome = await Promise.race([exited, sleep(5000).then(() => "still running")])
 			child.kill("SIGKILL")
