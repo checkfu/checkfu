@@ -435,8 +435,11 @@ export const shouldRetryError = (error: CheckfuSdkError, safety: RetrySafety): b
 		}
 		return error.status === 408 || error.status === 429 || error.status >= 500
 	}
-	if (error._tag === "APIConnectionTimeoutError" || error._tag === "APIConnectionError") {
+	if (error._tag === "APIConnectionTimeoutError") {
 		return safety === "idempotent"
+	}
+	if (error._tag === "APIConnectionError") {
+		return safety === "idempotent" && error.retryable
 	}
 	return false
 }

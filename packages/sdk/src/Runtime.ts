@@ -660,6 +660,7 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 								new APIConnectionError({
 									message: `Invalid SSE event payload: ${err.message}`,
 									cause: err,
+									transient: false,
 								}),
 						}),
 					),
@@ -705,6 +706,11 @@ export const pollPending = <T>(
 ): Effect.Effect<T, CheckfuSdkError> =>
 	Effect.gen(function* () {
 		const readiness = getPendingReadiness(pending)
+		if (readiness === undefined && options?.until === undefined) {
+			return yield* new CheckfuConfigError({
+				message: `waitForPending for unrecognized pending ${pending.type} "${pending.id}" requires an explicit "until" predicate because its originating mutation is unknown.`,
+			})
+		}
 		if (readiness?.kind === "requires-until" && options?.until === undefined) {
 			return yield* new CheckfuConfigError({
 				message: `waitForPending for pending ${readiness.operation} requires an explicit "until" predicate to distinguish the updated projection from existing state.`,
@@ -758,8 +764,8 @@ export const pollPending = <T>(
 						err._tag === "ServiceUnavailableError" ||
 						err._tag === "NotFoundError" ||
 						err._tag === "RateLimitError" ||
-						err._tag === "APIConnectionError" ||
-						err._tag === "APIConnectionTimeoutError"
+						err._tag === "APIConnectionTimeoutError" ||
+						(err._tag === "APIConnectionError" && err.retryable)
 					if (!retryablePending) {
 						return yield* err
 					}

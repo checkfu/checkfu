@@ -204,9 +204,10 @@ export class UnexpectedStatusError extends Data.TaggedError("UnexpectedStatusErr
 export class APIConnectionError extends Data.TaggedError("APIConnectionError")<{
 	readonly message: string
 	readonly cause?: unknown
+	readonly transient?: boolean | undefined
 }> {
 	get retryable(): boolean {
-		return true
+		return this.transient !== false
 	}
 }
 
@@ -490,6 +491,7 @@ export const mapRawClientError = (
 		return new APIConnectionError({
 			message: `Response validation failed: ${error.message}`,
 			cause: error,
+			transient: false,
 		})
 	}
 	if (Predicate.isTagged(error, "SseError")) {
@@ -500,6 +502,7 @@ export const mapRawClientError = (
 		return new APIConnectionError({
 			message: `Event stream decode failed: ${msg}`,
 			cause: error,
+			transient: false,
 		})
 	}
 	if (error instanceof Error) {

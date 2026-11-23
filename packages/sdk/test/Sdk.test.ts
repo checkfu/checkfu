@@ -11,7 +11,12 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
-import { executeSseStreamPromise, makePromiseSdkRuntime } from "../src/PromiseRuntime.ts"
+import {
+	executePaginatedPromise,
+	executeSseStreamPromise,
+	executeUnaryPromise,
+	makePromiseSdkRuntime,
+} from "../src/PromiseRuntime.ts"
 import { attachPendingReadiness } from "../src/Runtime.ts"
 import { makeAuthorizedHttpClient } from "../src/Transport.ts"
 import {
@@ -28,6 +33,8 @@ import {
 	CheckfuConfigError,
 	CheckfuError,
 	ConflictError,
+	EffectAgentsResource,
+	EffectSessionsEventsResource,
 	InternalServerError,
 	NotFoundError,
 	PaginationCursorCycleError,
@@ -1343,6 +1350,7 @@ describe("@checkfu/sdk", () => {
 							{
 								timeout: "40 millis",
 								initialDelay: "10 millis",
+								until: () => true,
 								requestOptions: { timeout: null, maxRetries: 0 },
 							},
 						),
@@ -2369,5 +2377,292 @@ describe("@checkfu/sdk", () => {
 					expect(attempts).toBe(3)
 				}),
 		)
+
+		it.live(
+			"requires an explicit until predicate for copied or serialized pending receipts without readiness metadata",
+			() =>
+				Effect.gen(function* () {
+					let getPolls = 0
+					const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						const url = new URL(req.url)
+						if (req.method === "POST" && url.pathname === "/v1/agents/agent_copy/archive") {
+							return jsonResponse({ id: "agent_copy", type: "agent", pending: true }, 202)
+						}
+						if (req.method === "POST" && url.pathname === "/v1/agents") {
+							return jsonResponse({ id: "agent_created", type: "agent", pending: true }, 202)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/agents/agent_copy") {
+							getPolls += 1
+							return jsonResponse(
+								sampleAgent({
+									id: "agent_copy",
+									archived_at: getPolls < 2 ? null : ISO_NOW,
+								}),
+							)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/agents/agent_created") {
+							getPolls += 1
+							return jsonResponse(sampleAgent({ id: "agent_created" }))
+						}
+						return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+					}) as typeof globalThis.fetch
+
+					const pollOpts = {
+						initialDelay: "1 millis" as const,
+						maxDelay: "2 millis" as const,
+						timeout: "2 seconds" as const,
+					}
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const pendingArchive = yield* client.agents.archive("agent_copy")
+						expect(isPendingResource(pendingArchive)).toBe(true)
+
+						// Shallow-copied and structuredClone'd receipts lose WeakMap metadata -> must require `until`
+						const copied = { ...pendingArchive }
+						const cloned = structuredClone(pendingArchive)
+
+						const copyErr = yield* Effect.flip(client.waitForPending(copied, pollOpts))
+						expect(copyErr._tag).toBe("CheckfuConfigError")
+						expect(copyErr.message).toContain("until")
+						expect(getPolls).toBe(0)
+
+						const cloneErr = yield* Effect.flip(client.waitForPending(cloned, pollOpts))
+						expect(cloneErr._tag).toBe("CheckfuConfigError")
+						expect(cloneErr.message).toContain("until")
+						expect(getPolls).toBe(0)
+
+						// With an explicit `until` predicate, the cloned receipt polls cleanly until ready
+						const ready = yield* client.waitForPending(cloned, {
+							...pollOpts,
+							until: (agent) => agent.archived_at !== null,
+						})
+						expect(ready.archived_at).not.toBeNull()
+						expect(getPolls).toBe(2)
+
+						// Direct SDK create receipt still resolves on first successful GET without `until`
+						const pendingCreate = yield* client.agents.create({
+							name: "Fresh",
+							model: "gpt-6.2-sol",
+						})
+						const created = yield* client.waitForPending(pendingCreate, pollOpts)
+						expect(created.id).toBe("agent_created")
+					}).pipe(Effect.provide(makeEffectLayer(fetchImpl, { maxRetries: 0 })))
+				}),
+		)
+
+		it("honors stream.controller.abort() immediately on lagging tee() branches before draining buffered events", async () => {
+			const payload = [
+				sseFrame(sampleUserMessageEvent(1)),
+				sseFrame(sampleUserMessageEvent(2)),
+				sseFrame(sampleUserMessageEvent(3)),
+				sseFrame(sampleArchivedEvent(4)),
+			].join("")
+			const mockFetch = async () =>
+				new Response(payload, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				})
+
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: mockFetch,
+			})
+			try {
+				const stream = await client.sessions.events.stream("sess_tee_abort")
+				const [fastBranch, slowBranch] = stream.tee()
+				const fastIter = fastBranch[Symbol.asyncIterator]()
+				const slowIter = slowBranch[Symbol.asyncIterator]()
+
+				// Fast branch reads 3 events ahead, buffering resolved promises in slowBranch's queue
+				expect((await fastIter.next()).value?.seq).toBe(1)
+				expect((await fastIter.next()).value?.seq).toBe(2)
+				expect((await fastIter.next()).value?.seq).toBe(3)
+
+				// Aborting the shared controller must reject slowBranch on its very next read without yielding 1..3
+				stream.controller.abort()
+				await expect(slowIter.next()).rejects.toThrow(APIUserAbortError)
+				await expect(fastIter.next()).rejects.toThrow(APIUserAbortError)
+			} finally {
+				await client.close()
+			}
+		})
+
+		it.live(
+			"fails immediately on HTTP 200 response schema mismatches while still retrying interrupted body reads",
+			() =>
+				Effect.gen(function* () {
+					// 1) HTTP 200 with `{}` is a schema mismatch -> must NOT retry (1 call, retryable === false)
+					let mismatchCalls = 0
+					const mismatchFetch = (async () => {
+						mismatchCalls += 1
+						return jsonResponse({})
+					}) as typeof globalThis.fetch
+
+					const mismatchErr = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(client.agents.retrieve("agent_1"))
+					}).pipe(Effect.provide(makeEffectLayer(mismatchFetch, { maxRetries: 2 })))
+
+					expect(mismatchErr._tag).toBe("APIConnectionError")
+					expect(mismatchErr.retryable).toBe(false)
+					expect(mismatchCalls).toBe(1)
+
+					// 2) HTTP 200 with non-JSON body is also a non-retryable decode failure (1 call)
+					let htmlCalls = 0
+					const htmlFetch = (async () => {
+						htmlCalls += 1
+						return new Response("<html>gateway error page</html>", {
+							status: 200,
+							headers: { "content-type": "application/json" },
+						})
+					}) as typeof globalThis.fetch
+
+					const htmlErr = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(client.agents.retrieve("agent_1"))
+					}).pipe(Effect.provide(makeEffectLayer(htmlFetch, { maxRetries: 2 })))
+
+					expect(htmlErr._tag).toBe("APIConnectionError")
+					expect(htmlErr.retryable).toBe(false)
+					expect(htmlCalls).toBe(1)
+
+					// 3) HTTP 200 with an interrupted body stream IS a transient transport failure -> retries cleanly
+					let interruptedCalls = 0
+					const encoder = new TextEncoder()
+					const interruptedFetch = (async () => {
+						interruptedCalls += 1
+						if (interruptedCalls === 1) {
+							const body = new ReadableStream<Uint8Array>({
+								start(controller) {
+									controller.enqueue(encoder.encode('{"id":"agent_1"'))
+									controller.error(new TypeError("socket closed mid-body"))
+								},
+							})
+							return new Response(body, {
+								status: 200,
+								headers: { "content-type": "application/json" },
+							})
+						}
+						return jsonResponse(sampleAgent({ id: "agent_1" }))
+					}) as typeof globalThis.fetch
+
+					const recovered = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* client.agents.retrieve("agent_1")
+					}).pipe(Effect.provide(makeEffectLayer(interruptedFetch, { maxRetries: 2 })))
+
+					expect(recovered.id).toBe("agent_1")
+					expect(interruptedCalls).toBe(2)
+				}),
+		)
+
+		it("defers raw web Response reconstruction until withResponse() or asResponse() is consumed", async () => {
+			let fetchCalls = 0
+			const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+				const req = toWebRequest(input, init)
+				const url = new URL(req.url)
+				fetchCalls += 1
+				if (url.pathname === "/v1/agents/agent_lazy") {
+					return jsonResponse(sampleAgent({ id: "agent_lazy" }))
+				}
+				const after = url.searchParams.get("after")
+				if (after === null) {
+					return jsonResponse({
+						data: [sampleUserMessageEvent(1)],
+						has_more: true,
+						next_cursor: 1,
+					})
+				}
+				if (after === "1") {
+					return jsonResponse({
+						data: [sampleUserMessageEvent(2)],
+						has_more: true,
+						next_cursor: 2,
+					})
+				}
+				return jsonResponse({
+					data: [sampleUserMessageEvent(3)],
+					has_more: false,
+					next_cursor: null,
+				})
+			}) as typeof globalThis.fetch
+
+			const managed = ManagedRuntime.make(
+				CheckfuClient.layerFetch({
+					apiKey: "ck_test_key",
+					baseUrl: "http://localhost:1337",
+					fetch: mockFetch,
+				}),
+			)
+			try {
+				let responseBodyCopies = 0
+				const baseRuntime = makePromiseSdkRuntime(
+					managed,
+					Effect.map(CheckfuClient, (c) => c[INTERNAL_EFFECT_RUNTIME]),
+				)
+				const spyRuntime = {
+					...baseRuntime,
+					runPromise: <A>(effect: Effect.Effect<A>): Promise<A> => {
+						responseBodyCopies += 1
+						return baseRuntime.runPromise(effect)
+					},
+				}
+
+				// 1) Plain await on unary request does NOT reconstruct a web Response or copy body bytes
+				const agent = await executeUnaryPromise(spyRuntime, undefined, (effectRuntime, opts) =>
+					new EffectAgentsResource(effectRuntime).retrieve("agent_lazy", {
+						...opts,
+						withResponse: true,
+					}),
+				)
+				expect(agent.id).toBe("agent_lazy")
+				expect(responseBodyCopies).toBe(0)
+
+				// 2) Auto-paginating across 3 pages does NOT reconstruct any Response bodies
+				const seenSeqs: Array<number> = []
+				const pagePromise = executePaginatedPromise(
+					spyRuntime,
+					undefined,
+					"asc",
+					undefined,
+					(effectRuntime, after: number | undefined, opts) =>
+						new EffectSessionsEventsResource(effectRuntime).list(
+							"sess_lazy",
+							after === undefined ? {} : { after },
+							{ ...opts, withResponse: true },
+						),
+				)
+				for await (const ev of pagePromise) {
+					seenSeqs.push(ev.seq)
+				}
+				expect(seenSeqs).toEqual([1, 2, 3])
+				expect(responseBodyCopies).toBe(0)
+
+				// 3) Calling withResponse() / asResponse() lazily builds a readable Response ONCE for the same exchange
+				const callsBefore = fetchCalls
+				const pendingUnary = executeUnaryPromise(spyRuntime, undefined, (effectRuntime, opts) =>
+					new EffectAgentsResource(effectRuntime).retrieve("agent_lazy", {
+						...opts,
+						withResponse: true,
+					}),
+				)
+				const dataOnly = await pendingUnary
+				expect(dataOnly.id).toBe("agent_lazy")
+				expect(responseBodyCopies).toBe(0)
+
+				const withRes = await pendingUnary.withResponse()
+				const asRes = await pendingUnary.asResponse()
+				expect(fetchCalls).toBe(callsBefore + 1)
+				expect(responseBodyCopies).toBe(1)
+				expect(asRes).toBe(withRes.response)
+				expect(asRes.bodyUsed).toBe(false)
+				expect(((await asRes.json()) as { readonly id: string }).id).toBe("agent_lazy")
+			} finally {
+				await managed.dispose()
+			}
+		})
 	})
 })

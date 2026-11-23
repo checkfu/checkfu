@@ -98,6 +98,7 @@ const mapSseError = (
 		return new APIConnectionError({
 			message: `Invalid SSE event payload: ${error.message}`,
 			cause: error,
+			transient: false,
 		})
 	}
 	return mapRawClientError(error, headers)
@@ -390,6 +391,7 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 					yield* cancelResponseBody(response)
 					return yield* new APIConnectionError({
 						message: `Expected text/event-stream response, got "${contentType || "missing"}".`,
+						transient: false,
 					})
 				}
 
@@ -673,6 +675,7 @@ export const streamSessionEvents = (
 								new APIConnectionError({
 									message: `Invalid SSE event payload: ${err.message}`,
 									cause: err,
+									transient: false,
 								}),
 						),
 					),

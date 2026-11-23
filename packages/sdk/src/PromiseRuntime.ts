@@ -206,18 +206,27 @@ export const unwrapPromiseExit = <A>(exit: Exit.Exit<A, CheckfuSdkError>, aborte
 	throw new APIConnectionError({ message: String(squashed), cause: squashed })
 }
 
+export interface LazyPromiseResponse<T> {
+	readonly data: T
+	readonly status: number
+	readonly headers: Readonly<Record<string, string>>
+	readonly requestId: string | undefined
+	readonly buildResponse: () => Promise<Response>
+}
+
 /**
  * Awaitable API result supporting `.withResponse()` and `.asResponse()` over a
  * single underlying HTTP exchange.
  */
 export class APIPromise<T> extends Promise<T> {
-	readonly #promise: Promise<PromiseWithResponse<T>>
+	readonly #promise: Promise<PromiseWithResponse<T> | LazyPromiseResponse<T>>
+	#withResponsePromise: Promise<PromiseWithResponse<T>> | undefined
 
 	static override get [Symbol.species](): PromiseConstructor {
 		return Promise
 	}
 
-	constructor(promise: Promise<PromiseWithResponse<T>>) {
+	constructor(promise: Promise<PromiseWithResponse<T> | LazyPromiseResponse<T>>) {
 		super((resolve, reject) => {
 			void promise.then((res) => {
 				resolve(res.data)
@@ -230,11 +239,23 @@ export class APIPromise<T> extends Promise<T> {
 	}
 
 	withResponse(): Promise<PromiseWithResponse<T>> {
-		return this.#promise
+		this.#withResponsePromise ??= this.#promise.then(async (res) =>
+			"buildResponse" in res
+				? {
+						data: res.data,
+						response: await res.buildResponse(),
+						status: res.status,
+						headers: toHeaders(res.headers),
+						request_id: res.requestId ?? null,
+						requestId: res.requestId,
+					}
+				: res,
+		)
+		return this.#withResponsePromise
 	}
 
 	asResponse(): Promise<Response> {
-		return this.#promise.then((res) => res.response)
+		return this.withResponse().then((res) => res.response)
 	}
 }
 
@@ -349,6 +370,7 @@ export class EventStream<T> implements AsyncIterable<T> {
 		if (this.#consumed) {
 			throw new APIConnectionError({
 				message: "Cannot iterate over a consumed EventStream; streams can only be read once.",
+				transient: false,
 			})
 		}
 		this.#consumed = true
@@ -367,6 +389,7 @@ export class EventStream<T> implements AsyncIterable<T> {
 	 */
 	tee(): readonly [EventStream<T>, EventStream<T>] {
 		const source = this[Symbol.asyncIterator]()
+		const controller = this.controller
 		const leftQueue: Array<Promise<IteratorResult<T, undefined>>> = []
 		const rightQueue: Array<Promise<IteratorResult<T, undefined>>> = []
 		let leftClosed = false
@@ -374,6 +397,7 @@ export class EventStream<T> implements AsyncIterable<T> {
 
 		const pullIntoBoth = (): void => {
 			const step = source.next()
+			void step.catch(() => undefined)
 			if (!leftClosed) {
 				leftQueue.push(step)
 			}
@@ -387,15 +411,30 @@ export class EventStream<T> implements AsyncIterable<T> {
 			isLeft: boolean,
 		): EventStream<T> => {
 			let branchClosed = false
-			const nextBranch = (): Promise<IteratorResult<T, undefined>> => {
+			const nextBranch = async (): Promise<IteratorResult<T, undefined>> => {
 				if (branchClosed) {
-					return Promise.resolve({ value: undefined, done: true })
+					return { value: undefined, done: true }
+				}
+				if (controller.signal.aborted) {
+					queue.length = 0
+					throw new APIUserAbortError({ message: "Event stream was aborted." })
 				}
 				if (queue.length === 0) {
 					pullIntoBoth()
 				}
 				const head = queue.shift()
-				return head ?? Promise.resolve({ value: undefined, done: true })
+				if (head === undefined) {
+					return { value: undefined, done: true }
+				}
+				const result = await head
+				if (branchClosed) {
+					return { value: undefined, done: true }
+				}
+				if (controller.signal.aborted) {
+					queue.length = 0
+					throw new APIUserAbortError({ message: "Event stream was aborted." })
+				}
+				return result
 			}
 			const closeBranch = async (): Promise<void> => {
 				if (branchClosed) {
@@ -413,7 +452,7 @@ export class EventStream<T> implements AsyncIterable<T> {
 					await source.return?.()
 				}
 			}
-			return new EventStream(this.controller, nextBranch, closeBranch)
+			return new EventStream(controller, nextBranch, closeBranch)
 		}
 
 		return [makeBranch(leftQueue, true), makeBranch(rightQueue, false)] as const
@@ -516,7 +555,7 @@ export const executeUnaryPromise = <A>(
 ): APIPromise<IsoDateTimes<A>> => {
 	const signal = requestOptions?.signal
 	const effectOpts = toEffectRequestOptions(requestOptions)
-	const promise = (async (): Promise<PromiseWithResponse<IsoDateTimes<A>>> => {
+	const promise = (async (): Promise<LazyPromiseResponse<IsoDateTimes<A>>> => {
 		if (isSignalAborted(signal)) {
 			throw new APIUserAbortError({ message: "Request was aborted." })
 		}
@@ -525,11 +564,10 @@ export const executeUnaryPromise = <A>(
 		const data = toIsoJson(raw.data)
 		return {
 			data,
-			response: await toWebResponse(runtime, raw, data),
 			status: raw.status,
-			headers: toHeaders(raw.headers),
-			request_id: raw.requestId ?? null,
+			headers: raw.headers,
 			requestId: raw.requestId,
+			buildResponse: () => toWebResponse(runtime, raw, data),
 		}
 	})()
 	return new APIPromise(promise)
@@ -549,43 +587,46 @@ export const executePaginatedPromise = <Item, Cursor extends string | number = n
 	const signal = requestOptions?.signal
 	const effectOpts = toEffectRequestOptions(requestOptions)
 
-	const fetchPage = (
+	const fetchPageRaw = async (
 		after: Cursor | undefined,
-	): Promise<PromiseWithResponse<CursorPage<IsoDateTimes<Item>, Cursor>>> =>
-		(async () => {
-			if (isSignalAborted(signal)) {
-				throw new APIUserAbortError({ message: "Request was aborted." })
-			}
-			const exit = await runtime.runExit(
-				(effectRuntime) => runPage(effectRuntime, after, effectOpts),
-				signal,
-			)
-			const raw = unwrapPromiseExit(exit, isSignalAborted(signal))
-			const body: CursorPageEnvelope<IsoDateTimes<Item>, Cursor> = {
-				data: raw.data.data.map(toIsoJson),
-				has_more: raw.data.has_more,
-				next_cursor: raw.data.next_cursor,
-			}
-			const page = new CursorPage<IsoDateTimes<Item>, Cursor>(
-				body,
-				async (nextAfter) => {
-					const nextRes = await fetchPage(nextAfter)
-					return nextRes.data
-				},
-				after,
-				order,
-			)
-			return {
-				data: page,
-				response: await toWebResponse(runtime, raw, body),
-				status: raw.status,
-				headers: toHeaders(raw.headers),
-				request_id: raw.requestId ?? null,
-				requestId: raw.requestId,
-			}
-		})()
+	): Promise<{
+		readonly page: CursorPage<IsoDateTimes<Item>, Cursor>
+		readonly body: CursorPageEnvelope<IsoDateTimes<Item>, Cursor>
+		readonly raw: WithResponse<CursorPageEnvelope<Item, Cursor>>
+	}> => {
+		if (isSignalAborted(signal)) {
+			throw new APIUserAbortError({ message: "Request was aborted." })
+		}
+		const exit = await runtime.runExit(
+			(effectRuntime) => runPage(effectRuntime, after, effectOpts),
+			signal,
+		)
+		const raw = unwrapPromiseExit(exit, isSignalAborted(signal))
+		const body: CursorPageEnvelope<IsoDateTimes<Item>, Cursor> = {
+			data: raw.data.data.map(toIsoJson),
+			has_more: raw.data.has_more,
+			next_cursor: raw.data.next_cursor,
+		}
+		const page = new CursorPage<IsoDateTimes<Item>, Cursor>(
+			body,
+			async (nextAfter) => (await fetchPageRaw(nextAfter)).page,
+			after,
+			order,
+		)
+		return { page, body, raw }
+	}
 
-	return new PagePromise(fetchPage(initialAfter))
+	const firstPagePromise = fetchPageRaw(initialAfter).then(
+		({ page, body, raw }): LazyPromiseResponse<CursorPage<IsoDateTimes<Item>, Cursor>> => ({
+			data: page,
+			status: raw.status,
+			headers: raw.headers,
+			requestId: raw.requestId,
+			buildResponse: () => toWebResponse(runtime, raw, body),
+		}),
+	)
+
+	return new PagePromise(firstPagePromise)
 }
 
 export const executeSseStreamPromise = <Event>(
