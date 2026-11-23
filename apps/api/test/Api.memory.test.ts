@@ -704,6 +704,144 @@ describe("Memory stores in a session", () => {
 			}),
 		))
 
+	it("stops mounting a store's memories once the store is deleted, also for a session attached before", () =>
+		withSessions((apiFetch, { workspaceFiles, onTurn }) =>
+			Effect.gen(function* () {
+				const { store, createSession, stored } = yield* setUp(apiFetch, {
+					"/secret.md": "Launch code.",
+				})
+				const resources = [{ type: "memory_store", memory_store_id: store.id }]
+				const early = yield* json<{ id: string }>(yield* createSession(resources))
+				const late = yield* json<{ id: string }>(yield* createSession(resources))
+				yield* sendAndSettle(apiFetch, early.id, ["Read it."], 1)
+				expect(Object.fromEntries(workspaceFiles(early.id))).toEqual({
+					[`${MOUNT}/secret.md`]: "Launch code.",
+				})
+
+				yield* request(apiFetch, "DELETE", `/v1/memory_stores/${store.id}`)
+				let seen: Record<string, string> | undefined
+				onTurn(() => {
+					seen = Object.fromEntries(workspaceFiles(early.id))
+					workspaceFiles(early.id).set(`${MOUNT}/new.md`, "Written after the delete.")
+				})
+				yield* sendAndSettle(apiFetch, early.id, ["Read it again."], 2)
+				expect(seen).toEqual({})
+
+				onTurn(() => {
+					seen = Object.fromEntries(workspaceFiles(late.id))
+				})
+				yield* sendAndSettle(apiFetch, late.id, ["Read it."], 1)
+				expect(seen).toEqual({})
+				expect((yield* request(apiFetch, "GET", `/v1/memory_stores/${store.id}`)).status).toBe(404)
+				void stored
+			}),
+		))
+
+	it("leaves a memory deleted by another writer deleted, though this session created it", () =>
+		withSessions((apiFetch, { workspaceFiles, onTurn }) =>
+			Effect.gen(function* () {
+				const { store, createSession, stored } = yield* setUp(apiFetch, {})
+				const session = yield* json<{ id: string }>(
+					yield* createSession([{ type: "memory_store", memory_store_id: store.id }]),
+				)
+				const files = workspaceFiles(session.id)
+				onTurn(() => {
+					files.set(`${MOUNT}/idea.md`, "Ship it.")
+				})
+				yield* sendAndSettle(apiFetch, session.id, ["Note the idea."], 1)
+				expect(yield* stored).toEqual({ "/idea.md": "Ship it." })
+
+				const listed = yield* json<{ data: ReadonlyArray<ListedMemory> }>(
+					yield* request(apiFetch, "GET", `/v1/memory_stores/${store.id}/memories`),
+				)
+				yield* request(
+					apiFetch,
+					"DELETE",
+					`/v1/memory_stores/${store.id}/memories/${listed.data[0]?.id}`,
+				)
+				onTurn(() => undefined)
+				yield* sendAndSettle(apiFetch, session.id, ["Carry on."], 2)
+				expect(Object.fromEntries(files)).toEqual({})
+				expect(yield* stored).toEqual({})
+				yield* sendAndSettle(apiFetch, session.id, ["And on."], 3)
+				expect(yield* stored).toEqual({})
+			}),
+		))
+
+	it("saves more changed memories than one call between the workspace and the API can carry", () =>
+		withSessions((apiFetch, { workspaceFiles, onTurn }) =>
+			Effect.gen(function* () {
+				const { store, createSession, stored } = yield* setUp(apiFetch, {})
+				const session = yield* json<{ id: string }>(
+					yield* createSession([{ type: "memory_store", memory_store_id: store.id }]),
+				)
+				// 45 memories of 99 kB: more than twice the two-megabyte batch.
+				const paths = Array.from({ length: 45 }, (_, index) => `/big/${index}.txt`)
+				onTurn(() => {
+					for (const [index, path] of paths.entries()) {
+						workspaceFiles(session.id).set(`${MOUNT}${path}`, String(index % 10).repeat(99_000))
+					}
+				})
+				yield* sendAndSettle(apiFetch, session.id, ["Write a lot."], 1)
+				const saved = yield* stored
+				expect(Object.keys(saved).toSorted()).toEqual(paths.toSorted())
+				expect(saved["/big/44.txt"]).toBe("4".repeat(99_000))
+			}),
+		))
+
+	it("answers a retried create with the session first admitted, whatever became of its store", () =>
+		withSessions((apiFetch) =>
+			Effect.gen(function* () {
+				const { store } = yield* setUp(apiFetch, {})
+				const agent = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/agents", { name: "Retry", model: "gpt-4o-mini" }),
+				)
+				const environment = yield* json<{ id: string }>(
+					yield* request(apiFetch, "POST", "/v1/environments", { name: "Retry" }),
+				)
+				const create = (key: string, access?: string) =>
+					sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": key },
+						body: {
+							agent: agent.id,
+							environment_id: environment.id,
+							resources: [
+								{
+									type: "memory_store",
+									memory_store_id: store.id,
+									...(access === undefined ? {} : { access }),
+								},
+							],
+						},
+					})
+				const first = yield* json<{ id: string; resources: ReadonlyArray<{ name: string }> }>(
+					yield* create("retry-1"),
+				)
+				expect(first.resources[0]?.name).toBe("Team Notes")
+
+				yield* request(apiFetch, "POST", `/v1/memory_stores/${store.id}`, { name: "Renamed" })
+				const afterRename = yield* create("retry-1")
+				expect(afterRename.status).toBe(201)
+				expect(yield* json<object>(afterRename)).toMatchObject({
+					id: first.id,
+					resources: [{ name: "Team Notes", mount_path: MOUNT }],
+				})
+				// The same key for a different request is still a conflict.
+				expect((yield* create("retry-1", "read_only")).status).toBe(409)
+
+				yield* request(apiFetch, "POST", `/v1/memory_stores/${store.id}/archive`)
+				expect(yield* json<object>(yield* create("retry-1"))).toMatchObject({ id: first.id })
+				yield* request(apiFetch, "DELETE", `/v1/memory_stores/${store.id}`)
+				const afterDelete = yield* create("retry-1")
+				expect(afterDelete.status).toBe(201)
+				expect(yield* json<object>(afterDelete)).toMatchObject({ id: first.id })
+				// A new request for the deleted store is refused as before.
+				expect((yield* create("retry-2")).status).toBe(404)
+			}),
+		))
+
 	it("refuses a store that is missing, archived, attached twice or mounted where another is", () =>
 		withSessions((apiFetch) =>
 			Effect.gen(function* () {

@@ -158,6 +158,7 @@ curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/memory_stores/$STORE_ID/memor
 - `POST /v1/memory_stores/{id}/memories/{memory_id}` replaces a memory's content. Pass `precondition: {type: "content_sha256", content_sha256}` to apply the change only if the memory is unchanged since you read it; a mismatch answers 409.
 - A memory's id is derived from its store and path, so creating at a path that holds a memory answers 409.
 - A memory holds up to 100 kB at a path of up to 256 characters, and a store up to 1,000 memories.
+- A path cannot be both a memory and a directory of memories: with `/notes` stored, `/notes/todo.md` is refused with 409, and the other way round.
 - `POST /v1/memory_stores/{id}/archive` makes a store read-only. `DELETE` makes it and its memories unreachable.
 
 ### Memory in a session
@@ -173,6 +174,7 @@ Attach stores when you create a session. Each is mounted in the workspace as a d
 
 - The agent reads and writes memories with its file tools, and is told where each store is mounted, with its description and your `instructions`.
 - A session sees a store as it was when the turn started, and what it changed is saved to the store when the turn ends. A change to a memory that another writer changed in the meantime is not saved; the session starts its next turn from the store's version.
+- A store deleted while a session is attached is gone from that session at its next turn. A path that is both a memory and a directory of memories, which two writers at the same instant can still create, is mounted as the directory.
 - `access` is `read_write` by default. A `read_only` store refuses writes, and nothing a session does there is saved. Use it for reference material, and for any agent that reads untrusted input.
 - A session takes up to 8 stores, each attached once. A store must be active when the session is created; the session keeps the store's name and description as they were then.
 

@@ -40,6 +40,21 @@ describe("read-only mounts", () => {
 		}
 	})
 
+	it("counts a mount as touched by a call that removes a directory above it", () => {
+		const removing = (path: string) => readOnlyMountOf(MOUNTS, path, { subtree: true })
+		expect(removing("/mnt/memory")).toBe("/mnt/memory/handbook")
+		expect(removing("/mnt")).toBe("/mnt/memory/handbook")
+		expect(removing("/")).toBe("/mnt/memory/handbook")
+		expect(removing("/mnt/artifacts/")).toBe("/mnt/artifacts/q3-data")
+		expect(removing("/workspace/../mnt/memory")).toBe("/mnt/memory/handbook")
+		expect(removing("/mnt/memory/handbook/rules.md")).toBe("/mnt/memory/handbook")
+		expect(removing("/mnt/memory/hand")).toBeUndefined()
+		expect(removing("/mnt/memory/team")).toBeUndefined()
+		expect(removing("/workspace")).toBeUndefined()
+		// Writing one file above a mount touches nothing below it.
+		expect(readOnlyMountOf(MOUNTS, "/mnt/memory")).toBeUndefined()
+	})
+
 	it("finds the mount a git command would work in, by directory or by argument", () => {
 		const inMount = (args: ReadonlyArray<string>, cwd: string) =>
 			readOnlyMountOfGit(MOUNTS, args, cwd)

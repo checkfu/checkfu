@@ -234,6 +234,22 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 	}
 }
 
+// What the client asked for, with defaults filled in and no token: the same for a retry.
+const askedResource = (resource: CreateSessionResource) =>
+	resource.type === "github_repository"
+		? {
+				type: resource.type,
+				url: resource.url,
+				mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+				checkout: resource.checkout ?? null,
+			}
+		: {
+				type: resource.type,
+				memory_store_id: resource.memory_store_id,
+				access: resource.access ?? "read_write",
+				instructions: resource.instructions ?? null,
+			}
+
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
@@ -398,7 +414,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
-					const requested = yield* Effect.forEach(payload.resources ?? [], requestedResource)
+					// The retry key is bound to what the client asked for, not to what a store was
+					// called at the time: a store can be renamed between a create and its retry.
+					const asked = (payload.resources ?? []).map(askedResource)
 					const identity = yield* createIdentity(
 						{ digest, random },
 						"session",
@@ -409,34 +427,44 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
-							...(requested.length === 0 ? {} : { resources: requested }),
+							...(asked.length === 0 ? {} : { resources: asked }),
 						},
 					)
 					const id = SessionId.make(identity.id)
 					const sendOptions = identity.sendOptions
-					const resources = yield* decodeResources(
-						yield* Effect.forEach(requested, (resource, index) =>
-							Effect.map(
-								idempotencyKey === undefined
-									? randomId(random, "sesrsc")
-									: idempotentId(digest, "sesrsc", [
-											"create",
-											"session",
-											"resource",
-											idempotencyKey,
-											index,
-										]),
-								(resourceId) => ({ id: resourceId, ...resource }),
+					// A retried create answers with what the first one admitted. Its stores may have
+					// been renamed, archived or deleted since, and none of that undoes the session.
+					const admitted =
+						idempotencyKey === undefined || (yield* sessions.get(id))._tag === "Uninitialized"
+							? undefined
+							: (yield* existing(id)).resources
+					const resources =
+						admitted ??
+						(yield* decodeResources(
+							yield* Effect.forEach(
+								yield* Effect.forEach(payload.resources ?? [], requestedResource),
+								(resource, index) =>
+									Effect.map(
+										idempotencyKey === undefined
+											? randomId(random, "sesrsc")
+											: idempotentId(digest, "sesrsc", [
+													"create",
+													"session",
+													"resource",
+													idempotencyKey,
+													index,
+												]),
+										(resourceId) => ({ id: resourceId, ...resource }),
+									),
 							),
-						),
-					).pipe(
-						Effect.catchTag("SchemaError", () =>
-							reject(
-								400,
-								"Resources must mount at distinct paths that do not contain one another, and attach each repository and each memory store once.",
+						).pipe(
+							Effect.catchTag("SchemaError", () =>
+								reject(
+									400,
+									"Resources must mount at distinct paths that do not contain one another, and attach each repository and each memory store once.",
+								),
 							),
-						),
-					)
+						))
 					const receipt = yield* admitSession
 						.send(
 							new AdmitSession({

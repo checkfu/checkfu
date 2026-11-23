@@ -13,14 +13,23 @@ export const resolvePath = (path: string, cwd = WORKING_DIRECTORY): string => {
 	return `/${segments.join("/")}`
 }
 
-/** The read-only mount a path is in, compared after the path is resolved. */
+/**
+ * The read-only mount a path is in, compared after the path is resolved. A call
+ * that removes a whole subtree also touches every mount below its path.
+ */
 export const readOnlyMountOf = (
 	mounts: ReadonlyArray<string>,
 	path: string,
-	cwd?: string,
+	options?: { readonly cwd?: string; readonly subtree?: boolean },
 ): string | undefined => {
-	const resolved = resolvePath(path, cwd)
-	return mounts.find((mount) => resolved === mount || resolved.startsWith(`${mount}/`))
+	const resolved = resolvePath(path, options?.cwd)
+	const below = resolved === "/" ? "/" : `${resolved}/`
+	return mounts.find(
+		(mount) =>
+			resolved === mount ||
+			resolved.startsWith(`${mount}/`) ||
+			(options?.subtree === true && mount.startsWith(below)),
+	)
 }
 
 /**
@@ -37,7 +46,7 @@ export const readOnlyMountOfGit = (
 		directory,
 		...args.flatMap((arg) => [arg, arg.slice(arg.indexOf("=") + 1)]),
 	]) {
-		const mount = readOnlyMountOf(mounts, candidate, directory)
+		const mount = readOnlyMountOf(mounts, candidate, { cwd: directory })
 		if (mount !== undefined) {
 			return mount
 		}

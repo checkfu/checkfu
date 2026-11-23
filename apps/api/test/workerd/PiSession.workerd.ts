@@ -963,6 +963,7 @@ describe("PiSession real Durable Object under workerd", () => {
 						name: "git",
 						arguments: { args: ["init"], cwd: "/mnt/memory/handbook" },
 					},
+					{ kind: "tool_call", name: "delete", arguments: { path: "/mnt/memory" } },
 					{
 						kind: "tool_call",
 						name: "read",
@@ -993,9 +994,10 @@ describe("PiSession real Durable Object under workerd", () => {
 			resources,
 		})
 		expect(await replyAfterTurn(first.id, "What is the launch code?", 1)).toContain("KIWI-9")
-		// The plain path, the same path spelled with "." and "//", and git are all refused.
+		// The plain path, the same path spelled with "." and "//", git, and a delete of the
+		// directory above the mount are all refused.
 		const refused = await replyAfterTurn(first.id, "Remember the customer's preference.", 2)
-		expect(refused.split("/mnt/memory/handbook is a read-only memory store.").length - 1).toBe(3)
+		expect(refused.split("/mnt/memory/handbook is a read-only memory store.").length - 1).toBe(4)
 		expect(refused.endsWith("Be kind.")).toBe(true)
 		expect(await storedMemories(notes.id)).toEqual({
 			"/customers/acme.md": "Prefers email.",
@@ -1017,6 +1019,50 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(systemText).toContain("- /mnt/memory/team-notes (read and write): Team Notes.")
 		expect(systemText).toContain("- /mnt/memory/handbook (read-only): Handbook.")
 	}, 180_000)
+
+	it("follows a memory path that turns from a directory into a file between turns", async () => {
+		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
+			name: "Shapes",
+		})
+		const memories = `/v1/memory_stores/${store.id}/memories`
+		const todo = await apiJson<{ readonly id: string }>(memories, {
+			method: "POST",
+			body: { path: "/notes/todo.md", content: "A file in a directory." },
+		})
+		expect(todo.status).toBe(201)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "memory_store", memory_store_id: store.id }],
+		})
+		const reads = new Map([
+			["Read the todo.", "/mnt/memory/shapes/notes/todo.md"],
+			["Read the notes.", "/mnt/memory/shapes/notes"],
+		])
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: reads.get(req.lastUserText) ?? "/missing" },
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` },
+		)
+		expect(await replyAfterTurn(session.id, "Read the todo.", 1)).toContain(
+			"A file in a directory.",
+		)
+
+		expect((await apiJson(`${memories}/${todo.body.id}`, { method: "DELETE" })).status).toBe(200)
+		const notes = await apiJson(memories, {
+			method: "POST",
+			body: { path: "/notes", content: "Now the directory is a file." },
+		})
+		expect(notes.status).toBe(201)
+		expect(await replyAfterTurn(session.id, "Read the notes.", 2)).toContain(
+			"Now the directory is a file.",
+		)
+		expect(await storedMemories(store.id)).toEqual({ "/notes": "Now the directory is a file." })
+	}, 120_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"

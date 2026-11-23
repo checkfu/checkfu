@@ -303,7 +303,17 @@ export const makePiDurableTestLayer = (
 		return makeMemorySync(
 			{
 				read: (file) => Promise.resolve(files.get(file) ?? null),
-				write: (file, content) => Promise.resolve(void files.set(file, content)),
+				// As a filesystem would: the file takes the place of a directory at its path
+				// and of a file standing where one of its directories goes.
+				write: (file, content) => {
+					for (const other of files.keys()) {
+						if (other.startsWith(`${file}/`) || file.startsWith(`${other}/`)) {
+							files.delete(other)
+						}
+					}
+					files.set(file, content)
+					return Promise.resolve()
+				},
 				remove: (file) => Promise.resolve(void files.delete(file)),
 				list: (directory) =>
 					Promise.resolve([...files.keys()].filter((file) => file.startsWith(`${directory}/`))),
@@ -377,6 +387,10 @@ export const makePiDurableTestLayer = (
 				Effect.promise(() => memorySync(sessionId).fill(mountPath, memories)),
 			memoryChanges: (sessionId, mountPath) =>
 				Effect.promise(() => memorySync(sessionId).changes(mountPath)),
+			memoryContents: (sessionId, mountPath, paths) =>
+				Effect.promise(() => memorySync(sessionId).contents(mountPath, paths)),
+			memorySaved: (sessionId, mountPath, saved) =>
+				Effect.sync(() => memorySync(sessionId).saved(mountPath, saved)),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)

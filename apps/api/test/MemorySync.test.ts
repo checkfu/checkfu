@@ -10,7 +10,17 @@ const workspace = () => {
 	const sync = makeMemorySync(
 		{
 			read: (file) => Promise.resolve(files.get(file) ?? null),
-			write: (file, content) => Promise.resolve(void files.set(file, content)),
+			// As a filesystem would: the file takes the place of a directory at its path and
+			// of a file standing where one of its directories goes.
+			write: (file, content) => {
+				for (const other of files.keys()) {
+					if (other.startsWith(`${file}/`) || file.startsWith(`${other}/`)) {
+						files.delete(other)
+					}
+				}
+				files.set(file, content)
+				return Promise.resolve()
+			},
 			remove: (file) => Promise.resolve(void files.delete(file)),
 			list: (directory) =>
 				Promise.resolve([...files.keys()].filter((file) => file.startsWith(`${directory}/`))),
@@ -74,19 +84,94 @@ describe("memory sync", () => {
 			written: [
 				{
 					path: "/style.md",
-					content: "Spaces.",
 					content_sha256: await sha256Hex("Spaces."),
+					size_bytes: 7,
 					base: await sha256Hex("Tabs."),
 				},
 				{
 					path: "/new/idea.md",
-					content: "Ship it.",
 					content_sha256: await sha256Hex("Ship it."),
+					size_bytes: 8,
 					base: null,
 				},
 			],
 			deleted: [{ path: "/old.md", base: await sha256Hex("Remove me.") }],
 		})
+		// The content crosses separately, for the paths asked for; one that is gone is left out.
+		files.set(`${MOUNT}/wide.md`, "é")
+		expect((await sync.changes(MOUNT)).written.at(-1)).toMatchObject({
+			path: "/wide.md",
+			size_bytes: 2,
+		})
+		expect(await sync.contents(MOUNT, ["/new/idea.md", "/old.md", "/style.md"])).toEqual([
+			{ path: "/new/idea.md", content: "Ship it.", content_sha256: await sha256Hex("Ship it.") },
+			{ path: "/style.md", content: "Spaces.", content_sha256: await sha256Hex("Spaces.") },
+		])
+	})
+
+	it("takes what the store saved as the new base, so a memory deleted elsewhere stays deleted", async () => {
+		const { files, sync, copyIn } = workspace()
+		await copyIn({ "/old.md": "Remove me." })
+		files.set(`${MOUNT}/idea.md`, "Ship it.")
+		files.delete(`${MOUNT}/old.md`)
+		const { written, deleted } = await sync.changes(MOUNT)
+		// The store took the write and the delete.
+		sync.saved(MOUNT, {
+			written: written.map(({ path, content_sha256 }) => ({ path, content_sha256 })),
+			deleted: deleted.map(({ path }) => path),
+		})
+		expect(await sync.changes(MOUNT)).toEqual({ written: [], deleted: [] })
+
+		// Another writer deletes the new memory before the next turn.
+		expect(await copyIn({})).toEqual([])
+		expect(Object.fromEntries(files)).toEqual({})
+		expect(await sync.changes(MOUNT)).toEqual({ written: [], deleted: [] })
+	})
+
+	it("keeps a change the store refused pending, and lets the store's version replace it", async () => {
+		const { files, sync, copyIn } = workspace()
+		await copyIn({ "/style.md": "Tabs." })
+		files.set(`${MOUNT}/style.md`, "Session edit.")
+		files.set(`${MOUNT}/idea.md`, "Kept.")
+		// Only the new file was taken.
+		sync.saved(MOUNT, {
+			written: [{ path: "/idea.md", content_sha256: await sha256Hex("Kept.") }],
+			deleted: [],
+		})
+		expect((await sync.changes(MOUNT)).written.map(({ path }) => path)).toEqual(["/style.md"])
+		expect(await copyIn({ "/style.md": "Other writer.", "/idea.md": "Kept." })).toEqual([
+			"/style.md",
+		])
+		expect(files.get(`${MOUNT}/style.md`)).toBe("Other writer.")
+	})
+
+	it("follows a path that turns from a directory into a file, and back", async () => {
+		const { files, sync, copyIn } = workspace()
+		await copyIn({ "/notes/todo.md": "Ship.", "/notes/deep/plan.md": "Plan." })
+		expect(await copyIn({ "/notes": "One file now." })).toEqual(["/notes"])
+		expect(Object.fromEntries(files)).toEqual({ [`${MOUNT}/notes`]: "One file now." })
+		expect(await sync.changes(MOUNT)).toEqual({ written: [], deleted: [] })
+
+		expect(await copyIn({ "/notes/todo.md": "A directory again." })).toEqual(["/notes/todo.md"])
+		expect(Object.fromEntries(files)).toEqual({ [`${MOUNT}/notes/todo.md`]: "A directory again." })
+		expect(await sync.changes(MOUNT)).toEqual({ written: [], deleted: [] })
+	})
+
+	it("mounts the memories below when a store holds a path both as a memory and as their directory", async () => {
+		const { files, sync, copyIn } = workspace()
+		const store = {
+			"/notes": "Cannot be a file here.",
+			"/notes/todo.md": "Ship.",
+			"/other.md": "Fine.",
+		}
+		expect(await copyIn(store)).toEqual(["/notes/todo.md", "/other.md"])
+		expect(Object.fromEntries(files)).toEqual({
+			[`${MOUNT}/notes/todo.md`]: "Ship.",
+			[`${MOUNT}/other.md`]: "Fine.",
+		})
+		// The memory left out is neither changed nor deleted by this session.
+		expect(await sync.changes(MOUNT)).toEqual({ written: [], deleted: [] })
+		expect(await copyIn(store)).toEqual([])
 	})
 
 	it("keeps a session's unsaved change while the store has not moved, and reports it again", async () => {
