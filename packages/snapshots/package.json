@@ -10,7 +10,7 @@
 	},
 	"scripts": {
 		"typecheck": "effect-tsgo tsc --noEmit",
-		"test": "vitest run --pool=threads --no-allowOnly --passWithNoTests"
+		"test": "vitest run --pool=threads --no-allowOnly"
 	},
 	"dependencies": {
 		"effect": "catalog:"
