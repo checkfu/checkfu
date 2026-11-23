@@ -1044,7 +1044,7 @@ describe("Transform and formatOutput", () => {
 			model: "gpt-6.2-sol",
 		})
 		expect(evaluateTransform(sample, "{id, model.id}")).toEqual({ id: "gpt-6.2-sol" })
-		expect(evaluateTransform(sample, "{id,name,missing}")).toEqual({
+		expect(evaluateTransform(sample, "{id,name,missing}")).toStrictEqual({
 			id: "agt_123",
 			name: "Helper",
 			missing: undefined,
@@ -1072,7 +1072,7 @@ describe("Transform and formatOutput", () => {
 		}
 		expect(evaluateTransform({ "#": 7 }, "#")).toBeUndefined()
 		expect(evaluateTransform({ a: { "#": 3 } }, "a.#")).toBeUndefined()
-		expect(evaluateTransform({ "#": 7 }, "{n:#}")).toEqual({ n: undefined })
+		expect(evaluateTransform({ "#": 7 }, "{n:#}")).toStrictEqual({ n: undefined })
 		expect(evaluateTransform(null, "{id}")).toBeUndefined()
 		expect(evaluateTransform(undefined, "{id,name}")).toBeUndefined()
 		for (const [format, expected] of [
@@ -1158,7 +1158,7 @@ describe("Transform and formatOutput", () => {
 			[42, "", 42],
 			[{ id: 1 }, "", { id: 1 }],
 			[{ id: 1, name: "n", v: 2 }, "{id,name}", { id: 1, name: "n" }],
-			[{ id: 1 }, "{ id , missing }", { id: 1 }],
+			[{ id: 1 }, "{ id , missing }", { id: 1, missing: undefined }],
 			[{ a: { b: 2 } }, "{a.b}", { b: 2 }],
 			[{ a: { b: 2 } }, "{x:a.b,y:a}", { x: 2, y: { b: 2 } }],
 			[{ id: 1 }, "{id.}", { "": 1 }],
@@ -1166,15 +1166,20 @@ describe("Transform and formatOutput", () => {
 			[{ id: 1 }, "{k:}", { k: { id: 1 } }],
 			[{ id: 1 }, "{}", {}],
 			[{ id: 1 }, "{,id,}", { id: 1 }],
-			[{ id: 1 }, "{a:b:c}", {}],
+			[{ id: 1 }, "{a:b:c}", { a: undefined }],
 			[{ id: 1 }, "{@this:id}", { "@this": 1 }],
 			[[1, 2], "{n:#,first:0}", { n: 2, first: 1 }],
+			[{ "#": 7 }, "{n:#}", { n: undefined }],
+			[[{ id: 1 }, {}], "{ids:#.id,missing:#.x.y}", { ids: [1], missing: [] }],
 			[null, "{id}", undefined],
 			[undefined, "{id}", undefined],
-			["abc", "{id}", {}],
+			["abc", "{id}", { id: undefined }],
 		]
 		for (const [value, expression, expected] of cases) {
-			expect([expression, evaluateTransform(value, expression)]).toEqual([expression, expected])
+			expect([expression, evaluateTransform(value, expression)]).toStrictEqual([
+				expression,
+				expected,
+			])
 		}
 	})
 
