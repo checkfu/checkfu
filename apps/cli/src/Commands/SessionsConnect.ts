@@ -57,6 +57,12 @@ interface TurnFailure {
 	readonly message: string
 }
 
+interface TurnErrorSnapshot {
+	readonly turn: number
+	readonly message: string
+	readonly retryStatus: string | undefined
+}
+
 interface ConnectState {
 	readonly trackPipedTurns: boolean
 	readonly status: "idle" | "running" | "terminated"
@@ -72,7 +78,7 @@ interface ConnectState {
 	readonly firstSubmittedTurnFailure: TurnFailure | undefined
 	readonly pendingTurnErrors: ReadonlyMap<number, string>
 	readonly sendInFlight: boolean
-	readonly latestTurnError: TurnFailure | undefined
+	readonly latestTurnError: TurnErrorSnapshot | undefined
 	readonly ended: boolean
 }
 
@@ -139,6 +145,12 @@ const extractSubmittedTurn = (data: ReadonlyArray<unknown>): number | undefined 
 	return typeof turn === "number" && Number.isInteger(turn) && turn >= 1 ? turn : undefined
 }
 
+const hasInterruptReceipt = (data: ReadonlyArray<unknown>): boolean => {
+	const first = data[0]
+	if (typeof first !== "object" || first === null) return false
+	return (first as Record<string, unknown>)["type"] === "user.interrupt"
+}
+
 const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
 	if (HttpClientError.isHttpClientError(err)) {
 		if (isTransientHttpError(err)) return true
@@ -174,6 +186,12 @@ const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): b
 const isRetryableSendError = (err: Parameters<typeof formatClientError>[0]): boolean =>
 	isUnconfirmedSendError(err) || (isApiErrorEnvelope(err) && statusOf(err) === 429)
 
+const isConfirmedPerMessageRejection = (err: Parameters<typeof formatClientError>[0]): boolean => {
+	if (!isApiErrorEnvelope(err) || err.unconfirmed_index !== undefined) return false
+	const status = statusOf(err)
+	return status === 400 || status === 409 || status === 413 || status === 429
+}
+
 const formatUnconfirmedSendError = (
 	err: Parameters<typeof formatClientError>[0],
 	idempotencyKey: string,
@@ -187,10 +205,15 @@ const formatUnconfirmedSendError = (
 	})
 }
 
+interface SendEventsFailure {
+	readonly failure: CliFailure
+	readonly confirmedPerMessageRejection: boolean
+}
+
 const sendConnectEventsWithRetry = <A>(
 	send: Effect.Effect<A, Parameters<typeof formatClientError>[0]>,
 	idempotencyKey: string,
-): Effect.Effect<A, CliFailure> =>
+): Effect.Effect<A, SendEventsFailure> =>
 	Effect.gen(function* () {
 		let hadUnconfirmedAttempt = false
 		for (let attempt = 0; ; attempt++) {
@@ -206,7 +229,10 @@ const sendConnectEventsWithRetry = <A>(
 				yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
 				continue
 			}
-			return yield* formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt)
+			return yield* Effect.fail({
+				failure: formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt),
+				confirmedPerMessageRejection: !hadUnconfirmedAttempt && isConfirmedPerMessageRejection(err),
+			})
 		}
 	})
 
@@ -395,7 +421,7 @@ const renderConnectEvent = (
 			case "user.message": {
 				const text = extractContentText(data)
 				if (!rawStructuredMode && text.length > 0) {
-					yield* writeStdoutLine(`[you] ${escapeTerminalControlCharacters(text)}`)
+					yield* writeStdoutLine(`[user] ${escapeTerminalControlCharacters(text)}`)
 				}
 				break
 			}
@@ -441,10 +467,23 @@ const renderConnectEvent = (
 						: undefined
 				const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
 				const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
+				const retryStatusObj =
+					typeof errObj?.["retry_status"] === "object" && errObj["retry_status"] !== null
+						? (errObj["retry_status"] as Record<string, unknown>)
+						: undefined
+				const retryStatus =
+					typeof retryStatusObj?.["type"] === "string" ? retryStatusObj["type"] : undefined
 				const formattedError = `${errType}: ${errMsg}`
 				yield* Ref.update(stateRef, (state) =>
 					state.trackPipedTurns
-						? { ...state, latestTurnError: { turn: state.observedTurn, message: formattedError } }
+						? {
+								...state,
+								latestTurnError: {
+									turn: state.observedTurn,
+									message: formattedError,
+									retryStatus,
+								},
+							}
 						: state,
 				)
 				if (!rawStructuredMode) {
@@ -549,7 +588,8 @@ const renderConnectEvent = (
 					if (
 						eventType === "session.status_terminated" &&
 						state.observedTurn > state.settledTurn &&
-						state.latestTurnError?.turn === state.observedTurn
+						state.latestTurnError?.turn === state.observedTurn &&
+						state.latestTurnError.retryStatus === "terminal"
 					) {
 						const turn = state.observedTurn
 						const turnError = state.latestTurnError.message
@@ -611,6 +651,7 @@ const dispatchUserLine = (
 	stateRef: Ref.Ref<ConnectState>,
 	options?: {
 		readonly failOnInterruptError?: boolean
+		readonly reportRecoverableSendErrors?: boolean
 		readonly onInterruptedSend?: (failure: CliFailure) => Effect.Effect<void>
 	},
 ): Effect.Effect<"continue" | "exit", CliFailure, Stdio.Stdio> =>
@@ -641,11 +682,19 @@ const dispatchUserLine = (
 					}),
 				),
 			)
-			if (res._tag === "Failure") {
+			const interruptFailure =
+				res._tag === "Failure"
+					? res.failure.failure
+					: hasInterruptReceipt(res.success.data)
+						? undefined
+						: networkFailure(
+								`Interrupt response did not confirm a user.interrupt receipt (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
+							)
+			if (interruptFailure !== undefined) {
 				if (options?.failOnInterruptError === true) {
-					return yield* res.failure
+					return yield* interruptFailure
 				}
-				yield* writeStderrLine(`Interrupt failed: ${res.failure.message}`)
+				yield* writeStderrLine(`Interrupt failed: ${interruptFailure.message}`)
 			} else {
 				yield* writeStderrLine("Interrupt requested.")
 			}
@@ -695,7 +744,14 @@ const dispatchUserLine = (
 		)
 		if (res._tag === "Failure") {
 			yield* clearSendInFlight
-			return yield* res.failure
+			if (
+				options?.reportRecoverableSendErrors === true &&
+				res.failure.confirmedPerMessageRejection
+			) {
+				yield* writeStderrLine(`Send failed: ${res.failure.failure.message}`)
+				return "continue" as const
+			}
+			return yield* res.failure.failure
 		}
 		const turn = extractSubmittedTurn(res.success.data)
 		if (turn === undefined) {
@@ -1217,6 +1273,7 @@ export const sessionsConnectCommand = Command.make(
 							interruptRequestedOnce = false
 							const dispatchOutcome = yield* Effect.raceFirst(
 								dispatchUserLine(client, sessionId, nextEvent.outcome.success, stateRef, {
+									reportRecoverableSendErrors: true,
 									onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
 								}).pipe(Effect.map((action) => ({ _tag: "action" as const, action }))),
 								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),

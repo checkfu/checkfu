@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import * as Http from "node:http"
 import { fileURLToPath } from "node:url"
@@ -973,7 +973,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(wsResult.exitCode).toBe(0)
 					expect(receivedInputs).toEqual([indented])
 					expect(wsResult.stdout).toContain(`Got:[${indented}]`)
-					expect(wsResult.stdout).toContain(`[you] ${indented}`)
+					expect(wsResult.stdout).toContain(`[user] ${indented}`)
 
 					// 2) Connecting to an already-running session and pressing Ctrl-C before SSE replay catches up
 					//    must still send user.interrupt based on liveStatus rather than replay baseline idle status
@@ -1388,9 +1388,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(secondSend.exitCode).toBe(0)
 					expect(secondSend.stdout.trim().split("\n")).toEqual([
-						"[you] same text",
+						"[user] same text",
 						"Reply-1:same text",
-						"[you] same text",
+						"[user] same text",
 						"Reply-2:same text",
 					])
 
@@ -2489,7 +2489,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						{
 							stdin: "shared hello\n",
 							onStdoutChunk: (chunk) =>
-								chunk.includes("[you] shared hello")
+								chunk.includes("[user] shared hello")
 									? Deferred.succeed(otherMessageRendered, undefined).pipe(Effect.asVoid)
 									: Effect.void,
 							interceptFetch: async (next, request) => {
@@ -2512,15 +2512,25 @@ describe("CLI sessions:events and sessions connect", () => {
 					const otherClientRes = yield* Fiber.join(otherClientFiber)
 					expect(otherClientRes.exitCode).toBe(0)
 					expect(sharedRes.exitCode).toBe(1)
-					expect(sharedRes.stdout).toContain("[you] shared hello")
+					expect(sharedRes.stdout).toContain("[user] shared hello")
 					expect(sharedRes.stderr).toContain("409 conflict_error")
 				}),
 			),
 		)
 	})
 
-	it("preserves Ctrl-C interrupt through the documented CLI launcher in a real PTY", async () => {
-		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
+	const hasPosixPythonPty = (): boolean => {
+		if (process.platform === "win32") return false
+		const probe = spawnSync("python3", ["-c", "import fcntl, pty, termios"], {
+			stdio: "ignore",
+			timeout: 3_000,
+		})
+		return probe.status === 0
+	}
+	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
+	const ptySupported = isLinuxCi || hasPosixPythonPty()
+
+	it("documents the direct CLI launcher instead of bun run cli", () => {
 		const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8")
 		const rootPkg = JSON.parse(
 			readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
@@ -2528,70 +2538,76 @@ describe("CLI sessions:events and sessions connect", () => {
 		expect(readme).toContain("bun apps/cli/src/main.ts --help")
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
+	})
 
-		const openSseResponses: Array<Http.ServerResponse> = []
-		const postedEventBodies: Array<string> = []
-		const server = Http.createServer((req, res) => {
-			const url = new URL(req.url ?? "/", "http://127.0.0.1")
-			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_pty") {
-				res.writeHead(200, { "content-type": "application/json" })
+	it.runIf(ptySupported)(
+		"preserves Ctrl-C interrupt through the documented CLI launcher in a real PTY",
+		async () => {
+			const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
+
+			const openSseResponses: Array<Http.ServerResponse> = []
+			const postedEventBodies: Array<string> = []
+			const server = Http.createServer((req, res) => {
+				const url = new URL(req.url ?? "/", "http://127.0.0.1")
+				if (req.method === "GET" && url.pathname === "/v1/sessions/sess_pty") {
+					res.writeHead(200, { "content-type": "application/json" })
+					res.end(
+						JSON.stringify({
+							id: "sess_pty",
+							type: "session",
+							status: "running",
+							turn: 1,
+							usage: { input_tokens: 0, output_tokens: 0 },
+							agent: { id: "agt_pty", version: 1 },
+							environment_id: "env_pty",
+							title: null,
+							created_at: "2026-11-22T00:00:00.000Z",
+							updated_at: "2026-11-22T00:00:00.000Z",
+							archived_at: null,
+						}),
+					)
+					return
+				}
+				if (req.method === "GET" && url.pathname === "/v1/sessions/sess_pty/events/stream") {
+					res.writeHead(200, {
+						"content-type": "text/event-stream; charset=utf-8",
+						"cache-control": "no-cache",
+					})
+					res.write(
+						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+					)
+					openSseResponses.push(res)
+					return
+				}
+				if (req.method === "POST" && url.pathname === "/v1/sessions/sess_pty/events") {
+					let body = ""
+					req.setEncoding("utf8")
+					req.on("data", (chunk: string) => {
+						body += chunk
+					})
+					req.on("end", () => {
+						postedEventBodies.push(body)
+						res.writeHead(200, { "content-type": "application/json" })
+						res.end(JSON.stringify({ data: [{ type: "user.interrupt" }] }))
+					})
+					return
+				}
+				res.writeHead(404, { "content-type": "application/json" })
 				res.end(
 					JSON.stringify({
-						id: "sess_pty",
-						type: "session",
-						status: "running",
-						turn: 1,
-						usage: { input_tokens: 0, output_tokens: 0 },
-						agent: { id: "agt_pty", version: 1 },
-						environment_id: "env_pty",
-						title: null,
-						created_at: "2026-11-22T00:00:00.000Z",
-						updated_at: "2026-11-22T00:00:00.000Z",
-						archived_at: null,
+						type: "error",
+						error: { type: "not_found_error", message: "not found" },
+						request_id: "req_pty",
 					}),
 				)
-				return
-			}
-			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_pty/events/stream") {
-				res.writeHead(200, {
-					"content-type": "text/event-stream; charset=utf-8",
-					"cache-control": "no-cache",
-				})
-				res.write(
-					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
-				)
-				openSseResponses.push(res)
-				return
-			}
-			if (req.method === "POST" && url.pathname === "/v1/sessions/sess_pty/events") {
-				let body = ""
-				req.setEncoding("utf8")
-				req.on("data", (chunk: string) => {
-					body += chunk
-				})
-				req.on("end", () => {
-					postedEventBodies.push(body)
-					res.writeHead(200, { "content-type": "application/json" })
-					res.end(JSON.stringify({ data: [{ type: "user.interrupt" }] }))
-				})
-				return
-			}
-			res.writeHead(404, { "content-type": "application/json" })
-			res.end(
-				JSON.stringify({
-					type: "error",
-					error: { type: "not_found_error", message: "not found" },
-					request_id: "req_pty",
-				}),
-			)
-		})
+			})
 
-		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
-		try {
-			const addr = server.address()
-			const port = typeof addr === "object" && addr !== null ? addr.port : 0
+			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+			try {
+				const addr = server.address()
+				const port = typeof addr === "object" && addr !== null ? addr.port : 0
 
-			const ptyScript = `
+				const ptyScript = `
 import fcntl, json, os, pty, select, signal, subprocess, sys, termios, time
 
 master, slave = pty.openpty()
@@ -2637,60 +2653,61 @@ if p.poll() is None:
 os.close(master)
 print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "output": out.decode("utf-8", errors="replace")}))
 `
-			const ptyResult = await new Promise<{
-				readonly rc: number | null
-				readonly aliveAfterFirst: boolean
-				readonly output: string
-			}>((resolve, reject) => {
-				const driver = spawn("python3", ["-c", ptyScript, String(port), repoRoot], {
-					env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
-					stdio: ["ignore", "pipe", "pipe"],
+				const ptyResult = await new Promise<{
+					readonly rc: number | null
+					readonly aliveAfterFirst: boolean
+					readonly output: string
+				}>((resolve, reject) => {
+					const driver = spawn("python3", ["-c", ptyScript, String(port), repoRoot], {
+						env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+						stdio: ["ignore", "pipe", "pipe"],
+					})
+					let stdout = ""
+					let stderr = ""
+					driver.stdout.setEncoding("utf8")
+					driver.stderr.setEncoding("utf8")
+					driver.stdout.on("data", (chunk: string) => {
+						stdout += chunk
+					})
+					driver.stderr.on("data", (chunk: string) => {
+						stderr += chunk
+					})
+					driver.on("error", reject)
+					driver.on("close", (code) => {
+						if (code !== 0) {
+							reject(new Error(`PTY driver failed (${code}): ${stderr}`))
+							return
+						}
+						try {
+							resolve(
+								JSON.parse(stdout.trim()) as {
+									readonly rc: number | null
+									readonly aliveAfterFirst: boolean
+									readonly output: string
+								},
+							)
+						} catch (err) {
+							reject(new Error(`Invalid PTY driver JSON: ${stdout} (${String(err)})`))
+						}
+					})
 				})
-				let stdout = ""
-				let stderr = ""
-				driver.stdout.setEncoding("utf8")
-				driver.stderr.setEncoding("utf8")
-				driver.stdout.on("data", (chunk: string) => {
-					stdout += chunk
-				})
-				driver.stderr.on("data", (chunk: string) => {
-					stderr += chunk
-				})
-				driver.on("error", reject)
-				driver.on("close", (code) => {
-					if (code !== 0) {
-						reject(new Error(`PTY driver failed (${code}): ${stderr}`))
-						return
-					}
-					try {
-						resolve(
-							JSON.parse(stdout.trim()) as {
-								readonly rc: number | null
-								readonly aliveAfterFirst: boolean
-								readonly output: string
-							},
-						)
-					} catch (err) {
-						reject(new Error(`Invalid PTY driver JSON: ${stdout} (${String(err)})`))
-					}
-				})
-			})
 
-			expect(ptyResult.aliveAfterFirst).toBe(true)
-			expect(ptyResult.rc).toBe(130)
-			expect(ptyResult.output).toContain("Interrupt requested.")
-			expect(ptyResult.output).toContain("Press Ctrl-C again to disconnect.")
-			expect(postedEventBodies).toHaveLength(1)
-			expect(JSON.parse(postedEventBodies[0] ?? "{}")).toEqual({
-				events: [{ type: "user.interrupt" }],
-			})
-		} finally {
-			for (const res of openSseResponses) {
-				res.end()
+				expect(ptyResult.aliveAfterFirst).toBe(true)
+				expect(ptyResult.rc).toBe(130)
+				expect(ptyResult.output).toContain("Interrupt requested.")
+				expect(ptyResult.output).toContain("Press Ctrl-C again to disconnect.")
+				expect(postedEventBodies).toHaveLength(1)
+				expect(JSON.parse(postedEventBodies[0] ?? "{}")).toEqual({
+					events: [{ type: "user.interrupt" }],
+				})
+			} finally {
+				for (const res of openSseResponses) {
+					res.end()
+				}
+				await new Promise<void>((resolve) => server.close(() => resolve()))
 			}
-			await new Promise<void>((resolve) => server.close(() => resolve()))
-		}
-	})
+		},
+	)
 
 	it("reports buffered piped input on live session termination, separates confirmed 429 rejections from unconfirmed delivery, and bounds turn bookkeeping", async () => {
 		await Effect.runPromise(
@@ -2956,6 +2973,217 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					expect(multiFailRes.stderr).toContain("turn 2 provider boom")
 					expect(multiFailRes.stdout).toContain("Ok-1")
 					expect(multiFailRes.stdout).toContain("Ok-3")
+				}),
+			),
+		)
+	})
+
+	it("validates interrupt receipts, keeps TTY open after confirmed message rejections, and distinguishes retrying vs terminal turn errors", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `Ok:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const sessionId = yield* createReadySession(cli)
+
+					// 1a) Piped /interrupt with empty or mismatched receipt fails as unconfirmed with Idempotency-Key
+					for (const badBody of [{ data: [] }, { data: [{ type: "user.message", turn: 1 }] }]) {
+						let capturedKey = ""
+						const badIntRes = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+							stdin: "/interrupt\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									capturedKey = request.headers.get("idempotency-key") ?? ""
+									return new Response(JSON.stringify(badBody), {
+										status: 200,
+										headers: { "content-type": "application/json" },
+									})
+								}
+								return next(request)
+							},
+						})
+						expect(badIntRes.exitCode).toBe(1)
+						expect(capturedKey).toMatch(/^cli_[0-9a-f]{24}$/)
+						expect(badIntRes.stderr).toContain("delivery unconfirmed")
+						expect(badIntRes.stderr).toContain(`Idempotency-Key: ${capturedKey}`)
+						expect(badIntRes.stderr).not.toContain("Interrupt requested.")
+					}
+
+					// 1b) TTY /interrupt with empty receipt reports unconfirmed error and does not print Interrupt requested.
+					let ttyIntKey = ""
+					const ttyBadIntRes = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdinIsTerminal: true,
+						terminalReads: [Effect.succeed("/interrupt"), Effect.succeed("/exit")],
+						interceptFetch: async (next, request) => {
+							if (request.method === "POST" && request.url.endsWith("/events")) {
+								ttyIntKey = request.headers.get("idempotency-key") ?? ""
+								return new Response(JSON.stringify({ data: [] }), {
+									status: 200,
+									headers: { "content-type": "application/json" },
+								})
+							}
+							return next(request)
+						},
+					})
+					expect(ttyBadIntRes.exitCode).toBe(0)
+					expect(ttyIntKey).toMatch(/^cli_[0-9a-f]{24}$/)
+					expect(ttyBadIntRes.stderr).toContain("Interrupt failed:")
+					expect(ttyBadIntRes.stderr).toContain(`Idempotency-Key: ${ttyIntKey}`)
+					expect(ttyBadIntRes.stderr).not.toContain("Interrupt requested.")
+
+					// 2) TTY keeps session open after confirmed per-message rejections (oversized 400 and queue-full 429)
+					const ttyRecoverSessionId = yield* createReadySession(cli)
+					const validReplyRendered = yield* Deferred.make<void>()
+					let queueFullRejected = false
+					const ttyRecoverRes = yield* cli.run(
+						["sessions", "connect", "--session-id", ttyRecoverSessionId],
+						{
+							stdinIsTerminal: true,
+							terminalReads: [
+								Effect.succeed("x".repeat(20_000)),
+								Effect.succeed("queue full message"),
+								Effect.succeed("corrected follow-up"),
+								Deferred.await(validReplyRendered).pipe(Effect.as("/exit")),
+							],
+							onStdoutChunk: (chunk) =>
+								chunk.includes("Ok:corrected follow-up")
+									? Deferred.succeed(validReplyRendered, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									const bodyText = await request.clone().text()
+									if (bodyText.includes("queue full message")) {
+										queueFullRejected = true
+										return new Response(
+											JSON.stringify({
+												type: "error",
+												error: {
+													type: "rate_limit_error",
+													message: "Too many queued user messages.",
+												},
+												request_id: "req_tty_429",
+											}),
+											{ status: 429, headers: { "content-type": "application/json" } },
+										)
+									}
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(ttyRecoverRes.exitCode).toBe(0)
+					expect(queueFullRejected).toBe(true)
+					expect(ttyRecoverRes.stderr).toContain(
+						"Send failed: API error (400 invalid_request_error)",
+					)
+					expect(ttyRecoverRes.stderr).toContain("Send failed: API error (429 rate_limit_error)")
+					expect(ttyRecoverRes.stdout).toContain("Ok:corrected follow-up")
+
+					// 3a) Retrying session.error followed by mid-turn archival attributes termination to archival,
+					//     not to the transient retrying error
+					const retryingTurnStarted = yield* Deferred.make<void>()
+					const releaseRetryingTurn = yield* Deferred.make<void>()
+					const retryingCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(retryingTurnStarted, undefined)
+								yield* Deferred.await(releaseRetryingTurn)
+								return {
+									thinking: null,
+									text: "never",
+									input_tokens: 1,
+									output_tokens: 1,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const retryingSessionId = yield* createReadySession(retryingCli)
+					const retryErrDelivered = yield* Deferred.make<void>()
+					const archiveDuringRetry = yield* Deferred.await(retryErrDelivered).pipe(
+						Effect.andThen(Effect.sleep("25 millis")),
+						Effect.andThen(
+							retryingCli.run(["sessions", "archive", "--session-id", retryingSessionId]),
+						),
+						Effect.forkChild,
+					)
+					const retryingArchivedRes = yield* retryingCli.run(
+						["sessions", "connect", "--session-id", retryingSessionId],
+						{
+							stdin: "trigger retrying then archive\n",
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								const res = await next(request)
+								if (res.status !== 200 || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								const encoder = new TextEncoder()
+								let injected = false
+								const observed = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										let text = decoder.decode(chunk.value, { stream: true })
+										if (!injected && text.includes("session.status_running")) {
+											injected = true
+											const retryErr = `event: session.error\ndata: ${JSON.stringify({
+												type: "session.error",
+												error: {
+													type: "upstream_overloaded",
+													message: "temporary retryable error",
+													retry_status: { type: "retrying" },
+												},
+											})}\n\n`
+											text = `${text}${retryErr}`
+											await Effect.runPromise(Deferred.succeed(retryErrDelivered, undefined))
+										}
+										controller.enqueue(encoder.encode(text))
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(observed, { status: 200, headers: res.headers })
+							},
+						},
+					)
+					yield* Deferred.succeed(releaseRetryingTurn, undefined)
+					yield* Fiber.await(archiveDuringRetry)
+					expect(retryingArchivedRes.exitCode).toBe(1)
+					expect(retryingArchivedRes.stderr).toContain(
+						"Session terminated before turn 1 completed.",
+					)
+					expect(retryingArchivedRes.stderr).not.toContain("Turn 1 failed:")
+
+					// 3b) Terminal session.error (retry_status.type === "terminal") followed by termination
+					//     still attributes failure to the terminal provider error
+					const terminalErrCli = yield* makeTestServer({
+						generate: () =>
+							Effect.fail({
+								_tag: "ModelProviderError" as const,
+								error_type: "invalid_request_error" as const,
+								message: "fatal context overflow",
+								terminal: true,
+							}),
+					})
+					const terminalErrSessionId = yield* createReadySession(terminalErrCli)
+					const terminalErrRes = yield* terminalErrCli.run(
+						["sessions", "connect", "--session-id", terminalErrSessionId],
+						{ stdin: "trigger terminal error\n" },
+					)
+					expect(terminalErrRes.exitCode).toBe(1)
+					expect(terminalErrRes.stderr).toContain("Turn 1 failed:")
+					expect(terminalErrRes.stderr).toContain("fatal context overflow")
 				}),
 			),
 		)
