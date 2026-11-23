@@ -3,6 +3,7 @@ import * as Http from "node:http"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
@@ -2260,6 +2261,144 @@ describe("CLI sessions:events and sessions connect", () => {
 						"[error] upstream_overloaded: transient overload",
 					)
 					expect(transientArchivedRes.stdout).toContain("Recovered reply")
+				}),
+			),
+		)
+	})
+
+	it("signals the current settlement waiter after slow output and honors /exit during ended-session replay", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) With two piped messages, if turn 2's session.status_idle starts rendering before
+					//    the input loop installs its final waiter, resolving the current waiter after output
+					//    must wake the loop instead of hanging on a stale deferred
+					const waiterCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `Reply-${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const waiterSessionId = yield* createReadySession(waiterCli)
+					const turn2IdleRendering = yield* Deferred.make<void>()
+					let idleRenderCount = 0
+					let postCount = 0
+					const [waiterDuration, waiterRes] = yield* Effect.timed(
+						waiterCli.run(
+							["--format", "jsonl", "sessions", "connect", "--session-id", waiterSessionId],
+							{
+								stdin: "first\nsecond\n",
+								onStdoutChunk: (chunk) =>
+									Effect.gen(function* () {
+										if (chunk.includes('"session.status_idle"')) {
+											idleRenderCount += 1
+											if (idleRenderCount === 2) {
+												// Release POST #2 receipt so the input loop hits EOF and installs a fresh
+												// waiter while turn 2's session.status_idle is still blocked in output
+												yield* Deferred.succeed(turn2IdleRendering, undefined)
+												yield* Effect.sleep("50 millis")
+											}
+										}
+									}),
+								interceptFetch: async (next, request) => {
+									if (request.method === "POST" && request.url.endsWith("/events")) {
+										postCount += 1
+										const res = await next(request)
+										if (postCount === 2) {
+											await Effect.runPromise(Deferred.await(turn2IdleRendering))
+										}
+										return res
+									}
+									return next(request)
+								},
+							},
+						),
+					)
+					expect(waiterRes.exitCode).toBe(0)
+					expect(postCount).toBe(2)
+					expect(idleRenderCount).toBe(2)
+					expect(Duration.toMillis(waiterDuration)).toBeLessThan(2_000)
+					expect(waiterRes.stdout).toContain("Reply-1:first")
+					expect(waiterRes.stdout).toContain("Reply-2:second")
+
+					// 2) Explicit /exit and /quit cancel a stalled ended-session replay cleanly in both
+					//    piped and interactive TTY modes without attempting to send messages
+					const archiveRes = yield* waiterCli.run([
+						"sessions",
+						"archive",
+						"--session-id",
+						waiterSessionId,
+					])
+					expect(archiveRes.exitCode).toBe(0)
+
+					const makeStalledReplayFetch = () => {
+						const encoder = new TextEncoder()
+						let postAttempts = 0
+						const interceptFetch = async (
+							next: (request: Request) => Promise<Response>,
+							request: Request,
+						): Promise<Response> => {
+							if (request.method === "POST" && request.url.endsWith("/events")) {
+								postAttempts += 1
+								return next(request)
+							}
+							if (request.url.includes("/events/stream")) {
+								let sent = false
+								const stalledStream = new ReadableStream<Uint8Array>({
+									pull(controller) {
+										if (!sent) {
+											sent = true
+											controller.enqueue(
+												encoder.encode(
+													'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message","content":[{"type":"text","text":"archived history"}]}\n\n',
+												),
+											)
+											return
+										}
+										return new Promise(() => {})
+									},
+								})
+								return new Response(stalledStream, {
+									status: 200,
+									headers: { "content-type": "text/event-stream; charset=utf-8" },
+								})
+							}
+							return next(request)
+						}
+						return { interceptFetch, getPostAttempts: () => postAttempts }
+					}
+
+					for (const exitCmd of ["/exit\n", "  \n/quit\n"]) {
+						const stalled = makeStalledReplayFetch()
+						const [elapsed, pipedExitRes] = yield* Effect.timed(
+							waiterCli.run(["sessions", "connect", "--session-id", waiterSessionId], {
+								stdin: exitCmd,
+								interceptFetch: stalled.interceptFetch,
+							}),
+						)
+						expect(pipedExitRes.exitCode).toBe(0)
+						expect(Duration.toMillis(elapsed)).toBeLessThan(1_000)
+						expect(stalled.getPostAttempts()).toBe(0)
+					}
+
+					const ttyStalled = makeStalledReplayFetch()
+					const [ttyElapsed, ttyExitRes] = yield* Effect.timed(
+						waiterCli.run(["sessions", "connect", "--session-id", waiterSessionId], {
+							stdinIsTerminal: true,
+							terminalReads: [Effect.succeed("cannot send"), Effect.succeed("/exit")],
+							interceptFetch: ttyStalled.interceptFetch,
+						}),
+					)
+					expect(ttyExitRes.exitCode).toBe(0)
+					expect(Duration.toMillis(ttyElapsed)).toBeLessThan(1_000)
+					expect(ttyStalled.getPostAttempts()).toBe(0)
+					expect(ttyExitRes.stderr).toContain(
+						`Cannot send input: session ${waiterSessionId} is already archived`,
+					)
 				}),
 			),
 		)

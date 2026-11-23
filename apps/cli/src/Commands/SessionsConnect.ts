@@ -251,11 +251,14 @@ const splitBoundedLines = (
 		return Stream.concat(body, flushTrailing)
 	})
 
-const findFirstSendablePipedLine = (
-	stdio: Stdio.Stdio,
-): Effect.Effect<Option.Option<string>, CliFailure> =>
+type EndedStdinSignal =
+	| { readonly _tag: "eof" }
+	| { readonly _tag: "exit" }
+	| { readonly _tag: "input"; readonly line: string }
+
+const inspectEndedPipedStdin = (stdio: Stdio.Stdio): Effect.Effect<EndedStdinSignal, CliFailure> =>
 	Effect.gen(function* () {
-		let firstSendable: Option.Option<string> = Option.none()
+		let signal: EndedStdinSignal = { _tag: "eof" }
 		yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH).pipe(
 			Stream.takeUntil((line) => {
 				const trimmed = line.trim()
@@ -264,13 +267,16 @@ const findFirstSendablePipedLine = (
 			Stream.runForEach((line) =>
 				Effect.sync(() => {
 					const trimmed = line.trim()
-					if (trimmed.length > 0 && trimmed !== "/exit" && trimmed !== "/quit") {
-						firstSendable = Option.some(trimmed)
+					if (trimmed.length === 0) return
+					if (trimmed === "/exit" || trimmed === "/quit") {
+						signal = { _tag: "exit" }
+					} else {
+						signal = { _tag: "input", line: trimmed }
 					}
 				}),
 			),
 		)
-		return firstSendable
+		return signal
 	})
 
 const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
@@ -284,7 +290,7 @@ const renderConnectEvent = (
 	sessionId: SessionId,
 	event: SessionStreamEvent,
 	stateRef: Ref.Ref<ConnectState>,
-	settleDeferred: Deferred.Deferred<void>,
+	settleDeferredRef: Ref.Ref<Deferred.Deferred<void>>,
 	stopConnectDeferred: Deferred.Deferred<void>,
 	expectArchivedEvent: boolean,
 	rawStructuredMode: boolean,
@@ -381,6 +387,9 @@ const renderConnectEvent = (
 						? (data["stop_reason"] as Record<string, unknown>)["type"]
 						: undefined
 				const stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined
+				if (!rawStructuredMode && stopReason !== undefined && stopReason !== "end_turn") {
+					yield* writeStderrLine(`[status: idle (${stopReason})]`)
+				}
 				const next = yield* Ref.updateAndGet(stateRef, (state) => {
 					const turn = state.observedTurn
 					const latestSettledStopReason =
@@ -408,15 +417,13 @@ const renderConnectEvent = (
 						failedTurnErrors,
 					}
 				})
-				if (!rawStructuredMode && stopReason !== undefined && stopReason !== "end_turn") {
-					yield* writeStderrLine(`[status: idle (${stopReason})]`)
-				}
 				if (
 					(next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
 					(next.queuedTurns.has(next.targetTurn) &&
 						next.settledTurn === next.targetTurn - 1 &&
 						isQueueHaltingStopReason(stopReason))
 				) {
+					const settleDeferred = yield* Ref.get(settleDeferredRef)
 					yield* Deferred.succeed(settleDeferred, undefined)
 				}
 				break
@@ -461,6 +468,7 @@ const renderConnectEvent = (
 
 				if (shouldStopNow) {
 					yield* Ref.update(stateRef, (state) => ({ ...state, ended: true }))
+					const settleDeferred = yield* Ref.get(settleDeferredRef)
 					yield* Deferred.succeed(settleDeferred, undefined)
 					yield* Deferred.succeed(stopConnectDeferred, undefined)
 				}
@@ -938,26 +946,23 @@ export const sessionsConnectCommand = Command.make(
 
 			const stdinCheckFiber =
 				initiallyEnded && !isInteractiveTty
-					? yield* Effect.result(findFirstSendablePipedLine(stdio)).pipe(Effect.forkChild)
+					? yield* Effect.result(inspectEndedPipedStdin(stdio)).pipe(Effect.forkChild)
 					: undefined
 
 			const streamFiber = yield* client
 				.streamSessionEvents(sessionId, after === undefined ? undefined : { after })
 				.pipe(
 					Stream.runForEach((event) =>
-						Effect.gen(function* () {
-							const settleDeferred = yield* Ref.get(settleDeferredRef)
-							yield* renderConnectEvent(
-								client,
-								sessionId,
-								event,
-								stateRef,
-								settleDeferred,
-								stopConnectDeferred,
-								expectArchivedEvent,
-								rawStructuredMode,
-							)
-						}),
+						renderConnectEvent(
+							client,
+							sessionId,
+							event,
+							stateRef,
+							settleDeferredRef,
+							stopConnectDeferred,
+							expectArchivedEvent,
+							rawStructuredMode,
+						),
 					),
 					Effect.catch((err) =>
 						Effect.gen(function* () {
@@ -986,7 +991,29 @@ export const sessionsConnectCommand = Command.make(
 								: Effect.void
 
 					if (stdinCheckFiber === undefined) {
-						yield* replayDone
+						const endedStatusLabel = session.archived_at !== null ? "archived" : "terminated"
+						while (true) {
+							const nextEvent = yield* Effect.race(
+								Effect.result(terminal.readLine).pipe(
+									Effect.map((outcome) => ({ _tag: "line" as const, outcome })),
+								),
+								replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
+							)
+							if (nextEvent._tag === "replay_done") break
+							if (nextEvent.outcome._tag === "Failure") {
+								yield* replayDone
+								break
+							}
+							const trimmed = nextEvent.outcome.success.trim()
+							if (trimmed === "/exit" || trimmed === "/quit") {
+								break
+							}
+							if (trimmed.length > 0) {
+								yield* writeStderrLine(
+									`Cannot send input: session ${session.id} is already ${endedStatusLabel}. Type /exit to disconnect.`,
+								)
+							}
+						}
 						return
 					}
 
@@ -995,14 +1022,17 @@ export const sessionsConnectCommand = Command.make(
 					)
 					const handleStdinOutcome = (
 						outcome:
-							| { readonly _tag: "Success"; readonly success: Option.Option<string> }
+							| { readonly _tag: "Success"; readonly success: EndedStdinSignal }
 							| { readonly _tag: "Failure"; readonly failure: CliFailure },
-					): Effect.Effect<void, CliFailure> =>
-						outcome._tag === "Failure"
-							? Effect.fail(outcome.failure)
-							: Option.isSome(outcome.success)
-								? Effect.fail(unsentInputError)
-								: Effect.void
+					): Effect.Effect<"eof" | "exit", CliFailure> => {
+						if (outcome._tag === "Failure") {
+							return Effect.fail(outcome.failure)
+						}
+						if (outcome.success._tag === "input") {
+							return Effect.fail(unsentInputError)
+						}
+						return Effect.succeed(outcome.success._tag)
+					}
 
 					yield* Effect.gen(function* () {
 						const first = yield* Effect.race(
@@ -1012,8 +1042,10 @@ export const sessionsConnectCommand = Command.make(
 							replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
 						)
 						if (first._tag === "stdin") {
-							yield* handleStdinOutcome(first.outcome)
-							yield* replayDone
+							const kind = yield* handleStdinOutcome(first.outcome)
+							if (kind === "eof") {
+								yield* replayDone
+							}
 						} else {
 							const lateStdin = yield* Effect.race(
 								Fiber.join(stdinCheckFiber).pipe(Effect.map(Option.some)),
@@ -1096,8 +1128,6 @@ export const sessionsConnectCommand = Command.make(
 									`Cannot send input: session ${session.id} has already ended.`,
 								)
 							}
-							const nextDeferred = yield* Deferred.make<void>()
-							yield* Ref.set(settleDeferredRef, nextDeferred)
 							const action = yield* dispatchUserLine(client, sessionId, line, stateRef, {
 								failOnInterruptError: true,
 								onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
@@ -1112,6 +1142,9 @@ export const sessionsConnectCommand = Command.make(
 
 				if (!explicitExit) {
 					while (true) {
+						const waiter = yield* Deferred.make<void>()
+						yield* Ref.set(settleDeferredRef, waiter)
+
 						const failed = yield* Ref.get(streamFailedRef)
 						if (failed !== null) break
 						const state = yield* Ref.get(stateRef)
@@ -1164,7 +1197,6 @@ export const sessionsConnectCommand = Command.make(
 						if (state.targetTurn === 0) {
 							break
 						}
-						const waiter = yield* Ref.get(settleDeferredRef)
 						const outcome = yield* Effect.race(
 							Deferred.await(waiter).pipe(Effect.as("settled" as const)),
 							Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
@@ -1187,8 +1219,6 @@ export const sessionsConnectCommand = Command.make(
 							}
 							break
 						}
-						const fresh = yield* Deferred.make<void>()
-						yield* Ref.set(settleDeferredRef, fresh)
 					}
 
 					const finalState = yield* Ref.get(stateRef)

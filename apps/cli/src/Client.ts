@@ -32,6 +32,7 @@ import {
 export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5
 const DEFAULT_SSE_RECONNECT_DELAY_MS = 250
+const DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS = 2_000
 const MAX_SSE_ERROR_BODY_BYTES = 16 * 1024
 const MAX_SSE_NO_PROGRESS_DELAY_MS = 5_000
 
@@ -44,7 +45,10 @@ const cancelResponseBody = (
 	const webResponse = HttpClientResponse.toWeb(response)
 	if (Option.isSome(webResponse) && webResponse.value.body !== null) {
 		const body = webResponse.value.body
-		return Effect.ignore(Effect.promise(() => body.cancel()))
+		return Effect.tryPromise({
+			try: () => body.cancel(),
+			catch: () => undefined,
+		}).pipe(Effect.ignore)
 	}
 	return Effect.void
 }
@@ -52,12 +56,13 @@ const cancelResponseBody = (
 const readBoundedResponseText = (
 	response: HttpClientResponse.HttpClientResponse,
 	maxBytes: number,
+	timeoutMs: number,
 ): Effect.Effect<string> =>
 	Effect.gen(function* () {
 		const chunks: Array<Uint8Array> = []
 		let totalBytes = 0
 		let truncated = false
-		yield* response.stream.pipe(
+		const readBody = response.stream.pipe(
 			Stream.takeUntil((chunk) => {
 				if (totalBytes + chunk.byteLength > maxBytes) {
 					const remaining = maxBytes - totalBytes
@@ -74,8 +79,14 @@ const readBoundedResponseText = (
 			}),
 			Stream.runDrain,
 			Effect.ignore,
+			Effect.catchDefect(() => Effect.void),
 		)
-		if (truncated) {
+		const outcome = yield* Effect.race(
+			readBody.pipe(Effect.as("done" as const)),
+			Effect.sleep(Duration.millis(timeoutMs)).pipe(Effect.as("timeout" as const)),
+		)
+		const timedOut = outcome === "timeout"
+		if (truncated || timedOut) {
 			yield* cancelResponseBody(response)
 		}
 		if (totalBytes === 0) return ""
@@ -86,7 +97,7 @@ const readBoundedResponseText = (
 			offset += chunk.byteLength
 		}
 		const decoded = new TextDecoder().decode(merged)
-		return truncated ? `${decoded}…` : decoded
+		return truncated || timedOut ? `${decoded}…` : decoded
 	})
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
@@ -178,6 +189,7 @@ export interface SessionStreamEvent {
 export interface StreamSseOptions {
 	readonly maxReconnectAttempts?: number | undefined
 	readonly baseReconnectDelayMs?: number | undefined
+	readonly errorBodyTimeoutMs?: number | undefined
 }
 
 export interface StreamSessionEventsOptions extends StreamSseOptions {
@@ -303,6 +315,7 @@ export const makeCheckfuClient = (
 
 			const maxReconnects = options?.maxReconnectAttempts ?? DEFAULT_MAX_SSE_RECONNECTS
 			const baseDelayMs = options?.baseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS
+			const errorBodyTimeoutMs = options?.errorBodyTimeoutMs ?? DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS
 
 			interface LoopState {
 				cursor: string | undefined
@@ -387,7 +400,11 @@ export const makeCheckfuClient = (
 								loopState.attempt += 1
 								return Stream.empty
 							}
-							const bodyText = yield* readBoundedResponseText(response, MAX_SSE_ERROR_BODY_BYTES)
+							const bodyText = yield* readBoundedResponseText(
+								response,
+								MAX_SSE_ERROR_BODY_BYTES,
+								errorBodyTimeoutMs,
+							)
 							const parsedError = yield* Effect.try({
 								try: () => JSON.parse(bodyText) as unknown,
 								catch: () => undefined,
@@ -421,9 +438,9 @@ export const makeCheckfuClient = (
 						}
 
 						const initialCursor = loopState.cursor
+						const hasCursorProgress = (): boolean => loopState.cursor !== initialCursor
 						let sawEvent = false
 						let sawKeepalive = false
-						let cursorAdvanced = false
 						let terminalReached = false
 						let handledError = false
 						let isFirstChunk = true
@@ -548,11 +565,7 @@ export const makeCheckfuClient = (
 								Stream.mapEffect((item) =>
 									Effect.gen(function* () {
 										if (item._tag === "CursorUpdate") {
-											const nextCursor = item.id === "" ? undefined : item.id
-											if (nextCursor !== loopState.cursor) {
-												loopState.cursor = nextCursor
-												cursorAdvanced = loopState.cursor !== initialCursor
-											}
+											loopState.cursor = item.id === "" ? undefined : item.id
 											sawKeepalive = true
 											return Option.none<SessionStreamEvent>()
 										}
@@ -565,9 +578,6 @@ export const makeCheckfuClient = (
 											loopState.cursor = sseEvent.id
 										} else if (seq !== undefined) {
 											loopState.cursor = String(seq)
-										}
-										if (loopState.cursor !== initialCursor) {
-											cursorAdvanced = true
 										}
 										sawEvent = true
 										if (requestSpec.isTerminalEvent?.(data) === true) {
@@ -588,7 +598,7 @@ export const makeCheckfuClient = (
 								),
 								Stream.catch((err) => {
 									if (err instanceof StreamBodyReadError) {
-										const nextAttempt = (cursorAdvanced ? 0 : loopState.attempt) + 1
+										const nextAttempt = (hasCursorProgress() ? 0 : loopState.attempt) + 1
 										if (nextAttempt <= maxReconnects) {
 											handledError = true
 											loopState.useHeader = true
@@ -614,9 +624,10 @@ export const makeCheckfuClient = (
 									return Stream.empty
 								}
 								const hasIncompleteFrame = pendingLine.length > 0 || hasPendingEventFields
+								const advanced = hasCursorProgress()
 								loopState.useHeader = true
 								if (hasIncompleteFrame) {
-									const nextAttempt = (cursorAdvanced ? 0 : loopState.attempt) + 1
+									const nextAttempt = (advanced ? 0 : loopState.attempt) + 1
 									if (nextAttempt > maxReconnects) {
 										loopState.done = true
 										return Stream.fail(
@@ -628,7 +639,7 @@ export const makeCheckfuClient = (
 										(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
 									return Stream.empty
 								}
-								if (cursorAdvanced) {
+								if (advanced) {
 									loopState.attempt = 0
 									loopState.noProgressCloses = 0
 									loopState.pendingDelayMs = loopState.retryDelayMs ?? 0

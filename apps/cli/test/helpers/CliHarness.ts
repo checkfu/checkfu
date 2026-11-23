@@ -67,6 +67,7 @@ export interface CliRunOptions {
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
 	readonly terminalReads?: ReadonlyArray<Effect.Effect<string, Terminal.QuitError>>
 	readonly sigintController?: SigintController
+	readonly onStdoutChunk?: (chunk: string) => Effect.Effect<void>
 	readonly interceptFetch?: (
 		next: (request: Request) => Promise<Response>,
 		request: Request,
@@ -134,10 +135,15 @@ export const makeTestServer = (handler?: ModelHandler) =>
 
 				const collectSink = (
 					target: Array<string>,
+					onChunk?: (chunk: string) => Effect.Effect<void>,
 				): Sink.Sink<void, string | Uint8Array, never, PlatformError.PlatformError> =>
 					Sink.forEach((chunk: string | Uint8Array) =>
-						Effect.sync(() => {
-							target.push(typeof chunk === "string" ? chunk : decoder.decode(chunk))
+						Effect.gen(function* () {
+							const text = typeof chunk === "string" ? chunk : decoder.decode(chunk)
+							target.push(text)
+							if (onChunk !== undefined) {
+								yield* onChunk(text)
+							}
 						}),
 					)
 
@@ -216,7 +222,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						stdinIsTerminal: Effect.succeed(options?.stdinIsTerminal ?? false),
 						stdoutIsTerminal: Effect.succeed(options?.stdoutIsTerminal ?? false),
 						stderrIsTerminal: Effect.succeed(options?.stderrIsTerminal ?? false),
-						stdout: () => collectSink(stdoutChunks),
+						stdout: () => collectSink(stdoutChunks, options?.onStdoutChunk),
 						stderr: () => collectSink(stderrChunks),
 					}),
 					terminalLayer,

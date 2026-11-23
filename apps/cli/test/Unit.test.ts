@@ -795,6 +795,182 @@ describe("normalizeApiUrl", () => {
 					)
 				}).pipe(Effect.provide(makeLayer(unnumberedErrFetch)))
 				expect(unnumberedErrCalls).toBe(2)
+
+				// 13) Replayed ID batch ending at the starting cursor (1, 2 starting from cursor 2)
+				//     counts as no progress at disconnect: clean closes back off and body errors keep
+				//     consuming the retry budget
+				let replayBatchCloseCalls = 0
+				const replayBatchCloseFetch = (async () => {
+					replayBatchCloseCalls++
+					if (replayBatchCloseCalls <= 2) {
+						return new Response(
+							'id: 1\nevent: custom.ping\ndata: {"seq":1}\n\nid: 2\nevent: custom.ping\ndata: {"seq":2}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const [replayBatchDuration] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Stream.runCollect(
+							client.streamEndpointEvents(
+								{
+									method: "GET",
+									path: "/v1/custom/replay-batch/stream",
+									initialCursor: "2",
+								},
+								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(replayBatchCloseFetch))),
+				)
+				expect(replayBatchCloseCalls).toBe(3)
+				// Connection 1 ends at cursor 2 (30ms backoff), connection 2 ends at cursor 2 (60ms backoff)
+				expect(Duration.toMillis(replayBatchDuration)).toBeGreaterThanOrEqual(75)
+
+				let replayBatchErrCalls = 0
+				const replayBatchErrFetch = (async () => {
+					replayBatchErrCalls++
+					let step = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (step === 0) {
+								step = 1
+								controller.enqueue(
+									encoder.encode(
+										'id: 1\nevent: custom.ping\ndata: {"seq":1}\n\nid: 2\nevent: custom.ping\ndata: {"seq":2}\n\n',
+									),
+								)
+							} else {
+								controller.error(new Error("replay batch drop"))
+							}
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+				yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamEndpointEvents(
+								{
+									method: "GET",
+									path: "/v1/custom/replay-batch-err/stream",
+									initialCursor: "2",
+								},
+								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 2 },
+							),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(replayBatchErrFetch)))
+				expect(replayBatchErrCalls).toBe(2)
+
+				// 14) Rejected body.cancel() during retryable 503 or truncated 400 cleanup does not
+				//     die or bypass SSE retries / error status reporting
+				let cancelReject503Calls = 0
+				const cancelReject503Fetch = (async () => {
+					cancelReject503Calls++
+					if (cancelReject503Calls === 1) {
+						const body = new ReadableStream<Uint8Array>({
+							pull() {
+								return new Promise(() => {})
+							},
+							cancel() {
+								return Promise.reject(new Error("stream already errored"))
+							},
+						})
+						return new Response(body, { status: 503 })
+					}
+					return new Response(
+						'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+				const cancelReject503Events = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_cancel_reject_503", {
+							maxReconnectAttempts: 1,
+							baseReconnectDelayMs: 2,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(cancelReject503Fetch)))
+				expect(cancelReject503Calls).toBe(2)
+				expect(Array.from(cancelReject503Events).map((e) => e.seq)).toEqual([1])
+
+				const cancelReject400Fetch = (async () => {
+					const chunk64k = encoder.encode("X".repeat(64 * 1024))
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							controller.enqueue(chunk64k)
+						},
+						cancel() {
+							return Promise.reject(new Error("cancel hook rejected"))
+						},
+					})
+					return new Response(body, { status: 400 })
+				}) as unknown as typeof globalThis.fetch
+				const cancelReject400Err = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_cancel_reject_400", {
+								maxReconnectAttempts: 0,
+								baseReconnectDelayMs: 1,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(cancelReject400Fetch)))
+				expect(cancelReject400Err.message).toContain("HTTP 400")
+
+				// 15) Stalled non-retried SSE error body hits the diagnostic deadline, cancels the
+				//     response body, and reports the HTTP status with any received prefix
+				let stalled400Canceled = false
+				const stalled400Fetch = (async () => {
+					let pulled = false
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (!pulled) {
+								pulled = true
+								controller.enqueue(encoder.encode("partial diagnostic"))
+								return
+							}
+							return new Promise(() => {})
+						},
+						cancel() {
+							stalled400Canceled = true
+						},
+					})
+					return new Response(body, { status: 400 })
+				}) as unknown as typeof globalThis.fetch
+				const [stalled400Duration, stalled400Err] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Effect.flip(
+							Stream.runDrain(
+								client.streamSessionEvents("sess_stalled_400", {
+									maxReconnectAttempts: 0,
+									baseReconnectDelayMs: 1,
+									errorBodyTimeoutMs: 40,
+								}),
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(stalled400Fetch))),
+				)
+				expect(Duration.toMillis(stalled400Duration)).toBeLessThan(1_000)
+				expect(stalled400Err.message).toContain("HTTP 400")
+				expect(stalled400Err.message).toContain("partial diagnostic")
+				expect(stalled400Canceled).toBe(true)
 			}),
 		)
 	})
