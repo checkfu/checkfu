@@ -43,7 +43,7 @@ const PiSessionExecutorLive = Layer.effect(
 			abortTurn: (conversation, operationId) =>
 				harnessCall(
 					Effect.suspend(() => piSessions.getByName(conversation).abortTurn(operationId)),
-				).pipe(Effect.asVoid),
+				).pipe(Effect.asVoid, Effect.withSpan("PiSession.abortTurn")),
 		}
 	}),
 )

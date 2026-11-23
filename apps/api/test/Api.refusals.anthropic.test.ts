@@ -165,17 +165,24 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			recoverTurn: (sessionId, operationId) =>
 				!backends.has(sessionId)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(sessionId), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(sessionId)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 			runTurn: (sessionId, request) =>
-				Effect.promise(async (signal) =>
-					runPiDurableTurn(await getBackend(sessionId), request, signal),
+				Effect.flatMap(
+					Effect.promise(() => getBackend(sessionId)),
+					(backend) => runPiDurableTurn(backend, request),
 				),
 			abortTurn: (sessionId, operationId) =>
-				Effect.promise(async () => {
+				Effect.suspend(() => {
 					const b = backends.get(sessionId)
-					if (b !== undefined) await (await b).abort(operationId)
+					return b === undefined
+						? Effect.void
+						: Effect.flatMap(
+								Effect.promise(() => b),
+								(backend) => Effect.asVoid(backend.abort(operationId)),
+							)
 				}),
 		})
 
@@ -419,17 +426,20 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			recoverTurn: (conversation, operationId) =>
 				!backends.has(conversation)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(conversation), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 			runTurn: (conversation, request) =>
-				Effect.promise(async (signal) =>
-					runPiDurableTurn(await getBackend(conversation), request, signal),
+				Effect.flatMap(
+					Effect.promise(() => getBackend(conversation)),
+					(backend) => runPiDurableTurn(backend, request),
 				),
 			abortTurn: (conversation, operationId) =>
-				Effect.promise(async () => {
-					await (await getBackend(conversation)).abort(operationId)
-				}),
+				Effect.flatMap(
+					Effect.promise(() => getBackend(conversation)),
+					(backend) => Effect.asVoid(backend.abort(operationId)),
+				),
 		})
 		const CheckfuLive = Checkfu.layer(
 			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
@@ -609,14 +619,16 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			})) as unknown as typeof fetch
 		const backend1 = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const result = await runPiDurableTurn(backend1, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "anthropic",
-				modelId: "claude-sonnet-4-5",
-				system: null,
-				text: "trigger sensitive then overloaded_error",
-			})
+			const result = await Effect.runPromise(
+				runPiDurableTurn(backend1, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "anthropic",
+					modelId: "claude-sonnet-4-5",
+					system: null,
+					text: "trigger sensitive then overloaded_error",
+				}),
+			)
 			expect(result).toMatchObject({
 				ok: false,
 				error: {
@@ -638,14 +650,16 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			})) as unknown as typeof fetch
 		const backend2 = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const result = await runPiDurableTurn(backend2, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "anthropic",
-				modelId: "claude-sonnet-4-5",
-				system: null,
-				text: "trigger refusal then disconnect",
-			})
+			const result = await Effect.runPromise(
+				runPiDurableTurn(backend2, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "anthropic",
+					modelId: "claude-sonnet-4-5",
+					system: null,
+					text: "trigger refusal then disconnect",
+				}),
+			)
 			expect(result).toMatchObject({
 				ok: false,
 				error: {
@@ -735,14 +749,16 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		}) as unknown as typeof fetch
 		const backend3 = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const result1 = await runPiDurableTurn(backend3, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "anthropic",
-				modelId: "claude-sonnet-4-5",
-				system: null,
-				text: "trigger post-stop overloaded_error",
-			})
+			const result1 = await Effect.runPromise(
+				runPiDurableTurn(backend3, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "anthropic",
+					modelId: "claude-sonnet-4-5",
+					system: null,
+					text: "trigger post-stop overloaded_error",
+				}),
+			)
 			expect(result1).toMatchObject({
 				ok: false,
 				error: {
@@ -752,14 +768,16 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				},
 			})
 
-			const result2 = await runPiDurableTurn(backend3, {
-				operationId: "turn:2",
-				turn: 2,
-				provider: "anthropic",
-				modelId: "claude-sonnet-4-5",
-				system: null,
-				text: "fresh prompt",
-			})
+			const result2 = await Effect.runPromise(
+				runPiDurableTurn(backend3, {
+					operationId: "turn:2",
+					turn: 2,
+					provider: "anthropic",
+					modelId: "claude-sonnet-4-5",
+					system: null,
+					text: "fresh prompt",
+				}),
+			)
 			expect(result2).toMatchObject({ ok: true, reply: { text: "Clean reply" } })
 			const lastRequest = sentAfterPostStopError.at(-1)
 			expect(JSON.stringify(lastRequest)).not.toContain("Overloaded after message_stop")
@@ -853,14 +871,16 @@ describe("Anthropic Messages refusals and stream errors", () => {
 
 			const backend = await createInMemoryPiDurableBackend(realModels)
 			try {
-				const turn1 = await runPiDurableTurn(backend, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "anthropic",
-					modelId: "claude-sonnet-4-5",
-					system: null,
-					text: `trigger:${unconfirmedStopReason}`,
-				})
+				const turn1 = await Effect.runPromise(
+					runPiDurableTurn(backend, {
+						operationId: "turn:1",
+						turn: 1,
+						provider: "anthropic",
+						modelId: "claude-sonnet-4-5",
+						system: null,
+						text: `trigger:${unconfirmedStopReason}`,
+					}),
+				)
 				expect(turn1).toMatchObject({
 					ok: false,
 					error: {
@@ -870,14 +890,16 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					},
 				})
 
-				const turn2 = await runPiDurableTurn(backend, {
-					operationId: "turn:2",
-					turn: 2,
-					provider: "anthropic",
-					modelId: "claude-sonnet-4-5",
-					system: null,
-					text: "clean next turn",
-				})
+				const turn2 = await Effect.runPromise(
+					runPiDurableTurn(backend, {
+						operationId: "turn:2",
+						turn: 2,
+						provider: "anthropic",
+						modelId: "claude-sonnet-4-5",
+						system: null,
+						text: "clean next turn",
+					}),
+				)
 				expect(turn2).toMatchObject({ ok: true, reply: { text: "Clean follow-up" } })
 				const lastRequest = JSON.stringify(sentRequests.at(-1))
 				expect(lastRequest).not.toContain("Unhandled stop reason")
@@ -956,17 +978,24 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				recoverTurn: (conversation, operationId) =>
 					!normalizedBackends.has(conversation)
 						? Effect.succeed(null)
-						: Effect.promise(async (signal) =>
-								recoverPiDurableTurn(await getNormalizedBackend(conversation), operationId, signal),
+						: Effect.flatMap(
+								Effect.promise(() => getNormalizedBackend(conversation)),
+								(backend) => recoverPiDurableTurn(backend, operationId),
 							),
 				runTurn: (conversation, request) =>
-					Effect.promise(async (signal) =>
-						runPiDurableTurn(await getNormalizedBackend(conversation), request, signal),
+					Effect.flatMap(
+						Effect.promise(() => getNormalizedBackend(conversation)),
+						(backend) => runPiDurableTurn(backend, request),
 					),
 				abortTurn: (conversation, operationId) =>
-					Effect.promise(async () => {
+					Effect.suspend(() => {
 						const backend = normalizedBackends.get(conversation)
-						if (backend !== undefined) await (await backend).abort(operationId)
+						return backend === undefined
+							? Effect.void
+							: Effect.flatMap(
+									Effect.promise(() => backend),
+									(resolved) => Effect.asVoid(resolved.abort(operationId)),
+								)
 					}),
 			})
 			const normalizedLayer = Checkfu.layer(
@@ -1187,21 +1216,24 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				recoverTurn: (conversation, operationId) =>
 					!unnormalizedBackends.has(conversation)
 						? Effect.succeed(null)
-						: Effect.promise(async (signal) =>
-								recoverPiDurableTurn(
-									await getUnnormalizedBackend(conversation),
-									operationId,
-									signal,
-								),
+						: Effect.flatMap(
+								Effect.promise(() => getUnnormalizedBackend(conversation)),
+								(backend) => recoverPiDurableTurn(backend, operationId),
 							),
 				runTurn: (conversation, request) =>
-					Effect.promise(async (signal) =>
-						runPiDurableTurn(await getUnnormalizedBackend(conversation), request, signal),
+					Effect.flatMap(
+						Effect.promise(() => getUnnormalizedBackend(conversation)),
+						(backend) => runPiDurableTurn(backend, request),
 					),
 				abortTurn: (conversation, operationId) =>
-					Effect.promise(async () => {
+					Effect.suspend(() => {
 						const backend = unnormalizedBackends.get(conversation)
-						if (backend !== undefined) await (await backend).abort(operationId)
+						return backend === undefined
+							? Effect.void
+							: Effect.flatMap(
+									Effect.promise(() => backend),
+									(resolved) => Effect.asVoid(resolved.abort(operationId)),
+								)
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(

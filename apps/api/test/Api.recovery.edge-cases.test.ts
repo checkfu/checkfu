@@ -65,11 +65,12 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			recoverTurn: (conversation, operationId) =>
 				!backends.has(conversation)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(conversation), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 			runTurn: (conversation, request) =>
-				Effect.promise(async () => {
+				Effect.gen(function* () {
 					requests.push(request)
 					if (failTurns) {
 						return {
@@ -82,7 +83,8 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 							},
 						}
 					}
-					return runPiDurableTurn(await getBackend(conversation), request)
+					const backend = yield* Effect.promise(() => getBackend(conversation))
+					return yield* runPiDurableTurn(backend, request)
 				}),
 			abortTurn: () => Effect.void,
 		})
@@ -345,22 +347,23 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			recoverTurn: (conversation, operationId) =>
 				!backends.has(conversation)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(conversation), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 			runTurn: (conversation, request) =>
-				Effect.promise(async () => {
-					const backend = await getBackend(conversation)
+				Effect.gen(function* () {
+					const backend = yield* Effect.promise(() => getBackend(conversation))
 					if (request.turn === 2) {
 						reachedTurn2AdmitResolve?.()
-						await turn2AdmitGate
+						yield* Effect.promise(() => turn2AdmitGate)
 					}
-					return runPiDurableTurn(backend, request)
+					return yield* runPiDurableTurn(backend, request)
 				}),
 			abortTurn: (conversation, operationId) =>
-				Effect.promise(async () => {
-					const backend = await getBackend(conversation)
-					await backend.abort(operationId)
+				Effect.gen(function* () {
+					const backend = yield* Effect.promise(() => getBackend(conversation))
+					yield* backend.abort(operationId)
 					if (operationId === "turn:2") {
 						turn2AbortedResolve?.()
 					}
@@ -642,19 +645,24 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			recoverTurn: (conversation, operationId) =>
 				!backends.has(conversation)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(conversation), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 			runTurn: (conversation, request) =>
-				Effect.promise(async (signal) =>
-					runPiDurableTurn(await getBackend(conversation), request, signal),
+				Effect.flatMap(
+					Effect.promise(() => getBackend(conversation)),
+					(backend) => runPiDurableTurn(backend, request),
 				),
 			abortTurn: (conversation, operationId) =>
-				Effect.promise(async () => {
-					if (backends.has(conversation)) {
-						await (await getBackend(conversation)).abort(operationId)
-					}
-				}),
+				Effect.suspend(() =>
+					!backends.has(conversation)
+						? Effect.void
+						: Effect.flatMap(
+								Effect.promise(() => getBackend(conversation)),
+								(backend) => Effect.asVoid(backend.abort(operationId)),
+							),
+				),
 		})
 
 		let breakViews = false
