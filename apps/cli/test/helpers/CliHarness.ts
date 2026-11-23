@@ -320,6 +320,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 					Layer.succeed(Checkout, {
 						root: "/checkout",
 						runtime: "bun",
+						runtimeEnv: {},
 						readyWithin: options?.readyWithin ?? "300 millis",
 					}),
 					FetchHttpClient.layer.pipe(
