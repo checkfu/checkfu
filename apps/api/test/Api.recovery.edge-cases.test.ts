@@ -113,9 +113,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 1,
-					baseDelayMs: 1,
-					interruptTimeoutMs: 50,
-					settleMarginMs: 50,
+					baseDelay: "1 millis",
+					interruptTimeout: "50 millis",
+					settleMargin: "50 millis",
 				}),
 			),
 			Layer.provide(Domain.InMemory),
@@ -377,9 +377,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
-					baseDelayMs: 1,
-					interruptTimeoutMs: 50,
-					settleMarginMs: 50,
+					baseDelay: "1 millis",
+					interruptTimeout: "50 millis",
+					settleMargin: "50 millis",
 				}),
 			),
 			Layer.provide(Domain.InMemory),
@@ -702,9 +702,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
-					baseDelayMs: 1,
-					interruptTimeoutMs: 50,
-					settleMarginMs: 50,
+					baseDelay: "1 millis",
+					interruptTimeout: "50 millis",
+					settleMargin: "50 millis",
 				}),
 			),
 			Layer.provide(Domain.InMemory),
@@ -796,9 +796,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						Layer.provideMerge(
 							Layer.succeed(HarnessLimits, {
 								attempts: 2,
-								baseDelayMs: 1,
-								interruptTimeoutMs: 50,
-								settleMarginMs: 50,
+								baseDelay: "1 millis",
+								interruptTimeout: "50 millis",
+								settleMargin: "50 millis",
 							}),
 						),
 						Layer.provideMerge(
@@ -902,5 +902,122 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				await (await b).close()
 			}
 		}
+	})
+
+	it("skips runTurn and runs only the final read-only recovery probe when HarnessLimits.attempts is 0", async () => {
+		let runTurnCalls = 0
+		let recoverCalls = 0
+		let recoverOnFinalProbe = false
+		const recoveredReply = {
+			thinking: null,
+			text: "Recovered from final read-only probe",
+			input_tokens: 7,
+			output_tokens: 4,
+			stop_reason: { type: "end_turn" as const },
+		}
+		const executorLayer = makePiTurnExecutorLayer({
+			recoverTurn: () =>
+				Effect.sync(() => {
+					recoverCalls += 1
+					if (recoverOnFinalProbe && recoverCalls === 2) {
+						return { ok: true as const, reply: recoveredReply }
+					}
+					return null
+				}),
+			runTurn: () =>
+				Effect.sync(() => {
+					runTurnCalls += 1
+					return { ok: true as const, reply: recoveredReply }
+				}),
+			abortTurn: () => Effect.void,
+		})
+		const CheckfuLive = Checkfu.layer(
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+		).pipe(Layer.provide(executorLayer))
+		const PiProviderLive = PiDurableModelProviderLive.pipe(
+			Layer.provide(executorLayer),
+			Layer.provide(CheckfuLive),
+		)
+		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
+			Layer.provideMerge(
+				Layer.succeed(HarnessLimits, {
+					attempts: 0,
+					baseDelay: "1 millis",
+					interruptTimeout: "50 millis",
+					settleMargin: "50 millis",
+				}),
+			),
+			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
+			Layer.provideMerge(SecureRandom.layerWebCrypto),
+			Layer.provideMerge(
+				ConfigProvider.layer(
+					ConfigProvider.fromUnknown({
+						CHECKFU_API_KEY: TEST_API_KEY,
+						OPENAI_API_KEY: "sk-openai-test",
+					}),
+				),
+			),
+		)
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const { fetch: apiFetch } = yield* makeApiHandler
+				const provider = yield* ModelProvider
+				const agentRes = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: "/v1/agents",
+					headers: AUTH_HEADERS,
+					body: { name: "Zero Budget Agent", model: "gpt-4o-mini" },
+				})
+				const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+				const envRes = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: "/v1/environments",
+					headers: AUTH_HEADERS,
+					body: { name: "Zero Budget Env" },
+				})
+				const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+				const sessRes = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: "/v1/sessions",
+					headers: AUTH_HEADERS,
+					body: { agent: agent.id, environment_id: env.id },
+				})
+				const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
+
+				// 1. With nothing to recover, a zero attempt budget skips runTurn and fails HarnessUnavailable.
+				const unavailable = yield* Effect.flip(
+					provider.generate({
+						session_id: SessionId.make(session.id),
+						agent_id: agent.id,
+						agent_version: 1,
+						environment_id: env.id,
+						turn: 1,
+						generation: 0,
+						input: ["do not start model work"],
+					}),
+				)
+				expect(unavailable).toEqual({ _tag: "HarnessUnavailable" })
+				expect(runTurnCalls).toBe(0)
+				expect(recoverCalls).toBe(2)
+
+				// 2. When the final read-only recovery probe finds a settled reply, it still recovers without calling runTurn.
+				recoverCalls = 0
+				recoverOnFinalProbe = true
+				const reply = yield* provider.generate({
+					session_id: SessionId.make(session.id),
+					agent_id: agent.id,
+					agent_version: 1,
+					environment_id: env.id,
+					turn: 1,
+					generation: 0,
+					input: ["recover without starting model work"],
+				})
+				expect(reply).toEqual(recoveredReply)
+				expect(runTurnCalls).toBe(0)
+				expect(recoverCalls).toBe(2)
+			}).pipe(Effect.scoped, Effect.provide(layer)),
+		)
 	})
 })

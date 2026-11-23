@@ -442,9 +442,9 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
-					baseDelayMs: 1,
-					interruptTimeoutMs: 50,
-					settleMarginMs: 50,
+					baseDelay: "1 millis",
+					interruptTimeout: "50 millis",
+					settleMargin: "50 millis",
 				}),
 			),
 			Layer.provide(Domain.InMemory),

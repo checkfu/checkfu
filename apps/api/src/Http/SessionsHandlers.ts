@@ -47,16 +47,18 @@ import {
 } from "./HttpHelpers.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
-export const DEFAULT_SSE_KEEPALIVE_MS = 15_000
-export const DEFAULT_SSE_MAX_CONNECTION_MS = 240_000
+export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
+export const DEFAULT_SSE_MAX_CONNECTION_DURATION: Duration.Input = "4 minutes"
 
-export const SseKeepaliveMs = Context.Reference<number>("@checkfu/api/SseKeepaliveMs", {
-	defaultValue: () => DEFAULT_SSE_KEEPALIVE_MS,
-})
+export const SseKeepaliveInterval = Context.Reference<Duration.Input>(
+	"@checkfu/api/SseKeepaliveInterval",
+	{ defaultValue: () => DEFAULT_SSE_KEEPALIVE_INTERVAL },
+)
 
-export const SseMaxConnectionMs = Context.Reference<number>("@checkfu/api/SseMaxConnectionMs", {
-	defaultValue: () => DEFAULT_SSE_MAX_CONNECTION_MS,
-})
+export const SseMaxConnectionDuration = Context.Reference<Duration.Input>(
+	"@checkfu/api/SseMaxConnectionDuration",
+	{ defaultValue: () => DEFAULT_SSE_MAX_CONNECTION_DURATION },
+)
 
 export const SessionReadWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/SessionReadWaitTimeout",
@@ -227,8 +229,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sessionViews = yield* SessionView
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
-		const sseKeepaliveMs = yield* SseKeepaliveMs
-		const sseMaxConnectionMs = yield* SseMaxConnectionMs
+		const sseKeepaliveInterval = yield* SseKeepaliveInterval
+		const sseMaxConnectionDuration = yield* SseMaxConnectionDuration
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -621,9 +623,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								data: encodeSessionEventJson(payload),
 							})
 						}),
-						Stream.interruptWhen(Effect.sleep(Duration.millis(sseMaxConnectionMs))),
+						Stream.interruptWhen(Effect.sleep(sseMaxConnectionDuration)),
 					)
-					const keepalive = Stream.tick(Duration.millis(sseKeepaliveMs)).pipe(
+					const keepalive = Stream.tick(sseKeepaliveInterval).pipe(
 						Stream.drop(1),
 						Stream.as(SSE_KEEPALIVE_FRAME),
 					)

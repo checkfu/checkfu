@@ -18,6 +18,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { ClaimEventBatch, type EventBatch, EventBatchId } from "../Checkfu.model.ts"
@@ -52,9 +53,6 @@ const ERROR_STATUS_OF_REJECTION: Readonly<Record<number, HandlerErrorStatus>> = 
 	409: 409,
 	429: 429,
 }
-
-export const hasTag = (err: unknown, tag: string): boolean =>
-	typeof err === "object" && err !== null && "_tag" in err && err._tag === tag
 
 type ApiErrorLike = Omit<HandlerError, "request_id"> & { readonly request_id?: unknown }
 
@@ -103,7 +101,7 @@ export const toApiError = (err: unknown, request_id: RequestId): HandlerError =>
 			request_id,
 		)
 	}
-	if (hasTag(err, "ConsistencyTimeout") || hasTag(err, "WaitTimeout")) {
+	if (Predicate.isTagged(err, "ConsistencyTimeout") || Predicate.isTagged(err, "WaitTimeout")) {
 		return apiError(503, "Timed out waiting for view consistency.", request_id)
 	}
 	return apiError(500, "Internal server error.", request_id)
@@ -171,7 +169,8 @@ export const orPending =
 				}),
 			),
 			Effect.catchIf(
-				(err) => hasTag(err, "ConsistencyTimeout") || hasTag(err, "WaitTimeout"),
+				(err) =>
+					Predicate.isTagged(err, "ConsistencyTimeout") || Predicate.isTagged(err, "WaitTimeout"),
 				() => Effect.succeed({ id, type, pending: true as const }),
 			),
 		)
@@ -182,10 +181,7 @@ export const bestEffortAfterCommit = <A, E, R>(
 	read.pipe(
 		Effect.asVoid,
 		Effect.catchDefect((defect) => Effect.logError("Read after commit failed", defect)),
-		Effect.catchIf(
-			(err) => hasTag(err, "ConsistencyTimeout"),
-			() => Effect.void,
-		),
+		Effect.catchIf(Predicate.isTagged("ConsistencyTimeout"), () => Effect.void),
 	)
 
 type SettledFailure<E> =
@@ -312,7 +308,7 @@ export const AuthenticationLive = Layer.effect(
 	Authentication,
 	Effect.gen(function* () {
 		const mac = yield* Mac.Mac
-		const secret = yield* optionalSecret("CHECKFU_API_KEY")
+		const secret = yield* optionalSecret("CHECKFU_API_KEY").pipe(Effect.orDie)
 		const configured = secret === null ? null : yield* prepareConfiguredCredential(mac, secret)
 		const guard = <A, E, R>(
 			handler: Effect.Effect<A, E, R>,

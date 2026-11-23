@@ -14,7 +14,6 @@ import {
 import { Session } from "@checkfu/sessions/Session/Session.aggregate"
 import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import * as Context from "effect/Context"
-import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Url from "effect/http/Url"
@@ -22,6 +21,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schedule from "effect/Schedule"
+import * as Schema from "effect/Schema"
 import {
 	PI_SEED_MAX_CHARS,
 	PI_SEED_MAX_MESSAGES,
@@ -42,9 +42,10 @@ import {
 } from "./PiModels.ts"
 import type { PiTurnOutcome } from "./PiRefusals.ts"
 
-export class HarnessCallFailed extends Data.TaggedError("HarnessCallFailed")<{
-	readonly cause: unknown
-}> {}
+export class HarnessCallFailed extends Schema.TaggedError<
+	HarnessCallFailed,
+	{ readonly brand: unique symbol }
+>()("HarnessCallFailed", { cause: Schema.Unknown }) {}
 
 export interface PiTurnExecutorService {
 	readonly recoverTurn: (
@@ -63,15 +64,15 @@ export interface PiTurnExecutorService {
 
 export const HarnessLimits = Context.Reference<{
 	readonly attempts: number
-	readonly baseDelayMs: number
-	readonly interruptTimeoutMs: number
-	readonly settleMarginMs: number
+	readonly baseDelay: Duration.Input
+	readonly interruptTimeout: Duration.Input
+	readonly settleMargin: Duration.Input
 }>("@checkfu/api/HarnessLimits", {
 	defaultValue: () => ({
 		attempts: 6,
-		baseDelayMs: 500,
-		interruptTimeoutMs: 30_000,
-		settleMarginMs: 60_000,
+		baseDelay: "500 millis",
+		interruptTimeout: "30 seconds",
+		settleMargin: "1 minute",
 	}),
 })
 
@@ -80,15 +81,15 @@ export const conversationName = (sessionId: string, generation: number): string 
 
 const withRetry = <A>(call: Effect.Effect<A, HarnessCallFailed>) =>
 	Effect.gen(function* () {
-		const { attempts, baseDelayMs } = yield* HarnessLimits
+		const { attempts, baseDelay } = yield* HarnessLimits
 		return yield* Effect.retry(call, {
 			times: attempts - 1,
-			schedule: Schedule.exponential(Duration.millis(baseDelayMs)),
+			schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
 		})
 	})
 
 export class PiTurnExecutor extends Context.Service<PiTurnExecutor, PiTurnExecutorService>()(
-	"PiTurnExecutor",
+	"@checkfu/api/PiTurnExecutor",
 ) {}
 
 export const AgentVersionLookupTimeout = Context.Reference<Duration.Input>(
@@ -482,7 +483,11 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 		return {
 			generate: (args) =>
 				Effect.gen(function* () {
-					const { settleMarginMs } = yield* HarnessLimits
+					const { settleMargin } = yield* HarnessLimits
+					const settleTimeout = Duration.sum(
+						Duration.millis(DEFAULT_MODEL_TIMEOUT_MS),
+						Duration.fromInputUnsafe(settleMargin),
+					)
 					const conversation = conversationName(args.session_id, args.generation)
 					const operationId = turnOperationId(args.turn)
 
@@ -491,23 +496,24 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 					// after a RunTurn restart always records Pi's actual outcome instead of
 					// diverging from Pi's live conversation history.
 					const recovered = yield* withRetry(executor.recoverTurn(conversation, operationId)).pipe(
-						Effect.catchTag("HarnessCallFailed", (error) =>
-							Effect.andThen(
-								Effect.logError("Harness unreachable", conversation, error.cause),
-								Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
-							),
+						Effect.tapError((error) =>
+							Effect.logError("Harness unreachable", conversation, error.cause),
 						),
-						Effect.timeoutOption(Duration.millis(DEFAULT_MODEL_TIMEOUT_MS + settleMarginMs)),
+						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+						Effect.timeoutOrElse({
+							duration: settleTimeout,
+							orElse: () =>
+								Effect.andThen(
+									Effect.logError("Harness did not settle the turn in time", conversation),
+									Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
+								),
+						}),
 					)
-					if (Option.isNone(recovered)) {
-						yield* Effect.logError("Harness did not settle the turn in time", conversation)
-						return yield* Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" })
-					}
-					if (recovered.value !== null) {
-						if (!recovered.value.ok) {
-							return yield* Effect.fail(recovered.value.error)
+					if (recovered !== null) {
+						if (!recovered.ok) {
+							return yield* Effect.fail(recovered.error)
 						}
-						return recovered.value.reply
+						return recovered.reply
 					}
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
@@ -560,7 +566,7 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 					const run = (seed?: PiSeed) =>
 						Effect.gen(function* () {
-							const { attempts, baseDelayMs } = yield* HarnessLimits
+							const { attempts, baseDelay } = yield* HarnessLimits
 							const request: PiTurnRequest = {
 								operationId,
 								turn: args.turn,
@@ -570,58 +576,55 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 								text: userText,
 								...(seed === undefined ? {} : { seed }),
 							}
-							let lastError: HarnessCallFailed | null = null
-							for (let attempt = 0; attempt < attempts; attempt++) {
+							const attemptCall = Effect.gen(function* () {
+								const { attempt } = yield* Schedule.CurrentMetadata
 								if (attempt > 0) {
-									yield* Effect.sleep(Duration.millis(baseDelayMs * 2 ** (attempt - 1)))
 									// After an ambiguous RPC failure, check whether Pi already admitted
 									// or settled this operation before rechecking mutable policy; if not
 									// admitted, revalidate the environment so revocations during backoff
 									// prevent dispatching the transcript under stale permissions.
-									const recoveredAttempt = yield* executor
-										.recoverTurn(conversation, operationId)
-										.pipe(
-											Effect.map((outcome) => ({ ok: true as const, outcome })),
-											Effect.catchTag("HarnessCallFailed", (error) =>
-												Effect.succeed({ ok: false as const, error }),
-											),
-										)
-									if (!recoveredAttempt.ok) {
-										lastError = recoveredAttempt.error
-										continue
-									}
-									if (recoveredAttempt.outcome !== null) return recoveredAttempt.outcome
+									const recoveredAttempt = yield* executor.recoverTurn(conversation, operationId)
+									if (recoveredAttempt !== null) return recoveredAttempt
 									yield* enforceEnvironmentNetworking(
 										args.environment_id,
 										resolved.model.baseUrl,
 										lookupTimeout,
 									)
 								}
-								const attemptResult = yield* executor.runTurn(conversation, request).pipe(
-									Effect.map((outcome) => ({ ok: true as const, outcome })),
-									Effect.catchTag("HarnessCallFailed", (error) =>
-										Effect.succeed({ ok: false as const, error }),
-									),
-								)
-								if (attemptResult.ok) return attemptResult.outcome
-								lastError = attemptResult.error
+								return yield* executor.runTurn(conversation, request)
+							})
+							const finalRecoveryProbe = (initialLastError?: HarnessCallFailed) =>
+								Effect.gen(function* () {
+									// Perform one bounded read-only recovery probe after the final failed
+									// submission so a saved reply whose RPC receipt was lost is still
+									// recovered instead of abandoning the turn and advancing generation.
+									yield* Effect.sleep(baseDelay)
+									const finalProbe = yield* Effect.result(
+										executor.recoverTurn(conversation, operationId),
+									)
+									if (Result.isSuccess(finalProbe) && finalProbe.success !== null) {
+										return finalProbe.success
+									}
+									const finalError = Result.isFailure(finalProbe)
+										? finalProbe.failure
+										: initialLastError
+									yield* Effect.logError("Harness unreachable", conversation, finalError?.cause)
+									return yield* Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" })
+								})
+							if (attempts <= 0) {
+								return yield* finalRecoveryProbe()
 							}
-							// Perform one bounded read-only recovery probe after the final failed
-							// submission so a saved reply whose RPC receipt was lost is still
-							// recovered instead of abandoning the turn and advancing generation.
-							yield* Effect.sleep(Duration.millis(baseDelayMs))
-							const finalRecovered = yield* executor.recoverTurn(conversation, operationId).pipe(
-								Effect.catchTag("HarnessCallFailed", (error) => {
-									lastError = error
-									return Effect.succeed(null)
+							return yield* attemptCall.pipe(
+								Effect.retry({
+									times: attempts - 1,
+									while: Schema.is(HarnessCallFailed),
+									schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
 								}),
+								Effect.catchTag("HarnessCallFailed", finalRecoveryProbe),
 							)
-							if (finalRecovered !== null) return finalRecovered
-							yield* Effect.logError("Harness unreachable", conversation, lastError?.cause)
-							return yield* Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" })
 						})
 
-					const settled = yield* Effect.gen(function* () {
+					const outcome = yield* Effect.gen(function* () {
 						const first = yield* run()
 						if (first !== "history_required") return first
 						const { messages, trimmed } = yield* messagesBeforeTurn(args.session_id, args.turn, {
@@ -635,12 +638,16 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 							lookupTimeout,
 						)
 						return yield* run({ api: resolved.model.api, messages, trimmed })
-					}).pipe(Effect.timeoutOption(Duration.millis(DEFAULT_MODEL_TIMEOUT_MS + settleMarginMs)))
-					if (Option.isNone(settled)) {
-						yield* Effect.logError("Harness did not settle the turn in time", conversation)
-						return yield* Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" })
-					}
-					const outcome = settled.value
+					}).pipe(
+						Effect.timeoutOrElse({
+							duration: settleTimeout,
+							orElse: () =>
+								Effect.andThen(
+									Effect.logError("Harness did not settle the turn in time", conversation),
+									Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
+								),
+						}),
+					)
 					if (outcome === "history_required") {
 						return yield* Effect.fail(HISTORY_UNAVAILABLE)
 					}
@@ -652,20 +659,18 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 				}),
 			interrupt: (args) =>
 				Effect.gen(function* () {
-					const { interruptTimeoutMs } = yield* HarnessLimits
+					const { interruptTimeout } = yield* HarnessLimits
 					yield* withRetry(
 						executor.abortTurn(
 							conversationName(args.session_id, args.generation),
 							turnOperationId(args.turn),
 						),
-					).pipe(Effect.timeout(Duration.millis(interruptTimeoutMs)))
+					).pipe(Effect.timeout(interruptTimeout))
 				}).pipe(
-					Effect.catch((error) =>
-						Effect.andThen(
-							Effect.logError("Interrupt not delivered to the harness", error),
-							Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
-						),
+					Effect.tapError((error) =>
+						Effect.logError("Interrupt not delivered to the harness", error),
 					),
+					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 				),
 		}
 	}),
