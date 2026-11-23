@@ -132,13 +132,8 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 			].some((ok) => ok)
 		},
 	},
-	reply: (states) => {
-		if (states.agent.status !== "active") {
-			throw new Error("Unreachable: agent must be active after UpdateAgent")
-		}
-		return {
-			version: states.agent.version,
-			version_id: AgentVersionId.make(states.agent.current_version_id),
-		}
-	},
+	reply: (states) => ({
+		version: states.agent.version,
+		version_id: AgentVersionId.make(states.agent.current_version_id, { disableChecks: true }),
+	}),
 }) {}
