@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { EnvironmentConfig, NonNegativeInt } from "./EnvironmentTypes.ts"
+import { EnvironmentConfig, NonNegativeInt, sameNetworkingFlags } from "./EnvironmentTypes.ts"
 import { ArchiveEnvironment, EnvironmentArchived } from "./ArchiveEnvironment.command.ts"
 import {
 	CreateEnvironment,
@@ -76,10 +76,12 @@ export class Environment extends Domain.Aggregate("Environment", {
 						: command.changes.description),
 				after.config !== null &&
 					before.config !== null &&
-					after.config.networking.type ===
-						(command.changes.config === undefined
-							? before.config.networking.type
-							: command.changes.config.networking.type),
+					sameNetworkingFlags(
+						after.config.networking,
+						command.changes.config === undefined
+							? before.config.networking
+							: command.changes.config.networking,
+					),
 			].every((ok) => ok),
 		CreatedEnvironmentNeverReturnsToUninitialized: ({ before, after }) =>
 			[before.status === "", after.status !== ""].some((ok) => ok),

@@ -3,6 +3,7 @@ import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import { Checkfu } from "../src/Checkfu.model.ts"
 import { Environments, EnvironmentsApi } from "../src/Environments.model.ts"
 
 const story = Story.make(Environments)
@@ -50,4 +51,50 @@ describe("Environments Z3 formal verification", () => {
 			}).pipe(Effect.provide(NodeServices.layer)),
 		120_000,
 	)
+
+	it("tells a projected limited config apart from the aggregate's by hosts and by each flag", () => {
+		const limited = (
+			allow_mcp_servers: boolean,
+			allow_package_managers: boolean,
+			allowed_hosts: ReadonlyArray<string>,
+		) => ({
+			type: "cloud" as const,
+			networking: {
+				type: "limited" as const,
+				allow_mcp_servers,
+				allow_package_managers,
+				allowed_hosts,
+			},
+		})
+		const committed = limited(false, true, ["api.openai.com", "registry.npmjs.org"])
+		const world = (projected: ReturnType<typeof limited>) => ({
+			Environment: [
+				{
+					id: "env_1",
+					state: {
+						status: "active",
+						version: 2,
+						name: "Env",
+						description: null,
+						config: committed,
+					},
+				},
+			],
+			EnvironmentView: [{ id: "env_1", state: { description: null, config: projected } }],
+		})
+		const cases = [
+			{ projected: committed, matches: true },
+			{ projected: limited(false, true, ["api.openai.com", "example.com"]), matches: false },
+			{ projected: limited(false, true, ["api.openai.com"]), matches: false },
+			{ projected: limited(true, true, committed.networking.allowed_hosts), matches: false },
+			{ projected: limited(false, false, committed.networking.allowed_hosts), matches: false },
+		]
+		const verdicts = [Environments.invariants, Checkfu.invariants].map((invariants) =>
+			Object.entries(invariants)
+				.filter(([name]) => name === "EnvironmentViewConfigMatchesEnvironment")
+				.map(([, rule]) => cases.map(({ projected }) => rule(world(projected) as never))),
+		)
+		const expected = cases.map(({ matches }) => matches)
+		expect(verdicts).toEqual([[expected], [expected]])
+	})
 })

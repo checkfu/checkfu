@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { Environment } from "./Environment/Environment.aggregate.ts"
+import { sameNetworking } from "./Environment/EnvironmentTypes.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 
 export class Environments extends Domain.Model("Environments", {
@@ -38,7 +39,7 @@ export class Environments extends Domain.Model("Environments", {
 				return [
 					view.state.description === e.state.description,
 					e.state.config !== null &&
-						view.state.config.networking.type === e.state.config.networking.type,
+						sameNetworking(view.state.config.networking, e.state.config.networking),
 				].every((ok) => ok)
 			}),
 	},

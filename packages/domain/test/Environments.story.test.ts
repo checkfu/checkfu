@@ -281,6 +281,80 @@ describe("Environments", () => {
 		)
 	})
 
+	it.effect("replaces one limited networking config with another, hosts and flags included", () => {
+		const env = Environment.ref("env_limited")
+		const widened = {
+			type: "cloud" as const,
+			networking: {
+				type: "limited" as const,
+				allow_mcp_servers: true,
+				allow_package_managers: false,
+				allowed_hosts: ["api.anthropic.com", "registry.npmjs.org"],
+			},
+		}
+		return story(
+			Story.clock(t0),
+			Story.when(
+				new CreateEnvironment({
+					environment_id: env.id,
+					name: "Locked Down",
+					description: null,
+					config: limitedConfig,
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentCreated({
+					version: 1,
+					name: "Locked Down",
+					description: null,
+					config: limitedConfig,
+				}),
+			),
+			Story.replied({ version: 1 }),
+			Story.clock(t1),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 1,
+					changes: { config: widened },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 2,
+					name: "Locked Down",
+					description: null,
+					config: widened,
+				}),
+			),
+			Story.replied({ version: 2 }),
+			Story.state(env, { status: "active", version: 2, config: widened }),
+			Story.view(EnvironmentView, env, { version: 2, config: widened }),
+			Story.clock(t2),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 2,
+					changes: { name: "Renamed" },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 3,
+					name: "Renamed",
+					description: null,
+					config: widened,
+				}),
+			),
+			Story.replied({ version: 3 }),
+			Story.state(env, { status: "active", version: 3, name: "Renamed", config: widened }),
+			Story.view(EnvironmentView, env, { version: 3, name: "Renamed", config: widened }),
+		)
+	})
+
 	it.effect("refuses a partial update of a missing, stale, archived or deleted environment", () => {
 		const missing = Environment.ref("env_partial_missing")
 		const env = Environment.ref("env_partial_refused")

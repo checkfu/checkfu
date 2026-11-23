@@ -7,6 +7,7 @@ import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
+import { sameNetworking } from "./Environment/EnvironmentTypes.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
@@ -238,7 +239,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 				return [
 					view.state.description === e.state.description,
 					e.state.config !== null &&
-						view.state.config.networking.type === e.state.config.networking.type,
+						sameNetworking(view.state.config.networking, e.state.config.networking),
 				].every((ok) => ok)
 			}),
 	},

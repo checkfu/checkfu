@@ -27,6 +27,20 @@ export const EnvironmentNetworking = Schema.Union([
 ])
 export type EnvironmentNetworking = typeof EnvironmentNetworking.Type
 
+export const sameNetworkingFlags = (a: EnvironmentNetworking, b: EnvironmentNetworking): boolean =>
+	a.type === "limited"
+		? b.type === "limited" &&
+			a.allow_mcp_servers === b.allow_mcp_servers &&
+			a.allow_package_managers === b.allow_package_managers
+		: b.type === "unrestricted"
+
+export const sameNetworking = (a: EnvironmentNetworking, b: EnvironmentNetworking): boolean =>
+	sameNetworkingFlags(a, b) &&
+	(a.type !== "limited" ||
+		b.type !== "limited" ||
+		(a.allowed_hosts.length === b.allowed_hosts.length &&
+			a.allowed_hosts.every((host, index) => host === b.allowed_hosts[index])))
+
 export const EnvironmentConfig = Schema.Struct({
 	type: Schema.Literal("cloud"),
 	networking: EnvironmentNetworking,

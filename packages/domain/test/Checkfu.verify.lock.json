@@ -244,11 +244,11 @@
 			},
 			"Environment.UpdateKeepsWhatItDoesNotName": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateEnvironment\" ||\n\t\t\t[\n\t\t\t\tafter.name === (command.changes.name === undefined ? before.name : command.changes.name),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.changes.description === undefined\n\t\t\t\t\t\t? before.description\n\t\t\t\t\t\t: command.changes.description),\n\t\t\t\tafter.config !== null &&\n\t\t\t\t\tbefore.config !== null &&\n\t\t\t\t\tafter.config.networking.type ===\n\t\t\t\t\t\t(command.changes.config === undefined\n\t\t\t\t\t\t\t? before.config.networking.type\n\t\t\t\t\t\t\t: command.changes.config.networking.type),\n\t\t\t].every((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateEnvironment\" ||\n\t\t\t[\n\t\t\t\tafter.name === (command.changes.name === undefined ? before.name : command.changes.name),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.changes.description === undefined\n\t\t\t\t\t\t? before.description\n\t\t\t\t\t\t: command.changes.description),\n\t\t\t\tafter.config !== null &&\n\t\t\t\t\tbefore.config !== null &&\n\t\t\t\t\tsameNetworkingFlags(\n\t\t\t\t\t\tafter.config.networking,\n\t\t\t\t\t\tcommand.changes.config === undefined\n\t\t\t\t\t\t\t? before.config.networking\n\t\t\t\t\t\t\t: command.changes.config.networking,\n\t\t\t\t\t),\n\t\t\t].every((ok) => ok)"
 			},
 			"Checkfu.EnvironmentViewConfigMatchesEnvironment": {
 				"kind": "model invariant",
-				"source": "(m) =>\n\t\t\tm.Environment.every((e) => {\n\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\treturn [\n\t\t\t\t\tview.state.description === e.state.description,\n\t\t\t\t\te.state.config !== null &&\n\t\t\t\t\t\tview.state.config.networking.type === e.state.config.networking.type,\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
+				"source": "(m) =>\n\t\t\tm.Environment.every((e) => {\n\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\treturn [\n\t\t\t\t\tview.state.description === e.state.description,\n\t\t\t\t\te.state.config !== null &&\n\t\t\t\t\t\tsameNetworking(view.state.config.networking, e.state.config.networking),\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
 			}
 		}
 	}
