@@ -108,6 +108,10 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 
 Every session has a durable workspace: a filesystem that lasts for the whole session and survives restarts. The agent works in it with `read`, `ls`, `find`, `grep`, `write`, `edit` and `delete` tools, starting from `/workspace`. The workspace runs in the harness Worker, beside the session object whose tools use it, and the API reaches it only through that Worker. It is discarded when the session terminates.
 
+## Scripts
+
+The agent can also write a JavaScript script that calls its tools (`await tools.read({ ... })`) with the `codemode` tool, so a chain of calls costs one model round trip. Scripts run in a sandbox with no network, files or timers, hosted by a second Worker (`CodemodeSandboxWorker`, `http://localhost:1340` under `bun run dev`) so a busy script cannot stall its session. A script that computes without calling a tool is stopped after about ten seconds of CPU, and one that waits is stopped after two minutes unless it asks for up to five. A script that was cut off by a restart resumes without repeating the calls it finished.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

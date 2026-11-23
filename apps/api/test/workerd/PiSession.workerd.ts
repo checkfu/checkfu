@@ -651,6 +651,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			"write",
 			"edit",
 			"delete",
+			"codemode",
 		])
 		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
 
@@ -713,6 +714,82 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
 	}, 60_000)
+
+	it("runs a script that calls the workspace tools", async () => {
+		const script = [
+			'await tools.write({ path: "/workspace/notes/script.txt", content: "MANGO-3" });',
+			'const text = await tools.read({ path: "/workspace/notes/script.txt" });',
+			"return text;",
+		].join("\n")
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			if (req.lastUserText === "Run the script.") {
+				return output === undefined
+					? { kind: "tool_call", name: "codemode", arguments: { code: script } }
+					: { kind: "reply", text: `The script returned: ${output}` }
+			}
+			return output === undefined
+				? { kind: "tool_call", name: "read", arguments: { path: "/workspace/notes/script.txt" } }
+				: { kind: "reply", text: `The file says: ${output}` }
+		})
+
+		const session = await createSession()
+		const send = (text: string) =>
+			apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+
+		expect((await send("Run the script.")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+		expect((await send("What is in the script file?")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+
+		const events = await listAllEvents(session.id)
+		const [ran, read] = events.filter((e) => e.type === "agent.tool_use")
+		expect(ran).toMatchObject({ name: "codemode", input: { code: script } })
+		expect(read).toMatchObject({ name: "read" })
+		const [ranResult, readResult] = events.filter((e) => e.type === "agent.tool_result")
+		expect(ranResult).toMatchObject({ tool_use_id: ran?.tool_use_id, is_error: false })
+		expect(ranResult?.content?.map((block) => block.text).join("")).toContain("MANGO-3")
+		expect(readResult?.content?.map((block) => block.text).join("")).toContain("MANGO-3")
+		const replies = events.filter((e) => e.type === "agent.message").map((e) => e.content)
+		expect(replies[0]?.[0]?.text).toContain("MANGO-3")
+		expect(replies[1]?.[0]?.text).toContain("MANGO-3")
+	}, 60_000)
+
+	it("ends a script that never yields and answers the next turn", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			if (req.lastUserText === "Spin forever.") {
+				return output === undefined
+					? { kind: "tool_call", name: "codemode", arguments: { code: "while (true) {}" } }
+					: { kind: "reply", text: "The script did not finish." }
+			}
+			return { kind: "reply", text: "Still here." }
+		})
+
+		const session = await createSession()
+		const send = (text: string) =>
+			apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+
+		expect((await send("Spin forever.")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 60_000)
+		expect((await send("Are you there?")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+
+		const events = await listAllEvents(session.id)
+		const [result] = events.filter((e) => e.type === "agent.tool_result")
+		expect(result?.is_error).toBe(true)
+		expect(result?.content?.map((block) => block.text).join("")).toContain("timed out")
+		expect(events.filter((e) => e.type === "agent.message").map((e) => e.content)).toEqual([
+			[{ type: "text", text: "The script did not finish." }],
+			[{ type: "text", text: "Still here." }],
+		])
+	}, 90_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
