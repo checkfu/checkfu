@@ -188,4 +188,42 @@ describe("versionedSnapshot", () => {
 			}),
 		).toThrow("Duplicate snapshot version 1")
 	})
+
+	it("rejects a migration chain with a missing middle version", () => {
+		expect(() =>
+			versionedSnapshot({
+				current: 4 as const,
+				schema: V4,
+				previous: [makeV1Step(), makeV3Step()],
+			}),
+		).toThrow("must be consecutive")
+	})
+
+	it("rejects a migration chain that stops short of current", () => {
+		expect(() =>
+			versionedSnapshot({
+				current: 4 as const,
+				schema: V4,
+				previous: [makeV1Step(), makeV2Step()],
+			}),
+		).toThrow("must be consecutive")
+	})
+
+	it("allows dropping the oldest versions from the chain", () => {
+		const codec = versionedSnapshot({
+			current: 4 as const,
+			schema: V4,
+			previous: [makeV2Step(), makeV3Step()],
+		})
+		const decode = Schema.decodeUnknownSync(codec)
+		const decodeExit = Schema.decodeUnknownExit(codec)
+
+		expect(decode({ schema_version: 2, state: { count: 4, label: "four" } })).toEqual({
+			count: 4,
+			label: "four",
+			active: true,
+			tier: "pro",
+		})
+		expect(Exit.isFailure(decodeExit({ schema_version: 1, state: { count: 4 } }))).toBe(true)
+	})
 })
