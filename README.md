@@ -59,3 +59,4 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
 - `bun run deploy` — deploy to your default Cloudflare stage
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy
+  - The production stack refuses to evaluate until that baseline is cut and committed, so `alchemy deploy` and `alchemy logs` with `--stage production` both need it. `alchemy destroy` does not.
