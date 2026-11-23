@@ -33,6 +33,7 @@ export interface PiDurableBackend {
 	readonly isCancelled: (operationId: string) => boolean
 	readonly beginUsage: (
 		operationId: string,
+		turn: number,
 		finalizedPrevious?: string,
 	) => Promise<BeginTurnUsageResult>
 	readonly settleUsage: (operationId: string) => Promise<ModelUsage>
@@ -175,8 +176,8 @@ export const readUnansweredSubmissionFromStorage = async (
 /**
  * Replaces an error-stopped refusal `AssistantEntry` in Pi's live context with
  * a `stopReason: "stop"` entry carrying the published refusal text. Because Pi
- * excludes `stopReason: "error"` entries from model context, this keeps retained
- * Pi roots consistent with history rebuilt from Checkfu's session log.
+ * excludes `stopReason: "error"` entries from model context, this keeps the
+ * conversation consistent with the refusal Checkfu published to the session.
  */
 export const restoreRefusalEntryInStorage = async (
 	pi: Harness,
@@ -209,9 +210,9 @@ export const restoreRefusalEntryInStorage = async (
 
 /**
  * Omits a non-committed turn's placed user (and, if present, answer) entries
- * from Pi's live model context so interrupted and failed turns match history
- * rebuilt from Checkfu's session log regardless of whether the interrupt or
- * failure landed before or after Pi placed the user entry.
+ * from Pi's live model context, so the model does not see a prompt the session
+ * records as interrupted or failed, whether the interrupt or failure landed
+ * before or after Pi placed the user entry.
  */
 export const omitTurnEntriesFromStorage = async (
 	pi: Harness,
@@ -373,7 +374,14 @@ const admitPiTurn = (
 								return false
 							}
 							while (true) {
-								const turnState = await backend.beginUsage(operationId, finalizedPrevious)
+								const turnState = await backend.beginUsage(
+									operationId,
+									request.turn,
+									finalizedPrevious,
+								)
+								if (turnState.status === "stale") {
+									return false
+								}
 								if (turnState.status === "waiting") {
 									return { waitingFor: turnState.operationId }
 								}

@@ -150,6 +150,8 @@ function registerPiDocFamily<T extends JsonObject, I extends JsonValue>(
 export const ACTIVE_USAGE_DOC_VERSION = 1 as const
 export const ActiveUsageState = Schema.Struct({
 	operation: Schema.NullOr(Schema.String),
+	// The newest turn this conversation has admitted. An older one arriving late is refused.
+	turn: NonNegativeInt,
 	input_tokens: NonNegativeInt,
 	output_tokens: NonNegativeInt,
 })
@@ -170,6 +172,7 @@ export const ActiveUsage = registerPiDoc<ActiveUsageState>(
 		scope: "session",
 		initial: (): ActiveUsageState => ({
 			operation: null,
+			turn: 0,
 			input_tokens: 0,
 			output_tokens: 0,
 		}),

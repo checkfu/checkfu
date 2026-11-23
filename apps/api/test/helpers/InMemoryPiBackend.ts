@@ -39,6 +39,7 @@ export type InMemoryStorage = InstrumentedMemoryStorage
 
 class InstrumentedMemoryStorage extends MemoryStorage {
 	readonly scanEntryCalls: Array<InMemoryEntryScanCall> = []
+	readonly cancelledOps = new Set<string>()
 
 	override commit(
 		batches: Parameters<Storage["commit"]>[0],
@@ -97,7 +98,8 @@ export const createInMemoryPiDurableBackend = async (
 ): Promise<InMemoryPiDurableBackend> => {
 	const storage = object.storage ?? new InstrumentedMemoryStorage()
 	const { scanEntryCalls } = storage
-	const cancelledOps = new Set<string>()
+	// Kept with the storage, as the session object's fence table is, so it survives a reset.
+	const { cancelledOps } = storage
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
@@ -123,8 +125,8 @@ export const createInMemoryPiDurableBackend = async (
 		hasApiKey,
 		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
 		isCancelled: (operationId) => cancelledOps.has(operationId),
-		beginUsage: (operationId, finalizedPrevious) =>
-			beginTurnUsage(pi, operationId, finalizedPrevious),
+		beginUsage: (operationId, turn, finalizedPrevious) =>
+			beginTurnUsage(pi, operationId, turn, finalizedPrevious),
 		settleUsage: (operationId) => settleTurnUsage(pi, operationId),
 		hasSubmission: async (operationId) =>
 			(await storage.submissionByRequest(ROOT_CONVERSATION_ID, operationId, BACKGROUND_CONTEXT)) !==

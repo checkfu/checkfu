@@ -205,20 +205,20 @@ export const makePiDurableTestLayer = (
 				...(storage === undefined ? {} : { storage }),
 				// A reset Durable Object: the isolate and every call it was serving are gone,
 				// and a new one opens Pi over the same storage.
-				reset: Effect.suspend(() => {
-					const stale = objects.get(sessionId)
-					if (stale !== undefined) {
-						resets.push(sessionId)
-						objects.set(
-							sessionId,
-							stale.then((object) => open(sessionId, object.backend.storage)),
-						)
-					}
-					return Effect.andThen(
+				reset: Effect.andThen(
+					Effect.promise(async () => {
+						// Only the object currently serving the session is replaced.
+						const serving = await objects.get(sessionId)
+						if (serving?.gone === gone) {
+							resets.push(sessionId)
+							objects.set(sessionId, open(sessionId, serving.backend.storage))
+						}
+					}),
+					Effect.andThen(
 						Deferred.fail(gone, new HarnessCallFailed({ cause: "object reset in test" })),
 						Effect.never,
-					)
-				}),
+					),
+				),
 			},
 		)
 		return { backend, gone }

@@ -47,19 +47,25 @@ export type BeginTurnUsageResult =
 	| { readonly status: "ready" }
 	| { readonly status: "waiting"; readonly operationId: string }
 	| { readonly status: "finalize"; readonly operationId: string }
+	| { readonly status: "stale" }
 
-// If a different operation is still working, wait for it outside the admission lock.
-// If it settled after losing its RPC waiter, finalize its context cleanup before
+// A turn older than one already admitted is stale: the session moved on without it.
+// If a different operation is still working, the caller stops it outside the admission
+// lock. If it settled after losing its RPC waiter, finalize its context cleanup before
 // sealing its usage and admitting a successor.
 export const beginTurnUsage = (
 	pi: Harness,
 	operation: string,
+	turn: number,
 	finalizedPrevious?: string,
 ): Promise<BeginTurnUsageResult> =>
 	pi.commit(async (tx) => {
 		const active = await tx.doc(ActiveUsage)
 		if (active.operation === operation) {
 			return { status: "ready" as const }
+		}
+		if (turn < active.turn) {
+			return { status: "stale" as const }
 		}
 		const previousOperation = active.operation
 		const previous =
@@ -84,6 +90,7 @@ export const beginTurnUsage = (
 			await closeUsage(tx, previousOperation, active, total)
 		}
 		active.operation = operation
+		active.turn = turn
 		active.input_tokens = total.input_tokens
 		active.output_tokens = total.output_tokens
 		return { status: "ready" as const }

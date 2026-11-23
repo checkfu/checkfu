@@ -48,8 +48,8 @@ export const makePiHarnessBackend = (
 		hasApiKey: (provider) => apiKeys[provider] !== null,
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
-		beginUsage: async (operationId, finalizedPrevious) =>
-			beginTurnUsage(await harness.pi(), operationId, finalizedPrevious),
+		beginUsage: async (operationId, turn, finalizedPrevious) =>
+			beginTurnUsage(await harness.pi(), operationId, turn, finalizedPrevious),
 		settleUsage: async (operationId) => settleTurnUsage(await harness.pi(), operationId),
 		hasSubmission: async (operationId) => {
 			await lifecycle.start()

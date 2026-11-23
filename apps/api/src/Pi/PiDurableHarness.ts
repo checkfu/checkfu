@@ -187,7 +187,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							Effect.gen(function* () {
 								// Perform one bounded read-only recovery probe after the final failed
 								// submission so a saved reply whose RPC receipt was lost is still
-								// recovered instead of abandoning the turn and advancing generation.
+								// recovered instead of abandoning the turn.
 								yield* Effect.sleep(baseDelay)
 								const finalProbe = yield* Effect.result(
 									executor.recoverTurn(conversation, operationId),

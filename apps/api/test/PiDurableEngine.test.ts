@@ -1870,7 +1870,7 @@ describe("turn engine", () => {
 
 			releaseLockStep()
 			const [originalResult, recoveredResult] = await Promise.all([originalTurn, recovery])
-			expect(originalResult).not.toBe("history_required")
+			expect(originalResult).toMatchObject({ ok: true })
 			expect(recoveredResult).not.toBeNull()
 			expect(recoveredResult?.ok ? recoveredResult.reply.text : null).toBe(
 				"Committed after disconnect",
@@ -2366,4 +2366,55 @@ describe("turn engine", () => {
 			error: { _tag: "TurnInterrupted" },
 		})
 	}, 20_000)
+
+	it("refuses a turn older than one the conversation already admitted, without touching the newer one", async () => {
+		const prompts: Array<string> = []
+		let releaseSecond: () => void = () => undefined
+		const secondHeld = new Promise<void>((resolve) => {
+			releaseSecond = resolve
+		})
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				prompts.push(prompt)
+				if (prompt === "second") {
+					await secondHeld
+				}
+				return makeAssistantReply(model, null, `Echo: ${prompt}`, 1, 1)
+			}),
+		)
+		const turn = (number: number, text: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+		})
+		const interrupted = { ok: false, error: { _tag: "TurnInterrupted" } }
+		try {
+			// Turn 1 never reached Pi; the session moved on and turn 2 is running.
+			const second = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second")))
+			while (prompts.length === 0) {
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 5)
+				})
+			}
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(1, "late")))).toMatchObject(
+				interrupted,
+			)
+			expect(backend.isCancelled("turn:2")).toBe(false)
+			releaseSecond()
+			expect(await second).toMatchObject({ ok: true, reply: { text: "Echo: second" } })
+
+			// The same late turn after turn 2 settled is still refused, and never reaches the model.
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(1, "late")))).toMatchObject(
+				interrupted,
+			)
+			expect(prompts).toEqual(["second"])
+		} finally {
+			releaseSecond()
+			await backend.close()
+		}
+	})
 })
