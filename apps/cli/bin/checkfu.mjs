@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// Trust boundary note: executing this file directly via its `#!/usr/bin/env node` shebang
-// (or a PATH-based `checkfu` shim) relies on `node` on the caller's PATH being trusted before
-// this launcher runs. In an untrusted working directory where PATH may contain empty, relative,
-// or project-local entries, invoke this launcher with a trusted absolute Node binary path
-// (for example `/usr/bin/node apps/cli/bin/checkfu.mjs ...`).
+// Trust boundary note:
+// - Executing via `#!/usr/bin/env node` (or a PATH-based `checkfu` shim) relies on both
+//   `checkfu` and `node` on the caller's PATH resolving to trusted installations before this
+//   launcher runs.
+// - In an untrusted checkout with CHECKFU_API_KEY exported (or a PATH that may include empty,
+//   relative, or checkout-local entries), invoke an independently installed launcher using
+//   absolute paths for BOTH Node and `checkfu.mjs` (for example
+//   `/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs ...`).
 import { spawn } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { dirname, resolve } from "node:path"
@@ -18,7 +21,7 @@ const bunExecutable = resolveBunExecutable()
 
 if (bunExecutable === null) {
 	process.stderr.write(
-		"Error: Could not find a trusted Bun executable on PATH or in standard Bun install directories.\n",
+		"Error: Could not find a trusted Bun executable in standard installation directories (PATH entries outside trusted installation roots and checkout-local directories are ignored). Install Bun to ~/.bun/bin (or a standard system/package-manager directory), or set BUN_INSTALL or CHECKFU_BUN_PATH to a trusted absolute installation outside the current checkout.\n",
 	)
 	process.exit(1)
 }

@@ -20,6 +20,8 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
+import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
+import { createLauncherSigintBridge } from "../bin/sigint-bridge.mjs"
 import { makeSigintController } from "../src/Signals.ts"
 import { makeTestServer } from "./helpers/CliHarness.ts"
 
@@ -2862,7 +2864,8 @@ describe("CLI sessions:events and sessions connect", () => {
 		const binScript = readFileSync(new URL("../bin/checkfu.mjs", import.meta.url), "utf8")
 		const cliBunfig = readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")
 		expect(readme).toContain("node apps/cli/bin/checkfu.mjs --help")
-		expect(readme).toContain("trusted absolute Node")
+		expect(readme).toContain("trusted Checkfu source checkout")
+		expect(readme).toContain("/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs --help")
 		expect(readme).toContain("#!/usr/bin/env node")
 		expect(readme).not.toContain("apps/cli/src/main.ts")
 		expect(readme).not.toContain("bun run cli")
@@ -3287,6 +3290,257 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				expect(nonTtyStreamResult.timedOut).toBe(false)
 				expect(nonTtyStreamResult.code).toBe(130)
 				expect(nonTtyStreamResult.stdout).toContain("session.status_running")
+
+				// 4) Deterministic non-TTY readiness-handshake race test against REAL Bun + REAL main.ts:
+				//    hold `checkfu:sigint-ready` after main.ts installs `onOsSigint`, trigger `onSigint()`,
+				//    verify the real Bun child survives the OS SIGINT, then release `onReady()` and verify
+				//    the retained interrupt cancels the stream with exit code 130 and stdout EOF.
+				const trustedBun = resolveBunExecutable()
+				expect(trustedBun).not.toBeNull()
+				const bunfigPath = fileURLToPath(new URL("../bunfig.toml", import.meta.url))
+				const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
+				const handshakeResult = await new Promise<{
+					readonly survivedOsSigint: boolean
+					readonly code: number | null
+					readonly stdoutEnded: boolean
+					readonly timedOut: boolean
+				}>((resolve, reject) => {
+					const bunChild = spawn(
+						trustedBun ?? "bun",
+						[
+							"--no-env-file",
+							`--config=${bunfigPath}`,
+							mainPath,
+							"sessions:events",
+							"stream",
+							"--session-id",
+							"sess_pty",
+							"--base-url",
+							`http://127.0.0.1:${port}`,
+						],
+						{
+							cwd: repoRoot,
+							env: { ...process.env, CHECKFU_API_KEY: "ck_dummy_handshake" },
+							stdio: ["ignore", "pipe", "pipe", "ipc"],
+							serialization: "json",
+						},
+					)
+					let stdout = ""
+					let stdoutEnded = false
+					let sawReadyMsg = false
+					let sawRunningEvent = false
+					let raceTriggered = false
+					let survivedOsSigint = false
+					let timedOut = false
+					const bridge = createLauncherSigintBridge({
+						hasTerminal: false,
+						isChildAlive: () => bunChild.exitCode === null && bunChild.signalCode === null,
+						isConnected: () => bunChild.connected,
+						sendIpcSigint: () => {
+							if (
+								!bunChild.connected ||
+								bunChild.exitCode !== null ||
+								bunChild.signalCode !== null
+							) {
+								return false
+							}
+							bunChild.send({ type: "checkfu:sigint" }, () => {})
+							return true
+						},
+						forwardOsSigint: () => {
+							if (bunChild.exitCode === null && bunChild.signalCode === null) {
+								bunChild.kill("SIGINT")
+							}
+						},
+					})
+					const maybeTriggerRace = () => {
+						if (raceTriggered || !sawReadyMsg || !sawRunningEvent) {
+							return
+						}
+						raceTriggered = true
+						// main.ts has installed onOsSigint and sent checkfu:sigint-ready, but the
+						// bridge has NOT called onReady() yet — exercise the exact handshake window.
+						bridge.onSigint()
+						setTimeout(() => {
+							survivedOsSigint = bunChild.exitCode === null && bunChild.signalCode === null
+							bridge.onReady()
+						}, 120)
+					}
+					const timer = setTimeout(() => {
+						timedOut = true
+						bunChild.kill("SIGKILL")
+					}, 4500)
+					bunChild.on("message", (msg) => {
+						if (
+							typeof msg === "object" &&
+							msg !== null &&
+							"type" in msg &&
+							msg.type === "checkfu:sigint-ready"
+						) {
+							sawReadyMsg = true
+							maybeTriggerRace()
+						}
+					})
+					const bunStdout = bunChild.stdout
+					if (bunStdout === null) {
+						clearTimeout(timer)
+						bunChild.kill("SIGKILL")
+						reject(new Error("Expected piped stdout on Bun IPC child"))
+						return
+					}
+					bunStdout.setEncoding("utf8")
+					bunStdout.on("data", (chunk: string) => {
+						stdout += chunk
+						if (stdout.includes("session.status_running")) {
+							sawRunningEvent = true
+							maybeTriggerRace()
+						}
+					})
+					bunStdout.on("end", () => {
+						stdoutEnded = true
+					})
+					bunChild.on("error", (err) => {
+						clearTimeout(timer)
+						reject(err)
+					})
+					bunChild.on("close", (code) => {
+						clearTimeout(timer)
+						resolve({ survivedOsSigint, code, stdoutEnded, timedOut })
+					})
+				})
+				expect(handshakeResult.timedOut).toBe(false)
+				expect(handshakeResult.survivedOsSigint).toBe(true)
+				expect(handshakeResult.code).toBe(130)
+				expect(handshakeResult.stdoutEnded).toBe(true)
+
+				// 5) Force-killing the launcher (`SIGKILL`) must cause the Bun child to detect the
+				//    unexpected IPC disconnect, stop reconnecting, exit promptly, and close inherited
+				//    stdout/stderr pipes to EOF.
+				let streamRequestsAfterKill = 0
+				let killTriggered = false
+				const killServer = Http.createServer((req, res) => {
+					const url = new URL(req.url ?? "/", "http://127.0.0.1")
+					if (req.method === "GET" && url.pathname === "/v1/sessions/sess_kill/events/stream") {
+						if (killTriggered) {
+							streamRequestsAfterKill += 1
+						}
+						res.writeHead(200, {
+							"content-type": "text/event-stream; charset=utf-8",
+							"cache-control": "no-cache",
+						})
+						res.write(
+							'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+						)
+						openSseResponses.push(res)
+						return
+					}
+					res.writeHead(404)
+					res.end()
+				})
+				await new Promise<void>((resolve) => {
+					killServer.listen(0, "127.0.0.1", resolve)
+				})
+				try {
+					const killPort = (killServer.address() as { port: number }).port
+					const killResult = await new Promise<{
+						readonly launcherSignal: NodeJS.Signals | null
+						readonly stdoutEnded: boolean
+						readonly stderrEnded: boolean
+						readonly timedOut: boolean
+					}>((resolve, reject) => {
+						const launcher = spawn(
+							nodeExecutable,
+							[
+								"apps/cli/bin/checkfu.mjs",
+								"sessions:events",
+								"stream",
+								"--session-id",
+								"sess_kill",
+								"--base-url",
+								`http://127.0.0.1:${killPort}`,
+							],
+							{
+								cwd: repoRoot,
+								env: { ...process.env, CHECKFU_API_KEY: "ck_dummy_kill" },
+								stdio: ["ignore", "pipe", "pipe"],
+							},
+						)
+						let stdout = ""
+						let launcherExited = false
+						let launcherSignal: NodeJS.Signals | null = null
+						let stdoutEnded = false
+						let stderrEnded = false
+						let timedOut = false
+						let settled = false
+						const finish = () => {
+							if (settled) {
+								return
+							}
+							settled = true
+							clearTimeout(timer)
+							resolve({ launcherSignal, stdoutEnded, stderrEnded, timedOut })
+						}
+						const checkDone = () => {
+							if (launcherExited && stdoutEnded && stderrEnded) {
+								finish()
+							}
+						}
+						const timer = setTimeout(() => {
+							timedOut = true
+							finish()
+						}, 4000)
+						launcher.stdout.setEncoding("utf8")
+						launcher.stdout.on("data", (chunk: string) => {
+							stdout += chunk
+							if (!killTriggered && stdout.includes("session.status_running")) {
+								killTriggered = true
+								launcher.kill("SIGKILL")
+								// End the open SSE stream shortly after SIGKILL to verify Bun does NOT reconnect
+								setTimeout(() => {
+									for (const res of openSseResponses) {
+										if (!res.writableEnded) {
+											res.end()
+										}
+									}
+								}, 80)
+							}
+						})
+						launcher.stdout.on("end", () => {
+							stdoutEnded = true
+							checkDone()
+						})
+						launcher.stderr.on("data", () => {})
+						launcher.stderr.on("end", () => {
+							stderrEnded = true
+							checkDone()
+						})
+						launcher.on("exit", (_code, signal) => {
+							launcherExited = true
+							launcherSignal = signal
+							checkDone()
+						})
+						launcher.on("error", (err) => {
+							clearTimeout(timer)
+							reject(err)
+						})
+					})
+					expect(killResult.timedOut).toBe(false)
+					expect(killResult.launcherSignal).toBe("SIGKILL")
+					expect(killResult.stdoutEnded).toBe(true)
+					expect(killResult.stderrEnded).toBe(true)
+					// Pause briefly to ensure no orphaned reconnect arrives after stdout EOF
+					await new Promise<void>((resolve) => {
+						setTimeout(resolve, 150)
+					})
+					expect(streamRequestsAfterKill).toBe(0)
+				} finally {
+					killServer.closeAllConnections()
+					await new Promise<void>((resolve) => {
+						killServer.close(() => {
+							resolve()
+						})
+					})
+				}
 			} finally {
 				for (const res of openSseResponses) {
 					res.end()
@@ -3298,7 +3552,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				})
 			}
 		},
-		15_000,
+		25_000,
 	)
 
 	it("reports buffered piped input on live session termination, separates confirmed 429 rejections from unconfirmed delivery, and bounds turn bookkeeping", async () => {
@@ -4392,25 +4646,56 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
 			)
 			writeFileSync(join(untrustedDir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
-			// Plant untrusted `node` / `bun` decoys in cwd AND under `<cwd>/node_modules/.bin`
-			// (matching package-runner prepended PATH entries). Invoking checkfu.mjs through a
-			// trusted absolute Node path must never execute any cwd or project-local binary.
+			// Build an untrusted monorepo checkout with a nested workspace subdirectory (`packages/app`)
+			// and plant decoys across top-level checkout, `node_modules/.bin`, `..`-prefixed dirs, and cwd.
+			const nestedWorkDir = join(untrustedDir, "packages", "app")
 			const projectLocalBinDir = join(untrustedDir, "node_modules", ".bin")
+			const topDotDotDir = join(untrustedDir, "..sneaky")
+			const nestedDotDotDir = join(nestedWorkDir, "..evil")
+			const decoyRelativeLauncherDir = join(nestedWorkDir, "apps", "cli", "bin")
+			mkdirSync(nestedWorkDir, { recursive: true })
 			mkdirSync(projectLocalBinDir, { recursive: true })
+			mkdirSync(topDotDotDir, { recursive: true })
+			mkdirSync(nestedDotDotDir, { recursive: true })
+			mkdirSync(decoyRelativeLauncherDir, { recursive: true })
+			writeFileSync(join(untrustedDir, ".git"), "gitdir: ./.git-fake\n")
+			writeFileSync(join(untrustedDir, "package.json"), '{"name":"untrusted-root"}\n')
+			writeFileSync(join(nestedWorkDir, "package.json"), '{"name":"untrusted-app"}\n')
+			writeFileSync(
+				join(nestedWorkDir, ".env"),
+				`CHECKFU_API_KEY=ck_from_nested_dotenv\nCHECKFU_API_URL=http://127.0.0.1:${evilPort}\n`,
+			)
+			writeFileSync(
+				join(nestedWorkDir, "evil-preload.js"),
+				'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
+			)
+			writeFileSync(join(nestedWorkDir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
+			writeFileSync(
+				join(decoyRelativeLauncherDir, "checkfu.mjs"),
+				'process.stderr.write("DECOY_LAUNCHER_EXECUTED\\n"); process.exit(95);\n',
+			)
 			const fakePosixNode = join(untrustedDir, "node")
 			const fakePosixBun = join(untrustedDir, "bun")
 			const fakeLocalBinBun = join(projectLocalBinDir, "bun")
+			const fakeTopDotDotBun = join(topDotDotDir, "bun")
+			const fakeNestedDotDotBun = join(nestedDotDotDir, "bun")
 			writeFileSync(fakePosixNode, '#!/bin/sh\necho "FAKE_NODE_EXECUTED" >&2\nexit 97\n')
 			writeFileSync(fakePosixBun, '#!/bin/sh\necho "FAKE_BUN_EXECUTED" >&2\nexit 98\n')
 			writeFileSync(fakeLocalBinBun, '#!/bin/sh\necho "FAKE_LOCAL_BUN_EXECUTED" >&2\nexit 96\n')
+			writeFileSync(fakeTopDotDotBun, '#!/bin/sh\necho "FAKE_TOP_DOTDOT_BUN" >&2\nexit 94\n')
+			writeFileSync(fakeNestedDotDotBun, '#!/bin/sh\necho "FAKE_NESTED_DOTDOT_BUN" >&2\nexit 93\n')
 			if (process.platform !== "win32") {
 				chmodSync(fakePosixNode, 0o755)
 				chmodSync(fakePosixBun, 0o755)
 				chmodSync(fakeLocalBinBun, 0o755)
+				chmodSync(fakeTopDotDotBun, 0o755)
+				chmodSync(fakeNestedDotDotBun, 0o755)
 			}
 			writeFileSync(join(untrustedDir, "node.exe"), "not-a-trusted-node-executable")
 			writeFileSync(join(untrustedDir, "bun.exe"), "not-a-trusted-bun-executable")
 			writeFileSync(join(projectLocalBinDir, "bun.exe"), "not-a-trusted-bun-executable")
+			writeFileSync(join(topDotDotDir, "bun.exe"), "not-a-trusted-bun-executable")
+			writeFileSync(join(nestedDotDotDir, "bun.exe"), "not-a-trusted-bun-executable")
 			const baseEnv: Record<string, string> = {}
 			for (const [k, v] of Object.entries(process.env)) {
 				if (v !== undefined && !k.startsWith("CHECKFU_")) {
@@ -4423,20 +4708,32 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					: "PATH"
 			const poisonedPathEnv = {
 				...baseEnv,
-				[pathEnvKey]: ["", ".", untrustedDir, projectLocalBinDir, baseEnv[pathEnvKey] ?? ""].join(
-					delimiter,
-				),
+				[pathEnvKey]: [
+					"",
+					".",
+					nestedWorkDir,
+					untrustedDir,
+					projectLocalBinDir,
+					topDotDotDir,
+					nestedDotDotDir,
+					baseEnv[pathEnvKey] ?? "",
+				].join(delimiter),
 			} satisfies Record<string, string>
 			const projectLocalPathEnv = {
 				...baseEnv,
-				[pathEnvKey]: [projectLocalBinDir, baseEnv[pathEnvKey] ?? ""].join(delimiter),
+				[pathEnvKey]: [
+					projectLocalBinDir,
+					topDotDotDir,
+					nestedDotDotDir,
+					baseEnv[pathEnvKey] ?? "",
+				].join(delimiter),
 			} satisfies Record<string, string>
 
 			const runSubprocess = (
 				cmd: string,
 				args: ReadonlyArray<string>,
 				env: Record<string, string>,
-				cwd = untrustedDir,
+				cwd = nestedWorkDir,
 			) =>
 				new Promise<{
 					readonly status: number | null
@@ -4466,23 +4763,46 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				? process.execPath
 				: "node"
 
-			// 1a) Trusted absolute Node invocation (`<abs-node> apps/cli/bin/checkfu.mjs`) protects
-			//     credentials even when PATH contains empty/relative/cwd/node_modules/.bin entries
-			//     and untrusted `node`, `bun`, `.env*`, and `bunfig.toml` decoys exist in cwd
+			// 1a) Trusted absolute Node + trusted absolute Checkfu launcher protects dummy credentials
+			//     even from a nested workspace subdirectory with poisoned PATH (containing empty, `.`,
+			//     enclosing checkout root, top-level `node_modules/.bin`, and `..`-prefixed directories)
 			const launcherResult = await runSubprocess(
 				nodeExecutable,
 				[binPath, "sessions", "retrieve", "--session-id", "sess_env"],
 				{
 					...poisonedPathEnv,
-					CHECKFU_API_KEY: "ck_exported_secret",
+					CHECKFU_API_KEY: "ck_dummy_exported_secret",
 					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
 				},
 			)
 			expect(launcherResult.status).toBe(0)
 			expect(launcherResult.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(launcherResult.stderr).not.toContain("DECOY_LAUNCHER_EXECUTED")
 			expect(launcherResult.stderr).not.toContain("FAKE_NODE_EXECUTED")
 			expect(launcherResult.stderr).not.toContain("FAKE_BUN_EXECUTED")
 			expect(launcherResult.stderr).not.toContain("FAKE_LOCAL_BUN_EXECUTED")
+			expect(launcherResult.stderr).not.toContain("FAKE_TOP_DOTDOT_BUN")
+			expect(launcherResult.stderr).not.toContain("FAKE_NESTED_DOTDOT_BUN")
+			expect(legitHits).toBe(1)
+			expect(evilHits).toBe(0)
+
+			// 1a-fail-closed) Explicitly pointing CHECKFU_BUN_PATH at a checkout-local `..`-prefixed binary
+			//                 fails closed with an actionable error and never executes the decoy
+			const rejectedBunOverride = await runSubprocess(
+				nodeExecutable,
+				[binPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_BUN_PATH:
+						process.platform === "win32" ? join(topDotDotDir, "bun.exe") : fakeTopDotDotBun,
+					CHECKFU_API_KEY: "ck_dummy_exported_secret",
+					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+				},
+			)
+			expect(rejectedBunOverride.status).toBe(1)
+			expect(rejectedBunOverride.stderr).toContain("Could not find a trusted Bun executable")
+			expect(rejectedBunOverride.stderr).toContain("CHECKFU_BUN_PATH")
+			expect(rejectedBunOverride.stderr).not.toContain("FAKE_TOP_DOTDOT_BUN")
 			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 
@@ -4500,9 +4820,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			expect(evilHits).toBe(0)
 
 			// 1c) Installed/symlinked `#!/usr/bin/env node` bin invocation (on a trusted Node PATH that
-			//     still includes a package-runner-prepended `<cwd>/node_modules/.bin` containing a decoy
-			//     `bun`) resolves the pinned bunfig relative to the real launcher path, skips the
-			//     project-local Bun decoy, and routes only to the explicit --base-url ephemeral server
+			//     still includes enclosing `<checkout>/node_modules/.bin` and `..`-prefixed directories)
+			//     resolves the pinned bunfig relative to the real launcher path, skips all checkout Bun
+			//     decoys, and routes only to the explicit --base-url ephemeral server
 			const explicitUrlArgs = [
 				"sessions",
 				"retrieve",
@@ -4513,7 +4833,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			]
 			const explicitUrlEnv = {
 				...projectLocalPathEnv,
-				CHECKFU_API_KEY: "ck_exported_secret",
+				CHECKFU_API_KEY: "ck_dummy_exported_secret",
 			}
 			const installedBinResult =
 				process.platform === "win32"
@@ -4526,6 +4846,8 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			expect(installedBinResult.status).toBe(0)
 			expect(installedBinResult.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(installedBinResult.stderr).not.toContain("FAKE_LOCAL_BUN_EXECUTED")
+			expect(installedBinResult.stderr).not.toContain("FAKE_TOP_DOTDOT_BUN")
+			expect(installedBinResult.stderr).not.toContain("FAKE_NESTED_DOTDOT_BUN")
 			expect(legitHits).toBe(2)
 			expect(evilHits).toBe(0)
 

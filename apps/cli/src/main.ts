@@ -40,12 +40,13 @@ const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean =
 
 // `apps/cli/bin/checkfu.mjs` enforces `--no-env-file --config=<cli>/bunfig.toml`
 // *before* Bun starts so untrusted working-directory `.env*` and `bunfig.toml`
-// preloads can never execute (invoke via a trusted absolute Node path when PATH
-// itself may include untrusted entries). Refuse unsupported direct invocations
-// consistently rather than allowing `bun apps/cli/src/main.ts` to run in clean directories.
+// preloads can never execute (in untrusted checkouts, invoke an independently
+// installed launcher via absolute paths for both Node and `checkfu.mjs`).
+// Refuse unsupported direct invocations consistently rather than allowing
+// `bun apps/cli/src/main.ts` to run in clean directories.
 if (!launchedWithPinnedCliConfig(process.execArgv)) {
 	process.stderr.write(
-		"Error: Launch the Checkfu CLI via a trusted Node binary (for example `/path/to/node apps/cli/bin/checkfu.mjs`) or the installed `checkfu` binary on a trusted PATH so Bun starts with --no-env-file and the pinned CLI config.\n",
+		"Error: Launch the Checkfu CLI via a trusted Node binary and trusted Checkfu installation (for example `/path/to/node /path/to/checkfu/apps/cli/bin/checkfu.mjs`) or the installed `checkfu` binary on a trusted PATH so Bun starts with --no-env-file and the pinned CLI config.\n",
 	)
 	process.exit(1)
 }
@@ -68,7 +69,23 @@ const releaseStdin = () => {
 
 const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	let exitSignalCode: number | undefined
-	let launcherOwnsSigint = typeof process.send === "function" && process.connected
+	const launchedViaIpc = typeof process.send === "function"
+	let launcherOwnsSigint = launchedViaIpc && process.connected
+	let finished = false
+
+	const interruptOnLauncherLoss = () => {
+		launcherOwnsSigint = false
+		if (finished) {
+			return
+		}
+		// The launcher disappeared unexpectedly (e.g., SIGKILL from a supervisor).
+		// Interrupt the running command so long-lived streams stop reconnecting
+		// and inherited stdio pipes close promptly.
+		if (exitSignalCode === undefined) {
+			exitSignalCode = 130
+		}
+		fiber.interruptUnsafe(fiber.id)
+	}
 
 	const onSigint = () => {
 		if (sigintController.handleSigint()) {
@@ -97,7 +114,7 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	}
 
 	const onLauncherDisconnect = () => {
-		launcherOwnsSigint = false
+		interruptOnLauncherLoss()
 	}
 
 	const onSigterm = () => {
@@ -106,6 +123,7 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	}
 
 	const cleanup = () => {
+		finished = true
 		process.removeListener("SIGINT", onOsSigint)
 		process.removeListener("SIGTERM", onSigterm)
 		process.removeListener("message", onLauncherMessage)
@@ -139,13 +157,20 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 
 	process.on("SIGINT", onOsSigint)
 	process.on("SIGTERM", onSigterm)
-	if (launcherOwnsSigint) {
+	if (launchedViaIpc) {
+		if (!process.connected) {
+			interruptOnLauncherLoss()
+			return
+		}
 		process.on("message", onLauncherMessage)
 		process.on("disconnect", onLauncherDisconnect)
 		try {
-			process.send?.({ type: "checkfu:sigint-ready" })
+			const sent = process.send?.({ type: "checkfu:sigint-ready" })
+			if (sent === false) {
+				interruptOnLauncherLoss()
+			}
 		} catch {
-			launcherOwnsSigint = false
+			interruptOnLauncherLoss()
 		}
 	}
 })

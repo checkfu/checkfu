@@ -1883,22 +1883,34 @@ describe("Transform and formatOutput", () => {
 })
 
 describe("resolveBunExecutable", () => {
-	it("resolves trusted absolute Bun paths on Windows while excluding cwd, project-local trees, relative, and drive-relative entries", () => {
+	it("resolves only explicitly trusted Bun paths on Windows while excluding nested checkouts, ..-prefixed dirs, node_modules, and arbitrary PATH entries", () => {
+		const winCheckouts = new Set([
+			String.raw`c:\untrusted\repo\.git`,
+			String.raw`c:\untrusted\repo\package.json`,
+			String.raw`c:\untrusted\repo\packages\app\package.json`,
+		])
 		const winExecutables = new Set([
 			String.raw`c:\untrusted\repo\bun.exe`,
 			String.raw`c:\untrusted\repo\sub\bun.exe`,
 			String.raw`c:\untrusted\repo\node_modules\.bin\bun.exe`,
+			String.raw`c:\untrusted\repo\..sneaky\bun.exe`,
+			String.raw`c:\untrusted\repo\packages\app\bun.exe`,
+			String.raw`c:\untrusted\repo\packages\app\..evil\bun.exe`,
+			String.raw`c:\random\attacker\bun.exe`,
 			String.raw`c:\bin\bun.exe`,
 			String.raw`c:\program files\bun\bin\bun.exe`,
 		])
 		const isWinExec = (candidate: string) => winExecutables.has(candidate.toLowerCase())
+		const winExists = (target: string) => winCheckouts.has(target.toLowerCase())
 
-		// Excludes bare cwd, relative, empty, drive-relative (\bin, C:bin), explicit cwd entries,
-		// AND absolute project-local directories like <cwd>\node_modules\.bin before selecting
-		// the quoted absolute PATH entry
+		// Invoked from a nested workspace subdirectory (`C:\untrusted\repo\packages\app`):
+		// excludes bare cwd, relative, empty, drive-relative (\bin, C:bin), enclosing checkout root,
+		// top-level <checkout>\node_modules\.bin, `..`-prefixed descendant dirs (`..evil`, `..sneaky`),
+		// and arbitrary untrusted absolute PATH dirs (`C:\random\attacker`) before selecting the
+		// explicitly trusted quoted `"C:\Program Files\Bun\bin"` entry.
 		const resolved = resolveBunExecutable({
 			platform: "win32",
-			cwd: String.raw`C:\untrusted\repo`,
+			cwd: String.raw`C:\untrusted\repo\packages\app`,
 			homedir: String.raw`C:\Users\alice`,
 			env: {
 				Path: [
@@ -1913,19 +1925,24 @@ describe("resolveBunExecutable", () => {
 					"c:\\UNTRUSTED\\REPO\\",
 					String.raw`C:\untrusted\repo\..\repo`,
 					String.raw`C:\untrusted\repo\node_modules\.bin`,
+					String.raw`C:\untrusted\repo\..sneaky`,
+					String.raw`C:\untrusted\repo\packages\app\..evil`,
 					String.raw`c:\UNTRUSTED\REPO\sub`,
+					String.raw`C:\random\attacker`,
 					String.raw`"C:\Program Files\Bun\bin"`,
 				].join(";"),
 			},
 			isExecutableFile: isWinExec,
 			realpath: (target) => target,
+			pathExists: winExists,
 		})
 		expect(resolved).toBe(String.raw`C:\Program Files\Bun\bin\bun.exe`)
 
-		// Running from %USERPROFILE% excludes %USERPROFILE%\bun.exe and %USERPROFILE%\node_modules\.bin\bun.exe
-		// while still resolving the explicitly trusted %USERPROFILE%\.bun\bin\bun.exe
+		// Running from %USERPROFILE% excludes %USERPROFILE%\bun.exe, %USERPROFILE%\..evil\bun.exe,
+		// and %USERPROFILE%\node_modules\.bin\bun.exe while resolving %USERPROFILE%\.bun\bin\bun.exe
 		const homeExecutables = new Set([
 			String.raw`c:\users\alice\bun.exe`,
+			String.raw`c:\users\alice\..evil\bun.exe`,
 			String.raw`c:\users\alice\node_modules\.bin\bun.exe`,
 			String.raw`c:\users\alice\.bun\bin\bun.exe`,
 		])
@@ -1937,30 +1954,37 @@ describe("resolveBunExecutable", () => {
 				env: {
 					Path: [
 						String.raw`C:\Users\alice`,
+						String.raw`C:\Users\alice\..evil`,
 						String.raw`C:\Users\alice\node_modules\.bin`,
 						".",
 					].join(";"),
 				},
 				isExecutableFile: (candidate) => homeExecutables.has(candidate.toLowerCase()),
 				realpath: (target) => target,
+				pathExists: () => false,
 			}),
 		).toBe(String.raw`C:\Users\alice\.bun\bin\bun.exe`)
 
-		// Falls back to trusted absolute BUN_INSTALL\bin, while ignoring relative or project-local BUN_INSTALL
+		// BUN_INSTALL / CHECKFU_BUN_PATH reject checkout-local, ..-prefixed, and node_modules paths,
+		// while accepting a sibling directory outside the checkout (C:\untrusted\repo-other) and cross-drive paths
 		const installExecutables = new Set([
 			String.raw`c:\untrusted\repo\bun.exe`,
 			String.raw`c:\untrusted\repo\bin\bun.exe`,
 			String.raw`c:\untrusted\repo\.bun\bin\bun.exe`,
-			String.raw`c:\tools\bun\bin\bun.exe`,
+			String.raw`c:\untrusted\repo\..sneaky\bin\bun.exe`,
+			String.raw`c:\untrusted\repo\packages\app\..evil\bun.exe`,
+			String.raw`c:\untrusted\repo-other\bin\bun.exe`,
+			String.raw`d:\trusted-bun\bun.exe`,
 		])
 		for (const untrustedBunInstall of [
 			String.raw`C:\untrusted\repo`,
 			String.raw`C:\untrusted\repo\.bun`,
+			String.raw`C:\untrusted\repo\..sneaky`,
 		]) {
 			expect(
 				resolveBunExecutable({
 					platform: "win32",
-					cwd: String.raw`C:\untrusted\repo`,
+					cwd: String.raw`C:\untrusted\repo\packages\app`,
 					homedir: String.raw`C:\Users\alice`,
 					env: {
 						PATH: String.raw`.;C:\untrusted\repo;C:\untrusted\repo\node_modules\.bin`,
@@ -1968,51 +1992,99 @@ describe("resolveBunExecutable", () => {
 					},
 					isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
 					realpath: (target) => target,
+					pathExists: winExists,
 				}),
 			).toBeNull()
 		}
 		expect(
 			resolveBunExecutable({
 				platform: "win32",
-				cwd: String.raw`C:\untrusted\repo`,
+				cwd: String.raw`C:\untrusted\repo\packages\app`,
 				homedir: String.raw`C:\Users\alice`,
 				env: {
 					PATH: String.raw`.;C:\untrusted\repo`,
-					BUN_INSTALL: String.raw`C:\tools\bun`,
+					BUN_INSTALL: String.raw`C:\untrusted\repo-other`,
 				},
 				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
 				realpath: (target) => target,
+				pathExists: winExists,
 			}),
-		).toBe(String.raw`C:\tools\bun\bin\bun.exe`)
+		).toBe(String.raw`C:\untrusted\repo-other\bin\bun.exe`)
+
+		// Explicit CHECKFU_BUN_PATH fails closed for checkout-local ..evil paths and succeeds for cross-drive paths
+		expect(
+			resolveBunExecutable({
+				platform: "win32",
+				cwd: String.raw`C:\untrusted\repo\packages\app`,
+				homedir: String.raw`C:\Users\alice`,
+				env: {
+					PATH: String.raw`"C:\Program Files\Bun\bin"`,
+					CHECKFU_BUN_PATH: String.raw`C:\untrusted\repo\packages\app\..evil\bun.exe`,
+				},
+				isExecutableFile: (candidate) =>
+					installExecutables.has(candidate.toLowerCase()) || isWinExec(candidate),
+				realpath: (target) => target,
+				pathExists: winExists,
+			}),
+		).toBeNull()
+		expect(
+			resolveBunExecutable({
+				platform: "win32",
+				cwd: String.raw`C:\untrusted\repo\packages\app`,
+				homedir: String.raw`C:\Users\alice`,
+				env: {
+					PATH: "",
+					CHECKFU_BUN_PATH: String.raw`D:\trusted-bun\bun.exe`,
+				},
+				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
+				realpath: (target) => target,
+				pathExists: winExists,
+			}),
+		).toBe(String.raw`D:\trusted-bun\bun.exe`)
 	})
 
-	it("resolves trusted absolute Bun paths on POSIX while excluding project-local PATH entries and symlinks into the project tree", () => {
+	it("resolves only explicitly trusted Bun paths on POSIX while excluding enclosing checkouts, ..-prefixed dirs, arbitrary PATH entries, and escaping symlinks", () => {
+		const posixCheckouts = new Set([
+			"/var/folders/untrusted/.git",
+			"/private/var/folders/untrusted/.git",
+			"/var/folders/untrusted/package.json",
+			"/private/var/folders/untrusted/package.json",
+			"/var/folders/untrusted/packages/app/package.json",
+			"/private/var/folders/untrusted/packages/app/package.json",
+		])
 		const posixExecutables = new Set([
 			"/private/var/folders/untrusted/bun",
 			"/var/folders/untrusted/bun",
 			"/var/folders/untrusted/node_modules/.bin/bun",
 			"/private/var/folders/untrusted/node_modules/.bin/bun",
-			"/tmp/symlink-bin/bun",
-			"/tmp/symlink-nested-bin/bun",
-			"/opt/bun/bin/bun",
+			"/var/folders/untrusted/..sneaky/bun",
+			"/var/folders/untrusted/packages/app/..evil/bun",
+			"/tmp/random-untrusted/bin/bun",
+			"/usr/local/bin/bun",
+			"/opt/homebrew/bin/bun",
 		])
 		const posixRealpaths = new Map<string, string>([
 			["/var/folders/untrusted", "/private/var/folders/untrusted"],
 			["/private/var/folders/untrusted", "/private/var/folders/untrusted"],
+			["/var/folders/untrusted/packages/app", "/private/var/folders/untrusted/packages/app"],
 			[
 				"/var/folders/untrusted/node_modules/.bin",
 				"/private/var/folders/untrusted/node_modules/.bin",
 			],
-			["/tmp/symlink-bin", "/tmp/symlink-bin"],
-			["/tmp/symlink-bin/bun", "/private/var/folders/untrusted/bun"],
-			["/tmp/symlink-nested-bin", "/tmp/symlink-nested-bin"],
-			["/tmp/symlink-nested-bin/bun", "/private/var/folders/untrusted/node_modules/evil/bun"],
-			["/opt/bun/bin", "/opt/bun/bin"],
-			["/opt/bun/bin/bun", "/opt/bun/bin/bun"],
+			["/var/folders/untrusted/..sneaky", "/private/var/folders/untrusted/..sneaky"],
+			[
+				"/var/folders/untrusted/packages/app/..evil",
+				"/private/var/folders/untrusted/packages/app/..evil",
+			],
+			["/usr/local/bin", "/usr/local/bin"],
+			// Symlink inside a trusted bin dir that escapes into a `..`-prefixed checkout directory
+			["/usr/local/bin/bun", "/private/var/folders/untrusted/..sneaky/bun"],
+			["/opt/homebrew/bin", "/opt/homebrew/bin"],
+			["/opt/homebrew/bin/bun", "/opt/homebrew/Cellar/bun/1.4.2/bin/bun"],
 		])
 		const resolved = resolveBunExecutable({
 			platform: "darwin",
-			cwd: "/var/folders/untrusted",
+			cwd: "/var/folders/untrusted/packages/app",
 			homedir: "/Users/alice",
 			env: {
 				PATH: [
@@ -2020,22 +2092,51 @@ describe("resolveBunExecutable", () => {
 					"/private/var/folders/untrusted",
 					"/var/folders/untrusted/node_modules/.bin",
 					"/private/var/folders/untrusted/node_modules/.bin",
+					"/var/folders/untrusted/..sneaky",
+					"/var/folders/untrusted/packages/app/..evil",
+					"/tmp/random-untrusted/bin",
 					".",
 					"./bin",
-					"/tmp/symlink-bin",
-					"/tmp/symlink-nested-bin",
-					"/opt/bun/bin",
+					"/usr/local/bin",
+					"/opt/homebrew/bin",
 					"",
 				].join(":"),
 			},
 			isExecutableFile: (candidate) => posixExecutables.has(candidate),
 			realpath: (target) => posixRealpaths.get(target) ?? target,
+			pathExists: (target) => posixCheckouts.has(target),
 		})
-		expect(resolved).toBe("/opt/bun/bin/bun")
+		expect(resolved).toBe("/opt/homebrew/bin/bun")
 
-		// Running from $HOME excludes $HOME/node_modules/.bin and symlinks escaping ~/.bun into $HOME,
-		// while resolving legitimate ~/.bun/bin/bun
+		// An arbitrary absolute PATH directory (/opt/custom/bin) is NOT trusted on its own;
+		// it requires an explicit BUN_INSTALL or CHECKFU_BUN_PATH outside the checkout
+		expect(
+			resolveBunExecutable({
+				platform: "linux",
+				cwd: "/tmp/untrusted/packages/app",
+				homedir: "/home/alice",
+				env: { PATH: "/opt/custom/bin" },
+				isExecutableFile: (candidate) => candidate === "/opt/custom/bin/bun",
+				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted/.git",
+			}),
+		).toBeNull()
+		expect(
+			resolveBunExecutable({
+				platform: "linux",
+				cwd: "/tmp/untrusted/packages/app",
+				homedir: "/home/alice",
+				env: { PATH: "/opt/custom/bin", BUN_INSTALL: "/opt/custom" },
+				isExecutableFile: (candidate) => candidate === "/opt/custom/bin/bun",
+				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted/.git",
+			}),
+		).toBe("/opt/custom/bin/bun")
+
+		// Running from $HOME excludes $HOME/..evil, $HOME/node_modules/.bin, and symlinks escaping
+		// ~/.bun into $HOME, while resolving legitimate ~/.bun/bin/bun
 		const homeExecutables = new Set([
+			"/Users/alice/..evil/bun",
 			"/Users/alice/node_modules/.bin/bun",
 			"/Users/alice/.bun/bin/bun",
 		])
@@ -2044,10 +2145,11 @@ describe("resolveBunExecutable", () => {
 				platform: "darwin",
 				cwd: "/Users/alice",
 				homedir: "/Users/alice",
-				env: { PATH: "/Users/alice/node_modules/.bin:/Users/alice/.bun/bin" },
+				env: { PATH: "/Users/alice/..evil:/Users/alice/node_modules/.bin:/Users/alice/.bun/bin" },
 				isExecutableFile: (candidate) => homeExecutables.has(candidate),
 				realpath: (target) =>
 					target === "/Users/alice/.bun/bin/bun" ? "/Users/alice/evil/bun" : target,
+				pathExists: () => false,
 			}),
 		).toBeNull()
 		expect(
@@ -2055,9 +2157,10 @@ describe("resolveBunExecutable", () => {
 				platform: "darwin",
 				cwd: "/Users/alice",
 				homedir: "/Users/alice",
-				env: { PATH: "/Users/alice/node_modules/.bin:/Users/alice/.bun/bin" },
+				env: { PATH: "/Users/alice/..evil:/Users/alice/node_modules/.bin:/Users/alice/.bun/bin" },
 				isExecutableFile: (candidate) => homeExecutables.has(candidate),
 				realpath: (target) => target,
+				pathExists: () => false,
 			}),
 		).toBe("/Users/alice/.bun/bin/bun")
 
@@ -2073,24 +2176,42 @@ describe("resolveBunExecutable", () => {
 					candidate === "/tmp/random/bun" || candidate === "/opt/homebrew/bin/bun",
 				realpath: (target) =>
 					target === "/opt/homebrew/bin/bun" ? "/opt/homebrew/Cellar/bun/1.4.2/bin/bun" : target,
+				pathExists: () => false,
 			}),
 		).toBe("/opt/homebrew/bin/bun")
 
-		// Fails closed with null when only project-local/relative candidates exist
+		// Fails closed with null when only checkout-local/relative candidates exist or CHECKFU_BUN_PATH is checkout-local
 		expect(
 			resolveBunExecutable({
 				platform: "linux",
-				cwd: "/tmp/untrusted",
+				cwd: "/tmp/untrusted/packages/app",
 				homedir: "/home/alice",
 				env: {
-					PATH: ".:./bin:/tmp/untrusted:/tmp/untrusted/node_modules/.bin",
+					PATH: ".:./bin:/tmp/untrusted:/tmp/untrusted/node_modules/.bin:/tmp/untrusted/..sneaky",
 					BUN_INSTALL: "/tmp/untrusted/.bun",
 				},
 				isExecutableFile: (candidate) =>
 					candidate === "/tmp/untrusted/bun" ||
 					candidate === "/tmp/untrusted/node_modules/.bin/bun" ||
+					candidate === "/tmp/untrusted/..sneaky/bun" ||
 					candidate === "/tmp/untrusted/.bun/bin/bun",
 				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted/.git",
+			}),
+		).toBeNull()
+		expect(
+			resolveBunExecutable({
+				platform: "linux",
+				cwd: "/tmp/untrusted/packages/app",
+				homedir: "/home/alice",
+				env: {
+					PATH: "/opt/homebrew/bin",
+					CHECKFU_BUN_PATH: "/tmp/untrusted/..sneaky/bun",
+				},
+				isExecutableFile: (candidate) =>
+					candidate === "/tmp/untrusted/..sneaky/bun" || candidate === "/opt/homebrew/bin/bun",
+				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted/.git",
 			}),
 		).toBeNull()
 	})
