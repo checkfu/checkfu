@@ -70,7 +70,11 @@ describe("MCP tool projection", () => {
 			inputSchema: {
 				properties: {
 					path: {
-						properties: { session_id: { pattern: String.raw`^(?!\.{1,2}$)[^/\\]+$` } },
+						properties: {
+							session_id: {
+								pattern: String.raw`^(?:[^/\\.][^/\\]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)$`,
+							},
+						},
 						required: ["session_id"],
 						additionalProperties: false,
 					},

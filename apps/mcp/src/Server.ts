@@ -113,41 +113,45 @@ const admission = <E, R>(
 > =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest
-		// Compared as written: the health check is exempt only under its exact spelling.
-		const isHealthCheck = request.url === HEALTH_PATH || request.url.startsWith(`${HEALTH_PATH}?`)
+		// The health check is the one thing answered without a credential, and only as a GET under
+		// its exact spelling. It is answered before anything else, so its body is never read.
+		if (
+			request.method === "GET" &&
+			(request.url === HEALTH_PATH || request.url.startsWith(`${HEALTH_PATH}?`))
+		) {
+			return yield* app
+		}
 		const api = yield* ApiBinding
-		if (!isHealthCheck) {
-			// The API is the authenticator: nothing is read or answered until it has accepted
-			// this request's credential. A missing credential is refused without asking it.
-			if (!hasCredential(request.headers)) {
-				return yield* unauthorizedResponse
-			}
-			const verdict = yield* Effect.tryPromise({
-				try: async (): Promise<"accepted" | "rejected" | "unverified"> => {
-					const response = await api.fetch(`${API_ORIGIN}${CREDENTIAL_PROBE_PATH}`, {
-						headers: credentialHeaders(request.headers),
-					})
-					if (response.status === 404) {
-						const body: unknown = await response.json()
-						return isNotFound(body) ? "accepted" : "unverified"
-					}
-					await response.body?.cancel()
-					return response.status === 401 ? "rejected" : "unverified"
-				},
-				catch: () => "unverified" as const,
-			}).pipe(Effect.orElseSucceed(() => "unverified" as const))
-			if (verdict === "rejected") {
-				return yield* unauthorizedResponse
-			}
-			// Only the API's own "no such agent" proves it accepted the credential. Any other
-			// answer, such as its 503 when no key is configured, proves nothing.
-			if (verdict === "unverified") {
-				return yield* errorResponse(
-					503,
-					"service_unavailable",
-					"The Checkfu API could not verify this credential.",
-				)
-			}
+		// The API is the authenticator: nothing is read or answered until it has accepted
+		// this request's credential. A missing credential is refused without asking it.
+		if (!hasCredential(request.headers)) {
+			return yield* unauthorizedResponse
+		}
+		const verdict = yield* Effect.tryPromise({
+			try: async (): Promise<"accepted" | "rejected" | "unverified"> => {
+				const response = await api.fetch(`${API_ORIGIN}${CREDENTIAL_PROBE_PATH}`, {
+					headers: credentialHeaders(request.headers),
+				})
+				if (response.status === 404) {
+					const body: unknown = await response.json()
+					return isNotFound(body) ? "accepted" : "unverified"
+				}
+				await response.body?.cancel()
+				return response.status === 401 ? "rejected" : "unverified"
+			},
+			catch: () => "unverified" as const,
+		}).pipe(Effect.orElseSucceed(() => "unverified" as const))
+		if (verdict === "rejected") {
+			return yield* unauthorizedResponse
+		}
+		// Only the API's own "no such agent" proves it accepted the credential. Any other
+		// answer, such as its 503 when no key is configured, proves nothing.
+		if (verdict === "unverified") {
+			return yield* errorResponse(
+				503,
+				"service_unavailable",
+				"The Checkfu API could not verify this credential.",
+			)
 		}
 		const bodyLimit = Effect.provideService(
 			HttpIncomingMessage.MaxBodySize,
@@ -172,11 +176,9 @@ const admission = <E, R>(
 			bodyLimit,
 			// Same storage rule as the API these responses come from. The response is written
 			// before this middleware resumes, so the header is set through the response hook.
-			isHealthCheck
-				? (self) => self
-				: HttpEffect.withPreResponseHandler((_, response) =>
-						Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
-					),
+			HttpEffect.withPreResponseHandler((_, response) =>
+				Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
+			),
 		)
 	})
 

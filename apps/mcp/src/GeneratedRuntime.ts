@@ -55,7 +55,8 @@ export const IDEMPOTENCY_KEY_PATTERN = String.raw`^[!-~](?:[\t -~]*[!-~])?$`
 
 // A value that is one URL path segment: "/" and "\" would add segments and "." and ".." are
 // resolved away, so none of them can name a resource.
-export const PATH_SEGMENT_PATTERN = String.raw`^(?!\.{1,2}$)[^/\\]+$`
+// Written without lookahead, which not every JSON Schema validator supports.
+export const PATH_SEGMENT_PATTERN = String.raw`^(?:[^/\\.][^/\\]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)$`
 
 const decodeDefinitions = Schema.decodeUnknownSync(
 	Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown)),

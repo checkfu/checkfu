@@ -12,10 +12,15 @@ import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { GENERATED_TOOLS } from "../src/generated/Tools.ts"
-import { importInputSchema, makeToolHandler } from "../src/GeneratedRuntime.ts"
+import {
+	PATH_SEGMENT_PATTERN,
+	importInputSchema,
+	makeToolHandler,
+} from "../src/GeneratedRuntime.ts"
 import { CREDENTIAL_PROBE_PATH, MAX_MCP_BODY_BYTES } from "../src/Server.ts"
 import { MCP_ORIGIN, MCP_URL, TEST_API_KEY, makeTestServer } from "./helpers/McpHarness.ts"
 
@@ -391,30 +396,106 @@ describe("Checkfu MCP server", () => {
 		}).pipe(Effect.scoped),
 	)
 
+	const everyByte = Array.from({ length: 256 }, (_, code) => String.fromCodePoint(code))
+	const published = (tool: (typeof GENERATED_TOOLS)[number], argument: string) =>
+		Schema.Struct({
+			properties: Schema.Struct({ [argument]: Schema.Record(Schema.String, Schema.Unknown) }),
+		})
+			.pipe(Schema.decodeUnknownOption)(tool.inputSchema)
+			.pipe(Option.map((schema) => schema.properties[argument] ?? {}))
+
 	it("accepts exactly the retry keys the API accepts that a header carries unchanged", () => {
-		const createAgent = GENERATED_TOOLS.find((tool) => tool.name === "agents_createAgent")
-		const published = Schema.is(importInputSchema(createAgent?.inputSchema ?? {}))
-		const body = { name: "Assistant", model: "gpt-6.2-sol" }
 		const apiAccepts = Schema.is(ClientEventId)
 		// Tab and printable ASCII: what fetch and curl both deliver to a server byte for byte.
 		const headerCarries = (key: string) => /^[\t\u0020-\u007E]*$/u.test(key)
-
 		const keys = [
 			"",
+			"batch 42",
+			"batch\t42",
 			"k".repeat(128),
 			"k".repeat(129),
 			"snow\u2603",
-			...Array.from({ length: 256 }, (_, code) => String.fromCodePoint(code)).flatMap(
-				(character) => [character, `${character}k`, `k${character}k`, `k${character}`],
-			),
+			...everyByte.flatMap((character) => [
+				character,
+				`${character}k`,
+				`k${character}k`,
+				`k${character}`,
+			]),
 		]
-		const disagreements = keys.filter(
-			(key) =>
-				published({ body, idempotency_key: key }) !== (apiAccepts(key) && headerCarries(key)),
+
+		const keyed = GENERATED_TOOLS.flatMap((tool) =>
+			Option.match(published(tool, "idempotency_key"), {
+				onNone: () => [],
+				onSome: (schema) => [[tool.name, schema] as const],
+			}),
 		)
-		expect(disagreements.map((key) => JSON.stringify(key))).toEqual([])
-		expect(published({ body, idempotency_key: "batch 42" })).toBe(true)
-		expect(published({ body, idempotency_key: "batch\t42" })).toBe(true)
+		expect(keyed.map(([name]) => name)).toEqual([
+			"agents_createAgent",
+			"environments_createEnvironment",
+			"sessions_createSession",
+			"sessions_sendSessionEvents",
+		])
+		for (const [name, schema] of keyed) {
+			const accepts = Schema.is(
+				importInputSchema({ type: "object", properties: { key: schema }, required: ["key"] }),
+			)
+			const disagreements = keys.filter(
+				(key) => accepts({ key }) !== (apiAccepts(key) && headerCarries(key)),
+			)
+			expect([name, disagreements.map((key) => JSON.stringify(key))]).toEqual([name, []])
+		}
+	})
+
+	it("publishes the path-segment rule in a form every validator can run", () => {
+		const isSegment = (value: string) =>
+			value.length > 0 &&
+			value !== "." &&
+			value !== ".." &&
+			!value.includes("/") &&
+			!value.includes("\\")
+		const pattern = new RegExp(PATH_SEGMENT_PATTERN, "u")
+		const values = [
+			"",
+			"...",
+			".a.b",
+			"a/b",
+			"snow\u2603",
+			...everyByte.flatMap((character) => [
+				character,
+				`${character}k`,
+				`k${character}k`,
+				`k${character}`,
+				`.${character}`,
+				`..${character}`,
+				`${character}.`,
+				`${character}..`,
+			]),
+		]
+		expect(
+			values.flatMap((value) =>
+				pattern.test(value) === isSegment(value) ? [] : [JSON.stringify(value)],
+			),
+		).toEqual([])
+
+		const pathParameters = GENERATED_TOOLS.flatMap((tool) =>
+			Option.match(published(tool, "path"), {
+				onNone: () => [],
+				onSome: (schema) =>
+					Object.values(
+						Schema.decodeUnknownSync(
+							Schema.Struct({
+								properties: Schema.Record(Schema.String, Schema.Struct({ pattern: Schema.String })),
+							}),
+						)(schema).properties,
+					),
+			}),
+		)
+		expect(pathParameters.length).toBeGreaterThan(0)
+		expect(new Set(pathParameters.map((parameter) => parameter.pattern))).toEqual(
+			new Set([PATH_SEGMENT_PATTERN]),
+		)
+		// Lookaround is not part of every regular-expression engine a client may validate with.
+		expect(JSON.stringify(GENERATED_TOOLS)).not.toMatch(/\(\?<?[=!]/)
 	})
 
 	it.live("delivers a retry key to the API unchanged and refuses the rest before any call", () =>
@@ -544,6 +625,13 @@ describe("Checkfu MCP server", () => {
 				expect([path, health.status]).toEqual([path, 200])
 				expect(health.headers.get("cache-control")).toBeNull()
 			}
+			// Only a GET is the health check. Anything else sent there needs a credential like every
+			// other request, and is refused before its body is read.
+			const posted = yield* server.fetch(
+				new Request(`${MCP_ORIGIN}/health`, { method: "POST", body: "x".repeat(1024) }),
+			)
+			expect(posted.status).toBe(401)
+
 			// A request target is a path, not a URL: a leading "//" is not a host.
 			for (const path of ["//", "//health", "//x/health", "/health/"]) {
 				const anonymous = yield* server.fetch(new Request(`${MCP_ORIGIN}${path}`))
