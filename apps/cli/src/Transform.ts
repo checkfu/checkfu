@@ -76,12 +76,15 @@ const evaluatePath = (value: NormalizedValue, path: ReadonlyArray<string>): Norm
 	if (head === undefined) {
 		return value
 	}
-	if (isNormalizedArray(value)) {
-		if (head === "#") {
-			return rest.length === 0
-				? value.length
-				: value.map((item) => evaluatePath(item, rest)).filter((item) => item !== undefined)
+	if (head === "#") {
+		if (!isNormalizedArray(value)) {
+			return undefined
 		}
+		return rest.length === 0
+			? value.length
+			: value.map((item) => evaluatePath(item, rest)).filter((item) => item !== undefined)
+	}
+	if (isNormalizedArray(value)) {
 		if (!/^-?\d+$/.test(head)) {
 			return undefined
 		}
@@ -93,6 +96,8 @@ const evaluatePath = (value: NormalizedValue, path: ReadonlyArray<string>): Norm
 		: undefined
 }
 
+const UNSUPPORTED_SYNTAX = /[{}[\]"'\\]/
+
 const evaluateNormalizedTransform = (
 	value: NormalizedValue,
 	expression: string,
@@ -101,11 +106,19 @@ const evaluateNormalizedTransform = (
 	if (trimmed.length === 0) {
 		return value
 	}
-	if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-		return evaluatePath(value, segmentsOf(trimmed))
+	const pick = trimmed.startsWith("{") && trimmed.endsWith("}")
+	const body = pick ? trimmed.slice(1, -1) : trimmed
+	if (UNSUPPORTED_SYNTAX.test(body)) {
+		return undefined
+	}
+	if (!pick) {
+		return evaluatePath(value, segmentsOf(body))
+	}
+	if (value === null || value === undefined) {
+		return undefined
 	}
 	const picked: MutableNormalizedObject = {}
-	for (const entry of trimmed.slice(1, -1).split(",")) {
+	for (const entry of body.split(",")) {
 		const colon = entry.indexOf(":")
 		const path = segmentsOf(colon === -1 ? entry : entry.slice(colon + 1))
 		const key = colon === -1 ? (path.at(-1) ?? "") : entry.slice(0, colon).trim()

@@ -1054,6 +1054,40 @@ describe("Transform and formatOutput", () => {
 		expect(evaluateTransform(sample, "data.#.missing")).toEqual([])
 		expect(evaluateTransform(sample, "data.5.type")).toBeUndefined()
 		expect(evaluateTransform(sample, "id.length")).toBeUndefined()
+		for (const unsupported of [
+			"{id,name}.{model,id}",
+			"{id,name}.id",
+			"{id}.{id}",
+			'{"label":id}',
+			"{'label':id}",
+			"{a:{id}}",
+			"[id,name]",
+			"[id,name].1",
+			'"id"',
+			String.raw`model\.id`,
+			"{id",
+			"id}",
+		]) {
+			expect(evaluateTransform(sample, unsupported)).toBeUndefined()
+		}
+		expect(evaluateTransform({ "#": 7 }, "#")).toBeUndefined()
+		expect(evaluateTransform({ a: { "#": 3 } }, "a.#")).toBeUndefined()
+		expect(evaluateTransform({ "#": 7 }, "{n:#}")).toEqual({ n: undefined })
+		expect(evaluateTransform(null, "{id}")).toBeUndefined()
+		expect(evaluateTransform(undefined, "{id,name}")).toBeUndefined()
+		for (const [format, expected] of [
+			["json", "null"],
+			["raw", ""],
+		] as const) {
+			expect(
+				formatOutput(null, {
+					format,
+					transform: Option.some("{id}"),
+					rawOutput: false,
+					isTerminal: false,
+				}),
+			).toBe(expected)
+		}
 		expect(evaluateTransform(sample, "missing.path")).toBeUndefined()
 		expect(evaluateTransform(sample, "constructor")).toBeUndefined()
 		expect(evaluateTransform(sample, "toString")).toBeUndefined()
