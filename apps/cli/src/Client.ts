@@ -107,7 +107,7 @@ const readBoundedResponseText = (
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 
-export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> =>
+const parseApiBase = (raw: string): Effect.Effect<URL, CliFailure> =>
 	Effect.gen(function* () {
 		const trimmed = raw.trim()
 		if (trimmed.length === 0) {
@@ -135,7 +135,12 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
 		} else if (protocol !== "https:") {
 			return yield* configError(`Unsupported API base URL scheme "${parsed.protocol}".`)
 		}
+		return parsed
+	})
 
+/** Turns a URL someone typed into the base the API lives under, dropping one trailing `/v1`. */
+export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> =>
+	Effect.map(parseApiBase(raw), (parsed) => {
 		let pathname = parsed.pathname.replace(/\/+$/, "")
 		if (pathname === "/v1") {
 			pathname = ""
@@ -144,6 +149,22 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
 		}
 		return `${parsed.origin}${pathname}`
 	})
+
+/**
+ * A saved URL is the exact base a key was verified against, so it is used as stored.
+ * Normalizing it a second time could strip another path segment and send the key
+ * somewhere that was never verified.
+ */
+const savedApiUrl = (saved: SavedConnection): Effect.Effect<string, CliFailure> =>
+	Effect.flatMap(parseApiBase(saved.url), (parsed) =>
+		`${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}` === saved.url
+			? Effect.succeed(saved.url)
+			: Effect.fail(
+					configError(
+						`The saved deployment URL is not in the form it is saved in. Run \`${COMMAND} login\` again.`,
+					),
+				),
+	)
 
 const optionalConfigString = (name: string): Effect.Effect<Option.Option<string>, CliFailure> =>
 	Config.option(Config.String(name)).pipe(
@@ -176,7 +197,7 @@ export const resolveBaseUrl = <R = never>(
 			return yield* normalizeApiUrl(explicit.value)
 		}
 		const saved = yield* loadSaved
-		return Option.isSome(saved) ? yield* normalizeApiUrl(saved.value.url) : DEFAULT_API_URL
+		return Option.isSome(saved) ? yield* savedApiUrl(saved.value) : DEFAULT_API_URL
 	})
 
 const MISSING_API_KEY = `Missing CHECKFU_API_KEY. Run \`${COMMAND} deploy\` or \`${COMMAND} login\` to save one, or export CHECKFU_API_KEY.`
@@ -201,7 +222,7 @@ export const resolveApiKey = <R = never>(
 		if (Option.isNone(saved)) {
 			return yield* configError(MISSING_API_KEY)
 		}
-		const savedUrl = yield* normalizeApiUrl(saved.value.url)
+		const savedUrl = yield* savedApiUrl(saved.value)
 		if (savedUrl !== baseUrl) {
 			return yield* configError(
 				`The saved API key belongs to ${savedUrl} and is not sent to ${baseUrl}. Export CHECKFU_API_KEY for this URL, or run \`${COMMAND} login\`.`,

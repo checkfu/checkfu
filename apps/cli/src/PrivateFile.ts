@@ -31,7 +31,11 @@ export const removeIfPresent = (
 		),
 	)
 
-/** Makes an existing file readable and writable by its owner only. */
+/**
+ * Makes an existing file readable and writable by its owner only. That is POSIX
+ * permissions: on Windows the mode is ignored and the file keeps the access control
+ * of its directory, so it is as private as the user profile or checkout it lives in.
+ */
 export const restrictToOwner = (
 	file: string,
 ): Effect.Effect<void, CliFailure, FileSystem.FileSystem> =>

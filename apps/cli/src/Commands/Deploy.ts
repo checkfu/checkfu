@@ -118,7 +118,12 @@ export const setDotEnvValue = (
 		return updated
 	})
 
+// The names Alchemy accepts for a stage, checked here so a typo is refused before
+// anything is signed in to, written, or printed back as a command.
+const STAGE_NAME = /^[a-z0-9]+[-_a-z0-9]*$/i
+
 const stageFlag = Flag.String("stage").pipe(
+	Flag.withSchema(Schema.String.check(Schema.isPattern(STAGE_NAME))),
 	Flag.withMetavar("NAME"),
 	Flag.withDescription(
 		`Deployment stage. deploy defaults to the one this checkout last deployed, or "${DEFAULT_STAGE}" the first time; destroy requires it`,
@@ -141,7 +146,7 @@ const yesFlag = Flag.Boolean("yes").pipe(
  */
 const DeploymentRecord = Schema.fromJsonString(
 	Schema.Struct({
-		stage: Schema.String,
+		stage: Schema.String.check(Schema.isPattern(STAGE_NAME)),
 		profile: Schema.String,
 		account_id: Schema.String,
 		// Absent between a successful deploy and reading its URL back.
@@ -521,15 +526,13 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
 
 		// The account is settled before any secret is written, so a refusal leaves the
-		// checkout exactly as it was.
-		const accountId = yield* requireAccount(
-			yield* resolveTarget(checkout, envFile, record),
-			Option.some({ retry }),
-		)
+		// checkout exactly as it was. The profile it was checked under is the one the
+		// deploy then uses; the env file is not consulted again for it.
+		const checked = yield* resolveTarget(checkout, envFile, record)
+		const accountId = yield* requireAccount(checked, Option.some({ retry }))
 		yield* requireRecordedAccount(record, stage, accountId)
 		const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
-		// Resolved again because preparing the secrets may have created the env file.
-		const target = yield* resolveTarget(checkout, envFile, record)
+		const target = { ...checked, envFile: Option.some(envFile) } satisfies Target
 
 		const exitCode = yield* run(target, [
 			"deploy",

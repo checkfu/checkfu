@@ -391,6 +391,43 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
+	it.live("deploys with the profile it checked, without consulting the env file again", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const calls: Array<ReadonlyArray<string>> = []
+			const files = virtualFiles(checkout)
+			// No .env yet, so the check runs without one; the deploy gets the file that
+			// preparing the secrets created, under the same profile.
+			yield* cli.run(["deploy", "--yes"], {
+				env: { ...deployEnv, ALCHEMY_PROFILE: "work" },
+				files,
+				spawn: fakeAlchemy(calls),
+			})
+			expect(calls.slice(0, 2)).toEqual([
+				["query", "account", "work", ""],
+				["deploy", "--stage", "live", "--yes", "--env-file", ENV_FILE, "--profile", "work"],
+			])
+		}),
+	)
+
+	it.live("refuses a stage name Alchemy would not accept before doing anything", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			for (const args of [
+				["deploy", "--yes", "--stage", "two words"],
+				["deploy", "--yes", "--stage", "$(reboot)"],
+				["destroy", "--yes", "--stage", "../live"],
+			]) {
+				const calls: Array<ReadonlyArray<string>> = []
+				const files = virtualFiles(checkout)
+				const result = yield* cli.run(args, { env: deployEnv, files, spawn: fakeAlchemy(calls) })
+				expect(result.exitCode).toBe(1)
+				expect(calls).toEqual([])
+				expect(files[ENV_FILE]).toBeUndefined()
+			}
+		}),
+	)
+
 	it.live("records the deployment only once Alchemy has deployed it", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
@@ -757,6 +794,49 @@ describe("saved connection", () => {
 				expect(needed.exitCode).toBe(1)
 				expect(needed.errorMessage).toContain(CONFIG_FILE)
 			}
+		}),
+	)
+
+	it.live("is used at exactly the URL the key was verified against", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles()
+			const requested: Array<string> = []
+			// A host that serves Checkfu under /team/v1, so its API lives at /team/v1/v1/...
+			const underPrefix = (next: (request: Request) => Promise<Response>, request: Request) => {
+				requested.push(request.url)
+				const url = new URL(request.url)
+				if (!url.pathname.startsWith("/team/v1/")) {
+					return Promise.resolve(new Response("another service", { status: 200 }))
+				}
+				url.pathname = url.pathname.slice("/team/v1".length)
+				return next(new Request(url, request))
+			}
+			const env = { CHECKFU_CONFIG_DIR: "/config" }
+
+			const login = yield* cli.run(["--base-url", "https://host.example/team/v1/v1", "login"], {
+				env: { ...env, CHECKFU_API_KEY: TEST_API_KEY },
+				files,
+				interceptFetch: underPrefix,
+			})
+			expect(login.errorMessage).toBeUndefined()
+			expect(JSON.parse(files[CONFIG_FILE] ?? "").url).toBe("https://host.example/team/v1")
+
+			requested.length = 0
+			const later = yield* cli.run(["environments", "create", "--name", "default"], {
+				env,
+				files,
+				interceptFetch: underPrefix,
+			})
+			expect(later.errorMessage).toBeUndefined()
+			expect(requested).toEqual(["https://host.example/team/v1/v1/environments"])
+
+			const edited = yield* cli.run(["environments", "create", "--name", "default"], {
+				env,
+				files: { [CONFIG_FILE]: saved({ url: "https://host.example/team/v1/" }) },
+				interceptFetch: underPrefix,
+			})
+			expect(edited.errorMessage).toContain("not in the form it is saved in")
 		}),
 	)
 
