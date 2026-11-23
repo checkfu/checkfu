@@ -16,10 +16,8 @@
 		"test": "vitest run --pool=threads --no-allowOnly"
 	},
 	"dependencies": {
-		"@checkfu/agents": "workspace:*",
 		"@checkfu/api": "workspace:*",
-		"@checkfu/environments": "workspace:*",
-		"@checkfu/sessions": "workspace:*",
+		"@checkfu/domain": "workspace:*",
 		"@effect/platform-bun": "catalog:",
 		"effect": "catalog:",
 		"yaml": "catalog:"

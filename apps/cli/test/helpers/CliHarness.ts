@@ -1,15 +1,15 @@
 import * as Domain from "@alchemy.run/domain"
-import { Checkfu } from "@checkfu/api/Checkfu.model"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
-import { boundedModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
+import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { boundedModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
 import type {
 	ModelProviderError,
 	ModelProviderReply,
 	ModelRequestInterrupted,
 	HarnessUnavailable,
-} from "@checkfu/sessions/Session/ModelProvider.external"
-import type { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+} from "@checkfu/domain/Session/ModelProvider.external"
+import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"

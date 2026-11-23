@@ -1,5 +1,5 @@
-import { AgentId } from "@checkfu/agents/Agent/Agent.id"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
+import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"

@@ -1,5 +1,5 @@
-import { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
+import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"

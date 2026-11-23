@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url"
 import { resolveBunExecutable } from "./resolve-bun.mjs"
 import { createLauncherSigintBridge } from "./sigint-bridge.mjs"
 
-// oxlint-disable-next-line unicorn/prefer-import-meta-properties -- preserve compatibility with Node < 20.11 where import.meta.filename is undefined
+// oxlint-disable-next-line unicorn/prefer-import-meta-properties -- keep launcher compatible with Node < 20.11
 const launcherPath = realpathSync(fileURLToPath(import.meta.url))
 const cliRoot = resolve(dirname(launcherPath), "..")
 const bunfigPath = resolve(cliRoot, "bunfig.toml")
