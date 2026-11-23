@@ -445,6 +445,7 @@ describe("Checkfu MCP server", () => {
 								url: "https://github.com/acme/api",
 								checkout: { type: "branch", name: "main" },
 							},
+							{ type: "memory_store", memory_store_id: "memstore_1", access: "read_only" },
 						],
 					},
 				},

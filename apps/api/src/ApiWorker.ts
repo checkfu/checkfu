@@ -49,6 +49,18 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(
 					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
 				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
+			mountMemory: (sessionId, mount) =>
+				harnessCall(Effect.suspend(() => workspace(sessionId).mountMemory(mount))).pipe(
+					Effect.withSpan("SessionWorkspace.mountMemory"),
+				),
+			fillMemory: (sessionId, mountPath, memories) =>
+				harnessCall(
+					Effect.suspend(() => workspace(sessionId).fillMemory(mountPath, memories)),
+				).pipe(Effect.withSpan("SessionWorkspace.fillMemory")),
+			memoryChanges: (sessionId, mountPath) =>
+				harnessCall(Effect.suspend(() => workspace(sessionId).memoryChanges(mountPath))).pipe(
+					Effect.withSpan("SessionWorkspace.memoryChanges"),
+				),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),
@@ -77,8 +89,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
-	Digest.layerWebCrypto,
-).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
+).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,

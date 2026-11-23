@@ -427,6 +427,31 @@ describe("PiSession real Durable Object under workerd", () => {
 		return res.body.data
 	}
 
+	const storedMemories = async (storeId: string): Promise<Record<string, string>> => {
+		const listed = await apiJson<{
+			readonly data: ReadonlyArray<{ readonly id: string; readonly path: string }>
+		}>(`/v1/memory_stores/${storeId}/memories`)
+		const contents: Record<string, string> = {}
+		for (const entry of listed.body.data) {
+			const memory = await apiJson<{ readonly content: string }>(
+				`/v1/memory_stores/${storeId}/memories/${entry.id}`,
+			)
+			contents[entry.path] = memory.body.content
+		}
+		return contents
+	}
+
+	const replyAfterTurn = async (sessionId: string, text: string, number: number) => {
+		const sent = await apiJson(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(sessionId, (s) => s.status === "idle" && s.turn === number, 60_000)
+		const replies = (await listAllEvents(sessionId)).filter((e) => e.type === "agent.message")
+		return replies.at(-1)?.content?.[0]?.text ?? ""
+	}
+
 	beforeAll(async () => {
 		fakeOpenAI = await startFakeOpenAIResponsesServer((req) => ({
 			kind: "reply",
@@ -807,16 +832,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(session.resources.map((resource) => resource.mount_path)).toEqual([repo])
 		expect(JSON.stringify(session)).not.toContain(TEST_GITHUB_TOKEN)
 
-		const turn = async (text: string, number: number) => {
-			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
-				method: "POST",
-				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
-			})
-			expect(sent.status).toBe(200)
-			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 60_000)
-			const replies = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message")
-			return replies.at(-1)?.content?.[0]?.text ?? ""
-		}
+		const turn = (text: string, number: number) => replyAfterTurn(session.id, text, number)
 
 		expect(await turn("Read the readme.", 1)).toContain("# Acme API")
 		const basic = `Basic ${Buffer.from(`x-access-token:${TEST_GITHUB_TOKEN}`).toString("base64")}`
@@ -894,6 +910,113 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe(`Log: ${pinned} Pinned\n`)
 	}, 120_000)
+
+	it("mounts memory stores as files, saves a session's changes, and shares them with the next session", async () => {
+		const createStore = async (name: string, memories: Readonly<Record<string, string>>) => {
+			const store = await createResource<{ readonly id: string }>("/v1/memory_stores", { name })
+			for (const [path, content] of Object.entries(memories)) {
+				const created = await apiJson(`/v1/memory_stores/${store.id}/memories`, {
+					method: "POST",
+					body: { path, content },
+				})
+				expect(created.status).toBe(201)
+			}
+			return store
+		}
+		const notes = await createStore("Team Notes", { "/facts.md": "The launch code is KIWI-9." })
+		const handbook = await createStore("Handbook", { "/rules.md": "Be kind." })
+		const resources = [
+			{ type: "memory_store", memory_store_id: notes.id },
+			{ type: "memory_store", memory_store_id: handbook.id, access: "read_only" },
+		]
+
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"What is the launch code?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/team-notes/facts.md" },
+					},
+				],
+				"Remember the customer's preference.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: {
+							path: "/mnt/memory/team-notes/customers/acme.md",
+							content: "Prefers email.",
+						},
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/memory/handbook/rules.md", content: "Be cruel." },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/memory/./handbook//rules.md", content: "Be cruel." },
+					},
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["init"], cwd: "/mnt/memory/handbook" },
+					},
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/handbook/rules.md" },
+					},
+				],
+				"What does Acme prefer?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/team-notes/customers/acme.md" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		const first = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources,
+		})
+		expect(await replyAfterTurn(first.id, "What is the launch code?", 1)).toContain("KIWI-9")
+		// The plain path, the same path spelled with "." and "//", and git are all refused.
+		const refused = await replyAfterTurn(first.id, "Remember the customer's preference.", 2)
+		expect(refused.split("/mnt/memory/handbook is a read-only memory store.").length - 1).toBe(3)
+		expect(refused.endsWith("Be kind.")).toBe(true)
+		expect(await storedMemories(notes.id)).toEqual({
+			"/customers/acme.md": "Prefers email.",
+			"/facts.md": "The launch code is KIWI-9.",
+		})
+		expect(await storedMemories(handbook.id)).toEqual({ "/rules.md": "Be kind." })
+
+		const second = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources,
+		})
+		expect(await replyAfterTurn(second.id, "What does Acme prefer?", 1)).toContain("Prefers email.")
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain("- /mnt/memory/team-notes (read and write): Team Notes.")
+		expect(systemText).toContain("- /mnt/memory/handbook (read-only): Handbook.")
+	}, 180_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"

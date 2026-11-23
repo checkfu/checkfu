@@ -160,6 +160,22 @@ curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/memory_stores/$STORE_ID/memor
 - A memory holds up to 100 kB at a path of up to 256 characters, and a store up to 1,000 memories.
 - `POST /v1/memory_stores/{id}/archive` makes a store read-only. `DELETE` makes it and its memories unreachable.
 
+### Memory in a session
+
+Attach stores when you create a session. Each is mounted in the workspace as a directory of files, at `/mnt/memory/<name>` (the store's name in lower case, with every run of other characters as one hyphen):
+
+```json
+{"resources": [
+  {"type": "memory_store", "memory_store_id": "memstore_…", "instructions": "Check before starting any task."},
+  {"type": "memory_store", "memory_store_id": "memstore_…", "access": "read_only"}
+]}
+```
+
+- The agent reads and writes memories with its file tools, and is told where each store is mounted, with its description and your `instructions`.
+- A session sees a store as it was when the turn started, and what it changed is saved to the store when the turn ends. A change to a memory that another writer changed in the meantime is not saved; the session starts its next turn from the store's version.
+- `access` is `read_write` by default. A `read_only` store refuses writes, and nothing a session does there is saved. Use it for reference material, and for any agent that reads untrusted input.
+- A session takes up to 8 stores, each attached once. A store must be active when the session is created; the session keeps the store's name and description as they were then.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

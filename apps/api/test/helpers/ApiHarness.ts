@@ -40,6 +40,7 @@ import {
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { makeMemorySync } from "../../src/Workspace/MemorySync.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -285,6 +286,34 @@ export const makePiDurableTestLayer = (
 	const beforeTokenStored: Array<() => Promise<Response>> = []
 	// Every token sent to a workspace, once per attempt.
 	const tokenDeliveries: Array<string> = []
+	// Each session's workspace files, kept in step with its memory stores by the same
+	// code the workspace object runs.
+	const workspaces = new Map<string, Map<string, string>>()
+	const memoryBases = new Map<string, Readonly<Record<string, string>>>()
+	const workspaceFiles = (sessionId: string): Map<string, string> => {
+		let files = workspaces.get(sessionId)
+		if (files === undefined) {
+			files = new Map()
+			workspaces.set(sessionId, files)
+		}
+		return files
+	}
+	const memorySync = (sessionId: string) => {
+		const files = workspaceFiles(sessionId)
+		return makeMemorySync(
+			{
+				read: (file) => Promise.resolve(files.get(file) ?? null),
+				write: (file, content) => Promise.resolve(void files.set(file, content)),
+				remove: (file) => Promise.resolve(void files.delete(file)),
+				list: (directory) =>
+					Promise.resolve([...files.keys()].filter((file) => file.startsWith(`${directory}/`))),
+			},
+			{
+				get: (mountPath) => memoryBases.get(`${sessionId}:${mountPath}`) ?? {},
+				put: (mountPath, base) => void memoryBases.set(`${sessionId}:${mountPath}`, base),
+			},
+		)
+	}
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -343,6 +372,11 @@ export const makePiDurableTestLayer = (
 						}),
 					),
 				),
+			mountMemory: (sessionId, mount) => Effect.promise(() => memorySync(sessionId).mount(mount)),
+			fillMemory: (sessionId, mountPath, memories) =>
+				Effect.promise(() => memorySync(sessionId).fill(mountPath, memories)),
+			memoryChanges: (sessionId, mountPath) =>
+				Effect.promise(() => memorySync(sessionId).changes(mountPath)),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -409,6 +443,7 @@ export const makePiDurableTestLayer = (
 		preparations,
 		beforeTokenStored,
 		tokenDeliveries,
+		workspaceFiles,
 	}
 }
 

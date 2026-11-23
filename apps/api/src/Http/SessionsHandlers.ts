@@ -6,13 +6,14 @@ import {
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { SessionResources } from "@checkfu/domain/Session/SessionResource"
+import { SessionResources, memoryMountPath } from "@checkfu/domain/Session/SessionResource"
 import type { RepositoryToken, SessionResourceId } from "@checkfu/domain/Session/SessionResource"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
@@ -36,7 +37,12 @@ import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decis
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
-import type { ClientEventId, SendSessionEventReceipt, SessionResourceItem } from "./Api.ts"
+import type {
+	ClientEventId,
+	CreateSessionResource,
+	SendSessionEventReceipt,
+	SessionResourceItem,
+} from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	archiveAndRead,
@@ -234,6 +240,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const admitSession = yield* AdmitSessionDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const memoryStores = yield* MemoryStore
 		const harness = yield* Harness
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
@@ -313,6 +320,35 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					),
 				)
 
+		// A store is checked here, not in the admission decision: it must be active when the
+		// session is created, and the session keeps its name and description as they were then.
+		const requestedResource = Effect.fn(function* (resource: CreateSessionResource) {
+			if (resource.type === "github_repository") {
+				return {
+					type: resource.type,
+					url: resource.url,
+					mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+					checkout: resource.checkout ?? null,
+				}
+			}
+			const store = yield* memoryStores.get(resource.memory_store_id)
+			if (store.status === "" || store.status === "deleted") {
+				return yield* reject(404, `Memory store ${resource.memory_store_id} not found.`)
+			}
+			if (store.status !== "active") {
+				return yield* reject(409, `Memory store ${resource.memory_store_id} is archived.`)
+			}
+			return {
+				type: resource.type,
+				memory_store_id: resource.memory_store_id,
+				access: resource.access ?? "read_write",
+				instructions: resource.instructions ?? null,
+				name: store.name,
+				description: store.description,
+				mount_path: memoryMountPath(store.name, resource.memory_store_id),
+			}
+		})
+
 		const existingResource = (sessionId: SessionId, resourceId: SessionResourceId) =>
 			Effect.gen(function* () {
 				const session = yield* existing(sessionId)
@@ -362,12 +398,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
-					const requested = (payload.resources ?? []).map((resource) => ({
-						type: resource.type,
-						url: resource.url,
-						mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
-						checkout: resource.checkout ?? null,
-					}))
+					const requested = yield* Effect.forEach(payload.resources ?? [], requestedResource)
 					const identity = yield* createIdentity(
 						{ digest, random },
 						"session",
@@ -402,7 +433,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						Effect.catchTag("SchemaError", () =>
 							reject(
 								400,
-								"Resources must mount at distinct paths that do not contain one another, and mount each repository once.",
+								"Resources must mount at distinct paths that do not contain one another, and attach each repository and each memory store once.",
 							),
 						),
 					)
@@ -425,7 +456,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					// create stores it only where none is stored yet, so it cannot undo a later rotation.
 					yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
-						return resource.authorization_token === undefined || stored === undefined
+						return resource.type !== "github_repository" ||
+							resource.authorization_token === undefined ||
+							stored === undefined
 							? Effect.void
 							: storeToken(id, stored.id, resource.authorization_token, false)
 					})
@@ -514,6 +547,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						params.session_id,
 						params.resource_id,
 					)
+					if (resource.type !== "github_repository") {
+						return yield* reject(400, `Resource ${resource.id} is not a repository.`)
+					}
 					if (session.status === "terminated") {
 						return yield* reject(409, `Session ${session.id} is terminated.`)
 					}

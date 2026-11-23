@@ -19,6 +19,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import { MemoryAccess } from "../MemoryAccess.ts"
+import { measureContent, memoryIdOf } from "../MemoryIdentity.ts"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
@@ -29,8 +30,6 @@ import {
 	IDEMPOTENCY_KEY_REUSED,
 	handled,
 	isPending,
-	measureContent,
-	memoryIdOf,
 	orPending,
 	orPendingWithin,
 	present,
