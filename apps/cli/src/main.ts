@@ -1,4 +1,5 @@
-#!/usr/bin/env bun
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Cause from "effect/Cause"
@@ -10,6 +11,32 @@ import { runCli } from "./Cli.ts"
 import { CliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
+
+const hasImplicitCwdDotenv = (): boolean => {
+	const cwd = process.cwd()
+	const nodeEnv = process.env["NODE_ENV"]
+	const candidates = [
+		".env",
+		".env.local",
+		".env.development",
+		".env.development.local",
+		".env.production",
+		".env.production.local",
+		".env.test",
+		".env.test.local",
+		...(nodeEnv !== undefined && nodeEnv.length > 0
+			? [`.env.${nodeEnv}`, `.env.${nodeEnv}.local`]
+			: []),
+	]
+	return candidates.some((name) => existsSync(join(cwd, name)))
+}
+
+if (!process.execArgv.includes("--no-env-file") && hasImplicitCwdDotenv()) {
+	process.stderr.write(
+		"Error: Refusing to run with implicit Bun .env autoloading while .env file(s) exist in the working directory. Run with: bun --no-env-file apps/cli/src/main.ts ...\n",
+	)
+	process.exit(1)
+}
 
 const sigintController = makeSigintController()
 

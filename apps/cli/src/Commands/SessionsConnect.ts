@@ -69,6 +69,7 @@ interface ConnectState {
 	readonly liveStatus: "idle" | "running" | "terminated"
 	readonly liveTurn: number
 	readonly liveStateVersion: number
+	readonly lastProcessedSeq: number
 	readonly observedTurn: number
 	readonly settledTurn: number
 	readonly latestSettledStopReason: string | undefined
@@ -132,6 +133,8 @@ const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
 const MAX_CONNECT_SEND_RETRIES = 2
 const CONNECT_SEND_RETRY_BASE_MS = 100
+const MAX_QUEUED_TURN_PROJECTION_RETRIES = 5
+const QUEUED_TURN_PROJECTION_RETRY_BASE_MS = 50
 
 const isAmbiguousResponseStatus = (status: number): boolean =>
 	(status >= 200 && status < 300) || isTransientHttpStatus(status)
@@ -420,6 +423,19 @@ const renderConnectEvent = (
 ): Effect.Effect<void, CliFailure, Command.CommandContext<"checkfu"> | Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const data = event.data
+		const rawSeq = data["seq"]
+		const eventSeq = typeof rawSeq === "number" && Number.isInteger(rawSeq) ? rawSeq : undefined
+		if (eventSeq !== undefined) {
+			const isDuplicate = yield* Ref.modify(stateRef, (state) =>
+				eventSeq <= state.lastProcessedSeq
+					? ([true, state] as const)
+					: ([false, { ...state, lastProcessedSeq: eventSeq }] as const),
+			)
+			if (isDuplicate) {
+				return
+			}
+		}
+
 		const eventType = typeof data["type"] === "string" ? data["type"] : event.event
 
 		if (rawStructuredMode) {
@@ -1176,6 +1192,7 @@ export const sessionsConnectCommand = Command.make(
 				liveStatus: session.status,
 				liveTurn: session.turn,
 				liveStateVersion: 0,
+				lastProcessedSeq: after ?? 0,
 				observedTurn: baseline.observedTurn,
 				settledTurn: baseline.settledTurn,
 				latestSettledStopReason: undefined,
@@ -1454,21 +1471,62 @@ export const sessionsConnectCommand = Command.make(
 							state.observedTurn < state.targetTurn &&
 							isQueueHaltingStopReason(lastStopReason)
 						) {
-							const latestRes = yield* Effect.result(fetchSessionStatusWithRetry(client, sessionId))
-							if (latestRes._tag === "Failure") {
-								yield* Ref.set(incompleteTurnRef, latestRes.failure)
-								break
-							}
-							if (
-								latestRes.success.status !== "running" &&
-								latestRes.success.turn < state.targetTurn
-							) {
-								yield* Ref.set(
-									incompleteTurnRef,
-									networkFailure(
-										`Queued turn ${state.targetTurn} did not start because turn ${state.settledTurn} stopped with ${lastStopReason}.`,
+							let haltedQueuedTurn = false
+							for (let checkAttempt = 0; ; checkAttempt++) {
+								const latestRes = yield* Effect.result(
+									fetchSessionStatusWithRetry(client, sessionId),
+								)
+								if (latestRes._tag === "Failure") {
+									yield* Ref.set(incompleteTurnRef, latestRes.failure)
+									haltedQueuedTurn = true
+									break
+								}
+								const snap = latestRes.success
+								if (snap.turn >= state.targetTurn) {
+									break
+								}
+								if (snap.status !== "running") {
+									yield* Ref.set(
+										incompleteTurnRef,
+										networkFailure(
+											`Queued turn ${state.targetTurn} did not start because turn ${state.settledTurn} stopped with ${lastStopReason}.`,
+										),
+									)
+									haltedQueuedTurn = true
+									break
+								}
+								const refreshed = yield* Ref.get(stateRef)
+								if (
+									refreshed.ended ||
+									refreshed.observedTurn >= state.targetTurn ||
+									refreshed.settledTurn >= state.targetTurn ||
+									!refreshed.unsettledQueuedTurns.has(state.targetTurn)
+								) {
+									break
+								}
+								if (checkAttempt >= MAX_QUEUED_TURN_PROJECTION_RETRIES) {
+									yield* Ref.set(
+										incompleteTurnRef,
+										networkFailure(
+											`Queued turn ${state.targetTurn} did not start because turn ${state.settledTurn} stopped with ${lastStopReason}.`,
+										),
+									)
+									haltedQueuedTurn = true
+									break
+								}
+								const delayMs = QUEUED_TURN_PROJECTION_RETRY_BASE_MS * 2 ** checkAttempt
+								const waitRace = yield* Effect.race(
+									Effect.sleep(Duration.millis(delayMs)).pipe(Effect.as("retry" as const)),
+									Effect.race(
+										Deferred.await(waiter).pipe(Effect.as("event" as const)),
+										Deferred.await(stopConnectDeferred).pipe(Effect.as("event" as const)),
 									),
 								)
+								if (waitRace === "event") {
+									break
+								}
+							}
+							if (haltedQueuedTurn) {
 								break
 							}
 						}

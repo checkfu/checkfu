@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+	DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd -P)
+	TARGET=$(readlink "$SOURCE")
+	case "$TARGET" in
+		/*) SOURCE="$TARGET" ;;
+		*) SOURCE="$DIR/$TARGET" ;;
+	esac
+done
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SOURCE")" && pwd -P)
+exec bun --no-env-file "$SCRIPT_DIR/../src/main.ts" "$@"

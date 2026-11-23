@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import * as Http from "node:http"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
@@ -1893,6 +1895,7 @@ describe("CLI sessions:events and sessions connect", () => {
 				const child = spawn(
 					"bun",
 					[
+						"--no-env-file",
 						mainPath,
 						"sessions",
 						"connect",
@@ -1942,6 +1945,7 @@ describe("CLI sessions:events and sessions connect", () => {
 				const child = spawn(
 					"bun",
 					[
+						"--no-env-file",
 						mainPath,
 						"agents",
 						"retrieve",
@@ -1981,6 +1985,7 @@ describe("CLI sessions:events and sessions connect", () => {
 				const child = spawn(
 					"bun",
 					[
+						"--no-env-file",
 						mainPath,
 						"agents",
 						"update",
@@ -2535,14 +2540,18 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("documents the direct CLI launcher instead of bun run cli", () => {
+	it("documents the direct --no-env-file CLI launcher instead of bun run cli", () => {
 		const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8")
 		const rootPkg = JSON.parse(
 			readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
 		) as { readonly scripts?: Record<string, string> }
-		expect(readme).toContain("bun apps/cli/src/main.ts --help")
+		const cliPkg = JSON.parse(
+			readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+		) as { readonly bin?: Record<string, string> }
+		expect(readme).toContain("bun --no-env-file apps/cli/src/main.ts --help")
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
+		expect(cliPkg.bin?.["checkfu"]).toBe("./bin/checkfu")
 	})
 
 	it.runIf(ptySupported)(
@@ -2620,7 +2629,7 @@ def setup_ctty():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-cmd = ["bun", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+cmd = ["bun", "--no-env-file", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
 p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
 os.close(slave)
 
@@ -3699,6 +3708,319 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					expect(startupGetCalls).toBe(3)
 					expect(startupRes.exitCode).toBe(0)
 					expect(startupRes.stdout).toContain("StartupOk:hello after 503")
+				}),
+			),
+		)
+	})
+
+	it("keeps API key destination independent of cwd .env, skips replayed SSE sequence numbers, and rechecks lagging running snapshots", async () => {
+		// 1) Untrusted working directory .env / .env.local must NEVER hijack CHECKFU_API_URL / CHECKFU_URL
+		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
+		const binPath = fileURLToPath(new URL("../bin/checkfu", import.meta.url))
+		let evilHits = 0
+		let legitHits = 0
+		const evilServer = Http.createServer((_req, res) => {
+			evilHits += 1
+			res.writeHead(200, { "content-type": "application/json" })
+			res.end("{}")
+		})
+		const legitServer = Http.createServer((req, res) => {
+			legitHits += 1
+			const url = new URL(req.url ?? "/", "http://127.0.0.1")
+			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_env") {
+				res.writeHead(200, { "content-type": "application/json" })
+				res.end(
+					JSON.stringify({
+						id: "sess_env",
+						type: "session",
+						status: "idle",
+						turn: 0,
+						usage: { input_tokens: 0, output_tokens: 0 },
+						agent: { id: "agt_env", version: 1 },
+						environment_id: "env_1",
+						title: null,
+						created_at: "2026-11-22T00:00:00.000Z",
+						updated_at: "2026-11-22T00:00:00.000Z",
+						archived_at: null,
+					}),
+				)
+				return
+			}
+			res.writeHead(404, { "content-type": "application/json" })
+			res.end(
+				JSON.stringify({
+					type: "error",
+					error: { type: "not_found_error", message: "not found" },
+					request_id: "req_env",
+				}),
+			)
+		})
+		await Promise.all([
+			new Promise<void>((resolve) => evilServer.listen(0, "127.0.0.1", resolve)),
+			new Promise<void>((resolve) => legitServer.listen(0, "127.0.0.1", resolve)),
+		])
+		const untrustedDir = mkdtempSync(join(tmpdir(), "checkfu-untrusted-cwd-"))
+		try {
+			const evilPort = (evilServer.address() as { port: number }).port
+			const legitPort = (legitServer.address() as { port: number }).port
+			writeFileSync(join(untrustedDir, ".env"), `CHECKFU_API_URL=http://127.0.0.1:${evilPort}\n`)
+			writeFileSync(join(untrustedDir, ".env.local"), `CHECKFU_URL=http://127.0.0.1:${evilPort}\n`)
+			const baseEnv: Record<string, string> = {}
+			for (const [k, v] of Object.entries(process.env)) {
+				if (v !== undefined && !k.startsWith("CHECKFU_")) {
+					baseEnv[k] = v
+				}
+			}
+
+			const runSubprocess = (
+				cmd: string,
+				args: ReadonlyArray<string>,
+				env: Record<string, string>,
+			) =>
+				new Promise<{
+					readonly status: number | null
+					readonly stdout: string
+					readonly stderr: string
+				}>((resolve, reject) => {
+					const child = spawn(cmd, [...args], {
+						cwd: untrustedDir,
+						env,
+						stdio: ["ignore", "pipe", "pipe"],
+					})
+					let stdout = ""
+					let stderr = ""
+					child.stdout.setEncoding("utf8")
+					child.stderr.setEncoding("utf8")
+					child.stdout.on("data", (chunk: string) => {
+						stdout += chunk
+					})
+					child.stderr.on("data", (chunk: string) => {
+						stderr += chunk
+					})
+					child.on("error", reject)
+					child.on("close", (status) => resolve({ status, stdout, stderr }))
+				})
+
+			// 1a) Documented launcher (`bun --no-env-file apps/cli/src/main.ts`) ignores cwd .env files
+			const noEnvDoc = await runSubprocess(
+				"bun",
+				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_API_KEY: "ck_exported_secret",
+					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+				},
+			)
+			expect(noEnvDoc.status).toBe(0)
+			expect(legitHits).toBe(1)
+			expect(evilHits).toBe(0)
+
+			// 1b) Without an exported URL, documented launcher must NOT fall back to cwd .env's CHECKFU_API_URL
+			const noEnvDefault = await runSubprocess(
+				"bun",
+				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_API_KEY: "ck_exported_secret",
+				},
+			)
+			expect(evilHits).toBe(0)
+			expect(noEnvDefault.stdout).not.toContain('"sess_env"')
+
+			// 1c) Bare `bun apps/cli/src/main.ts` without `--no-env-file` fails closed when cwd has .env
+			const bareLaunch = await runSubprocess(
+				"bun",
+				[mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_API_KEY: "ck_exported_secret",
+				},
+			)
+			expect(bareLaunch.status).toBe(1)
+			expect(bareLaunch.stderr).toContain("--no-env-file")
+			expect(evilHits).toBe(0)
+
+			// 1d) POSIX bin launcher (`apps/cli/bin/checkfu`) execs `bun --no-env-file` and ignores cwd .env
+			const binStatus =
+				process.platform === "win32"
+					? 0
+					: (
+							await runSubprocess(binPath, ["sessions", "retrieve", "--session-id", "sess_env"], {
+								...baseEnv,
+								CHECKFU_API_KEY: "ck_exported_secret",
+								CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+							})
+						).status
+			expect(binStatus).toBe(0)
+			expect(legitHits).toBe(process.platform === "win32" ? 1 : 2)
+			expect(evilHits).toBe(0)
+		} finally {
+			rmSync(untrustedDir, { recursive: true, force: true })
+			await Promise.all([
+				new Promise<void>((resolve) => evilServer.close(() => resolve())),
+				new Promise<void>((resolve) => legitServer.close(() => resolve())),
+			])
+		}
+
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 2) Replayed SSE frames (duplicate seq for session.status_running) on reconnect must NOT
+					//    double-count observedTurn and prematurely settle queued turn 2
+					const turn1Gate = yield* Deferred.make<void>()
+					const replayCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.await(turn1Gate)
+								}
+								return {
+									thinking: null,
+									text: `Turn${args.turn}:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const replaySessionId = yield* createReadySession(replayCli)
+					let streamConnections = 0
+					let savedInitialFrames = ""
+					const replayRes = yield* replayCli.run(
+						["sessions", "connect", "--session-id", replaySessionId],
+						{
+							stdin: "first\nsecond\n",
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								streamConnections += 1
+								const conn = streamConnections
+								const res = await next(request)
+								if (res.status !== 200 || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								const encoder = new TextEncoder()
+								if (conn === 1) {
+									let buffered = ""
+									let errored = false
+									const dropping = new ReadableStream<Uint8Array>({
+										async pull(controller) {
+											if (errored) return
+											const chunk = await reader.read()
+											if (chunk.done) {
+												controller.close()
+												return
+											}
+											const text = decoder.decode(chunk.value, { stream: true })
+											buffered += text
+											controller.enqueue(chunk.value)
+											if (buffered.includes("session.status_running")) {
+												savedInitialFrames = buffered
+												errored = true
+												await reader.cancel()
+												controller.error(new TypeError("simulated drop after turn 1 running"))
+											}
+										},
+										cancel(reason) {
+											return reader.cancel(reason)
+										},
+									})
+									return new Response(dropping, { status: 200, headers: res.headers })
+								}
+								// Connection 2 replays the exact turn-1 running frames before streaming the real tail
+								let replayedPrefix = false
+								const replaying = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										if (!replayedPrefix) {
+											replayedPrefix = true
+											controller.enqueue(encoder.encode(savedInitialFrames))
+											await Effect.runPromise(Deferred.succeed(turn1Gate, undefined))
+											return
+										}
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										controller.enqueue(chunk.value)
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(replaying, { status: 200, headers: res.headers })
+							},
+						},
+					)
+					expect(streamConnections).toBeGreaterThanOrEqual(2)
+					expect(replayRes.exitCode).toBe(0)
+					expect(replayRes.stdout).toContain("Turn1:first")
+					expect(replayRes.stdout).toContain("Turn2:second")
+					expect(replayRes.stdout.split("[user] first")).toHaveLength(2)
+
+					// 3) After turn 1 stops with refusal while turn 2 is queued, a lagging GET snapshot that
+					//    still reports turn 1 as running is rechecked with a bound instead of hanging
+					const lagTurn1Running = yield* Deferred.make<void>()
+					const releaseLagTurn1 = yield* Deferred.make<void>()
+					const lagCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(lagTurn1Running, undefined)
+								yield* Deferred.await(releaseLagTurn1)
+								return {
+									thinking: null,
+									text: "Refused lag turn 1",
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "refusal" as const },
+								}
+							}),
+					})
+					const lagSessionId = yield* createReadySession(lagCli)
+					const encoder = new TextEncoder()
+					let lagPosts = 0
+					let lagGets = 0
+					const lagStdin = Stream.concat(
+						Stream.make(encoder.encode("turn 1\n")),
+						Stream.fromEffect(
+							Deferred.await(lagTurn1Running).pipe(Effect.as(encoder.encode("queued turn 2\n"))),
+						),
+					)
+					const [lagDuration, lagRes] = yield* Effect.timed(
+						lagCli.run(["sessions", "connect", "--session-id", lagSessionId], {
+							stdin: lagStdin,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									lagPosts += 1
+									const res = await next(request)
+									if (lagPosts === 2) {
+										await Effect.runPromise(Deferred.succeed(releaseLagTurn1, undefined))
+									}
+									return res
+								}
+								if (request.method === "GET" && request.url.endsWith(`/sessions/${lagSessionId}`)) {
+									lagGets += 1
+									const res = await next(request)
+									// Return lagging "running" at turn 1 for the first two post-refusal rechecks,
+									// then let the third recheck see the real idle snapshot
+									if (lagGets === 2 || lagGets === 3) {
+										const body = (await res.json()) as Record<string, unknown>
+										return new Response(JSON.stringify({ ...body, status: "running", turn: 1 }), {
+											status: 200,
+											headers: { "content-type": "application/json" },
+										})
+									}
+									return res
+								}
+								return next(request)
+							},
+						}),
+					)
+					expect(lagGets).toBe(4)
+					expect(Duration.toMillis(lagDuration)).toBeLessThan(2_000)
+					expect(lagRes.exitCode).toBe(1)
+					expect(lagRes.stderr).toContain(
+						"Queued turn 2 did not start because turn 1 stopped with refusal.",
+					)
 				}),
 			),
 		)

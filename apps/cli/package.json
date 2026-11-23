@@ -4,7 +4,7 @@
 	"private": true,
 	"license": "Apache-2.0",
 	"bin": {
-		"checkfu": "./src/main.ts"
+		"checkfu": "./bin/checkfu"
 	},
 	"type": "module",
 	"sideEffects": false,

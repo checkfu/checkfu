@@ -52,7 +52,7 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 ## Commands
 
-- `bun apps/cli/src/main.ts --help` — run the Checkfu CLI (`agents`, `environments`, `sessions`, `sessions:events`)
+- `bun --no-env-file apps/cli/src/main.ts --help` — run the Checkfu CLI (`agents`, `environments`, `sessions`, `sessions:events`)
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI commands from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
 - `bun run state:sync-observability` — one-time rollout to apply `alchemy.run.ts` observability settings (disabling invocation logs) to an existing Cloudflare state-store Worker
