@@ -111,7 +111,12 @@ const isCredentialCheck = (input: RequestInfo | URL) =>
 const afterCredentialCheck = (reply: () => Promise<Response>) => ({
 	fetch: ((input) =>
 		isCredentialCheck(input)
-			? Promise.resolve(new Response("{}", { status: 404 }))
+			? Promise.resolve(
+					Response.json(
+						{ type: "error", error: { type: "not_found_error", message: "Not found." } },
+						{ status: 404 },
+					),
+				)
 			: reply()) satisfies typeof globalThis.fetch,
 })
 
@@ -174,24 +179,28 @@ describe("Checkfu MCP server", () => {
 			const hints = Object.fromEntries(
 				tools.map((tool) => [
 					tool.name,
-					`${tool.annotations?.readOnlyHint ? "read-only" : "writes"}, ${tool.annotations?.destructiveHint ? "destructive" : "additive"}`,
+					[
+						tool.annotations?.readOnlyHint ? "read-only" : "writes",
+						tool.annotations?.destructiveHint ? "destructive" : "additive",
+						tool.annotations?.idempotentHint ? "repeatable" : "not repeatable",
+					].join(", "),
 				]),
 			)
 			expect(hints).toEqual({
-				agents_archiveAgent: "writes, destructive",
-				agents_createAgent: "writes, additive",
-				agents_getAgent: "read-only, additive",
-				agents_updateAgent: "writes, destructive",
-				environments_archiveEnvironment: "writes, destructive",
-				environments_createEnvironment: "writes, additive",
-				environments_deleteEnvironment: "writes, destructive",
-				environments_getEnvironment: "read-only, additive",
-				environments_updateEnvironment: "writes, destructive",
-				sessions_archiveSession: "writes, destructive",
-				sessions_createSession: "writes, additive",
-				sessions_getSession: "read-only, additive",
-				sessions_listEvents: "read-only, additive",
-				sessions_sendSessionEvents: "writes, destructive",
+				agents_archiveAgent: "writes, destructive, repeatable",
+				agents_createAgent: "writes, additive, not repeatable",
+				agents_getAgent: "read-only, additive, repeatable",
+				agents_updateAgent: "writes, destructive, not repeatable",
+				environments_archiveEnvironment: "writes, destructive, repeatable",
+				environments_createEnvironment: "writes, additive, not repeatable",
+				environments_deleteEnvironment: "writes, destructive, repeatable",
+				environments_getEnvironment: "read-only, additive, repeatable",
+				environments_updateEnvironment: "writes, destructive, not repeatable",
+				sessions_archiveSession: "writes, destructive, repeatable",
+				sessions_createSession: "writes, additive, not repeatable",
+				sessions_getSession: "read-only, additive, repeatable",
+				sessions_listEvents: "read-only, additive, repeatable",
+				sessions_sendSessionEvents: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
 	)
@@ -471,11 +480,37 @@ describe("Checkfu MCP server", () => {
 			expect(accepted.status).toBe(200)
 			expect(accepted.headers.get("www-authenticate")).toBeNull()
 
-			// If the API cannot be asked, the credential is not taken on trust.
-			const unreachable = yield* server.fetch(listToolsRequest("/mcp", stale), {
-				fetch: () => Promise.reject(new Error("unreachable")),
-			})
-			expect(unreachable.status).toBe(503)
+			// Only the API's own "no such agent" admits a request. An API that cannot be asked, or
+			// that answers anything else, has not accepted the credential.
+			const notFound = { type: "error", error: { type: "not_found_error", message: "Not found." } }
+			const unconfigured = {
+				type: "error",
+				error: { type: "service_unavailable", message: "API authentication is not configured." },
+			}
+			const answers: ReadonlyArray<readonly [string, () => Promise<Response>]> = [
+				["unreachable", () => Promise.reject(new Error("unreachable"))],
+				[
+					"503 no key configured",
+					() => Promise.resolve(Response.json(unconfigured, { status: 503 })),
+				],
+				["500", () => Promise.resolve(Response.json({}, { status: 500 }))],
+				["429", () => Promise.resolve(Response.json({}, { status: 429 }))],
+				["200", () => Promise.resolve(Response.json(notFound, { status: 200 }))],
+				["404 that is not JSON", () => Promise.resolve(new Response("<html>", { status: 404 }))],
+				["404 that is not the API's", () => Promise.resolve(Response.json({}, { status: 404 }))],
+				[
+					"404 with another error",
+					() =>
+						Promise.resolve(Response.json({ error: { type: "route_missing" } }, { status: 404 })),
+				],
+			]
+			for (const [label, answer] of answers) {
+				const unverified = yield* server.fetch(
+					listToolsRequest("/mcp", { authorization: `Bearer ${TEST_API_KEY}` }),
+					{ fetch: answer },
+				)
+				expect([label, unverified.status]).toEqual([label, 503])
+			}
 		}).pipe(Effect.scoped),
 	)
 
@@ -612,6 +647,7 @@ describe("Checkfu MCP server", () => {
 					method: "GET",
 					path: "/v1/things/{thing-id}/parts/{part.id}",
 					readOnly: true,
+					idempotent: true,
 					destructive: false,
 					inputSchema: {
 						type: "object",

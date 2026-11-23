@@ -5,7 +5,8 @@ import {
 	importInputSchema,
 } from "@checkfu/mcp/GeneratedRuntime"
 import * as Schema from "effect/Schema"
-import type { GeneratedFile } from "./CliTransformer.ts"
+import { buildSurfaceCatalog } from "./SurfaceCatalog.ts"
+import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
 type JsonRecord = Readonly<Record<string, Json>>
 
@@ -16,6 +17,7 @@ interface McpTool {
 	readonly method: string
 	readonly path: string
 	readonly readOnly: boolean
+	readonly idempotent: boolean
 	readonly destructive: boolean
 	readonly inputSchema: JsonRecord
 }
@@ -161,12 +163,12 @@ const isObjectType = (type: Type): boolean => {
 	}
 }
 
-const projectMethod = (
-	method: Method,
+const projectOperation = (
+	operation: SurfaceOperation,
 	paths: JsonRecord,
 	components: JsonRecord,
 ): McpTool | undefined => {
-	const httpMethod = method.httpMethod.toUpperCase()
+	const { method, httpMethod } = operation
 	const label = `${httpMethod} ${method.path}`
 	const exposure = readExposure(method, label)
 	if (exposure === undefined) {
@@ -186,12 +188,12 @@ const projectMethod = (
 		)
 	}
 	const pathItem = recordAt(paths, method.path)
-	const operation = recordAt(pathItem, httpMethod.toLowerCase())
-	if (pathItem === undefined || operation === undefined) {
+	const rawOperation = recordAt(pathItem, httpMethod.toLowerCase())
+	if (pathItem === undefined || rawOperation === undefined) {
 		throw new Error(`${label}: operation is missing from the OpenAPI document.`)
 	}
 
-	const parameters = readParameters(pathItem, operation, label)
+	const parameters = readParameters(pathItem, rawOperation, label)
 	// A parameter the runtime does not forward would be dropped from the tool without a trace,
 	// so every parameter has to be one of the kinds it does.
 	for (const parameter of parameters) {
@@ -233,7 +235,7 @@ const projectMethod = (
 			required.push("query")
 		}
 	}
-	const requestBody = recordAt(operation, "requestBody")
+	const requestBody = recordAt(rawOperation, "requestBody")
 	if (requestBody !== undefined) {
 		if (readOnly) {
 			throw new Error(`${label}: MCP tools cannot send a request body with GET.`)
@@ -280,6 +282,8 @@ const projectMethod = (
 		method: httpMethod,
 		path: method.path,
 		readOnly,
+		// The same retry-safety rule the CLI and SDK are generated from.
+		idempotent: operation.retrySafety === "idempotent",
 		// MCP reads "not destructive" as "only adds", so an operation has to claim that itself.
 		destructive: !readOnly && exposure.destructive !== false,
 		inputSchema,
@@ -292,18 +296,16 @@ export const projectMcpTools = (forge: Forge, openApiJson: string): ReadonlyArra
 	const components = recordAt(recordAt(document, "components"), "schemas") ?? {}
 	const tools: Array<McpTool> = []
 	const names = new Set<string>()
-	for (const group of forge.groups) {
-		for (const method of group.methods) {
-			const tool = projectMethod(method, paths, components)
-			if (tool === undefined) {
-				continue
-			}
-			if (names.has(tool.name)) {
-				throw new Error(`Duplicate MCP tool name ${JSON.stringify(tool.name)}.`)
-			}
-			names.add(tool.name)
-			tools.push(tool)
+	for (const operation of buildSurfaceCatalog(forge).operations) {
+		const tool = projectOperation(operation, paths, components)
+		if (tool === undefined) {
+			continue
 		}
+		if (names.has(tool.name)) {
+			throw new Error(`Duplicate MCP tool name ${JSON.stringify(tool.name)}.`)
+		}
+		names.add(tool.name)
+		tools.push(tool)
 	}
 	return tools.toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }

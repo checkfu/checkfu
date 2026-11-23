@@ -91,6 +91,18 @@ describe("MCP tool projection", () => {
 			},
 		})
 
+		// Repeating is safe for reads, for DELETE, and for writes the API declares idempotent.
+		// A write that is only safe with a retry key is not.
+		expect(
+			tools.filter((tool) => tool.idempotent && !tool.readOnly).map((tool) => tool.name),
+		).toEqual([
+			"agents_archiveAgent",
+			"environments_archiveEnvironment",
+			"environments_deleteEnvironment",
+			"sessions_archiveSession",
+		])
+		expect(tools.filter((tool) => tool.readOnly && !tool.idempotent)).toEqual([])
+
 		// Only an operation that declares itself additive may drop the destructive hint.
 		expect(
 			tools.filter((tool) => !tool.readOnly && !tool.destructive).map((tool) => tool.name),

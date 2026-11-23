@@ -12,6 +12,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/agents/{agent_id}/archive",
 		readOnly: false,
+		idempotent: true,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -41,6 +42,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/agents",
 		readOnly: false,
+		idempotent: false,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -122,6 +124,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "GET",
 		path: "/v1/agents/{agent_id}",
 		readOnly: true,
+		idempotent: true,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -151,6 +154,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/agents/{agent_id}",
 		readOnly: false,
+		idempotent: false,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -243,6 +247,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/environments/{environment_id}/archive",
 		readOnly: false,
+		idempotent: true,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -272,6 +277,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/environments",
 		readOnly: false,
+		idempotent: false,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -377,6 +383,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "DELETE",
 		path: "/v1/environments/{environment_id}",
 		readOnly: false,
+		idempotent: true,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -406,6 +413,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "GET",
 		path: "/v1/environments/{environment_id}",
 		readOnly: true,
+		idempotent: true,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -435,6 +443,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/environments/{environment_id}",
 		readOnly: false,
+		idempotent: false,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -551,6 +560,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/sessions/{session_id}/archive",
 		readOnly: false,
+		idempotent: true,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -581,6 +591,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/sessions",
 		readOnly: false,
+		idempotent: false,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -737,6 +748,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "GET",
 		path: "/v1/sessions/{session_id}",
 		readOnly: true,
+		idempotent: true,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -767,6 +779,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "GET",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: true,
+		idempotent: true,
 		destructive: false,
 		inputSchema: {
 			type: "object",
@@ -820,6 +833,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: false,
+		idempotent: false,
 		destructive: true,
 		inputSchema: {
 			type: "object",

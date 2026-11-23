@@ -40,7 +40,7 @@ const toTool = (descriptor: GeneratedToolDescriptor) =>
 		.annotate(Tool.Title, descriptor.title)
 		.annotate(Tool.Readonly, descriptor.readOnly)
 		.annotate(Tool.Destructive, descriptor.destructive)
-		.annotate(Tool.Idempotent, descriptor.readOnly)
+		.annotate(Tool.Idempotent, descriptor.idempotent)
 
 const CheckfuToolkit = Toolkit.make(...GENERATED_TOOLS.map(toTool))
 
@@ -74,6 +74,10 @@ const API_ORIGIN = "https://api.checkfu.internal"
 // A protected route for a resource that does not exist, as the CLI uses to check a key: the
 // API answers 401 to a credential it rejects and 404 to one it accepts.
 export const CREDENTIAL_PROBE_PATH = "/v1/agents/agent_unknown"
+
+const isNotFound = Schema.is(
+	Schema.Struct({ error: Schema.Struct({ type: Schema.Literal("not_found_error") }) }),
+)
 
 const errorResponse = (
 	status: number,
@@ -118,21 +122,31 @@ const admission = <E, R>(
 			if (!hasCredential(request.headers)) {
 				return yield* unauthorizedResponse
 			}
-			const probe = yield* Effect.tryPromise({
-				try: async () => {
+			const verdict = yield* Effect.tryPromise({
+				try: async (): Promise<"accepted" | "rejected" | "unverified"> => {
 					const response = await api.fetch(`${API_ORIGIN}${CREDENTIAL_PROBE_PATH}`, {
 						headers: credentialHeaders(request.headers),
 					})
+					if (response.status === 404) {
+						const body: unknown = await response.json()
+						return isNotFound(body) ? "accepted" : "unverified"
+					}
 					await response.body?.cancel()
-					return response.status
+					return response.status === 401 ? "rejected" : "unverified"
 				},
-				catch: () => "unreachable" as const,
-			}).pipe(Effect.orElseSucceed(() => undefined))
-			if (probe === 401) {
+				catch: () => "unverified" as const,
+			}).pipe(Effect.orElseSucceed(() => "unverified" as const))
+			if (verdict === "rejected") {
 				return yield* unauthorizedResponse
 			}
-			if (probe === undefined) {
-				return yield* errorResponse(503, "service_unavailable", "The Checkfu API is unreachable.")
+			// Only the API's own "no such agent" proves it accepted the credential. Any other
+			// answer, such as its 503 when no key is configured, proves nothing.
+			if (verdict === "unverified") {
+				return yield* errorResponse(
+					503,
+					"service_unavailable",
+					"The Checkfu API could not verify this credential.",
+				)
 			}
 		}
 		const bodyLimit = Effect.provideService(

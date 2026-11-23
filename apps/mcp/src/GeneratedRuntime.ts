@@ -16,6 +16,7 @@ export interface GeneratedToolDescriptor {
 	readonly method: HttpMethod.HttpMethod
 	readonly path: string
 	readonly readOnly: boolean
+	readonly idempotent: boolean
 	readonly destructive: boolean
 	readonly inputSchema: JsonSchema.JsonSchema
 }
