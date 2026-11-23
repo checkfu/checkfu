@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+import * as Alchemy from "alchemy"
 import * as Cause from "effect/Cause"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -9,7 +10,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu } from "./Checkfu.model.ts"
-import { makeApiHandler } from "./Http/Router.ts"
+import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import {
 	HarnessCallFailed,
 	PiDurableModelProviderLive,
@@ -54,6 +55,7 @@ const CheckfuLive = Checkfu.layer(
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
 	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
+	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,
 ).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
 

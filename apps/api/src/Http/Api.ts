@@ -343,7 +343,22 @@ export const SessionEvent = Schema.Union([
 
 export type SessionEvent = typeof SessionEvent.Type
 
-const Digits = Schema.String.check(Schema.isPattern(/^\d{1,15}$/))
+export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
+	Schema.decodeTo(
+		Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
+		{
+			decode: SchemaGetter.transform((value) => Number(value)),
+			encode: SchemaGetter.transform((value) => String(value)),
+		},
+	),
+)
+
+const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u)).pipe(
+	Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
+		decode: SchemaGetter.transform((value) => Number(value)),
+		encode: SchemaGetter.transform((value) => String(value)),
+	}),
+)
 
 const agentParams = { agent_id: AgentId }
 const environmentParams = { environment_id: EnvironmentId }
@@ -550,8 +565,8 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("listEvents", "/v1/sessions/:session_id/events", {
 			params: sessionParams,
 			query: {
-				after: Schema.optionalKey(Digits),
-				limit: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/))),
+				after: Schema.optionalKey(CursorFromString),
+				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(Schema.Literals(["asc", "desc"])),
 			},
 			success: Schema.Struct({
@@ -565,6 +580,8 @@ const Sessions = HttpApiGroup.make("sessions")
 	.add(
 		HttpApiEndpoint.get("streamEvents", "/v1/sessions/:session_id/events/stream", {
 			params: sessionParams,
+			// Keep `after` as a raw string here so `streamEvents` can give a non-empty
+			// `Last-Event-ID` header precedence before decoding the selected cursor.
 			query: { after: Schema.optionalKey(Schema.String) },
 			success: [HttpApiSchema.StreamSse({ data: SessionEvent }), HttpApiSchema.NoContent],
 			error: HandlerErrors,
