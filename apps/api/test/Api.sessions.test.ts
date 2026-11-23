@@ -1252,10 +1252,12 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 											agent_id: command.agent_id,
 											expected_version: 1,
 											next_version_id: AgentVersionId.make("aver_race_v2"),
-											name: "Agent v2",
-											model: { id: "gpt-4o-mini" },
-											system: "Updated system",
-											description: null,
+											changes: {
+												name: "Agent v2",
+												model: { id: "gpt-4o-mini" },
+												system: "Updated system",
+												description: null,
+											},
 										}),
 									)
 								}

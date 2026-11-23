@@ -11,7 +11,6 @@ import { CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
 import { UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
-import { AgentDescription, AgentName, AgentSystem } from "@checkfu/domain/Agent/AgentTypes"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -20,7 +19,6 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
 import { createPiModels, resolveCatalogModel } from "../Pi/PiModels.ts"
 import { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
 import { CheckfuApi } from "./Api.ts"
@@ -39,12 +37,6 @@ import {
 	randomId,
 	reject,
 } from "./HttpHelpers.ts"
-
-const ValidatedAgentFields = Schema.Struct({
-	name: AgentName,
-	system: Schema.NullOr(AgentSystem),
-	description: Schema.NullOr(AgentDescription),
-})
 
 export const AgentVersionWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/AgentVersionWaitTimeout",
@@ -224,45 +216,17 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
-					const model = payload.model === undefined ? undefined : normalizeModel(payload.model)
+					const { version, model: modelInput, ...fields } = payload
+					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
 					if (model !== undefined) {
 						yield* supported(model)
 					}
-					const committed = yield* agents.get(id)
-					if (committed.status === "") {
-						return yield* reject(404, `Agent ${id} not found.`)
-					}
-					if (committed.status === "archived") {
-						return yield* reject(409, "Agent is archived.")
-					}
-					if (committed.version !== payload.version) {
-						return yield* reject(409, "Agent version does not match.")
-					}
-					const nextFields = yield* Schema.decodeEffect(ValidatedAgentFields)({
-						name: payload.name ?? committed.name,
-						system:
-							payload.system !== undefined
-								? payload.system
-								: committed.has_system
-									? committed.system
-									: null,
-						description:
-							payload.description !== undefined
-								? payload.description
-								: committed.has_description
-									? committed.description
-									: null,
-					}).pipe(Effect.catch((error) => reject(400, error.message)))
-					const nextVersionId = AgentVersionId.make(yield* randomId(random, "aver"))
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,
-							expected_version: payload.version,
-							next_version_id: nextVersionId,
-							name: nextFields.name,
-							model: model ?? { id: committed.model_id },
-							system: nextFields.system,
-							description: nextFields.description,
+							expected_version: version,
+							next_version_id: AgentVersionId.make(yield* randomId(random, "aver")),
+							changes: model === undefined ? fields : { ...fields, model },
 						}),
 					)
 					return yield* loadCommittedAgentVersion(

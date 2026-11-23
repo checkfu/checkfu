@@ -459,10 +459,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							agent_id: agentRef.id,
 							expected_version: 1,
 							next_version_id: v2Ref.id,
-							name: "Post-Admission Agent v2",
-							model: { id: "gpt-5.4" },
-							system: null,
-							description: null,
+							changes: {
+								name: "Post-Admission Agent v2",
+								model: { id: "gpt-5.4" },
+								system: null,
+								description: null,
+							},
 						}),
 					)
 					yield* recordStep("updated-agent-to-v2-after-admission")
@@ -471,10 +473,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							agent_id: agentRef.id,
 							expected_version: 2,
 							next_version_id: vNoopRef.id,
-							name: "Post-Admission Agent v2",
-							model: { id: "gpt-5.4" },
-							system: null,
-							description: null,
+							changes: {
+								name: "Post-Admission Agent v2",
+								model: { id: "gpt-5.4" },
+								system: null,
+								description: null,
+							},
 						}),
 					)
 					yield* recordStep("noop-update-agent-at-v2")

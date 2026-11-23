@@ -25,14 +25,21 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 				current_version: head.version,
 			})
 		}
-		const hasSystem = cmd.system !== null
-		const system = cmd.system ?? ""
-		const hasDescription = cmd.description !== null
-		const description = cmd.description ?? ""
+		const name = cmd.changes.name === undefined ? head.name : cmd.changes.name
+		const modelId = cmd.changes.model === undefined ? head.model_id : cmd.changes.model.id
+		const hasSystem =
+			cmd.changes.system === undefined ? head.has_system : cmd.changes.system !== null
+		const system = cmd.changes.system === undefined ? head.system : (cmd.changes.system ?? "")
+		const hasDescription =
+			cmd.changes.description === undefined
+				? head.has_description
+				: cmd.changes.description !== null
+		const description =
+			cmd.changes.description === undefined ? head.description : (cmd.changes.description ?? "")
 		if (
 			[
-				cmd.name === head.name,
-				cmd.model.id === head.model_id,
+				name === head.name,
+				modelId === head.model_id,
 				hasSystem === head.has_system,
 				system === head.system,
 				hasDescription === head.has_description,
@@ -45,38 +52,39 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 			return new AgentVersionAlreadyExists({ version_id: version.id })
 		}
 		const nextVersion = head.version + 1
+		const next = {
+			name,
+			model: { id: modelId },
+			system: hasSystem ? system : null,
+			description: hasDescription ? description : null,
+		}
 		return [
-			agent.record(
-				new AgentUpdated({
-					version: nextVersion,
-					version_id: version.id,
-					name: cmd.name,
-					model: cmd.model,
-					system: cmd.system,
-					description: cmd.description,
-				}),
-			),
-			version.record(
-				new AgentVersionMinted({
-					agent_id: agent.id,
-					version: nextVersion,
-					name: cmd.name,
-					model: cmd.model,
-					system: cmd.system,
-					description: cmd.description,
-				}),
-			),
+			agent.record(new AgentUpdated({ version: nextVersion, version_id: version.id, ...next })),
+			version.record(new AgentVersionMinted({ agent_id: agent.id, version: nextVersion, ...next })),
 		]
 	},
 	transitions: {
 		ChangeMintsNextVersionOrNoOps: ({ before, after, command }) => {
-			const hasSystem = command.system !== null
-			const system = command.system ?? ""
-			const hasDescription = command.description !== null
-			const description = command.description ?? ""
+			const name = command.changes.name === undefined ? before.agent.name : command.changes.name
+			const modelId =
+				command.changes.model === undefined ? before.agent.model_id : command.changes.model.id
+			const hasSystem =
+				command.changes.system === undefined
+					? before.agent.has_system
+					: command.changes.system !== null
+			const system =
+				command.changes.system === undefined ? before.agent.system : (command.changes.system ?? "")
+			const hasDescription =
+				command.changes.description === undefined
+					? before.agent.has_description
+					: command.changes.description !== null
+			const description =
+				command.changes.description === undefined
+					? before.agent.description
+					: (command.changes.description ?? "")
 			const unchanged = [
-				command.name === before.agent.name,
-				command.model.id === before.agent.model_id,
+				name === before.agent.name,
+				modelId === before.agent.model_id,
 				hasSystem === before.agent.has_system,
 				system === before.agent.system,
 				hasDescription === before.agent.has_description,
@@ -96,8 +104,8 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 						!unchanged,
 						after.agent.version === before.agent.version + 1,
 						after.agent.current_version_id === command.next_version_id,
-						after.agent.name === command.name,
-						after.agent.model_id === command.model.id,
+						after.agent.name === name,
+						after.agent.model_id === modelId,
 						after.agent.has_system === hasSystem,
 						after.agent.system === system,
 						after.agent.has_description === hasDescription,
@@ -111,14 +119,27 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 			].every((ok) => ok)
 		},
 		UnchangedConfigMintsNothing: ({ before, after, command }) => {
-			const hasSystem = command.system !== null
-			const system = command.system ?? ""
-			const hasDescription = command.description !== null
-			const description = command.description ?? ""
+			const name = command.changes.name === undefined ? before.agent.name : command.changes.name
+			const modelId =
+				command.changes.model === undefined ? before.agent.model_id : command.changes.model.id
+			const hasSystem =
+				command.changes.system === undefined
+					? before.agent.has_system
+					: command.changes.system !== null
+			const system =
+				command.changes.system === undefined ? before.agent.system : (command.changes.system ?? "")
+			const hasDescription =
+				command.changes.description === undefined
+					? before.agent.has_description
+					: command.changes.description !== null
+			const description =
+				command.changes.description === undefined
+					? before.agent.description
+					: (command.changes.description ?? "")
 			return [
 				before.agent.status !== "active",
-				command.name !== before.agent.name,
-				command.model.id !== before.agent.model_id,
+				name !== before.agent.name,
+				modelId !== before.agent.model_id,
 				hasSystem !== before.agent.has_system,
 				system !== before.agent.system,
 				hasDescription !== before.agent.has_description,
