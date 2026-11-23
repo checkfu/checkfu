@@ -20,7 +20,6 @@ import {
 	bestEffortAfterCommit,
 	claimCreate,
 	handled,
-	hasTag,
 	idempotentId,
 	isPending,
 	orPending,
@@ -150,13 +149,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 							{ version: { gte: 1 } },
 							{ timeout: yield* EnvironmentPartialUpdateWaitTimeout },
 						)
-						.pipe(
-							Effect.catch((err) =>
-								hasTag(err, "WaitTimeout") || hasTag(err, "ConsistencyTimeout")
-									? Effect.andThen(checkExists, Effect.fail(err))
-									: Effect.fail(err),
-							),
-						)
+						.pipe(Effect.tapErrorTag("WaitTimeout", () => checkExists))
 					if (projected === null) {
 						yield* checkExists
 						return yield* reject(503, `Environment ${id} projection is not ready.`)
@@ -202,13 +195,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 									{ version: { gte: committed.version } },
 									{ timeout: yield* EnvironmentPartialUpdateWaitTimeout },
 								)
-								.pipe(
-									Effect.catch((err) =>
-										hasTag(err, "WaitTimeout") || hasTag(err, "ConsistencyTimeout")
-											? Effect.andThen(checkStillUpdatable, Effect.fail(err))
-											: Effect.fail(err),
-									),
-								)
+								.pipe(Effect.tapErrorTag("WaitTimeout", () => checkStillUpdatable))
 						}
 						if (view === null) return yield* reject(404, `Environment ${id} not found.`)
 						if (view.version !== payload.version) {
@@ -217,7 +204,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 						if (description === undefined) description = view.description
 						if (config === undefined) config = view.config
 					}
-					const nextFields = yield* Schema.decodeUnknownEffect(ValidatedEnvironmentFields)({
+					const nextFields = yield* Schema.decodeEffect(ValidatedEnvironmentFields)({
 						name: payload.name ?? committed.name,
 						description,
 					}).pipe(Effect.catch((error) => reject(400, error.message)))

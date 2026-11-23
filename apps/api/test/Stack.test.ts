@@ -2,6 +2,7 @@ import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
 import { describe, expect, it } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import { State } from "alchemy/State"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -20,14 +21,25 @@ describe("Alchemy stack and worker entry", () => {
 		expect(stack).toBeDefined()
 		expect(AgentView.definition.version).toBeUndefined()
 
-		const devStateLayer = (stack.state as Layer.Layer<typeof State.Identifier>).pipe(
+		const devStateLayer = stack.state.pipe(
 			Layer.provide(
 				Layer.mergeAll(
+					// `stack.state` types the full `Alchemy.StackServices` union for its production branch,
+					// while `dev: true` only resolves `Alchemy.localState()` (`AlchemyContext | Stage | FileSystem | Path`).
+					Layer.succeedContext(
+						Context.makeUnsafe<
+							Exclude<
+								Alchemy.StackServices,
+								Alchemy.AlchemyContext | Alchemy.Stage | FileSystem.FileSystem | Path.Path
+							>
+						>(new Map()),
+					),
 					Layer.succeed(Alchemy.AlchemyContext, {
 						dotAlchemy: "/nonexistent/.alchemy",
 						dev: true,
 						adopt: false,
 					}),
+					Layer.succeed(Alchemy.Stage, "dev"),
 					FileSystem.layerNoop({
 						makeDirectory: () => Effect.void,
 						exists: () => Effect.succeed(false),
@@ -51,16 +63,14 @@ describe("Alchemy stack and worker entry", () => {
 		const checkBaselineGate = (dev: boolean, stage: string) =>
 			Effect.runPromise(
 				shouldRequireShippedBaseline.pipe(
-					Effect.provide(
-						Layer.mergeAll(
-							Layer.succeed(Alchemy.AlchemyContext, {
-								dotAlchemy: "/nonexistent/.alchemy",
-								dev,
-								adopt: false,
-							}),
-							Layer.succeed(Alchemy.Stage, stage),
-						),
-					),
+					Effect.provide([
+						Layer.succeed(Alchemy.AlchemyContext, {
+							dotAlchemy: "/nonexistent/.alchemy",
+							dev,
+							adopt: false,
+						}),
+						Layer.succeed(Alchemy.Stage, stage),
+					]),
 				),
 			)
 		expect(await checkBaselineGate(true, "production")).toBe(false)

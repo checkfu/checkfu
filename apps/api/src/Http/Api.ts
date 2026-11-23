@@ -46,8 +46,8 @@ const errorEnvelope = <const T extends string>(status: number, type: T) =>
 		error: Schema.Struct({ type: Schema.Literal(type), message: Schema.String }),
 		request_id: RequestId,
 		accepted: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-		failed_index: Schema.optionalKey(Schema.Number),
-		unconfirmed_index: Schema.optionalKey(Schema.Number),
+		failed_index: Schema.optionalKey(Schema.Finite),
+		unconfirmed_index: Schema.optionalKey(Schema.Finite),
 	}).pipe(HttpApiSchema.status(status))
 
 export const ERRORS = {
@@ -557,7 +557,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			success: Schema.Struct({
 				data: Schema.Array(SessionEvent),
 				has_more: Schema.Boolean,
-				next_cursor: Schema.NullOr(Schema.Number),
+				next_cursor: Schema.NullOr(Schema.Finite),
 			}),
 			error: HandlerErrors,
 		}),

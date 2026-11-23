@@ -184,7 +184,7 @@ describe("persisted shape lock", () => {
 							: shape,
 					)
 
-				const required = yield* lockProblems(lock, withInput({ added_later: Schema.Number }))
+				const required = yield* lockProblems(lock, withInput({ added_later: Schema.Finite }))
 				expect(required.length).toBe(1)
 				expect(required[0]).toContain(id)
 				expect(required[0]).toContain("A run in flight during a deploy")
@@ -211,12 +211,12 @@ describe("persisted shape lock", () => {
 				expect(yield* lockProblems(lockWithCause)).toEqual([])
 				const brokenCause = yield* lockProblems(
 					lockWithCause,
-					withInput({ __cause: Schema.optional(Schema.Struct({ correlationId: Schema.Number })) }),
+					withInput({ __cause: Schema.optional(Schema.Struct({ correlationId: Schema.Finite })) }),
 				)
 				expect(brokenCause.length).toBe(1)
 				expect(brokenCause[0]).toContain(id)
 
-				const optional = withInput({ added_later: Schema.optionalKey(Schema.Number) })
+				const optional = withInput({ added_later: Schema.optionalKey(Schema.Finite) })
 				const unreviewed = yield* lockProblems(lock, optional)
 				expect(unreviewed.length).toBe(1)
 				expect(unreviewed[0]).toContain("has not been reviewed")
@@ -292,7 +292,7 @@ describe("persisted shape lock", () => {
 
 				const required = yield* lockProblems(
 					lock,
-					replacing(id, Schema.Struct({ ...UserMessage.fields, added_later: Schema.Number })),
+					replacing(id, Schema.Struct({ ...UserMessage.fields, added_later: Schema.Finite })),
 				)
 				expect(required.length).toBe(1)
 				expect(required[0]).toContain(id)
@@ -302,7 +302,7 @@ describe("persisted shape lock", () => {
 					id,
 					Schema.Struct({
 						...UserMessage.fields,
-						added_later: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+						added_later: Schema.Finite.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
 					}),
 				)
 				const unreviewed = yield* lockProblems(lock, defaulted)
@@ -724,7 +724,7 @@ describe("persisted shape lock", () => {
 				const V1WithTransformAndDefault = Schema.Struct({
 					input_tokens: NonNegativeInt,
 					output_tokens: NonNegativeInt,
-					count: Schema.NumberFromString,
+					count: Schema.FiniteFromString,
 					defaulted_weight: Schema.Finite.pipe(Schema.withDecodingDefaultKey(Effect.succeed(42))),
 				})
 				const v1Shape: PersistedShape = {
@@ -843,7 +843,7 @@ describe("persisted shape lock", () => {
 				//    running an Effect codec, so the lock MUST validate the runtime value shape
 				//    without applying decoding defaults or wire-to-runtime transforms.
 				const CurrentTransformedV2 = Schema.Struct({
-					count: Schema.NumberFromString,
+					count: Schema.FiniteFromString,
 					output_tokens: NonNegativeInt,
 				})
 				const transformedBadMigrate: PersistedShape = {
@@ -994,6 +994,7 @@ describe("persisted shape lock", () => {
 				//     "NaN" / "Infinity" / "-Infinity" strings into numbers) MUST NOT mask a migration
 				//     or stored value that leaves a Schema.Number field as a string at runtime.
 				const NumberFieldV2 = Schema.Struct({
+					// oxlint-disable-next-line effecttsgo/schema-number -- intentionally tests Schema.Number JSON coercion of "NaN"/"Infinity"
 					n: Schema.Number,
 				})
 				for (const coercedString of ["NaN", "Infinity", "-Infinity"] as const) {

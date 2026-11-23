@@ -217,7 +217,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					if (committed.version !== payload.version) {
 						return yield* reject(409, "Agent version does not match.")
 					}
-					const nextFields = yield* Schema.decodeUnknownEffect(ValidatedAgentFields)({
+					const nextFields = yield* Schema.decodeEffect(ValidatedAgentFields)({
 						name: payload.name ?? committed.name,
 						system:
 							payload.system !== undefined

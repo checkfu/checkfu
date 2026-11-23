@@ -399,7 +399,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							continue
 						}
 						const joined = event.content.map((block) => block.text).join("\n")
-						const text = yield* Schema.decodeUnknownEffect(MessageText)(joined).pipe(
+						const text = yield* Schema.decodeEffect(MessageText)(joined).pipe(
 							Effect.catch(() =>
 								reject(
 									400,
