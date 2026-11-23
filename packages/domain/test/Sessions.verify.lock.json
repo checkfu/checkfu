@@ -102,9 +102,13 @@
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\")),\n\t\t\t)"
 			},
-			"Session.AbandonedTurnIsTheRunningTurn": {
+			"Session.AbandonedTurnEnds": {
 				"kind": "transition",
-				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.abandoned\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\")),\n\t\t\t)"
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.abandoned\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"Session.AgentMessageEndsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
 			}
 		}
 	}

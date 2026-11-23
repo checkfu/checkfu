@@ -1364,7 +1364,7 @@ describe("Sessions", () => {
 	})
 
 	it.effect(
-		"fails a turn whose harness cannot be reached and moves the session to a fresh conversation",
+		"abandons a turn whose harness cannot be reached and runs the next turn while that interrupt is still retried",
 		() => {
 			const session = Session.ref("sess_e2e_unreachable")
 			const turn1Key = turnKey(session.id, 1)

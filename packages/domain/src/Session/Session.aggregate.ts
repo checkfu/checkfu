@@ -223,13 +223,22 @@ export class Session extends Domain.Aggregate("Session", {
 						event.turn === before.turn &&
 						(after._tag === "Idle" || after._tag === "Running")),
 			),
-		AbandonedTurnIsTheRunningTurn: ({ before, after, events }) =>
+		AbandonedTurnEnds: ({ before, after, events }) =>
 			events.every(
 				(event) =>
 					event._tag !== "turn.abandoned" ||
 					(before._tag === "Running" &&
 						event.turn === before.turn &&
-						(after._tag === "Idle" || after._tag === "Running")),
+						(after._tag === "Idle" ||
+							(after._tag === "Running" && after.turn === before.turn + 1))),
+			),
+		AgentMessageEndsTheTurn: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "agent.message" ||
+					(before._tag === "Running" &&
+						(after._tag === "Idle" ||
+							(after._tag === "Running" && after.turn === before.turn + 1))),
 			),
 		OpenModelRequestClosedBeforeLeavingRunning: ({ before, after, events }) => {
 			if (
