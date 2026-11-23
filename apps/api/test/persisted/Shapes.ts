@@ -6,7 +6,8 @@ import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "../../src/Checkfu.model.ts"
-import { CHECKFU_PI_DOCS, type CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
+import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
+import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 
 export type PersistedSchema = Schema.Codec<unknown, unknown, never, never>
 
@@ -136,9 +137,12 @@ const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
 		})
 	}
 	for (const policy of model.definitions?.policies ?? []) {
-		const sources = Array.isArray(policy.definition.from)
-			? policy.definition.from
-			: [policy.definition.from]
+		const from = policy.definition.from
+		const sources: ReadonlyArray<{
+			readonly kind?: string
+			readonly viewName?: string
+			readonly definition?: { readonly state?: PersistedSchema }
+		}> = Array.isArray(from) ? from : [from]
 		for (const source of sources) {
 			if (
 				source.kind === "View" &&
@@ -154,16 +158,18 @@ const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
 		}
 	}
 	for (const saga of model.sagas ?? []) {
-		shapes.push({
-			id: `saga-input:${model.modelName}.${saga.sagaName}`,
-			kind: "saga-input",
-			schema: saga.workflow.payloadSchema,
-		})
-		shapes.push({
-			id: `saga-result:${model.modelName}.${saga.sagaName}`,
-			kind: "saga-result",
-			schema: saga.workflow.successSchema,
-		})
+		shapes.push(
+			{
+				id: `saga-input:${model.modelName}.${saga.sagaName}`,
+				kind: "saga-input",
+				schema: saga.workflow.payloadSchema,
+			},
+			{
+				id: `saga-result:${model.modelName}.${saga.sagaName}`,
+				kind: "saga-result",
+				schema: saga.workflow.successSchema,
+			},
+		)
 	}
 	return shapes
 }
@@ -197,7 +203,7 @@ const validatePiDocRuntimeValue = (
 			if (copied === null || typeof copied !== "object" || Array.isArray(copied)) {
 				throw new TypeError(`Pi doc "${kind}" v${version} value must be a JSON object`)
 			}
-			return copied as Readonly<Record<string, Schema.Json>>
+			return copied
 		},
 		catch: (cause) =>
 			new SchemaIssue.InvalidValue(
@@ -219,18 +225,18 @@ const validatePiDocRuntimeValue = (
 export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema => {
 	const def = spec.token.definition
 	const family = def.family === true
-	if (def.scope === "conversation" && (def.history === undefined || def.fork === undefined)) {
-		throw new Error(
-			`Conversation-scoped Pi doc "${def.kind}" must declare both history and fork semantics`,
-		)
+	let conversationSemantics: {
+		readonly history: "latest" | "rewindable"
+		readonly fork: "asOf" | "current" | "initial"
+	} | null = null
+	if (def.scope === "conversation") {
+		if (def.history === undefined || def.fork === undefined) {
+			throw new Error(
+				`Conversation-scoped Pi doc "${def.kind}" must declare both history and fork semantics`,
+			)
+		}
+		conversationSemantics = { history: def.history, fork: def.fork }
 	}
-	const conversationSemantics =
-		def.scope === "conversation"
-			? {
-					history: def.history!,
-					fork: def.fork!,
-				}
-			: null
 	const makeWireEnvelope = (version: number, valueDoc: unknown) => {
 		const value = Schema.Record(Schema.String, Schema.Json).annotate({
 			description: JSON.stringify(valueDoc),
@@ -254,7 +260,9 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 	const previous = [...(spec.previous ?? [])].sort((a, b) => a.version - b.version)
 	for (let i = 0; i < previous.length; i++) {
 		const step = previous[i]
-		if (step === undefined) continue
+		if (step === undefined) {
+			continue
+		}
 		if (step.version >= def.version) {
 			throw new Error(
 				`Pi doc "${def.kind}" previous version ${step.version} must be less than current version ${def.version}`,
@@ -358,7 +366,7 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 					).pipe(
 						Effect.flatMap((rawJson) =>
 							Effect.try({
-								try: (): unknown => migrate(rawJson as JsonObject, envelope.version),
+								try: () => migrate(rawJson as JsonObject, envelope.version),
 								catch: (cause) =>
 									new SchemaIssue.InvalidValue(
 										{
@@ -397,7 +405,7 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 					),
 			}),
 		),
-	) as unknown as PersistedSchema
+	)
 }
 
 const SAGA_STEPS: ReadonlyArray<PersistedShape> = Object.values(RUN_TURN_ACTIVITIES).map(
@@ -426,10 +434,16 @@ export const registryProblems = (
 	const problems: Array<string> = []
 	const seen = new Set<string>()
 	for (const shape of shapes) {
-		if (seen.has(shape.id)) problems.push(`${shape.id} is listed twice`)
+		if (seen.has(shape.id)) {
+			problems.push(`${shape.id} is listed twice`)
+		}
 		seen.add(shape.id)
-		if (shape.id.includes("undefined")) problems.push(`${shape.id} has an unnamed part`)
-		if (!Schema.isSchema(shape.schema)) problems.push(`${shape.id} is not a Schema`)
+		if (shape.id.includes("undefined")) {
+			problems.push(`${shape.id} has an unnamed part`)
+		}
+		if (!Schema.isSchema(shape.schema)) {
+			problems.push(`${shape.id} is not a Schema`)
+		}
 	}
 	for (const kind of [
 		"event",

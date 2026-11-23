@@ -1,21 +1,20 @@
 import { ModelUsage, NonNegativeInt } from "@checkfu/sessions/Session/SessionTypes"
 import type { ServiceFreeSchema } from "@checkfu/snapshots/VersionedSnapshot"
 import type { JsonValue } from "@earendil-works/chord/json"
-import {
-	type CommonDocDefinition,
-	type ConversationDocFamilyToken,
-	type ConversationDocToken,
-	type JsonObject,
-	type LatestConversationSemantics,
-	type RewindableConversationDocFamilyToken,
-	type RewindableConversationDocToken,
-	type RewindableConversationSemantics,
-	type SessionDocFamilyToken,
-	type SessionDocToken,
-	type TaskDocFamilyToken,
-	type TaskDocToken,
-	defineDoc,
-	defineDocFamily,
+import { defineDoc, defineDocFamily } from "@earendil-works/pi-durable"
+import type {
+	CommonDocDefinition,
+	ConversationDocFamilyToken,
+	ConversationDocToken,
+	JsonObject,
+	LatestConversationSemantics,
+	RewindableConversationDocFamilyToken,
+	RewindableConversationDocToken,
+	RewindableConversationSemantics,
+	SessionDocFamilyToken,
+	SessionDocToken,
+	TaskDocFamilyToken,
+	TaskDocToken,
 } from "@earendil-works/pi-durable"
 import * as Schema from "effect/Schema"
 
@@ -88,7 +87,14 @@ function registerPiDoc<T extends JsonObject>(
 	| ConversationDocToken<T>
 	| RewindableConversationDocToken<T>
 	| TaskDocToken<T> {
-	const token = defineDoc<T>(definition as CommonDocDefinition<T> & { readonly scope: "session" })
+	const token =
+		definition.scope === "session"
+			? defineDoc<T>(definition)
+			: definition.scope === "task"
+				? defineDoc<T>(definition)
+				: definition.history === "latest"
+					? defineDoc<T>(definition)
+					: defineDoc<T>(definition)
 	registeredPiDocs.push({
 		token,
 		schema: registration.schema,
@@ -125,9 +131,14 @@ function registerPiDocFamily<T extends JsonObject, I extends JsonValue>(
 	| ConversationDocFamilyToken<T, I>
 	| RewindableConversationDocFamilyToken<T, I>
 	| TaskDocFamilyToken<T, I> {
-	const token = defineDocFamily<T, I>(
-		definition as FamilyDocInput<T, I> & { readonly scope: "session" },
-	)
+	const token =
+		definition.scope === "session"
+			? defineDocFamily<T, I>(definition)
+			: definition.scope === "task"
+				? defineDocFamily<T, I>(definition)
+				: definition.history === "latest"
+					? defineDocFamily<T, I>(definition)
+					: defineDocFamily<T, I>(definition)
 	registeredPiDocs.push({
 		token,
 		schema: registration.schema,

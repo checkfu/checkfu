@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 
 export const MAX_ENVIRONMENT_NAME_LENGTH = 256
-export const MAX_ENVIRONMENT_DESCRIPTION_LENGTH = 1_024
+export const MAX_ENVIRONMENT_DESCRIPTION_LENGTH = 1024
 
 export const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 export const EnvironmentName = Schema.String.check(

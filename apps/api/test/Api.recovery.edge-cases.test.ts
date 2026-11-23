@@ -16,11 +16,8 @@ import * as Layer from "effect/Layer"
 import { Checkfu } from "../src/Checkfu.model.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { SEED_MESSAGE_OVERHEAD_TOKENS, seedTokenBudget } from "../src/Pi/PiContextBudget.ts"
-import {
-	type PiTurnRequest,
-	recoverPiDurableTurn,
-	runPiDurableTurn,
-} from "../src/Pi/PiDurableEngine.ts"
+import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import type { PiTurnRequest } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AgentVersionLookupTimeout,
 	HarnessLimits,
@@ -150,7 +147,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 									status: string
 									turn: number
 								}
-								if (body.status === "idle" && body.turn >= expectedTurn) return
+								if (body.status === "idle" && body.turn >= expectedTurn) {
+									return
+								}
 								yield* Effect.sleep("5 millis")
 							}
 							throw new Error(`Session did not become idle at turn ${expectedTurn}`)
@@ -178,7 +177,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					failTurns = false
 					const existing = backends.get(conversationName(session.id, 0))
 					backends.delete(conversationName(session.id, 0))
-					if (existing !== undefined) yield* Effect.promise(async () => (await existing).close())
+					if (existing !== undefined) {
+						yield* Effect.promise(async () => (await existing).close())
+					}
 					listCalls = 0
 
 					yield* sendAndSettle(apiFetch, session.id, ["fresh-after-failures"], 42)
@@ -248,7 +249,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 									status: string
 									turn: number
 								}
-								if (body.status === "idle" && body.turn >= expectedTurn) return
+								if (body.status === "idle" && body.turn >= expectedTurn) {
+									return
+								}
 								yield* Effect.sleep("5 millis")
 							}
 							throw new Error(`Session did not become idle at turn ${expectedTurn}`)
@@ -437,7 +440,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 							status: string
 							turn: number
 						}
-						if (body.status === "idle" && body.turn >= 2) break
+						if (body.status === "idle" && body.turn >= 2) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 
@@ -452,7 +457,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					// Rebuild after losing Pi state must produce the exact same prior history.
 					const existing = backends.get(conversationName(session.id, 0))
 					backends.delete(conversationName(session.id, 0))
-					if (existing !== undefined) yield* Effect.promise(async () => (await existing).close())
+					if (existing !== undefined) {
+						yield* Effect.promise(async () => (await existing).close())
+					}
 
 					yield* sendAndSettle(apiFetch, session.id, ["turn-4"], 4)
 					expect(contexts.at(-1)).toEqual([
@@ -582,10 +589,10 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					// Size system + currentInput on gpt-4 (8,192 window, 2,048 reserve -> 6,144 available)
 					// so exactly 22 bytes remain for the seed: 16 bytes for pair overhead + 6 bytes for text!
 					// A 50/50 split gives 3 + 3 bytes and would drop the 4-byte trailing emoji `🚀`.
-					const system = "s".repeat(4_000) // 4,000 + 8 = 4,008
-					const currentInput = "c".repeat(2_106) // 2,106 + 8 = 2,114 -> total 6,122 -> 22 remaining -> 6 pair bytes!
+					const system = "s".repeat(4000) // 4,000 + 8 = 4,008
+					const currentInput = "c".repeat(2106) // 2,106 + 8 = 2,114 -> total 6,122 -> 22 remaining -> 6 pair bytes!
 					expect(
-						seedTokenBudget({ contextWindow: 8_192, system, currentInput }) -
+						seedTokenBudget({ contextWindow: 8192, system, currentInput }) -
 							2 * SEED_MESSAGE_OVERHEAD_TOKENS,
 					).toBe(6)
 

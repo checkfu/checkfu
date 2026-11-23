@@ -115,7 +115,7 @@ describe("Sessions Z3 formal verification", () => {
 					story,
 					instances: 1,
 					depth: 2,
-					budget: 2_000,
+					budget: 2000,
 					faults: { redeliver: true, reorder: true, rerun: false },
 					walks: { count: 0 },
 					lock: "./Sessions.verify.lock.json",

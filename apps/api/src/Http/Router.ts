@@ -57,9 +57,13 @@ export const HealthTracerDisabledWhen: Layer.Layer<never> = Layer.succeed(
 const isPublicPath = (path: string): boolean => path === "/health" || path === "/openapi.json"
 
 const withCachePolicy = (path: string, response: HttpServerResponse.HttpServerResponse) => {
-	if (isPublicPath(path)) return response
+	if (isPublicPath(path)) {
+		return response
+	}
 	const existing = response.headers["cache-control"]
-	if (existing !== undefined && /\bno-store\b/i.test(existing)) return response
+	if (existing !== undefined && /\bno-store\b/i.test(existing)) {
+		return response
+	}
 	return HttpServerResponse.setHeader(
 		response,
 		"cache-control",

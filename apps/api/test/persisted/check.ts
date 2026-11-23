@@ -4,12 +4,17 @@ import * as Effect from "effect/Effect"
 import * as Runtime from "effect/Runtime"
 import { PersistedServicesLive, checkShippedBaseline } from "./Lock.ts"
 
-checkShippedBaseline.pipe(
-	Effect.catch((error) =>
-		Console.error(error.message).pipe(
-			Effect.andThen(Effect.fail({ [Runtime.errorReported]: false })),
+const main = () => {
+	BunRuntime.runMain(
+		checkShippedBaseline.pipe(
+			Effect.catch((error) =>
+				Console.error(error.message).pipe(
+					Effect.andThen(Effect.fail({ [Runtime.errorReported]: false })),
+				),
+			),
+			Effect.provide(PersistedServicesLive),
 		),
-	),
-	Effect.provide(PersistedServicesLive),
-	BunRuntime.runMain,
-)
+	)
+}
+
+main()

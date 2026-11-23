@@ -12,11 +12,8 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { Checkfu } from "../src/Checkfu.model.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import {
-	type PiTurnResult,
-	recoverPiDurableTurn,
-	runPiDurableTurn,
-} from "../src/Pi/PiDurableEngine.ts"
+import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import type { PiTurnResult } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AgentVersionLookupTimeout,
 	PiDurableModelProviderLive,
@@ -245,7 +242,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 
 		const originalFetch = globalThis.fetch
-		globalThis.fetch = (async () => {
+		globalThis.fetch = async () => {
 			fetchCalls += 1
 			requestStartedResolve?.()
 			await responseGate
@@ -316,7 +313,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const realOpenAIModels = createPiModels({
 			openai: Redacted.make("sk-openai-test"),
@@ -473,7 +470,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 	it("preserves stream errors after a partial OpenAI refusal, and handles lagging version views non-terminally", async () => {
 		// 1. Interrupted/errored OpenAI Responses stream after a partial refusal delta MUST fail (never commit as refusal)
 		const originalFetch = globalThis.fetch
-		globalThis.fetch = (async () => {
+		globalThis.fetch = async () => {
 			// Stream sends a refusal delta and then terminates prematurely without `response.completed`
 			const partialRefusalSse = [
 				`event: response.created\ndata: ${JSON.stringify({
@@ -508,7 +505,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const realOpenAIModels = createPiModels({
 			openai: Redacted.make("sk-openai-test"),
@@ -576,7 +573,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		const originalFetch = globalThis.fetch
 		const sentInputs: Array<unknown> = []
 		let callCount = 0
-		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_url: unknown, init?: RequestInit) => {
 			callCount += 1
 			if (typeof init?.body === "string") {
 				sentInputs.push(JSON.parse(init.body))
@@ -695,7 +692,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const realModels = createPiModels({
 			openai: Redacted.make("sk-openai-test"),
@@ -749,7 +746,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 
 		const sentBodies: Array<unknown> = []
-		globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
 			sentBodies.push(body)
 			const isFailingTurn = JSON.stringify(body).includes(
@@ -832,7 +829,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
@@ -877,7 +874,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		}
 
 		// Clean response.incomplete(content_filter) without a trailing stream error still normalizes as a refusal.
-		globalThis.fetch = (async () =>
+		globalThis.fetch = async () =>
 			new Response(
 				[
 					`event: response.created\ndata: ${JSON.stringify({
@@ -899,7 +896,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					status: 200,
 					headers: { "content-type": "text/event-stream" },
 				},
-			)) as unknown as typeof fetch
+			)
 		const backend2 = await createInMemoryPiDurableBackend(realModels)
 		try {
 			const cleanRefusal = await Effect.runPromise(
@@ -1046,7 +1043,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			].join("")
 
 		let responseSeq = 0
-		globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			responseSeq += 1
 			const rawBody = typeof init?.body === "string" ? init.body : ""
 			if (rawBody.includes("<conversation>")) {
@@ -1070,18 +1067,13 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			}
 			const estimatedInput = Math.ceil(rawBody.length / 4)
 			return new Response(
-				makeOpenAITextResponse(
-					`resp_turn_${responseSeq}`,
-					"r".repeat(6_000),
-					estimatedInput,
-					1_500,
-				),
+				makeOpenAITextResponse(`resp_turn_${responseSeq}`, "r".repeat(6000), estimatedInput, 1500),
 				{
 					status: 200,
 					headers: { "content-type": "text/event-stream" },
 				},
 			)
-		}) as unknown as typeof fetch
+		}
 
 		const realModels = createPiModels({
 			openai: Redacted.make("sk-openai-test"),
@@ -1099,7 +1091,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 						provider: "openai",
 						modelId: "gpt-4",
 						system: null,
-						text: `preserved-turn-${turn}: ${"u".repeat(6_000)}`,
+						text: `preserved-turn-${turn}: ${"u".repeat(6000)}`,
 					}),
 				)
 				if (result !== "history_required" && !result.ok) {
@@ -1126,7 +1118,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					provider: "openai",
 					modelId: "gpt-4",
 					system: null,
-					text: `recovery-turn: ${"u".repeat(6_000)}`,
+					text: `recovery-turn: ${"u".repeat(6000)}`,
 				}),
 			)
 			expect(recovered).toMatchObject({ ok: true })
@@ -1149,7 +1141,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		// 1. OpenAI emits ordinary text deltas then stops with response.incomplete(content_filter):
 		//    partial text MUST be discarded from both the published reply and Turn 2's model context.
 		const filteredSentBodies: Array<unknown> = []
-		globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
 			filteredSentBodies.push(body)
 			const serialized = JSON.stringify(body)
@@ -1255,7 +1247,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const filterBackend = await createInMemoryPiDurableBackend(realModels)
 		try {
@@ -1301,7 +1293,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		// 2. OpenAI completed response mixing output_text and explicit refusal part:
 		//    preserve ONLY the provider-authored refusal part text, discarding mixed output_text.
 		const mixedSentBodies: Array<unknown> = []
-		globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
 			mixedSentBodies.push(body)
 			const serialized = JSON.stringify(body)
@@ -1420,7 +1412,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const mixedBackend = await createInMemoryPiDurableBackend(realModels)
 		try {
@@ -1570,7 +1562,9 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					})),
 				)
 				const gptModel = wrappedCompactionModels.getModel("openai", "gpt-4o-mini")
-				if (gptModel === undefined) throw new Error("expected gpt-4o-mini")
+				if (gptModel === undefined) {
+					throw new Error("expected gpt-4o-mini")
+				}
 				const rejectedDirect = await wrappedCompactionModels.completeSimple(gptModel, {
 					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
 				})
@@ -1603,9 +1597,9 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				return makeAssistantReply(
 					model,
 					null,
-					"r".repeat(6_000),
-					normalTurns === 2 ? 7_000 : 2_000,
-					1_500,
+					"r".repeat(6000),
+					normalTurns === 2 ? 7000 : 2000,
+					1500,
 				)
 			})
 			closeables.push(compactionHarness.closeAll)
@@ -1636,7 +1630,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
 					for (let turn = 1; turn <= 2; turn++) {
-						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${"u".repeat(6_000)}`], turn)
+						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${"u".repeat(6000)}`], turn)
 					}
 					yield* sendAndSettle(apiFetch, session.id, ["trigger-compaction-refusal"], 3)
 

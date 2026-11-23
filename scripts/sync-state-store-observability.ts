@@ -1,6 +1,5 @@
 import * as NodePath from "node:path"
 import { argv, exit, stderr } from "node:process"
-import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as workers from "@distilled.cloud/cloudflare/workers"
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -145,7 +144,10 @@ export const parseSyncCliArgs = (args: ReadonlyArray<string>): SyncCliArgs => {
 	let accountId: string | undefined
 
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i]!
+		const arg = args[i]
+		if (arg === undefined) {
+			continue
+		}
 		if (arg === "--dry-run") {
 			dryRun = true
 		} else if (arg === "--worker-name") {
@@ -156,7 +158,9 @@ export const parseSyncCliArgs = (args: ReadonlyArray<string>): SyncCliArgs => {
 			scriptName = next
 		} else if (arg.startsWith("--worker-name=")) {
 			const value = arg.slice("--worker-name=".length)
-			if (!value) throw new Error("Missing value for --worker-name")
+			if (!value) {
+				throw new Error("Missing value for --worker-name")
+			}
 			scriptName = value
 		} else if (arg === "--account-id") {
 			const next = args[++i]
@@ -166,7 +170,9 @@ export const parseSyncCliArgs = (args: ReadonlyArray<string>): SyncCliArgs => {
 			accountId = next
 		} else if (arg.startsWith("--account-id=")) {
 			const value = arg.slice("--account-id=".length)
-			if (!value) throw new Error("Missing value for --account-id")
+			if (!value) {
+				throw new Error("Missing value for --account-id")
+			}
 			accountId = value
 		} else {
 			throw new Error(`Unknown argument: ${arg}`)
@@ -243,12 +249,13 @@ const main = Effect.gen(function* () {
 	}).pipe(Effect.provide(makeSyncCloudflareApiLayer(parsed.accountId)))
 })
 
-const isDirectEntry =
-	argv[1] !== undefined && NodePath.resolve(argv[1]) === fileURLToPath(import.meta.url)
+const isDirectEntry = argv[1] !== undefined && NodePath.resolve(argv[1]) === import.meta.filename
 
 if (isDirectEntry) {
-	Effect.runPromise(main).catch((error: unknown) => {
+	try {
+		await Effect.runPromise(main)
+	} catch (error: unknown) {
 		stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
 		exit(1)
-	})
+	}
 }

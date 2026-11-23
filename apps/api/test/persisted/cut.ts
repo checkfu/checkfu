@@ -73,12 +73,17 @@ const program = Effect.gen(function* () {
 	)
 })
 
-program.pipe(
-	Effect.catch((error) =>
-		Console.error(error.message).pipe(
-			Effect.andThen(Effect.fail({ [Runtime.errorReported]: false })),
+const main = () => {
+	BunRuntime.runMain(
+		program.pipe(
+			Effect.catch((error) =>
+				Console.error(error.message).pipe(
+					Effect.andThen(Effect.fail({ [Runtime.errorReported]: false })),
+				),
+			),
+			Effect.provide(PersistedServicesLive),
 		),
-	),
-	Effect.provide(PersistedServicesLive),
-	BunRuntime.runMain,
-)
+	)
+}
+
+main()

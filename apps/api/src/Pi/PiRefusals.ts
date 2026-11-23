@@ -4,15 +4,10 @@ import type {
 	ModelRequestInterrupted,
 } from "@checkfu/sessions/Session/ModelProvider.external"
 import type { ModelUsage } from "@checkfu/sessions/Session/SessionTypes"
-import type { Api, AssistantMessage } from "@earendil-works/pi-ai"
+import type { AnyModel, Api, AssistantMessage } from "@earendil-works/pi-ai"
 import type { Models } from "@earendil-works/pi-ai/models"
-import {
-	type EntryId,
-	GenerationTask,
-	createRegistry,
-	defineExtension,
-	hook,
-} from "@earendil-works/pi-durable"
+import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"
+import type { EntryId } from "@earendil-works/pi-durable"
 
 export type PiTurnOutcome =
 	| { readonly ok: true; readonly reply: ModelProviderReply }
@@ -46,7 +41,9 @@ export const isProviderRefusalStopReason = (
 	provider: string,
 	rawStopReason: string | undefined,
 ): boolean => {
-	if (rawStopReason === undefined) return false
+	if (rawStopReason === undefined) {
+		return false
+	}
 	if (api === "anthropic-messages" && provider === "anthropic") {
 		return rawStopReason === "refusal" || rawStopReason === "sensitive"
 	}
@@ -106,36 +103,54 @@ export const normalizeRefusalAssistantMessage = (message: AssistantMessage): Ass
 	}
 }
 
+const rejectRefusal = (message: AssistantMessage): AssistantMessage =>
+	isRefusalAssistantMessage(message) && message.stopReason !== "aborted"
+		? {
+				...message,
+				stopReason: "error",
+				errorMessage: refusalFallbackText(message),
+			}
+		: message
+
 /**
  * Wraps `models.complete` / `models.completeSimple` (used by Pi's `CompactionTask`)
  * so confirmed provider refusals never pass `summaryText` as a `stopReason: "stop"`
  * summary and overwrite older conversation history. Ordinary turns stream through
  * `streamSimple` and normalize refusals in `createCheckfuRegistry`.
  */
-export const rejectRefusalCompactions = <M extends Models>(models: M): M => {
-	const rejectRefusal = (message: AssistantMessage): AssistantMessage =>
-		isRefusalAssistantMessage(message) && message.stopReason !== "aborted"
-			? {
-					...message,
-					stopReason: "error",
-					errorMessage: refusalFallbackText(message),
-				}
-			: message
-	return new Proxy(models, {
-		get(target, prop, receiver) {
-			if (prop === "completeSimple") {
-				return async (...args: Parameters<Models["completeSimple"]>) =>
-					rejectRefusal(await target.completeSimple(...args))
-			}
-			if (prop === "complete") {
-				return async (...args: Parameters<Models["complete"]>) =>
-					rejectRefusal(await target.complete(...args))
-			}
-			const value = Reflect.get(target, prop, receiver) as unknown
-			return typeof value === "function" ? value.bind(target) : value
-		},
-	})
-}
+export const rejectRefusalCompactions = (models: Models): Models => ({
+	getProviders: () => models.getProviders(),
+	getProvider: (id) => models.getProvider(id),
+	getModels: (provider) => models.getModels(provider),
+	getModel: (provider, id) => models.getModel(provider, id),
+	getModelsOfType: (type, provider) => models.getModelsOfType(type, provider),
+	getModelOfType: (type, provider, id) => models.getModelOfType(type, provider, id),
+	getAllModels: (provider) => models.getAllModels(provider),
+	refresh: (options) => models.refresh(options),
+	checkAuth: (providerId, options) => models.checkAuth(providerId, options),
+	getAvailable: (providerId, options) => models.getAvailable(providerId, options),
+	getAvailableOfType: (type, providerId, options) =>
+		models.getAvailableOfType(type, providerId, options),
+	getAllAvailable: (providerId, options) => models.getAllAvailable(providerId, options),
+	getAuth: (target: string | AnyModel, overrides?: Parameters<Models["getAuth"]>[1]) =>
+		typeof target === "string"
+			? models.getAuth(target, overrides)
+			: models.getAuth(target, overrides),
+	login: (providerId, type, interaction, options) =>
+		models.login(providerId, type, interaction, options),
+	logout: (providerId, options) => models.logout(providerId, options),
+	stream: (model, context, options) => models.stream(model, context, options),
+	complete: async (model, context, options) =>
+		rejectRefusal(await models.complete(model, context, options)),
+	streamSimple: (model, context, options) => models.streamSimple(model, context, options),
+	completeSimple: async (model, context, options) =>
+		rejectRefusal(await models.completeSimple(model, context, options)),
+	streamDeferred: (model, handle, options) => models.streamDeferred(model, handle, options),
+	fetchDeferred: (model, handle, options) => models.fetchDeferred(model, handle, options),
+	cancelDeferred: (model, handle, options) => models.cancelDeferred(model, handle, options),
+	generateImages: (model, context, options) => models.generateImages(model, context, options),
+	classify: (model, context, options) => models.classify(model, context, options),
+})
 
 /**
  * Normalizes confirmed provider refusals (Anthropic `refusal`/`sensitive` and
@@ -152,8 +167,12 @@ export const createCheckfuRegistry = () => {
 			hooks: [
 				hook(GenerationTask, {
 					afterResponse(message) {
-						if (!isRefusalAssistantMessage(message)) return
-						if (message.stopReason !== "error" && message.stopReason !== "stop") return
+						if (!isRefusalAssistantMessage(message)) {
+							return
+						}
+						if (message.stopReason !== "error" && message.stopReason !== "stop") {
+							return
+						}
 						const normalized = normalizeRefusalAssistantMessage(message)
 						message.content = normalized.content
 						message.stopReason = normalized.stopReason
@@ -256,14 +275,55 @@ export const mapUnansweredToError = (
 	}
 }
 
-const parseEmbeddedJson = (detail: string): Record<string, unknown> | null => {
+interface ParsedProviderErrorFields {
+	readonly code: string | undefined
+	readonly type: string | undefined
+	readonly status: number | string | undefined
+	readonly statusCode: number | string | undefined
+	readonly status_code: number | string | undefined
+}
+
+interface ParsedProviderErrorJson extends ParsedProviderErrorFields {
+	readonly error: ParsedProviderErrorFields | null
+}
+
+const isPlainObject = (value: unknown): value is object =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const readStringField = (value: unknown): string | undefined =>
+	typeof value === "string" ? value : undefined
+
+const readStatusField = (value: unknown): number | string | undefined =>
+	typeof value === "number" || typeof value === "string" ? value : undefined
+
+const parseProviderErrorFields = (value: unknown): ParsedProviderErrorFields | null => {
+	if (!isPlainObject(value)) {
+		return null
+	}
+	return {
+		code: "code" in value ? readStringField(value.code) : undefined,
+		type: "type" in value ? readStringField(value.type) : undefined,
+		status: "status" in value ? readStatusField(value.status) : undefined,
+		statusCode: "statusCode" in value ? readStatusField(value.statusCode) : undefined,
+		status_code: "status_code" in value ? readStatusField(value.status_code) : undefined,
+	}
+}
+
+const parseEmbeddedJson = (detail: string): ParsedProviderErrorJson | null => {
 	const braceIndex = detail.indexOf("{")
-	if (braceIndex < 0) return null
+	if (braceIndex < 0) {
+		return null
+	}
 	try {
 		const parsed: unknown = JSON.parse(detail.slice(braceIndex))
-		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: null
+		const fields = parseProviderErrorFields(parsed)
+		if (fields === null || !isPlainObject(parsed)) {
+			return null
+		}
+		return {
+			...fields,
+			error: "error" in parsed ? parseProviderErrorFields(parsed.error) : null,
+		}
 	} catch {
 		return null
 	}
@@ -271,25 +331,23 @@ const parseEmbeddedJson = (detail: string): Record<string, unknown> | null => {
 
 const extractProviderErrorCodes = (
 	detail: string,
-	json: Record<string, unknown> | null,
+	json: ParsedProviderErrorJson | null,
 ): ReadonlyArray<string> => {
 	const codes: Array<string> = []
-	const pushCode = (value: unknown) => {
-		if (typeof value === "string" && value.trim().length > 0) {
+	const pushCode = (value: string | undefined) => {
+		if (value !== undefined && value.trim().length > 0) {
 			codes.push(value.trim().toLowerCase())
 		}
 	}
 	if (json !== null) {
-		const nested =
-			typeof json.error === "object" && json.error !== null && !Array.isArray(json.error)
-				? (json.error as Record<string, unknown>)
-				: null
-		if (nested !== null) {
-			pushCode(nested.code)
-			pushCode(nested.type)
+		if (json.error !== null) {
+			pushCode(json.error.code)
+			pushCode(json.error.type)
 		}
 		pushCode(json.code)
-		if (json.type !== "error") pushCode(json.type)
+		if (json.type !== "error") {
+			pushCode(json.type)
+		}
 	}
 	const errorCodePrefix = /^\s*error code\s+([a-z0-9._-]+)\s*:/i.exec(detail)
 	if (errorCodePrefix?.[1] !== undefined) {
@@ -335,31 +393,30 @@ const classifyErrorCode = (code: string): string | null => {
 	return null
 }
 
-const extractHttpStatus = (detail: string, json: Record<string, unknown> | null): number | null => {
-	const parseStatus = (value: unknown): number | null => {
-		const num =
-			typeof value === "number"
-				? value
-				: typeof value === "string" && /^[45]\d\d$/.test(value.trim())
-					? Number(value.trim())
-					: Number.NaN
-		return Number.isInteger(num) && num >= 400 && num <= 599 ? num : null
-	}
+const parseHttpStatusCode = (value: unknown): number | null => {
+	const num =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && /^[45]\d\d$/.test(value.trim())
+				? Number(value.trim())
+				: Number.NaN
+	return Number.isInteger(num) && num >= 400 && num <= 599 ? num : null
+}
+
+const extractHttpStatus = (detail: string, json: ParsedProviderErrorJson | null): number | null => {
 	if (json !== null) {
-		const nested =
-			typeof json.error === "object" && json.error !== null && !Array.isArray(json.error)
-				? (json.error as Record<string, unknown>)
-				: null
 		for (const candidate of [
 			json.status,
 			json.statusCode,
 			json.status_code,
-			nested?.status,
-			nested?.statusCode,
-			nested?.status_code,
+			json.error?.status,
+			json.error?.statusCode,
+			json.error?.status_code,
 		]) {
-			const status = parseStatus(candidate)
-			if (status !== null) return status
+			const status = parseHttpStatusCode(candidate)
+			if (status !== null) {
+				return status
+			}
 		}
 	}
 	for (const pattern of [
@@ -369,18 +426,28 @@ const extractHttpStatus = (detail: string, json: Record<string, unknown> | null)
 	]) {
 		const match = pattern.exec(detail)
 		if (match?.[1] !== undefined) {
-			const status = parseStatus(match[1])
-			if (status !== null) return status
+			const status = parseHttpStatusCode(match[1])
+			if (status !== null) {
+				return status
+			}
 		}
 	}
 	return null
 }
 
 const classifyHttpStatus = (status: number): string | null => {
-	if (status === 401 || status === 403) return "auth_error"
-	if (status === 429) return "rate_limit"
-	if (status === 400 || status === 422) return "invalid_request"
-	if (status >= 500 && status <= 599) return "provider_5xx"
+	if (status === 401 || status === 403) {
+		return "auth_error"
+	}
+	if (status === 429) {
+		return "rate_limit"
+	}
+	if (status === 400 || status === 422) {
+		return "invalid_request"
+	}
+	if (status >= 500 && status <= 599) {
+		return "provider_5xx"
+	}
 	return null
 }
 
@@ -389,7 +456,9 @@ export const classifyUnansweredCategory = (
 	submissionInfo: UnansweredSubmissionInfo | null,
 ): string => {
 	const effectiveReason = submissionInfo?.reason ?? reason ?? "model_error"
-	if (effectiveReason !== "model_error") return effectiveReason
+	if (effectiveReason !== "model_error") {
+		return effectiveReason
+	}
 	const rawStop = submissionInfo?.assistantMessage?.rawStopReason?.toLowerCase()
 	if (
 		rawStop !== undefined &&
@@ -403,15 +472,21 @@ export const classifyUnansweredCategory = (
 	const json = parseEmbeddedJson(rawDetail)
 	for (const code of extractProviderErrorCodes(rawDetail, json)) {
 		const category = classifyErrorCode(code)
-		if (category !== null) return category
+		if (category !== null) {
+			return category
+		}
 	}
 	const httpStatus = extractHttpStatus(rawDetail, json)
 	if (httpStatus !== null) {
 		const category = classifyHttpStatus(httpStatus)
-		if (category !== null) return category
+		if (category !== null) {
+			return category
+		}
 	}
 	const detail = rawDetail.toLowerCase()
-	if (/\b(rate[_ ]limit|too many requests)\b/.test(detail)) return "rate_limit"
+	if (/\b(rate[_ ]limit|too many requests)\b/.test(detail)) {
+		return "rate_limit"
+	}
 	if (/\b(unauthorized|forbidden|authentication|invalid[_ ]api[_ ]key)\b/.test(detail)) {
 		return "auth_error"
 	}

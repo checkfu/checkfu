@@ -1,12 +1,11 @@
-import { type ChildProcess, spawn } from "node:child_process"
+import { spawn } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import {
-	type FakeOpenAIResponsesServer,
-	startFakeOpenAIResponsesServer,
-} from "./FakeOpenAIResponsesServer.ts"
+import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
+import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
@@ -32,10 +31,27 @@ interface SessionEventItem {
 	readonly stop_reason?: { readonly type: string }
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> =>
+	new Promise((resolve) => {
+		setTimeout(resolve, ms)
+	})
+
+const parseResponseJson = <T>(method: string, path: string, status: number, raw: string): T => {
+	try {
+		return JSON.parse(raw) as T
+	} catch {
+		throw new Error(`${method} ${path} returned non-JSON body (status=${status}): ${raw}`)
+	}
+}
+
+interface ChildState {
+	spawnError: Error | null
+}
 
 const waitForExit = (child: ChildProcess, timeoutMs: number): Promise<boolean> => {
-	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true)
+	if (child.exitCode !== null || child.signalCode !== null) {
+		return Promise.resolve(true)
+	}
 	return new Promise((resolveExit) => {
 		const timer = setTimeout(() => {
 			child.off("exit", onExit)
@@ -72,7 +88,9 @@ const killProcessTree = (pid: number, signal: NodeJS.Signals): void => {
 
 const stopProcessByPid = async (child: ChildProcess): Promise<void> => {
 	const pid = child.pid
-	if (pid === undefined || child.exitCode !== null || child.signalCode !== null) return
+	if (pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+		return
+	}
 	try {
 		process.kill(pid, "SIGTERM")
 	} catch {
@@ -81,7 +99,7 @@ const stopProcessByPid = async (child: ChildProcess): Promise<void> => {
 	const exited = await waitForExit(child, 10_000)
 	if (!exited) {
 		killProcessTree(pid, "SIGKILL")
-		await waitForExit(child, 5_000)
+		await waitForExit(child, 5000)
 	}
 }
 
@@ -92,7 +110,7 @@ const ANSI_ESCAPE_RE = new RegExp(
 	"g",
 )
 
-const stripAnsi = (text: string): string => text.replace(ANSI_ESCAPE_RE, "")
+const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
 
 const cleanupStageState = (stage: string): void => {
 	const stateDir = join(REPO_ROOT, ".alchemy", "state", "Checkfu", stage)
@@ -150,7 +168,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		throw error
 	}
 
-	const childEnv: Record<string, string | undefined> = { ...process.env }
+	const childEnv = { ...process.env }
 	delete childEnv.CHECKFU_API_KEY
 	delete childEnv.OPENAI_API_KEY
 	delete childEnv.ANTHROPIC_API_KEY
@@ -183,7 +201,9 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	})
 
 	const inspectLine = (line: string) => {
-		if (readyUrl !== null) return
+		if (readyUrl !== null) {
+			return
+		}
 		const clean = stripAnsi(line)
 		const match = clean.match(/ready at (http:\/\/[^\s]+)/)
 		if (match?.[1] !== undefined) {
@@ -216,7 +236,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 
 	const stdoutListener = makeLineListener()
 	const stderrListener = makeLineListener()
-	const childState: { spawnError: Error | null } = { spawnError: null }
+	const childState: ChildState = { spawnError: null }
 	child.on("error", (err) => {
 		childState.spawnError = err
 		if (readyUrl === null) {
@@ -264,10 +284,12 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				)
 			}
 			const remainingMs = healthDeadline - Date.now()
-			if (remainingMs <= 0) break
+			if (remainingMs <= 0) {
+				break
+			}
 			try {
 				const res = await fetch(`${baseUrl}/health`, {
-					signal: AbortSignal.timeout(Math.min(2_000, remainingMs)),
+					signal: AbortSignal.timeout(Math.min(2000, remainingMs)),
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
@@ -275,11 +297,15 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				}
 			} catch {
 				const sleepMs = Math.min(100, healthDeadline - Date.now())
-				if (sleepMs > 0) await sleep(sleepMs)
+				if (sleepMs > 0) {
+					await sleep(sleepMs)
+				}
 				continue
 			}
 			const sleepMs = Math.min(100, healthDeadline - Date.now())
-			if (sleepMs > 0) await sleep(sleepMs)
+			if (sleepMs > 0) {
+				await sleep(sleepMs)
+			}
 		}
 		throw new Error(`Worker at ${baseUrl} did not respond 200 on /health\n${logs.join("")}`)
 	} catch (error) {
@@ -299,7 +325,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		path: string,
 		init?: { readonly method?: string; readonly body?: unknown },
 	): Promise<Response> => {
-		const headers: Record<string, string> = {
+		const headers = {
 			...AUTH_HEADERS,
 			...(init?.body === undefined ? {} : { "content-type": "application/json" }),
 		}
@@ -319,14 +345,6 @@ describe("PiSession real Durable Object under workerd", () => {
 		return { status: res.status, body }
 	}
 
-	const parseResponseJson = <T>(method: string, path: string, status: number, raw: string): T => {
-		try {
-			return JSON.parse(raw) as T
-		} catch {
-			throw new Error(`${method} ${path} returned non-JSON body (status=${status}): ${raw}`)
-		}
-	}
-
 	const pollResourceReady = async <T>(
 		resourcePath: string,
 		predicate?: (resource: T) => boolean,
@@ -341,7 +359,9 @@ describe("PiSession real Durable Object under workerd", () => {
 			lastRaw = await res.text()
 			if (res.status === 200) {
 				const parsed = parseResponseJson<T>("GET", resourcePath, res.status, lastRaw)
-				if (predicate === undefined || predicate(parsed)) return parsed
+				if (predicate === undefined || predicate(parsed)) {
+					return parsed
+				}
 			} else if (res.status !== 404 && res.status !== 503) {
 				throw new Error(`GET ${resourcePath} failed (status=${res.status}): ${lastRaw}`)
 			}

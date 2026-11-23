@@ -1,7 +1,8 @@
-import type { Api, Model, Provider, StreamFunction, StreamOptions } from "@earendil-works/pi-ai"
+import type { Api, Model, Provider, StreamOptions } from "@earendil-works/pi-ai"
 import * as anthropicMessages from "@earendil-works/pi-ai/api/anthropic-messages"
 import * as openAIResponses from "@earendil-works/pi-ai/api/openai-responses"
-import { type MutableModels, createModels, createProvider } from "@earendil-works/pi-ai/models"
+import { createModels, createProvider } from "@earendil-works/pi-ai/models"
+import type { MutableModels } from "@earendil-works/pi-ai/models"
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
@@ -67,7 +68,7 @@ export const parseLoopbackBaseUrl = (raw: string): string => {
 		!isLoopbackHost ||
 		!Number.isInteger(portNumber) ||
 		portNumber < 1 ||
-		portNumber > 65535 ||
+		portNumber > 65_535 ||
 		parsed.username.length > 0 ||
 		parsed.password.length > 0 ||
 		parsed.search.length > 0 ||
@@ -91,11 +92,17 @@ const resolveOpenAIBaseUrl = (override?: string | null): string =>
 export const providerBaseUrls = Effect.gen(function* () {
 	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
 	if (Option.isSome(alchemyContext)) {
-		if (!alchemyContext.value.dev) return { openai: null }
+		if (!alchemyContext.value.dev) {
+			return { openai: null }
+		}
 		const stage = yield* Effect.serviceOption(Stage)
-		if (Option.isSome(stage) && stage.value === "production") return { openai: null }
+		if (Option.isSome(stage) && stage.value === "production") {
+			return { openai: null }
+		}
 		const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
-		if (rawOpenAI === null) return { openai: null }
+		if (rawOpenAI === null) {
+			return { openai: null }
+		}
 		const openai = parseLoopbackBaseUrl(rawOpenAI)
 		const runtimeContext = yield* CurrentRuntimeContext
 		yield* (
@@ -105,9 +112,13 @@ export const providerBaseUrls = Effect.gen(function* () {
 		return { openai }
 	}
 	const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
-	if (runtimeStage === "production") return { openai: null }
+	if (runtimeStage === "production") {
+		return { openai: null }
+	}
 	const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
-	if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) return { openai: null }
+	if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) {
+		return { openai: null }
+	}
 	const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
 	return {
 		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),
@@ -137,27 +148,64 @@ const staticEnvApiKeyAuth = (name: string, envVar: string) => ({
 	},
 })
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null
+const isObject = (value: unknown): value is object => typeof value === "object" && value !== null
 
-const requestUrlString = (input: Parameters<typeof fetch>[0]): string =>
-	typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+const readNativeUrlHref = (input: unknown): string | null => {
+	const descriptor = Object.getOwnPropertyDescriptor(URL.prototype, "href")
+	if (descriptor?.get === undefined) {
+		return null
+	}
+	try {
+		const href: unknown = descriptor.get.call(input)
+		return typeof href === "string" ? href : null
+	} catch {
+		return null
+	}
+}
 
 const isRedirectStatus = (status: number): boolean => status >= 300 && status < 400
+
+const discardResponseBody = (body: Response["body"]): void => {
+	if (body === null) {
+		return
+	}
+	void body.cancel().catch(() => undefined)
+}
 
 /**
  * Wraps provider `fetch` calls so outbound requests stay pinned to the
  * resolved provider origin and refuse HTTP redirects at the transport.
  * Prevents a redirect from an allowed provider host from sending transcripts
  * or API keys to a host excluded by a limited environment's `allowed_hosts`.
+ *
+ * Only URL strings and native `URL` instances are accepted. The validated
+ * destination is dispatched as an immutable normalized URL string (`parsed.href`)
+ * with `{ ...init, redirect: "manual" }`, leaving the underlying `fetch`
+ * transport as the sole owner of headers, bodies, routing options (`dispatcher`,
+ * `proxy`, `keepalive`), and stream lifetimes. `Request` objects (native or
+ * custom) are rejected fail-closed with a `TypeError`.
  */
 export const createNoRedirectProviderFetch = (
 	expectedBaseUrl: string,
 	upstreamFetch?: typeof fetch,
 ): typeof fetch => {
 	const expectedOrigin = new URL(expectedBaseUrl).origin
-	return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-		const rawUrl = requestUrlString(input)
+	const guardedFetch = async (
+		input: Parameters<typeof fetch>[0],
+		init?: Parameters<typeof fetch>[1],
+	): Promise<Response> => {
+		let rawUrl: string
+		if (typeof input === "string") {
+			rawUrl = input
+		} else {
+			const nativeHref = readNativeUrlHref(input)
+			if (nativeHref === null) {
+				throw new TypeError(
+					"Refusing provider request: only URL strings and URL instances are supported.",
+				)
+			}
+			rawUrl = nativeHref
+		}
 		let parsed: URL
 		try {
 			parsed = new URL(rawUrl)
@@ -173,20 +221,22 @@ export const createNoRedirectProviderFetch = (
 		// Cloudflare workerd throws a TypeError on `redirect: "error"` before
 		// dispatching the request; use `redirect: "manual"` and reject 3xx
 		// responses below so redirects are never followed.
-		const requestInit: RequestInit = { ...init, redirect: "manual" }
-		const response = await baseFetch(input, requestInit)
+		const requestInit: RequestInit =
+			init === undefined ? { redirect: "manual" } : { ...init, redirect: "manual" }
+		const response = await baseFetch(parsed.href, requestInit)
 		if (
 			response.redirected ||
 			response.type === "opaqueredirect" ||
 			isRedirectStatus(response.status)
 		) {
-			void response.body?.cancel().catch(() => undefined)
+			discardResponseBody(response.body)
 			throw new TypeError(
 				`Provider request to ${parsed.origin} attempted a redirect, which is not allowed.`,
 			)
 		}
 		return response
-	}) as typeof fetch
+	}
+	return guardedFetch
 }
 
 const OPENAI_INCOMPLETE_CONTENT_FILTER_ERROR = "Response incomplete: content_filter"
@@ -195,40 +245,61 @@ const ANTHROPIC_DEFAULT_REFUSAL_ERROR = "The model refused to complete the reque
 const ANTHROPIC_SENSITIVE_ERROR = "Provider stopped with: sensitive"
 
 const extractMessageRefusalTexts = (item: unknown): ReadonlyArray<string> => {
-	if (!isRecord(item) || item.type !== "message" || !Array.isArray(item.content)) return []
+	if (
+		!isObject(item) ||
+		!("type" in item) ||
+		item.type !== "message" ||
+		!("content" in item) ||
+		!Array.isArray(item.content)
+	) {
+		return []
+	}
 	const texts: Array<string> = []
 	for (const part of item.content) {
-		if (isRecord(part) && part.type === "refusal") {
-			texts.push(typeof part.refusal === "string" ? part.refusal : "")
+		if (isObject(part) && "type" in part && part.type === "refusal") {
+			texts.push("refusal" in part && typeof part.refusal === "string" ? part.refusal : "")
 		}
 	}
 	return texts
 }
 
 const completedResponseRefusalTexts = (response: unknown): ReadonlyArray<string> | null => {
-	if (!isRecord(response) || response.status !== "completed") return []
-	if (!Array.isArray(response.output)) return null
+	if (!isObject(response) || !("status" in response) || response.status !== "completed") {
+		return []
+	}
+	if (!("output" in response) || !Array.isArray(response.output)) {
+		return null
+	}
 	return response.output.flatMap(extractMessageRefusalTexts)
 }
 
 const isIncompleteContentFilterResponse = (response: unknown): boolean =>
-	isRecord(response) &&
+	isObject(response) &&
+	"status" in response &&
 	response.status === "incomplete" &&
-	isRecord(response.incomplete_details) &&
+	"incomplete_details" in response &&
+	isObject(response.incomplete_details) &&
+	"reason" in response.incomplete_details &&
 	response.incomplete_details.reason === "content_filter"
 
-const expectedAnthropicRefusalMessage = (delta: Record<string, unknown>): string | null => {
-	if (delta.stop_reason === "refusal") {
-		const explanation = isRecord(delta.stop_details) ? delta.stop_details.explanation : undefined
+const expectedAnthropicRefusalMessage = (
+	stopReason: string,
+	stopDetails: unknown,
+): string | null => {
+	if (stopReason === "refusal") {
+		const explanation =
+			isObject(stopDetails) && "explanation" in stopDetails ? stopDetails.explanation : undefined
 		return typeof explanation === "string" && explanation.length > 0
 			? explanation
 			: ANTHROPIC_DEFAULT_REFUSAL_ERROR
 	}
-	if (delta.stop_reason === "sensitive") {
+	if (stopReason === "sensitive") {
 		return ANTHROPIC_SENSITIVE_ERROR
 	}
 	return null
 }
+
+type WrappedStreamOverrides = Required<Pick<StreamOptions, "fetch" | "onProviderStreamEvent">>
 
 /**
  * `@earendil-works/pi-ai` folds completed OpenAI Responses `refusal` parts into
@@ -239,95 +310,90 @@ const expectedAnthropicRefusalMessage = (delta: Record<string, unknown>): string
  * later SSE `error` event (before `onProviderStreamEvent` runs), abort, or
  * transport failure, strip `rawStopReason` so stream failures stay errors.
  */
-const wrapOpenAIResponsesStream =
-	<TOptions extends StreamOptions>(
-		fn: StreamFunction<"openai-responses", TOptions>,
-	): StreamFunction<"openai-responses", TOptions> =>
-	(model, context, options) => {
-		let completedRefusalTexts: Array<string> = []
-		let completedWithRefusal = false
-		let finalRefusalTexts: ReadonlyArray<string> = []
-		let sawIncompleteContentFilter = false
-		let sawStreamError = false
-		const upstreamOnEvent = options?.onProviderStreamEvent
-		const wrappedOptions = {
-			...options,
-			fetch: createNoRedirectProviderFetch(model.baseUrl, options?.fetch),
-			onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
-				if (isRecord(data)) {
-					if (data.type === "response.output_item.done") {
-						const texts = extractMessageRefusalTexts(data.item)
-						if (texts.length > 0) {
-							completedRefusalTexts = [...completedRefusalTexts, ...texts]
-						}
-					} else if (data.type === "response.completed") {
-						const texts = completedResponseRefusalTexts(data.response)
-						finalRefusalTexts = texts ?? completedRefusalTexts
-						completedWithRefusal = finalRefusalTexts.length > 0
-						sawIncompleteContentFilter = false
-					} else if (data.type === "response.incomplete") {
-						sawIncompleteContentFilter = isIncompleteContentFilterResponse(data.response)
-					} else if (data.type === "error") {
-						sawStreamError = true
+const runOpenAIResponsesRefusalGuard = (
+	model: Model<"openai-responses">,
+	options: StreamOptions | undefined,
+	start: (
+		overrides: WrappedStreamOverrides,
+	) => ReturnType<typeof createAssistantMessageEventStream>,
+) => {
+	let completedRefusalTexts: Array<string> = []
+	let completedWithRefusal = false
+	let finalRefusalTexts: ReadonlyArray<string> = []
+	let sawIncompleteContentFilter = false
+	let sawStreamError = false
+	const upstreamOnEvent = options?.onProviderStreamEvent
+	const inner = start({
+		fetch: createNoRedirectProviderFetch(model.baseUrl, options?.fetch),
+		onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
+			if (isObject(data) && "type" in data) {
+				if (data.type === "response.output_item.done" && "item" in data) {
+					const texts = extractMessageRefusalTexts(data.item)
+					if (texts.length > 0) {
+						completedRefusalTexts = [...completedRefusalTexts, ...texts]
 					}
+				} else if (data.type === "response.completed" && "response" in data) {
+					const texts = completedResponseRefusalTexts(data.response)
+					finalRefusalTexts = texts ?? completedRefusalTexts
+					completedWithRefusal = finalRefusalTexts.length > 0
+					sawIncompleteContentFilter = false
+				} else if (data.type === "response.incomplete" && "response" in data) {
+					sawIncompleteContentFilter = isIncompleteContentFilterResponse(data.response)
+				} else if (data.type === "error") {
+					sawStreamError = true
 				}
-				await upstreamOnEvent?.(data, eventModel)
-			},
-		} as TOptions
-
-		const inner = fn(model, context, wrappedOptions)
-		const outer = createAssistantMessageEventStream()
-		void (async () => {
-			try {
-				for await (const event of inner) {
-					if (
-						event.type === "done" &&
-						completedWithRefusal &&
-						event.message.stopReason === "stop"
-					) {
-						// Emit completed OpenAI refusals as error-stopped messages with `rawStopReason: "refusal"`
-						// carrying only the explicit `refusal` part text (discarding any mixed output_text/thinking).
-						// GenerationTask's `afterResponse` hook normalizes them into published refusal turns,
-						// while CompactionTask (`completeSimple`) rejects them so a refusal never overwrites history.
-						const refusalText = finalRefusalTexts.filter((text) => text.length > 0).join("")
-						outer.push({
-							type: "error",
-							reason: "error",
-							error: {
-								...event.message,
-								content: refusalText.length > 0 ? [{ type: "text", text: refusalText }] : [],
-								stopReason: "error",
-								rawStopReason: "refusal",
-								errorMessage: OPENAI_REFUSAL_ERROR,
-							},
-						})
-					} else if (event.type === "done" && isRefusalAssistantMessage(event.message)) {
-						const { rawStopReason: _dropped, ...rest } = event.message
-						outer.push({ ...event, message: rest })
-					} else if (event.type === "error" && isRefusalAssistantMessage(event.error)) {
-						const isConfirmedIncompleteRefusal =
-							event.reason === "error" &&
-							event.error.stopReason === "error" &&
-							sawIncompleteContentFilter &&
-							!sawStreamError &&
-							event.error.rawStopReason === "incomplete.content_filter" &&
-							event.error.errorMessage === OPENAI_INCOMPLETE_CONTENT_FILTER_ERROR
-						if (isConfirmedIncompleteRefusal) {
-							outer.push(event)
-						} else {
-							const { rawStopReason: _dropped, ...rest } = event.error
-							outer.push({ ...event, error: rest })
-						}
-					} else {
-						outer.push(event)
-					}
-				}
-			} finally {
-				outer.end()
 			}
-		})()
-		return outer
-	}
+			await upstreamOnEvent?.(data, eventModel)
+		},
+	})
+	const outer = createAssistantMessageEventStream()
+	void (async () => {
+		try {
+			for await (const event of inner) {
+				if (event.type === "done" && completedWithRefusal && event.message.stopReason === "stop") {
+					// Emit completed OpenAI refusals as error-stopped messages with `rawStopReason: "refusal"`
+					// carrying only the explicit `refusal` part text (discarding any mixed output_text/thinking).
+					// GenerationTask's `afterResponse` hook normalizes them into published refusal turns,
+					// while CompactionTask (`completeSimple`) rejects them so a refusal never overwrites history.
+					const refusalText = finalRefusalTexts.filter((text) => text.length > 0).join("")
+					outer.push({
+						type: "error",
+						reason: "error",
+						error: {
+							...event.message,
+							content: refusalText.length > 0 ? [{ type: "text", text: refusalText }] : [],
+							stopReason: "error",
+							rawStopReason: "refusal",
+							errorMessage: OPENAI_REFUSAL_ERROR,
+						},
+					})
+				} else if (event.type === "done" && isRefusalAssistantMessage(event.message)) {
+					const { rawStopReason: _dropped, ...rest } = event.message
+					outer.push({ ...event, message: rest })
+				} else if (event.type === "error" && isRefusalAssistantMessage(event.error)) {
+					const isConfirmedIncompleteRefusal =
+						event.reason === "error" &&
+						event.error.stopReason === "error" &&
+						sawIncompleteContentFilter &&
+						!sawStreamError &&
+						event.error.rawStopReason === "incomplete.content_filter" &&
+						event.error.errorMessage === OPENAI_INCOMPLETE_CONTENT_FILTER_ERROR
+					if (isConfirmedIncompleteRefusal) {
+						outer.push(event)
+					} else {
+						const { rawStopReason: _dropped, ...rest } = event.error
+						outer.push({ ...event, error: rest })
+					}
+				} else {
+					outer.push(event)
+				}
+			}
+		} finally {
+			outer.end()
+		}
+	})()
+	return outer
+}
 
 /**
  * `@earendil-works/pi-ai` records `rawStopReason` on `message_delta` before the
@@ -338,66 +404,68 @@ const wrapOpenAIResponsesStream =
  * Clear `rawStopReason` unless `message_stop` completed cleanly with the codec's
  * expected refusal error message.
  */
-const wrapAnthropicMessagesStream =
-	<TOptions extends StreamOptions>(
-		fn: StreamFunction<"anthropic-messages", TOptions>,
-	): StreamFunction<"anthropic-messages", TOptions> =>
-	(model, context, options) => {
-		let sawMessageStop = false
-		let sawStreamError = false
-		let expectedRefusalErrorMessage: string | null = null
-		const upstreamOnEvent = options?.onProviderStreamEvent
-		const wrappedOptions = {
-			...options,
-			fetch: createNoRedirectProviderFetch(model.baseUrl, options?.fetch),
-			onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
-				if (isRecord(data)) {
-					if (data.type === "message_delta" && isRecord(data.delta)) {
-						if (typeof data.delta.stop_reason === "string") {
-							expectedRefusalErrorMessage = expectedAnthropicRefusalMessage(data.delta)
-						}
-					} else if (data.type === "message_stop") {
-						sawMessageStop = true
-					} else if (data.type === "error") {
-						sawStreamError = true
+const runAnthropicMessagesRefusalGuard = (
+	model: Model<"anthropic-messages">,
+	options: StreamOptions | undefined,
+	start: (
+		overrides: WrappedStreamOverrides,
+	) => ReturnType<typeof createAssistantMessageEventStream>,
+) => {
+	let sawMessageStop = false
+	let sawStreamError = false
+	let expectedRefusalErrorMessage: string | null = null
+	const upstreamOnEvent = options?.onProviderStreamEvent
+	const inner = start({
+		fetch: createNoRedirectProviderFetch(model.baseUrl, options?.fetch),
+		onProviderStreamEvent: async (data: unknown, eventModel: Model<Api>) => {
+			if (isObject(data) && "type" in data) {
+				if (data.type === "message_delta" && "delta" in data && isObject(data.delta)) {
+					if ("stop_reason" in data.delta && typeof data.delta.stop_reason === "string") {
+						expectedRefusalErrorMessage = expectedAnthropicRefusalMessage(
+							data.delta.stop_reason,
+							"stop_details" in data.delta ? data.delta.stop_details : undefined,
+						)
 					}
+				} else if (data.type === "message_stop") {
+					sawMessageStop = true
+				} else if (data.type === "error") {
+					sawStreamError = true
 				}
-				await upstreamOnEvent?.(data, eventModel)
-			},
-		} as TOptions
-
-		const inner = fn(model, context, wrappedOptions)
-		const outer = createAssistantMessageEventStream()
-		void (async () => {
-			try {
-				for await (const event of inner) {
-					if (event.type === "error" && isRefusalAssistantMessage(event.error)) {
-						const isConfirmedRefusal =
-							event.reason === "error" &&
-							event.error.stopReason === "error" &&
-							sawMessageStop &&
-							!sawStreamError &&
-							expectedRefusalErrorMessage !== null &&
-							event.error.errorMessage === expectedRefusalErrorMessage
-						if (isConfirmedRefusal) {
-							outer.push(event)
-						} else {
-							const { rawStopReason: _dropped, ...rest } = event.error
-							outer.push({ ...event, error: rest })
-						}
-					} else if (event.type === "done" && isRefusalAssistantMessage(event.message)) {
-						const { rawStopReason: _dropped, ...rest } = event.message
-						outer.push({ ...event, message: rest })
-					} else {
-						outer.push(event)
-					}
-				}
-			} finally {
-				outer.end()
 			}
-		})()
-		return outer
-	}
+			await upstreamOnEvent?.(data, eventModel)
+		},
+	})
+	const outer = createAssistantMessageEventStream()
+	void (async () => {
+		try {
+			for await (const event of inner) {
+				if (event.type === "error" && isRefusalAssistantMessage(event.error)) {
+					const isConfirmedRefusal =
+						event.reason === "error" &&
+						event.error.stopReason === "error" &&
+						sawMessageStop &&
+						!sawStreamError &&
+						expectedRefusalErrorMessage !== null &&
+						event.error.errorMessage === expectedRefusalErrorMessage
+					if (isConfirmedRefusal) {
+						outer.push(event)
+					} else {
+						const { rawStopReason: _dropped, ...rest } = event.error
+						outer.push({ ...event, error: rest })
+					}
+				} else if (event.type === "done" && isRefusalAssistantMessage(event.message)) {
+					const { rawStopReason: _dropped, ...rest } = event.message
+					outer.push({ ...event, message: rest })
+				} else {
+					outer.push(event)
+				}
+			}
+		} finally {
+			outer.end()
+		}
+	})()
+	return outer
+}
 
 /**
  * Eager OpenAI + Anthropic providers for Cloudflare workerd and Bun/Node.
@@ -420,8 +488,14 @@ export const createOpenAIProvider = (baseUrl?: string | null): Provider<"openai-
 		},
 		models,
 		api: {
-			stream: wrapOpenAIResponsesStream(openAIResponses.stream),
-			streamSimple: wrapOpenAIResponsesStream(openAIResponses.streamSimple),
+			stream: (model: Model<"openai-responses">, context, options) =>
+				runOpenAIResponsesRefusalGuard(model, options, (overrides) =>
+					openAIResponses.stream(model, context, { ...options, ...overrides }),
+				),
+			streamSimple: (model: Model<"openai-responses">, context, options) =>
+				runOpenAIResponsesRefusalGuard(model, options, (overrides) =>
+					openAIResponses.streamSimple(model, context, { ...options, ...overrides }),
+				),
 		},
 	})
 }
@@ -436,8 +510,14 @@ export const createAnthropicProvider = (): Provider<"anthropic-messages"> =>
 		},
 		models: Object.values(ANTHROPIC_MODELS),
 		api: {
-			stream: wrapAnthropicMessagesStream(anthropicMessages.stream),
-			streamSimple: wrapAnthropicMessagesStream(anthropicMessages.streamSimple),
+			stream: (model: Model<"anthropic-messages">, context, options) =>
+				runAnthropicMessagesRefusalGuard(model, options, (overrides) =>
+					anthropicMessages.stream(model, context, { ...options, ...overrides }),
+				),
+			streamSimple: (model: Model<"anthropic-messages">, context, options) =>
+				runAnthropicMessagesRefusalGuard(model, options, (overrides) =>
+					anthropicMessages.streamSimple(model, context, { ...options, ...overrides }),
+				),
 		},
 	})
 

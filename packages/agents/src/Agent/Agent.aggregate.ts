@@ -108,8 +108,12 @@ export class Agent extends Domain.Aggregate("Agent", {
 	},
 	decide: {
 		ArchiveAgent: (state, _cmd, ctx) => {
-			if (state.status === "") return new AgentNotFound({ agent_id: ctx.id })
-			if (state.status === "archived") return []
+			if (state.status === "") {
+				return new AgentNotFound({ agent_id: ctx.id })
+			}
+			if (state.status === "archived") {
+				return []
+			}
 			return [new AgentArchived()]
 		},
 	},

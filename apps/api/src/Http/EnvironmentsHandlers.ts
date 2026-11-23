@@ -86,7 +86,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					const result = yield* environmentViews
 						.get(Environment.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "environment"))
-					if (isPending(result)) return result
+					if (isPending(result)) {
+						return result
+					}
 					const head = Option.getOrNull(result)
 					if (head !== null) {
 						if (head.version === receipt.reply.version && head.archived_at === null) {
@@ -112,7 +114,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 							const page = yield* environmentViews
 								.list(Environment.ref(id), { take: 1, order: "asc" })
 								.pipe(orPending(id, "environment"))
-							if (isPending(page)) return page
+							if (isPending(page)) {
+								return page
+							}
 							const created = page.entries[0]
 							if (created !== undefined && created.event._tag === "environment.created") {
 								return (
@@ -150,7 +154,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					yield* checkExists
 					const ref = Environment.ref(id)
 					const found = Option.getOrNull(yield* environmentViews.get(ref))
-					if (found !== null) return found
+					if (found !== null) {
+						return found
+					}
 					const projected = yield* environmentViews
 						.waitFor(
 							ref,
@@ -205,12 +211,18 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 								)
 								.pipe(Effect.tapErrorTag("WaitTimeout", () => checkStillUpdatable))
 						}
-						if (view === null) return yield* reject(404, `Environment ${id} not found.`)
+						if (view === null) {
+							return yield* reject(404, `Environment ${id} not found.`)
+						}
 						if (view.version !== payload.version) {
 							return yield* reject(409, "Environment version does not match.")
 						}
-						if (description === undefined) description = view.description
-						if (config === undefined) config = view.config
+						if (description === undefined) {
+							description = view.description
+						}
+						if (config === undefined) {
+							config = view.config
+						}
 					}
 					const nextFields = yield* Schema.decodeEffect(ValidatedEnvironmentFields)({
 						name: payload.name ?? committed.name,
@@ -228,7 +240,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					const result = yield* environmentViews
 						.get(Environment.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "environment"))
-					if (isPending(result)) return result
+					if (isPending(result)) {
+						return result
+					}
 					const head = Option.getOrNull(result)
 					if (head !== null) {
 						if (head.version === receipt.reply.version && head.archived_at === null) {
@@ -264,7 +278,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					const result = yield* environmentViews
 						.get(Environment.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "environment"))
-					if (isPending(result)) return result
+					if (isPending(result)) {
+						return result
+					}
 					return yield* present(result, 404, `Environment ${id} not found.`)
 				}).pipe(handled),
 			)

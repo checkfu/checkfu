@@ -51,7 +51,8 @@ import {
 	SseMaxConnectionDuration,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
-import { type DomainSessionEvent, serializeSessionEvent } from "../src/Http/SessionsHandlers.ts"
+import { serializeSessionEvent } from "../src/Http/SessionsHandlers.ts"
+import type { DomainSessionEvent } from "../src/Http/SessionsHandlers.ts"
 import {
 	AUTH_HEADERS,
 	createIdleSession,
@@ -80,18 +81,16 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const real = yield* Session
 					let failOnSend = Number.POSITIVE_INFINITY
 					let sends = 0
-					const flaky = new Proxy(real, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof real.send>[0],
-										options?: Parameters<typeof real.send>[1],
-									) =>
-										++sends === failOnSend
-											? Effect.die(new Error("storage unavailable"))
-											: target.send(command, options)
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+					const flaky: typeof real = {
+						...real,
+						send: ((
+							command: Parameters<typeof real.send>[0],
+							options?: Parameters<typeof real.send>[1],
+						) =>
+							++sends === failOnSend
+								? Effect.die(new Error("storage unavailable"))
+								: real.send(command, options)) as typeof real.send,
+					}
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(Session, flaky),
 					)
@@ -299,8 +298,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 								{
 									type: "user.message",
 									content: [
-										{ type: "text", text: "a".repeat(9_000) },
-										{ type: "text", text: "b".repeat(9_000) },
+										{ type: "text", text: "a".repeat(9000) },
+										{ type: "text", text: "b".repeat(9000) },
 									],
 								},
 							],
@@ -492,7 +491,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const turn1Frames = yield* Effect.promise(() =>
 						readSseUntil(stream1, (evt) => evt.type === "session.status_idle"),
 					)
-					const afterTurn1 = turn1Frames[turn1Frames.length - 1]!.id
+					const afterTurn1 = turn1Frames.at(-1)!.id
 
 					// Turn 2 sends a new prompt -> Pi must receive ONLY "Second prompt", NOT "First prompt\nSecond prompt"
 					const stream2 = yield* sendRequest(apiFetch, {
@@ -868,7 +867,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						headers: AUTH_HEADERS,
 					})
 					const reader = idle.body?.getReader()
-					if (reader === undefined) throw new Error("Expected SSE response body stream")
+					if (reader === undefined) {
+						throw new Error("Expected SSE response body stream")
+					}
 					const first = yield* Effect.promise(() => reader.read())
 					expect(new TextDecoder().decode(first.value)).toBe(": keepalive\n\n")
 					yield* Effect.promise(() => reader.cancel())
@@ -1110,7 +1111,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							Effect.gen(function* () {
 								const action = beforeAdmit
 								beforeAdmit = null
-								if (action !== null) yield* action()
+								if (action !== null) {
+									yield* action()
+								}
 								return yield* realAdmit.send(command, options)
 							}),
 					} as unknown as typeof realAdmit
@@ -1428,23 +1431,21 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const real = yield* Session
 					let dropReceiptOnSend = Number.POSITIVE_INFINITY
 					let sends = 0
-					const dropAfterCommit = new Proxy(real, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof real.send>[0],
-										options?: Parameters<typeof real.send>[1],
-									) => {
-										const sendNumber = ++sends
-										if (sendNumber === dropReceiptOnSend) {
-											return target
-												.send(command, options)
-												.pipe(Effect.andThen(Effect.die(new Error("receipt lost after commit"))))
-										}
-										return target.send(command, options)
-									}
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+					const dropAfterCommit: typeof real = {
+						...real,
+						send: ((
+							command: Parameters<typeof real.send>[0],
+							options?: Parameters<typeof real.send>[1],
+						) => {
+							const sendNumber = ++sends
+							if (sendNumber === dropReceiptOnSend) {
+								return real
+									.send(command, options)
+									.pipe(Effect.andThen(Effect.die(new Error("receipt lost after commit"))))
+							}
+							return real.send(command, options)
+						}) as typeof real.send,
+					}
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(Session, dropAfterCommit),
 					)
@@ -1460,7 +1461,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 									status: string
 									turn: number
 								}
-								if (body.status === "idle" && body.turn >= expectedTurn) return body
+								if (body.status === "idle" && body.turn >= expectedTurn) {
+									return body
+								}
 								yield* Effect.sleep("5 millis")
 							}
 							throw new Error(`Session ${sessionId} did not settle to turn ${expectedTurn}`)
@@ -1903,23 +1906,19 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						Schema.decodeUnknownEffect(Schema.Finite)("not-a-number"),
 					)
 					let failWithSchemaErrorOnce = true
-					const corruptReceiptSession = new Proxy(real, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof real.send>[0],
-										options?: Parameters<typeof real.send>[1],
-									) => {
-										if (failWithSchemaErrorOnce) {
-											failWithSchemaErrorOnce = false
-											return target
-												.send(command, options)
-												.pipe(Effect.andThen(Effect.die(schemaFailure)))
-										}
-										return target.send(command, options)
-									}
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+					const corruptReceiptSession: typeof real = {
+						...real,
+						send: ((
+							command: Parameters<typeof real.send>[0],
+							options?: Parameters<typeof real.send>[1],
+						) => {
+							if (failWithSchemaErrorOnce) {
+								failWithSchemaErrorOnce = false
+								return real.send(command, options).pipe(Effect.andThen(Effect.die(schemaFailure)))
+							}
+							return real.send(command, options)
+						}) as typeof real.send,
+					}
 					const { fetch: corruptFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(Session, corruptReceiptSession),
 					)
@@ -2190,7 +2189,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		const at = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
 		const samples: ReadonlyArray<{
 			readonly event: DomainSessionEvent
-			readonly expectedJson: Record<string, unknown>
+			readonly expectedJson: object
 		}> = [
 			{
 				event: new UserMessage({ content: [{ type: "text", text: "Hello" }] }),
@@ -2492,51 +2491,45 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					let dropNextAdmitReceipt = false
 					let dropNextUserMessageReceipt = false
 
-					const wrappedAdmit = new Proxy(realAdmit, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof realAdmit.send>[0],
-										options?: Parameters<typeof realAdmit.send>[1],
-									) => {
-										admittedSessionIds.push(command.session_id)
-										const call = target.send(command, options)
-										if (dropNextAdmitReceipt) {
-											dropNextAdmitReceipt = false
-											return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
-										}
-										return call
-									}
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+					const wrappedAdmit: typeof realAdmit = {
+						...realAdmit,
+						send: (
+							command: Parameters<typeof realAdmit.send>[0],
+							options?: Parameters<typeof realAdmit.send>[1],
+						) => {
+							admittedSessionIds.push(command.session_id)
+							const call = realAdmit.send(command, options)
+							if (dropNextAdmitReceipt) {
+								dropNextAdmitReceipt = false
+								return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
+							}
+							return call
+						},
+					}
 
-					const wrappedSessions = new Proxy(realSessions, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof realSessions.send>[0],
-										options?: Parameters<typeof realSessions.send>[1],
-									) => {
-										const call = target.send(command, options).pipe(
-											Effect.tap((receipt) =>
-												Effect.sync(() => {
-													if (command._tag === "SendUserMessage") {
-														sentUserMessages.push(command.text)
-														lastUserMessageCommit = receipt.commits[0]
-													}
-												}),
-											),
-										)
-										if (command._tag === "SendUserMessage" && dropNextUserMessageReceipt) {
-											dropNextUserMessageReceipt = false
-											return call.pipe(
-												Effect.andThen(Effect.die(new Error("message receipt lost"))),
-											)
+					const wrappedSessions: typeof realSessions = {
+						...realSessions,
+						send: ((
+							command: Parameters<typeof realSessions.send>[0],
+							options?: Parameters<typeof realSessions.send>[1],
+						) => {
+							const call = realSessions.send(command, options).pipe(
+								Effect.tap((receipt) =>
+									Effect.sync(() => {
+										if (command._tag === "SendUserMessage") {
+											sentUserMessages.push(command.text)
+											lastUserMessageCommit = receipt.commits[0]
 										}
-										return call
-									}
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+									}),
+								),
+							)
+							if (command._tag === "SendUserMessage" && dropNextUserMessageReceipt) {
+								dropNextUserMessageReceipt = false
+								return call.pipe(Effect.andThen(Effect.die(new Error("message receipt lost"))))
+							}
+							return call
+						}) as typeof realSessions.send,
+					}
 
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(AdmitSessionDecision, wrappedAdmit),
@@ -2635,7 +2628,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							status: string
 							turn: number
 						}
-						if (current.status === "idle" && current.turn === 1) break
+						if (current.status === "idle" && current.turn === 1) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 					const archiveSessRes = yield* sendRequest(apiFetch, {

@@ -1,12 +1,12 @@
 import type { ModelUsage } from "@checkfu/sessions/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
-import { type Harness, ROOT_CONVERSATION_ID, type Tx, UsageDoc } from "@earendil-works/pi-durable"
+import { ROOT_CONVERSATION_ID, UsageDoc } from "@earendil-works/pi-durable"
+import type { Harness, Tx } from "@earendil-works/pi-durable"
 import {
 	ACTIVE_USAGE_DOC_VERSION,
 	ActiveUsage,
 	ActiveUsageState,
 	CHECKFU_PI_DOCS,
-	type CheckfuPiDocSpec,
 	SEED_STATE_DOC_VERSION,
 	SETTLED_USAGE_DOC_VERSION,
 	SeedState,
@@ -14,6 +14,7 @@ import {
 	SettledUsage,
 	SettledUsageState,
 } from "./PiDocRegistry.ts"
+import type { CheckfuPiDocSpec } from "./PiDocRegistry.ts"
 
 export {
 	ACTIVE_USAGE_DOC_VERSION,
@@ -31,7 +32,9 @@ export {
 
 export const clearSeedRebuild = async (pi: Harness): Promise<void> => {
 	const current = await pi.snapshot(SeedState, BACKGROUND_CONTEXT)
-	if (current?.rebuildRequired !== true) return
+	if (current?.rebuildRequired !== true) {
+		return
+	}
 	await pi.commit(async (tx) => {
 		const seedState = await tx.doc(SeedState)
 		seedState.rebuildRequired = false
@@ -77,7 +80,9 @@ export const beginTurnUsage = (
 ): Promise<BeginTurnUsageResult> =>
 	pi.commit(async (tx) => {
 		const active = await tx.doc(ActiveUsage)
-		if (active.operation === operation) return { status: "ready" as const }
+		if (active.operation === operation) {
+			return { status: "ready" as const }
+		}
 		const previousOperation = active.operation
 		const previous =
 			previousOperation === null
@@ -114,14 +119,20 @@ export const beginTurnUsage = (
 export const settleTurnUsage = async (pi: Harness, operation: string): Promise<ModelUsage> => {
 	const closed = await pi.commit(async (tx) => {
 		const active = await tx.doc(ActiveUsage)
-		if (active.operation !== operation) return undefined
+		if (active.operation !== operation) {
+			return undefined
+		}
 		const usage = await closeUsage(tx, operation, active, await totalUsage(tx))
 		active.operation = null
 		return usage
 	}, BACKGROUND_CONTEXT)
-	if (closed !== undefined) return closed
+	if (closed !== undefined) {
+		return closed
+	}
 	// Another waiter or the next admission already sealed this operation.
 	const saved = await pi.snapshot(SettledUsage, operation, BACKGROUND_CONTEXT)
-	if (saved === undefined) throw new Error("Missing Pi operation usage receipt")
+	if (saved === undefined) {
+		throw new Error("Missing Pi operation usage receipt")
+	}
 	return saved
 }

@@ -47,6 +47,8 @@ jobs:
 
       - run: bun run check
 
+      - run: bun run test:bun
+
       - run: bun run test:workerd
 
       - name: Fail if the check changed any tracked file

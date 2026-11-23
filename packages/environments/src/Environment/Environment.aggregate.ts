@@ -146,7 +146,9 @@ export class Environment extends Domain.Aggregate("Environment", {
 			if ([state.status === "", state.status === "deleted"].some((gone) => gone)) {
 				return new EnvironmentNotFound({ environment_id: ctx.id })
 			}
-			if (state.status === "archived") return []
+			if (state.status === "archived") {
+				return []
+			}
 			return [new EnvironmentArchived()]
 		},
 		DeleteEnvironment: (state, _cmd, ctx) => {

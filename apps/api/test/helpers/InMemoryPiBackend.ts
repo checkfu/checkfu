@@ -1,17 +1,15 @@
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
 import type { Models } from "@earendil-works/pi-ai/models"
 import {
-	type Cursor,
 	Harness as PiHarnessRuntime,
 	MemoryStorage,
 	ROOT_CONVERSATION_ID,
-	type Storage,
 } from "@earendil-works/pi-durable"
+import type { Cursor, Storage } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { createPiHarnessSettings } from "../../src/Pi/PiContextBudget.ts"
 import {
-	type PiDurableBackend,
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
@@ -19,6 +17,7 @@ import {
 	rebuildRootInStorage,
 	restoreRefusalEntryInStorage,
 } from "../../src/Pi/PiDurableEngine.ts"
+import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry, rejectRefusalCompactions } from "../../src/Pi/PiRefusals.ts"
 import {
 	CHECKFU_PI_DOCS,
@@ -42,6 +41,48 @@ export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly close: () => Promise<void>
 }
 
+class InstrumentedMemoryStorage extends MemoryStorage {
+	readonly scanEntryCalls: Array<InMemoryEntryScanCall> = []
+
+	override commit(
+		batches: Parameters<Storage["commit"]>[0],
+		receive: Parameters<Storage["commit"]>[1],
+		context: Parameters<Storage["commit"]>[2],
+	): ReturnType<Storage["commit"]> {
+		for (const batch of batches) {
+			for (const write of batch) {
+				if (
+					(write.type === "document.create" || write.type === "document.copy") &&
+					!write.record.kind.startsWith("pi.") &&
+					!CHECKFU_PI_DOCS.some((spec) => spec.token.definition.kind === write.record.kind)
+				) {
+					return Promise.reject(
+						new Error(
+							`Unregistered Pi durable document "${write.record.kind}" was persisted without registering it in CHECKFU_PI_DOCS.`,
+						),
+					)
+				}
+			}
+		}
+		return super.commit(batches, receive, context)
+	}
+
+	override scanEntries(
+		query: Parameters<Storage["scanEntries"]>[0],
+		limit: Parameters<Storage["scanEntries"]>[1],
+		cursor: Parameters<Storage["scanEntries"]>[2],
+		context: Parameters<Storage["scanEntries"]>[3],
+	): ReturnType<Storage["scanEntries"]> {
+		this.scanEntryCalls.push({
+			...(query.minEntryId === undefined ? {} : { minEntryId: query.minEntryId }),
+			...(query.maxEntryId === undefined ? {} : { maxEntryId: query.maxEntryId }),
+			...(query.order === undefined ? {} : { order: query.order }),
+			limit,
+		})
+		return super.scanEntries(query, limit, cursor, context)
+	}
+}
+
 /**
  * In-process `pi-durable` backend backed by `MemoryStorage`.
  * Runs the real `@earendil-works/pi-durable` `Harness.open` loop (conversations,
@@ -52,54 +93,8 @@ export const createInMemoryPiDurableBackend = async (
 	retryBaseDelayMs = 1,
 	registry = createCheckfuRegistry(),
 ): Promise<InMemoryPiDurableBackend> => {
-	const rawStorage = new MemoryStorage()
-	const scanEntryCalls: Array<InMemoryEntryScanCall> = []
-	const storage: Storage = new Proxy(rawStorage, {
-		get(target, prop, receiver) {
-			if (prop === "commit") {
-				return (
-					batches: Parameters<Storage["commit"]>[0],
-					receive: Parameters<Storage["commit"]>[1],
-					context: Parameters<Storage["commit"]>[2],
-				) => {
-					for (const batch of batches) {
-						for (const write of batch) {
-							if (
-								(write.type === "document.create" || write.type === "document.copy") &&
-								!write.record.kind.startsWith("pi.") &&
-								!CHECKFU_PI_DOCS.some((spec) => spec.token.definition.kind === write.record.kind)
-							) {
-								return Promise.reject(
-									new Error(
-										`Unregistered Pi durable document "${write.record.kind}" was persisted without registering it in CHECKFU_PI_DOCS.`,
-									),
-								)
-							}
-						}
-					}
-					return target.commit(batches, receive, context)
-				}
-			}
-			if (prop === "scanEntries") {
-				return (
-					query: Parameters<Storage["scanEntries"]>[0],
-					limit: Parameters<Storage["scanEntries"]>[1],
-					cursor: Parameters<Storage["scanEntries"]>[2],
-					context: Parameters<Storage["scanEntries"]>[3],
-				) => {
-					scanEntryCalls.push({
-						...(query.minEntryId === undefined ? {} : { minEntryId: query.minEntryId }),
-						...(query.maxEntryId === undefined ? {} : { maxEntryId: query.maxEntryId }),
-						...(query.order === undefined ? {} : { order: query.order }),
-						limit,
-					})
-					return target.scanEntries(query, limit, cursor, context)
-				}
-			}
-			const value = Reflect.get(target, prop, receiver)
-			return typeof value === "function" ? value.bind(target) : value
-		},
-	})
+	const storage = new InstrumentedMemoryStorage()
+	const { scanEntryCalls } = storage
 	const cancelledOps = new Set<string>()
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
@@ -136,7 +131,9 @@ export const createInMemoryPiDurableBackend = async (
 				await existing.configure(agent, BACKGROUND_CONTEXT)
 				return true
 			}
-			if (create === false) return false
+			if (create === false) {
+				return false
+			}
 			await pi.root(BACKGROUND_CONTEXT, create === true ? { agent } : { agent, init: create })
 			return true
 		},

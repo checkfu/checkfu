@@ -7,9 +7,6 @@ import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { createPiHarnessSettings } from "./PiContextBudget.ts"
 import {
-	type PiDurableBackend,
-	type PiTurnRequest,
-	type PiTurnResult,
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
@@ -19,20 +16,18 @@ import {
 	restoreRefusalEntryInStorage,
 	runPiDurableTurn,
 } from "./PiDurableEngine.ts"
+import type { PiDurableBackend, PiTurnRequest, PiTurnResult } from "./PiDurableEngine.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
-import {
-	type PiTurnOutcome,
-	createCheckfuRegistry,
-	rejectRefusalCompactions,
-} from "./PiRefusals.ts"
+import { createCheckfuRegistry, rejectRefusalCompactions } from "./PiRefusals.ts"
+import type { PiTurnOutcome } from "./PiRefusals.ts"
 import { beginTurnUsage, clearSeedRebuild, settleTurnUsage } from "./PiTurnUsage.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
-type LifecycleHost = ConstructorParameters<typeof Lifecycle>[0]
+type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
 
 class PiSessionHost {
-	readonly ctx: LifecycleHost["ctx"]
-	constructor(ctx: LifecycleHost["ctx"]) {
+	readonly ctx: RawDurableObjectState
+	constructor(ctx: RawDurableObjectState) {
 		this.ctx = ctx
 	}
 }
@@ -71,7 +66,9 @@ export const makePiHarnessBackend = (
 				await conversation.configure(agent, BACKGROUND_CONTEXT)
 				return true
 			}
-			if (create === false) return false
+			if (create === false) {
+				return false
+			}
 			await harness.root(create === true ? { agent } : { agent, init: create })
 			return true
 		},
@@ -178,10 +175,8 @@ export class PiSession extends Cloudflare.DurableObject<PiSession>()(
 						)
 					},
 				})
-				const rawCtx = state.raw as unknown as LifecycleHost["ctx"]
-				const lifecycle = new LifecycleClass(
-					new PiSessionHost(rawCtx) as unknown as LifecycleHost,
-				).use(harness)
+				const rawCtx = state.raw
+				const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
 				const fence = new SqliteTurnFence({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 					transaction: (run) => rawCtx.storage.transactionSync(run),
