@@ -1,6 +1,62 @@
 import cloudflare from "@cloudflare/oxlint-config"
 import { strict as effectStrict } from "@effect/tsgo/oxlint-presets"
 import { defineConfig } from "oxlint"
+import type { OxlintConfig } from "oxlint"
+
+// Each operation is confined to the one file that owns it. That file is exempt from its own
+// entry and from nothing else.
+const OWNED = [
+	{
+		owner: "apps/api/src/Pi/PiDocRegistry.ts",
+		message:
+			"Declare Checkfu Pi documents and document families in apps/api/src/Pi/PiDocRegistry.ts so they are covered by Persisted.lock.json.",
+		imports: [
+			{ name: "@earendil-works/pi-durable", importNames: ["defineDoc", "defineDocFamily"] },
+		],
+		properties: ["defineDoc", "defineDocFamily"],
+	},
+	{
+		owner: "apps/api/src/PlacedDurableObjects.ts",
+		message:
+			"Host the model on PlacedDurableObjects from apps/api/src/PlacedDurableObjects.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
+		imports: [{ name: "@alchemy.run/domain/Cloudflare", importNames: ["layerDurableObjects"] }],
+		properties: ["layerDurableObjects"],
+	},
+	{
+		owner: "apps/api/src/Placement.ts",
+		message:
+			"Address a Durable Object with placedStub from apps/api/src/Placement.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to it.",
+		imports: [],
+		properties: ["getByName", "idFromName", "idFromString", "newUniqueId"],
+	},
+	{
+		owner: "packages/domain/src/Session/RunTurnActivities.ts",
+		message:
+			"Declare RunTurn workflow activities through runTurnActivity in packages/domain/src/Session/RunTurnActivities.ts so they are covered by Persisted.lock.json.",
+		imports: [{ name: "effect/workflow", importNames: ["Activity"] }],
+		properties: [],
+	},
+]
+
+const confined = (exempt?: string): NonNullable<OxlintConfig["rules"]> => {
+	const enforced = OWNED.filter(({ owner }) => owner !== exempt)
+	return {
+		"no-restricted-imports": [
+			"error",
+			{
+				paths: enforced.flatMap(({ message, imports }) =>
+					imports.map((path) => ({ ...path, allowTypeImports: true, message })),
+				),
+			},
+		],
+		"no-restricted-properties": [
+			"error",
+			...enforced.flatMap(({ message, properties }) =>
+				properties.map((property) => ({ property, message })),
+			),
+		],
+	}
+}
 
 export default defineConfig({
 	...cloudflare,
@@ -35,57 +91,7 @@ export default defineConfig({
 		"import/no-cycle": "error",
 		"import/no-duplicates": "error",
 		"no-proto": "error",
-		"no-restricted-imports": [
-			"error",
-			{
-				paths: [
-					{
-						name: "@earendil-works/pi-durable",
-						importNames: ["defineDoc", "defineDocFamily"],
-						allowTypeImports: true,
-						message:
-							"Declare Checkfu Pi documents in apps/api/src/Pi/PiDocRegistry.ts so they are covered by Persisted.lock.json.",
-					},
-					{
-						name: "@alchemy.run/domain/Cloudflare",
-						importNames: ["layerDurableObjects"],
-						allowTypeImports: true,
-						message:
-							"Host the model on PlacedDurableObjects from apps/api/src/PlacedDurableObjects.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
-					},
-					{
-						name: "effect/workflow",
-						importNames: ["Activity"],
-						allowTypeImports: true,
-						message:
-							"Declare RunTurn workflow activities through runTurnActivity in packages/domain/src/Session/RunTurnActivities.ts so they are covered by Persisted.lock.json.",
-					},
-				],
-			},
-		],
-		"no-restricted-properties": [
-			"error",
-			{
-				property: "defineDoc",
-				message:
-					"Declare Checkfu Pi documents in apps/api/src/Pi/PiDocRegistry.ts so every persisted Pi document is covered by Persisted.lock.json.",
-			},
-			{
-				property: "defineDocFamily",
-				message:
-					"Declare Checkfu Pi document families in apps/api/src/Pi/PiDocRegistry.ts so every persisted Pi document family is covered by Persisted.lock.json.",
-			},
-			{
-				property: "layerDurableObjects",
-				message:
-					"Host the model on PlacedDurableObjects from apps/api/src/PlacedDurableObjects.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
-			},
-			...["getByName", "idFromName", "idFromString", "newUniqueId"].map((property) => ({
-				property,
-				message:
-					"Address a Durable Object with placedStub from apps/api/src/Placement.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to it.",
-			})),
-		],
+		...confined(),
 		"no-sequences": "error",
 		"promise/no-new-statics": "error",
 		"promise/valid-params": "error",
@@ -208,32 +214,7 @@ export default defineConfig({
 				"unicorn/prefer-string-raw": "off",
 			},
 		},
-		{
-			files: ["apps/api/src/Placement.ts"],
-			rules: {
-				"no-restricted-properties": "off",
-			},
-		},
-		{
-			files: ["apps/api/src/PlacedDurableObjects.ts"],
-			rules: {
-				"no-restricted-imports": "off",
-				"no-restricted-properties": "off",
-			},
-		},
-		{
-			files: ["apps/api/src/Pi/PiDocRegistry.ts"],
-			rules: {
-				"no-restricted-imports": "off",
-				"no-restricted-properties": "off",
-			},
-		},
-		{
-			files: ["packages/domain/src/Session/RunTurnActivities.ts"],
-			rules: {
-				"no-restricted-imports": "off",
-			},
-		},
+		...OWNED.map(({ owner }) => ({ files: [owner], rules: confined(owner) })),
 		{
 			files: ["**/*.story.{test,spec}.ts"],
 			rules: {

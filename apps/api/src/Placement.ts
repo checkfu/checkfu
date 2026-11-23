@@ -8,10 +8,8 @@ export const LOCATION_HINT_ENV = "CHECKFU_LOCATION_HINT"
 
 const UNSET = Schema.Literal("")
 
-export const Jurisdiction = Schema.Literals([
-	"eu",
-	"fedramp",
-]) satisfies Schema.Schema<Cloudflare.DurableObjectJurisdiction>
+// Placement.test.ts holds both lists equal to the platform's own types.
+export const Jurisdiction = Schema.Literals(["eu", "fedramp", "fedramp-high", "us"])
 
 export const LocationHint = Schema.Literals([
 	"wnam",
@@ -20,10 +18,12 @@ export const LocationHint = Schema.Literals([
 	"weur",
 	"eeur",
 	"apac",
+	"apac-ne",
+	"apac-se",
 	"oc",
 	"afr",
 	"me",
-]) satisfies Schema.Schema<Cloudflare.DurableObjectLocationHint>
+])
 
 export interface Placement {
 	readonly jurisdiction?: typeof Jurisdiction.Type
