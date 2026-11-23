@@ -37,13 +37,13 @@ const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean =
 	})
 }
 
-// `apps/cli/bin/checkfu` enforces `--no-env-file --config=<cli>/bunfig.toml`
+// `apps/cli/bin/checkfu.mjs` enforces `--no-env-file --config=<cli>/bunfig.toml`
 // *before* Bun starts so untrusted working-directory `.env*` and `bunfig.toml`
 // preloads can never execute. Refuse unsupported direct invocations consistently
 // rather than allowing `bun apps/cli/src/main.ts` to run in clean directories.
 if (!launchedWithPinnedCliConfig(process.execArgv)) {
 	process.stderr.write(
-		"Error: Launch the Checkfu CLI via apps/cli/bin/checkfu (or the installed `checkfu` binary) so Bun starts with --no-env-file and the pinned CLI config.\n",
+		"Error: Launch the Checkfu CLI via `node apps/cli/bin/checkfu.mjs` (or the installed `checkfu` binary) so Bun starts with --no-env-file and the pinned CLI config.\n",
 	)
 	process.exit(1)
 }

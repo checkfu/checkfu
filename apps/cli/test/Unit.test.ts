@@ -10,7 +10,12 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
-import { makeCheckfuClient, normalizeApiUrl, resolveBaseUrl } from "../src/Client.ts"
+import {
+	DEFAULT_API_URL,
+	makeCheckfuClient,
+	normalizeApiUrl,
+	resolveBaseUrl,
+} from "../src/Client.ts"
 import {
 	escapeTerminalControlCharacters,
 	hasUnsafeTerminalCodePoint,
@@ -1468,13 +1473,93 @@ describe("normalizeApiUrl", () => {
 				expect(immediateResetLastIds).toEqual([null, "4", "4", "4", "4", "4"])
 				expect(immediateResetSleepsMs).toEqual([250, 500, 1000, 2000, 4000])
 				expect(immediateResetErr._tag).toBe("CliFailure")
+
+				// Stalled 60s connections that deliver neither events nor completed keepalives (empty
+				// chunks or unterminated `: partial` comments) must NOT reset the retry budget:
+				// elapsed time alone is not evidence of a healthy stream
+				let stalledResetCalls = 0
+				const stalledResetLastIds: Array<string | null> = []
+				const stalledResetSleepsMs: Array<number> = []
+				const stalledResetClock: Clock.Clock = {
+					currentTimeMillisUnsafe: () => Number(resetNowNanos / 1_000_000n),
+					currentTimeMillis: Effect.sync(() => Number(resetNowNanos / 1_000_000n)),
+					currentTimeNanosUnsafe: () => resetNowNanos,
+					currentTimeNanos: Effect.sync(() => resetNowNanos),
+					monotonicTimeNanosUnsafe: () => resetNowNanos,
+					monotonicTimeNanos: Effect.sync(() => resetNowNanos),
+					sleep: (duration) =>
+						Effect.sync(() => {
+							const ms = Duration.toMillis(duration)
+							stalledResetSleepsMs.push(ms)
+							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+						}),
+				}
+				const stalledResetFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = input instanceof Request ? input : new Request(input, init)
+					stalledResetLastIds.push(req.headers.get("last-event-id"))
+					stalledResetCalls += 1
+					if (stalledResetCalls > 10) {
+						return new Response(sseSessionFrame(8, "session.archived"), {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					const callNumber = stalledResetCalls
+					let step = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (step === 0) {
+								step = 1
+								// Alternate silent stalls and unterminated comments (neither is a completed keepalive)
+								controller.enqueue(
+									callNumber % 2 === 1 ? new Uint8Array(0) : encoder.encode(": partial"),
+								)
+							} else {
+								resetNowNanos += 60_000_000_000n
+								controller.error(new TypeError("stalled proxy reset"))
+							}
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+
+				const stalledResetErr = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(client.streamSessionEvents("sess_stalled_resets", { after: 7 })),
+					)
+				}).pipe(
+					Effect.provide(makeLayer(stalledResetFetch)),
+					Effect.provideService(Clock.Clock, stalledResetClock),
+				)
+				expect(stalledResetCalls).toBe(6)
+				expect(stalledResetLastIds).toEqual([null, "7", "7", "7", "7", "7"])
+				expect(stalledResetSleepsMs).toEqual([250, 500, 1000, 2000, 4000])
+				expect(stalledResetErr._tag).toBe("CliFailure")
 			}),
 		)
 	})
 
-	it("rejects explicitly blank --base-url instead of falling back to env vars or localhost", async () => {
+	it("resolves default URL without network access and rejects explicitly blank --base-url", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
+				const emptyEnvLayer = ConfigProvider.layer(ConfigProvider.fromUnknown({}))
+				expect(yield* resolveBaseUrl(Option.none()).pipe(Effect.provide(emptyEnvLayer))).toBe(
+					DEFAULT_API_URL,
+				)
+
+				const fallbackUrlLayer = ConfigProvider.layer(
+					ConfigProvider.fromUnknown({
+						CHECKFU_URL: "https://staging.checkfu.com/v1/",
+					}),
+				)
+				expect(yield* resolveBaseUrl(Option.none()).pipe(Effect.provide(fallbackUrlLayer))).toBe(
+					"https://staging.checkfu.com",
+				)
+
 				const envLayer = ConfigProvider.layer(
 					ConfigProvider.fromUnknown({
 						CHECKFU_API_URL: "https://api.checkfu.com",

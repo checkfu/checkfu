@@ -472,12 +472,15 @@ export const makeCheckfuClient = (
 						let handledError = false
 						// Separate cursor progress ("where do we resume?") from connection health
 						// ("was this connection healthy enough to reset retry/no-progress budgets?"):
-						// a quiet connection delivering keepalives for >= healthyIdleDurationNanos is
-						// healthy even though its resume cursor has not changed.
+						// a quiet connection must have delivered at least one completed keepalive
+						// (not merely stalled without bytes) and stayed open >= healthyIdleDurationNanos
+						// to count as healthy when its resume cursor has not changed.
 						const assessConnectionHealth = (closedAtNanos: bigint) => {
 							const advanced = hasCursorProgress()
 							const healthyIdle =
-								!sawEvent && closedAtNanos - connectedAtNanos >= healthyIdleDurationNanos
+								!sawEvent &&
+								sawKeepalive &&
+								closedAtNanos - connectedAtNanos >= healthyIdleDurationNanos
 							return { advanced, healthyIdle, healthy: advanced || healthyIdle }
 						}
 						let isFirstChunk = true
@@ -722,7 +725,7 @@ export const makeCheckfuClient = (
 								const floorBaseMs = Math.max(baseDelayMs, 1)
 								if (health.healthyIdle) {
 									loopState.noProgressCloses = 0
-									const minIdleDelayMs = sawKeepalive ? Math.min(floorBaseMs, 50) : floorBaseMs
+									const minIdleDelayMs = Math.min(floorBaseMs, 50)
 									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, minIdleDelayMs)
 								} else {
 									const streak = loopState.noProgressCloses

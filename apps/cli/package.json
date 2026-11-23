@@ -4,7 +4,7 @@
 	"private": true,
 	"license": "Apache-2.0",
 	"bin": {
-		"checkfu": "./bin/checkfu"
+		"checkfu": "./bin/checkfu.mjs"
 	},
 	"type": "module",
 	"sideEffects": false,

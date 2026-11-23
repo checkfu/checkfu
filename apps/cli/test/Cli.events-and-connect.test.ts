@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import * as Http from "node:http"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
@@ -2054,14 +2054,15 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 
-		// 3) Real subprocess via apps/cli/bin/checkfu exits cleanly with code 0 on /exit\n even
+		// 3) Real subprocess via apps/cli/bin/checkfu.mjs exits cleanly with code 0 on /exit\n even
 		//    while the parent keeps stdin open, and reports path-segment & redirect errors on stderr
-		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
-		const bunfigPath = fileURLToPath(new URL("../bunfig.toml", import.meta.url))
-		const launcherPath = fileURLToPath(new URL("../bin/checkfu", import.meta.url))
+		const launcherPath = fileURLToPath(new URL("../bin/checkfu.mjs", import.meta.url))
+		const nodeExecutable = basename(process.execPath).toLowerCase().startsWith("node")
+			? process.execPath
+			: "node"
 		const launcherCommand = (cliArgs: ReadonlyArray<string>): readonly [string, Array<string>] =>
 			process.platform === "win32"
-				? ["bun", ["--no-env-file", `--config=${bunfigPath}`, mainPath, ...cliArgs]]
+				? [nodeExecutable, [launcherPath, ...cliArgs]]
 				: [launcherPath, [...cliArgs]]
 		const openSseResponses: Array<Http.ServerResponse> = []
 		let redirectTargetGetHits = 0
@@ -2809,7 +2810,7 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("documents the apps/cli/bin/checkfu launcher instead of direct bun main.ts or bun run cli", () => {
+	it("documents the cross-platform apps/cli/bin/checkfu.mjs launcher instead of direct bun main.ts or bun run cli", () => {
 		const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8")
 		const rootPkg = JSON.parse(
 			readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
@@ -2818,17 +2819,19 @@ describe("CLI sessions:events and sessions connect", () => {
 			readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 		) as { readonly bin?: Record<string, string> }
 		const bunLock = readFileSync(new URL("../../../bun.lock", import.meta.url), "utf8")
-		const binScript = readFileSync(new URL("../bin/checkfu", import.meta.url), "utf8")
+		const binScript = readFileSync(new URL("../bin/checkfu.mjs", import.meta.url), "utf8")
 		const cliBunfig = readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")
-		expect(readme).toContain("./apps/cli/bin/checkfu --help")
+		expect(readme).toContain("node apps/cli/bin/checkfu.mjs --help")
 		expect(readme).not.toContain("apps/cli/src/main.ts")
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
-		expect(cliPkg.bin?.["checkfu"]).toBe("./bin/checkfu")
-		expect(binScript).toContain('--no-env-file --config="$SCRIPT_DIR/../bunfig.toml"')
+		expect(cliPkg.bin?.["checkfu"]).toBe("./bin/checkfu.mjs")
+		expect(binScript).toContain("#!/usr/bin/env node")
+		expect(binScript).toContain("--no-env-file")
+		expect(binScript).toContain("--config=${bunfigPath}")
 		expect(cliBunfig).toContain("preload = []")
 		expect(bunLock).toMatch(
-			/"apps\/cli":\s*\{[\s\S]*?"bin":\s*\{\s*"checkfu":\s*"\.\/bin\/checkfu",?\s*\}/,
+			/"apps\/cli":\s*\{[\s\S]*?"bin":\s*\{\s*"checkfu":\s*"\.\/bin\/checkfu\.mjs",?\s*\}/,
 		)
 	})
 
@@ -2907,7 +2910,7 @@ def setup_ctty():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-cmd = ["./apps/cli/bin/checkfu", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+cmd = ["node", "apps/cli/bin/checkfu.mjs", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
 p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
 os.close(slave)
 
@@ -4015,7 +4018,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		//    hijack CHECKFU_API_URL / CHECKFU_URL or execute project-controlled code
 		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
 		const bunfigPath = fileURLToPath(new URL("../bunfig.toml", import.meta.url))
-		const binPath = fileURLToPath(new URL("../bin/checkfu", import.meta.url))
+		const binPath = fileURLToPath(new URL("../bin/checkfu.mjs", import.meta.url))
 		let evilHits = 0
 		let legitHits = 0
 		const evilServer = Http.createServer((_req, res) => {
@@ -4063,7 +4066,10 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		try {
 			const evilPort = (evilServer.address() as { port: number }).port
 			const legitPort = (legitServer.address() as { port: number }).port
-			writeFileSync(join(untrustedDir, ".env"), `CHECKFU_API_URL=http://127.0.0.1:${evilPort}\n`)
+			writeFileSync(
+				join(untrustedDir, ".env"),
+				`CHECKFU_API_KEY=ck_from_untrusted_dotenv\nCHECKFU_API_URL=http://127.0.0.1:${evilPort}\n`,
+			)
 			writeFileSync(join(untrustedDir, ".env.local"), `CHECKFU_URL=http://127.0.0.1:${evilPort}\n`)
 			writeFileSync(
 				join(untrustedDir, "evil-preload.js"),
@@ -4107,21 +4113,21 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					child.on("close", (status) => resolve({ status, stdout, stderr }))
 				})
 
+			// Always exercise the real cross-platform `apps/cli/bin/checkfu.mjs` entry point
+			// (direct via shebang on POSIX, via Node on Windows — never bypassing the bin)
+			const nodeExecutable = basename(process.execPath).toLowerCase().startsWith("node")
+				? process.execPath
+				: "node"
 			const invokeLauncher = (
 				cliArgs: ReadonlyArray<string>,
 				env: Record<string, string>,
 				cwd = untrustedDir,
 			) =>
 				process.platform === "win32"
-					? runSubprocess(
-							"bun",
-							["--no-env-file", `--config=${bunfigPath}`, mainPath, ...cliArgs],
-							env,
-							cwd,
-						)
+					? runSubprocess(nodeExecutable, [binPath, ...cliArgs], env, cwd)
 					: runSubprocess(binPath, cliArgs, env, cwd)
 
-			// 1a) Supported launcher (`apps/cli/bin/checkfu`) pins --no-env-file and --config=...
+			// 1a) Supported launcher (`apps/cli/bin/checkfu.mjs`) pins --no-env-file and --config=...
 			//     before Bun starts, ignoring both cwd .env* and cwd bunfig.toml preloads
 			const launcherResult = await invokeLauncher(
 				["sessions", "retrieve", "--session-id", "sess_env"],
@@ -4136,19 +4142,48 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 
-			// 1b) Without an exported URL, launcher must NOT fall back to cwd .env's CHECKFU_API_URL
-			const launcherDefault = await invokeLauncher(
-				["sessions", "retrieve", "--session-id", "sess_env"],
-				{
-					...baseEnv,
-					CHECKFU_API_KEY: "ck_exported_secret",
-				},
+			// 1b) Documented cross-platform invocation (`node apps/cli/bin/checkfu.mjs`) ignores cwd .env*
+			//     even when neither CHECKFU_API_KEY nor URL vars are exported (fails before any network call,
+			//     never touching localhost:1337 or evilServer)
+			const launcherNoEnv = await runSubprocess(
+				nodeExecutable,
+				[binPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				baseEnv,
 			)
-			expect(launcherDefault.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(launcherNoEnv.status).toBe(1)
+			expect(launcherNoEnv.stderr).toContain("Missing CHECKFU_API_KEY")
+			expect(launcherNoEnv.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(evilHits).toBe(0)
-			expect(launcherDefault.stdout).not.toContain('"sess_env"')
 
-			// 1c) Direct `bun apps/cli/src/main.ts` invocations without the pinned launcher flags
+			// 1c) Installed/symlinked bin invocation (symlink via realpathSync on POSIX, `node bin/checkfu.mjs`
+			//     on Windows) resolves the pinned bunfig relative to the real launcher path and routes only to
+			//     the explicit --base-url ephemeral server
+			const explicitUrlArgs = [
+				"sessions",
+				"retrieve",
+				"--session-id",
+				"sess_env",
+				"--base-url",
+				`http://127.0.0.1:${legitPort}`,
+			]
+			const explicitUrlEnv = {
+				...baseEnv,
+				CHECKFU_API_KEY: "ck_exported_secret",
+			}
+			const installedBinResult =
+				process.platform === "win32"
+					? await runSubprocess(nodeExecutable, [binPath, ...explicitUrlArgs], explicitUrlEnv)
+					: await (() => {
+							const symlinkPath = join(cleanDir, "checkfu")
+							symlinkSync(binPath, symlinkPath)
+							return runSubprocess(symlinkPath, explicitUrlArgs, explicitUrlEnv)
+						})()
+			expect(installedBinResult.status).toBe(0)
+			expect(installedBinResult.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(legitHits).toBe(2)
+			expect(evilHits).toBe(0)
+
+			// 1d) Direct `bun apps/cli/src/main.ts` invocations without the pinned launcher flags
 			//     are refused unconditionally even in a clean directory (direct entry is unsupported)
 			for (const unsupportedArgs of [
 				[mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
@@ -4166,9 +4201,9 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					cleanDir,
 				)
 				expect(direct.status).toBe(1)
-				expect(direct.stderr).toContain("apps/cli/bin/checkfu")
+				expect(direct.stderr).toContain("apps/cli/bin/checkfu.mjs")
 			}
-			expect(legitHits).toBe(1)
+			expect(legitHits).toBe(2)
 			expect(evilHits).toBe(0)
 		} finally {
 			rmSync(untrustedDir, { recursive: true, force: true })
