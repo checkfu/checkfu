@@ -16,6 +16,8 @@ export class Sessions extends Domain.Model("Sessions", {
 		ASessionCompletesATurn: (m) =>
 			m.Session.some((s) => s.state._tag === "Idle" && s.state.turn >= 1),
 		ASessionTerminates: (m) => m.Session.some((s) => s.state._tag === "Terminated"),
+		ASessionIsArchived: (m) =>
+			m.Session.some((s) => s.state._tag === "Terminated" && s.state.archived),
 	},
 	eventually: {
 		EveryTurnSettles: (m) => m.Session.every((s) => s.state._tag !== "Running"),

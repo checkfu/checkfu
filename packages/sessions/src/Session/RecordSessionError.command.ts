@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { SessionStatusIdle } from "./CompleteTurn.command.ts"
 import { OpenModelRequests } from "./OpenModelRequests.rejection.ts"
+import { SpanModelRequestEnd } from "./RecordModelRequestEnd.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
@@ -21,6 +22,12 @@ export class RecordSessionError extends Domain.Command("RecordSessionError", {
 		turn: Schema.NullOr(PositiveInt),
 		error: SessionErrorBody,
 	},
-	events: [SessionErrorEvent, SessionStatusIdle, SessionStatusRunning, SessionStatusTerminated],
+	events: [
+		SpanModelRequestEnd,
+		SessionErrorEvent,
+		SessionStatusIdle,
+		SessionStatusRunning,
+		SessionStatusTerminated,
+	],
 	rejects: [SessionNotFound, SessionTerminated, SessionNotRunning, StaleTurn, OpenModelRequests],
 }) {}

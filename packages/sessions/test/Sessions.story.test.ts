@@ -718,6 +718,68 @@ describe("Sessions", () => {
 		)
 	})
 
+	it.effect("closes an open model request span before terminating via RecordSessionError", () => {
+		const turnScoped = Session.ref("sess_terminal_open_span_turn")
+		const unscoped = Session.ref("sess_terminal_open_span_unscoped")
+		const terminalError = {
+			type: "provider_error",
+			message: "401 unauthorized",
+			retry_status: { type: "terminal" as const },
+		}
+		return story(
+			Story.given(
+				turnScoped,
+				createdEvent,
+				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+				new SessionStatusRunning(),
+				new SpanModelRequestStart({ model_request_start_id: "mreq_open_1" }),
+			),
+			Story.when(
+				new RecordSessionError({
+					session_id: turnScoped.id,
+					turn: 1,
+					error: terminalError,
+				}),
+			),
+			Story.then(
+				turnScoped,
+				new SpanModelRequestEnd({
+					model_request_start_id: "mreq_open_1",
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				new SessionErrorEvent({ error: terminalError }),
+				new SessionStatusTerminated(),
+			),
+			Story.state(turnScoped, { _tag: "Terminated", archived: false }),
+			Story.given(
+				unscoped,
+				createdEvent,
+				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+				new SessionStatusRunning(),
+				new SpanModelRequestStart({ model_request_start_id: "mreq_open_2" }),
+			),
+			Story.when(
+				new RecordSessionError({
+					session_id: unscoped.id,
+					turn: null,
+					error: terminalError,
+				}),
+			),
+			Story.then(
+				unscoped,
+				new SpanModelRequestEnd({
+					model_request_start_id: "mreq_open_2",
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				new SessionErrorEvent({ error: terminalError }),
+				new SessionStatusTerminated(),
+			),
+			Story.state(unscoped, { _tag: "Terminated", archived: false }),
+		)
+	})
+
 	it.effect("rejects turn-recording commands when idle and archives running sessions", () => {
 		const session = Session.ref("sess_005")
 		return story(
