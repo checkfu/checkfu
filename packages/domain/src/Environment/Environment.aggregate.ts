@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { EnvironmentConfig, NonNegativeInt, sameNetworkingFlags } from "./EnvironmentTypes.ts"
+import { EnvironmentConfig, NonNegativeInt } from "./EnvironmentTypes.ts"
 import { ArchiveEnvironment, EnvironmentArchived } from "./ArchiveEnvironment.command.ts"
 import {
 	CreateEnvironment,
@@ -66,23 +66,31 @@ export class Environment extends Domain.Aggregate("Environment", {
 			].some((ok) => ok),
 	},
 	transitions: {
-		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) =>
-			command._tag !== "UpdateEnvironment" ||
-			[
+		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) => {
+			if (command._tag !== "UpdateEnvironment") {
+				return true
+			}
+			if (after.config === null || before.config === null) {
+				return false
+			}
+			const kept = after.config.networking
+			const asked =
+				command.changes.config === undefined
+					? before.config.networking
+					: command.changes.config.networking
+			return [
 				after.name === (command.changes.name === undefined ? before.name : command.changes.name),
 				after.description ===
 					(command.changes.description === undefined
 						? before.description
 						: command.changes.description),
-				after.config !== null &&
-					before.config !== null &&
-					sameNetworkingFlags(
-						after.config.networking,
-						command.changes.config === undefined
-							? before.config.networking
-							: command.changes.config.networking,
-					),
-			].every((ok) => ok),
+				kept.type === asked.type,
+				kept.type !== "limited" ||
+					asked.type !== "limited" ||
+					(kept.allow_mcp_servers === asked.allow_mcp_servers &&
+						kept.allow_package_managers === asked.allow_package_managers),
+			].every((ok) => ok)
+		},
 		CreatedEnvironmentNeverReturnsToUninitialized: ({ before, after }) =>
 			[before.status === "", after.status !== ""].some((ok) => ok),
 		ArchivedNeverReactivates: ({ before, after }) =>

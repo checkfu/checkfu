@@ -1,6 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
 import { Environment } from "./Environment/Environment.aggregate.ts"
-import { sameNetworking } from "./Environment/EnvironmentTypes.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 
 export class Environments extends Domain.Model("Environments", {
@@ -36,10 +35,22 @@ export class Environments extends Domain.Model("Environments", {
 				if (view === undefined) {
 					return true
 				}
+				if (e.state.config === null) {
+					return false
+				}
+				const projected = view.state.config.networking
+				const committed = e.state.config.networking
 				return [
 					view.state.description === e.state.description,
-					e.state.config !== null &&
-						sameNetworking(view.state.config.networking, e.state.config.networking),
+					projected.type === committed.type,
+					projected.type !== "limited" ||
+						committed.type !== "limited" ||
+						(projected.allow_mcp_servers === committed.allow_mcp_servers &&
+							projected.allow_package_managers === committed.allow_package_managers &&
+							projected.allowed_hosts.length === committed.allowed_hosts.length &&
+							projected.allowed_hosts.every(
+								(host, index) => host === committed.allowed_hosts[index],
+							)),
 				].every((ok) => ok)
 			}),
 	},

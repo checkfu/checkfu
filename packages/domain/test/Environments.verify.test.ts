@@ -52,7 +52,7 @@ describe("Environments Z3 formal verification", () => {
 		120_000,
 	)
 
-	it("tells a projected limited config apart from the aggregate's by hosts and by each flag", () => {
+	it("tells a projected config apart from the aggregate's by type, by hosts and by each flag", () => {
 		const limited = (
 			allow_mcp_servers: boolean,
 			allow_package_managers: boolean,
@@ -66,8 +66,10 @@ describe("Environments Z3 formal verification", () => {
 				allowed_hosts,
 			},
 		})
+		const unrestricted = { type: "cloud" as const, networking: { type: "unrestricted" as const } }
 		const committed = limited(false, true, ["api.openai.com", "registry.npmjs.org"])
-		const world = (projected: ReturnType<typeof limited>) => ({
+		type Config = ReturnType<typeof limited> | typeof unrestricted
+		const world = (aggregate: Config, projected: Config) => ({
 			Environment: [
 				{
 					id: "env_1",
@@ -76,23 +78,40 @@ describe("Environments Z3 formal verification", () => {
 						version: 2,
 						name: "Env",
 						description: null,
-						config: committed,
+						config: aggregate,
 					},
 				},
 			],
 			EnvironmentView: [{ id: "env_1", state: { description: null, config: projected } }],
 		})
 		const cases = [
-			{ projected: committed, matches: true },
-			{ projected: limited(false, true, ["api.openai.com", "example.com"]), matches: false },
-			{ projected: limited(false, true, ["api.openai.com"]), matches: false },
-			{ projected: limited(true, true, committed.networking.allowed_hosts), matches: false },
-			{ projected: limited(false, false, committed.networking.allowed_hosts), matches: false },
+			{ aggregate: committed, projected: committed, matches: true },
+			{ aggregate: unrestricted, projected: unrestricted, matches: true },
+			{ aggregate: committed, projected: unrestricted, matches: false },
+			{ aggregate: unrestricted, projected: committed, matches: false },
+			{
+				aggregate: committed,
+				projected: limited(false, true, ["api.openai.com", "example.com"]),
+				matches: false,
+			},
+			{ aggregate: committed, projected: limited(false, true, ["api.openai.com"]), matches: false },
+			{
+				aggregate: committed,
+				projected: limited(true, true, committed.networking.allowed_hosts),
+				matches: false,
+			},
+			{
+				aggregate: committed,
+				projected: limited(false, false, committed.networking.allowed_hosts),
+				matches: false,
+			},
 		]
 		const verdicts = [Environments.invariants, Checkfu.invariants].map((invariants) =>
 			Object.entries(invariants)
 				.filter(([name]) => name === "EnvironmentViewConfigMatchesEnvironment")
-				.map(([, rule]) => cases.map(({ projected }) => rule(world(projected) as never))),
+				.map(([, rule]) =>
+					cases.map(({ aggregate, projected }) => rule(world(aggregate, projected) as never)),
+				),
 		)
 		const expected = cases.map(({ matches }) => matches)
 		expect(verdicts).toEqual([[expected], [expected]])

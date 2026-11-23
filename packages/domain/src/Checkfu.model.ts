@@ -7,7 +7,6 @@ import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
-import { sameNetworking } from "./Environment/EnvironmentTypes.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
@@ -236,10 +235,22 @@ export class Checkfu extends Domain.Model("Checkfu", {
 				if (view === undefined) {
 					return true
 				}
+				if (e.state.config === null) {
+					return false
+				}
+				const projected = view.state.config.networking
+				const committed = e.state.config.networking
 				return [
 					view.state.description === e.state.description,
-					e.state.config !== null &&
-						sameNetworking(view.state.config.networking, e.state.config.networking),
+					projected.type === committed.type,
+					projected.type !== "limited" ||
+						committed.type !== "limited" ||
+						(projected.allow_mcp_servers === committed.allow_mcp_servers &&
+							projected.allow_package_managers === committed.allow_package_managers &&
+							projected.allowed_hosts.length === committed.allowed_hosts.length &&
+							projected.allowed_hosts.every(
+								(host, index) => host === committed.allowed_hosts[index],
+							)),
 				].every((ok) => ok)
 			}),
 	},
