@@ -301,6 +301,98 @@
 			"Session.AgentMessageEndsTheTurn": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"MemoryStore.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"archived\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"MemoryStore.NamedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.name === \"\", s.description === \"\", s.memory_count === 0].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t\t[s.status !== \"\", s.name !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"MemoryStore.HoldsNoMoreThanItsLimit": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.memory_count >= 0, s.memory_count <= MAX_MEMORIES_PER_STORE].every((ok) => ok)"
+			},
+			"MemoryStore.CreatedStoreNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"MemoryStore.ArchivedStoreNeverReactivates": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.status === \"archived\", after.status === \"deleted\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"MemoryStore.DeletedStoreStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"deleted\", after.status === \"deleted\"].some((ok) => ok)"
+			},
+			"MemoryStore.OnlyAnActiveStoreChangesWhatItHolds": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\t[\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.description === before.description,\n\t\t\t\t\tafter.memory_count === before.memory_count,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[before.status === \"\", after.status === \"active\", after.memory_count === 0].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"MemoryStore.CountMovesByAtMostOne": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.memory_count === before.memory_count,\n\t\t\t\tafter.memory_count === before.memory_count + 1,\n\t\t\t\tafter.memory_count === before.memory_count - 1,\n\t\t\t].some((ok) => ok)"
+			},
+			"MemoryStore.UpdateKeepsWhatItDoesNotName": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"UpdateMemoryStore\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.name === (command.changes.name === undefined ? before.name : command.changes.name),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.changes.description === undefined\n\t\t\t\t\t\t? before.description\n\t\t\t\t\t\t: command.changes.description),\n\t\t\t\tafter.memory_count === before.memory_count,\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"Memory.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"present\", s.status === \"deleted\"].some((ok) => ok)"
+			},
+			"Memory.PlacedExactlyWhenWritten": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\ts.status === \"\",\n\t\t\t\t\ts.memory_store_id === \"\",\n\t\t\t\t\ts.path === \"\",\n\t\t\t\t\ts.content_sha256 === \"\",\n\t\t\t\t\ts.version === 0,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.memory_store_id !== \"\", s.path !== \"\", s.version >= 1].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"Memory.AMemoryNeverLeavesItsPlace": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[after.memory_store_id === before.memory_store_id, after.path === before.path].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"Memory.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[after.version === before.version, after.status === before.status].every((ok) => ok),\n\t\t\t\tafter.version === before.version + 1,\n\t\t\t].some((ok) => ok)"
+			},
+			"WriteMemory.OnlyAnActiveStoreIsWritten": {
+				"kind": "transition",
+				"source": "({ before }) => before.store.status === \"active\""
+			},
+			"WriteMemory.AWriteLeavesTheMemoryPresentWithItsContent": {
+				"kind": "transition",
+				"source": "({ after, command }) =>\n\t\t\t[\n\t\t\t\tafter.memory.status === \"present\",\n\t\t\t\tafter.memory.memory_store_id === command.memory_store_id,\n\t\t\t\tafter.memory.path === command.path,\n\t\t\t\tafter.memory.content_sha256 === command.content_sha256,\n\t\t\t].every((ok) => ok)"
+			},
+			"WriteMemory.ANewMemoryCountsOnceAndWithinTheLimit": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.store.memory_count ===\n\t\t\t\t\tbefore.store.memory_count + (before.memory.status === \"present\" ? 0 : 1),\n\t\t\t\tafter.store.memory_count <= MAX_MEMORIES_PER_STORE,\n\t\t\t].every((ok) => ok)"
+			},
+			"WriteMemory.AnAbsentPreconditionNeverOverwrites": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[command.precondition.type !== \"absent\", before.memory.status !== \"present\"].some((ok) => ok)"
+			},
+			"DeleteMemory.ADeleteRemovesOnePresentMemory": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.store.status === \"active\",\n\t\t\t\tbefore.memory.status === \"present\",\n\t\t\t\tafter.memory.status === \"deleted\",\n\t\t\t\tafter.store.memory_count === before.store.memory_count - 1,\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.AStoreCountsItsPresentMemories": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.MemoryStore.every(\n\t\t\t\t(store) =>\n\t\t\t\t\tstore.state.status === \"\" ||\n\t\t\t\t\tstore.state.status === \"deleted\" ||\n\t\t\t\t\tstore.state.memory_count ===\n\t\t\t\t\t\tm.Memory.filter(\n\t\t\t\t\t\t\t(memory) =>\n\t\t\t\t\t\t\t\tmemory.state.status === \"present\" && memory.state.memory_store_id === store.id,\n\t\t\t\t\t\t).length,\n\t\t\t)"
+			},
+			"Checkfu.MemoryViewsMatchMemories": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Memory.every((memory) => {\n\t\t\t\t\tconst view = m.MemoryView.find((v) => v.id === memory.id)\n\t\t\t\t\tif (memory.state.status !== \"present\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.memory_store_id === memory.state.memory_store_id,\n\t\t\t\t\t\tview.state.path === memory.state.path,\n\t\t\t\t\t\tview.state.content_sha256 === memory.state.content_sha256,\n\t\t\t\t\t\tview.state.version === memory.state.version,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.MemoryView.every((v) =>\n\t\t\t\t\tm.Memory.some((memory) =>\n\t\t\t\t\t\t[memory.id === v.id, memory.state.status === \"present\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.TheIndexListsEachStoresPresentMemories": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.MemoryIndex.every((index) =>\n\t\t\t\t\tindex.state.entries.every((entry) =>\n\t\t\t\t\t\tm.Memory.some((memory) =>\n\t\t\t\t\t\t\t[\n\t\t\t\t\t\t\t\tmemory.id === entry.id,\n\t\t\t\t\t\t\t\tmemory.state.status === \"present\",\n\t\t\t\t\t\t\t\tmemory.state.memory_store_id === index.id,\n\t\t\t\t\t\t\t\tmemory.state.path === entry.path,\n\t\t\t\t\t\t\t\tmemory.state.content_sha256 === entry.content_sha256,\n\t\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t\t),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t\tm.Memory.every(\n\t\t\t\t\t(memory) =>\n\t\t\t\t\t\tmemory.state.status !== \"present\" ||\n\t\t\t\t\t\tm.MemoryIndex.some(\n\t\t\t\t\t\t\t(index) =>\n\t\t\t\t\t\t\t\tindex.id === memory.state.memory_store_id &&\n\t\t\t\t\t\t\t\tindex.state.entries.some((entry) => entry.id === memory.id),\n\t\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.MemoryStoreViewsMatchStores": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.MemoryStore.every((store) => {\n\t\t\t\t\tconst view = m.MemoryStoreView.find((v) => v.id === store.id)\n\t\t\t\t\tif (store.state.status === \"\" || store.state.status === \"deleted\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.name === store.state.name,\n\t\t\t\t\t\tview.state.description === store.state.description,\n\t\t\t\t\t\t!!view.state.archived_at === (store.state.status === \"archived\"),\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.MemoryStoreView.every((v) =>\n\t\t\t\t\tm.MemoryStore.some((store) =>\n\t\t\t\t\t\t[store.id === v.id, store.state.status !== \"\", store.state.status !== \"deleted\"].every(\n\t\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t\t),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.APresentMemoryIsInAStoreThatWasCreated": {
+				"kind": "relation",
+				"source": "({ memory, store }) =>\n\t\t\t\t[\n\t\t\t\t\tmemory.state.status !== \"present\",\n\t\t\t\t\tmemory.state.memory_store_id !== store.id,\n\t\t\t\t\tstore.state.status !== \"\",\n\t\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

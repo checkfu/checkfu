@@ -380,26 +380,22 @@ const generateResourcesFile = (
 						}
 						if (op.queryParams.length > 0) {
 							const qVar = hasBodyAndQuery ? "query" : "params"
-							out("query: {")
-							out.indent(() => {
-								for (const qp of op.queryParams) {
-									const keyJson = JSON.stringify(qp.wireName)
-									out(
-										"...(",
-										qVar,
-										"?.[",
-										keyJson,
-										"] === undefined ? {} : { ",
-										keyJson,
-										": ",
-										qVar,
-										"[",
-										keyJson,
-										"] }),",
-									)
-								}
-							})
-							out("},")
+							const present = (wireName: string): string => {
+								const keyJson = JSON.stringify(wireName)
+								return `${qVar}?.[${keyJson}] === undefined ? {} : { ${keyJson}: ${qVar}[${keyJson}] }`
+							}
+							const [only, ...others] = op.queryParams
+							if (only !== undefined && others.length === 0) {
+								out("query: ", present(only.wireName), ",")
+							} else {
+								out("query: {")
+								out.indent(() => {
+									for (const qp of op.queryParams) {
+										out("...(", present(qp.wireName), "),")
+									}
+								})
+								out("},")
+							}
 						}
 						if (op.requiresIdempotencyKey) {
 							out('headers: { "idempotency-key": key },')

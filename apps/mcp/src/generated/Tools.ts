@@ -1032,6 +1032,441 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "memoryStores_archiveMemoryStore",
+		title: "Archive a memory store",
+		description: "Make a memory store read-only and stop new sessions from attaching it",
+		method: "POST",
+		path: "/v1/memory_stores/{memory_store_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_createMemory",
+		title: "Create a memory",
+		description: "Create a memory at a path that holds none",
+		method: "POST",
+		path: "/v1/memory_stores/{memory_store_id}/memories",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						path: {
+							type: "string",
+							maxLength: 1024,
+							pattern:
+								"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+							description: "Path inside the store, such as /notes/todo.md",
+						},
+						content: {
+							type: "string",
+							maxLength: 100000,
+							description: "Text of the memory, up to 100 kB",
+						},
+					},
+					required: ["path", "content"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_createMemoryStore",
+		title: "Create a memory store",
+		description: "Create a store of memories that sessions can share",
+		method: "POST",
+		path: "/v1/memory_stores",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				body: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Name shown to the agent",
+						},
+						description: {
+							type: "string",
+							maxLength: 1024,
+							description: "What the store holds. Shown to the agent.",
+						},
+					},
+					required: ["name"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_deleteMemory",
+		title: "Delete a memory",
+		description: "Delete a memory from its store",
+		method: "DELETE",
+		path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						memory_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id", "memory_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						expected_content_sha256: {
+							type: "string",
+							pattern: "^[0-9a-f]{64}$",
+							description: "Delete only if the stored content still has this SHA-256",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_deleteMemoryStore",
+		title: "Delete a memory store",
+		description: "Delete a memory store and make its memories unreachable",
+		method: "DELETE",
+		path: "/v1/memory_stores/{memory_store_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_getMemory",
+		title: "Retrieve a memory",
+		description: "Retrieve a memory with its content",
+		method: "GET",
+		path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						memory_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id", "memory_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_getMemoryStore",
+		title: "Retrieve a memory store",
+		description: "Retrieve a memory store by ID",
+		method: "GET",
+		path: "/v1/memory_stores/{memory_store_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_listMemories",
+		title: "List memories",
+		description: "List the memories in a store, without their content",
+		method: "GET",
+		path: "/v1/memory_stores/{memory_store_id}/memories",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						path_prefix: {
+							type: "string",
+							description: "List only memories under this directory. Must end with /",
+						},
+						depth: {
+							type: "string",
+							enum: ["0", "1"],
+							description: "1 lists only the directory's own memories; 0 lists the whole subtree",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_updateMemory",
+		title: "Update a memory",
+		description: "Replace a memory's content, optionally only if it is unchanged since it was read",
+		method: "POST",
+		path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						memory_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id", "memory_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						content: {
+							type: "string",
+							maxLength: 100000,
+							description: "New text of the memory",
+						},
+						precondition: {
+							type: "object",
+							properties: {
+								type: {
+									type: "string",
+									enum: ["content_sha256"],
+								},
+								content_sha256: {
+									type: "string",
+									pattern: "^[0-9a-f]{64}$",
+								},
+							},
+							required: ["type", "content_sha256"],
+							additionalProperties: false,
+							description: "Apply only if the stored content still has this SHA-256",
+						},
+					},
+					required: ["content"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "memoryStores_updateMemoryStore",
+		title: "Update a memory store",
+		description: "Rename a memory store or change its description",
+		method: "POST",
+		path: "/v1/memory_stores/{memory_store_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						memory_store_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Memory store ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["memory_store_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "New name",
+						},
+						description: {
+							type: "string",
+							maxLength: 1024,
+							description: "New description",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "sessions_archiveSession",
 		title: "Archive a session",
 		description: "Archive a session",

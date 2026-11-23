@@ -46,6 +46,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { Memory } from "../src/Memory/Memory.aggregate.ts"
+import { MemoryIndex } from "../src/Memory/MemoryIndex.view.ts"
+import { MemoryStore } from "../src/Memory/MemoryStore.aggregate.ts"
+import { MemoryStoreView } from "../src/Memory/MemoryStoreView.view.ts"
+import { MemoryView } from "../src/Memory/MemoryView.view.ts"
 import {
 	AdmitSession,
 	BoundedAgentId,
@@ -134,6 +139,19 @@ const STANDING = {
 	"Automation.AFailedRunPausesOnlyAnActiveAutomation": "proved",
 	"AutomationCapacity.ReservedSlotsStayWithinTheLimit": "proved",
 	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
+	"MemoryStore.StatusIsKnown": "proved",
+	"MemoryStore.NamedExactlyWhenCreated": "proved",
+	"MemoryStore.HoldsNoMoreThanItsLimit": "proved",
+	"MemoryStore.CreatedStoreNeverReturnsToUninitialized": "proved",
+	"MemoryStore.ArchivedStoreNeverReactivates": "proved",
+	"MemoryStore.DeletedStoreStaysDeleted": "proved",
+	"MemoryStore.OnlyAnActiveStoreChangesWhatItHolds": "proved",
+	"MemoryStore.CountMovesByAtMostOne": "proved",
+	"MemoryStore.UpdateKeepsWhatItDoesNotName": "proved",
+	"Memory.StatusIsKnown": "proved",
+	"Memory.PlacedExactlyWhenWritten": "proved",
+	"Memory.AMemoryNeverLeavesItsPlace": "proved",
+	"Memory.VersionGrowsByOneOrNotAtAll": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
@@ -148,11 +166,21 @@ const STANDING = {
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"WriteMemory.OnlyAnActiveStoreIsWritten": "proved",
+	"WriteMemory.AWriteLeavesTheMemoryPresentWithItsContent": "proved",
+	"WriteMemory.ANewMemoryCountsOnceAndWithinTheLimit": "proved",
+	"WriteMemory.AnAbsentPreconditionNeverOverwrites": "proved",
+	"DeleteMemory.ADeleteRemovesOnePresentMemory": "proved",
+	"Checkfu.APresentMemoryIsInAStoreThatWasCreated": "proved",
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
 	"Checkfu.AutomationViewsMatchAutomations": "checked",
 	"Checkfu.AutomationDirectoryListsLiveAutomations": "checked",
+	"Checkfu.AStoreCountsItsPresentMemories": "checked",
+	"Checkfu.MemoryViewsMatchMemories": "checked",
+	"Checkfu.TheIndexListsEachStoresPresentMemories": "checked",
+	"Checkfu.MemoryStoreViewsMatchStores": "checked",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -217,6 +245,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"UnpauseAutomation",
 			"ArchiveAutomation",
 			"RunAutomation",
+			"CreateMemoryStore",
+			"UpdateMemoryStore",
+			"ArchiveMemoryStore",
+			"DeleteMemoryStore",
+			"WriteMemory",
+			"DeleteMemory",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
 		expect(hostedCommands).not.toContain("CreateAutomation")
@@ -230,6 +264,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"AutomationView",
 			"AutomationRunView",
 			"AutomationDirectory",
+			"MemoryStoreView",
+			"MemoryView",
+			"MemoryIndex",
 		])
 		const report = await Effect.runPromise(
 			Verify.model(Checkfu, {
@@ -446,6 +483,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							Agent: yield* readAggregate(Agent),
 							Environment: yield* readAggregate(Environment),
 							Session: yield* readAggregate(Session),
+							MemoryStore: yield* readAggregate(MemoryStore),
+							Memory: yield* readAggregate(Memory),
 							AgentView: yield* readView(AgentView),
 							AgentVersionByNumberView: yield* readView(AgentVersionByNumberView),
 							EnvironmentView: yield* readView(EnvironmentView),
@@ -456,6 +495,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							AutomationView: yield* readView(AutomationView),
 							AutomationRunView: yield* readView(AutomationRunView),
 							AutomationDirectory: yield* readView(AutomationDirectory),
+							MemoryStoreView: yield* readView(MemoryStoreView),
+							MemoryView: yield* readView(MemoryView),
+							MemoryIndex: yield* readView(MemoryIndex),
 						}
 					})
 
@@ -606,6 +648,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				EnvironmentViewConfigMatchesEnvironment: true,
 				AutomationViewsMatchAutomations: true,
 				AutomationDirectoryListsLiveAutomations: true,
+				AStoreCountsItsPresentMemories: true,
+				MemoryViewsMatchMemories: true,
+				TheIndexListsEachStoresPresentMemories: true,
+				MemoryStoreViewsMatchStores: true,
 			})
 		}
 
@@ -758,6 +804,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -773,6 +823,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		// A pinned session reads its version's row, so a wrong historical row must be caught
 		// even when the row is present and the head is right.
@@ -814,6 +868,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -827,6 +885,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -845,6 +907,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 
 		// A session's mounts are what it was admitted with, in the view the API reads and in

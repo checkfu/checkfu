@@ -176,6 +176,16 @@ describe("Checkfu MCP server", () => {
 				"environments_getEnvironment",
 				"environments_listEnvironments",
 				"environments_updateEnvironment",
+				"memoryStores_archiveMemoryStore",
+				"memoryStores_createMemory",
+				"memoryStores_createMemoryStore",
+				"memoryStores_deleteMemory",
+				"memoryStores_deleteMemoryStore",
+				"memoryStores_getMemory",
+				"memoryStores_getMemoryStore",
+				"memoryStores_listMemories",
+				"memoryStores_updateMemory",
+				"memoryStores_updateMemoryStore",
 				"sessions_archiveSession",
 				"sessions_createSession",
 				"sessions_getResource",
@@ -219,6 +229,16 @@ describe("Checkfu MCP server", () => {
 				environments_getEnvironment: "read-only, additive, repeatable",
 				environments_listEnvironments: "read-only, additive, repeatable",
 				environments_updateEnvironment: "writes, destructive, not repeatable",
+				memoryStores_archiveMemoryStore: "writes, destructive, repeatable",
+				memoryStores_createMemory: "writes, additive, not repeatable",
+				memoryStores_createMemoryStore: "writes, additive, not repeatable",
+				memoryStores_deleteMemory: "writes, destructive, repeatable",
+				memoryStores_deleteMemoryStore: "writes, destructive, repeatable",
+				memoryStores_getMemory: "read-only, additive, repeatable",
+				memoryStores_getMemoryStore: "read-only, additive, repeatable",
+				memoryStores_listMemories: "read-only, additive, repeatable",
+				memoryStores_updateMemory: "writes, destructive, not repeatable",
+				memoryStores_updateMemoryStore: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
 				sessions_getResource: "read-only, additive, repeatable",
@@ -359,6 +379,8 @@ describe("Checkfu MCP server", () => {
 			const environment = { path: { environment_id: "env_1" } }
 			const session = { path: { session_id: "sess_1" } }
 			const automation = { path: { automation_id: "auto_1" } }
+			const store = { path: { memory_store_id: "memstore_1" } }
+			const memory = { path: { memory_store_id: "memstore_1", memory_id: "mem_1" } }
 			const calls = {
 				agents_archiveAgent: agent,
 				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
@@ -390,6 +412,25 @@ describe("Checkfu MCP server", () => {
 				environments_getEnvironment: environment,
 				environments_listEnvironments: { query: { order: "desc" } },
 				environments_updateEnvironment: { ...environment, body: { version: 1, config } },
+				memoryStores_archiveMemoryStore: store,
+				memoryStores_createMemory: {
+					...store,
+					body: { path: "/notes/todo.md", content: "Ship." },
+				},
+				memoryStores_createMemoryStore: { body: { name: "Notes" } },
+				memoryStores_deleteMemory: memory,
+				memoryStores_deleteMemoryStore: store,
+				memoryStores_getMemory: memory,
+				memoryStores_getMemoryStore: store,
+				memoryStores_listMemories: { ...store, query: { path_prefix: "/notes/" } },
+				memoryStores_updateMemory: {
+					...memory,
+					body: {
+						content: "Shipped.",
+						precondition: { type: "content_sha256", content_sha256: "a".repeat(64) },
+					},
+				},
+				memoryStores_updateMemoryStore: { ...store, body: { name: "Team notes" } },
 				sessions_archiveSession: session,
 				sessions_createSession: {
 					body: {
@@ -489,6 +530,7 @@ describe("Checkfu MCP server", () => {
 			"agents_createAgent",
 			"automations_createAutomation",
 			"environments_createEnvironment",
+			"memoryStores_createMemoryStore",
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
 		])

@@ -33,6 +33,7 @@ import {
 	randomId,
 	requestPath,
 } from "./HttpHelpers.ts"
+import { MemoryStoresLive } from "./MemoryStoresHandlers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
@@ -84,6 +85,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		EnvironmentsLive,
 		SessionsLive,
 		AutomationsLive,
+		MemoryStoresLive,
 	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),

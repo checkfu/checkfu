@@ -138,6 +138,27 @@ curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/sessions" \
 - A session takes up to 8 repositories. Their mount paths must be inside `/workspace` and must not contain one another.
 - If a clone fails, the turn ends with a `session.error` of type `repository_unavailable`, and the next turn tries again.
 
+## Memory stores
+
+A memory store is a set of text memories, each at a path, that outlives any one session:
+
+```sh
+STORE_ID=$(curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/memory_stores" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"User Preferences","description":"Per-user preferences and project context."}' \
+  | jq -er '.id')
+
+curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/memory_stores/$STORE_ID/memories" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" -H "Content-Type: application/json" \
+  -d '{"path":"/preferences/formatting.md","content":"Always use tabs, not spaces."}' | jq .
+```
+
+- `GET /v1/memory_stores/{id}/memories` lists memories without their content. `path_prefix=/notes/` lists one directory's subtree, and `depth=1` only its own memories.
+- `POST /v1/memory_stores/{id}/memories/{memory_id}` replaces a memory's content. Pass `precondition: {type: "content_sha256", content_sha256}` to apply the change only if the memory is unchanged since you read it; a mismatch answers 409.
+- A memory's id is derived from its store and path, so creating at a path that holds a memory answers 409.
+- A memory holds up to 100 kB and a store up to 2,000 memories.
+- `POST /v1/memory_stores/{id}/archive` makes a store read-only. `DELETE` makes it and its memories unreachable.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

@@ -1037,6 +1037,472 @@ const environmentsUpdateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(environmentsUpdateCommandSpec, flags),
 ).pipe(CommandWithDescription("Update an environment (accepts flags and/or JSON/YAML on stdin)"))
 
+const memoryStoresArchiveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores archive",
+	apiGroup: "memory_stores",
+	apiEndpoint: "archive",
+	hasBody: false,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const memoryStoresArchiveCommand = CommandMake(
+	"archive",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresArchiveCommandSpec, flags),
+).pipe(
+	CommandWithDescription("Make a memory store read-only and stop new sessions from attaching it"),
+)
+
+const memoryStoresCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores create",
+	apiGroup: "memory_stores",
+	apiEndpoint: "create",
+	hasBody: true,
+	flags: [
+		{
+			propName: "name",
+			flagName: "name",
+			wireName: "name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "description",
+			flagName: "description",
+			wireName: "description",
+			location: "body",
+			kind: "file-text",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresCreateCommand = CommandMake(
+	"create",
+	{
+		name: FlagString("name").pipe(FlagWithDescription("Name shown to the agent"), FlagOptional),
+		description: FlagString("description").pipe(
+			FlagWithMetavar("TEXT|@FILE"),
+			FlagWithDescription("What the store holds. Shown to the agent. (supports @file)"),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Create a store of memories that sessions can share (accepts flags and/or JSON/YAML on stdin)",
+	),
+	CommandWithExamples([
+		{
+			command:
+				'checkfu memory-stores create --name "User Preferences" --description "Per-user preferences"',
+			description: "Create a memory store",
+		},
+	]),
+)
+
+const memoryStoresDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores delete",
+	apiGroup: "memory_stores",
+	apiEndpoint: "delete",
+	hasBody: false,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const memoryStoresDeleteCommand = CommandMake(
+	"delete",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Delete a memory store and make its memories unreachable"))
+
+const memoryStoresRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores retrieve",
+	apiGroup: "memory_stores",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const memoryStoresRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a memory store by ID"))
+
+const memoryStoresUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores update",
+	apiGroup: "memory_stores",
+	apiEndpoint: "update",
+	hasBody: true,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "name",
+			flagName: "name",
+			wireName: "name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "description",
+			flagName: "description",
+			wireName: "description",
+			location: "body",
+			kind: "file-text",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresUpdateCommand = CommandMake(
+	"update",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+		name: FlagString("name").pipe(FlagWithDescription("New name"), FlagOptional),
+		description: FlagString("description").pipe(
+			FlagWithMetavar("TEXT|@FILE"),
+			FlagWithDescription("New description (supports @file)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Rename a memory store or change its description (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const memoryStoresMemoriesCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores:memories create",
+	apiGroup: "memory_stores",
+	apiEndpoint: "createMemory",
+	hasBody: true,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "path",
+			flagName: "path",
+			wireName: "path",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "content",
+			flagName: "content",
+			wireName: "content",
+			location: "body",
+			kind: "file-text",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresMemoriesCreateCommand = CommandMake(
+	"create",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+		path: FlagString("path").pipe(
+			FlagWithDescription("Path inside the store, such as /notes/todo.md"),
+			FlagOptional,
+		),
+		content: FlagString("content").pipe(
+			FlagWithMetavar("TEXT|@FILE"),
+			FlagWithDescription("Text of the memory, up to 100 kB (supports @file)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresMemoriesCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Create a memory at a path that holds none (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const memoryStoresMemoriesDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores:memories delete",
+	apiGroup: "memory_stores",
+	apiEndpoint: "deleteMemory",
+	hasBody: false,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "memoryId",
+			flagName: "memory-id",
+			wireName: "memory_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "expectedContentSha256",
+			flagName: "expected-content-sha256",
+			wireName: "expected_content_sha256",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresMemoriesDeleteCommand = CommandMake(
+	"delete",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+		memoryId: FlagString("memory-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Memory ID")),
+		expectedContentSha256: FlagString("expected-content-sha256").pipe(
+			FlagWithDescription("Delete only if the stored content still has this SHA-256"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresMemoriesDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Delete a memory from its store"))
+
+const memoryStoresMemoriesListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores:memories list",
+	apiGroup: "memory_stores",
+	apiEndpoint: "listMemories",
+	hasBody: false,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "pathPrefix",
+			flagName: "path-prefix",
+			wireName: "path_prefix",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "depth",
+			flagName: "depth",
+			wireName: "depth",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresMemoriesListCommand = CommandMake(
+	"list",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+		pathPrefix: FlagString("path-prefix").pipe(
+			FlagWithDescription("List only memories under this directory. Must end with /"),
+			FlagOptional,
+		),
+		depth: FlagLiterals("depth", ["0", "1"]).pipe(
+			FlagWithDescription("1 lists only the directory's own memories; 0 lists the whole subtree"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresMemoriesListCommandSpec, flags),
+).pipe(CommandWithDescription("List the memories in a store, without their content"))
+
+const memoryStoresMemoriesRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores:memories retrieve",
+	apiGroup: "memory_stores",
+	apiEndpoint: "getMemory",
+	hasBody: false,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "memoryId",
+			flagName: "memory-id",
+			wireName: "memory_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const memoryStoresMemoriesRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+		memoryId: FlagString("memory-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Memory ID")),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresMemoriesRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a memory with its content"))
+
+const memoryStoresMemoriesUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores:memories update",
+	apiGroup: "memory_stores",
+	apiEndpoint: "updateMemory",
+	hasBody: true,
+	flags: [
+		{
+			propName: "memoryStoreId",
+			flagName: "memory-store-id",
+			wireName: "memory_store_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "memoryId",
+			flagName: "memory-id",
+			wireName: "memory_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "content",
+			flagName: "content",
+			wireName: "content",
+			location: "body",
+			kind: "file-text",
+			required: false,
+		},
+		{
+			propName: "precondition",
+			flagName: "precondition",
+			wireName: "precondition",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresMemoriesUpdateCommand = CommandMake(
+	"update",
+	{
+		memoryStoreId: FlagString("memory-store-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Memory store ID"),
+		),
+		memoryId: FlagString("memory-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Memory ID")),
+		content: FlagString("content").pipe(
+			FlagWithMetavar("TEXT|@FILE"),
+			FlagWithDescription("New text of the memory (supports @file)"),
+			FlagOptional,
+		),
+		precondition: FlagString("precondition").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Apply only if the stored content still has this SHA-256 (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresMemoriesUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Replace a memory's content, optionally only if it is unchanged since it was read (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
 const sessionsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "sessions archive",
 	apiGroup: "sessions",
@@ -1619,6 +2085,8 @@ export const buildGeneratedResourceCommands = <
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const MemoryStoresExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const MemoryStoresMemoriesExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsResourcesExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -1627,6 +2095,8 @@ export const buildGeneratedResourceCommands = <
 	readonly automations?: AutomationsExtras
 	readonly "automations:runs"?: AutomationsRunsExtras
 	readonly environments?: EnvironmentsExtras
+	readonly "memory-stores"?: MemoryStoresExtras
+	readonly "memory-stores:memories"?: MemoryStoresMemoriesExtras
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
 	readonly "sessions:resources"?: SessionsResourcesExtras
@@ -1673,6 +2143,28 @@ export const buildGeneratedResourceCommands = <
 				environmentsRetrieveCommand,
 				environmentsUpdateCommand,
 				...(extras?.["environments"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("memory-stores").pipe(
+			CommandWithDescription("Manage memory-stores"),
+			CommandWithSubcommands([
+				memoryStoresArchiveCommand,
+				memoryStoresCreateCommand,
+				memoryStoresDeleteCommand,
+				memoryStoresRetrieveCommand,
+				memoryStoresUpdateCommand,
+				...(extras?.["memory-stores"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("memory-stores:memories").pipe(
+			CommandWithDescription("Read and edit the memories in a store"),
+			CommandWithSubcommands([
+				memoryStoresMemoriesCreateCommand,
+				memoryStoresMemoriesDeleteCommand,
+				memoryStoresMemoriesListCommand,
+				memoryStoresMemoriesRetrieveCommand,
+				memoryStoresMemoriesUpdateCommand,
+				...(extras?.["memory-stores:memories"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("sessions").pipe(

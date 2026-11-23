@@ -106,6 +106,66 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/environments/{environment_id}",
 			},
 			{
+				group: "memory-stores",
+				name: "archive",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}/archive",
+			},
+			{
+				group: "memory-stores",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/memory_stores",
+			},
+			{
+				group: "memory-stores",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/memory_stores/{memory_store_id}",
+			},
+			{
+				group: "memory-stores",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/memory_stores/{memory_store_id}",
+			},
+			{
+				group: "memory-stores",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}/memories",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/memory_stores/{memory_store_id}/memories",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+			},
+			{
 				group: "sessions",
 				name: "archive",
 				httpMethod: "POST",
@@ -429,7 +489,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(29)
+		expect(inspectedMethods.length).toBe(39)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {
