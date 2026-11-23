@@ -1,5 +1,8 @@
 import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
-import { describe, expect, it } from "@effect/vitest"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, it, vi } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
 import { State } from "alchemy/State"
@@ -111,11 +114,24 @@ describe("Alchemy stack and worker entry", () => {
 	it.live("refuses every way of addressing production before any network call", () =>
 		Effect.gen(function* () {
 			let requests = 0
+			const scratch = yield* Effect.acquireRelease(
+				Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-"))),
+				(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+			)
+			yield* Effect.acquireRelease(
+				Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+				() => Effect.sync(() => vi.unstubAllEnvs()),
+			)
 			const stack = checkfuStack(Effect.die(new Error("baseline refused")))
 			const refused = <A, E>(operation: Effect.Effect<A, E, Alchemist.Services | Scope.Scope>) =>
 				operation.pipe(
 					Effect.scoped,
 					Effect.provide(Alchemist.layer()),
+					Effect.provideService(Alchemy.AlchemyContext, {
+						dotAlchemy: join(scratch, "project"),
+						dev: false,
+						adopt: false,
+					}),
 					Effect.provideService(FetchHttpClient.Fetch, () => {
 						requests += 1
 						return Promise.reject(new Error("no network in this test"))
