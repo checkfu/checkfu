@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs"
 import { AgentState } from "@checkfu/agents/Agent/Agent.aggregate"
 import { AbandonTurn } from "@checkfu/sessions/Session/AbandonTurn.command"
 import { RUN_TURN_ACTIVITIES, RunTurn } from "@checkfu/sessions/Session/RunTurn.saga"
@@ -10,18 +9,19 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { DocumentId } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import { CHECKFU_PI_DOCS, SettledUsage, SettledUsageState } from "../src/Pi/PiTurnUsage.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import {
-	LOCK_FILE_URL,
 	type PersistedLock,
+	PersistedServicesLive,
 	cutBaseline,
 	decodeFailure,
-	decodeLock,
 	lockProblems,
+	readLockFile,
 	sampleEncoded,
 	schemaFingerprint,
 	shipBlockers,
@@ -49,18 +49,18 @@ const replacing = (id: string, schema: Schema.Top): ReadonlyArray<PersistedShape
 	)
 }
 
-const reviewing = (
-	lock: PersistedLock,
-	id: string,
-	shapes: ReadonlyArray<PersistedShape>,
-): PersistedLock => {
-	const shape = shapes.find((candidate) => candidate.id === id)
-	if (shape === undefined) throw new Error(`no shape ${id}`)
-	return {
-		...lock,
-		reviewed: { [id]: { schema: schemaFingerprint(shape), reason: "Checked in a test." } },
-	}
-}
+const runLock = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof PersistedServicesLive>>) =>
+	Effect.runPromise(Effect.provide(effect, PersistedServicesLive))
+
+const reviewing = (lock: PersistedLock, id: string, shapes: ReadonlyArray<PersistedShape>) =>
+	Effect.gen(function* () {
+		const shape = shapes.find((candidate) => candidate.id === id)
+		if (shape === undefined) throw new Error(`no shape ${id}`)
+		return {
+			...lock,
+			reviewed: { [id]: { schema: yield* schemaFingerprint(shape), reason: "Checked in a test." } },
+		} satisfies PersistedLock
+	})
 
 const lockWith = (
 	shapes: Record<string, ReadonlyArray<unknown>>,
@@ -91,7 +91,7 @@ describe("persisted shapes", () => {
 	})
 
 	it("writes every shape in a JSON form the same code reads back", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const unreadable: Array<string> = []
 				for (const shape of persistedShapes) {
@@ -107,9 +107,9 @@ describe("persisted shapes", () => {
 		))
 
 	it("still reads everything written by every shipped baseline", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
-				const lock = yield* decodeLock(JSON.parse(readFileSync(LOCK_FILE_URL, "utf8")) as unknown)
+				const lock = yield* readLockFile
 				expect(yield* lockProblems(lock)).toEqual([])
 			}),
 		))
@@ -117,7 +117,7 @@ describe("persisted shapes", () => {
 
 describe("persisted shape lock", () => {
 	it("accepts a baseline cut from the current code", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const baseline = yield* cutBaseline("now", "2026-01-01T00:00:00.000Z")
 				expect(Object.keys(baseline.shapes).length).toBe(persistedShapes.length)
@@ -128,7 +128,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("reports a shipped value the current schema can no longer read, with the rule", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const event = shapeOfKind("event")
 				const problems = yield* lockProblems(lockWith({ [event.id]: [{ not: "this event" }] }))
@@ -140,7 +140,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("reports a shipped shape nothing reads any more, unless it is retired", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const gone = "event:Sessions.Session/removed.event"
 				const dropped = yield* lockProblems(lockWith({ [gone]: [{}] }))
@@ -159,7 +159,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("fails a saga input that gains a required field or breaks __cause, and passes an optional one", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = "saga-input:Checkfu.RunTurn"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -220,12 +220,12 @@ describe("persisted shape lock", () => {
 				const unreviewed = yield* lockProblems(lock, optional)
 				expect(unreviewed.length).toBe(1)
 				expect(unreviewed[0]).toContain("has not been reviewed")
-				expect(yield* lockProblems(reviewing(lock, id, optional), optional)).toEqual([])
+				expect(yield* lockProblems(yield* reviewing(lock, id, optional), optional)).toEqual([])
 			}),
 		))
 
 	it("blocks a release that cannot deliver an already-armed turn deadline", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = "scheduled-command:Checkfu.Session/AbandonTurn"
 				// The Durable Object stores this JSON as the alarm job's command.
@@ -256,7 +256,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("blocks unreadable receipt replies from aggregates and decisions, including previously empty replies", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const sessionReply = "command-reply:Checkfu/SendUserMessage"
 				const agentReply = "command-reply:Checkfu/CreateAgent"
@@ -284,7 +284,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("rehearses adding a field to a shipped event", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = "event:Checkfu.Session/user.message"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -308,12 +308,12 @@ describe("persisted shape lock", () => {
 				const unreviewed = yield* lockProblems(lock, defaulted)
 				expect(unreviewed.length).toBe(1)
 				expect(unreviewed[0]).toContain("has not been reviewed")
-				expect(yield* lockProblems(reviewing(lock, id, defaulted), defaulted)).toEqual([])
+				expect(yield* lockProblems(yield* reviewing(lock, id, defaulted), defaulted)).toEqual([])
 			}),
 		))
 
 	it("rehearses changing a shipped aggregate state with a migration step", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = "state:Checkfu.Agent"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -334,7 +334,7 @@ describe("persisted shape lock", () => {
 						],
 					}),
 				)
-				expect(yield* lockProblems(reviewing(lock, id, migrated), migrated)).toEqual([])
+				expect(yield* lockProblems(yield* reviewing(lock, id, migrated), migrated)).toEqual([])
 
 				const inPlace = yield* lockProblems(
 					lock,
@@ -347,7 +347,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("reports a retired shape that is active again", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const event = shapeOfKind("event")
 				const problems = yield* lockProblems({
@@ -363,7 +363,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("lets a view change shape only when its version increased", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = "view:Checkfu.TurnInput@v1"
 				expect(persistedShapes.map((shape) => shape.id)).toContain(id)
@@ -400,7 +400,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("blocks a view version bump whose new state breaks queued policy deliveries", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const viewId = "view:Checkfu.TurnInput@v1"
 				const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
@@ -454,15 +454,19 @@ describe("persisted shape lock", () => {
 				expect(unreviewed.length).toBe(2)
 				expect(unreviewed.every((p) => p.includes("has not been reviewed"))).toBe(true)
 
+				const reviewedEntries = yield* Effect.forEach([startDeliveryId, stopDeliveryId], (id) =>
+					Effect.gen(function* () {
+						const shape = compatible.find((candidate) => candidate.id === id)
+						if (shape === undefined) throw new Error(`missing ${id}`)
+						return [
+							id,
+							{ schema: yield* schemaFingerprint(shape), reason: "Optional field added." },
+						] as const
+					}),
+				)
 				const reviewedLock: PersistedLock = {
 					...lock,
-					reviewed: Object.fromEntries(
-						[startDeliveryId, stopDeliveryId].map((id) => {
-							const shape = compatible.find((candidate) => candidate.id === id)
-							if (shape === undefined) throw new Error(`missing ${id}`)
-							return [id, { schema: schemaFingerprint(shape), reason: "Optional field added." }]
-						}),
-					),
+					reviewed: Object.fromEntries(reviewedEntries),
 				}
 				expect(yield* lockProblems(reviewedLock, compatible)).toEqual([])
 
@@ -494,7 +498,7 @@ describe("persisted shape lock", () => {
 	})
 
 	it("locks a saga's completed result", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = "saga-result:Checkfu.RunTurn"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -519,7 +523,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("blocks a production deploy until a baseline covers the current shapes", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				expect(
 					yield* shipBlockers({ version: 1, retired: {}, reviewed: {}, baselines: [] }),
@@ -541,7 +545,7 @@ describe("persisted shape lock", () => {
 		))
 
 	it("treats a schema change as a change even when every sample is identical", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const shape = shapeOfKind("event")
 				const narrowed = (schema: Schema.Top): PersistedShape => ({
@@ -549,8 +553,12 @@ describe("persisted shape lock", () => {
 					schema: schema as unknown as PersistedShape["schema"],
 				})
 				expect(
-					schemaFingerprint(narrowed(Schema.Struct({ status: Schema.Literals(["a", "b"]) }))),
-				).not.toBe(schemaFingerprint(narrowed(Schema.Struct({ status: Schema.Literals(["a"]) }))))
+					yield* schemaFingerprint(
+						narrowed(Schema.Struct({ status: Schema.Literals(["a", "b"]) })),
+					),
+				).not.toBe(
+					yield* schemaFingerprint(narrowed(Schema.Struct({ status: Schema.Literals(["a"]) }))),
+				)
 
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
 				const sameSamples: PersistedLock = {
@@ -619,7 +627,7 @@ describe("persisted shape lock", () => {
 	})
 
 	it("blocks incompatible changes to Checkfu-owned Pi documents unless versioned with a working migration", () =>
-		Effect.runPromise(
+		runLock(
 			Effect.gen(function* () {
 				const id = piDocShapeId(SettledUsage.definition.kind)
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -716,7 +724,7 @@ describe("persisted shape lock", () => {
 				const unreviewed = yield* lockProblems(lock, migratedV2)
 				expect(unreviewed.length).toBe(1)
 				expect(unreviewed[0]).toContain("has not been reviewed")
-				expect(yield* lockProblems(reviewing(lock, id, migratedV2), migratedV2)).toEqual([])
+				expect(yield* lockProblems(yield* reviewing(lock, id, migratedV2), migratedV2)).toEqual([])
 
 				// 6. A v1 schema cut using Schema.toType (e.g. storing numeric count for NumberFromString
 				//    or a required defaulted_weight) MUST remain readable when that same schema moves
@@ -985,7 +993,7 @@ describe("persisted shape lock", () => {
 				)
 				expect(
 					yield* lockProblems(
-						reviewing(lock, id, populatedDefaultMigrate),
+						yield* reviewing(lock, id, populatedDefaultMigrate),
 						populatedDefaultMigrate,
 					),
 				).toEqual([])
@@ -1206,8 +1214,10 @@ describe("persisted shape lock", () => {
 				}
 				const changedHistory = makeConvShape("rewindable", "current")
 				const changedFork = makeConvShape("latest", "initial")
-				expect(schemaFingerprint(changedHistory)).not.toBe(schemaFingerprint(convBase))
-				expect(schemaFingerprint(changedFork)).not.toBe(schemaFingerprint(convBase))
+				expect(yield* schemaFingerprint(changedHistory)).not.toBe(
+					yield* schemaFingerprint(convBase),
+				)
+				expect(yield* schemaFingerprint(changedFork)).not.toBe(yield* schemaFingerprint(convBase))
 				expect(yield* shipBlockers(convLock, [changedHistory])).toEqual([
 					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
 				])
@@ -1220,9 +1230,9 @@ describe("persisted shape lock", () => {
 				])
 				// Migrating v1 -> v2 while preserving history & fork succeeds once reviewed.
 				const validConvV2 = [makeConvShape("latest", "current", 2)]
-				expect(yield* lockProblems(reviewing(convLock, convId, validConvV2), validConvV2)).toEqual(
-					[],
-				)
+				expect(
+					yield* lockProblems(yield* reviewing(convLock, convId, validConvV2), validConvV2),
+				).toEqual([])
 			}),
 		))
 })

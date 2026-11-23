@@ -1,10 +1,13 @@
-import { spawnSync } from "node:child_process"
-import { createHash } from "node:crypto"
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
 import { isDeepStrictEqual } from "node:util"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Arbitrary from "effect/Arbitrary"
+import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
 import { type PersistedShape, RULES, parseViewShapeId, persistedShapes } from "./Shapes.ts"
 
@@ -27,36 +30,78 @@ export const PersistedLock = Schema.Struct({
 })
 export type PersistedLock = typeof PersistedLock.Type
 
+export const PersistedLockJson = Schema.fromJsonString(PersistedLock, { space: "\t" })
+
+export class PersistedLockError extends Schema.TaggedError<
+	PersistedLockError,
+	{ readonly brand: unique symbol }
+>()("PersistedLockError", {
+	message: Schema.String,
+}) {}
+
+export const PersistedServicesLive = Layer.merge(BunServices.layer, Digest.layerWebCrypto)
+
 export const LOCK_FILE_URL = new URL("./Persisted.lock.json", import.meta.url)
 
 export const SAMPLES_PER_SHAPE = 8
 
+const textEncoder = new TextEncoder()
+
 const describeFailure = (cause: unknown): string =>
 	cause instanceof Error ? cause.message : String(cause)
 
-export const schemaFingerprint = (shape: PersistedShape): string =>
-	createHash("sha256")
-		.update(JSON.stringify(Schema.toJsonSchemaDocument(Schema.toCodecJson(shape.schema))))
-		.digest("hex")
+const lockFilePath: Effect.Effect<string, PersistedLockError, Path.Path> = Effect.flatMap(
+	Path.Path,
+	(path) =>
+		path.fromFileUrl(LOCK_FILE_URL).pipe(
+			Effect.mapError(
+				(error) =>
+					new PersistedLockError({
+						message: `Cannot resolve Persisted.lock.json path: ${error.message}`,
+					}),
+			),
+		),
+)
+
+export const schemaFingerprint = (
+	shape: PersistedShape,
+): Effect.Effect<string, never, Digest.Digest> =>
+	Effect.flatMap(Digest.Digest, (digest) =>
+		digest.digestHex(
+			Digest.sha256,
+			textEncoder.encode(
+				JSON.stringify(Schema.toJsonSchemaDocument(Schema.toCodecJson(shape.schema))),
+			),
+		),
+	)
 
 export const sampleEncoded = (
 	shape: PersistedShape,
 	count: number = SAMPLES_PER_SHAPE,
-): Effect.Effect<ReadonlyArray<unknown>, string> =>
+): Effect.Effect<ReadonlyArray<unknown>, PersistedLockError> =>
 	Effect.gen(function* () {
 		const arbitrary = yield* Effect.try({
 			try: () => Arbitrary.schema(shape.schema),
-			catch: (cause) => `${shape.id}: cannot generate values: ${describeFailure(cause)}`,
+			catch: (cause) =>
+				new PersistedLockError({
+					message: `${shape.id}: cannot generate values: ${describeFailure(cause)}`,
+				}),
 		})
 		const values = yield* Arbitrary.sampleEffect(arbitrary, { count, seed: shape.id }).pipe(
 			Effect.mapError(
-				(error) => `${shape.id}: generated ${error.generated} of ${count} values before giving up`,
+				(error) =>
+					new PersistedLockError({
+						message: `${shape.id}: generated ${error.generated} of ${count} values before giving up`,
+					}),
 			),
 		)
 		const encode = Schema.encodeUnknownEffect(Schema.toCodecJson(shape.schema))
 		return yield* Effect.forEach(values, (value) =>
 			encode(value).pipe(
-				Effect.mapError((error) => `${shape.id}: has no JSON form: ${error.message}`),
+				Effect.mapError(
+					(error) =>
+						new PersistedLockError({ message: `${shape.id}: has no JSON form: ${error.message}` }),
+				),
 			),
 		)
 	})
@@ -73,7 +118,7 @@ export const decodeFailure = (
 export const lockProblems = (
 	lock: PersistedLock,
 	shapes: ReadonlyArray<PersistedShape> = persistedShapes,
-): Effect.Effect<ReadonlyArray<string>> =>
+): Effect.Effect<ReadonlyArray<string>, never, Digest.Digest> =>
 	Effect.gen(function* () {
 		const current = new Map(shapes.map((shape) => [shape.id, shape]))
 		const currentViews = new Map(
@@ -84,6 +129,15 @@ export const lockProblems = (
 		)
 		const problems: Array<string> = []
 		const unreviewed = new Set<string>()
+		const fingerprints = new Map<string, string>()
+		const fingerprintOf = (shape: PersistedShape) =>
+			Effect.gen(function* () {
+				const cached = fingerprints.get(shape.id)
+				if (cached !== undefined) return cached
+				const computed = yield* schemaFingerprint(shape)
+				fingerprints.set(shape.id, computed)
+				return computed
+			})
 		for (const id of Object.keys(lock.retired)) {
 			if (current.has(id)) {
 				problems.push(
@@ -114,11 +168,8 @@ export const lockProblems = (
 					continue
 				}
 				const shipped = baseline.schemas[id]
-				if (
-					shape.kind === "view" &&
-					shipped !== undefined &&
-					shipped !== schemaFingerprint(shape)
-				) {
+				const fingerprint = shipped !== undefined ? yield* fingerprintOf(shape) : undefined
+				if (shape.kind === "view" && shipped !== undefined && shipped !== fingerprint) {
 					problems.push(
 						`${id} changed since baseline "${baseline.label}" without a new version, so existing rows keep the old state.\n` +
 							`  ${RULES.view}`,
@@ -136,10 +187,10 @@ export const lockProblems = (
 					unreadable = true
 					break
 				}
-				const fingerprint = schemaFingerprint(shape)
 				if (
 					!unreadable &&
 					shipped !== undefined &&
+					fingerprint !== undefined &&
 					shipped !== fingerprint &&
 					lock.reviewed[id]?.schema !== fingerprint &&
 					!unreviewed.has(id)
@@ -161,28 +212,75 @@ export const cutBaseline = (
 	label: string,
 	cutAt: string,
 	shapes: ReadonlyArray<PersistedShape> = persistedShapes,
-): Effect.Effect<Baseline, string> =>
+): Effect.Effect<Baseline, PersistedLockError, Digest.Digest> =>
 	Effect.gen(function* () {
 		const entries = yield* Effect.forEach(shapes, (shape) =>
-			Effect.map(sampleEncoded(shape), (samples) => [shape.id, samples] as const),
+			Effect.all({
+				fingerprint: schemaFingerprint(shape),
+				samples: sampleEncoded(shape),
+			}).pipe(Effect.map(({ fingerprint, samples }) => ({ id: shape.id, fingerprint, samples }))),
 		)
 		return {
 			label,
 			cut_at: cutAt,
-			schemas: Object.fromEntries(shapes.map((shape) => [shape.id, schemaFingerprint(shape)])),
-			shapes: Object.fromEntries(entries),
+			schemas: Object.fromEntries(entries.map((entry) => [entry.id, entry.fingerprint])),
+			shapes: Object.fromEntries(entries.map((entry) => [entry.id, entry.samples])),
 		}
 	})
 
-export const decodeLock = (raw: unknown): Effect.Effect<PersistedLock, string> =>
-	Schema.decodeUnknownEffect(PersistedLock)(raw).pipe(
-		Effect.mapError((error) => `Persisted.lock.json is not a lock file: ${error.message}`),
+export const readLockFile: Effect.Effect<
+	PersistedLock,
+	PersistedLockError,
+	FileSystem.FileSystem | Path.Path
+> = Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem
+	const file = yield* lockFilePath
+	const content = yield* fs.readFileString(file).pipe(
+		Effect.mapError(
+			(error) =>
+				new PersistedLockError({
+					message: `Failed to read Persisted.lock.json: ${error.message}`,
+				}),
+		),
 	)
+	return yield* Schema.decodeEffect(PersistedLockJson)(content).pipe(
+		Effect.mapError(
+			(error) =>
+				new PersistedLockError({
+					message: `Persisted.lock.json is not a lock file: ${error.message}`,
+				}),
+		),
+	)
+})
+
+export const writeLockFile = (
+	lock: PersistedLock,
+): Effect.Effect<void, PersistedLockError, FileSystem.FileSystem | Path.Path> =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem
+		const file = yield* lockFilePath
+		const encoded = yield* Schema.encodeEffect(PersistedLockJson)(lock).pipe(
+			Effect.mapError(
+				(error) =>
+					new PersistedLockError({
+						message: `Failed to encode Persisted.lock.json: ${error.message}`,
+					}),
+			),
+		)
+		yield* fs.writeFileString(file, `${encoded}\n`).pipe(
+			Effect.mapError(
+				(error) =>
+					new PersistedLockError({
+						message: `Failed to write Persisted.lock.json: ${error.message}`,
+					}),
+			),
+		)
+	})
 
 export const shipBlockers = (
 	lock: PersistedLock,
 	shapes: ReadonlyArray<PersistedShape> = persistedShapes,
-): Effect.Effect<ReadonlyArray<string>, string> =>
+): Effect.Effect<ReadonlyArray<string>, PersistedLockError, Digest.Digest> =>
 	Effect.gen(function* () {
 		const problems = yield* lockProblems(lock, shapes)
 		if (problems.length > 0) return problems
@@ -195,22 +293,48 @@ export const shipBlockers = (
 			: [`Persisted shapes changed since "${latest.label}".`]
 	})
 
-const lockIsCommitted = (): boolean => {
-	const file = fileURLToPath(LOCK_FILE_URL)
+const lockIsCommitted: Effect.Effect<
+	boolean,
+	never,
+	ChildProcessSpawner.ChildProcessSpawner | Path.Path
+> = Effect.gen(function* () {
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const file = yield* lockFilePath.pipe(Effect.orElseSucceed(() => null))
+	if (file === null) return false
 	const git = (...args: ReadonlyArray<string>) =>
-		spawnSync("git", [...args, "--", file], { stdio: "ignore" }).status === 0
-	return git("ls-files", "--error-unmatch") && git("diff", "--quiet", "HEAD")
-}
+		spawner
+			.exitCode(
+				ChildProcess.make("git", [...args, "--", file], {
+					stdin: "ignore",
+					stdout: "ignore",
+					stderr: "ignore",
+				}),
+			)
+			.pipe(
+				Effect.map((code) => code === 0),
+				Effect.orElseSucceed(() => false),
+			)
+	return (yield* git("ls-files", "--error-unmatch")) && (yield* git("diff", "--quiet", "HEAD"))
+})
 
-export const requireShippedBaseline = Effect.gen(function* () {
-	const lock = yield* decodeLock(JSON.parse(readFileSync(LOCK_FILE_URL, "utf8")) as unknown)
+export const checkShippedBaseline: Effect.Effect<
+	void,
+	PersistedLockError,
+	FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Digest.Digest
+> = Effect.gen(function* () {
+	const lock = yield* readLockFile
 	const blockers = [
 		...(yield* shipBlockers(lock)),
-		...(lockIsCommitted() ? [] : ["Persisted.lock.json has uncommitted changes."]),
+		...((yield* lockIsCommitted) ? [] : ["Persisted.lock.json has uncommitted changes."]),
 	]
 	if (blockers.length > 0) {
-		return yield* Effect.fail(
-			`Production deploy refused:\n${blockers.map((blocker) => `  - ${blocker}`).join("\n")}\nRun \`bun run persisted:cut\`, commit Persisted.lock.json, then deploy.`,
-		)
+		return yield* new PersistedLockError({
+			message: `Production deploy refused:\n${blockers.map((blocker) => `  - ${blocker}`).join("\n")}\nRun \`bun run persisted:cut\`, commit Persisted.lock.json, then deploy.`,
+		})
 	}
-}).pipe(Effect.orDie)
+})
+
+export const requireShippedBaseline: Effect.Effect<void> = checkShippedBaseline.pipe(
+	Effect.provide(PersistedServicesLive),
+	Effect.orDie,
+)
