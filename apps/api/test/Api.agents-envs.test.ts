@@ -1787,9 +1787,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Layer.provideMerge(
 					Layer.succeed(HarnessLimits, {
 						attempts: 3,
-						baseDelayMs: 5,
-						interruptTimeoutMs: 5_000,
-						settleMarginMs: 5_000,
+						baseDelay: "5 millis",
+						interruptTimeout: "5 seconds",
+						settleMargin: "5 seconds",
 					}),
 				),
 				Layer.provideMerge(Digest.layerWebCrypto),
@@ -2002,9 +2002,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 1,
-					baseDelayMs: 5,
-					interruptTimeoutMs: 5_000,
-					settleMarginMs: 5_000,
+					baseDelay: "5 millis",
+					interruptTimeout: "5 seconds",
+					settleMargin: "5 seconds",
 				}),
 			),
 			Layer.provideMerge(Digest.layerWebCrypto),

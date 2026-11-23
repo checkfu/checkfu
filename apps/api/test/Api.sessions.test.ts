@@ -47,8 +47,8 @@ import {
 	AgentVersionWaitTimeout,
 	SSE_CATCHUP_PAGE_SIZE,
 	SessionReadWaitTimeout,
-	SseKeepaliveMs,
-	SseMaxConnectionMs,
+	SseKeepaliveInterval,
+	SseMaxConnectionDuration,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
 import { type DomainSessionEvent, serializeSessionEvent } from "../src/Http/SessionsHandlers.ts"
@@ -896,7 +896,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(futureBody).not.toContain("event: session.archived")
 				}).pipe(
 					Effect.scoped,
-					Effect.provide(Layer.succeed(SseKeepaliveMs, 20).pipe(Layer.provideMerge(layer))),
+					Effect.provide(
+						Layer.succeed(SseKeepaliveInterval, "20 millis").pipe(Layer.provideMerge(layer)),
+					),
 				),
 			)
 		} finally {
@@ -932,7 +934,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(text).not.toContain("event: session.archived")
 				}).pipe(
 					Effect.scoped,
-					Effect.provide(Layer.succeed(SseMaxConnectionMs, 400).pipe(Layer.provideMerge(layer))),
+					Effect.provide(
+						Layer.succeed(SseMaxConnectionDuration, "400 millis").pipe(Layer.provideMerge(layer)),
+					),
 				),
 			)
 		} finally {
@@ -1047,7 +1051,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					Effect.provide(
 						Layer.mergeAll(
 							Layer.succeed(SessionReadWaitTimeout, "50 millis"),
-							Layer.succeed(SseMaxConnectionMs, 400),
+							Layer.succeed(SseMaxConnectionDuration, "400 millis"),
 						).pipe(Layer.provideMerge(layer)),
 					),
 				),

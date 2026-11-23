@@ -36,12 +36,12 @@ import { SessionsLive } from "./SessionsHandlers.ts"
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
 export { EnvironmentPartialUpdateWaitTimeout } from "./EnvironmentsHandlers.ts"
 export {
-	DEFAULT_SSE_KEEPALIVE_MS,
-	DEFAULT_SSE_MAX_CONNECTION_MS,
+	DEFAULT_SSE_KEEPALIVE_INTERVAL,
+	DEFAULT_SSE_MAX_CONNECTION_DURATION,
 	SSE_CATCHUP_PAGE_SIZE,
 	SessionReadWaitTimeout,
-	SseKeepaliveMs,
-	SseMaxConnectionMs,
+	SseKeepaliveInterval,
+	SseMaxConnectionDuration,
 } from "./SessionsHandlers.ts"
 
 const HealthLive = HttpApiBuilder.group(CheckfuApi, "health", (handlers) =>

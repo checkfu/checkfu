@@ -30,21 +30,24 @@ export const LOCAL_DEV_SIGNAL_VALUE = "local-dev"
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 export const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 
-export const providerApiKeys = Effect.all({
+export const providerApiKeys = Config.all({
 	openai: optionalSecret(PROVIDER_API_KEY_ENV.openai),
 	anthropic: optionalSecret(PROVIDER_API_KEY_ENV.anthropic),
-})
+}).pipe(Effect.orDie)
 
 export interface ProviderBaseUrlOverrides {
 	readonly openai?: string | null
 }
 
-const optionalConfigString = (name: string) =>
+const optionalConfigString = (name: string): Config.Config<string | null> =>
 	Config.option(Config.String(name)).pipe(
-		Effect.map(Option.map((value) => value.trim())),
-		Effect.map(Option.filter((value) => value.length > 0)),
-		Effect.map(Option.getOrNull),
-		Effect.orDie,
+		Config.map((value) =>
+			value.pipe(
+				Option.map((raw) => raw.trim()),
+				Option.filter((trimmed) => trimmed.length > 0),
+				Option.getOrNull,
+			),
+		),
 	)
 
 const EXPLICIT_LOOPBACK_PORT = /^http:\/\/(?:127\.0\.0\.1|\[::1\]):(\d+)(?:\/|$)/i
@@ -109,7 +112,7 @@ export const providerBaseUrls = Effect.gen(function* () {
 	return {
 		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),
 	}
-})
+}).pipe(Effect.orDie)
 
 const isSupportedProvider = (value: string): value is SupportedProvider =>
 	value === "openai" || value === "anthropic"
