@@ -6,9 +6,12 @@ import {
 } from "@checkfu/agents/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/environments/EnvironmentTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
-import { createHash, timingSafeEqual } from "node:crypto"
 import * as ByteSize from "effect/ByteSize"
+import * as Digest from "effect/crypto/Digest"
+import * as Mac from "effect/crypto/Mac"
+import type * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -17,7 +20,6 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
-import type * as SecureRandom from "effect/crypto/SecureRandom"
 import { ClaimEventBatch, type EventBatch, EventBatchId } from "../Checkfu.model.ts"
 import { optionalSecret } from "../Secrets.ts"
 import {
@@ -216,11 +218,10 @@ export const commitForStream = (
 export const normalizeModel = (input: string | AgentModel): AgentModel =>
 	typeof input === "string" ? { id: input } : input
 
+const utf8Encoder = new TextEncoder()
+
 export const randomId = (random: SecureRandom.SecureRandom["Service"], prefix: string) =>
-	Effect.map(
-		random.randomBytes(12),
-		(bytes) => `${prefix}_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`,
-	)
+	Effect.map(random.randomBytes(12), (bytes) => `${prefix}_${Hex.encode(bytes)}`)
 
 const canonicalize = (value: unknown): unknown => {
 	if (Array.isArray(value)) return value.map(canonicalize)
@@ -233,29 +234,45 @@ const canonicalize = (value: unknown): unknown => {
 	return value
 }
 
-export const sha256Json = (value: unknown): string =>
-	createHash("sha256").update(JSON.stringify(value)).digest("hex")
+export const sha256Json = (
+	digest: Digest.Digest["Service"],
+	value: unknown,
+): Effect.Effect<string> =>
+	digest.digestHex(Digest.sha256, utf8Encoder.encode(JSON.stringify(value)))
 
-export const idempotencyClaimId = (prefix: string, scope: ReadonlyArray<unknown>): EventBatchId =>
-	EventBatchId.make(`${prefix}_${sha256Json(scope)}`)
+export const idempotencyClaimId = (
+	digest: Digest.Digest["Service"],
+	prefix: string,
+	scope: ReadonlyArray<unknown>,
+): Effect.Effect<EventBatchId> =>
+	Effect.map(sha256Json(digest, scope), (hash) => EventBatchId.make(`${prefix}_${hash}`))
 
-export const idempotentId = (prefix: string, scope: ReadonlyArray<unknown>): string =>
-	`${prefix}_${sha256Json(scope)}`
+export const idempotentId = (
+	digest: Digest.Digest["Service"],
+	prefix: string,
+	scope: ReadonlyArray<unknown>,
+): Effect.Effect<string> => Effect.map(sha256Json(digest, scope), (hash) => `${prefix}_${hash}`)
 
-export const idempotentCommandId = (prefix: string, scope: ReadonlyArray<unknown>): string =>
-	`${prefix}:${sha256Json(scope)}`
+export const idempotentCommandId = (
+	digest: Digest.Digest["Service"],
+	prefix: string,
+	scope: ReadonlyArray<unknown>,
+): Effect.Effect<string> => Effect.map(sha256Json(digest, scope), (hash) => `${prefix}:${hash}`)
 
 export const createClaimId = (
+	digest: Digest.Digest["Service"],
 	resource: "agent" | "environment" | "session",
 	idempotencyKey: string,
-) => idempotencyClaimId("cr", ["create", resource, idempotencyKey])
+) => idempotencyClaimId(digest, "cr", ["create", resource, idempotencyKey])
 
-export const createFingerprint = (payload: unknown) => sha256Json(canonicalize(payload))
+export const createFingerprint = (digest: Digest.Digest["Service"], payload: unknown) =>
+	sha256Json(digest, canonicalize(payload))
 
 export const createCommandId = (
+	digest: Digest.Digest["Service"],
 	resource: "agent" | "environment" | "session",
 	idempotencyKey: string,
-) => idempotentCommandId(`create-${resource}`, ["create", resource, idempotencyKey])
+) => idempotentCommandId(digest, `create-${resource}`, ["create", resource, idempotencyKey])
 
 export const claimIdempotency = (
 	eventBatches: Effect.Success<typeof EventBatch>,
@@ -268,38 +285,51 @@ export const claimIdempotency = (
 
 export const claimCreate = (
 	eventBatches: Effect.Success<typeof EventBatch>,
+	digest: Digest.Digest["Service"],
 	resource: "agent" | "environment" | "session",
 	idempotencyKey: string,
 	payload: unknown,
 ) =>
-	Effect.as(
-		claimIdempotency(
-			eventBatches,
-			createClaimId(resource, idempotencyKey),
-			createFingerprint(payload),
-		),
-		createCommandId(resource, idempotencyKey),
-	)
+	Effect.gen(function* () {
+		const claimId = yield* createClaimId(digest, resource, idempotencyKey)
+		const fingerprint = yield* createFingerprint(digest, payload)
+		yield* claimIdempotency(eventBatches, claimId, fingerprint)
+		return yield* createCommandId(digest, resource, idempotencyKey)
+	})
 
-const tokenDigest = (token: string) => createHash("sha256").update(token).digest()
+// Ephemeral-keyed HMAC-SHA-256 verification via `Mac.Mac` (`Mac.layerWebCrypto`)
+// delegates tag comparison to native `crypto.subtle.verify("HMAC", ...)` instead
+// of a JavaScript byte loop (`Mac.timingSafeEqual`), keeping arbitrary-length
+// credential checks constant-time without depending on `node:crypto`.
+const prepareConfiguredCredential = (mac: Mac.Mac["Service"], secret: Redacted.Redacted<string>) =>
+	Effect.gen(function* () {
+		const key = yield* mac.generateKey(Mac.hmacSha256)
+		const tag = yield* mac.sign(key, utf8Encoder.encode(Redacted.value(secret)))
+		return { key, tag }
+	}).pipe(Effect.orDie)
 
 export const AuthenticationLive = Layer.effect(
 	Authentication,
 	Effect.gen(function* () {
-		const configured = yield* optionalSecret("CHECKFU_API_KEY").pipe(
-			Effect.map((secret) => (secret === null ? null : tokenDigest(Redacted.value(secret)))),
-		)
+		const mac = yield* Mac.Mac
+		const secret = yield* optionalSecret("CHECKFU_API_KEY")
+		const configured = secret === null ? null : yield* prepareConfiguredCredential(mac, secret)
 		const guard = <A, E, R>(
 			handler: Effect.Effect<A, E, R>,
 			credential: Redacted.Redacted<string>,
-		): Effect.Effect<A, E | (typeof ERRORS)[401 | 503]["Type"], R> => {
-			if (configured === null) {
-				return reject(503, "API authentication is not configured. Set CHECKFU_API_KEY.")
-			}
-			return timingSafeEqual(tokenDigest(Redacted.value(credential)), configured)
-				? handler
-				: reject(401, "Invalid or missing API key.")
-		}
+		): Effect.Effect<A, E | (typeof ERRORS)[401 | 503]["Type"], R> =>
+			Effect.gen(function* () {
+				if (configured === null) {
+					return yield* reject(503, "API authentication is not configured. Set CHECKFU_API_KEY.")
+				}
+				const valid = yield* mac
+					.verify(configured.key, configured.tag, utf8Encoder.encode(Redacted.value(credential)))
+					.pipe(Effect.orDie)
+				if (!valid) {
+					return yield* reject(401, "Invalid or missing API key.")
+				}
+				return yield* handler
+			})
 		return {
 			bearer: (handler, { credential }) => guard(handler, credential),
 			apiKey: (handler, { credential }) => guard(handler, credential),

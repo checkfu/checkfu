@@ -13,10 +13,12 @@ import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/sessions/Session/SessionTypes"
 import { type SessionSnapshot, SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import * as Context from "effect/Context"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Sse from "effect/encoding/Sse"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
@@ -61,40 +63,50 @@ export const SessionReadWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
-const encodeUtf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
-const SSE_KEEPALIVE_FRAME = encodeUtf8(": keepalive\n\n")
+const SSE_KEEPALIVE_FRAME = ": keepalive\n\n"
 const IDEMPOTENCY_CONFLICT_MESSAGE =
 	"Event id or Idempotency-Key was already used for a different event."
 
 const sessionEventCommandId = (
+	digest: Digest.Digest["Service"],
 	sessionId: SessionId,
 	scope:
 		| { readonly kind: "event"; readonly eventId: string }
 		| { readonly kind: "batch"; readonly key: string; readonly index: number },
-): string =>
+) =>
 	idempotentCommandId(
+		digest,
 		"evt",
 		scope.kind === "event"
 			? [sessionId, "event", scope.eventId]
 			: [sessionId, "batch", scope.key, scope.index],
 	)
 
-const sessionEventBatchId = (sessionId: SessionId, idempotencyKey: string) =>
-	idempotencyClaimId("eb", [sessionId, "batch", idempotencyKey])
+const sessionEventBatchId = (
+	digest: Digest.Digest["Service"],
+	sessionId: SessionId,
+	idempotencyKey: string,
+) => idempotencyClaimId(digest, "eb", [sessionId, "batch", idempotencyKey])
 
-const sessionEventClaimId = (sessionId: SessionId, eventId: string) =>
-	idempotencyClaimId("ev", [sessionId, "event", eventId])
+const sessionEventClaimId = (
+	digest: Digest.Digest["Service"],
+	sessionId: SessionId,
+	eventId: string,
+) => idempotencyClaimId(digest, "ev", [sessionId, "event", eventId])
 
 const singleEventFingerprint = (
+	digest: Digest.Digest["Service"],
 	item:
 		| { readonly type: "user.interrupt" }
 		| { readonly type: "user.message"; readonly text: string },
-): string =>
+) =>
 	sha256Json(
+		digest,
 		item.type === "user.interrupt" ? { type: item.type } : { type: item.type, text: item.text },
 	)
 
 const eventBatchFingerprint = (
+	digest: Digest.Digest["Service"],
 	items: ReadonlyArray<
 		| { readonly type: "user.interrupt"; readonly eventId: string | undefined }
 		| {
@@ -103,8 +115,9 @@ const eventBatchFingerprint = (
 				readonly text: string
 		  }
 	>,
-): string =>
+) =>
 	sha256Json(
+		digest,
 		items.map((item) =>
 			item.type === "user.interrupt"
 				? { type: item.type, ...(item.eventId === undefined ? {} : { id: item.eventId }) }
@@ -212,6 +225,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const eventBatches = yield* EventBatch
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveMs = yield* SseKeepaliveMs
 		const sseMaxConnectionMs = yield* SseMaxConnectionMs
@@ -278,13 +292,15 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						const commandId = yield* claimCreate(eventBatches, "session", idempotencyKey, {
+						const commandId = yield* claimCreate(eventBatches, digest, "session", idempotencyKey, {
 							agent_id: agentId,
 							agent_version: agentVersion,
 							environment_id: environmentId,
 							title,
 						})
-						id = SessionId.make(idempotentId("sess", ["create", "session", "id", idempotencyKey]))
+						id = SessionId.make(
+							yield* idempotentId(digest, "sess", ["create", "session", "id", idempotencyKey]),
+						)
 						sendOptions = { commandId }
 					} else {
 						id = SessionId.make(yield* randomId(random, "sess"))
@@ -390,9 +406,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						}
 						const commandId =
 							event.id !== undefined
-								? sessionEventCommandId(id, { kind: "event", eventId: event.id })
+								? yield* sessionEventCommandId(digest, id, { kind: "event", eventId: event.id })
 								: idempotencyKey !== undefined
-									? sessionEventCommandId(id, { kind: "batch", key: idempotencyKey, index })
+									? yield* sessionEventCommandId(digest, id, {
+											kind: "batch",
+											key: idempotencyKey,
+											index,
+										})
 									: undefined
 						if (event.type === "user.interrupt") {
 							prepared.push({ type: "user.interrupt", eventId: event.id, commandId })
@@ -418,8 +438,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						}
 					}
 					if (idempotencyKey !== undefined) {
-						const batchId = sessionEventBatchId(id, idempotencyKey)
-						const fingerprint = eventBatchFingerprint(prepared)
+						const batchId = yield* sessionEventBatchId(digest, id, idempotencyKey)
+						const fingerprint = yield* eventBatchFingerprint(digest, prepared)
 						yield* claimIdempotency(eventBatches, batchId, fingerprint)
 					}
 
@@ -430,12 +450,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						const claimEventId =
 							item.eventId === undefined
 								? Effect.void
-								: Effect.suspend(() => {
-										const claimId = sessionEventClaimId(id, item.eventId!)
-										const fingerprint = singleEventFingerprint(item)
-										return claimIdempotency(eventBatches, claimId, fingerprint).pipe(
+								: Effect.gen(function* () {
+										const claimId = yield* sessionEventClaimId(digest, id, item.eventId!)
+										const fingerprint = yield* singleEventFingerprint(digest, item)
+										yield* claimIdempotency(eventBatches, claimId, fingerprint).pipe(
 											Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
-											Effect.asVoid,
 										)
 									})
 						const outcome =
@@ -595,18 +614,21 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
 						Stream.map((entry) => {
 							const payload = serializeSessionEvent(entry)
-							return encodeUtf8(
-								`id: ${entry.envelope.seq}\nevent: ${payload.type}\ndata: ${encodeSessionEventJson(payload)}\n\n`,
-							)
+							return Sse.encoder.write({
+								_tag: "Event",
+								id: String(entry.envelope.seq),
+								event: payload.type,
+								data: encodeSessionEventJson(payload),
+							})
 						}),
 						Stream.interruptWhen(Effect.sleep(Duration.millis(sseMaxConnectionMs))),
 					)
 					const keepalive = Stream.tick(Duration.millis(sseKeepaliveMs)).pipe(
 						Stream.drop(1),
-						Stream.map(() => SSE_KEEPALIVE_FRAME),
+						Stream.as(SSE_KEEPALIVE_FRAME),
 					)
 					return HttpServerResponse.stream(
-						Stream.merge(frames, keepalive, { haltStrategy: "left" }),
+						Stream.merge(frames, keepalive, { haltStrategy: "left" }).pipe(Stream.encodeText),
 						{
 							status: 200,
 							headers: {

@@ -2,6 +2,8 @@ import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import * as Cause from "effect/Cause"
+import * as Digest from "effect/crypto/Digest"
+import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -49,7 +51,11 @@ const CheckfuLive = Checkfu.layer(
 	SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
 ).pipe(Layer.provide(PiSessionExecutorLive), Layer.provide(DomainCloudflare.layerDurableObjects()))
 
-const ApiWorkerLive = Layer.merge(CheckfuLive, Cloudflare.Telemetry({ headSamplingRate: 0.1 }))
+const ApiWorkerLive = Layer.mergeAll(
+	CheckfuLive,
+	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
+	Digest.layerWebCrypto,
+).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 	"ApiWorker",

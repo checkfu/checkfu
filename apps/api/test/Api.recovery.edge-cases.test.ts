@@ -9,6 +9,7 @@ import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import type { TranscriptContext } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -108,8 +109,8 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			Layer.provide(CheckfuLive),
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
-			Layer.provide(Layer.succeed(SeedMaxScanPages, 2)),
-			Layer.provide(
+			Layer.provideMerge(Layer.succeed(SeedMaxScanPages, 2)),
+			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 1,
 					baseDelayMs: 1,
@@ -118,6 +119,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -372,7 +374,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			Layer.provide(CheckfuLive),
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
-			Layer.provide(
+			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
 					baseDelayMs: 1,
@@ -381,6 +383,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -695,8 +698,8 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			Layer.provide(CheckfuLive),
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
-			Layer.provide(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
-			Layer.provide(
+			Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
+			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
 					baseDelayMs: 1,
@@ -705,6 +708,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -788,8 +792,8 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						Layer.provide(BrokenVersionView),
 						Layer.provide(BrokenEnvView),
 						Layer.provide(executorLayer),
-						Layer.provide(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
-						Layer.provide(
+						Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
+						Layer.provideMerge(
 							Layer.succeed(HarnessLimits, {
 								attempts: 2,
 								baseDelayMs: 1,
@@ -797,7 +801,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 								settleMarginMs: 50,
 							}),
 						),
-						Layer.provide(
+						Layer.provideMerge(
 							ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: TEST_API_KEY })),
 						),
 					)

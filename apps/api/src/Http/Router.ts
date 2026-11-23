@@ -1,6 +1,7 @@
 import * as ByteSize from "effect/ByteSize"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
+import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -63,7 +64,7 @@ const withCachePolicy = (path: string, response: HttpServerResponse.HttpServerRe
 const ApiLive = HttpApiBuilder.layer(CheckfuApi, { openapiPath: "/openapi.json" }).pipe(
 	Layer.provide([HealthLive, AgentsLive, EnvironmentsLive, SessionsLive]),
 	Layer.provide([
-		AuthenticationLive,
+		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 		RequestValidationLive,
 		AgentBodyLimitLive,
 		EventBatchBodyLimitLive,

@@ -54,6 +54,7 @@ import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
 import { storageCallbacks } from "alchemy/Workers/StorageCallbacks"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -1423,8 +1424,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			),
 		).pipe(Layer.provide(neverCallExecutor))
 		const lagLayer = CheckfuLagLive.pipe(
-			Layer.provide(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
+			Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -1605,6 +1607,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			).pipe(Layer.provide(executorLayer))
 			const layer = CheckfuLive.pipe(
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
 					ConfigProvider.layer(
@@ -1789,6 +1792,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						settleMarginMs: 5_000,
 					}),
 				),
+				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
 					ConfigProvider.layer(
@@ -2003,6 +2007,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					settleMarginMs: 5_000,
 				}),
 			),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
