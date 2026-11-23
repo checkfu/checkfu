@@ -47,6 +47,13 @@ export default defineConfig({
 							"Declare Checkfu Pi documents in apps/api/src/Pi/PiDocRegistry.ts so they are covered by Persisted.lock.json.",
 					},
 					{
+						name: "@alchemy.run/domain/Cloudflare",
+						importNames: ["layerDurableObjects"],
+						allowTypeImports: true,
+						message:
+							"Host the model on PlacedDurableObjects from apps/api/src/PlacedDurableObjects.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
+					},
+					{
 						name: "effect/workflow",
 						importNames: ["Activity"],
 						allowTypeImports: true,
@@ -71,13 +78,13 @@ export default defineConfig({
 			{
 				property: "layerDurableObjects",
 				message:
-					"Host the model on PlacedDurableObjects from apps/api/src/Placement.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
+					"Host the model on PlacedDurableObjects from apps/api/src/PlacedDurableObjects.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
 			},
-			{
-				property: "getByName",
+			...["getByName", "idFromName", "idFromString", "newUniqueId"].map((property) => ({
+				property,
 				message:
 					"Address a Durable Object with placedStub from apps/api/src/Placement.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to it.",
-			},
+			})),
 		],
 		"no-sequences": "error",
 		"promise/no-new-statics": "error",
@@ -204,6 +211,13 @@ export default defineConfig({
 		{
 			files: ["apps/api/src/Placement.ts"],
 			rules: {
+				"no-restricted-properties": "off",
+			},
+		},
+		{
+			files: ["apps/api/src/PlacedDurableObjects.ts"],
+			rules: {
+				"no-restricted-imports": "off",
 				"no-restricted-properties": "off",
 			},
 		},

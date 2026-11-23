@@ -12,7 +12,8 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
 import { PiSession } from "./Pi/PiSession.do.ts"
-import { PlacedDurableObjects, placedStub, placement } from "./Placement.ts"
+import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { placedStub, placement } from "./Placement.ts"
 
 const harnessCall = <A, E, R>(
 	call: Effect.Effect<A, E, R>,
