@@ -50,17 +50,15 @@ import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 export const SESSION_STATE_SCHEMA_VERSION = 1 as const
 
 export const SessionState = Schema.Union([
-	Schema.Struct({ _tag: Schema.Literal("Uninitialized") }),
-	Schema.Struct({ _tag: Schema.Literal("Idle"), turn: NonNegativeInt }),
-	Schema.Struct({
-		_tag: Schema.Literal("Running"),
+	Schema.TaggedStruct("Uninitialized", {}),
+	Schema.TaggedStruct("Idle", { turn: NonNegativeInt }),
+	Schema.TaggedStruct("Running", {
 		turn: PositiveInt,
 		open_model_request_id: Schema.NullOr(NonEmptyString),
 		model_requests_started: NonNegativeInt,
 		pending_user_messages: NonNegativeInt,
 	}),
-	Schema.Struct({
-		_tag: Schema.Literal("Terminated"),
+	Schema.TaggedStruct("Terminated", {
 		archived: Schema.Boolean,
 	}),
 ])

@@ -31,11 +31,14 @@ export const StartTurnLive = StartTurn.toLayer(
 			}
 			if (event._tag !== "session.status_running") {
 				// An expired, previously cancelled or absent deadline needs no further work.
-				yield* sessions.unschedule(source.id, TURN_DEADLINE).pipe(
-					Effect.catchTag("AlreadyExecuted", () => Effect.void),
-					Effect.catchTag("AlreadyCancelled", () => Effect.void),
-					Effect.catchTag("NotScheduled", () => Effect.void),
-				)
+				yield* sessions
+					.unschedule(source.id, TURN_DEADLINE)
+					.pipe(
+						Effect.catchTag(
+							["AlreadyExecuted", "AlreadyCancelled", "NotScheduled"],
+							() => Effect.void,
+						),
+					)
 				return
 			}
 			yield* sessions.schedule(

@@ -53,8 +53,8 @@ export const BatchFingerprint = Schema.String.check(Schema.isMinLength(1), Schem
 export const EVENT_BATCH_STATE_SCHEMA_VERSION = 1 as const
 
 export const EventBatchState = Schema.Union([
-	Schema.Struct({ _tag: Schema.Literal("Unclaimed") }),
-	Schema.Struct({ _tag: Schema.Literal("Claimed"), fingerprint: BatchFingerprint }),
+	Schema.TaggedStruct("Unclaimed", {}),
+	Schema.TaggedStruct("Claimed", { fingerprint: BatchFingerprint }),
 ])
 export type EventBatchState = typeof EventBatchState.Type
 

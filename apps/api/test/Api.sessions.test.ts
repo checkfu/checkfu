@@ -123,7 +123,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(serializedLogs).not.toContain(secretMessage)
 					expect(serializedLogs).toContain('"accepted_count":1')
 					expect(serializedLogs).toContain('"unconfirmed_index":1')
-				}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layer, captureLogger))),
+				}).pipe(Effect.scoped, Effect.provide([layer, captureLogger])),
 			)
 		} finally {
 			await closeAll()
@@ -955,10 +955,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						get: (
 							ref: Parameters<typeof realSessionViews.get>[0],
 							options?: Parameters<typeof realSessionViews.get>[1],
-						) =>
-							lagMode !== "off"
-								? Effect.succeed(Option.none())
-								: realSessionViews.get(ref, options),
+						) => (lagMode !== "off" ? Effect.succeedNone : realSessionViews.get(ref, options)),
 						waitFor: (
 							ref: Parameters<typeof realSessionViews.waitFor>[0],
 							filter: Parameters<typeof realSessionViews.waitFor>[1],
@@ -1094,10 +1091,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						get: (
 							key: Parameters<typeof realVersionsByNumber.get>[0],
 							options?: Parameters<typeof realVersionsByNumber.get>[1],
-						) =>
-							alwaysLagVersions
-								? Effect.succeed(Option.none())
-								: realVersionsByNumber.get(key, options),
+						) => (alwaysLagVersions ? Effect.succeedNone : realVersionsByNumber.get(key, options)),
 						waitFor: (
 							key: Parameters<typeof realVersionsByNumber.waitFor>[0],
 							filter: Parameters<typeof realVersionsByNumber.waitFor>[1],
@@ -1257,7 +1251,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							options?: Parameters<typeof realVersionsByNumber.get>[1],
 						) =>
 							lagVersion2Mode !== "off" && String(key).endsWith("@2")
-								? Effect.succeed(Option.none())
+								? Effect.succeedNone
 								: realVersionsByNumber.get(key, options),
 						waitFor: (
 							key: Parameters<typeof realVersionsByNumber.waitFor>[0],
@@ -1877,7 +1871,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					//    unconfirmed_index (NOT a confirmed 409 conflict), so the caller retries the same id.
 					const sessF = yield* createIdleSession(apiFetch)
 					const schemaFailure = yield* Effect.flip(
-						Schema.decodeUnknownEffect(Schema.Number)("not-a-number"),
+						Schema.decodeUnknownEffect(Schema.Finite)("not-a-number"),
 					)
 					let failWithSchemaErrorOnce = true
 					const corruptReceiptSession = new Proxy(real, {
@@ -1966,7 +1960,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const atLimitEnv = EnvironmentId.make("e".repeat(256))
 
 					const badAgent = yield* Effect.result(
-						Schema.decodeUnknownEffect(AdmitSession)({
+						Schema.decodeEffect(AdmitSession)({
 							_tag: "AdmitSession",
 							session_id: "sess_1",
 							agent_id: overLimit,
@@ -1978,7 +1972,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(badAgent._tag).toBe("Failure")
 
 					const badEnv = yield* Effect.result(
-						Schema.decodeUnknownEffect(AdmitSession)({
+						Schema.decodeEffect(AdmitSession)({
 							_tag: "AdmitSession",
 							session_id: "sess_1",
 							agent_id: "agent_1",
@@ -2371,7 +2365,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					}
 					const stubbed: typeof real = {
 						...real,
-						get: () => Effect.succeed(Option.some(snapshot)),
+						get: () => Effect.succeedSome(snapshot),
 						snapshot: () => Effect.succeed({ state: snapshot, cursor: entries.length }),
 						list: () => Effect.succeed({ entries, cursor: null }),
 					}

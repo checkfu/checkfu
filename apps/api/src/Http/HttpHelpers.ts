@@ -168,10 +168,9 @@ export const orPending =
 					pending: true as const,
 				}),
 			),
-			Effect.catch((err): Effect.Effect<Pending, E> =>
-				hasTag(err, "ConsistencyTimeout") || hasTag(err, "WaitTimeout")
-					? Effect.succeed({ id, type, pending: true })
-					: Effect.fail(err),
+			Effect.catchIf(
+				(err) => hasTag(err, "ConsistencyTimeout") || hasTag(err, "WaitTimeout"),
+				() => Effect.succeed({ id, type, pending: true as const }),
 			),
 		)
 
@@ -181,7 +180,10 @@ export const bestEffortAfterCommit = <A, E, R>(
 	read.pipe(
 		Effect.asVoid,
 		Effect.catchDefect((defect) => Effect.logError("Read after commit failed", defect)),
-		Effect.catch((err) => (hasTag(err, "ConsistencyTimeout") ? Effect.void : Effect.fail(err))),
+		Effect.catchIf(
+			(err) => hasTag(err, "ConsistencyTimeout"),
+			() => Effect.void,
+		),
 	)
 
 type SettledFailure<E> =

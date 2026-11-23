@@ -129,7 +129,7 @@ const createdEvent = new SessionCreated({
 describe("Sessions", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(Layer.build(Sessions.layer(SessionsHandlersLive))).pipe(
-			Effect.provide(Layer.mergeAll(Domain.InMemory, ModelProviderNoopLayer)),
+			Effect.provide([Domain.InMemory, ModelProviderNoopLayer]),
 		),
 	)
 
@@ -2628,7 +2628,7 @@ describe("Sessions", () => {
 		})
 		expect(
 			Exit.isFailure(
-				Schema.decodeUnknownExit(SessionStateSnapshot)({
+				Schema.decodeExit(SessionStateSnapshot)({
 					schema_version: 2,
 					state: { _tag: "Idle", turn: 0 },
 				}),
@@ -2679,13 +2679,12 @@ describe("Sessions", () => {
 	it("lazily upgrades a v1 snapshot to v2 through the real DurableObjects storage adapter, skips migration on reopen, and rejects future versions", async () => {
 		const CounterId = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("CounterId"))
 		const V1State = Schema.Union([
-			Schema.Struct({ _tag: Schema.Literal("Empty") }),
-			Schema.Struct({ _tag: Schema.Literal("Active"), count: Schema.Int }),
+			Schema.TaggedStruct("Empty", {}),
+			Schema.TaggedStruct("Active", { count: Schema.Int }),
 		])
 		const V2State = Schema.Union([
-			Schema.Struct({ _tag: Schema.Literal("Empty") }),
-			Schema.Struct({
-				_tag: Schema.Literal("Active"),
+			Schema.TaggedStruct("Empty", {}),
+			Schema.TaggedStruct("Active", {
 				count: Schema.Int,
 				label: Schema.String,
 			}),
@@ -2810,7 +2809,7 @@ describe("Sessions", () => {
 								Type: "TestDurableObject",
 								id: key,
 								env: {},
-								get: () => Effect.succeed(undefined),
+								get: () => Effect.undefined,
 								set: (id: string) => Effect.succeed(id),
 							}
 							let methodsPromise:
@@ -2914,21 +2913,19 @@ describe("Sessions", () => {
 		const futureStore = storeFor("CounterAggregate:cnt_future")
 		futureStore.set("meta", futureMeta)
 
-		const futureExit = await Effect.runPromise(
-			Effect.exit(
-				Effect.gen(function* () {
-					const counters = yield* Counter
-					yield* counters.send(new IncrementCounter({ counter_id: futureId }))
-				}).pipe(Effect.provide(Counters.layer(Layer.empty).pipe(Layer.provide(openPlatform())))),
-			),
+		const futureExit = await Effect.runPromiseExit(
+			Effect.gen(function* () {
+				const counters = yield* Counter
+				yield* counters.send(new IncrementCounter({ counter_id: futureId }))
+			}).pipe(Effect.provide(Counters.layer(Layer.empty).pipe(Layer.provide(openPlatform())))),
 		)
 		expect(Exit.isFailure(futureExit)).toBe(true)
 		expect(futureStore.get("meta")).toEqual(futureMeta)
 	})
 
-	it("round-trips transforming fields like Schema.NumberFromString once in versionedSnapshot", () => {
+	it("round-trips transforming fields like Schema.FiniteFromString once in versionedSnapshot", () => {
 		const V1Transformed = Schema.Struct({ rawCount: Schema.String })
-		const V2Transformed = Schema.Struct({ count: Schema.NumberFromString })
+		const V2Transformed = Schema.Struct({ count: Schema.FiniteFromString })
 		const TransformedSnapshot = versionedSnapshot({
 			current: 2 as const,
 			schema: V2Transformed,

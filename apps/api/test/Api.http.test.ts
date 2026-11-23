@@ -19,7 +19,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
-import * as Option from "effect/Option"
 import * as References from "effect/References"
 import * as Scope from "effect/Scope"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
@@ -925,21 +924,19 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const brokenAgentViews = {
 						...realAgentViews,
 						get: () =>
-							Effect.succeed(
-								Option.some({
-									id: "agent_broken",
-									type: "agent",
-									version: 0, // Violates PositiveInt in AgentResource!
-									name: "Broken",
-									model: { id: "gpt-4o-mini" },
-									system: null,
-									description: null,
-									created_at: "2026-01-01T00:00:00.000Z",
-									updated_at: "2026-01-01T00:00:00.000Z",
-									archived_at: null,
-									current_version_id: "aver_broken",
-								} as unknown as never),
-							),
+							Effect.succeedSome({
+								id: "agent_broken",
+								type: "agent",
+								version: 0, // Violates PositiveInt in AgentResource!
+								name: "Broken",
+								model: { id: "gpt-4o-mini" },
+								system: null,
+								description: null,
+								created_at: "2026-01-01T00:00:00.000Z",
+								updated_at: "2026-01-01T00:00:00.000Z",
+								archived_at: null,
+								current_version_id: "aver_broken",
+							} as unknown as never),
 					} as unknown as typeof realAgentViews
 
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
@@ -1498,7 +1495,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 								entry.annotations.service === "checkfu-api",
 						),
 					).toBe(true)
-				}).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layer, captureLogger))),
+				}).pipe(Effect.scoped, Effect.provide([layer, captureLogger])),
 			)
 		} finally {
 			await closeAll()

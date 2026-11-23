@@ -17,8 +17,10 @@ import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Url from "effect/http/Url"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import * as Schedule from "effect/Schedule"
 import {
 	PI_SEED_MAX_CHARS,
@@ -237,12 +239,12 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 			const envRef = Environment.ref(envId)
 			let envSnapshot = Option.getOrNull(
-				yield* environmentViews.get(envRef).pipe(Effect.catch(() => Effect.succeed(Option.none()))),
+				yield* environmentViews.get(envRef).pipe(Effect.orElseSucceed(() => Option.none())),
 			)
 			if (envSnapshot === null || envSnapshot.version < envState.version) {
 				envSnapshot = yield* environmentViews
 					.waitFor(envRef, { version: { gte: envState.version } }, { timeout: lookupTimeout })
-					.pipe(Effect.catch(() => Effect.succeed(null)))
+					.pipe(Effect.orElseSucceed(() => null))
 			}
 			if (envSnapshot === null || envSnapshot.version < envState.version) {
 				const latest = yield* environments.get(envId)
@@ -265,10 +267,8 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 			const { networking } = envSnapshot.config
 			if (networking.type !== "limited") return
 
-			let parsedUrl: URL
-			try {
-				parsedUrl = new URL(providerBaseUrl)
-			} catch {
+			const parsedUrlResult = Url.fromString(providerBaseUrl)
+			if (Result.isFailure(parsedUrlResult)) {
 				return yield* Effect.fail<ModelProviderError>({
 					_tag: "ModelProviderError",
 					error_type: "environment_network_blocked",
@@ -276,6 +276,7 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 					terminal: false,
 				})
 			}
+			const parsedUrl = parsedUrlResult.success
 
 			if (!isAllowedHost(parsedUrl, networking.allowed_hosts)) {
 				return yield* Effect.fail<ModelProviderError>({

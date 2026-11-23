@@ -463,7 +463,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						...realAgentViews,
 						get: (ref, options) =>
 							options?.atLeast === undefined
-								? Effect.succeed(Option.none())
+								? Effect.succeedNone
 								: Effect.fail(
 										new Domain.ConsistencyTimeout({
 											view: "AgentView",
@@ -489,7 +489,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								)
 							}
 							envGetCalls += 1
-							return envGetCalls === 1 ? Effect.succeed(Option.none()) : realEnvViews.get(ref)
+							return envGetCalls === 1 ? Effect.succeedNone : realEnvViews.get(ref)
 						},
 					}
 
@@ -658,7 +658,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							options?: Parameters<typeof realEnvViews.get>[1],
 						) =>
 							simulateDeleteDuringWait && options?.atLeast === undefined
-								? Effect.succeed(Option.none())
+								? Effect.succeedNone
 								: realEnvViews.get(ref, options),
 						waitFor: (
 							ref: Parameters<typeof realEnvViews.waitFor>[0],
@@ -1026,7 +1026,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							if (lagMode !== "off") {
 								// No-op update must NOT pass an atLeast checkpoint for an unminted nextVersionId.
 								seenAtLeastWhenLagging.push(options?.atLeast)
-								return Effect.succeed(Option.none())
+								return Effect.succeedNone
 							}
 							return realVersionsByNumber.get(key, options)
 						},
@@ -1763,7 +1763,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								// Pi admits and settles the turn, then the RPC receipt is lost.
 								yield* Effect.promise(async () => runPiDurableTurn(await backendFor(name), request))
 							}
-							return yield* Effect.fail(new HarnessCallFailed({ cause: "simulated RPC drop" }))
+							return yield* new HarnessCallFailed({ cause: "simulated RPC drop" })
 						}
 						return yield* Effect.promise(async () =>
 							runPiDurableTurn(await backendFor(name), request),
@@ -1838,32 +1838,26 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							Effect.gen(function* () {
 								const receipt =
 									mode === "unadmitted-delete"
-										? yield* environments
-												.send(new DeleteEnvironment({ environment_id: targetId }))
-												.pipe(Effect.orDie)
-										: yield* environments
-												.send(
-													new UpdateEnvironment({
-														environment_id: targetId,
-														expected_version: 1,
-														name: "Mutated During Retry Backoff",
-														description: null,
-														config: {
-															type: "cloud",
-															networking: {
-																type: "limited",
-																allow_mcp_servers: false,
-																allow_package_managers: false,
-																allowed_hosts: ["api.anthropic.com"],
-															},
+										? yield* environments.send(new DeleteEnvironment({ environment_id: targetId }))
+										: yield* environments.send(
+												new UpdateEnvironment({
+													environment_id: targetId,
+													expected_version: 1,
+													name: "Mutated During Retry Backoff",
+													description: null,
+													config: {
+														type: "cloud",
+														networking: {
+															type: "limited",
+															allow_mcp_servers: false,
+															allow_package_managers: false,
+															allowed_hosts: ["api.anthropic.com"],
 														},
-													}),
-												)
-												.pipe(Effect.orDie)
-								yield* envViews
-									.get(Environment.ref(targetId), { atLeast: receipt })
-									.pipe(Effect.orDie)
-							})
+													},
+												}),
+											)
+								yield* envViews.get(Environment.ref(targetId), { atLeast: receipt })
+							}).pipe(Effect.orDie)
 
 						// Initial recoverTurn happens before runTurn; trigger mutation on the retry recoverTurn.
 						let sawInitialRecover = false
@@ -1987,7 +1981,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					runTurnCalls += 1
 					// Final (and only) runTurn attempt commits the reply in Pi, then loses its RPC receipt.
 					yield* Effect.promise(async () => runPiDurableTurn(await backendFor(name), request))
-					return yield* Effect.fail(new HarnessCallFailed({ cause: "final RPC receipt lost" }))
+					return yield* new HarnessCallFailed({ cause: "final RPC receipt lost" })
 				}),
 			abortTurn: (name, operationId) =>
 				Effect.promise(async () => {
@@ -2982,7 +2976,7 @@ describe("Agent and environment field length limits", () => {
 								Type: "Test",
 								id: `${className}:${objectId}`,
 								env: {},
-								get: () => Effect.succeed(undefined),
+								get: () => Effect.undefined,
 								set: (id) => Effect.succeed(id),
 							}
 							const objectState: DurableObjects.ObjectStateShape = {
@@ -3203,7 +3197,7 @@ describe("Agent and environment field length limits", () => {
 		const legacyEnvName = "e".repeat(MAX_ENVIRONMENT_NAME_LENGTH + 1)
 		const legacyEnvDescription = "x".repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH + 1)
 
-		const decodedAgentSnapshot = Schema.decodeUnknownSync(AgentStateSnapshot)({
+		const decodedAgentSnapshot = Schema.decodeSync(AgentStateSnapshot)({
 			schema_version: 1,
 			state: {
 				status: "active",
@@ -3221,7 +3215,7 @@ describe("Agent and environment field length limits", () => {
 		expect(decodedAgentSnapshot.system).toBe(legacyAgentSystem)
 		expect(decodedAgentSnapshot.description).toBe(legacyAgentDescription)
 
-		const decodedAgentVersionSnapshot = Schema.decodeUnknownSync(AgentVersionStateSnapshot)({
+		const decodedAgentVersionSnapshot = Schema.decodeSync(AgentVersionStateSnapshot)({
 			schema_version: 1,
 			state: {
 				minted: true,
@@ -3239,7 +3233,7 @@ describe("Agent and environment field length limits", () => {
 		expect(decodedAgentVersionSnapshot.system).toBe(legacyAgentSystem)
 		expect(decodedAgentVersionSnapshot.description).toBe(legacyAgentDescription)
 
-		const decodedEnvSnapshot = Schema.decodeUnknownSync(EnvironmentStateSnapshot)({
+		const decodedEnvSnapshot = Schema.decodeSync(EnvironmentStateSnapshot)({
 			schema_version: 1,
 			state: {
 				status: "active",

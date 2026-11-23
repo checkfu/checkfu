@@ -1185,7 +1185,7 @@ describe("turn engine", () => {
 			Type: "test",
 			id: "test",
 			env: {},
-			get: () => Effect.succeed(undefined),
+			get: () => Effect.undefined,
 			set: (key, _output) => {
 				boundSignals.push(key)
 				return Effect.succeed(key)

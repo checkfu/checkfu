@@ -8,7 +8,6 @@ import {
 	HARNESS_UNAVAILABLE,
 	HARNESS_UNAVAILABLE_MESSAGE,
 	ModelProvider,
-	type ModelProviderError,
 } from "./ModelProvider.external.ts"
 import { RecordModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import {
@@ -68,12 +67,17 @@ export const RunTurnLive = RunTurn.toLayer(
 						}),
 					)
 					.pipe(
-						Effect.map(() => PROCEED),
-						Effect.catchTag("DuplicateModelRequest", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("SessionNotFound", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("OutOfOrderModelRequest", () => Effect.succeed(ABORTED)),
+						Effect.andThen(Effect.succeed(PROCEED)),
+						Effect.catchTag(
+							[
+								"DuplicateModelRequest",
+								"SessionNotFound",
+								"SessionNotRunning",
+								"StaleTurn",
+								"OutOfOrderModelRequest",
+							],
+							() => Effect.succeed(ABORTED),
+						),
 					),
 			)
 
@@ -103,32 +107,35 @@ export const RunTurnLive = RunTurn.toLayer(
 							output_tokens: reply.output_tokens,
 							stop_reason: reply.stop_reason,
 						})),
-						Effect.catchTag("ModelProviderError", (err: ModelProviderError) =>
-							Effect.succeed({
-								ok: false as const,
-								interrupted: false as const,
-								model_usage: err.model_usage ?? { input_tokens: 0, output_tokens: 0 },
-								error_type: err.error_type,
-								message: err.message,
-								disposition: err.terminal ? ("terminal" as const) : ("exhausted" as const),
-							}),
-						),
-						Effect.catchTag("HarnessUnavailable", () =>
-							Effect.succeed({
-								ok: false as const,
-								interrupted: false as const,
-								model_usage: { input_tokens: 0, output_tokens: 0 },
-								error_type: HARNESS_UNAVAILABLE,
-								message: HARNESS_UNAVAILABLE_MESSAGE,
-								disposition: "abandoned" as const,
-							}),
-						),
-						Effect.catchTag("ModelRequestInterrupted", (err) =>
-							Effect.succeed({
-								ok: false as const,
-								interrupted: true as const,
-								model_usage: err.model_usage ?? { input_tokens: 0, output_tokens: 0 },
-							}),
+						Effect.catchTag(
+							["ModelProviderError", "HarnessUnavailable", "ModelRequestInterrupted"],
+							(err): Effect.Effect<typeof GenerateOutcome.Type> => {
+								if (err._tag === "ModelProviderError") {
+									return Effect.succeed({
+										ok: false,
+										interrupted: false,
+										model_usage: err.model_usage ?? { input_tokens: 0, output_tokens: 0 },
+										error_type: err.error_type,
+										message: err.message,
+										disposition: err.terminal ? "terminal" : "exhausted",
+									})
+								}
+								if (err._tag === "HarnessUnavailable") {
+									return Effect.succeed({
+										ok: false,
+										interrupted: false,
+										model_usage: { input_tokens: 0, output_tokens: 0 },
+										error_type: HARNESS_UNAVAILABLE,
+										message: HARNESS_UNAVAILABLE_MESSAGE,
+										disposition: "abandoned",
+									})
+								}
+								return Effect.succeed({
+									ok: false,
+									interrupted: true,
+									model_usage: err.model_usage ?? { input_tokens: 0, output_tokens: 0 },
+								})
+							},
 						),
 					),
 			)
@@ -147,11 +154,11 @@ export const RunTurnLive = RunTurn.toLayer(
 							}),
 						)
 						.pipe(
-							Effect.map(() => PROCEED),
-							Effect.catchTag("UnknownModelRequest", () => Effect.succeed(ABORTED)),
-							Effect.catchTag("SessionNotFound", () => Effect.succeed(ABORTED)),
-							Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
-							Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
+							Effect.andThen(Effect.succeed(PROCEED)),
+							Effect.catchTag(
+								["UnknownModelRequest", "SessionNotFound", "SessionNotRunning", "StaleTurn"],
+								() => Effect.succeed(ABORTED),
+							),
 						),
 				)
 
@@ -177,11 +184,11 @@ export const RunTurnLive = RunTurn.toLayer(
 							}),
 						)
 						.pipe(
-							Effect.map(() => PROCEED),
-							Effect.catchTag("UnknownModelRequest", () => Effect.succeed(ABORTED)),
-							Effect.catchTag("SessionNotFound", () => Effect.succeed(ABORTED)),
-							Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
-							Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
+							Effect.andThen(Effect.succeed(PROCEED)),
+							Effect.catchTag(
+								["UnknownModelRequest", "SessionNotFound", "SessionNotRunning", "StaleTurn"],
+								() => Effect.succeed(ABORTED),
+							),
 						),
 				)
 
@@ -210,11 +217,11 @@ export const RunTurnLive = RunTurn.toLayer(
 						}),
 					)
 					.pipe(
-						Effect.map(() => PROCEED),
-						Effect.catchTag("UnknownModelRequest", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("SessionNotFound", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("SessionNotRunning", () => Effect.succeed(ABORTED)),
-						Effect.catchTag("StaleTurn", () => Effect.succeed(ABORTED)),
+						Effect.andThen(Effect.succeed(PROCEED)),
+						Effect.catchTag(
+							["UnknownModelRequest", "SessionNotFound", "SessionNotRunning", "StaleTurn"],
+							() => Effect.succeed(ABORTED),
+						),
 					),
 			)
 

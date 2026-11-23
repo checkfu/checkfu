@@ -208,14 +208,7 @@ const validatePiDocRuntimeValue = (
 				},
 				rawValue,
 			),
-	}).pipe(
-		Effect.flatMap((copied) =>
-			validator(copied).pipe(
-				Effect.mapError((error) => error.issue),
-				Effect.as(copied),
-			),
-		),
-	)
+	}).pipe(Effect.tap((copied) => validator(copied).pipe(Effect.mapError((error) => error.issue))))
 
 /**
  * Encodes a Checkfu-owned Pi durable document's on-disk metadata (`version`,
