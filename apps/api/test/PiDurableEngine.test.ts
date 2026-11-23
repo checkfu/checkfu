@@ -7,7 +7,6 @@ import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai"
-import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import { AlchemyContext } from "alchemy/AlchemyContext"
 import { RuntimeContext } from "alchemy/RuntimeContext"
@@ -33,7 +32,7 @@ import {
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnOutcome, PiTurnRequest } from "../src/Pi/PiTurn.ts"
+import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
 import {
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
@@ -46,7 +45,6 @@ import {
 	providerBaseUrls,
 } from "../src/Pi/PiModels.ts"
 import {
-	DEFAULT_REFUSAL_TEXT,
 	PROVIDER_FAILURE_MESSAGE,
 	isProviderRefusalStopReason,
 	isRefusalAssistantMessage,
@@ -216,133 +214,6 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 				model_usage: usage,
 			},
 		})
-	})
-
-	it("reads failure details from the settled submission record even after a later turn runs", async () => {
-		let callIndex = 0
-		const backend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(async (model) => {
-				callIndex++
-				if (callIndex === 1) {
-					return {
-						...makeAssistantReply(model, null, "", 5, 1),
-						stopReason: "error",
-						errorMessage: "401 Unauthorized: invalid_api_key",
-					}
-				}
-				return makeAssistantReply(model, null, "Turn 2 succeeded", 5, 3)
-			}),
-		)
-
-		try {
-			const turn1 = await Effect.runPromise(
-				runPiDurableTurn(backend, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "openai",
-					modelId: "gpt-4o-mini",
-					system: null,
-					text: "Bad key turn",
-				}),
-			)
-			expect(turn1).toEqual({
-				ok: false,
-				error: {
-					_tag: "TurnFailed",
-					error_type: "model_request_failed_error",
-					message: PROVIDER_FAILURE_MESSAGE,
-					terminal: false,
-					model_usage: { input_tokens: 5, output_tokens: 1 },
-				},
-			})
-
-			// Turn 2 runs and succeeds (mutating LiveDoc); re-reading Turn 1's settled submission
-			// still returns Turn 1's own auth error.
-			const turn2 = await Effect.runPromise(
-				runPiDurableTurn(backend, {
-					operationId: "turn:2",
-					turn: 2,
-					provider: "openai",
-					modelId: "gpt-4o-mini",
-					system: null,
-					text: "Good turn",
-				}),
-			)
-			expect(turn2).toMatchObject({ ok: true })
-
-			const replayedTurn1 = await backend.readUnansweredSubmission("turn:1")
-			expect(replayedTurn1).toMatchObject({
-				reason: "model_error",
-				detail: "401 Unauthorized: invalid_api_key",
-				assistantMessage: {
-					stopReason: "error",
-					errorMessage: "401 Unauthorized: invalid_api_key",
-				},
-			})
-		} finally {
-			await backend.close()
-		}
-	})
-
-	it("stops failed-turn lookup at the next turn boundary", async () => {
-		// 2. Ascending failed-turn lookup stops at Turn 2's boundary without scanning later turns
-		let callCount = 0
-		const backend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(async (model, context) => {
-				callCount++
-				if (callCount === 1) {
-					return {
-						...makeAssistantReply(model, null, "", 0, 0),
-						stopReason: "error",
-						errorMessage: "Temporary failure on turn 1",
-					}
-				}
-				return makeAssistantReply(model, null, `Reply ${extractLastUserText(context)}`, 4, 2)
-			}),
-		)
-		try {
-			const turn1 = await Effect.runPromise(
-				runPiDurableTurn(backend, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "openai",
-					modelId: "gpt-4o-mini",
-					system: null,
-					text: "Failed turn 1",
-				}),
-			)
-			expect(turn1).toMatchObject({ ok: false })
-
-			const history: Array<{ readonly role: "user" | "assistant"; readonly text: string }> = [
-				{ role: "user", text: "Failed turn 1" },
-			]
-			for (let t = 2; t <= 22; t++) {
-				const text = `Later turn ${t}`
-				const res = await Effect.runPromise(
-					runPiDurableTurn(backend, {
-						operationId: `turn:${t}`,
-						turn: t,
-						provider: "openai",
-						modelId: "gpt-4o-mini",
-						system: null,
-						text,
-					}),
-				)
-				expect(res).toMatchObject({ ok: true })
-				history.push({ role: "user", text }, { role: "assistant", text: `Reply ${text}` })
-			}
-
-			backend.clearScanEntryCalls()
-			const recovered = await backend.readUnansweredSubmission("turn:1")
-			expect(recovered?.assistantMessage?.errorMessage).toBe("Temporary failure on turn 1")
-
-			const scans = backend.getScanEntryCalls()
-			expect(scans.length).toBe(1)
-			expect(scans[0]?.order).toBe("ascending")
-			expect(scans[0]?.limit).toBe(32)
-		} finally {
-			await backend.close()
-		}
 	})
 
 	it("offers no model whose context window is too small for Pi's compaction defaults", () => {
@@ -763,103 +634,6 @@ describe("turn engine", () => {
 		}
 	})
 
-	it("restores a recovered error-stopped refusal into live Pi context across both replay and dropped-waiter finalization", async () => {
-		const textOf = (message: TranscriptContext["messages"][number]) =>
-			typeof message.content === "string"
-				? message.content
-				: message.content.map((part) => (part.type === "text" ? part.text : "")).join("")
-
-		const runScenario = async (mode: "replay" | "finalize") => {
-			const seenContexts: Array<ReadonlyArray<{ readonly role: string; readonly text: string }>> =
-				[]
-			// Use an empty registry so Pi persists the refusal as an unanswered `stopReason: "error"`
-			// AssistantEntry, exercising the recovered-refusal path in runPiDurableTurn / finalizeSettledTurnFromStorage.
-			const backend = await createInMemoryPiDurableBackend(
-				makeScriptedPiModels(async (model, context) => {
-					seenContexts.push(
-						context.messages
-							.filter((message) => message.role === "user" || message.role === "assistant")
-							.map((message) => ({ role: message.role, text: textOf(message) })),
-					)
-					if (extractLastUserText(context) === "disallowed request") {
-						return {
-							...makeAssistantReply(model, null, "", 10, 2),
-							content: [],
-							stopReason: "error",
-							rawStopReason: "refusal",
-							errorMessage: "Refused for safety reasons.",
-						}
-					}
-					return makeAssistantReply(model, null, "Follow-up acknowledged.", 12, 4)
-				}),
-				1,
-				createRegistry(),
-			)
-			try {
-				let turn1: PiTurnOutcome | undefined
-				let turn1Replay: PiTurnOutcome | undefined
-				if (mode === "replay") {
-					turn1 = await Effect.runPromise(
-						runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
-					)
-					// Replaying the recovered refusal must be idempotent.
-					turn1Replay = await Effect.runPromise(
-						runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
-					)
-				} else {
-					// Simulate waiter disconnect before post-settlement recovery runs.
-					await Effect.runPromise(
-						Effect.gen(function* () {
-							const running = yield* Effect.forkChild(
-								runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
-								{ startImmediately: true },
-							)
-							yield* Fiber.interrupt(running)
-						}),
-					)
-					// Wait until turn:1 settles in Pi storage as unanswered.
-					await backend.wait("turn:1")
-				}
-
-				const turn2 = await Effect.runPromise(
-					runPiDurableTurn(backend, turnRequest(2, "why did you refuse?")),
-				)
-				return { turn1, turn1Replay, turn2, lastContext: seenContexts.at(-1) }
-			} finally {
-				await backend.close()
-			}
-		}
-
-		const expectedContext = [
-			{ role: "user", text: "disallowed request" },
-			{ role: "assistant", text: DEFAULT_REFUSAL_TEXT },
-			{ role: "user", text: "why did you refuse?" },
-		]
-		const expectedRefusal = {
-			ok: true,
-			reply: {
-				text: DEFAULT_REFUSAL_TEXT,
-				stop_reason: { type: "refusal" },
-			},
-		}
-
-		const replayResult = await runScenario("replay")
-		expect(replayResult.turn1).toMatchObject(expectedRefusal)
-		expect(replayResult.turn1Replay).toMatchObject(expectedRefusal)
-		expect(replayResult.turn2).toMatchObject({
-			ok: true,
-			reply: { text: "Follow-up acknowledged." },
-		})
-		expect(replayResult.lastContext).toEqual(expectedContext)
-
-		const finalizeResult = await runScenario("finalize")
-		expect(finalizeResult.turn2).toMatchObject({
-			ok: true,
-			reply: { text: "Follow-up acknowledged." },
-		})
-		expect(finalizeResult.lastContext).toEqual(expectedContext)
-	})
-
 	it("matches only provider-specific, case-sensitive confirmed refusal stop reasons", () => {
 		expect(isProviderRefusalStopReason("anthropic-messages", "anthropic", "refusal")).toBe(true)
 		expect(isProviderRefusalStopReason("anthropic-messages", "anthropic", "sensitive")).toBe(true)
@@ -913,90 +687,6 @@ describe("turn engine", () => {
 				message: PROVIDER_FAILURE_MESSAGE,
 			},
 		})
-	})
-
-	it("discards partial output when restoring a stored content_filter refusal across replay and finalization", async () => {
-		const textOf = (message: TranscriptContext["messages"][number]) =>
-			typeof message.content === "string"
-				? message.content
-				: message.content.map((part) => (part.type === "text" ? part.text : "")).join("")
-
-		const runScenario = async (mode: "replay" | "finalize") => {
-			const seenContexts: Array<ReadonlyArray<{ readonly role: string; readonly text: string }>> =
-				[]
-			const backend = await createInMemoryPiDurableBackend(
-				makeScriptedPiModels(async (model, context) => {
-					seenContexts.push(
-						context.messages
-							.filter((message) => message.role === "user" || message.role === "assistant")
-							.map((message) => ({ role: message.role, text: textOf(message) })),
-					)
-					if (extractLastUserText(context) === "filtered prompt") {
-						return {
-							...makeAssistantReply(
-								model,
-								"SECRET_PARTIAL_THINKING",
-								"PARTIAL_FILTERED_BODY",
-								10,
-								4,
-							),
-							stopReason: "error",
-							rawStopReason: "incomplete.content_filter",
-							errorMessage: "Response incomplete: content_filter",
-						}
-					}
-					return makeAssistantReply(model, null, "Follow-up ok.", 12, 4)
-				}),
-				1,
-				createRegistry(),
-			)
-			try {
-				let turn1: PiTurnOutcome | undefined
-				if (mode === "replay") {
-					turn1 = await Effect.runPromise(
-						runPiDurableTurn(backend, turnRequest(1, "filtered prompt")),
-					)
-				} else {
-					await Effect.runPromise(
-						Effect.gen(function* () {
-							const running = yield* Effect.forkChild(
-								runPiDurableTurn(backend, turnRequest(1, "filtered prompt")),
-								{ startImmediately: true },
-							)
-							yield* Fiber.interrupt(running)
-						}),
-					)
-					await backend.wait("turn:1")
-				}
-				const turn2 = await Effect.runPromise(
-					runPiDurableTurn(backend, turnRequest(2, "after filter")),
-				)
-				return { turn1, turn2, lastContext: seenContexts.at(-1) }
-			} finally {
-				await backend.close()
-			}
-		}
-
-		const expectedContext = [
-			{ role: "user", text: "filtered prompt" },
-			{ role: "assistant", text: DEFAULT_REFUSAL_TEXT },
-			{ role: "user", text: "after filter" },
-		]
-
-		const replayResult = await runScenario("replay")
-		expect(replayResult.turn1).toMatchObject({
-			ok: true,
-			reply: {
-				thinking: null,
-				text: DEFAULT_REFUSAL_TEXT,
-				stop_reason: { type: "refusal" },
-			},
-		})
-		expect(replayResult.lastContext).toEqual(expectedContext)
-
-		const finalizeResult = await runScenario("finalize")
-		expect(finalizeResult.turn2).toMatchObject({ ok: true, reply: { text: "Follow-up ok." } })
-		expect(finalizeResult.lastContext).toEqual(expectedContext)
 	})
 
 	it("refuses HTTP redirects and cross-origin requests at the provider fetch transport", async () => {

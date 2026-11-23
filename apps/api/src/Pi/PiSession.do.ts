@@ -11,9 +11,7 @@ import {
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
-	readUnansweredSubmissionFromStorage,
 	recoverPiDurableTurn,
-	restoreRefusalEntryInStorage,
 	runPiDurableTurn,
 } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
@@ -107,17 +105,6 @@ export const makePiHarnessBackend = (
 			const pi = await harness.pi()
 			const storage = await harness.storage()
 			return readAssistantMessageFromStorage(pi, storage, operationId)
-		},
-		readUnansweredSubmission: async (operationId) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			const storage = await harness.storage()
-			return readUnansweredSubmissionFromStorage(pi, storage, operationId)
-		},
-		restoreRefusal: async (operationId, entryId, message) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			await restoreRefusalEntryInStorage(pi, operationId, entryId, message)
 		},
 		omitEntries: async (operationId) => {
 			await lifecycle.start()

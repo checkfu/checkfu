@@ -2,16 +2,8 @@ import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import type { Api, AssistantMessage } from "@earendil-works/pi-ai"
 import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"
-import type { EntryId } from "@earendil-works/pi-durable"
 
 import type { PiTurnOutcome } from "./PiTurn.ts"
-
-export interface UnansweredSubmissionInfo {
-	readonly reason: string
-	readonly detail?: string
-	readonly assistantMessage?: AssistantMessage
-	readonly assistantEntryId?: EntryId
-}
 
 export const PROVIDER_FAILURE_MESSAGE = "The model provider returned an error."
 export const DEFAULT_REFUSAL_TEXT = "The model refused to complete the request."
@@ -198,12 +190,8 @@ export const mapAssistantMessageToOutcome = (
 	}
 }
 
-export const mapUnansweredToError = (
-	reason: string | undefined,
-	submissionInfo: UnansweredSubmissionInfo | null,
-): TurnFailed => {
-	const effectiveReason = submissionInfo?.reason ?? reason ?? "model_error"
-	if (effectiveReason === "no_model") {
+export const mapUnansweredToError = (reason: string | undefined): TurnFailed => {
+	if (reason === "no_model") {
 		return {
 			_tag: "TurnFailed",
 			error_type: "unknown_model_error",

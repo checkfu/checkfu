@@ -1,13 +1,8 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
-import {
-	AssistantEntry,
-	ROOT_CONVERSATION_ID,
-	ResetEntry,
-	UserEntry,
-} from "@earendil-works/pi-durable"
-import type { AgentChange, Cursor, EntryId, Harness, Storage } from "@earendil-works/pi-durable"
+import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
+import type { AgentChange, EntryId, Harness, Storage } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -15,13 +10,7 @@ import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
 import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import type { SupportedProvider } from "./PiCatalog.ts"
-import {
-	isRefusalAssistantMessage,
-	mapAssistantMessageToOutcome,
-	mapUnansweredToError,
-	normalizeRefusalAssistantMessage,
-} from "./PiRefusals.ts"
-import type { UnansweredSubmissionInfo } from "./PiRefusals.ts"
+import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
 import type { BeginTurnUsageResult } from "./PiTurnUsage.ts"
 
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
@@ -48,14 +37,6 @@ export interface PiDurableBackend {
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
 	readonly reset: Effect.Effect<never>
 	readonly readAnswerEntry: (operationId: string) => Promise<AssistantMessage | null>
-	readonly readUnansweredSubmission: (
-		operationId: string,
-	) => Promise<UnansweredSubmissionInfo | null>
-	readonly restoreRefusal: (
-		operationId: string,
-		entryId: EntryId,
-		message: AssistantMessage,
-	) => Promise<void>
 	readonly omitEntries: (operationId: string) => Promise<void>
 	readonly finalizePrevious: (operationId: string) => Promise<void>
 }
@@ -86,125 +67,6 @@ export const readAssistantMessageFromStorage = async (
 	const entry = page.items[0]
 	const firstMessage = entry?.model?.[0]
 	return firstMessage?.role === "assistant" ? firstMessage : null
-}
-
-const formatSubmissionDetail = (detail: unknown): string | undefined => {
-	if (typeof detail === "string" && detail.length > 0) {
-		return detail
-	}
-	if (detail === undefined || detail === null) {
-		return undefined
-	}
-	if (typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
-		return detail.message
-	}
-	return JSON.stringify(detail)
-}
-
-const FAILED_TURN_ENTRY_PAGE_SIZE = 32
-
-const readAssistantEntryForUnansweredSubmission = async (
-	pi: Harness,
-	userEntryId: EntryId,
-): Promise<{ readonly entryId: EntryId; readonly message: AssistantMessage } | undefined> => {
-	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) {
-		return undefined
-	}
-	// Scan forward from `userEntryId` and stop at the next turn boundary so
-	// delayed reads in long sessions never scan or retain later turns.
-	let cursor: Cursor | undefined
-	let lastAssistant: { readonly entryId: EntryId; readonly message: AssistantMessage } | undefined
-	do {
-		const page = await conversation.entries(
-			{ minEntryId: userEntryId, order: "ascending" },
-			FAILED_TURN_ENTRY_PAGE_SIZE,
-			cursor,
-			BACKGROUND_CONTEXT,
-		)
-		for (const entry of page.items) {
-			if (entry.id <= userEntryId) {
-				continue
-			}
-			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
-				return lastAssistant
-			}
-			if (AssistantEntry.is(entry)) {
-				const first = entry.model?.[0]
-				if (first?.role === "assistant") {
-					lastAssistant = { entryId: entry.id, message: first }
-				}
-			}
-		}
-		cursor = page.next
-	} while (cursor !== undefined)
-	return lastAssistant
-}
-
-/**
- * Reads the immutable `reason`, `detail`, and (when `model_error` persisted a
- * terminal `AssistantEntry`) the specific turn's `AssistantMessage` from storage.
- */
-export const readUnansweredSubmissionFromStorage = async (
-	pi: Harness,
-	storage: Storage,
-	operationId: string,
-): Promise<UnansweredSubmissionInfo | null> => {
-	const record = await storage.submissionByRequest(
-		ROOT_CONVERSATION_ID,
-		operationId,
-		BACKGROUND_CONTEXT,
-	)
-	if (record?.status !== "unanswered") {
-		return null
-	}
-	const detail = formatSubmissionDetail(record.detail)
-	const assistant =
-		record.type === "input" && record.reason === "model_error" && record.entry !== undefined
-			? await readAssistantEntryForUnansweredSubmission(pi, record.entry)
-			: undefined
-	return {
-		reason: record.reason,
-		...(detail === undefined ? {} : { detail }),
-		...(assistant === undefined
-			? {}
-			: { assistantMessage: assistant.message, assistantEntryId: assistant.entryId }),
-	}
-}
-
-/**
- * Replaces an error-stopped refusal `AssistantEntry` in Pi's live context with
- * a `stopReason: "stop"` entry carrying the published refusal text. Because Pi
- * excludes `stopReason: "error"` entries from model context, this keeps the
- * conversation consistent with the refusal Checkfu published to the session.
- */
-export const restoreRefusalEntryInStorage = async (
-	pi: Harness,
-	operationId: string,
-	entryId: EntryId,
-	message: AssistantMessage,
-): Promise<void> => {
-	const hasText = message.content.some((block) => block.type === "text" && block.text.length > 0)
-	if (message.stopReason === "stop" && hasText) {
-		return
-	}
-	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) {
-		return
-	}
-	const normalized = normalizeRefusalAssistantMessage(message)
-	const submission = await conversation.submit(
-		{
-			type: "write",
-			requestId: `restore-refusal:${operationId}`,
-			entry: {
-				kind: "checkfu.restore_refusal",
-				edits: [{ target: entryId, action: "replace", messages: [normalized] }],
-			},
-		},
-		BACKGROUND_CONTEXT,
-	)
-	await submission.wait(BACKGROUND_CONTEXT)
 }
 
 /**
@@ -277,22 +139,6 @@ export const finalizeSettledTurnFromStorage = async (
 		return
 	}
 	if (record.status === "unanswered") {
-		const info = await readUnansweredSubmissionFromStorage(pi, storage, operationId)
-		if (
-			info?.assistantMessage !== undefined &&
-			info.assistantMessage.stopReason !== "aborted" &&
-			isRefusalAssistantMessage(info.assistantMessage)
-		) {
-			if (info.assistantEntryId !== undefined) {
-				await restoreRefusalEntryInStorage(
-					pi,
-					operationId,
-					info.assistantEntryId,
-					info.assistantMessage,
-				)
-			}
-			return
-		}
 		await omitTurnEntriesFromStorage(pi, storage, operationId)
 		return
 	}
@@ -447,34 +293,18 @@ const resolveSettledPiTurn = (
 					const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
 					return { ok: false, error: { _tag: "TurnInterrupted", model_usage: usage } }
 				}
-				const submissionInfo = yield* Effect.promise(() =>
-					backend.readUnansweredSubmission(operationId),
-				)
-				if (
-					submissionInfo?.assistantMessage !== undefined &&
-					submissionInfo.assistantMessage.stopReason !== "aborted" &&
-					isRefusalAssistantMessage(submissionInfo.assistantMessage)
-				) {
-					if (submissionInfo.assistantEntryId !== undefined) {
-						const entryId = submissionInfo.assistantEntryId
-						const message = submissionInfo.assistantMessage
-						yield* Effect.promise(() => backend.restoreRefusal(operationId, entryId, message))
-					}
-					const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
-					return mapAssistantMessageToOutcome(submissionInfo.assistantMessage, usage)
-				}
 				yield* Effect.promise(() => backend.omitEntries(operationId))
 				const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
 				yield* Effect.logWarning("pi turn unanswered").pipe(
 					Effect.annotateLogs({
 						operationId,
-						provider: submissionInfo?.assistantMessage?.provider ?? providerForLog,
+						provider: providerForLog,
 						reason: settled.reason ?? "unknown",
 					}),
 				)
 				return {
 					ok: false,
-					error: { ...mapUnansweredToError(settled.reason, submissionInfo), model_usage: usage },
+					error: { ...mapUnansweredToError(settled.reason), model_usage: usage },
 				}
 			}
 

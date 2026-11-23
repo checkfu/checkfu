@@ -13,8 +13,6 @@ import {
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
-	readUnansweredSubmissionFromStorage,
-	restoreRefusalEntryInStorage,
 } from "../../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
@@ -296,10 +294,6 @@ export const createInMemoryPiDurableBackend = async (
 				}),
 			),
 		readAnswerEntry: (operationId) => readAssistantMessageFromStorage(pi, storage, operationId),
-		readUnansweredSubmission: (operationId) =>
-			readUnansweredSubmissionFromStorage(pi, storage, operationId),
-		restoreRefusal: (operationId, entryId, message) =>
-			restoreRefusalEntryInStorage(pi, operationId, entryId, message),
 		omitEntries: (operationId) => omitTurnEntriesFromStorage(pi, storage, operationId),
 		finalizePrevious: (operationId) => finalizeSettledTurnFromStorage(pi, storage, operationId),
 		countEntries: async () => {
