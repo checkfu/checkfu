@@ -43,9 +43,10 @@ export const SESSION_STATE_SCHEMA_VERSION = 1 as const
 
 export const SessionState = Schema.Union([
 	Schema.TaggedStruct("Uninitialized", {}),
-	Schema.TaggedStruct("Idle", { turn: NonNegativeInt }),
+	Schema.TaggedStruct("Idle", { turn: NonNegativeInt, generation: NonNegativeInt }),
 	Schema.TaggedStruct("Running", {
 		turn: PositiveInt,
+		generation: NonNegativeInt,
 		open_model_request_id: Schema.NullOr(NonEmptyString),
 		model_requests_started: NonNegativeInt,
 		pending_user_messages: NonNegativeInt,
@@ -70,24 +71,33 @@ const shouldDrainQueue = (pending_user_messages: number, stop_reason: StopReason
 		stop_reason.type === "retries_exhausted" ||
 		stop_reason.type === "interrupted")
 
+const nextGeneration = (generation: number, retired: boolean): number =>
+	retired ? generation + 1 : generation
+
+const endTurn = (running: RunningState, stop_reason: StopReason, generation: number) => {
+	const idle = new SessionStatusIdle({ stop_reason, turn: running.turn, generation })
+	return shouldDrainQueue(running.pending_user_messages, stop_reason)
+		? [idle, new SessionStatusRunning({ turn: running.turn + 1, generation })]
+		: [idle]
+}
+
 const abandonTurn = (
 	running: RunningState,
 	error_type: string,
 	message: string,
 	model_usage: ModelUsage,
 ) => {
-	const errorEvent = new SessionErrorEvent({
-		error: {
-			type: error_type,
-			message,
-			retry_status: { type: "exhausted" },
-		},
-	})
-	const stop_reason = { type: "retries_exhausted" as const }
-	const idle = new SessionStatusIdle({ stop_reason })
-	const settled = shouldDrainQueue(running.pending_user_messages, stop_reason)
-		? [errorEvent, new TurnAbandoned(), idle, new SessionStatusRunning()]
-		: [errorEvent, new TurnAbandoned(), idle]
+	const settled = [
+		new SessionErrorEvent({
+			error: {
+				type: error_type,
+				message,
+				retry_status: { type: "exhausted" },
+			},
+		}),
+		new TurnAbandoned({ turn: running.turn, generation: running.generation }),
+		...endTurn(running, { type: "retries_exhausted" }, nextGeneration(running.generation, true)),
+	]
 	return running.open_model_request_id === null
 		? settled
 		: [
@@ -157,6 +167,8 @@ export class Session extends Domain.Aggregate("Session", {
 			s._tag !== "Running" || (s.pending_user_messages >= 0 && s.pending_user_messages <= 8),
 		OpenModelRequestRequiresStartedCount: (s) =>
 			s._tag !== "Running" || s.open_model_request_id === null || s.model_requests_started >= 1,
+		GenerationIsNonNegative: (s) =>
+			(s._tag !== "Idle" && s._tag !== "Running") || s.generation >= 0,
 	},
 	transitions: {
 		TerminatedSessionStaysTerminated: ({ before, after }) =>
@@ -201,6 +213,68 @@ export class Session extends Domain.Aggregate("Session", {
 			!after.archived ||
 			(before._tag === "Terminated" && before.archived) ||
 			command._tag === "ArchiveSession",
+		GenerationNeverDecreases: ({ before, after }) =>
+			(before._tag !== "Idle" && before._tag !== "Running") ||
+			(after._tag !== "Idle" && after._tag !== "Running") ||
+			after.generation >= before.generation,
+		GenerationAdvancesByAtMostOne: ({ before, after }) =>
+			(before._tag !== "Idle" && before._tag !== "Running") ||
+			(after._tag !== "Idle" && after._tag !== "Running") ||
+			after.generation <= before.generation + 1,
+		GenerationHoldsWithinTurn: ({ before, after }) =>
+			before._tag !== "Running" ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.generation === before.generation,
+		IdleSessionStartsTurnUnderItsGeneration: ({ before, after }) =>
+			before._tag !== "Idle" ||
+			after._tag !== "Running" ||
+			(after.turn === before.turn + 1 && after.generation === before.generation),
+		StatusRunningCarriesStartedTurnAndGeneration: ({ after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "session.status_running" ||
+					(after._tag === "Running" &&
+						event.turn === after.turn &&
+						event.generation === after.generation),
+			),
+		StatusIdleCarriesEndedTurnAndNextGeneration: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "session.status_idle" ||
+					(before._tag === "Running" &&
+						event.turn === before.turn &&
+						(after._tag === "Idle" || after._tag === "Running") &&
+						event.generation === after.generation),
+			),
+		AbandonedTurnRetiresItsGeneration: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "turn.abandoned" ||
+					(before._tag === "Running" &&
+						event.turn === before.turn &&
+						event.generation === before.generation &&
+						(after._tag === "Idle" || after._tag === "Running") &&
+						after.generation === before.generation + 1),
+			),
+		TruncatedReplyRetiresGeneration: ({ before, after, events }) =>
+			events.every(
+				(event) =>
+					event._tag !== "agent.message" ||
+					event.truncated !== true ||
+					(before._tag === "Running" &&
+						(after._tag === "Idle" || after._tag === "Running") &&
+						after.generation === before.generation + 1),
+			),
+		OnlyAbandonmentOrTruncationRetiresGeneration: ({ before, after, events }) =>
+			(before._tag !== "Idle" && before._tag !== "Running") ||
+			(after._tag !== "Idle" && after._tag !== "Running") ||
+			after.generation === before.generation ||
+			events.some(
+				(event) =>
+					event._tag === "turn.abandoned" ||
+					(event._tag === "agent.message" && event.truncated === true),
+			),
 		OpenModelRequestClosedBeforeLeavingRunning: ({ before, after, events }) => {
 			if (
 				before._tag !== "Running" ||
@@ -243,7 +317,12 @@ export class Session extends Domain.Aggregate("Session", {
 				return new PendingMessageQueueFull({ session_id: ctx.id, limit: 8 })
 			}
 			const message = new UserMessage({ content: [{ type: "text", text: cmd.text }] })
-			return active._tag === "Running" ? [message] : [message, new SessionStatusRunning()]
+			return active._tag === "Running"
+				? [message]
+				: [
+						message,
+						new SessionStatusRunning({ turn: active.turn + 1, generation: active.generation }),
+					]
 		},
 
 		SendUserInterrupt: (state, _cmd, ctx) => {
@@ -306,15 +385,16 @@ export class Session extends Domain.Aggregate("Session", {
 				model_usage: cmd.model_usage,
 				is_error: false,
 			})
-			const idle = new SessionStatusIdle({ stop_reason: cmd.stop_reason })
-			const drain = shouldDrainQueue(running.pending_user_messages, cmd.stop_reason)
+			// A retained Pi conversation still contains the full answer. Rebuild from the published text.
+			const settled = endTurn(
+				running,
+				cmd.stop_reason,
+				nextGeneration(running.generation, cmd.truncated === true),
+			)
 			if (cmd.thinking !== null) {
-				const thought = new AgentThinking({ thinking: cmd.thinking })
-				return drain
-					? [thought, msg, end, idle, new SessionStatusRunning()]
-					: [thought, msg, end, idle]
+				return [new AgentThinking({ thinking: cmd.thinking }), msg, end, ...settled]
 			}
-			return drain ? [msg, end, idle, new SessionStatusRunning()] : [msg, end, idle]
+			return [msg, end, ...settled]
 		},
 
 		FailModelRequest: (state, cmd, ctx) => {
@@ -349,11 +429,11 @@ export class Session extends Domain.Aggregate("Session", {
 			if (cmd.disposition === "terminal") {
 				return [end, errorEvent, new SessionStatusTerminated()]
 			}
-			const stop_reason = { type: "retries_exhausted" as const }
-			const idle = new SessionStatusIdle({ stop_reason })
-			return shouldDrainQueue(running.pending_user_messages, stop_reason)
-				? [end, errorEvent, idle, new SessionStatusRunning()]
-				: [end, errorEvent, idle]
+			return [
+				end,
+				errorEvent,
+				...endTurn(running, { type: "retries_exhausted" }, running.generation),
+			]
 		},
 
 		InterruptModelRequest: (state, cmd, ctx) => {
@@ -375,11 +455,7 @@ export class Session extends Domain.Aggregate("Session", {
 				model_usage: cmd.model_usage,
 				is_error: true,
 			})
-			const stop_reason = { type: "interrupted" as const }
-			const idle = new SessionStatusIdle({ stop_reason })
-			return shouldDrainQueue(running.pending_user_messages, stop_reason)
-				? [end, idle, new SessionStatusRunning()]
-				: [end, idle]
+			return [end, ...endTurn(running, { type: "interrupted" }, running.generation)]
 		},
 
 		AbandonTurn: (state, cmd) => {
@@ -411,7 +487,7 @@ export class Session extends Domain.Aggregate("Session", {
 		},
 	},
 	evolve: {
-		"session.created": () => ({ _tag: "Idle" as const, turn: 0 }),
+		"session.created": () => ({ _tag: "Idle" as const, turn: 0, generation: 0 }),
 		"user.message": (state) =>
 			state._tag === "Running"
 				? {
@@ -421,11 +497,12 @@ export class Session extends Domain.Aggregate("Session", {
 					}
 				: state,
 		"user.interrupt": (state) => state,
-		"session.status_running": (state) =>
+		"session.status_running": (state, e) =>
 			state._tag === "Idle"
 				? {
 						_tag: "Running" as const,
-						turn: state.turn + 1,
+						turn: e.turn,
+						generation: e.generation,
 						open_model_request_id: null,
 						model_requests_started: 0,
 						pending_user_messages: 0,
@@ -448,8 +525,10 @@ export class Session extends Domain.Aggregate("Session", {
 						open_model_request_id: null,
 					}
 				: state,
-		"session.status_idle": (state) =>
-			state._tag === "Running" ? { _tag: "Idle" as const, turn: state.turn } : state,
+		"session.status_idle": (state, e) =>
+			state._tag === "Running"
+				? { _tag: "Idle" as const, turn: e.turn, generation: e.generation }
+				: state,
 		"session.error": (state) => state,
 		"turn.abandoned": (state) => state,
 		"session.status_terminated": (state) =>

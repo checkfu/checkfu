@@ -20,7 +20,7 @@ export const TurnInputState = Schema.Struct({
 export type TurnInputState = typeof TurnInputState.Type
 
 export class TurnInput extends Domain.View("TurnInput", {
-	version: 1,
+	version: 2,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(TurnInputState),
@@ -55,23 +55,18 @@ export class TurnInput extends Domain.View("TurnInput", {
 							...e.content.map((block) => block.text).filter((text) => text.length > 0),
 						],
 					},
-		"session.status_running": (state) =>
+		"session.status_running": (state, e) =>
 			state === null
 				? null
 				: {
 						...state,
-						turn: state.turn + 1,
+						turn: e.turn,
+						harness_generation: e.generation,
 						input: state.unsent,
 						unsent: [],
 					},
-		"session.status_idle": (state) => (state === null ? null : { ...state, input: [] }),
-		// A retained Pi conversation still contains the full answer. Rebuild from the published text.
-		"agent.message": (state, event) =>
-			state !== null && event.truncated === true
-				? { ...state, harness_generation: state.harness_generation + 1 }
-				: state,
-		"turn.abandoned": (state) =>
-			state === null ? state : { ...state, harness_generation: state.harness_generation + 1 },
+		"session.status_idle": (state, e) =>
+			state === null ? null : { ...state, harness_generation: e.generation, input: [] },
 		"session.status_terminated": (state) =>
 			state === null ? null : { ...state, input: [], unsent: [] },
 	},

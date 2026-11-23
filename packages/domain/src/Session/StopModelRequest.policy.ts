@@ -30,9 +30,8 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 			if (state === null || state.turn === 0) {
 				return
 			}
-			// TurnInput advances the generation when it projects the abandonment.
 			const generation =
-				event._tag === "turn.abandoned" ? state.harness_generation - 1 : state.harness_generation
+				event._tag === "turn.abandoned" ? event.generation : state.harness_generation
 			const interrupt = provider.interrupt({ session_id: source.id, turn: state.turn, generation })
 			if (event._tag === "user.interrupt") {
 				yield* interrupt.pipe(
