@@ -1,6 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
+import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -24,6 +25,10 @@ const bullets = (problems: ReadonlyArray<string>) =>
 const cut = Command.make(
 	"cut",
 	{
+		check: Flag.Boolean("check").pipe(
+			Flag.withDefault(false),
+			Flag.withDescription("Report whether a new baseline is needed without writing one"),
+		),
 		label: Argument.String("label").pipe(
 			Argument.withDescription("Name of the baseline (defaults to the current UTC time)"),
 			Argument.optional,
@@ -48,10 +53,17 @@ const cut = Command.make(
 			}
 
 			const lock = yield* readLockFile
+			const blockers = yield* shipBlockers(lock)
 			const latest = lock.baselines.at(-1)
-			if (latest !== undefined && (yield* shipBlockers(lock)).length === 0) {
+			if (latest !== undefined && blockers.length === 0) {
 				yield* Console.log(`No persisted shape changed since "${latest.label}"; nothing to cut.`)
 				return
+			}
+
+			if (input.check) {
+				return yield* new PersistedLockError({
+					message: `${bullets(blockers)}\nRun \`bun run persisted:cut\`, commit Persisted.lock.json, then deploy.`,
+				})
 			}
 
 			const unreadable = yield* lockProblems(lock)
