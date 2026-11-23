@@ -159,14 +159,7 @@ export const SETTLED_USAGE_DOC_VERSION = 1 as const
 export const SettledUsageState = ModelUsage
 export type SettledUsageState = typeof SettledUsageState.Type
 
-export const SEED_STATE_DOC_VERSION = 1 as const
-export const SeedStateValue = Schema.Struct({
-	rebuildRequired: Schema.Boolean,
-	seededByOperation: Schema.NullOr(Schema.String),
-})
-export type SeedStateValue = typeof SeedStateValue.Type
-
-// Each Pi object hosts one generation of a Checkfu session. Only one submission
+// Each Pi object hosts one Checkfu session. Only one submission
 // can accrue usage at a time, including any blocking compaction or retry.
 export const ActiveUsage = registerPiDoc<ActiveUsageState>(
 	{ schema: ActiveUsageState },
@@ -192,23 +185,6 @@ export const SettledUsage = registerPiDocFamily<SettledUsageState, SettledUsageS
 		scope: "session",
 		family: true,
 		initial: (usage: SettledUsageState): SettledUsageState => ({ ...usage }),
-	},
-)
-
-// Marks a root initialized from a trimmed recovery seed (e.g. when a large prompt
-// exhausted the seed budget) so the next turn rebuilds full history if the recovery
-// turn does not commit a reply.
-export const SeedState = registerPiDoc<SeedStateValue>(
-	{ schema: SeedStateValue },
-	{
-		kind: "checkfu.seed-state",
-		version: SEED_STATE_DOC_VERSION,
-		checkpointWhen: () => true,
-		scope: "session",
-		initial: (): SeedStateValue => ({
-			rebuildRequired: false,
-			seededByOperation: null,
-		}),
 	},
 )
 

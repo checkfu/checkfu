@@ -95,7 +95,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"command-reply:Checkfu/ClaimIdempotencyKey",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
-						"pi-doc:checkfu.seed-state",
 					]),
 				)
 			}),

@@ -14,17 +14,11 @@ import {
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
 	readUnansweredSubmissionFromStorage,
-	rebuildRootInStorage,
 	restoreRefusalEntryInStorage,
 } from "../../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry, rejectRefusalCompactions } from "../../src/Pi/PiRefusals.ts"
-import {
-	CHECKFU_PI_DOCS,
-	beginTurnUsage,
-	clearSeedRebuild,
-	settleTurnUsage,
-} from "../../src/Pi/PiTurnUsage.ts"
+import { CHECKFU_PI_DOCS, beginTurnUsage, settleTurnUsage } from "../../src/Pi/PiTurnUsage.ts"
 
 export interface InMemoryEntryScanCall {
 	readonly minEntryId?: number
@@ -34,12 +28,14 @@ export interface InMemoryEntryScanCall {
 }
 
 export interface InMemoryPiDurableBackend extends PiDurableBackend {
-	readonly storage: Storage
+	readonly storage: InMemoryStorage
 	readonly countEntries: () => Promise<number>
 	readonly getScanEntryCalls: () => ReadonlyArray<InMemoryEntryScanCall>
 	readonly clearScanEntryCalls: () => void
 	readonly close: () => Promise<void>
 }
+
+export type InMemoryStorage = InstrumentedMemoryStorage
 
 class InstrumentedMemoryStorage extends MemoryStorage {
 	readonly scanEntryCalls: Array<InMemoryEntryScanCall> = []
@@ -93,8 +89,13 @@ export const createInMemoryPiDurableBackend = async (
 	retryBaseDelayMs = 1,
 	registry = createCheckfuRegistry(),
 	hasApiKey: PiDurableBackend["hasApiKey"] = () => true,
+	object: {
+		/** Reopen Pi over another backend's storage, as a reset Durable Object does. */
+		readonly storage?: InMemoryStorage
+		readonly reset?: PiDurableBackend["reset"]
+	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
-	const storage = new InstrumentedMemoryStorage()
+	const storage = object.storage ?? new InstrumentedMemoryStorage()
 	const { scanEntryCalls } = storage
 	const cancelledOps = new Set<string>()
 	const lock = Semaphore.makeUnsafe(1)
@@ -120,27 +121,22 @@ export const createInMemoryPiDurableBackend = async (
 		storage,
 		withLock,
 		hasApiKey,
+		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
 		isCancelled: (operationId) => cancelledOps.has(operationId),
-		beginUsage: (operationId, finalizedPrevious, hasSeed) =>
-			beginTurnUsage(pi, operationId, finalizedPrevious, hasSeed),
+		beginUsage: (operationId, finalizedPrevious) =>
+			beginTurnUsage(pi, operationId, finalizedPrevious),
 		settleUsage: (operationId) => settleTurnUsage(pi, operationId),
 		hasSubmission: async (operationId) =>
 			(await storage.submissionByRequest(ROOT_CONVERSATION_ID, operationId, BACKGROUND_CONTEXT)) !==
 			undefined,
-		ensureRoot: async (agent, create) => {
+		ensureRoot: async (agent) => {
 			const existing = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-			if (existing !== undefined) {
+			if (existing === undefined) {
+				await pi.root(BACKGROUND_CONTEXT, { agent })
+			} else {
 				await existing.configure(agent, BACKGROUND_CONTEXT)
-				return true
 			}
-			if (create === false) {
-				return false
-			}
-			await pi.root(BACKGROUND_CONTEXT, create === true ? { agent } : { agent, init: create })
-			return true
 		},
-		rebuildRoot: (agent, request, seed) => rebuildRootInStorage(pi, agent, request, seed),
-		markSeedCommitted: () => clearSeedRebuild(pi),
 		submit: async (text, operationId) => {
 			const conversation = await pi.root(BACKGROUND_CONTEXT)
 			await conversation.submit(

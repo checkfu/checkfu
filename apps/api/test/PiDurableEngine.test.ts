@@ -22,9 +22,9 @@ import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { createPiHarnessSettings } from "../src/Pi/PiContextBudget.ts"
-import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import { AbortGrace, recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnRequest, PiTurnResult } from "../src/Pi/PiTurn.ts"
+import type { PiTurnOutcome, PiTurnRequest } from "../src/Pi/PiTurn.ts"
 import {
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
@@ -57,6 +57,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import type { InMemoryPiDurableBackend, InMemoryStorage } from "./helpers/InMemoryPiBackend.ts"
 
 describe("PiDurableEngine storage, compaction, and provider error classification", () => {
 	it("supports OpenAI + Anthropic only and surfaces missing_api_key_error / unknown_model_error", async () => {
@@ -803,10 +804,10 @@ describe("turn engine", () => {
 			})
 			const slowRoot: PiDurableBackend = {
 				...backend,
-				ensureRoot: async (agent, create) => {
+				ensureRoot: async (agent) => {
 					admitting()
 					await gate
-					return backend.ensureRoot(agent, create)
+					return backend.ensureRoot(agent)
 				},
 			}
 			await Effect.runPromise(
@@ -867,8 +868,8 @@ describe("turn engine", () => {
 				createRegistry(),
 			)
 			try {
-				let turn1: PiTurnResult | undefined
-				let turn1Replay: PiTurnResult | undefined
+				let turn1: PiTurnOutcome | undefined
+				let turn1Replay: PiTurnOutcome | undefined
 				if (mode === "replay") {
 					turn1 = await Effect.runPromise(
 						runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
@@ -1022,7 +1023,7 @@ describe("turn engine", () => {
 				createRegistry(),
 			)
 			try {
-				let turn1: PiTurnResult | undefined
+				let turn1: PiTurnOutcome | undefined
 				if (mode === "replay") {
 					turn1 = await Effect.runPromise(
 						runPiDurableTurn(backend, turnRequest(1, "filtered prompt")),
@@ -1832,13 +1833,10 @@ describe("turn engine", () => {
 		)
 		const backend = {
 			...rawBackend,
-			ensureRoot: async (
-				agent: Parameters<typeof rawBackend.ensureRoot>[0],
-				create: Parameters<typeof rawBackend.ensureRoot>[1],
-			) => {
+			ensureRoot: async (agent: Parameters<typeof rawBackend.ensureRoot>[0]) => {
 				markEnteredEnsureRoot()
 				await holdLockStep
-				return rawBackend.ensureRoot(agent, create)
+				return rawBackend.ensureRoot(agent)
 			},
 		}
 
@@ -1989,6 +1987,7 @@ describe("turn engine", () => {
 			{} as unknown as Parameters<typeof makePiHarnessBackend>[1],
 			{} as unknown as Parameters<typeof makePiHarnessBackend>[2],
 			{ openai: Redacted.make("sk-test"), anthropic: null },
+			() => undefined,
 		)
 		expect(backend.hasApiKey("openai")).toBe(true)
 		expect(backend.hasApiKey("anthropic")).toBe(false)
@@ -2012,6 +2011,7 @@ describe("turn engine", () => {
 				isCancelled: (operationId: string) => cancelled.has(operationId),
 			} as unknown as Parameters<typeof makePiHarnessBackend>[2],
 			{ openai: null, anthropic: null },
+			() => undefined,
 		)
 		let markSubmitHeld!: () => void
 		const submitHeld = new Promise<void>((resolve) => {
@@ -2300,4 +2300,70 @@ describe("turn engine", () => {
 		const defaults = createPiModels({ openai: null, anthropic: null })
 		expect(defaults.getModel("openai", "gpt-4o-mini")?.baseUrl).toBe(DEFAULT_OPENAI_BASE_URL)
 	})
+
+	it("resets a session object whose stuck turn ignores abort, and runs the next turn once it reopens", async () => {
+		const prompts: Array<string> = []
+		const models = makeScriptedPiModels((model, context) => {
+			const prompt = extractLastUserText(context)
+			prompts.push(prompt)
+			return prompt === "hang"
+				? new Promise<AssistantMessage>(() => {
+						// Never settles and ignores its abort signal.
+					})
+				: Promise.resolve(makeAssistantReply(model, null, `Echo: ${prompt}`, 1, 1))
+		})
+		let resets = 0
+		let object: InMemoryPiDurableBackend
+		const open = (storage?: InMemoryStorage): Promise<InMemoryPiDurableBackend> =>
+			createInMemoryPiDurableBackend(models, 1, undefined, undefined, {
+				...(storage === undefined ? {} : { storage }),
+				reset: Effect.andThen(
+					Effect.promise(async () => {
+						resets += 1
+						object = await open(object.storage)
+					}),
+					Effect.die(new Error("The Pi session object was reset")),
+				),
+			})
+		const turn = (number: number, text: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+		})
+		const runNext = () =>
+			Effect.runPromiseExit(
+				runPiDurableTurn(object, turn(2, "next")).pipe(
+					Effect.provideService(AbortGrace, "30 millis"),
+				),
+			)
+
+		object = await open()
+		void Effect.runPromiseExit(runPiDurableTurn(object, turn(1, "hang")))
+		while (prompts.length === 0) {
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 5)
+			})
+		}
+
+		// The abandoned turn never stops, so the next turn's abort runs out of grace and resets.
+		expect(Exit.isFailure(await runNext())).toBe(true)
+		expect(resets).toBe(1)
+
+		// Reopened over the same storage, Pi has the abort on record: it settles the stuck
+		// turn without calling the model again, and the next turn runs.
+		const next = await runNext()
+		expect(Exit.isSuccess(next) && next.value).toMatchObject({
+			ok: true,
+			reply: { text: "Echo: next" },
+		})
+		expect(resets).toBe(1)
+		expect(prompts).toEqual(["hang", "next"])
+		expect(await Effect.runPromise(recoverPiDurableTurn(object, "turn:1"))).toMatchObject({
+			ok: false,
+			error: { _tag: "TurnInterrupted" },
+		})
+	}, 20_000)
 })

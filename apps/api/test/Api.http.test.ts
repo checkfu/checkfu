@@ -487,8 +487,8 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
-	it("enforces body size limits and rejects a turn with no admitted user message or unseen history", async () => {
-		const { layer, closeAll, requests } = makePiDurableTestLayer(async (model) =>
+	it("enforces body size limits and rejects a turn with no admitted user message", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "unused", 1, 1),
 		)
 		try {
@@ -541,22 +541,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					)
 					expect(providerError(emptyTurnErr).error_type).toBe("invalid_turn_input")
 					expect(providerError(emptyTurnErr).terminal).toBe(false)
-
-					const session = yield* createIdleSession(apiFetch)
-					const unseenTurnErr = yield* Effect.flip(
-						provider.runTurn({
-							session_id: SessionId.make(session.id),
-							agent_id: okAgent.id,
-							agent_version: 1,
-							environment_id: session.environment_id,
-							turn: 3,
-							generation: 0,
-							input: ["a turn the event log has not reached"],
-						}),
-					)
-					expect(providerError(unseenTurnErr).error_type).toBe("session_history_unavailable")
-					expect(providerError(unseenTurnErr).terminal).toBe(false)
-					expect(requests.map((request) => request.seed)).toEqual([undefined])
 				}).pipe(
 					Effect.scoped,
 					Effect.provide(

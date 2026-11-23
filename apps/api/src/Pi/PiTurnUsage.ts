@@ -7,10 +7,7 @@ import {
 	ActiveUsage,
 	ActiveUsageState,
 	CHECKFU_PI_DOCS,
-	SEED_STATE_DOC_VERSION,
 	SETTLED_USAGE_DOC_VERSION,
-	SeedState,
-	SeedStateValue,
 	SettledUsage,
 	SettledUsageState,
 } from "./PiDocRegistry.ts"
@@ -22,24 +19,9 @@ export {
 	ActiveUsageState,
 	CHECKFU_PI_DOCS,
 	type CheckfuPiDocSpec,
-	SEED_STATE_DOC_VERSION,
 	SETTLED_USAGE_DOC_VERSION,
-	SeedState,
-	SeedStateValue,
 	SettledUsage,
 	SettledUsageState,
-}
-
-export const clearSeedRebuild = async (pi: Harness): Promise<void> => {
-	const current = await pi.snapshot(SeedState, BACKGROUND_CONTEXT)
-	if (current?.rebuildRequired !== true) {
-		return
-	}
-	await pi.commit(async (tx) => {
-		const seedState = await tx.doc(SeedState)
-		seedState.rebuildRequired = false
-		seedState.seededByOperation = null
-	}, BACKGROUND_CONTEXT)
 }
 
 const totalUsage = async (tx: Tx): Promise<ModelUsage> => {
@@ -65,18 +47,14 @@ export type BeginTurnUsageResult =
 	| { readonly status: "ready" }
 	| { readonly status: "waiting"; readonly operationId: string }
 	| { readonly status: "finalize"; readonly operationId: string }
-	| { readonly status: "history_required" }
-	| { readonly status: "rebuild" }
 
 // If a different operation is still working, wait for it outside the admission lock.
 // If it settled after losing its RPC waiter, finalize its context cleanup before
-// sealing its usage, checking whether a trimmed recovery root needs rebuilding, and
-// admitting a successor.
+// sealing its usage and admitting a successor.
 export const beginTurnUsage = (
 	pi: Harness,
 	operation: string,
 	finalizedPrevious?: string,
-	hasSeed = false,
 ): Promise<BeginTurnUsageResult> =>
 	pi.commit(async (tx) => {
 		const active = await tx.doc(ActiveUsage)
@@ -104,11 +82,6 @@ export const beginTurnUsage = (
 		const total = await totalUsage(tx)
 		if (previousOperation !== null && previous !== undefined) {
 			await closeUsage(tx, previousOperation, active, total)
-		}
-		active.operation = null
-		const seedState = await tx.doc(SeedState)
-		if (seedState.rebuildRequired && seedState.seededByOperation !== operation) {
-			return hasSeed ? { status: "rebuild" as const } : { status: "history_required" as const }
 		}
 		active.operation = operation
 		active.input_tokens = total.input_tokens

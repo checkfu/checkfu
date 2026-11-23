@@ -3,19 +3,6 @@ import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
-export const PiSeedMessage = Schema.Struct({
-	role: Schema.Literals(["user", "assistant"]),
-	text: Schema.String,
-})
-export type PiSeedMessage = typeof PiSeedMessage.Type
-
-export const PiSeed = Schema.Struct({
-	api: Schema.String,
-	messages: Schema.Array(PiSeedMessage),
-	trimmed: Schema.optionalKey(Schema.Boolean),
-})
-export type PiSeed = typeof PiSeed.Type
-
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
 	turn: Schema.Finite,
@@ -23,7 +10,6 @@ export const PiTurnRequest = Schema.Struct({
 	modelId: Schema.String,
 	system: Schema.NullOr(Schema.String),
 	text: Schema.String,
-	seed: Schema.optionalKey(PiSeed),
 })
 export type PiTurnRequest = typeof PiTurnRequest.Type
 
@@ -52,15 +38,12 @@ export const PiTurnOutcome = Schema.Union([
 ])
 export type PiTurnOutcome = typeof PiTurnOutcome.Type
 
-export const PiTurnResult = Schema.Union([PiTurnOutcome, Schema.Literal("history_required")])
-export type PiTurnResult = typeof PiTurnResult.Type
-
 export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
 
 // Every method the harness Worker serves, as its argument tuple and its result. The RPC type
 // and the persisted lock are both derived from this, so neither can describe a different call.
 export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
-	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnResult },
+	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 } as const

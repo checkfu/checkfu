@@ -7,11 +7,11 @@ import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { createPiHarnessSettings } from "./PiContextBudget.ts"
 import {
+	abortPiDurableTurn,
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
 	readUnansweredSubmissionFromStorage,
-	rebuildRootInStorage,
 	recoverPiDurableTurn,
 	restoreRefusalEntryInStorage,
 	runPiDurableTurn,
@@ -19,8 +19,8 @@ import {
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
 import { createCheckfuRegistry, rejectRefusalCompactions } from "./PiRefusals.ts"
-import type { PiTurnOutcome, PiTurnRequest, PiTurnResult } from "./PiTurn.ts"
-import { beginTurnUsage, clearSeedRebuild, settleTurnUsage } from "./PiTurnUsage.ts"
+import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
 type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
@@ -37,6 +37,7 @@ export const makePiHarnessBackend = (
 	harness: PiHarness,
 	fence: SqliteTurnFence,
 	apiKeys: Effect.Success<typeof providerApiKeys>,
+	reset: () => void,
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
@@ -45,9 +46,10 @@ export const makePiHarnessBackend = (
 	return {
 		withLock,
 		hasApiKey: (provider) => apiKeys[provider] !== null,
+		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
-		beginUsage: async (operationId, finalizedPrevious, hasSeed) =>
-			beginTurnUsage(await harness.pi(), operationId, finalizedPrevious, hasSeed),
+		beginUsage: async (operationId, finalizedPrevious) =>
+			beginTurnUsage(await harness.pi(), operationId, finalizedPrevious),
 		settleUsage: async (operationId) => settleTurnUsage(await harness.pi(), operationId),
 		hasSubmission: async (operationId) => {
 			await lifecycle.start()
@@ -60,28 +62,15 @@ export const makePiHarnessBackend = (
 				)) !== undefined
 			)
 		},
-		ensureRoot: async (agent, create) => {
+		ensureRoot: async (agent) => {
 			await lifecycle.start()
 			const pi = await harness.pi()
 			const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-			if (conversation !== undefined) {
+			if (conversation === undefined) {
+				await harness.root({ agent })
+			} else {
 				await conversation.configure(agent, BACKGROUND_CONTEXT)
-				return true
 			}
-			if (create === false) {
-				return false
-			}
-			await harness.root(create === true ? { agent } : { agent, init: create })
-			return true
-		},
-		rebuildRoot: async (agent, request, seed) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			await rebuildRootInStorage(pi, agent, request, seed)
-		},
-		markSeedCommitted: async () => {
-			await lifecycle.start()
-			await clearSeedRebuild(await harness.pi())
 		},
 		submit: async (text, operationId) => {
 			await lifecycle.start()
@@ -148,7 +137,7 @@ export const makePiHarnessBackend = (
 export interface PiSessionShape {
 	readonly alarm: (info?: Cloudflare.AlarmInvocationInfo) => Effect.Effect<void>
 	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
-	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnResult>
+	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnOutcome>
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
 }
 
@@ -191,13 +180,15 @@ export const PiSessionLive = PiSession.make(
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 					transaction: (run) => rawCtx.storage.transactionSync(run),
 				})
-				const backend = makePiHarnessBackend(lifecycle, harness, fence, apiKeys)
+				const backend = makePiHarnessBackend(lifecycle, harness, fence, apiKeys, () => {
+					rawCtx.abort("A turn did not stop when aborted")
+				})
 
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
 					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
 					runTurn: (request) => runPiDurableTurn(backend, request),
-					abortTurn: (operationId) => backend.abort(operationId),
+					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
 				}
 			}),
 	),

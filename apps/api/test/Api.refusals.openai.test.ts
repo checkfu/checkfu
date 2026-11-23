@@ -12,7 +12,7 @@ import * as Redacted from "effect/Redacted"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnResult } from "../src/Pi/PiTurn.ts"
+import type { PiTurnOutcome } from "../src/Pi/PiTurn.ts"
 import {
 	AgentVersionLookupTimeout,
 	PiDurableHarnessLive,
@@ -1081,7 +1081,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
 			// Run turns on gpt-4 (8,192 context window) until blocking compaction triggers.
-			let failedTurn: PiTurnResult | undefined
+			let failedTurn: PiTurnOutcome | undefined
 			for (let turn = 1; turn <= 4; turn++) {
 				const result = await Effect.runPromise(
 					runPiDurableTurn(backend, {
@@ -1093,7 +1093,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 						text: `preserved-turn-${turn}: ${"u".repeat(6000)}`,
 					}),
 				)
-				if (result !== "history_required" && !result.ok) {
+				if (!result.ok) {
 					failedTurn = result
 					break
 				}
