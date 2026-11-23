@@ -31,9 +31,21 @@ const hasImplicitCwdDotenv = (): boolean => {
 	return candidates.some((name) => existsSync(join(cwd, name)))
 }
 
+const hasExplicitBunConfig = (execArgv: ReadonlyArray<string>): boolean =>
+	execArgv.some((arg) => arg.startsWith("--config=") && arg.length > "--config=".length)
+
+const hasImplicitCwdBunfig = (): boolean => existsSync(join(process.cwd(), "bunfig.toml"))
+
 if (!process.execArgv.includes("--no-env-file") && hasImplicitCwdDotenv()) {
 	process.stderr.write(
-		"Error: Refusing to run with implicit Bun .env autoloading while .env file(s) exist in the working directory. Run with: bun --no-env-file apps/cli/src/main.ts ...\n",
+		"Error: Refusing to run with implicit Bun .env autoloading while .env file(s) exist in the working directory. Run with: bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts ...\n",
+	)
+	process.exit(1)
+}
+
+if (!hasExplicitBunConfig(process.execArgv) && hasImplicitCwdBunfig()) {
+	process.stderr.write(
+		"Error: Refusing to run with implicit working-directory bunfig.toml loading. Run with: bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts ...\n",
 	)
 	process.exit(1)
 }

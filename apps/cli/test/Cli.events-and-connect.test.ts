@@ -1704,18 +1704,97 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sessionGetCount).toBe(4)
 					expect(archiveLookupRes.stderr.length).toBeGreaterThan(0)
 
-					// 6) Ended session replay with an open piped stdin (Stream.never) completes immediately
-					//    without hanging waiting for stdin EOF
-					const openStdinRes = yield* archiveLookupCli.run(
+					// 6) Ended session replay with a quiet stdin pipe waits for EOF, /exit, or actual
+					//    input instead of treating quietness after replay as EOF
+					const endedEncoder = new TextEncoder()
+					const replayFinishedForInput = yield* Deferred.make<void>()
+					const lateInputRes = yield* archiveLookupCli.run(
 						["--format", "jsonl", "sessions", "connect", "--session-id", archiveLookupSessionId],
-						{ stdin: Stream.never },
+						{
+							onStdoutChunk: (chunk) =>
+								chunk.includes("session.archived")
+									? Deferred.succeed(replayFinishedForInput, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							stdin: Stream.fromEffect(
+								Deferred.await(replayFinishedForInput).pipe(
+									Effect.andThen(Effect.sleep("40 millis")),
+									Effect.as(endedEncoder.encode("message arriving after replay\n")),
+								),
+							),
+						},
 					)
-					expect(openStdinRes.exitCode).toBe(0)
-					const openStdinTypes = openStdinRes.stdout
+					expect(lateInputRes.exitCode).toBe(1)
+					expect(lateInputRes.stderr).toContain(
+						`Cannot send input: session ${archiveLookupSessionId} is already archived.`,
+					)
+
+					const replayFinishedForPartial = yield* Deferred.make<void>()
+					const latePartialRes = yield* archiveLookupCli.run(
+						["--format", "jsonl", "sessions", "connect", "--session-id", archiveLookupSessionId],
+						{
+							onStdoutChunk: (chunk) =>
+								chunk.includes("session.archived")
+									? Deferred.succeed(replayFinishedForPartial, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							stdin: Stream.concat(
+								Stream.fromEffect(
+									Deferred.await(replayFinishedForPartial).pipe(
+										Effect.andThen(Effect.sleep("40 millis")),
+										Effect.as(endedEncoder.encode("partial after replay without newline")),
+									),
+								),
+								Stream.never,
+							),
+						},
+					)
+					expect(latePartialRes.exitCode).toBe(1)
+					expect(latePartialRes.stderr).toContain(
+						`Cannot send input: session ${archiveLookupSessionId} is already archived.`,
+					)
+
+					const replayFinishedForEof = yield* Deferred.make<void>()
+					const delayedEofRes = yield* archiveLookupCli.run(
+						["--format", "jsonl", "sessions", "connect", "--session-id", archiveLookupSessionId],
+						{
+							onStdoutChunk: (chunk) =>
+								chunk.includes("session.archived")
+									? Deferred.succeed(replayFinishedForEof, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							stdin: Stream.unwrap(
+								Deferred.await(replayFinishedForEof).pipe(
+									Effect.andThen(Effect.sleep("40 millis")),
+									Effect.as(Stream.empty),
+								),
+							),
+						},
+					)
+					expect(delayedEofRes.exitCode).toBe(0)
+					const delayedEofTypes = delayedEofRes.stdout
 						.trim()
 						.split("\n")
 						.map((line) => (JSON.parse(line) as { type: string }).type)
-					expect(openStdinTypes).toContain("session.archived")
+					expect(delayedEofTypes).toContain("session.archived")
+
+					const replayFinishedForExit = yield* Deferred.make<void>()
+					const delayedExitRes = yield* archiveLookupCli.run(
+						["--format", "jsonl", "sessions", "connect", "--session-id", archiveLookupSessionId],
+						{
+							onStdoutChunk: (chunk) =>
+								chunk.includes("session.archived")
+									? Deferred.succeed(replayFinishedForExit, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							stdin: Stream.concat(
+								Stream.fromEffect(
+									Deferred.await(replayFinishedForExit).pipe(
+										Effect.andThen(Effect.sleep("40 millis")),
+										Effect.as(endedEncoder.encode("/exit\n")),
+									),
+								),
+								Stream.never,
+							),
+						},
+					)
+					expect(delayedExitRes.exitCode).toBe(0)
 
 					// 7) Message receipts with empty data, missing type, mismatched type, or missing numeric turn
 					//    fail as unconfirmed delivery with the generated Idempotency-Key
@@ -1978,6 +2057,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		// 3) Real Bun subprocess running src/main.ts exits cleanly with code 0 on /exit\n even
 		//    while the parent keeps stdin open, and reports path-segment errors on stderr
 		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
+		const bunfigPath = fileURLToPath(new URL("../bunfig.toml", import.meta.url))
 		const openSseResponses: Array<Http.ServerResponse> = []
 		let redirectTargetGetHits = 0
 		const server = Http.createServer((req, res) => {
@@ -2059,6 +2139,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					"bun",
 					[
 						"--no-env-file",
+						`--config=${bunfigPath}`,
 						mainPath,
 						"sessions",
 						"connect",
@@ -2109,6 +2190,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					"bun",
 					[
 						"--no-env-file",
+						`--config=${bunfigPath}`,
 						mainPath,
 						"agents",
 						"retrieve",
@@ -2149,6 +2231,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					"bun",
 					[
 						"--no-env-file",
+						`--config=${bunfigPath}`,
 						mainPath,
 						"agents",
 						"update",
@@ -2604,18 +2687,39 @@ describe("CLI sessions:events and sessions connect", () => {
 						(yield* cli.run(["sessions", "archive", "--session-id", endedSessionId])).exitCode,
 					).toBe(0)
 
-					for (const buffered of ["hello", "/ex"]) {
-						const [elapsed, bufferedRes] = yield* Effect.timed(
-							cli.run(["sessions", "connect", "--session-id", endedSessionId], {
-								stdin: Stream.concat(Stream.make(encoder.encode(buffered)), Stream.never),
-							}),
-						)
-						expect(bufferedRes.exitCode).toBe(1)
-						expect(Duration.toMillis(elapsed)).toBeLessThan(1_000)
-						expect(bufferedRes.stderr).toContain(
-							`Cannot send input: session ${endedSessionId} is already archived.`,
-						)
-					}
+					const [helloElapsed, helloRes] = yield* Effect.timed(
+						cli.run(["sessions", "connect", "--session-id", endedSessionId], {
+							stdin: Stream.concat(Stream.make(encoder.encode("hello")), Stream.never),
+						}),
+					)
+					expect(helloRes.exitCode).toBe(1)
+					expect(Duration.toMillis(helloElapsed)).toBeLessThan(1_000)
+					expect(helloRes.stderr).toContain(
+						`Cannot send input: session ${endedSessionId} is already archived.`,
+					)
+
+					const partialPrefixEofRes = yield* cli.run(
+						["sessions", "connect", "--session-id", endedSessionId],
+						{ stdin: "/ex" },
+					)
+					expect(partialPrefixEofRes.exitCode).toBe(1)
+					expect(partialPrefixEofRes.stderr).toContain(
+						`Cannot send input: session ${endedSessionId} is already archived.`,
+					)
+
+					const [divergedElapsed, divergedPrefixRes] = yield* Effect.timed(
+						cli.run(["sessions", "connect", "--session-id", endedSessionId], {
+							stdin: Stream.concat(
+								Stream.make(encoder.encode("/ex")),
+								Stream.concat(Stream.make(encoder.encode("tra")), Stream.never),
+							),
+						}),
+					)
+					expect(divergedPrefixRes.exitCode).toBe(1)
+					expect(Duration.toMillis(divergedElapsed)).toBeLessThan(1_000)
+					expect(divergedPrefixRes.stderr).toContain(
+						`Cannot send input: session ${endedSessionId} is already archived.`,
+					)
 
 					// Chunked /exit\n and /exit\n followed by trailing partial text in the same chunk exit 0
 					const chunkedExitRes = yield* cli.run(
@@ -2715,10 +2819,16 @@ describe("CLI sessions:events and sessions connect", () => {
 			readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 		) as { readonly bin?: Record<string, string> }
 		const bunLock = readFileSync(new URL("../../../bun.lock", import.meta.url), "utf8")
-		expect(readme).toContain("bun --no-env-file apps/cli/src/main.ts --help")
+		const binScript = readFileSync(new URL("../bin/checkfu", import.meta.url), "utf8")
+		const cliBunfig = readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")
+		expect(readme).toContain(
+			"bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts --help",
+		)
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
 		expect(cliPkg.bin?.["checkfu"]).toBe("./bin/checkfu")
+		expect(binScript).toContain('--no-env-file --config="$SCRIPT_DIR/../bunfig.toml"')
+		expect(cliBunfig).toContain("preload = []")
 		expect(bunLock).toMatch(
 			/"apps\/cli":\s*\{[\s\S]*?"bin":\s*\{\s*"checkfu":\s*"\.\/bin\/checkfu",?\s*\}/,
 		)
@@ -2799,7 +2909,7 @@ def setup_ctty():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-cmd = ["bun", "--no-env-file", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+cmd = ["bun", "--no-env-file", "--config=apps/cli/bunfig.toml", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
 p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
 os.close(slave)
 
@@ -3887,9 +3997,11 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		)
 	})
 
-	it("keeps API key destination independent of cwd .env, skips replayed SSE sequence numbers, and rechecks lagging running snapshots", async () => {
-		// 1) Untrusted working directory .env / .env.local must NEVER hijack CHECKFU_API_URL / CHECKFU_URL
+	it("keeps API key destination independent of cwd .env and bunfig.toml, skips replayed SSE sequence numbers, and rechecks lagging running snapshots", async () => {
+		// 1) Untrusted working directory .env / .env.local AND bunfig.toml preloads must NEVER
+		//    hijack CHECKFU_API_URL / CHECKFU_URL or execute project-controlled code
 		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
+		const bunfigPath = fileURLToPath(new URL("../bunfig.toml", import.meta.url))
 		const binPath = fileURLToPath(new URL("../bin/checkfu", import.meta.url))
 		let evilHits = 0
 		let legitHits = 0
@@ -3934,11 +4046,18 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 			new Promise<void>((resolve) => legitServer.listen(0, "127.0.0.1", resolve)),
 		])
 		const untrustedDir = mkdtempSync(join(tmpdir(), "checkfu-untrusted-cwd-"))
+		const bunfigOnlyDir = mkdtempSync(join(tmpdir(), "checkfu-bunfig-only-cwd-"))
 		try {
 			const evilPort = (evilServer.address() as { port: number }).port
 			const legitPort = (legitServer.address() as { port: number }).port
 			writeFileSync(join(untrustedDir, ".env"), `CHECKFU_API_URL=http://127.0.0.1:${evilPort}\n`)
 			writeFileSync(join(untrustedDir, ".env.local"), `CHECKFU_URL=http://127.0.0.1:${evilPort}\n`)
+			writeFileSync(
+				join(untrustedDir, "evil-preload.js"),
+				'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
+			)
+			writeFileSync(join(untrustedDir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
+			writeFileSync(join(bunfigOnlyDir, "bunfig.toml"), "# untrusted cwd bunfig\n")
 			const baseEnv: Record<string, string> = {}
 			for (const [k, v] of Object.entries(process.env)) {
 				if (v !== undefined && !k.startsWith("CHECKFU_")) {
@@ -3950,6 +4069,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 				cmd: string,
 				args: ReadonlyArray<string>,
 				env: Record<string, string>,
+				cwd = untrustedDir,
 			) =>
 				new Promise<{
 					readonly status: number | null
@@ -3957,7 +4077,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					readonly stderr: string
 				}>((resolve, reject) => {
 					const child = spawn(cmd, [...args], {
-						cwd: untrustedDir,
+						cwd,
 						env,
 						stdio: ["ignore", "pipe", "pipe"],
 					})
@@ -3975,10 +4095,18 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					child.on("close", (status) => resolve({ status, stdout, stderr }))
 				})
 
-			// 1a) Documented launcher (`bun --no-env-file apps/cli/src/main.ts`) ignores cwd .env files
+			// 1a) Documented direct invocation ignores cwd .env files AND cwd bunfig.toml preloads
 			const noEnvDoc = await runSubprocess(
 				"bun",
-				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				[
+					"--no-env-file",
+					`--config=${bunfigPath}`,
+					mainPath,
+					"sessions",
+					"retrieve",
+					"--session-id",
+					"sess_env",
+				],
 				{
 					...baseEnv,
 					CHECKFU_API_KEY: "ck_exported_secret",
@@ -3986,25 +4114,35 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 				},
 			)
 			expect(noEnvDoc.status).toBe(0)
+			expect(noEnvDoc.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 
 			// 1b) Without an exported URL, documented launcher must NOT fall back to cwd .env's CHECKFU_API_URL
 			const noEnvDefault = await runSubprocess(
 				"bun",
-				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				[
+					"--no-env-file",
+					`--config=${bunfigPath}`,
+					mainPath,
+					"sessions",
+					"retrieve",
+					"--session-id",
+					"sess_env",
+				],
 				{
 					...baseEnv,
 					CHECKFU_API_KEY: "ck_exported_secret",
 				},
 			)
+			expect(noEnvDefault.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(evilHits).toBe(0)
 			expect(noEnvDefault.stdout).not.toContain('"sess_env"')
 
-			// 1c) Bare `bun apps/cli/src/main.ts` without `--no-env-file` fails closed when cwd has .env
+			// 1c) Bare `bun --config=... apps/cli/src/main.ts` without `--no-env-file` fails closed when cwd has .env
 			const bareLaunch = await runSubprocess(
 				"bun",
-				[mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				[`--config=${bunfigPath}`, mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
 				{
 					...baseEnv,
 					CHECKFU_API_KEY: "ck_exported_secret",
@@ -4014,22 +4152,38 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 			expect(bareLaunch.stderr).toContain("--no-env-file")
 			expect(evilHits).toBe(0)
 
-			// 1d) POSIX bin launcher (`apps/cli/bin/checkfu`) execs `bun --no-env-file` and ignores cwd .env
-			const binStatus =
+			// 1d) Direct invocation without `--config=...` fails closed when cwd has bunfig.toml
+			const unpinnedBunfigLaunch = await runSubprocess(
+				"bun",
+				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_API_KEY: "ck_exported_secret",
+					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+				},
+				bunfigOnlyDir,
+			)
+			expect(unpinnedBunfigLaunch.status).toBe(1)
+			expect(unpinnedBunfigLaunch.stderr).toContain("--config=")
+			expect(legitHits).toBe(1)
+
+			// 1e) POSIX bin launcher (`apps/cli/bin/checkfu`) pins --no-env-file and --config=...
+			//     and ignores both cwd .env and cwd bunfig.toml preloads
+			const binResult =
 				process.platform === "win32"
-					? 0
-					: (
-							await runSubprocess(binPath, ["sessions", "retrieve", "--session-id", "sess_env"], {
-								...baseEnv,
-								CHECKFU_API_KEY: "ck_exported_secret",
-								CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
-							})
-						).status
-			expect(binStatus).toBe(0)
+					? { status: 0, stdout: "", stderr: "" }
+					: await runSubprocess(binPath, ["sessions", "retrieve", "--session-id", "sess_env"], {
+							...baseEnv,
+							CHECKFU_API_KEY: "ck_exported_secret",
+							CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+						})
+			expect(binResult.status).toBe(0)
+			expect(binResult.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(legitHits).toBe(process.platform === "win32" ? 1 : 2)
 			expect(evilHits).toBe(0)
 		} finally {
 			rmSync(untrustedDir, { recursive: true, force: true })
+			rmSync(bunfigOnlyDir, { recursive: true, force: true })
 			await Promise.all([
 				new Promise<void>((resolve) => evilServer.close(() => resolve())),
 				new Promise<void>((resolve) => legitServer.close(() => resolve())),

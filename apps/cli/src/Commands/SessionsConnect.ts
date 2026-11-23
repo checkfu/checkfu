@@ -282,24 +282,21 @@ const isExitCommand = (trimmed: string): boolean => trimmed === "/exit" || trimm
 const isExitCommandPrefix = (trimmed: string): boolean =>
 	"/exit".startsWith(trimmed) || "/quit".startsWith(trimmed)
 
-const inspectEndedPipedStdin = (
-	stdio: Stdio.Stdio,
-	bufferedLineRef: Ref.Ref<string>,
-): Effect.Effect<EndedStdinSignal, CliFailure> =>
+const inspectEndedPipedStdin = (stdio: Stdio.Stdio): Effect.Effect<EndedStdinSignal, CliFailure> =>
 	Effect.gen(function* () {
 		const earlyInput = yield* Deferred.make<EndedStdinSignal>()
 		const readLines = Effect.gen(function* () {
 			let signal: EndedStdinSignal = { _tag: "eof" }
 			yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
-				onPendingAfterLines: (pending) =>
-					Effect.gen(function* () {
-						yield* Ref.set(bufferedLineRef, pending)
-						const trimmed = pending.trim()
-						if (trimmed.length > 0 && !isExitCommandPrefix(trimmed)) {
-							yield* Deferred.succeed(earlyInput, { _tag: "input", line: trimmed })
-						}
-					}),
-				onTrailingFlushed: () => Ref.set(bufferedLineRef, ""),
+				onPendingAfterLines: (pending) => {
+					const trimmed = pending.trim()
+					if (trimmed.length > 0 && !isExitCommandPrefix(trimmed)) {
+						return Deferred.succeed(earlyInput, { _tag: "input", line: trimmed }).pipe(
+							Effect.asVoid,
+						)
+					}
+					return Effect.void
+				},
 			}).pipe(
 				Stream.takeUntil((line) => line.trim().length > 0),
 				Stream.runForEach((line) =>
@@ -919,18 +916,16 @@ export const sessionsConnectCommand = Command.make(
 
 			const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())
 			const streamFailedRef = yield* Ref.make<CliFailure | null>(null)
+			const streamFailedDeferred = yield* Deferred.make<void>()
 			const incompleteTurnRef = yield* Ref.make<CliFailure | null>(null)
 			const failedTurnRef = yield* Ref.make<CliFailure | null>(null)
 			const streamEndedDeferred = yield* Deferred.make<void>()
 			const stopConnectDeferred = yield* Deferred.make<void>()
 			const expectArchivedEvent = session.archived_at !== null
-			const endedBufferedLineRef = yield* Ref.make("")
 
 			const stdinCheckFiber =
 				initiallyEnded && !isInteractiveTty
-					? yield* Effect.result(inspectEndedPipedStdin(stdio, endedBufferedLineRef)).pipe(
-							Effect.forkChild,
-						)
+					? yield* Effect.result(inspectEndedPipedStdin(stdio)).pipe(Effect.forkChild)
 					: undefined
 
 			const streamFiber = yield* client
@@ -951,6 +946,7 @@ export const sessionsConnectCommand = Command.make(
 					Effect.catch((err) =>
 						Effect.gen(function* () {
 							yield* Ref.set(streamFailedRef, err)
+							yield* Deferred.succeed(streamFailedDeferred, undefined)
 							const settleDeferred = yield* Ref.get(settleDeferredRef)
 							yield* Deferred.succeed(settleDeferred, undefined)
 						}),
@@ -1031,17 +1027,20 @@ export const sessionsConnectCommand = Command.make(
 								yield* replayDone
 							}
 						} else {
-							const lateStdin = yield* Effect.race(
-								Fiber.join(stdinCheckFiber).pipe(Effect.asSome),
-								Effect.sleep("20 millis").pipe(Effect.as(Option.none())),
+							const streamErr = yield* Ref.get(streamFailedRef)
+							if (streamErr !== null) {
+								return
+							}
+							const afterReplay = yield* Effect.race(
+								Fiber.join(stdinCheckFiber).pipe(
+									Effect.map((outcome) => ({ _tag: "stdin" as const, outcome })),
+								),
+								Deferred.await(streamFailedDeferred).pipe(
+									Effect.as({ _tag: "stream_failed" as const }),
+								),
 							)
-							if (Option.isSome(lateStdin)) {
-								yield* handleStdinOutcome(lateStdin.value)
-							} else {
-								const buffered = (yield* Ref.get(endedBufferedLineRef)).trim()
-								if (buffered.length > 0 && !isExitCommand(buffered)) {
-									return yield* unsentInputError
-								}
+							if (afterReplay._tag === "stdin") {
+								yield* handleStdinOutcome(afterReplay.outcome)
 							}
 						}
 					}).pipe(Effect.ensuring(Fiber.interrupt(stdinCheckFiber)))
