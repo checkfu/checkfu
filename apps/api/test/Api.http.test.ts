@@ -17,13 +17,17 @@ import { MAX_IDENTIFIER_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as HttpEffect from "effect/http/HttpEffect"
+import * as HttpServerRequest from "effect/http/HttpServerRequest"
+import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as References from "effect/References"
 import * as Scope from "effect/Scope"
+import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
 import { MAX_AGENT_BODY_BYTES, toApiError } from "../src/Http/HttpHelpers.ts"
-import { makeApiHandler } from "../src/Http/Router.ts"
+import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableModelProvider.ts"
 import {
 	AUTH_HEADERS,
@@ -1496,6 +1500,83 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						),
 					).toBe(true)
 				}).pipe(Effect.scoped, Effect.provide([layer, captureLogger])),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("traces HTTP requests once via HttpEffect.toHandled, annotates request.id, and skips /health", async () => {
+		const spans: Array<Tracer.NativeSpan> = []
+		const captureTracer = Tracer.make({
+			span(options) {
+				const span = new Tracer.NativeSpan(options)
+				spans.push(span)
+				return span
+			},
+		})
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const dispatch = (input: {
+						readonly method: string
+						readonly path: string
+						readonly headers?: Record<string, string>
+						readonly body?: unknown
+					}) =>
+						Effect.gen(function* () {
+							let response!: Response
+							const webRequest = new Request(`http://localhost${input.path}`, {
+								method: input.method,
+								headers: {
+									...(input.body === undefined ? {} : { "content-type": "application/json" }),
+									...input.headers,
+								},
+								...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+							})
+							yield* HttpEffect.toHandled(apiFetch, (_request, res) =>
+								Effect.sync(() => {
+									response = HttpServerResponse.toWeb(res)
+								}),
+							).pipe(
+								Effect.provideService(
+									HttpServerRequest.HttpServerRequest,
+									HttpServerRequest.fromWeb(webRequest),
+								),
+							)
+							return response
+						})
+
+					const healthRes = yield* dispatch({ method: "GET", path: "/health" })
+					expect(healthRes.status).toBe(200)
+					expect(spans.filter((span) => span.kind === "server")).toHaveLength(0)
+
+					const agentRes = yield* dispatch({
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Traced Agent", model: "gpt-4o-mini" },
+					})
+					expect(agentRes.status).toBe(201)
+					const requestId = agentRes.headers.get(REQUEST_ID_HEADER)
+					expect(requestId).toMatch(/^req_[0-9a-f]{24}$/)
+
+					const httpSpans = spans.filter(
+						(span) => span.kind === "server" && span.attributes.has("http.request.method"),
+					)
+					expect(httpSpans).toHaveLength(1)
+					expect(httpSpans[0]?.attributes.get("request.id")).toBe(requestId)
+					expect(httpSpans[0]?.attributes.get("http.request.method")).toBe("POST")
+					expect(httpSpans[0]?.attributes.get("http.response.status_code")).toBe(201)
+				}).pipe(
+					Effect.scoped,
+					Effect.provideService(Tracer.Tracer, captureTracer),
+					Effect.provide([layer, HealthTracerDisabledWhen]),
+				),
 			)
 		} finally {
 			await closeAll()

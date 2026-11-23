@@ -9,6 +9,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Etag from "effect/http/Etag"
 import * as HttpBody from "effect/http/HttpBody"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
+import * as HttpMiddleware from "effect/http/HttpMiddleware"
 import * as HttpPlatform from "effect/http/HttpPlatform"
 import * as HttpRouter from "effect/http/HttpRouter"
 import * as HttpServerError from "effect/http/HttpServerError"
@@ -46,6 +47,11 @@ export {
 
 const HealthLive = HttpApiBuilder.group(CheckfuApi, "health", (handlers) =>
 	handlers.handle("health", () => Effect.succeed({ status: "ok" as const })),
+)
+
+export const HealthTracerDisabledWhen: Layer.Layer<never> = Layer.succeed(
+	HttpMiddleware.TracerDisabledWhen,
+	(request) => requestPath(request) === "/health",
 )
 
 const isPublicPath = (path: string): boolean => path === "/health" || path === "/openapi.json"
@@ -99,6 +105,7 @@ export const makeApiHandler = Effect.gen(function* () {
 			...callerLogAnnotations,
 			request_id: requestId,
 		}
+		yield* Effect.annotateCurrentSpan({ "request.id": requestId })
 		return yield* app.pipe(
 			Effect.flatMap((response) => {
 				if (response.status === 401 && response.headers["www-authenticate"] === undefined) {

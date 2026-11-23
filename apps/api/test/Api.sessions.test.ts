@@ -378,6 +378,27 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						readSseUntil(resumedStream, (evt) => evt.type === "session.status_idle"),
 					)
 					expect(resumedFrames.map((f) => f.id)).toEqual(allSoFar.slice(3).map((f) => f.id))
+
+					// Reconnect with ?after=invalid AND Last-Event-ID=<3rd event id>:
+					// Last-Event-ID MUST take precedence before cursor validation!
+					const overriddenInvalidQueryStream = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream?after=invalid`,
+						headers: { ...AUTH_HEADERS, "last-event-id": thirdId },
+					})
+					expect(overriddenInvalidQueryStream.status).toBe(200)
+					const overriddenFrames = yield* Effect.promise(() =>
+						readSseUntil(overriddenInvalidQueryStream, (evt) => evt.type === "session.status_idle"),
+					)
+					expect(overriddenFrames.map((f) => f.id)).toEqual(allSoFar.slice(3).map((f) => f.id))
+
+					// Without Last-Event-ID, ?after=invalid is still rejected with 400.
+					const invalidQueryStream = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events/stream?after=invalid`,
+						headers: AUTH_HEADERS,
+					})
+					expect(invalidQueryStream.status).toBe(400)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

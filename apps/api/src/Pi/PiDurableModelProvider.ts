@@ -222,11 +222,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 		const baseUrls = yield* providerBaseUrls
 		const catalog = createPiModels(apiKeys, baseUrls)
 
-		const enforceEnvironmentNetworking = Effect.fnUntraced(function* (
-			rawEnvironmentId: string,
-			providerBaseUrl: string,
-			lookupTimeout: Duration.Input,
-		) {
+		const enforceEnvironmentNetworking = Effect.fn(
+			"PiDurableModelProvider.enforceEnvironmentNetworking",
+		)(function* (rawEnvironmentId: string, providerBaseUrl: string, lookupTimeout: Duration.Input) {
 			const envId = EnvironmentId.make(rawEnvironmentId)
 			const envState = yield* environments.get(envId)
 			if (envState.status === "" || envState.status === "deleted") {
@@ -289,7 +287,7 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 			}
 		})
 
-		const messagesBeforeTurn = Effect.fnUntraced(function* (
+		const messagesBeforeTurn = Effect.fn("PiDurableModelProvider.messagesBeforeTurn")(function* (
 			sessionId: string,
 			turn: number,
 			budget: {

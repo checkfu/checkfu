@@ -26,7 +26,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { AdmitSession, AdmitSessionDecision, EventBatch } from "../Checkfu.model.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
-import { CheckfuApi, SessionEvent, statusOf } from "./Api.ts"
+import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import {
 	claimCreate,
 	claimIdempotency,
@@ -59,6 +59,8 @@ export const SseMaxConnectionDuration = Context.Reference<Duration.Input>(
 	"@checkfu/api/SseMaxConnectionDuration",
 	{ defaultValue: () => DEFAULT_SSE_MAX_CONNECTION_DURATION },
 )
+
+const decodeCursor = Schema.decodeEffect(CursorFromString)
 
 export const SessionReadWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/SessionReadWaitTimeout",
@@ -530,8 +532,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				Effect.gen(function* () {
 					yield* existing(params.session_id)
 					const page = yield* sessionViews.list(Session.ref(params.session_id), {
-						...(query.after === undefined ? {} : { after: Number(query.after) }),
-						take: query.limit === undefined ? 50 : Number(query.limit),
+						...(query.after === undefined ? {} : { after: query.after }),
+						take: query.limit ?? 50,
 						order: query.order ?? "asc",
 					})
 					return {
@@ -547,10 +549,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const snapshot = yield* existing(id)
 					const header = request.headers["last-event-id"]
 					const rawCursor = header !== undefined && header.length > 0 ? header : query.after
-					if (rawCursor !== undefined && !/^\d{1,15}$/.test(rawCursor)) {
-						return yield* reject(400, "Cursor must be a non-negative integer.")
-					}
-					const after = rawCursor === undefined ? undefined : Number(rawCursor)
+					const after =
+						rawCursor === undefined
+							? undefined
+							: yield* decodeCursor(rawCursor).pipe(
+									Effect.catch(() => reject(400, "Cursor must be a non-negative integer.")),
+								)
 					const ref = Session.ref(id)
 					let initialHead = 0
 					if (snapshot.archived_at !== null) {
