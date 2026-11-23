@@ -51,6 +51,7 @@ import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
 import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
+import { storageCallbacks } from "alchemy/Workers/StorageCallbacks"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -2958,7 +2959,7 @@ describe("Agent and environment field length limits", () => {
 							const gate = Semaphore.makeUnsafe(1)
 							let alarmAt: number | null = null
 							let fireAlarm: Effect.Effect<void> = Effect.void
-							const { callbacks, fire } = DurableObjects.alarmCallbacks(storage, {
+							const { callbacks, fire } = storageCallbacks(storage, {
 								get: Effect.sync(() => alarmAt),
 								set: (at) =>
 									Effect.gen(function* () {

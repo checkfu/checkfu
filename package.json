@@ -8,9 +8,9 @@
 			"packages/*"
 		],
 		"catalog": {
-			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d8128ecf06280fbd65b849e2275d598c1e1c656195747840cb59ec82edac4d85.tgz",
-			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/e85b3a6a00e28386e60e208e52f03d66b08cbfcd275db59b83ef83f8730df7f9.tgz",
-			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/370bac4b59419be26db7b46d7a15e7cd575b964388c39ac4416984aa4c950adf.tgz",
+			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d49aab2e8f5ab9abbec4b4bcbd8d4d7b428c14143eb0e20a07eba6b5194ade5d.tgz",
+			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/300073173839ac69f7f76fd46021bdc13ce7386471bda71ff2b930b6f319f117.tgz",
+			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
 			"@earendil-works/chord": "1.6.0",
 			"@earendil-works/pi-ai": "1.6.0",
 			"@earendil-works/pi-durable": "1.6.0",
@@ -19,7 +19,7 @@
 			"@effect/platform-node": "4.1.5",
 			"@effect/vitest": "4.1.5",
 			"agents": "0.34.0",
-			"alchemy": "https://pkg.alchemy.run/alchemy/-/76bc7521b3b218d6de95626c9bed1e2107937587092c5c27c9afa41371225228.tgz",
+			"alchemy": "https://pkg.alchemy.run/alchemy/-/3882966d5d3b5229ec2df019a1d53902e85bd720a17326cf3e24c6bba3cb78bc.tgz",
 			"effect": "4.1.5",
 			"typescript": "7.0.2",
 			"vitest": "5.1.1"

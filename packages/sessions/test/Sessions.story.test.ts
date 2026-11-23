@@ -5,6 +5,7 @@ import * as InMemory from "@alchemy.run/domain/InMemory"
 import { Story } from "@alchemy.run/domain/Story"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
+import { storageCallbacks } from "alchemy/Workers/StorageCallbacks"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -2797,7 +2798,7 @@ describe("Sessions", () => {
 						getByName: (key) => {
 							const data = storeFor(`${name}:${key}`)
 							const storage = makeObjectStorage(data)
-							const { callbacks } = DurableObjects.alarmCallbacks(storage, {
+							const { callbacks } = storageCallbacks(storage, {
 								set: () => Effect.void,
 								get: Effect.succeed(null),
 							})
