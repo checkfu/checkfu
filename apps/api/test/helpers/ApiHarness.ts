@@ -201,23 +201,28 @@ export const makePiDurableTestLayer = (
 				? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
 				: !backends.has(conversation)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(conversation), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 		runTurn: (conversation, request) =>
 			unreachable.has(conversation)
 				? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
-				: Effect.promise(async (signal) => {
+				: Effect.suspend(() => {
 						requests.push(request)
 						conversations.push(conversation)
-						return runPiDurableTurn(await getBackend(conversation), request, signal)
+						return Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => runPiDurableTurn(backend, request),
+						)
 					}),
 		abortTurn: (conversation, operationId) =>
 			unreachable.has(conversation)
 				? Effect.never
-				: Effect.promise(async () => {
-						await (await getBackend(conversation)).abort(operationId)
-					}),
+				: Effect.flatMap(
+						Effect.promise(() => getBackend(conversation)),
+						(backend) => Effect.asVoid(backend.abort(operationId)),
+					),
 	})
 
 	const CheckfuLive = Checkfu.layer(

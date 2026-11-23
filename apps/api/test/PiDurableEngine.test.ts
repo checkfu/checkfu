@@ -13,12 +13,17 @@ import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
 import { Stage } from "alchemy/Stage"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
+import * as References from "effect/References"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { createPiHarnessSettings } from "../src/Pi/PiContextBudget.ts"
 import {
 	type PiDurableBackend,
 	type PiTurnRequest,
+	type PiTurnResult,
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
@@ -41,6 +46,7 @@ import {
 	isRefusalAssistantMessage,
 	mapAssistantMessageToOutcome,
 } from "../src/Pi/PiRefusals.ts"
+import { makePiHarnessBackend } from "../src/Pi/PiSession.do.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
@@ -223,14 +229,16 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		)
 
 		try {
-			const turn1 = await runPiDurableTurn(backend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "Bad key turn",
-			})
+			const turn1 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "Bad key turn",
+				}),
+			)
 			expect(turn1).toEqual({
 				ok: false,
 				error: {
@@ -244,14 +252,16 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 
 			// Turn 2 runs and succeeds (mutating LiveDoc); re-reading Turn 1's settled submission
 			// still returns Turn 1's own auth error.
-			const turn2 = await runPiDurableTurn(backend, {
-				operationId: "turn:2",
-				turn: 2,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "Good turn",
-			})
+			const turn2 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:2",
+					turn: 2,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "Good turn",
+				}),
+			)
 			expect(turn2).toMatchObject({ ok: true })
 
 			const replayedTurn1 = await backend.readUnansweredSubmission("turn:1")
@@ -285,14 +295,16 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			}),
 		)
 		try {
-			const turn1 = await runPiDurableTurn(backend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "Failed turn 1",
-			})
+			const turn1 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "Failed turn 1",
+				}),
+			)
 			expect(turn1).toMatchObject({ ok: false })
 
 			const history: Array<{ readonly role: "user" | "assistant"; readonly text: string }> = [
@@ -300,14 +312,16 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			]
 			for (let t = 2; t <= 22; t++) {
 				const text = `Later turn ${t}`
-				const res = await runPiDurableTurn(backend, {
-					operationId: `turn:${t}`,
-					turn: t,
-					provider: "openai",
-					modelId: "gpt-4o-mini",
-					system: null,
-					text,
-				})
+				const res = await Effect.runPromise(
+					runPiDurableTurn(backend, {
+						operationId: `turn:${t}`,
+						turn: t,
+						provider: "openai",
+						modelId: "gpt-4o-mini",
+						system: null,
+						text,
+					}),
+				)
 				expect(res).toMatchObject({ ok: true })
 				history.push({ role: "user", text })
 				history.push({ role: "assistant", text: `Reply ${text}` })
@@ -353,14 +367,16 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			// Each turn adds ~3,000 tokens (user + assistant); by turn 4 history exceeds
 			// gpt-4's 6,144-token blocking compaction threshold while staying well below Pi's 20,000-token default.
 			for (let turn = 1; turn <= 4; turn++) {
-				const result = await runPiDurableTurn(backend, {
-					operationId: `turn:${turn}`,
-					turn,
-					provider: "openai",
-					modelId: "gpt-4",
-					system: null,
-					text: `turn-${turn}: ${"u".repeat(6_000)}`,
-				})
+				const result = await Effect.runPromise(
+					runPiDurableTurn(backend, {
+						operationId: `turn:${turn}`,
+						turn,
+						provider: "openai",
+						modelId: "gpt-4",
+						system: null,
+						text: `turn-${turn}: ${"u".repeat(6_000)}`,
+					}),
+				)
 				expect(result).toMatchObject({ ok: true })
 			}
 			expect(compactionCalls).toBeGreaterThanOrEqual(1)
@@ -380,33 +396,47 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 				errorMessage: `400 invalid_request: ${secretBody}`,
 			})),
 		)
-		const warnCalls: Array<ReadonlyArray<unknown>> = []
-		const originalWarn = console.warn
-		console.warn = (...args: ReadonlyArray<unknown>) => {
-			warnCalls.push(args)
-		}
+		const warnLogs: Array<{
+			readonly level: string
+			readonly message: unknown
+			readonly annotations: Readonly<Record<string, unknown>>
+		}> = []
+		const captureLogger = Logger.layer(
+			[
+				Logger.make(({ logLevel, message, fiber }) => {
+					warnLogs.push({
+						level: logLevel,
+						message,
+						annotations: fiber.getRef(References.CurrentLogAnnotations),
+					})
+				}),
+			],
+			{ mergeWithExisting: false },
+		)
 		try {
-			const result = await runPiDurableTurn(backend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "trigger error",
-			})
+			const result = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "trigger error",
+				}).pipe(Effect.provide(captureLogger)),
+			)
 			expect(result).toMatchObject({
 				ok: false,
 				error: { error_type: "model_request_failed_error", message: PROVIDER_FAILURE_MESSAGE },
 			})
-			expect(warnCalls.length).toBeGreaterThanOrEqual(1)
-			const serialized = JSON.stringify(warnCalls)
+			expect(warnLogs.length).toBeGreaterThanOrEqual(1)
+			const serialized = JSON.stringify(warnLogs)
 			expect(serialized).not.toContain(secretBody)
-			expect(warnCalls).toContainEqual([
-				"pi turn unanswered",
-				{ operationId: "turn:1", provider: "openai", category: "invalid_request" },
-			])
+			expect(warnLogs).toContainEqual({
+				level: "Warn",
+				message: ["pi turn unanswered"],
+				annotations: { operationId: "turn:1", provider: "openai", category: "invalid_request" },
+			})
 		} finally {
-			console.warn = originalWarn
 			await backend.close()
 		}
 	})
@@ -523,18 +553,24 @@ describe("turn engine", () => {
 			}),
 		)
 		try {
-			const first = await runPiDurableTurn(backend, turnRequest(1, "First"))
+			const first = await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "First")))
 			expect(first).toMatchObject({ ok: true, reply: { input_tokens: 120_000, output_tokens: 1 } })
-			const second = await runPiDurableTurn(backend, turnRequest(2, "Second"))
+			const second = await Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "Second")))
 			expect(summaries).toBe(1)
 			expect(attempts).toBe(2)
 			expect(second).toMatchObject({ ok: true, reply: { input_tokens: 29, output_tokens: 6 } })
-			expect(await runPiDurableTurn(backend, turnRequest(3, "Third"))).toMatchObject({
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(3, "Third"))),
+			).toMatchObject({
 				ok: true,
 				reply: { input_tokens: 6, output_tokens: 2 },
 			})
-			expect(await runPiDurableTurn(backend, turnRequest(2, "Second"))).toEqual(second)
-			expect(await runPiDurableTurn(backend, turnRequest(1, "First"))).toEqual(first)
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "Second")))).toEqual(
+				second,
+			)
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "First")))).toEqual(
+				first,
+			)
 			expect(attempts).toBe(2)
 		} finally {
 			await backend.close()
@@ -544,8 +580,10 @@ describe("turn engine", () => {
 	it("reports a turn cancelled before it reached Pi as interrupted, without calling the model", async () => {
 		const { backend, calls } = await blockingBackend()
 		try {
-			await backend.abort("turn:1")
-			expect(await runPiDurableTurn(backend, turnRequest(1, "never sent"))).toMatchObject({
+			await Effect.runPromise(backend.abort("turn:1"))
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "never sent"))),
+			).toMatchObject({
 				ok: false,
 				error: { _tag: "ModelRequestInterrupted" },
 			})
@@ -558,9 +596,9 @@ describe("turn engine", () => {
 	it("reports an aborted running turn as interrupted", async () => {
 		const { backend, started } = await blockingBackend()
 		try {
-			const running = runPiDurableTurn(backend, turnRequest(1, "stop me"))
+			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "stop me")))
 			await started
-			await backend.abort("turn:1")
+			await Effect.runPromise(backend.abort("turn:1"))
 			expect(await running).toMatchObject({ ok: false, error: { _tag: "ModelRequestInterrupted" } })
 		} finally {
 			await backend.close()
@@ -571,12 +609,16 @@ describe("turn engine", () => {
 		const { backend, release } = await blockingBackend()
 		try {
 			release()
-			expect(await runPiDurableTurn(backend, turnRequest(1, "done first"))).toMatchObject({
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "done first"))),
+			).toMatchObject({
 				ok: true,
 				reply: { text: "re: done first" },
 			})
-			await backend.abort("turn:1")
-			expect(await runPiDurableTurn(backend, turnRequest(1, "done first"))).toMatchObject({
+			await Effect.runPromise(backend.abort("turn:1"))
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "done first"))),
+			).toMatchObject({
 				ok: true,
 				reply: { text: "re: done first" },
 			})
@@ -588,19 +630,30 @@ describe("turn engine", () => {
 	it("keeps a turn running when the caller's connection drops, and returns its reply on re-entry", async () => {
 		const { backend, release, started, calls } = await blockingBackend()
 		try {
-			const connection = new AbortController()
-			const dropped = runPiDurableTurn(backend, turnRequest(1, "keep going"), connection.signal)
-			await started
-			connection.abort()
-			await expect(dropped).rejects.toBeDefined()
-			const next = runPiDurableTurn(backend, turnRequest(2, "next"))
-			release()
-			expect(await next).toMatchObject({ ok: true, reply: { input_tokens: 3, output_tokens: 2 } })
-			expect(await runPiDurableTurn(backend, turnRequest(1, "keep going"))).toMatchObject({
-				ok: true,
-				reply: { text: "re: keep going", input_tokens: 3, output_tokens: 2 },
-			})
-			expect(calls()).toBe(2)
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const dropped = yield* Effect.forkChild(
+						runPiDurableTurn(backend, turnRequest(1, "keep going")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => started)
+					yield* Fiber.interrupt(dropped)
+					expect(Exit.isFailure(yield* Fiber.await(dropped))).toBe(true)
+					const next = yield* Effect.forkChild(runPiDurableTurn(backend, turnRequest(2, "next")), {
+						startImmediately: true,
+					})
+					release()
+					expect(yield* Fiber.join(next)).toMatchObject({
+						ok: true,
+						reply: { input_tokens: 3, output_tokens: 2 },
+					})
+					expect(yield* runPiDurableTurn(backend, turnRequest(1, "keep going"))).toMatchObject({
+						ok: true,
+						reply: { text: "re: keep going", input_tokens: 3, output_tokens: 2 },
+					})
+					expect(calls()).toBe(2)
+				}),
+			)
 		} finally {
 			await backend.close()
 		}
@@ -643,28 +696,39 @@ describe("turn engine", () => {
 			}),
 		)
 		try {
-			const conn = new AbortController()
-			const dropped = runPiDurableTurn(failedBackend, turnRequest(1, "doomed-turn-1"), conn.signal)
-			await failedStarted
-			conn.abort()
-			await expect(dropped).rejects.toBeDefined()
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const dropped = yield* Effect.forkChild(
+						runPiDurableTurn(failedBackend, turnRequest(1, "doomed-turn-1")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => failedStarted)
+					yield* Fiber.interrupt(dropped)
+					expect(Exit.isFailure(yield* Fiber.await(dropped))).toBe(true)
 
-			const successor = runPiDurableTurn(failedBackend, turnRequest(2, "clean-turn-2"))
-			releaseFailed()
-			expect(await successor).toMatchObject({
-				ok: true,
-				reply: { text: "re: clean-turn-2", input_tokens: 4, output_tokens: 2 },
-			})
-			expect(failedContexts.at(-1)).toEqual(["user:clean-turn-2"])
+					const successor = yield* Effect.forkChild(
+						runPiDurableTurn(failedBackend, turnRequest(2, "clean-turn-2")),
+						{ startImmediately: true },
+					)
+					releaseFailed()
+					expect(yield* Fiber.join(successor)).toMatchObject({
+						ok: true,
+						reply: { text: "re: clean-turn-2", input_tokens: 4, output_tokens: 2 },
+					})
+					expect(failedContexts.at(-1)).toEqual(["user:clean-turn-2"])
 
-			// Re-entering Turn 1 still returns its sealed usage and failure outcome.
-			expect(await runPiDurableTurn(failedBackend, turnRequest(1, "doomed-turn-1"))).toMatchObject({
-				ok: false,
-				error: {
-					error_type: "model_request_failed_error",
-					model_usage: { input_tokens: 7, output_tokens: 1 },
-				},
-			})
+					// Re-entering Turn 1 still returns its sealed usage and failure outcome.
+					expect(
+						yield* runPiDurableTurn(failedBackend, turnRequest(1, "doomed-turn-1")),
+					).toMatchObject({
+						ok: false,
+						error: {
+							error_type: "model_request_failed_error",
+							model_usage: { input_tokens: 7, output_tokens: 1 },
+						},
+					})
+				}),
+			)
 		} finally {
 			await failedBackend.close()
 		}
@@ -698,23 +762,28 @@ describe("turn engine", () => {
 			}),
 		)
 		try {
-			const conn = new AbortController()
-			const dropped = runPiDurableTurn(
-				abortedBackend,
-				turnRequest(1, "aborted-after-drop"),
-				conn.signal,
-			)
-			await abortStarted
-			conn.abort()
-			await expect(dropped).rejects.toBeDefined()
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const dropped = yield* Effect.forkChild(
+						runPiDurableTurn(abortedBackend, turnRequest(1, "aborted-after-drop")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => abortStarted)
+					yield* Fiber.interrupt(dropped)
+					expect(Exit.isFailure(yield* Fiber.await(dropped))).toBe(true)
 
-			const successor = runPiDurableTurn(abortedBackend, turnRequest(2, "successor-after-abort"))
-			await abortedBackend.abort("turn:1")
-			expect(await successor).toMatchObject({
-				ok: true,
-				reply: { text: "re: successor-after-abort", input_tokens: 3, output_tokens: 2 },
-			})
-			expect(abortContexts.at(-1)).toEqual(["user:successor-after-abort"])
+					const successor = yield* Effect.forkChild(
+						runPiDurableTurn(abortedBackend, turnRequest(2, "successor-after-abort")),
+						{ startImmediately: true },
+					)
+					yield* abortedBackend.abort("turn:1")
+					expect(yield* Fiber.join(successor)).toMatchObject({
+						ok: true,
+						reply: { text: "re: successor-after-abort", input_tokens: 3, output_tokens: 2 },
+					})
+					expect(abortContexts.at(-1)).toEqual(["user:successor-after-abort"])
+				}),
+			)
 		} finally {
 			await abortedBackend.close()
 		}
@@ -739,14 +808,26 @@ describe("turn engine", () => {
 					return backend.ensureRoot(agent, create)
 				},
 			}
-			const running = runPiDurableTurn(slowRoot, turnRequest(1, "cancel me"))
-			await reachedRoot
-			const aborting = backend.abort("turn:1")
-			proceed()
-			expect(await running).toMatchObject({ ok: false, error: { _tag: "ModelRequestInterrupted" } })
-			await aborting
-			expect(await backend.hasSubmission("turn:1")).toBe(false)
-			expect(calls()).toBe(0)
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const running = yield* Effect.forkChild(
+						runPiDurableTurn(slowRoot, turnRequest(1, "cancel me")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => reachedRoot)
+					const aborting = yield* Effect.forkChild(backend.abort("turn:1"), {
+						startImmediately: true,
+					})
+					proceed()
+					expect(yield* Fiber.join(running)).toMatchObject({
+						ok: false,
+						error: { _tag: "ModelRequestInterrupted" },
+					})
+					yield* Fiber.join(aborting)
+					expect(yield* Effect.promise(() => backend.hasSubmission("turn:1"))).toBe(false)
+					expect(calls()).toBe(0)
+				}),
+			)
 		} finally {
 			await backend.close()
 		}
@@ -785,27 +866,34 @@ describe("turn engine", () => {
 				createRegistry(),
 			)
 			try {
-				let turn1: Awaited<ReturnType<typeof runPiDurableTurn>> | undefined
-				let turn1Replay: Awaited<ReturnType<typeof runPiDurableTurn>> | undefined
+				let turn1: PiTurnResult | undefined
+				let turn1Replay: PiTurnResult | undefined
 				if (mode === "replay") {
-					turn1 = await runPiDurableTurn(backend, turnRequest(1, "disallowed request"))
+					turn1 = await Effect.runPromise(
+						runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
+					)
 					// Replaying the recovered refusal must be idempotent.
-					turn1Replay = await runPiDurableTurn(backend, turnRequest(1, "disallowed request"))
+					turn1Replay = await Effect.runPromise(
+						runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
+					)
 				} else {
 					// Simulate waiter disconnect before post-settlement recovery runs.
-					const disconnect = new AbortController()
-					const running = runPiDurableTurn(
-						backend,
-						turnRequest(1, "disallowed request"),
-						disconnect.signal,
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const running = yield* Effect.forkChild(
+								runPiDurableTurn(backend, turnRequest(1, "disallowed request")),
+								{ startImmediately: true },
+							)
+							yield* Fiber.interrupt(running)
+						}),
 					)
-					disconnect.abort()
-					await running.catch(() => undefined)
 					// Wait until turn:1 settles in Pi storage as unanswered.
 					await backend.wait("turn:1")
 				}
 
-				const turn2 = await runPiDurableTurn(backend, turnRequest(2, "why did you refuse?"))
+				const turn2 = await Effect.runPromise(
+					runPiDurableTurn(backend, turnRequest(2, "why did you refuse?")),
+				)
 				return { turn1, turn1Replay, turn2, lastContext: seenContexts.at(-1) }
 			} finally {
 				await backend.close()
@@ -933,21 +1021,26 @@ describe("turn engine", () => {
 				createRegistry(),
 			)
 			try {
-				let turn1: Awaited<ReturnType<typeof runPiDurableTurn>> | undefined
+				let turn1: PiTurnResult | undefined
 				if (mode === "replay") {
-					turn1 = await runPiDurableTurn(backend, turnRequest(1, "filtered prompt"))
-				} else {
-					const disconnect = new AbortController()
-					const running = runPiDurableTurn(
-						backend,
-						turnRequest(1, "filtered prompt"),
-						disconnect.signal,
+					turn1 = await Effect.runPromise(
+						runPiDurableTurn(backend, turnRequest(1, "filtered prompt")),
 					)
-					disconnect.abort()
-					await running.catch(() => undefined)
+				} else {
+					await Effect.runPromise(
+						Effect.gen(function* () {
+							const running = yield* Effect.forkChild(
+								runPiDurableTurn(backend, turnRequest(1, "filtered prompt")),
+								{ startImmediately: true },
+							)
+							yield* Fiber.interrupt(running)
+						}),
+					)
 					await backend.wait("turn:1")
 				}
-				const turn2 = await runPiDurableTurn(backend, turnRequest(2, "after filter"))
+				const turn2 = await Effect.runPromise(
+					runPiDurableTurn(backend, turnRequest(2, "after filter")),
+				)
 				return { turn1, turn2, lastContext: seenContexts.at(-1) }
 			} finally {
 				await backend.close()
@@ -1090,23 +1183,27 @@ describe("turn engine", () => {
 
 		try {
 			// Original runTurn enters admitPiTurn, acquires withLock, and pauses before submit().
-			const originalTurn = runPiDurableTurn(backend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "hello",
-			})
+			const originalTurn = Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "hello",
+				}),
+			)
 			await enteredEnsureRoot
 
 			// Retry's recovery probe starts while admitPiTurn still holds the lock before submit().
 			// It MUST wait for admission to finish instead of returning null.
 			let recoverySettled = false
-			const recovery = recoverPiDurableTurn(backend, "turn:1").then((outcome) => {
-				recoverySettled = true
-				return outcome
-			})
+			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:1")).then(
+				(outcome) => {
+					recoverySettled = true
+					return outcome
+				},
+			)
 			await new Promise((resolve) => setTimeout(resolve, 15))
 			expect(recoverySettled).toBe(false)
 
@@ -1119,6 +1216,224 @@ describe("turn engine", () => {
 			)
 		} finally {
 			releaseLockStep()
+			await rawBackend.close()
+		}
+	})
+
+	it("keeps withLock mutually exclusive even when the lock holder fiber is interrupted mid-critical-section", async () => {
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "unused", 1, 1)),
+		)
+		let markEntered!: () => void
+		const entered = new Promise<void>((resolve) => {
+			markEntered = resolve
+		})
+		let releaseCritical!: () => void
+		const holdCritical = new Promise<void>((resolve) => {
+			releaseCritical = resolve
+		})
+		const events: Array<string> = []
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					try {
+						const holder = yield* Effect.forkChild(
+							backend.withLock(
+								Effect.promise(async () => {
+									events.push("holder:start")
+									markEntered()
+									await holdCritical
+									events.push("holder:end")
+								}),
+							),
+							{ startImmediately: true },
+						)
+						yield* Effect.promise(() => entered)
+
+						// Interrupting the holder while its async critical section is still running
+						// must NOT release the semaphore permit before the critical section finishes.
+						const interrupting = yield* Effect.forkChild(Fiber.interrupt(holder), {
+							startImmediately: true,
+						})
+						const waiter = yield* Effect.forkChild(
+							backend.withLock(
+								Effect.sync(() => {
+									events.push("waiter:enter")
+								}),
+							),
+							{ startImmediately: true },
+						)
+						yield* Effect.sleep("15 millis")
+						expect(events).toEqual(["holder:start"])
+
+						releaseCritical()
+						yield* Fiber.join(interrupting)
+						yield* Fiber.join(waiter)
+						expect(events).toEqual(["holder:start", "holder:end", "waiter:enter"])
+					} finally {
+						releaseCritical()
+					}
+				}),
+			)
+		} finally {
+			releaseCritical()
+			await backend.close()
+		}
+	})
+
+	it("keeps a queued abort alive when interrupted while submit holds the permit", async () => {
+		// 1. Directly exercise `PiSession.do.ts`'s `makePiHarnessBackend` abort path.
+		const cancelled = new Set<string>()
+		const harnessAborts: Array<string> = []
+		const harnessBackend = makePiHarnessBackend(
+			{ start: async () => undefined } as unknown as Parameters<typeof makePiHarnessBackend>[0],
+			{
+				abort: async ({ operationId }: { readonly operationId: string }) => {
+					harnessAborts.push(operationId)
+				},
+			} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+			{
+				markCancelled: (operationId: string) => {
+					cancelled.add(operationId)
+				},
+				isCancelled: (operationId: string) => cancelled.has(operationId),
+			} as unknown as Parameters<typeof makePiHarnessBackend>[2],
+		)
+		let markSubmitHeld!: () => void
+		const submitHeld = new Promise<void>((resolve) => {
+			markSubmitHeld = resolve
+		})
+		let releaseSubmitHold!: () => void
+		const holdSubmit = new Promise<void>((resolve) => {
+			releaseSubmitHold = resolve
+		})
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				try {
+					const holder = yield* Effect.forkChild(
+						harnessBackend.withLock(
+							Effect.promise(async () => {
+								markSubmitHeld()
+								await holdSubmit
+							}),
+						),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => submitHeld)
+
+					const abortFiber = yield* Effect.forkChild(harnessBackend.abort("turn:1"), {
+						startImmediately: true,
+					})
+					expect(harnessBackend.isCancelled("turn:1")).toBe(true)
+					expect(harnessAborts).toEqual([])
+
+					// Interrupting the queued abort while `submit` holds the permit must NOT
+					// drop the waiter before `harness.abort` executes.
+					const interrupting = yield* Effect.forkChild(Fiber.interrupt(abortFiber), {
+						startImmediately: true,
+					})
+					yield* Effect.sleep("15 millis")
+					expect(harnessAborts).toEqual([])
+
+					releaseSubmitHold()
+					yield* Fiber.join(holder)
+					yield* Fiber.join(interrupting)
+					expect(harnessAborts).toEqual(["turn:1"])
+				} finally {
+					releaseSubmitHold()
+				}
+			}),
+		)
+
+		// 2. End-to-end against `InMemoryPiDurableBackend`: interrupt abort while `admitPiTurn`
+		// is paused inside `submit()` (after the final fence check) and verify recovery sees
+		// `ModelRequestInterrupted` instead of a completed reply.
+		let markEnteredSubmit!: () => void
+		const enteredSubmit = new Promise<void>((resolve) => {
+			markEnteredSubmit = resolve
+		})
+		let releaseSubmit!: () => void
+		const submitGate = new Promise<void>((resolve) => {
+			releaseSubmit = resolve
+		})
+		const rawBackend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, _context, signal) => {
+				await new Promise<void>((resolve) => {
+					if (signal?.aborted) {
+						resolve()
+						return
+					}
+					const timer = setTimeout(resolve, 150)
+					signal?.addEventListener(
+						"abort",
+						() => {
+							clearTimeout(timer)
+							resolve()
+						},
+						{ once: true },
+					)
+				})
+				if (signal?.aborted) {
+					return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" as const }
+				}
+				return makeAssistantReply(model, null, "should have been aborted", 5, 3)
+			}),
+		)
+		const backend: PiDurableBackend = {
+			...rawBackend,
+			submit: async (text, operationId) => {
+				markEnteredSubmit()
+				await submitGate
+				return rawBackend.submit(text, operationId)
+			},
+		}
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					try {
+						const turnFiber = yield* Effect.forkChild(
+							runPiDurableTurn(backend, {
+								operationId: "turn:1",
+								turn: 1,
+								provider: "openai",
+								modelId: "gpt-4o-mini",
+								system: null,
+								text: "abort while submit holds permit",
+							}),
+							{ startImmediately: true },
+						)
+						yield* Effect.promise(() => enteredSubmit)
+
+						const abortFiber = yield* Effect.forkChild(backend.abort("turn:1"), {
+							startImmediately: true,
+						})
+						expect(backend.isCancelled("turn:1")).toBe(true)
+
+						const interrupting = yield* Effect.forkChild(Fiber.interrupt(abortFiber), {
+							startImmediately: true,
+						})
+						yield* Effect.sleep("15 millis")
+
+						releaseSubmit()
+						yield* Fiber.join(interrupting)
+
+						const outcome = yield* Fiber.join(turnFiber)
+						expect(outcome).toMatchObject({
+							ok: false,
+							error: { _tag: "ModelRequestInterrupted" },
+						})
+						const recovered = yield* recoverPiDurableTurn(backend, "turn:1")
+						expect(recovered).toMatchObject({
+							ok: false,
+							error: { _tag: "ModelRequestInterrupted" },
+						})
+					} finally {
+						releaseSubmit()
+					}
+				}),
+			)
+		} finally {
+			releaseSubmit()
 			await rawBackend.close()
 		}
 	})

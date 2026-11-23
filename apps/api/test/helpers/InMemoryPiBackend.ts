@@ -7,10 +7,11 @@ import {
 	ROOT_CONVERSATION_ID,
 	type Storage,
 } from "@earendil-works/pi-durable"
+import * as Effect from "effect/Effect"
+import * as Semaphore from "effect/Semaphore"
 import { createPiHarnessSettings } from "../../src/Pi/PiContextBudget.ts"
 import {
 	type PiDurableBackend,
-	createAsyncMutex,
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
@@ -100,7 +101,9 @@ export const createInMemoryPiDurableBackend = async (
 		},
 	})
 	const cancelledOps = new Set<string>()
-	const withLock = createAsyncMutex()
+	const lock = Semaphore.makeUnsafe(1)
+	const withLock: PiDurableBackend["withLock"] = (effect) =>
+		lock.withPermit(Effect.uninterruptible(effect))
 
 	const settings = createPiHarnessSettings(models)
 	const pi = await PiHarnessRuntime.open(
@@ -169,30 +172,42 @@ export const createInMemoryPiDurableBackend = async (
 			}
 			return { status: "done" }
 		},
-		abort: async (operationId) => {
-			cancelledOps.add(operationId)
-			return withLock(async () => {
-				const record = await storage.submissionByRequest(
-					ROOT_CONVERSATION_ID,
-					operationId,
-					BACKGROUND_CONTEXT,
-				)
-				if (record === undefined || record.status === "done" || record.status === "unanswered") {
-					return true
-				}
-				const outcome = await pi.abortSubmission(
-					record.id,
-					BACKGROUND_CONTEXT,
-					ROOT_CONVERSATION_ID,
-				)
-				if (outcome === "already_placed") {
-					const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-					await conversation?.abort(BACKGROUND_CONTEXT)
-					return true
-				}
-				return outcome === "aborted"
-			})
-		},
+		abort: (operationId) =>
+			// Match `PiSession.do.ts`: once cancellation is recorded, keep permit
+			// acquisition and abort delivery uninterruptible so an interrupted
+			// abort cannot strand an in-flight `submit`.
+			Effect.uninterruptible(
+				Effect.suspend(() => {
+					cancelledOps.add(operationId)
+					return withLock(
+						Effect.promise(async () => {
+							const record = await storage.submissionByRequest(
+								ROOT_CONVERSATION_ID,
+								operationId,
+								BACKGROUND_CONTEXT,
+							)
+							if (
+								record === undefined ||
+								record.status === "done" ||
+								record.status === "unanswered"
+							) {
+								return true
+							}
+							const outcome = await pi.abortSubmission(
+								record.id,
+								BACKGROUND_CONTEXT,
+								ROOT_CONVERSATION_ID,
+							)
+							if (outcome === "already_placed") {
+								const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
+								await conversation?.abort(BACKGROUND_CONTEXT)
+								return true
+							}
+							return outcome === "aborted"
+						}),
+					)
+				}),
+			),
 		readAnswerEntry: (operationId) => readAssistantMessageFromStorage(pi, storage, operationId),
 		readUnansweredSubmission: (operationId) =>
 			readUnansweredSubmissionFromStorage(pi, storage, operationId),

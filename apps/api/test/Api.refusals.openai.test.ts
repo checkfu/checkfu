@@ -12,7 +12,11 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { Checkfu } from "../src/Checkfu.model.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import {
+	type PiTurnResult,
+	recoverPiDurableTurn,
+	runPiDurableTurn,
+} from "../src/Pi/PiDurableEngine.ts"
 import {
 	AgentVersionLookupTimeout,
 	PiDurableModelProviderLive,
@@ -334,17 +338,24 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			recoverTurn: (sessionId, operationId) =>
 				!backends.has(sessionId)
 					? Effect.succeed(null)
-					: Effect.promise(async (signal) =>
-							recoverPiDurableTurn(await getBackend(sessionId), operationId, signal),
+					: Effect.flatMap(
+							Effect.promise(() => getBackend(sessionId)),
+							(backend) => recoverPiDurableTurn(backend, operationId),
 						),
 			runTurn: (sessionId, request) =>
-				Effect.promise(async (signal) =>
-					runPiDurableTurn(await getBackend(sessionId), request, signal),
+				Effect.flatMap(
+					Effect.promise(() => getBackend(sessionId)),
+					(backend) => runPiDurableTurn(backend, request),
 				),
 			abortTurn: (sessionId, operationId) =>
-				Effect.promise(async () => {
+				Effect.suspend(() => {
 					const b = backends.get(sessionId)
-					if (b !== undefined) await (await b).abort(operationId)
+					return b === undefined
+						? Effect.void
+						: Effect.flatMap(
+								Effect.promise(() => b),
+								(backend) => Effect.asVoid(backend.abort(operationId)),
+							)
 				}),
 		})
 
@@ -505,14 +516,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 		const partialBackend = await createInMemoryPiDurableBackend(realOpenAIModels)
 		try {
-			const outcome = await runPiDurableTurn(partialBackend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "trigger-partial-refusal-disconnect",
-			})
+			const outcome = await Effect.runPromise(
+				runPiDurableTurn(partialBackend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "trigger-partial-refusal-disconnect",
+				}),
+			)
 			expect(outcome).toMatchObject({
 				ok: false,
 				error: {
@@ -690,14 +703,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const turn1 = await runPiDurableTurn(backend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "Please do disallowed thing",
-			})
+			const turn1 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "Please do disallowed thing",
+				}),
+			)
 			expect(turn1).toMatchObject({
 				ok: true,
 				reply: {
@@ -706,14 +721,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				},
 			})
 
-			const turn2 = await runPiDurableTurn(backend, {
-				operationId: "turn:2",
-				turn: 2,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "Why did you refuse?",
-			})
+			const turn2 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:2",
+					turn: 2,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "Why did you refuse?",
+				}),
+			)
 			expect(turn2).toMatchObject({ ok: true, reply: { text: "Follow-up answer" } })
 
 			expect(sentInputs).toHaveLength(2)
@@ -819,14 +836,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const turn1 = await runPiDurableTurn(backend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "trigger incomplete content_filter then sse error",
-			})
+			const turn1 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "trigger incomplete content_filter then sse error",
+				}),
+			)
 			expect(turn1).toMatchObject({
 				ok: false,
 				error: {
@@ -836,14 +855,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				},
 			})
 
-			const turn2 = await runPiDurableTurn(backend, {
-				operationId: "turn:2",
-				turn: 2,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "next clean prompt",
-			})
+			const turn2 = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:2",
+					turn: 2,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "next clean prompt",
+				}),
+			)
 			expect(turn2).toMatchObject({ ok: true, reply: { text: "Clean OpenAI follow-up" } })
 			const lastRequest = sentBodies.at(-1)
 			expect(JSON.stringify(lastRequest)).not.toContain("Upstream stream failed after incomplete")
@@ -881,14 +902,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			)) as unknown as typeof fetch
 		const backend2 = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const cleanRefusal = await runPiDurableTurn(backend2, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "trigger clean incomplete content_filter",
-			})
+			const cleanRefusal = await Effect.runPromise(
+				runPiDurableTurn(backend2, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "trigger clean incomplete content_filter",
+				}),
+			)
 			expect(cleanRefusal).toMatchObject({
 				ok: true,
 				reply: {
@@ -1067,16 +1090,18 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
 			// Run turns on gpt-4 (8,192 context window) until blocking compaction triggers.
-			let failedTurn: Awaited<ReturnType<typeof runPiDurableTurn>> | undefined
+			let failedTurn: PiTurnResult | undefined
 			for (let turn = 1; turn <= 4; turn++) {
-				const result = await runPiDurableTurn(backend, {
-					operationId: `turn:${turn}`,
-					turn,
-					provider: "openai",
-					modelId: "gpt-4",
-					system: null,
-					text: `preserved-turn-${turn}: ${"u".repeat(6_000)}`,
-				})
+				const result = await Effect.runPromise(
+					runPiDurableTurn(backend, {
+						operationId: `turn:${turn}`,
+						turn,
+						provider: "openai",
+						modelId: "gpt-4",
+						system: null,
+						text: `preserved-turn-${turn}: ${"u".repeat(6_000)}`,
+					}),
+				)
 				if (result !== "history_required" && !result.ok) {
 					failedTurn = result
 					break
@@ -1094,14 +1119,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			})
 
 			// On the next turn, compaction runs again over the original preserved history — NOT refusal text.
-			const recovered = await runPiDurableTurn(backend, {
-				operationId: "turn:5",
-				turn: 5,
-				provider: "openai",
-				modelId: "gpt-4",
-				system: null,
-				text: `recovery-turn: ${"u".repeat(6_000)}`,
-			})
+			const recovered = await Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:5",
+					turn: 5,
+					provider: "openai",
+					modelId: "gpt-4",
+					system: null,
+					text: `recovery-turn: ${"u".repeat(6_000)}`,
+				}),
+			)
 			expect(recovered).toMatchObject({ ok: true })
 			expect(compactionCalls).toBe(2)
 			expect(compactionInputs[1]).toContain("preserved-turn-1")
@@ -1232,14 +1259,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 
 		const filterBackend = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const turn1 = await runPiDurableTurn(filterBackend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "trigger-partial-content-filter",
-			})
+			const turn1 = await Effect.runPromise(
+				runPiDurableTurn(filterBackend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "trigger-partial-content-filter",
+				}),
+			)
 			expect(turn1).toMatchObject({
 				ok: true,
 				reply: {
@@ -1249,14 +1278,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				},
 			})
 
-			const turn2 = await runPiDurableTurn(filterBackend, {
-				operationId: "turn:2",
-				turn: 2,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "next safe question",
-			})
+			const turn2 = await Effect.runPromise(
+				runPiDurableTurn(filterBackend, {
+					operationId: "turn:2",
+					turn: 2,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "next safe question",
+				}),
+			)
 			expect(turn2).toMatchObject({ ok: true, reply: { text: "Safe follow-up" } })
 			const turn2Payload = JSON.stringify(filteredSentBodies.at(-1))
 			expect(turn2Payload).toContain(DEFAULT_REFUSAL_TEXT)
@@ -1393,14 +1424,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 
 		const mixedBackend = await createInMemoryPiDurableBackend(realModels)
 		try {
-			const turn1 = await runPiDurableTurn(mixedBackend, {
-				operationId: "turn:1",
-				turn: 1,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "trigger-mixed-refusal",
-			})
+			const turn1 = await Effect.runPromise(
+				runPiDurableTurn(mixedBackend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "trigger-mixed-refusal",
+				}),
+			)
 			expect(turn1).toMatchObject({
 				ok: true,
 				reply: {
@@ -1410,14 +1443,16 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				},
 			})
 
-			const turn2 = await runPiDurableTurn(mixedBackend, {
-				operationId: "turn:2",
-				turn: 2,
-				provider: "openai",
-				modelId: "gpt-4o-mini",
-				system: null,
-				text: "follow-up",
-			})
+			const turn2 = await Effect.runPromise(
+				runPiDurableTurn(mixedBackend, {
+					operationId: "turn:2",
+					turn: 2,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "follow-up",
+				}),
+			)
 			expect(turn2).toMatchObject({ ok: true, reply: { text: "Next answer" } })
 			const turn2Payload = JSON.stringify(mixedSentBodies.at(-1))
 			expect(turn2Payload).toContain("I cannot assist with that.")
@@ -1658,21 +1693,24 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				recoverTurn: (conversation, operationId) =>
 					!unnormalizedBackends.has(conversation)
 						? Effect.succeed(null)
-						: Effect.promise(async (signal) =>
-								recoverPiDurableTurn(
-									await getUnnormalizedBackend(conversation),
-									operationId,
-									signal,
-								),
+						: Effect.flatMap(
+								Effect.promise(() => getUnnormalizedBackend(conversation)),
+								(backend) => recoverPiDurableTurn(backend, operationId),
 							),
 				runTurn: (conversation, request) =>
-					Effect.promise(async (signal) =>
-						runPiDurableTurn(await getUnnormalizedBackend(conversation), request, signal),
+					Effect.flatMap(
+						Effect.promise(() => getUnnormalizedBackend(conversation)),
+						(backend) => runPiDurableTurn(backend, request),
 					),
 				abortTurn: (conversation, operationId) =>
-					Effect.promise(async () => {
+					Effect.suspend(() => {
 						const backend = unnormalizedBackends.get(conversation)
-						if (backend !== undefined) await (await backend).abort(operationId)
+						return backend === undefined
+							? Effect.void
+							: Effect.flatMap(
+									Effect.promise(() => backend),
+									(resolved) => Effect.asVoid(resolved.abort(operationId)),
+								)
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(

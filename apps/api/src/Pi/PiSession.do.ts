@@ -4,12 +4,12 @@ import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
 import type { Lifecycle } from "agents/lifecycle"
 import * as Effect from "effect/Effect"
+import * as Semaphore from "effect/Semaphore"
 import { createPiHarnessSettings } from "./PiContextBudget.ts"
 import {
 	type PiDurableBackend,
 	type PiTurnRequest,
 	type PiTurnResult,
-	createAsyncMutex,
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
@@ -37,12 +37,14 @@ class PiSessionHost {
 	}
 }
 
-const makePiHarnessBackend = (
+export const makePiHarnessBackend = (
 	lifecycle: Lifecycle,
 	harness: PiHarness,
 	fence: SqliteTurnFence,
 ): PiDurableBackend => {
-	const withLock = createAsyncMutex()
+	const lock = Semaphore.makeUnsafe(1)
+	const withLock: PiDurableBackend["withLock"] = (effect) =>
+		lock.withPermit(Effect.uninterruptible(effect))
 
 	return {
 		withLock,
@@ -95,14 +97,23 @@ const makePiHarnessBackend = (
 					? { status: "unanswered" }
 					: { status: "unanswered", reason: result.reason }
 		},
-		abort: async (operationId) => {
-			fence.markCancelled(operationId)
-			return withLock(async () => {
-				await lifecycle.start()
-				await harness.abort({ operationId })
-				return true
-			})
-		},
+		abort: (operationId) =>
+			// Once the durable cancellation fence is written, keep both permit
+			// acquisition and `harness.abort` uninterruptible so an interrupted
+			// caller cannot leave a cancelled marker without stopping a turn
+			// that was already inside `submit`.
+			Effect.uninterruptible(
+				Effect.suspend(() => {
+					fence.markCancelled(operationId)
+					return withLock(
+						Effect.promise(async () => {
+							await lifecycle.start()
+							await harness.abort({ operationId })
+							return true
+						}),
+					)
+				}),
+			),
 		readAnswerEntry: async (operationId) => {
 			await lifecycle.start()
 			const pi = await harness.pi()
@@ -180,11 +191,10 @@ export class PiSession extends Cloudflare.DurableObject<PiSession>()(
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
 					recoverTurn: (operationId: string): Effect.Effect<PiTurnOutcome | null> =>
-						Effect.promise((signal) => recoverPiDurableTurn(backend, operationId, signal)),
+						recoverPiDurableTurn(backend, operationId),
 					runTurn: (request: PiTurnRequest): Effect.Effect<PiTurnResult> =>
-						Effect.promise((signal) => runPiDurableTurn(backend, request, signal)),
-					abortTurn: (operationId: string): Effect.Effect<boolean> =>
-						Effect.promise(() => backend.abort(operationId)),
+						runPiDurableTurn(backend, request),
+					abortTurn: (operationId: string): Effect.Effect<boolean> => backend.abort(operationId),
 				}
 			}),
 	),

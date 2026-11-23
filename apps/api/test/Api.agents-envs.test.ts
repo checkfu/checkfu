@@ -1544,13 +1544,17 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				recoverTurn: (conversation, operationId) =>
 					!backends.has(conversation)
 						? Effect.succeed(null)
-						: Effect.promise(async (signal) =>
-								recoverPiDurableTurn(await getBackend(conversation), operationId, signal),
+						: Effect.flatMap(
+								Effect.promise(() => getBackend(conversation)),
+								(backend) => recoverPiDurableTurn(backend, operationId),
 							),
 				runTurn: (conversation, request) =>
-					Effect.promise(async (signal) => {
+					Effect.suspend(() => {
 						if (request.seed !== undefined) seededRequests.push(request)
-						return runPiDurableTurn(await getBackend(conversation), request, signal)
+						return Effect.flatMap(
+							Effect.promise(() => getBackend(conversation)),
+							(backend) => runPiDurableTurn(backend, request),
+						)
 					}),
 				abortTurn: () => Effect.void,
 			})
@@ -1755,28 +1759,27 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							mutateDuringBackoff = null
 							yield* mutate()
 						}
-						return yield* Effect.promise(async () =>
-							recoverPiDurableTurn(await backendFor(name), operationId),
-						)
+						const backend = yield* Effect.promise(() => backendFor(name))
+						return yield* recoverPiDurableTurn(backend, operationId)
 					}),
 				runTurn: (name, request) =>
 					Effect.gen(function* () {
 						runTurnCalls += 1
+						const backend = yield* Effect.promise(() => backendFor(name))
 						if (runTurnCalls === 1) {
 							if (mode === "admitted") {
 								// Pi admits and settles the turn, then the RPC receipt is lost.
-								yield* Effect.promise(async () => runPiDurableTurn(await backendFor(name), request))
+								yield* runPiDurableTurn(backend, request)
 							}
 							return yield* new HarnessCallFailed({ cause: "simulated RPC drop" })
 						}
-						return yield* Effect.promise(async () =>
-							runPiDurableTurn(await backendFor(name), request),
-						)
+						return yield* runPiDurableTurn(backend, request)
 					}),
 				abortTurn: (name, operationId) =>
-					Effect.promise(async () => {
-						await (await backendFor(name)).abort(operationId)
-					}),
+					Effect.flatMap(
+						Effect.promise(() => backendFor(name)),
+						(backend) => Effect.asVoid(backend.abort(operationId)),
+					),
 			})
 
 			const CheckfuLive = Checkfu.layer(
@@ -1977,21 +1980,22 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			recoverTurn: (name, operationId) =>
 				Effect.gen(function* () {
 					recoverTurnCalls += 1
-					return yield* Effect.promise(async () =>
-						recoverPiDurableTurn(await backendFor(name), operationId),
-					)
+					const backend = yield* Effect.promise(() => backendFor(name))
+					return yield* recoverPiDurableTurn(backend, operationId)
 				}),
 			runTurn: (name, request) =>
 				Effect.gen(function* () {
 					runTurnCalls += 1
 					// Final (and only) runTurn attempt commits the reply in Pi, then loses its RPC receipt.
-					yield* Effect.promise(async () => runPiDurableTurn(await backendFor(name), request))
+					const backend = yield* Effect.promise(() => backendFor(name))
+					yield* runPiDurableTurn(backend, request)
 					return yield* new HarnessCallFailed({ cause: "final RPC receipt lost" })
 				}),
 			abortTurn: (name, operationId) =>
-				Effect.promise(async () => {
-					await (await backendFor(name)).abort(operationId)
-				}),
+				Effect.flatMap(
+					Effect.promise(() => backendFor(name)),
+					(backend) => Effect.asVoid(backend.abort(operationId)),
+				),
 		})
 
 		const CheckfuLive = Checkfu.layer(
