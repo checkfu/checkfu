@@ -47,4 +47,6 @@ export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	// The workspace is the harness's: its tools run next to the session object that calls them.
+	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 } as const

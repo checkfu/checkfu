@@ -125,6 +125,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			Effect.succeed({
 				runTurn: effective.generate,
 				interrupt: effective.interrupt,
+				discardWorkspace: () => Effect.void,
 			}),
 		)
 		const CheckfuLive = Checkfu.layer(

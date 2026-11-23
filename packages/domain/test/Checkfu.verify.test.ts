@@ -158,6 +158,7 @@ const automationRef = Automation.ref(AutomationId.make("auto_post_1"))
 const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
+		discardWorkspace: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,

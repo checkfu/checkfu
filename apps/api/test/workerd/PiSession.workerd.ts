@@ -304,6 +304,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
+	let workerLogs: ReadonlyArray<string> = []
 	let agentId: string
 	let environmentId: string
 
@@ -432,6 +433,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
+		workerLogs = worker.logs
 
 		const createdAgent = await createResource<{ readonly id: string }>(
 			"/v1/agents",
@@ -635,6 +637,75 @@ describe("PiSession real Durable Object under workerd", () => {
 			{ input_tokens: 43, output_tokens: 11 },
 		])
 	}, 30_000)
+
+	it("keeps a file a workspace tool wrote for the turns that follow", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			if (req.lastUserText === "Save the launch code.") {
+				return output === undefined
+					? {
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: "/workspace/notes/launch.txt", content: "PAPAYA-7" },
+						}
+					: { kind: "reply", text: "Saved." }
+			}
+			return output === undefined
+				? { kind: "tool_call", name: "read", arguments: { path: "/workspace/notes/launch.txt" } }
+				: { kind: "reply", text: `The file says: ${output}` }
+		})
+
+		const session = await createSession()
+		const startCount = fakeOpenAI.requests.length
+		const send = (text: string) =>
+			apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+
+		expect((await send("Save the launch code.")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+		expect((await send("What is in the launch file?")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+
+		const requests = fakeOpenAI.requests.slice(startCount)
+		expect(requests).toHaveLength(4)
+		expect(requests[0]?.toolNames).toEqual([
+			"read",
+			"ls",
+			"find",
+			"grep",
+			"write",
+			"edit",
+			"delete",
+		])
+		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
+
+		const events = await listAllEvents(session.id)
+		expect(events.map((e) => e.type)).toEqual([
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+		])
+		const replies = events.filter((e) => e.type === "agent.message").map((e) => e.content)
+		expect(replies[0]).toEqual([{ type: "text", text: "Saved." }])
+		expect(replies[1]?.[0]?.text).toContain("PAPAYA-7")
+		expect(
+			events.filter((e) => e.type === "span.model_request_end").map((e) => e.model_usage),
+		).toEqual([
+			{ input_tokens: 24, output_tokens: 12 },
+			{ input_tokens: 24, output_tokens: 12 },
+		])
+	}, 60_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
@@ -908,5 +979,14 @@ describe("PiSession real Durable Object under workerd", () => {
 			},
 		})
 		expect(afterArchive.status).toBe(409)
+
+		const discardDeadline = Date.now() + 10_000
+		while (!workerLogs.join("").includes("Workspace discarded") && Date.now() < discardDeadline) {
+			await sleep(100)
+		}
+		const logged = stripAnsi(workerLogs.join(""))
+		expect(logged).toContain("Workspace discarded")
+		expect(logged).toContain(session.id)
+		expect(logged).not.toContain("Workspace not discarded")
 	}, 30_000)
 })

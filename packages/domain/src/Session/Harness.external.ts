@@ -76,6 +76,11 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 		},
 		error: HarnessUnavailable,
 	},
+	discardWorkspace: {
+		args: {
+			session_id: SessionId,
+		},
+	},
 }) {}
 
 const clampText = (value: string, maxLength: number, fallback: string): string => {
@@ -161,6 +166,7 @@ export const boundedHarness = <R = never>(
 				readonly session_id: SessionId
 				readonly turn: number
 			}) => Effect.Effect<void, HarnessUnavailable>
+			readonly discardWorkspace: (args: { readonly session_id: SessionId }) => Effect.Effect<void>
 		},
 		never,
 		R
@@ -187,5 +193,6 @@ export const boundedHarness = <R = never>(
 					Effect.flatMap(clampHarnessReply),
 				),
 			interrupt: adapter.interrupt,
+			discardWorkspace: adapter.discardWorkspace,
 		})),
 	)

@@ -48,6 +48,7 @@ import {
 } from "../src/Pi/PiModels.ts"
 import {
 	PROVIDER_FAILURE_MESSAGE,
+	createCheckfuRegistry,
 	isProviderRefusalStopReason,
 	isRefusalAssistantMessage,
 	mapAssistantMessageToOutcome,
@@ -401,6 +402,65 @@ describe("turn engine", () => {
 			await started
 			await Effect.runPromise(backend.abort("turn:1"))
 			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+		} finally {
+			await backend.close()
+		}
+	})
+
+	it("drops an interrupted turn's tool rounds from the context of the turns that follow", async () => {
+		const contexts: Array<TranscriptContext> = []
+		const conversationRoles = (context: TranscriptContext | undefined) =>
+			context?.messages.map((message) => message.role).filter((role) => role !== "system")
+		let markToolRan: () => void = () => undefined
+		const toolRan = new Promise<void>((resolve) => {
+			markToolRan = resolve
+		})
+		const registry = createCheckfuRegistry()
+		registry.install({
+			name: "probe",
+			tools: [
+				{
+					name: "probe",
+					description: "Probe.",
+					parameters: { type: "object", properties: {} },
+					replay: "safe",
+					execute: () => Promise.resolve({ output: [{ type: "text", text: "probed" }] }),
+				},
+			],
+		})
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context, signal) => {
+				contexts.push(context)
+				if (extractLastUserText(context) !== "use the tool") {
+					return makeAssistantReply(model, null, "fresh start", 3, 2)
+				}
+				if (contexts.length === 1) {
+					return {
+						...makeAssistantReply(model, null, "", 3, 2),
+						content: [{ type: "toolCall", id: "call-1", name: "probe", arguments: {} }],
+						stopReason: "toolUse",
+					}
+				}
+				markToolRan()
+				await new Promise<void>((resolve) => {
+					signal?.addEventListener("abort", () => resolve(), { once: true })
+				})
+				return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" }
+			}),
+			1,
+			registry,
+		)
+		try {
+			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "use the tool")))
+			await toolRan
+			expect(conversationRoles(contexts[1])).toEqual(["user", "assistant", "toolResult"])
+			await Effect.runPromise(backend.abort("turn:1"))
+			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "start over"))),
+			).toMatchObject({ ok: true, reply: { text: "fresh start" } })
+			expect(conversationRoles(contexts[2])).toEqual(["user"])
 		} finally {
 			await backend.close()
 		}
