@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { API_WORKER_BUDGET, EAGER_BYTES_HELP, STARTUP_HELP, measureBundle } from "./BundleBudget.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
@@ -293,7 +294,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
-					return { baseUrl, logs, stop }
+					return { baseUrl, logs, stage, stop }
 				}
 			} catch {
 				const sleepMs = Math.min(100, healthDeadline - Date.now())
@@ -317,6 +318,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
 	let baseUrl: string
+	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
 	let agentId: string
 	let environmentId: string
@@ -444,6 +446,7 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		const worker = await startAlchemyDev(fakeOpenAI.baseUrl)
 		baseUrl = worker.baseUrl
+		stage = worker.stage
 		stopWorker = worker.stop
 
 		const createdAgent = await createResource<{ readonly id: string }>(
@@ -467,6 +470,23 @@ describe("PiSession real Durable Object under workerd", () => {
 		await stopWorker?.()
 		await fakeOpenAI?.close()
 	}, 30_000)
+
+	it("keeps the code every isolate loads at start-up inside its budget", async () => {
+		const measured = await measureBundle(
+			join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-ApiWorker`),
+			"ApiWorker.js",
+		)
+		const found = JSON.stringify(measured)
+		expect(measured.eagerBytes, `${EAGER_BYTES_HELP} Measured ${found}`).toBeLessThanOrEqual(
+			API_WORKER_BUDGET.eagerBytes,
+		)
+		expect(measured.totalBytes, `Measured ${found}`).toBeLessThanOrEqual(
+			API_WORKER_BUDGET.totalBytes,
+		)
+		expect(measured.startupCpuMs, `${STARTUP_HELP} Measured ${found}`).toBeLessThanOrEqual(
+			API_WORKER_BUDGET.startupCpuMs,
+		)
+	}, 60_000)
 
 	it("runs a turn from message to reply and remembers the first turn on the second", async () => {
 		fakeOpenAI.setHandler((req) => {
