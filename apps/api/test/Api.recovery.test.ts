@@ -5,6 +5,7 @@ import type { TranscriptContext } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Latch from "effect/Latch"
+import * as Layer from "effect/Layer"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	PI_SEED_MAX_CHARS,
@@ -14,7 +15,7 @@ import {
 	seedTokenBudget,
 	trimTailToBudget,
 } from "../src/Pi/PiContextBudget.ts"
-import { conversationName } from "../src/Pi/PiDurableHarness.ts"
+import { HarnessTurnTimeout, conversationName } from "../src/Pi/PiDurableHarness.ts"
 import {
 	AUTH_HEADERS,
 	createIdleSession,
@@ -291,6 +292,99 @@ describe("Pi history recovery and small-context budgeting", () => {
 				expect(events[5]?.error?.type).toBe("harness_unavailable")
 				expect(conversations.at(-1)).toBe(conversationName(session.id, 1))
 			}).pipe(Effect.ensuring(gate.open), Effect.scoped, Effect.provide(layer))
+		},
+	)
+
+	it.live(
+		"abandons a turn the harness never settles, then continues in a fresh conversation",
+		() => {
+			const gate = Latch.makeUnsafe(false)
+			const started = Latch.makeUnsafe(false)
+			const { layer, conversations } = makePiDurableTestLayer(async (model, context) => {
+				const text = extractLastUserText(context)
+				if (text === "stuck") {
+					started.openUnsafe()
+					await Effect.runPromise(gate.await)
+				}
+				return makeAssistantReply(model, null, `Echo: ${text}`, 1, 1)
+			})
+
+			return Effect.gen(function* () {
+				const { fetch: apiFetch } = yield* makeApiHandler
+				const session = yield* createIdleSession(apiFetch)
+				const sent = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: `/v1/sessions/${session.id}/events`,
+					headers: AUTH_HEADERS,
+					body: {
+						events: [{ type: "user.message", content: [{ type: "text", text: "stuck" }] }],
+					},
+				})
+				expect(sent.status).toBe(200)
+				yield* started.await
+				yield* waitForSession(
+					apiFetch,
+					session.id,
+					(current) => current.status === "idle" && current.turn === 1,
+					"stuck turn was not abandoned",
+				)
+
+				const listEvents = () =>
+					Effect.gen(function* () {
+						const listed = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${session.id}/events`,
+							headers: AUTH_HEADERS,
+						})
+						expect(listed.status).toBe(200)
+						return (
+							(yield* Effect.promise(() => listed.json())) as {
+								data: ReadonlyArray<{
+									type: string
+									content?: ReadonlyArray<{ type: string; text?: string }>
+									error?: { type: string; retry_status: { type: string } }
+									stop_reason?: { type: string }
+								}>
+							}
+						).data
+					})
+
+				const turn1Events = yield* listEvents()
+				expect(turn1Events.map((event) => event.type)).toEqual([
+					"user.message",
+					"session.status_running",
+					"span.model_request_start",
+					"span.model_request_end",
+					"session.error",
+					"session.status_idle",
+				])
+				expect(turn1Events[4]?.error).toMatchObject({
+					type: "harness_unavailable",
+					retry_status: { type: "exhausted" },
+				})
+				expect(turn1Events[5]?.stop_reason).toEqual({ type: "retries_exhausted" })
+
+				yield* sendAndSettle(apiFetch, session.id, ["next"], 2)
+				expect(conversations.at(-1)).toBe(conversationName(session.id, 1))
+
+				const turn2Events = (yield* listEvents()).slice(turn1Events.length)
+				expect(turn2Events.map((event) => event.type)).toEqual([
+					"user.message",
+					"session.status_running",
+					"span.model_request_start",
+					"agent.message",
+					"span.model_request_end",
+					"session.status_idle",
+				])
+				expect(turn2Events[3]?.content).toEqual([{ type: "text", text: "Echo: next" }])
+				expect(turn2Events[5]?.stop_reason).toEqual({ type: "end_turn" })
+			}).pipe(
+				Effect.ensuring(gate.open),
+				Effect.scoped,
+				Effect.provide(
+					Layer.succeed(HarnessTurnTimeout, "50 millis").pipe(Layer.provideMerge(layer)),
+				),
+			)
 		},
 	)
 

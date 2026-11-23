@@ -89,6 +89,11 @@ export const AgentVersionLookupTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
+export const HarnessTurnTimeout = Context.Reference<Duration.Input>(
+	"@checkfu/api/HarnessTurnTimeout",
+	{ defaultValue: () => Duration.millis(DEFAULT_TURN_TIMEOUT_MS) },
+)
+
 export const SeedMaxScanPages = Context.Reference<number>("@checkfu/api/SeedMaxScanPages", {
 	defaultValue: () => PI_SEED_MAX_SCAN_PAGES,
 })
@@ -345,7 +350,7 @@ export const PiDurableHarnessLive = boundedHarness(
 				Effect.gen(function* () {
 					const { settleMargin } = yield* HarnessLimits
 					const settleTimeout = Duration.sum(
-						Duration.millis(DEFAULT_TURN_TIMEOUT_MS),
+						Duration.fromInputUnsafe(yield* HarnessTurnTimeout),
 						Duration.fromInputUnsafe(settleMargin),
 					)
 					const conversation = conversationName(args.session_id, args.generation)
