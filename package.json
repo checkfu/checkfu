@@ -39,7 +39,8 @@
 		"format:check": "oxfmt --check .",
 		"check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
 		"persisted:check": "bun apps/api/test/persisted/check.ts",
-		"persisted:cut": "bun apps/api/test/persisted/cut.ts"
+		"persisted:cut": "bun apps/api/test/persisted/cut.ts",
+		"state:sync-observability": "bun scripts/sync-state-store-observability.ts"
 	},
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",

@@ -57,9 +57,30 @@ const ApiWorkerLive = Layer.mergeAll(
 	Digest.layerWebCrypto,
 ).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
 
+export const API_WORKER_PROPS = {
+	main: import.meta.url,
+	compatibility: {
+		// >= 2026-11-17 enables request.signal by default so Effect fetch handlers
+		// and SSE polling streams interrupt cleanly when clients disconnect.
+		date: "2026-11-17",
+	},
+	// Exceed DEFAULT_MODEL_TIMEOUT_MS (10m) + settle margin so deploys don't evict
+	// active PiSession/RunTurn Durable Objects mid-turn.
+	codeUpdateStrategy: {
+		mode: "deferred" as const,
+		maxDelay: "12 minutes" as const,
+	},
+	observability: {
+		// Keep top-level Workers Observability enabled when adding `issues`, since
+		// providing `observability` bypasses Alchemy's DEFAULT_OBSERVABILITY fallback.
+		enabled: true,
+		issues: { enabled: true },
+	},
+} satisfies Cloudflare.WorkerProps
+
 export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 	"ApiWorker",
-	{ main: import.meta.url, compatibility: { date: "2026-11-17" } },
+	API_WORKER_PROPS,
 	Effect.gen(function* () {
 		// Platform pins the owning instance/build Scope onto the Worker init context.
 		// Building both the domain/telemetry layers and the HTTP router in that scope
