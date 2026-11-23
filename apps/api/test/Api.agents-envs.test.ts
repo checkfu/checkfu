@@ -1497,7 +1497,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		}
 	})
 
-	it("retries an unadmitted RPC failure whatever happened to the environment during backoff, while recovering an already-admitted turn", async () => {
+	it("retries a failed call whatever happened to the environment during backoff, without running an admitted turn twice", async () => {
 		const runRetryCase = async (mode: "unadmitted-tighten" | "unadmitted-delete" | "admitted") => {
 			let modelCalls = 0
 			let runTurnCalls = 0
@@ -1523,11 +1523,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				recoverTurn: (name, operationId) =>
 					Effect.gen(function* () {
 						recoverTurnCalls += 1
-						if (mutateDuringBackoff !== null) {
-							const mutate = mutateDuringBackoff
-							mutateDuringBackoff = null
-							yield* mutate()
-						}
 						const backend = yield* Effect.promise(() => backendFor(name))
 						return yield* recoverPiDurableTurn(backend, operationId)
 					}),
@@ -1541,6 +1536,11 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								yield* runPiDurableTurn(backend, request)
 							}
 							return yield* new HarnessCallFailed({ cause: "simulated RPC drop" })
+						}
+						if (mutateDuringBackoff !== null) {
+							const mutate = mutateDuringBackoff
+							mutateDuringBackoff = null
+							yield* mutate()
 						}
 						return yield* runPiDurableTurn(backend, request)
 					}),
@@ -1638,17 +1638,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								yield* envViews.get(Environment.ref(targetId), { atLeast: receipt })
 							}).pipe(Effect.orDie)
 
-						// Initial recoverTurn happens before runTurn; trigger mutation on the retry recoverTurn.
-						let sawInitialRecover = false
-						mutateDuringBackoff = () =>
-							Effect.gen(function* () {
-								if (!sawInitialRecover) {
-									sawInitialRecover = true
-									mutateDuringBackoff = triggerMutation
-									return
-								}
-								yield* triggerMutation()
-							})
+						// The mutation fires when the call is sent again.
+						mutateDuringBackoff = triggerMutation
 
 						const sendRes = yield* sendRequest(apiFetch, {
 							method: "POST",
@@ -1679,10 +1670,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						}
 						expect(settled).toBe(true)
 
-						// Retry checked recoverTurn (initial + retry) and issued a second runTurn
-						// only when Pi had not admitted the first.
-						expect(recoverTurnCalls).toBe(2)
-						expect(runTurnCalls).toBe(mode === "admitted" ? 1 : 2)
+						// The call is sent again either way; a turn Pi already admitted is joined, not run again.
+						expect(recoverTurnCalls).toBe(1)
+						expect(runTurnCalls).toBe(2)
 
 						const eventsRes = yield* sendRequest(apiFetch, {
 							method: "GET",
@@ -1717,131 +1707,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		await runRetryCase("unadmitted-tighten")
 		await runRetryCase("unadmitted-delete")
 		await runRetryCase("admitted")
-	})
-
-	it("recovers a saved reply after the final runTurn attempt loses its RPC receipt", async () => {
-		let modelCalls = 0
-		let runTurnCalls = 0
-		let recoverTurnCalls = 0
-		const models = makeScriptedPiModels(async (model, context) => {
-			modelCalls += 1
-			return makeAssistantReply(model, null, `FinalReply: ${extractLastUserText(context)}`, 7, 5)
-		})
-		const backends = new Map<string, ReturnType<typeof createInMemoryPiDurableBackend>>()
-		const backendFor = (name: string) => {
-			let existing = backends.get(name)
-			if (existing === undefined) {
-				existing = createInMemoryPiDurableBackend(models)
-				backends.set(name, existing)
-			}
-			return existing
-		}
-
-		const executorLayer = makePiTurnExecutorLayer({
-			recoverTurn: (name, operationId) =>
-				Effect.gen(function* () {
-					recoverTurnCalls += 1
-					const backend = yield* Effect.promise(() => backendFor(name))
-					return yield* recoverPiDurableTurn(backend, operationId)
-				}),
-			runTurn: (name, request) =>
-				Effect.gen(function* () {
-					runTurnCalls += 1
-					// Final (and only) runTurn attempt commits the reply in Pi, then loses its RPC receipt.
-					const backend = yield* Effect.promise(() => backendFor(name))
-					yield* runPiDurableTurn(backend, request)
-					return yield* new HarnessCallFailed({ cause: "final RPC receipt lost" })
-				}),
-			abortTurn: (name, operationId) =>
-				Effect.flatMap(
-					Effect.promise(() => backendFor(name)),
-					(backend) => Effect.asVoid(backend.abort(operationId)),
-				),
-		})
-
-		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
-		).pipe(Layer.provide(executorLayer))
-		const layer = CheckfuLive.pipe(
-			Layer.provide(Domain.InMemory),
-			Layer.provideMerge(
-				Layer.succeed(HarnessLimits, {
-					attempts: 1,
-					baseDelay: "5 millis",
-					interruptTimeout: "5 seconds",
-					settleMargin: "5 seconds",
-				}),
-			),
-			Layer.provideMerge(Digest.layerWebCrypto),
-			Layer.provideMerge(SecureRandom.layerWebCrypto),
-			Layer.provideMerge(
-				ConfigProvider.layer(
-					ConfigProvider.fromUnknown({
-						CHECKFU_API_KEY: TEST_API_KEY,
-						OPENAI_API_KEY: "sk-openai-test",
-						ANTHROPIC_API_KEY: "sk-anthropic-test",
-					}),
-				),
-			),
-		)
-
-		try {
-			await Effect.runPromise(
-				Effect.gen(function* () {
-					const { fetch: apiFetch } = yield* makeApiHandler
-					const agentRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/agents",
-						headers: AUTH_HEADERS,
-						body: { name: "Final Recovery Agent", model: "gpt-4o-mini" },
-					})
-					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
-
-					const envRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/environments",
-						headers: AUTH_HEADERS,
-						body: { name: "Default Env" },
-					})
-					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
-
-					const sessRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/sessions",
-						headers: AUTH_HEADERS,
-						body: { agent: agent.id, environment_id: env.id },
-					})
-					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
-
-					yield* sendAndSettle(apiFetch, session.id, ["save me"], 1)
-
-					expect(runTurnCalls).toBe(1)
-					// 1 initial recovery check + 1 post-final recovery probe after the lost receipt.
-					expect(recoverTurnCalls).toBe(2)
-					expect(modelCalls).toBe(1)
-
-					const eventsRes = yield* sendRequest(apiFetch, {
-						method: "GET",
-						path: `/v1/sessions/${session.id}/events`,
-						headers: AUTH_HEADERS,
-					})
-					const events = (yield* Effect.promise(() => eventsRes.json())) as {
-						data: ReadonlyArray<{
-							type: string
-							content?: ReadonlyArray<{ text?: string }>
-						}>
-					}
-					expect(events.data.filter((e) => e.type === "session.error")).toHaveLength(0)
-					expect(
-						events.data.filter((e) => e.type === "agent.message").map((e) => e.content?.[0]?.text),
-					).toEqual(["FinalReply: save me"])
-				}).pipe(Effect.scoped, Effect.provide(layer)),
-			)
-		} finally {
-			for (const b of backends.values()) {
-				await (await b).close()
-			}
-		}
 	})
 
 	it("enforces Idempotency-Key deduplication and payload conflict checks on agent and environment creates", async () => {

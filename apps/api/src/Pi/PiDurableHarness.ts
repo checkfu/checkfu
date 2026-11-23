@@ -9,7 +9,6 @@ import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Result from "effect/Result"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { resolveCatalogModel } from "./PiCatalog.ts"
@@ -167,61 +166,24 @@ export const PiDurableHarnessLive = boundedHarness(
 						})
 					}
 
-					const outcome = yield* Effect.gen(function* () {
-						const { attempts, baseDelay } = yield* HarnessLimits
-						const request: PiTurnRequest = {
-							operationId,
-							turn: args.turn,
-							provider: resolved.provider,
-							modelId: resolved.model.id,
-							system: version.system,
-							text: userText,
-							...(args.last_reply_turn === undefined
-								? {}
-								: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
-						}
-						const attemptCall = Effect.gen(function* () {
-							const { attempt } = yield* Schedule.CurrentMetadata
-							if (attempt > 0) {
-								// After an ambiguous RPC failure, check whether Pi already admitted
-								// or settled this operation before submitting it again.
-								const recoveredAttempt = yield* executor.recoverTurn(conversation, operationId)
-								if (recoveredAttempt !== null) {
-									return recoveredAttempt
-								}
-							}
-							return yield* executor.runTurn(conversation, request)
-						})
-						const finalRecoveryProbe = (initialLastError?: HarnessCallFailed) =>
-							Effect.gen(function* () {
-								// Perform one bounded read-only recovery probe after the final failed
-								// submission so a saved reply whose RPC receipt was lost is still
-								// recovered instead of abandoning the turn.
-								yield* Effect.sleep(baseDelay)
-								const finalProbe = yield* Effect.result(
-									executor.recoverTurn(conversation, operationId),
-								)
-								if (Result.isSuccess(finalProbe) && finalProbe.success !== null) {
-									return finalProbe.success
-								}
-								const finalError = Result.isFailure(finalProbe)
-									? finalProbe.failure
-									: initialLastError
-								yield* Effect.logError("Harness unreachable", conversation, finalError?.cause)
-								return yield* Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" })
-							})
-						if (attempts <= 0) {
-							return yield* finalRecoveryProbe()
-						}
-						return yield* attemptCall.pipe(
-							Effect.retry({
-								times: attempts - 1,
-								while: Schema.is(HarnessCallFailed),
-								schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
-							}),
-							Effect.catchTag("HarnessCallFailed", finalRecoveryProbe),
-						)
-					}).pipe(
+					const request: PiTurnRequest = {
+						operationId,
+						turn: args.turn,
+						provider: resolved.provider,
+						modelId: resolved.model.id,
+						system: version.system,
+						text: userText,
+						...(args.last_reply_turn === undefined
+							? {}
+							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
+					}
+					// A turn is submitted under its operation id, so sending it again after a
+					// lost reply joins the turn already there instead of starting another.
+					const outcome = yield* withRetry(executor.runTurn(conversation, request)).pipe(
+						Effect.tapError((error) =>
+							Effect.logError("Harness unreachable", conversation, error.cause),
+						),
+						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 						Effect.timeoutOrElse({
 							duration: settleTimeout,
 							orElse: () =>
