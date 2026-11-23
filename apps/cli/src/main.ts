@@ -10,7 +10,6 @@ import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
 import { isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
-import { isStandalone } from "./Standalone.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
 const resolvePhysicalPath = (path: string): string | undefined => {
@@ -45,7 +44,7 @@ const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean =
 // installed launcher via absolute paths for both Node and `checkfu.mjs`).
 // Refuse unsupported direct invocations consistently rather than allowing
 // `bun apps/cli/src/main.ts` to run in clean directories.
-if (!isStandalone && !launchedWithPinnedCliConfig(process.execArgv)) {
+if (!launchedWithPinnedCliConfig(process.execArgv)) {
 	process.stderr.write(
 		"Error: Launch the Checkfu CLI via a trusted Node binary and trusted Checkfu installation (for example `/path/to/node /path/to/checkfu/apps/cli/bin/checkfu.mjs`) or the installed `checkfu` binary on a trusted PATH so Bun starts with --no-env-file and the pinned CLI config.\n",
 	)

@@ -29,7 +29,7 @@ import {
 } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import type { SavedConnection } from "./SavedConnection.ts"
-import { COMMAND } from "./Standalone.ts"
+import { COMMAND } from "./Invocation.ts"
 
 export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5

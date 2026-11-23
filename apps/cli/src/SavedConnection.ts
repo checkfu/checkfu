@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema"
 import { configError } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { readIfPresent, removeIfPresent, writePrivate } from "./PrivateFile.ts"
-import { COMMAND } from "./Standalone.ts"
+import { COMMAND } from "./Invocation.ts"
 
 export const SavedConnection = Schema.Struct({
 	url: Schema.String,

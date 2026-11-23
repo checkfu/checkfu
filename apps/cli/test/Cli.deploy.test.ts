@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { providerForKey, readDotEnvValue, setDotEnvValue } from "../src/Commands/Deploy.ts"
-import { COMMAND, invocation } from "../src/Standalone.ts"
+import { COMMAND, invocation } from "../src/Invocation.ts"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 
 const DEPLOYED_URL = "https://checkfu.example.workers.dev"
@@ -140,35 +140,13 @@ describe("dotenv helpers", () => {
 	})
 })
 
-describe("the command printed for the user to run again", () => {
-	const source = {
-		standalone: false,
-		executable: "/opt/bun",
-		launcher: "/opt/checkfu/apps/cli/bin/checkfu.mjs",
-		checkoutRoot: "/opt/checkfu",
-	}
-
-	it("is the checkout shorthand only when standing in the checkout it runs from", () => {
-		expect(invocation({ ...source, workingDirectory: "/opt/checkfu" })).toBe("bun checkfu")
+describe("what the CLI calls itself in messages", () => {
+	it("is the checkout script only when standing in the checkout it runs from", () => {
+		expect(invocation("/opt/checkfu", "/opt/checkfu")).toBe("bun checkfu")
 		for (const workingDirectory of ["/work/other-checkout", "/opt/checkfu/apps/cli", undefined]) {
-			expect(invocation({ ...source, workingDirectory })).toBe(
-				"node /opt/checkfu/apps/cli/bin/checkfu.mjs",
-			)
+			expect(invocation("/opt/checkfu", workingDirectory)).toBe("checkfu")
 		}
-		expect(
-			invocation({ ...source, launcher: "/opt/my tools/checkfu.mjs", workingDirectory: "/x" }),
-		).toBe("node '/opt/my tools/checkfu.mjs'")
-	})
-
-	it("is the binary's own path when compiled", () => {
-		expect(
-			invocation({
-				...source,
-				standalone: true,
-				executable: "/usr/local/bin/checkfu",
-				workingDirectory: "/opt/checkfu",
-			}),
-		).toBe("/usr/local/bin/checkfu")
+		expect(invocation(undefined, undefined)).toBe("checkfu")
 	})
 })
 
@@ -590,6 +568,29 @@ describe("checkfu deploy", () => {
 			}),
 	)
 
+	it.live("waits for the new key to be accepted when the old version is still answering", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles(checkout)
+			let stale = true
+			const result = yield* cli.run(["deploy", "--yes"], {
+				env: deployEnv,
+				files,
+				readyWithin: "10 seconds",
+				spawn: fakeAlchemy([]),
+				interceptFetch: (next, request) => {
+					if (stale && request.headers.has("authorization")) {
+						stale = false
+						return Promise.resolve(errorEnvelope(401, "authentication_error"))
+					}
+					return next(request)
+				},
+			})
+			expect(result.errorMessage).toBeUndefined()
+			expect(JSON.parse(files[CONFIG_FILE] ?? "").url).toBe(DEPLOYED_URL)
+		}),
+	)
+
 	it.live("gives up on a deployment that accepts connections but never answers", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
@@ -601,7 +602,7 @@ describe("checkfu deploy", () => {
 				interceptFetch: () => Promise.withResolvers<Response>().promise,
 			})
 			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("did not start answering within")
+			expect(result.errorMessage).toContain("did not accept its API key within")
 			expect(files[RECORD_FILE]).toBe(record("live"))
 			expect(files[CONFIG_FILE]).toBeUndefined()
 		}),

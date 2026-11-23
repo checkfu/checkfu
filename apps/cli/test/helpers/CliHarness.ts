@@ -14,6 +14,7 @@ import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
@@ -82,6 +83,7 @@ export interface CliRunOptions {
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
 	readonly onChmod?: (filePath: string, mode: number) => void
+	readonly readyWithin?: Duration.Input
 	readonly spawn?: (args: ReadonlyArray<string>) => {
 		readonly exitCode: number
 		readonly stdout?: string
@@ -318,8 +320,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 					Layer.succeed(Checkout, {
 						root: "/checkout",
 						runtime: "bun",
-						runtimeEnv: {},
-						readyWithin: "300 millis",
+						readyWithin: options?.readyWithin ?? "300 millis",
 					}),
 					FetchHttpClient.layer.pipe(
 						Layer.provide(Layer.succeed(FetchHttpClient.Fetch, customFetch)),

@@ -9,7 +9,7 @@ import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from
 import { CliFailure, configError, usageError } from "../Errors.ts"
 import { RootCommand } from "../RootCommand.ts"
 import { removeSavedConnection, writeSavedConnection } from "../SavedConnection.ts"
-import { COMMAND } from "../Standalone.ts"
+import { COMMAND } from "../Invocation.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 
 const apiKeyFromEnvOrPrompt = Effect.gen(function* () {

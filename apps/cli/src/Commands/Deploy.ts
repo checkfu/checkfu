@@ -1,4 +1,4 @@
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { fileURLToPath } from "node:url"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
@@ -9,13 +9,12 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
-import * as HttpClient from "effect/http/HttpClient"
-import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Redacted from "effect/Redacted"
+import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
@@ -27,8 +26,8 @@ import {
 	writeSavedConnection,
 } from "../SavedConnection.ts"
 import { readIfPresent, removeIfPresent, restrictToOwner, writePrivate } from "../PrivateFile.ts"
-import { COMMAND, isStandalone } from "../Standalone.ts"
-import { shellQuote, writeStderrLine } from "../TerminalOutput.ts"
+import { COMMAND } from "../Invocation.ts"
+import { writeStderrLine } from "../TerminalOutput.ts"
 
 export const STACK_NAME = "Checkfu"
 export const DEFAULT_STAGE = "live"
@@ -45,20 +44,16 @@ export const providerForKey = (key: string): ModelProvider =>
 
 export interface Checkout {
 	readonly root: string
-	/** The Bun that runs Alchemy, with any extra environment it needs to behave as Bun. */
+	/** The Bun that runs Alchemy. */
 	readonly runtime: string
-	readonly runtimeEnv: Readonly<Record<string, string>>
 	/** How long a fresh deployment gets to start answering before the deploy is reported as failed. */
 	readonly readyWithin: Duration.Input
 }
 
 export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
 	defaultValue: () => ({
-		root: isStandalone
-			? fileURLToPath(new URL("../../../", pathToFileURL(process.execPath)))
-			: fileURLToPath(new URL("../../../../", import.meta.url)),
+		root: fileURLToPath(new URL("../../../../", import.meta.url)),
 		runtime: process.execPath,
-		runtimeEnv: isStandalone ? { BUN_BE_BUN: "1" } : {},
 		readyWithin: "90 seconds",
 	}),
 })
@@ -205,11 +200,7 @@ interface Target {
 	readonly envFile: Option.Option<string>
 }
 
-const inCheckout = (target: Target) => ({
-	cwd: target.checkout.root,
-	env: target.checkout.runtimeEnv,
-	extendEnv: true,
-})
+const inCheckout = (target: Target) => ({ cwd: target.checkout.root })
 
 /** Runs an Alchemy command attached to the terminal and returns its exit code. */
 const run = (target: Target, args: ReadonlyArray<string>) =>
@@ -488,24 +479,24 @@ const readDeployedUrl = (target: Target, stage: string, retry: string) =>
 		}
 	})
 
-const waitUntilLive = (url: string, within: Duration.Input, retry: string) =>
+/**
+ * Ready means the deployed key is accepted, not merely that something answers: after a
+ * redeploy the previous version can keep serving for a moment with the old key.
+ */
+const waitUntilReady = (url: string, apiKey: string, within: Duration.Input, retry: string) =>
 	Effect.gen(function* () {
-		const http = yield* HttpClient.HttpClient
-		yield* http.execute(HttpClientRequest.get(`${url}/health`)).pipe(
-			Effect.map((response) => response.status),
-			Effect.scoped,
-			Effect.mapError((error) => networkFailure(`${url} is not reachable: ${error.message}`)),
-			Effect.filterOrFail(
-				(code) => code === 200,
-				(code) => networkFailure(`${url}/health answered HTTP ${code}.`),
-			),
+		const lastFailure = yield* Ref.make("it did not answer")
+		yield* verifyApiKey(url, apiKey).pipe(
+			Effect.tapError((error) => Ref.set(lastFailure, error.message)),
 			Effect.retry(Schedule.spaced("2 seconds")),
 			Effect.timeoutOrElse({
 				duration: within,
 				orElse: () =>
-					Effect.fail(
-						networkFailure(
-							`${url} did not start answering within ${Duration.format(Duration.fromInputUnsafe(within))}. It is deployed; run \`${retry}\` again to re-check.`,
+					Effect.flatMap(Ref.get(lastFailure), (reason) =>
+						Effect.fail(
+							networkFailure(
+								`The deployment did not accept its API key within ${Duration.format(Duration.fromInputUnsafe(within))}: ${reason.replace(/\.+$/, "")}. It is deployed; run \`${retry}\` again to re-check.`,
+							),
 						),
 					),
 			}),
@@ -566,8 +557,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		const url = yield* readDeployedUrl(target, stage, retry)
 		yield* writeDeploymentRecord(checkout, { ...deployed, url })
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)
-		yield* waitUntilLive(url, checkout.readyWithin, retry)
-		yield* verifyApiKey(url, apiKey)
+		yield* waitUntilReady(url, apiKey, checkout.readyWithin, retry)
 		const file = yield* writeSavedConnection({ url, api_key: apiKey })
 
 		// These commands go wherever CHECKFU_API_URL or CHECKFU_URL points, so say so when
@@ -593,7 +583,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				"",
 				...(elsewhere
 					? [
-							`This shell exports a different Checkfu URL. Unset it, or add \`--base-url ${shellQuote(url)}\` after \`${COMMAND}\`.`,
+							`This shell exports a different Checkfu URL. Unset it, or add \`--base-url ${url}\` after \`${COMMAND}\`.`,
 							"",
 						]
 					: []),
