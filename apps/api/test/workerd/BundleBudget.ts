@@ -8,7 +8,8 @@ import { promisify } from "node:util"
 const run = promisify(execFile)
 
 const STATIC_IMPORT = /(?:\bfrom|\bimport)\s*["'](\.{1,2}\/[^"']+)["']/g
-const PLATFORM_IMPORT = /import\s*\{([^}]*)\}\s*from\s*["']cloudflare:[^"']+["']/g
+const PLATFORM_IMPORT =
+	/(?:import|export)\s*(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*["']cloudflare:[^"']+["']/g
 
 export interface BundleMeasurement {
 	readonly eagerBytes: number
