@@ -15,7 +15,7 @@ const sigintController = makeSigintController()
 
 const MainLive = Layer.mergeAll(
 	BunServices.layer,
-	BunHttpClient.layer,
+	BunHttpClient.layerOptions({ redirect: "manual" }),
 	SecureRandom.layerWebCrypto,
 	Layer.succeed(SigintCoordinator, sigintController),
 )

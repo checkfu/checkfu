@@ -8,10 +8,41 @@ import * as YAML from "yaml"
 import { type CliFailure, usageError } from "./Errors.ts"
 import { writeStderrLine } from "./TerminalOutput.ts"
 
-const MAX_STDIN_BYTES = 2 * 1024 * 1024
+export const MAX_INPUT_BYTES = 2 * 1024 * 1024
 
 export const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const readBoundedBytes = <E extends { readonly message: string }>(
+	stream: Stream.Stream<Uint8Array, E>,
+	maxBytes: number,
+	readErrorPrefix: string,
+	limitLabel: string,
+): Effect.Effect<Uint8Array, CliFailure> =>
+	Effect.gen(function* () {
+		const chunks: Array<Uint8Array> = []
+		let totalBytes = 0
+		yield* stream.pipe(
+			Stream.mapError((err) => usageError(`${readErrorPrefix}: ${err.message}`)),
+			Stream.runForEach((chunk) =>
+				Effect.suspend(() => {
+					totalBytes += chunk.byteLength
+					if (totalBytes > maxBytes) {
+						return Effect.fail(usageError(`${limitLabel} exceeds ${maxBytes} byte limit.`))
+					}
+					chunks.push(chunk)
+					return Effect.void
+				}),
+			),
+		)
+		const merged = new Uint8Array(totalBytes)
+		let offset = 0
+		for (const chunk of chunks) {
+			merged.set(chunk, offset)
+			offset += chunk.byteLength
+		}
+		return merged
+	})
 
 export const resolveTextOrFile = (
 	raw: string,
@@ -21,11 +52,13 @@ export const resolveTextOrFile = (
 		if (raw.startsWith("@") && raw.length > 1) {
 			const filePath = raw.slice(1)
 			const fs = yield* FileSystem.FileSystem
-			return yield* fs
-				.readFileString(filePath)
-				.pipe(
-					Effect.mapError((err) => usageError(`Failed to read file "${filePath}": ${err.message}`)),
-				)
+			const bytes = yield* readBoundedBytes(
+				fs.stream(filePath),
+				MAX_INPUT_BYTES,
+				`Failed to read file "${filePath}"`,
+				`File "${filePath}"`,
+			)
+			return new TextDecoder().decode(bytes)
 		}
 		return raw
 	})
@@ -93,29 +126,14 @@ export const readPipedStdin = (): Effect.Effect<Option.Option<unknown>, CliFailu
 		if (yield* stdio.stdinIsTerminal) {
 			return Option.none()
 		}
-		const chunks: Array<Uint8Array> = []
-		let totalBytes = 0
-		yield* stdio.stdin.pipe(
-			Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
-			Stream.runForEach((chunk) =>
-				Effect.suspend(() => {
-					totalBytes += chunk.byteLength
-					if (totalBytes > MAX_STDIN_BYTES) {
-						return Effect.fail(usageError(`stdin payload exceeds ${MAX_STDIN_BYTES} byte limit.`))
-					}
-					chunks.push(chunk)
-					return Effect.void
-				}),
-			),
+		const bytes = yield* readBoundedBytes(
+			stdio.stdin,
+			MAX_INPUT_BYTES,
+			"Failed to read stdin",
+			"stdin payload",
 		)
-		if (totalBytes === 0) return Option.none()
-		const merged = new Uint8Array(totalBytes)
-		let offset = 0
-		for (const chunk of chunks) {
-			merged.set(chunk, offset)
-			offset += chunk.byteLength
-		}
-		const text = new TextDecoder().decode(merged)
+		if (bytes.byteLength === 0) return Option.none()
+		const text = new TextDecoder().decode(bytes)
 		if (text.trim().length === 0) return Option.none()
 		const parsed = yield* parseJsonOrYaml(text, "stdin")
 		return Option.some(parsed)

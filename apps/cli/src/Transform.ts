@@ -11,6 +11,15 @@ import {
 export const OUTPUT_FORMATS = ["auto", "json", "jsonl", "yaml", "pretty", "raw"] as const
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number]
 
+const setOwnProperty = (target: Record<string, unknown>, key: string, value: unknown): void => {
+	Object.defineProperty(target, key, {
+		value,
+		enumerable: true,
+		writable: true,
+		configurable: true,
+	})
+}
+
 export const normalizeJsonValue = (value: unknown): unknown => {
 	if (DateTime.isDateTime(value)) return DateTime.formatIso(value)
 	if (Array.isArray(value)) return value.map((item) => normalizeJsonValue(item))
@@ -18,7 +27,7 @@ export const normalizeJsonValue = (value: unknown): unknown => {
 		const out: Record<string, unknown> = {}
 		for (const [key, entry] of Object.entries(value)) {
 			if (entry !== undefined) {
-				out[key] = normalizeJsonValue(entry)
+				setOwnProperty(out, key, normalizeJsonValue(entry))
 			}
 		}
 		return out
@@ -111,11 +120,11 @@ const evaluateObjectLiteral = (value: unknown, body: string): Record<string, unk
 			const segments = splitTopLevel(entry, ".")
 			const last = segments.at(-1) ?? entry
 			const key = unescapeSegment(last)
-			result[key] = evaluateTransform(value, entry)
+			setOwnProperty(result, key, evaluateTransform(value, entry))
 		} else {
 			const key = unescapeSegment(entry.slice(0, colonIndex))
 			const expr = entry.slice(colonIndex + 1).trim()
-			result[key] = evaluateTransform(value, expr)
+			setOwnProperty(result, key, evaluateTransform(value, expr))
 		}
 	}
 	return result

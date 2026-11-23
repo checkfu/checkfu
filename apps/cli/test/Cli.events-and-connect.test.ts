@@ -1806,8 +1806,33 @@ describe("CLI sessions:events and sessions connect", () => {
 		//    while the parent keeps stdin open, and reports path-segment errors on stderr
 		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
 		const openSseResponses: Array<Http.ServerResponse> = []
+		let redirectTargetGetHits = 0
 		const server = Http.createServer((req, res) => {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1")
+			if (req.method === "POST" && url.pathname === "/v1/agents/agent_redirect") {
+				res.writeHead(302, { location: "/v1/agents/agent_redirect" })
+				res.end()
+				return
+			}
+			if (req.method === "GET" && url.pathname === "/v1/agents/agent_redirect") {
+				redirectTargetGetHits++
+				res.writeHead(200, { "content-type": "application/json" })
+				res.end(
+					JSON.stringify({
+						id: "agent_redirect",
+						type: "agent",
+						version: 1,
+						name: "Unchanged",
+						description: null,
+						system: null,
+						model: { id: "gpt-6.2-sol" },
+						created_at: "2026-11-22T00:00:00.000Z",
+						updated_at: "2026-11-22T00:00:00.000Z",
+						archived_at: null,
+					}),
+				)
+				return
+			}
 			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_subproc") {
 				res.writeHead(200, { "content-type": "application/json" })
 				res.end(
@@ -1938,6 +1963,50 @@ describe("CLI sessions:events and sessions connect", () => {
 			expect(badDotSubproc.code).toBe(1)
 			expect(badDotSubproc.stdout).toBe("")
 			expect(badDotSubproc.stderr).toContain("Invalid --agent-id")
+
+			// Real Bun subprocess must NOT follow a 302 redirect from POST update into GET retrieve
+			const redirectSubproc = await new Promise<{
+				readonly code: number | null
+				readonly stdout: string
+				readonly stderr: string
+			}>((resolve, reject) => {
+				const child = spawn(
+					"bun",
+					[
+						mainPath,
+						"agents",
+						"update",
+						"--agent-id",
+						"agent_redirect",
+						"--version",
+						"1",
+						"--name",
+						"ShouldNotChange",
+						"--base-url",
+						`http://127.0.0.1:${port}`,
+					],
+					{
+						env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+						stdio: ["ignore", "pipe", "pipe"],
+					},
+				)
+				let stdout = ""
+				let stderr = ""
+				child.stdout.setEncoding("utf8")
+				child.stdout.on("data", (c: string) => {
+					stdout += c
+				})
+				child.stderr.setEncoding("utf8")
+				child.stderr.on("data", (c: string) => {
+					stderr += c
+				})
+				child.on("error", reject)
+				child.on("close", (code) => resolve({ code, stdout, stderr }))
+			})
+			expect(redirectSubproc.code).toBe(1)
+			expect(redirectSubproc.stdout).toBe("")
+			expect(redirectSubproc.stderr).toContain("302")
+			expect(redirectTargetGetHits).toBe(0)
 		} finally {
 			for (const res of openSseResponses) {
 				res.end()
@@ -2107,6 +2176,90 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(validBeforeOverflow.stderr).toContain("exceeds maximum message length")
 					expect(sentPayloads).toHaveLength(1)
 					expect(sentPayloads[0]).toContain("valid first line")
+
+					// 5) Transient retrying session.error followed by successful turn settlement must NOT
+					//    cause a later archive while piped stdin is open to mark the settled turn as failed
+					const transientRecoverCli = yield* makeTestServer({
+						generate: () =>
+							Effect.succeed({
+								thinking: null,
+								text: "Recovered reply",
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const transientSessionId = yield* createReadySession(transientRecoverCli)
+					const turn1Settled = yield* Deferred.make<void>()
+					const archiveAfterSettle = yield* Deferred.await(turn1Settled).pipe(
+						Effect.andThen(Effect.sleep("30 millis")),
+						Effect.andThen(
+							transientRecoverCli.run(["sessions", "archive", "--session-id", transientSessionId]),
+						),
+						Effect.forkChild,
+					)
+					const openAfterTurnStdin = Stream.concat(
+						Stream.make(new TextEncoder().encode("transient then recover\n")),
+						Stream.never,
+					)
+					const transientArchivedRes = yield* transientRecoverCli.run(
+						["sessions", "connect", "--session-id", transientSessionId],
+						{
+							stdin: openAfterTurnStdin,
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								const res = await next(request)
+								if (res.status !== 200 || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								const encoder = new TextEncoder()
+								let injectedRetryErr = false
+								let idleSignaled = false
+								const observed = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										let text = decoder.decode(chunk.value, { stream: true })
+										if (!injectedRetryErr && text.includes("session.status_idle")) {
+											injectedRetryErr = true
+											const retryErrFrame = `event: session.error\ndata: ${JSON.stringify({
+												type: "session.error",
+												error: {
+													type: "upstream_overloaded",
+													message: "transient overload",
+													retry_status: { type: "retrying" },
+												},
+											})}\n\n`
+											const idleIdx = text.indexOf("event: session.status_idle")
+											const frameStart = idleIdx >= 0 ? text.lastIndexOf("\n\n", idleIdx) : -1
+											text =
+												frameStart >= 0
+													? `${text.slice(0, frameStart + 2)}${retryErrFrame}${text.slice(frameStart + 2)}`
+													: `${retryErrFrame}${text}`
+										}
+										controller.enqueue(encoder.encode(text))
+										if (!idleSignaled && text.includes("session.status_idle")) {
+											idleSignaled = true
+											await Effect.runPromise(Deferred.succeed(turn1Settled, undefined))
+										}
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(observed, { status: 200, headers: res.headers })
+							},
+						},
+					)
+					yield* Fiber.await(archiveAfterSettle)
+					expect(transientArchivedRes.exitCode).toBe(0)
+					expect(transientArchivedRes.stderr).toContain(
+						"[error] upstream_overloaded: transient overload",
+					)
+					expect(transientArchivedRes.stdout).toContain("Recovered reply")
 				}),
 			),
 		)

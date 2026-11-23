@@ -83,7 +83,7 @@ const MAX_CONNECT_SEND_RETRIES = 2
 const CONNECT_SEND_RETRY_BASE_MS = 100
 
 const isAmbiguousResponseStatus = (status: number): boolean =>
-	status < 400 || isTransientHttpStatus(status)
+	(status >= 200 && status < 300) || isTransientHttpStatus(status)
 
 const extractSubmittedTurn = (data: ReadonlyArray<unknown>): number | undefined => {
 	const first = data[0]
@@ -403,6 +403,8 @@ const renderConnectEvent = (
 						liveStateVersion: reachedLiveIdle ? state.liveStateVersion + 1 : state.liveStateVersion,
 						settledTurn: Math.max(state.settledTurn, turn),
 						latestSettledStopReason,
+						latestTurnError:
+							state.latestTurnError?.turn === turn ? undefined : state.latestTurnError,
 						failedTurnErrors,
 					}
 				})
@@ -425,6 +427,7 @@ const renderConnectEvent = (
 					let failedTurnErrors = state.failedTurnErrors
 					if (
 						eventType === "session.status_terminated" &&
+						state.observedTurn > state.settledTurn &&
 						state.latestTurnError?.turn === state.observedTurn
 					) {
 						const nextFailed = new Map(state.failedTurnErrors)

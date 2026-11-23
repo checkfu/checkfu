@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 
 describe("CLI help, errors, and resource commands", () => {
@@ -480,6 +481,57 @@ describe("CLI help, errors, and resource commands", () => {
 					} finally {
 						process.off("warning", onWarning)
 					}
+
+					// Redirect responses on mutations fail instead of silently downgrading POST to GET
+					const redirectedUpdate = yield* cli.run(
+						[
+							"agents",
+							"update",
+							"--agent-id",
+							agent.id,
+							"--version",
+							"1",
+							"--name",
+							"ShouldNotSucceed",
+						],
+						{
+							interceptFetch: async (_next, _request) =>
+								new Response(null, {
+									status: 302,
+									headers: { location: `/v1/agents/${agent.id}` },
+								}),
+						},
+					)
+					expect(redirectedUpdate.exitCode).toBe(1)
+					expect(redirectedUpdate.stdout).toBe("")
+					expect(redirectedUpdate.stderr).toContain("302")
+
+					// Oversized @file inputs fail while streaming chunks instead of buffering unbounded memory
+					const fileChunk64k = new TextEncoder().encode("x".repeat(64 * 1024))
+					let fileChunksPulled = 0
+					const hugeVirtualFile = Stream.unfold(0, (n) =>
+						Effect.sync(() => {
+							fileChunksPulled++
+							return [fileChunk64k, n + 1] as const
+						}),
+					)
+					const hugeFileAgent = yield* cli.run(
+						[
+							"agents",
+							"create",
+							"--name",
+							"TooBig",
+							"--model",
+							"gpt-6.2-sol",
+							"--system",
+							"@huge.txt",
+						],
+						{ files: { "huge.txt": hugeVirtualFile } },
+					)
+					expect(hugeFileAgent.exitCode).toBe(1)
+					expect(hugeFileAgent.stdout).toBe("")
+					expect(hugeFileAgent.stderr).toContain("exceeds 2097152 byte limit")
+					expect(fileChunksPulled).toBeLessThanOrEqual(35)
 				}),
 			),
 		)

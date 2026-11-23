@@ -665,6 +665,136 @@ describe("normalizeApiUrl", () => {
 				}).pipe(Effect.provide(makeLayer(idOnlyFetch)))
 				expect(Array.from(idOnlyEvents).map((e) => e.seq)).toEqual([1])
 				expect(idOnlyLastIds).toEqual([null, "cur_2", null])
+
+				// 11) Transient 503 with a stalled body cancels the body and retries immediately;
+				//     final non-retried error reads only a bounded diagnostic
+				let stalled503Canceled = false
+				let stalled503Calls = 0
+				const stalled503Fetch = (async () => {
+					stalled503Calls++
+					if (stalled503Calls === 1) {
+						const stalledBody = new ReadableStream<Uint8Array>({
+							pull() {
+								return new Promise<void>(() => {
+									// intentionally stalls forever — retry must not await EOF
+								})
+							},
+							cancel() {
+								stalled503Canceled = true
+							},
+						})
+						return new Response(stalledBody, { status: 503 })
+					}
+					return new Response(
+						'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+				const stalled503Events = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_stalled_503", {
+							maxReconnectAttempts: 1,
+							baseReconnectDelayMs: 2,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(stalled503Fetch)))
+				expect(stalled503Calls).toBe(2)
+				expect(stalled503Canceled).toBe(true)
+				expect(Array.from(stalled503Events).map((e) => e.seq)).toEqual([1])
+
+				let hugeErrChunks = 0
+				let hugeErrCanceled = false
+				const hugeErrFetch = (async () => {
+					const chunk64k = encoder.encode("E".repeat(64 * 1024))
+					const hugeBody = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							hugeErrChunks++
+							controller.enqueue(chunk64k)
+						},
+						cancel() {
+							hugeErrCanceled = true
+						},
+					})
+					return new Response(hugeBody, { status: 400 })
+				}) as unknown as typeof globalThis.fetch
+				const hugeErr = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_huge_err", {
+								maxReconnectAttempts: 0,
+								baseReconnectDelayMs: 1,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(hugeErrFetch)))
+				expect(hugeErr.message).toContain("HTTP 400")
+				expect(hugeErrChunks).toBeLessThanOrEqual(2)
+				expect(hugeErrCanceled).toBe(true)
+
+				// 12) Repeated same-ID or unnumbered SSE closes back off instead of tight-looping,
+				//     and unnumbered mid-stream errors do not reset the retry budget
+				let repeatIdCalls = 0
+				const repeatIdFetch = (async () => {
+					repeatIdCalls++
+					if (repeatIdCalls <= 3) {
+						return new Response('id: same_1\nevent: custom.ping\ndata: {"ok":true}\n\n', {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const [repeatDuration] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Stream.runCollect(
+							client.streamEndpointEvents(
+								{ method: "GET", path: "/v1/custom/repeat/stream" },
+								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(repeatIdFetch))),
+				)
+				expect(repeatIdCalls).toBe(4)
+				// Connection 1 advances undefined->same_1 (0ms), connection 2 repeats (30ms), connection 3 repeats (60ms)
+				expect(Duration.toMillis(repeatDuration)).toBeGreaterThanOrEqual(75)
+
+				let unnumberedErrCalls = 0
+				const unnumberedErrFetch = (async () => {
+					unnumberedErrCalls++
+					let step = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (step === 0) {
+								step = 1
+								controller.enqueue(encoder.encode('event: custom.ping\ndata: {"ok":true}\n\n'))
+							} else {
+								controller.error(new Error("unnumbered drop"))
+							}
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+				yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamEndpointEvents(
+								{ method: "GET", path: "/v1/custom/unnumbered/stream" },
+								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 2 },
+							),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(unnumberedErrFetch)))
+				expect(unnumberedErrCalls).toBe(2)
 			}),
 		)
 	})
@@ -759,6 +889,32 @@ describe("Transform and formatOutput", () => {
 				isTerminal: false,
 			}),
 		).toBe("null")
+
+		// Reserved property names like __proto__ are preserved as own properties in transforms & normalization
+		expect(
+			formatOutput(sample, {
+				format: "json",
+				transform: Option.some("{__proto__:id}"),
+				rawOutput: false,
+				isTerminal: false,
+			}),
+		).toBe('{"__proto__":"agt_123"}')
+		expect(
+			formatOutput(sample, {
+				format: "yaml",
+				transform: Option.some("{__proto__:id}"),
+				rawOutput: false,
+				isTerminal: false,
+			}),
+		).toBe("__proto__: agt_123")
+		expect(
+			formatOutput(JSON.parse('{"__proto__":"kept","a":1}'), {
+				format: "json",
+				transform: Option.none(),
+				rawOutput: false,
+				isTerminal: false,
+			}),
+		).toBe('{"__proto__":"kept","a":1}')
 	})
 
 	it("formats auto, json, pretty, yaml, raw, and DateTime.Utc cleanly", () => {

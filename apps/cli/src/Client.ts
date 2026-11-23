@@ -3,13 +3,15 @@ import {
 	makeCheckfuClientWith,
 } from "@checkfu/api/Http/Api"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Sse from "effect/encoding/Sse"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
-import type * as HttpClientError from "effect/http/HttpClientError"
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
@@ -30,6 +32,62 @@ import {
 export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5
 const DEFAULT_SSE_RECONNECT_DELAY_MS = 250
+const MAX_SSE_ERROR_BODY_BYTES = 16 * 1024
+const MAX_SSE_NO_PROGRESS_DELAY_MS = 5_000
+
+const isRedirectStatus = (status: number): boolean =>
+	status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+
+const cancelResponseBody = (
+	response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<void> => {
+	const webResponse = HttpClientResponse.toWeb(response)
+	if (Option.isSome(webResponse) && webResponse.value.body !== null) {
+		const body = webResponse.value.body
+		return Effect.ignore(Effect.promise(() => body.cancel()))
+	}
+	return Effect.void
+}
+
+const readBoundedResponseText = (
+	response: HttpClientResponse.HttpClientResponse,
+	maxBytes: number,
+): Effect.Effect<string> =>
+	Effect.gen(function* () {
+		const chunks: Array<Uint8Array> = []
+		let totalBytes = 0
+		let truncated = false
+		yield* response.stream.pipe(
+			Stream.takeUntil((chunk) => {
+				if (totalBytes + chunk.byteLength > maxBytes) {
+					const remaining = maxBytes - totalBytes
+					if (remaining > 0) {
+						chunks.push(chunk.subarray(0, remaining))
+						totalBytes += remaining
+					}
+					truncated = true
+					return true
+				}
+				chunks.push(chunk)
+				totalBytes += chunk.byteLength
+				return false
+			}),
+			Stream.runDrain,
+			Effect.ignore,
+		)
+		if (truncated) {
+			yield* cancelResponseBody(response)
+		}
+		if (totalBytes === 0) return ""
+		const merged = new Uint8Array(totalBytes)
+		let offset = 0
+		for (const chunk of chunks) {
+			merged.set(chunk, offset)
+			offset += chunk.byteLength
+		}
+		const decoded = new TextDecoder().decode(merged)
+		return truncated ? `${decoded}…` : decoded
+	})
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 
@@ -186,10 +244,39 @@ export const makeCheckfuClient = (
 		const baseUrl = yield* resolveBaseUrl(baseUrlFlag)
 		const apiKey = yield* resolveApiKey()
 		const rawHttpClient = yield* HttpClient.HttpClient
+		const existingRequestInit = Context.getOrUndefined(
+			yield* Effect.context(),
+			FetchHttpClient.RequestInit,
+		)
 		const random = yield* SecureRandom.SecureRandom
 		const bearerValue = Redacted.value(apiKey)
 
 		const authedHttpClient = rawHttpClient.pipe(
+			HttpClient.transformResponse((effect) =>
+				Effect.provideService(effect, FetchHttpClient.RequestInit, {
+					...existingRequestInit,
+					redirect: "manual",
+				}).pipe(
+					Effect.flatMap((response) => {
+						if (isRedirectStatus(response.status)) {
+							return cancelResponseBody(response).pipe(
+								Effect.andThen(
+									Effect.fail(
+										new HttpClientError.HttpClientError({
+											reason: new HttpClientError.StatusCodeError({
+												request: response.request,
+												response,
+												description: `Unexpected HTTP ${response.status} redirect (redirects are not followed). Check --base-url.`,
+											}),
+										}),
+									),
+								),
+							)
+						}
+						return Effect.succeed(response)
+					}),
+				),
+			),
 			HttpClient.mapRequest(HttpClientRequest.bearerToken(bearerValue)),
 		)
 
@@ -221,6 +308,7 @@ export const makeCheckfuClient = (
 				cursor: string | undefined
 				useHeader: boolean
 				attempt: number
+				noProgressCloses: number
 				retryDelayMs: number | undefined
 				pendingDelayMs: number
 				done: boolean
@@ -286,23 +374,25 @@ export const makeCheckfuClient = (
 
 						const response = responseResult.success
 						if (response.status === 204) {
+							yield* cancelResponseBody(response)
 							loopState.done = true
 							return Stream.empty
 						}
 						if (response.status !== 200) {
-							const bodyText = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")))
-							const parsedError = yield* Effect.try({
-								try: () => JSON.parse(bodyText) as unknown,
-								catch: () => undefined,
-							}).pipe(Effect.catch(() => Effect.succeed(undefined)))
-
 							if (isTransientHttpStatus(response.status) && loopState.attempt < maxReconnects) {
+								yield* cancelResponseBody(response)
 								loopState.useHeader = true
 								loopState.pendingDelayMs =
 									(loopState.retryDelayMs ?? baseDelayMs) * 2 ** loopState.attempt
 								loopState.attempt += 1
 								return Stream.empty
 							}
+							const bodyText = yield* readBoundedResponseText(response, MAX_SSE_ERROR_BODY_BYTES)
+							const parsedError = yield* Effect.try({
+								try: () => JSON.parse(bodyText) as unknown,
+								catch: () => undefined,
+							}).pipe(Effect.catch(() => Effect.succeed(undefined)))
+
 							loopState.done = true
 							if (isApiErrorEnvelope(parsedError)) {
 								return Stream.fail(formatApiErrorEnvelope(parsedError, response.status))
@@ -317,11 +407,7 @@ export const makeCheckfuClient = (
 						const contentType = response.headers["content-type"] ?? ""
 						const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? ""
 						if (mediaType !== "text/event-stream") {
-							const webResponse = HttpClientResponse.toWeb(response)
-							if (Option.isSome(webResponse) && webResponse.value.body !== null) {
-								const body = webResponse.value.body
-								yield* Effect.ignore(Effect.promise(() => body.cancel()))
-							}
+							yield* cancelResponseBody(response)
 							loopState.done = true
 							return Stream.fail(
 								networkFailure(
@@ -334,8 +420,10 @@ export const makeCheckfuClient = (
 							)
 						}
 
+						const initialCursor = loopState.cursor
 						let sawEvent = false
 						let sawKeepalive = false
+						let cursorAdvanced = false
 						let terminalReached = false
 						let handledError = false
 						let isFirstChunk = true
@@ -460,7 +548,11 @@ export const makeCheckfuClient = (
 								Stream.mapEffect((item) =>
 									Effect.gen(function* () {
 										if (item._tag === "CursorUpdate") {
-											loopState.cursor = item.id === "" ? undefined : item.id
+											const nextCursor = item.id === "" ? undefined : item.id
+											if (nextCursor !== loopState.cursor) {
+												loopState.cursor = nextCursor
+												cursorAdvanced = loopState.cursor !== initialCursor
+											}
 											sawKeepalive = true
 											return Option.none<SessionStreamEvent>()
 										}
@@ -473,6 +565,9 @@ export const makeCheckfuClient = (
 											loopState.cursor = sseEvent.id
 										} else if (seq !== undefined) {
 											loopState.cursor = String(seq)
+										}
+										if (loopState.cursor !== initialCursor) {
+											cursorAdvanced = true
 										}
 										sawEvent = true
 										if (requestSpec.isTerminalEvent?.(data) === true) {
@@ -493,7 +588,7 @@ export const makeCheckfuClient = (
 								),
 								Stream.catch((err) => {
 									if (err instanceof StreamBodyReadError) {
-										const nextAttempt = (sawEvent ? 0 : loopState.attempt) + 1
+										const nextAttempt = (cursorAdvanced ? 0 : loopState.attempt) + 1
 										if (nextAttempt <= maxReconnects) {
 											handledError = true
 											loopState.useHeader = true
@@ -521,7 +616,7 @@ export const makeCheckfuClient = (
 								const hasIncompleteFrame = pendingLine.length > 0 || hasPendingEventFields
 								loopState.useHeader = true
 								if (hasIncompleteFrame) {
-									const nextAttempt = (sawEvent ? 0 : loopState.attempt) + 1
+									const nextAttempt = (cursorAdvanced ? 0 : loopState.attempt) + 1
 									if (nextAttempt > maxReconnects) {
 										loopState.done = true
 										return Stream.fail(
@@ -533,17 +628,29 @@ export const makeCheckfuClient = (
 										(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
 									return Stream.empty
 								}
-								if (sawEvent) {
+								if (cursorAdvanced) {
 									loopState.attempt = 0
+									loopState.noProgressCloses = 0
 									loopState.pendingDelayMs = loopState.retryDelayMs ?? 0
 									return Stream.empty
 								}
-								// Clean close without advancing the cursor (e.g., healthy keepalive rotation
-								// or empty HTTP 200 close): keep listening without spending error retries,
-								// applying a minimum delay (or the server's advertised retry: delay).
+								// Clean close without advancing the cursor (e.g., healthy keepalive rotation,
+								// empty HTTP 200 close, or repeated/unnumbered events): keep listening without
+								// spending error retries, but always apply a minimum delay (and back off on
+								// repeated non-advancing event closes).
 								loopState.attempt = 0
-								loopState.pendingDelayMs =
-									loopState.retryDelayMs ?? (sawKeepalive ? Math.min(baseDelayMs, 50) : baseDelayMs)
+								if (sawEvent) {
+									const streak = loopState.noProgressCloses
+									loopState.noProgressCloses = streak + 1
+									loopState.pendingDelayMs =
+										loopState.retryDelayMs ??
+										Math.min(baseDelayMs * 2 ** Math.min(streak, 4), MAX_SSE_NO_PROGRESS_DELAY_MS)
+								} else {
+									loopState.noProgressCloses = 0
+									loopState.pendingDelayMs =
+										loopState.retryDelayMs ??
+										(sawKeepalive ? Math.min(baseDelayMs, 50) : baseDelayMs)
+								}
 								return Stream.empty
 							}),
 						)
@@ -557,6 +664,7 @@ export const makeCheckfuClient = (
 					cursor: requestSpec.initialCursor,
 					useHeader: false,
 					attempt: 0,
+					noProgressCloses: 0,
 					retryDelayMs: undefined,
 					pendingDelayMs: 0,
 					done: false,

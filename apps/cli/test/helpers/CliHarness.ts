@@ -64,7 +64,7 @@ export interface CliRunOptions {
 	readonly stdinIsTerminal?: boolean
 	readonly stdoutIsTerminal?: boolean
 	readonly stderrIsTerminal?: boolean
-	readonly files?: Record<string, string>
+	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
 	readonly terminalReads?: ReadonlyArray<Effect.Effect<string, Terminal.QuitError>>
 	readonly sigintController?: SigintController
 	readonly interceptFetch?: (
@@ -149,18 +149,27 @@ export const makeTestServer = (handler?: ModelHandler) =>
 							: options.stdin
 
 				const files = options?.files ?? {}
+				const notFoundError = (method: string, filePath: string) =>
+					PlatformError.systemError({
+						_tag: "NotFound",
+						module: "FileSystem",
+						method,
+						pathOrDescriptor: filePath,
+					})
 				const fileSystemLayer = FileSystem.layerNoop({
-					readFileString: (filePath) =>
-						filePath in files
-							? Effect.succeed(files[filePath]!)
-							: Effect.fail(
-									PlatformError.systemError({
-										_tag: "NotFound",
-										module: "FileSystem",
-										method: "readFileString",
-										pathOrDescriptor: filePath,
-									}),
-								),
+					readFileString: (filePath) => {
+						const entry = files[filePath]
+						return typeof entry === "string"
+							? Effect.succeed(entry)
+							: Effect.fail(notFoundError("readFileString", filePath))
+					},
+					stream: (filePath) => {
+						const entry = files[filePath]
+						if (entry === undefined) {
+							return Stream.fail(notFoundError("stream", filePath))
+						}
+						return typeof entry === "string" ? Stream.make(new TextEncoder().encode(entry)) : entry
+					},
 				})
 
 				const reads = [...(options?.terminalReads ?? [])]
