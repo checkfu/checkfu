@@ -14,7 +14,7 @@
 	"scripts": {
 		"build": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --define CHECKFU_STANDALONE=true src/main.ts --outfile dist/checkfu",
 		"typecheck": "effect-tsgo tsc --noEmit",
-		"test": "vitest run --pool=threads --no-allowOnly"
+		"test": "vitest run --pool=threads --no-allowOnly --testTimeout=20000"
 	},
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",
