@@ -1,38 +1,26 @@
 import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
-import { describe, expect, it } from "@effect/vitest"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, it, vi } from "@effect/vitest"
 import * as Alchemy from "alchemy"
+import * as Alchemist from "alchemy/Alchemist"
 import { State } from "alchemy/State"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
-import * as Result from "effect/Result"
+import type * as Scope from "effect/Scope"
 import stack, {
 	CLOUDFLARE_STATE_OBSERVABILITY,
-	markDeployProgramEvaluated,
-	shouldRequireShippedBaseline,
-	withProductionBaselineGate,
-	withProductionStateGate,
+	checkfuStack,
+	inProduction,
 } from "../../../alchemy.run.ts"
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
-
-const expectRefusedDefect = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-	Effect.map(Effect.exit(effect), (exit) => {
-		expect(Exit.isFailure(exit)).toBe(true)
-		if (Exit.isFailure(exit)) {
-			const defect = Cause.findDefect(exit.cause)
-			expect(Result.isSuccess(defect)).toBe(true)
-			if (Result.isSuccess(defect)) {
-				const error = defect.success
-				expect(error instanceof Error ? error.message : String(error)).toMatch(
-					/Production deploy refused/,
-				)
-			}
-		}
-	})
 
 describe("Alchemy stack and worker entry", () => {
 	it.effect(
@@ -94,293 +82,72 @@ describe("Alchemy stack and worker entry", () => {
 					return yield* state
 				}).pipe(Effect.provide(devStateLayer))
 				expect(devStateStore.id).toBe("local")
-
-				const checkBaselineGate = (dev: boolean, stage: string) =>
-					shouldRequireShippedBaseline.pipe(
-						Effect.provide([
-							Layer.succeed(Alchemy.AlchemyContext, {
-								dotAlchemy: "/nonexistent/.alchemy",
-								dev,
-								adopt: false,
-							}),
-							Layer.succeed(Alchemy.Stage, stage),
-						]),
-					)
-				expect(yield* checkBaselineGate(true, "production")).toBe(false)
-				expect(yield* checkBaselineGate(false, "production")).toBe(true)
-				expect(yield* checkBaselineGate(false, "staging")).toBe(false)
 			}),
 	)
 
-	it.effect(
-		"gates production provider mutations on the shipped baseline while allowing logs, destroy, dev, and staging",
-		() =>
-			Effect.gen(function* () {
-				let gateChecks = 0
-				let reconcileCalls = 0
-				let precreateCalls = 0
-				let logsCalls = 0
-				let deleteCalls = 0
-				let failGate = true
-				const mockProvider = {
-					logs: () => {
-						logsCalls += 1
-						return Effect.succeed([])
-					},
-					delete: () => {
-						deleteCalls += 1
-						return Effect.void
-					},
-					precreate: () => {
-						precreateCalls += 1
-						return Effect.succeed({ id: "precreated" })
-					},
-					reconcile: () => {
-						reconcileCalls += 1
-						return Effect.succeed({ id: "reconciled" })
-					},
-				}
-				class DualCollection extends Alchemy.ProviderCollection<DualCollection>()(
-					"MockCollection",
-				) {}
-				const mockProvidersLayer = Layer.succeed(DualCollection, {
-					kind: "ProviderCollection" as const,
-					get: (name: string) =>
-						name === "Mock.Resource"
-							? ({
-									...mockProvider,
-									modes: {
-										live: Effect.succeed(mockProvider),
-										local: Effect.succeed(mockProvider),
-									},
-								} as never)
-							: undefined,
-					providers: {
-						"Mock.Resource": {
-							...mockProvider,
-							modes: {
-								live: Effect.succeed(mockProvider),
-								local: Effect.succeed(mockProvider),
-							},
-						} as never,
-					},
-				})
-				const testGate = Effect.suspend(() => {
-					gateChecks += 1
-					return failGate ? Effect.die(new Error("Production deploy refused")) : Effect.void
-				})
-				const buildGatedCollection = (dev: boolean, stage: string, runProgram: boolean) =>
-					Effect.scoped(
-						Effect.gen(function* () {
-							if (runProgram) {
-								yield* markDeployProgramEvaluated
-							}
-							const collection = yield* DualCollection
-							return collection.get("Mock.Resource")!
-						}).pipe(
-							Effect.provide(
-								withProductionBaselineGate(mockProvidersLayer, testGate).pipe(
-									Layer.provideMerge(
-										Layer.mergeAll(
-											Layer.succeed(Alchemy.AlchemyContext, {
-												dotAlchemy: "/nonexistent/.alchemy",
-												dev,
-												adopt: false,
-											}),
-											Layer.succeed(Alchemy.Stage, stage),
-											Layer.succeed(Alchemy.Stack, {
-												name: "Checkfu",
-												stage,
-												resources: {},
-												bindings: {},
-												actions: {},
-											}),
-										),
-									),
-								),
-							),
-						),
-					)
-
-				const destroyProvider = yield* buildGatedCollection(false, "production", false)
-				expect(gateChecks).toBe(0)
-				const destroyLive = yield* destroyProvider.modes!.live
-				const destroyLocal = yield* destroyProvider.modes!.local
-				yield* destroyLive.delete({} as never)
-				yield* destroyLocal.delete({} as never)
-				expect(deleteCalls).toBe(2)
-				expect(gateChecks).toBe(0)
-
-				const prodProvider = yield* buildGatedCollection(false, "production", true)
-				expect(gateChecks).toBe(0)
-				yield* prodProvider.logs!({} as never)
-				expect(logsCalls).toBe(1)
-				expect(gateChecks).toBe(0)
-
-				const liveVariant = yield* prodProvider.modes!.live
-				const localVariant = yield* prodProvider.modes!.local
-				yield* expectRefusedDefect(liveVariant.delete({} as never))
-				yield* expectRefusedDefect(localVariant.delete({} as never))
-				yield* expectRefusedDefect(liveVariant.reconcile({} as never))
-				yield* expectRefusedDefect(liveVariant.precreate!({} as never))
-				expect(deleteCalls).toBe(2)
-				expect(reconcileCalls).toBe(0)
-				expect(precreateCalls).toBe(0)
-				expect(gateChecks).toBe(1)
-
-				failGate = false
-				gateChecks = 0
-				const passingProdProvider = yield* buildGatedCollection(false, "production", true)
-				const passingLive = yield* passingProdProvider.modes!.live
-				yield* passingLive.delete({} as never)
-				yield* passingLive.reconcile({} as never)
-				yield* passingLive.precreate!({} as never)
-				expect(gateChecks).toBe(1)
-				expect(deleteCalls).toBe(3)
-				expect(reconcileCalls).toBe(1)
-				expect(precreateCalls).toBe(1)
-
-				failGate = true
-				gateChecks = 0
-				const devProdProvider = yield* buildGatedCollection(true, "production", true)
-				yield* devProdProvider.delete({} as never)
-				yield* devProdProvider.reconcile({} as never)
-				const stagingProvider = yield* buildGatedCollection(false, "staging", true)
-				yield* stagingProvider.delete({} as never)
-				yield* stagingProvider.reconcile({} as never)
-				expect(gateChecks).toBe(0)
-				expect(deleteCalls).toBe(5)
-				expect(reconcileCalls).toBe(3)
-			}),
+	it.effect("checks the shipped baseline only for a production deploy", () =>
+		Effect.gen(function* () {
+			const checked = (dev: boolean, stage: string) => {
+				let ran = false
+				return inProduction(
+					Effect.sync(() => {
+						ran = true
+					}),
+				).pipe(
+					Effect.provide([
+						Layer.succeed(Alchemy.AlchemyContext, {
+							dotAlchemy: "/nonexistent/.alchemy",
+							dev,
+							adopt: false,
+						}),
+						Layer.succeed(Alchemy.Stage, stage),
+					]),
+					Effect.map(() => ran),
+				)
+			}
+			expect(yield* checked(false, "production")).toBe(true)
+			expect(yield* checked(true, "production")).toBe(false)
+			expect(yield* checked(false, "staging")).toBe(false)
+		}),
 	)
 
-	it.effect(
-		"gates production state-store initialization during deploy planning and drift preflight",
-		() =>
-			Effect.gen(function* () {
-				let stateInitCalls = 0
-				let stateGateChecks = 0
-				let failStateGate = true
-				const mockStateLayer = Layer.succeed(
-					State,
-					Effect.suspend(() => {
-						stateInitCalls += 1
-						return Effect.succeed({ id: "mock-cloudflare-state" } as never)
-					}),
-				)
-				const stateGate = Effect.suspend(() => {
-					stateGateChecks += 1
-					return failStateGate ? Effect.die(new Error("Production deploy refused")) : Effect.void
-				})
-				const initGatedState = (options: {
-					readonly dev: boolean
-					readonly stage: string
-					readonly runProgram: boolean
-					readonly spans: ReadonlyArray<string>
-				}) =>
-					Effect.scoped(
-						Effect.gen(function* () {
-							if (options.runProgram) {
-								yield* markDeployProgramEvaluated
-							}
-							const stateInit = yield* State
-							let wrapped = stateInit
-							for (let i = options.spans.length - 1; i >= 0; i--) {
-								wrapped = wrapped.pipe(Effect.withSpan(options.spans[i]!))
-							}
-							return yield* wrapped
-						}).pipe(
-							Effect.provide(
-								withProductionStateGate(mockStateLayer, stateGate).pipe(
-									Layer.provideMerge(
-										Layer.mergeAll(
-											Layer.succeed(Alchemy.AlchemyContext, {
-												dotAlchemy: "/nonexistent/.alchemy",
-												dev: options.dev,
-												adopt: false,
-											}),
-											Layer.succeed(Alchemy.Stage, options.stage),
-											Layer.succeed(Alchemy.Stack, {
-												name: "Checkfu",
-												stage: options.stage,
-												resources: {},
-												bindings: {},
-												actions: {},
-											}),
-										),
-									),
-								),
-							),
-						),
-					)
-
-				yield* expectRefusedDefect(
-					initGatedState({
+	it.live("refuses every way of addressing production before any network call", () =>
+		Effect.gen(function* () {
+			let requests = 0
+			const scratch = yield* Effect.acquireRelease(
+				Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-"))),
+				(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+			)
+			yield* Effect.acquireRelease(
+				Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+				() => Effect.sync(() => vi.unstubAllEnvs()),
+			)
+			const stack = checkfuStack(Effect.die(new Error("baseline refused")))
+			const refused = <A, E>(operation: Effect.Effect<A, E, Alchemist.Services | Scope.Scope>) =>
+				operation.pipe(
+					Effect.scoped,
+					Effect.provide(Alchemist.layer()),
+					Effect.provideService(Alchemy.AlchemyContext, {
+						dotAlchemy: join(scratch, "project"),
 						dev: false,
-						stage: "production",
-						runProgram: true,
-						spans: ["plan.make"],
+						adopt: false,
 					}),
-				)
-				yield* expectRefusedDefect(
-					initGatedState({
-						dev: false,
-						stage: "production",
-						runProgram: false,
-						spans: ["cli.deploy", "Alchemist.Drift.scan"],
+					Effect.provideService(FetchHttpClient.Fetch, () => {
+						requests += 1
+						return Promise.reject(new Error("no network in this test"))
 					}),
+					Effect.exit,
+					Effect.map((exit) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "not refused")),
 				)
-				expect(stateGateChecks).toBe(2)
-				expect(stateInitCalls).toBe(0)
-
-				yield* initGatedState({
-					dev: false,
-					stage: "production",
-					runProgram: true,
-					spans: ["cli.logs", "Alchemist.Logs.entries"],
-				})
-				yield* initGatedState({
-					dev: false,
-					stage: "production",
-					runProgram: false,
-					spans: ["cli.drift", "Alchemist.Drift.scan"],
-				})
-				yield* initGatedState({
-					dev: false,
-					stage: "production",
-					runProgram: false,
-					spans: ["cli.destroy"],
-				})
-				yield* initGatedState({
-					dev: true,
-					stage: "production",
-					runProgram: true,
-					spans: ["cli.deploy", "plan.make"],
-				})
-				yield* initGatedState({
-					dev: false,
-					stage: "staging",
-					runProgram: true,
-					spans: ["cli.deploy", "plan.make"],
-				})
-				expect(stateGateChecks).toBe(2)
-				expect(stateInitCalls).toBe(5)
-
-				failStateGate = false
-				yield* initGatedState({
-					dev: false,
-					stage: "production",
-					runProgram: false,
-					spans: ["cli.deploy", "Alchemist.Drift.scan"],
-				})
-				yield* initGatedState({
-					dev: false,
-					stage: "production",
-					runProgram: true,
-					spans: ["cli.deploy", "plan.make"],
-				})
-				expect(stateGateChecks).toBe(4)
-				expect(stateInitCalls).toBe(7)
-			}),
+			const production = { stack, stage: "production" }
+			expect(yield* refused(Alchemist.plan({ ...production, operation: "deploy" }))).toContain(
+				"baseline refused",
+			)
+			expect(yield* refused(Alchemist.Drift.scan(production))).toContain("baseline refused")
+			expect(yield* refused(Alchemist.plan({ ...production, operation: "destroy" }))).toContain(
+				"baseline refused",
+			)
+			expect(requests).toBe(0)
+		}),
 	)
 })
