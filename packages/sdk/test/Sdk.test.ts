@@ -5,7 +5,10 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
+import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Stream from "effect/Stream"
+import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
+import { executeSseStreamPromise, makePromiseSdkRuntime } from "../src/PromiseRuntime.ts"
 import {
 	APIConnectionError,
 	APIConnectionTimeoutError,
@@ -1475,5 +1478,296 @@ describe("@checkfu/sdk", () => {
 				await client.close()
 			}
 		})
+
+		it.live(
+			"does not retry ambiguous gateway 503/408/429 or Checkfu 503 on unkeyed writes, while retrying keyed writes",
+			() =>
+				Effect.gen(function* () {
+					const ambiguousCases: ReadonlyArray<{
+						readonly label: string
+						readonly makeResponse: () => Response
+					}> = [
+						{
+							label: "plain gateway 503",
+							makeResponse: () => new Response("Service Unavailable", { status: 503 }),
+						},
+						{
+							label: "plain gateway 408",
+							makeResponse: () => new Response("Request Timeout", { status: 408 }),
+						},
+						{
+							label: "plain gateway 429",
+							makeResponse: () => new Response("Too Many Requests", { status: 429 }),
+						},
+						{
+							label: "Checkfu 503 envelope",
+							makeResponse: () =>
+								jsonResponse(
+									apiErrorBody("service_unavailable", "Timed out waiting for view consistency."),
+									503,
+								),
+						},
+					]
+
+					for (const testCase of ambiguousCases) {
+						let unkeyedCreateCalls = 0
+						yield* Effect.gen(function* () {
+							const client = yield* CheckfuClient
+							yield* Effect.flip(client.agents.create({ name: "Unkeyed", model: "gpt-6.2-sol" }))
+						}).pipe(
+							Effect.provide(
+								CheckfuClient.layerFetch({
+									apiKey: "ck_test_key",
+									baseUrl: "http://localhost:1337",
+									maxRetries: 2,
+									autoIdempotencyKey: false,
+									fetch: async () => {
+										unkeyedCreateCalls += 1
+										return testCase.makeResponse()
+									},
+								}),
+							),
+						)
+						expect(unkeyedCreateCalls, `${testCase.label} on unkeyed create`).toBe(1)
+
+						let unkeyedSendCalls = 0
+						yield* Effect.gen(function* () {
+							const client = yield* CheckfuClient
+							yield* Effect.flip(
+								client.sessions.events.send("sess_1", {
+									events: [{ type: "user.message", content: [{ type: "text", text: "hi" }] }],
+								}),
+							)
+						}).pipe(
+							Effect.provide(
+								CheckfuClient.layerFetch({
+									apiKey: "ck_test_key",
+									baseUrl: "http://localhost:1337",
+									maxRetries: 2,
+									autoIdempotencyKey: false,
+									fetch: async () => {
+										unkeyedSendCalls += 1
+										return testCase.makeResponse()
+									},
+								}),
+							),
+						)
+						expect(unkeyedSendCalls, `${testCase.label} on unkeyed send`).toBe(1)
+					}
+
+					// Keyed write (autoIdempotencyKey: true) safely retries plain gateway 503
+					let keyedCalls = 0
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const agent = yield* client.agents.create({ name: "Keyed", model: "gpt-6.2-sol" })
+						expect(agent.type).toBe("agent")
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								autoIdempotencyKey: true,
+								fetch: async () => {
+									keyedCalls += 1
+									if (keyedCalls === 1) {
+										return new Response("Service Unavailable", {
+											status: 503,
+											headers: { "retry-after-ms": "1" },
+										})
+									}
+									return jsonResponse(sampleAgent(), 201)
+								},
+							}),
+						),
+					)
+					expect(keyedCalls).toBe(2)
+				}),
+		)
+
+		it("settles Promise stream open and iteration cleanly when the producer fiber defects", async () => {
+			const mockFetch = async () =>
+				new Response(sseFrame(sampleUserMessageEvent(1)), {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				})
+
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: mockFetch,
+			})
+			try {
+				await expect(
+					client.sessions.events.stream("sess_defect_open", undefined, {
+						onOpen: () => Effect.die(new Error("onOpen boom")),
+					}),
+				).rejects.toThrow("onOpen boom")
+			} finally {
+				await client.close()
+			}
+
+			// Post-open producer defect (after opening and emitting event 1) must settle next queue read
+			const managed = ManagedRuntime.make(
+				CheckfuClient.layerFetch({
+					apiKey: "ck_test_key",
+					baseUrl: "http://localhost:1337",
+					fetch: mockFetch,
+				}),
+			)
+			try {
+				const promiseRuntime = makePromiseSdkRuntime(
+					managed,
+					Effect.map(CheckfuClient, (c) => c[INTERNAL_EFFECT_RUNTIME]),
+				)
+				const stream = await executeSseStreamPromise(promiseRuntime, undefined, (_rt, opts) =>
+					Stream.unwrap(
+						Effect.gen(function* () {
+							if (opts.onOpen !== undefined) {
+								yield* opts.onOpen(200)
+							}
+							return Stream.concat(
+								Stream.make(sampleUserMessageEvent(1)),
+								Stream.fromEffect(Effect.die(new Error("post-open defect"))),
+							)
+						}),
+					),
+				)
+				const seen: Array<number> = []
+				await expect(
+					(async () => {
+						for await (const ev of stream) {
+							seen.push(ev.seq)
+						}
+					})(),
+				).rejects.toThrow("post-open defect")
+				expect(seen).toEqual([1])
+			} finally {
+				await managed.dispose()
+			}
+		})
+
+		it("stops yielding buffered events immediately after abort() or iterator.return()", async () => {
+			const payload = [
+				sseFrame(sampleUserMessageEvent(1)),
+				sseFrame(sampleUserMessageEvent(2)),
+				sseFrame(sampleUserMessageEvent(3)),
+				sseFrame(sampleArchivedEvent(4)),
+			].join("")
+			const mockFetch = async () =>
+				new Response(payload, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				})
+
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: mockFetch,
+			})
+			try {
+				// 1) controller.abort() with events already buffered in queue must reject on the very next read
+				const abortStream = await client.sessions.events.stream("sess_buffered_abort")
+				// Yield a timer turn so the producer fills the queue with all 4 events
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 15)
+				})
+				const abortIter = abortStream[Symbol.asyncIterator]()
+				const first = await abortIter.next()
+				expect(first.done).toBe(false)
+				expect(first.value?.seq).toBe(1)
+				abortStream.controller.abort()
+				await expect(abortIter.next()).rejects.toThrow(APIUserAbortError)
+
+				// 2) iterator.return() with events already buffered in queue must yield done on subsequent reads
+				const returnStream = await client.sessions.events.stream("sess_buffered_return")
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 15)
+				})
+				const returnIter = returnStream[Symbol.asyncIterator]()
+				const rFirst = await returnIter.next()
+				expect(rFirst.done).toBe(false)
+				expect(rFirst.value?.seq).toBe(1)
+				expect(await returnIter.return?.()).toEqual({ value: undefined, done: true })
+				expect(await returnIter.next()).toEqual({ value: undefined, done: true })
+			} finally {
+				await client.close()
+			}
+		})
+
+		it.live(
+			"decodes legacy v1 status events without turn and delivers complete SSE frames before an oversized trailing frame",
+			() =>
+				Effect.gen(function* () {
+					// 1) Legacy v1 status events without `turn` decode cleanly in both list and stream
+					const legacyRunning = {
+						id: "evt_1",
+						seq: 1,
+						type: "session.status_running",
+						created_at: ISO_NOW,
+					}
+					const legacyIdle = {
+						id: "evt_2",
+						seq: 2,
+						type: "session.status_idle",
+						created_at: ISO_NOW,
+						stop_reason: { type: "end_turn" },
+					}
+					const legacyArchived = sampleArchivedEvent(3)
+					const legacyFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						const url = new URL(req.url)
+						if (url.pathname.endsWith("/events/stream")) {
+							return new Response(
+								`${sseFrame(legacyRunning)}${sseFrame(legacyIdle)}${sseFrame(legacyArchived)}`,
+								{ status: 200, headers: { "content-type": "text/event-stream" } },
+							)
+						}
+						return jsonResponse({
+							data: [legacyRunning, legacyIdle, legacyArchived],
+							has_more: false,
+							next_cursor: null,
+						})
+					}
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const listed = yield* client.sessions.events.list("sess_legacy")
+						expect(listed.data.map((e) => e.type)).toEqual([
+							"session.status_running",
+							"session.status_idle",
+							"session.archived",
+						])
+						const streamed = yield* Stream.runCollect(client.sessions.events.stream("sess_legacy"))
+						expect(Array.from(streamed).map((e) => e.seq)).toEqual([1, 2, 3])
+					}).pipe(Effect.provide(makeEffectLayer(legacyFetch)))
+
+					// 2) Complete SSE frame in the same chunk as an oversized (>10 MiB) trailing frame
+					//    must still be delivered before EventTooLarge fails the stream
+					const oversizedChunk = `${sseFrame(sampleUserMessageEvent(1))}id: 2\nevent: user.message\ndata: ${"x".repeat(10 * 1024 * 1024 + 64)}`
+					const oversizedFetch = async () =>
+						new Response(oversizedChunk, {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+
+					const deliveredBeforeError: Array<number> = []
+					const oversizedErr = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(
+							client.sessions.events.stream("sess_oversized").pipe(
+								Stream.runForEach((ev) =>
+									Effect.sync(() => {
+										deliveredBeforeError.push(ev.seq)
+									}),
+								),
+							),
+						)
+					}).pipe(Effect.provide(makeEffectLayer(oversizedFetch)))
+					expect(deliveredBeforeError).toEqual([1])
+					expect(oversizedErr._tag).toBe("APIConnectionError")
+					expect(oversizedErr.message).toContain("Event stream decode failed")
+				}),
+		)
 	})
 })

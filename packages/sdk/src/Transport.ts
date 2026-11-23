@@ -11,7 +11,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
-import { CheckfuConfigError, isAPIError } from "./Errors.ts"
+import { CheckfuConfigError, isAPIError, isApiErrorEnvelope } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./Schemas.ts"
 
@@ -424,13 +424,13 @@ export const shouldRetryError = (error: CheckfuSdkError, safety: RetrySafety): b
 		if (shouldRetryHeader === "true") {
 			return true
 		}
-		if (error.status === 408 || error.status === 429 || error.status === 503) {
-			return true
+		if (safety === "idempotent") {
+			return error.status === 408 || error.status === 429 || error.status >= 500
 		}
-		if (error.status >= 500) {
-			return safety === "idempotent"
-		}
-		return false
+		// For pre-commit-only operations, only retry a confirmed Checkfu 429 rate-limit
+		// rejection (with no partial/unconfirmed batch results). Plain gateway 408/429/503
+		// or Checkfu 503 (e.g. view-consistency timeout) can occur after a write commits.
+		return error.status === 429 && isApiErrorEnvelope(error.body)
 	}
 	if (error._tag === "APIConnectionTimeoutError" || error._tag === "APIConnectionError") {
 		return safety === "idempotent"

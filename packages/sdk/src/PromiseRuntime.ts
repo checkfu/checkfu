@@ -628,18 +628,27 @@ export const executeSseStreamPromise = <Event>(
 					}),
 			}).pipe(
 				Stream.runForEach((event) => Queue.offer(queue, event)),
-				Effect.andThen(Deferred.succeed(opened, undefined)),
-				Effect.andThen(Queue.end(queue)),
-				Effect.catch((error) =>
-					Deferred.fail(opened, error).pipe(Effect.andThen(Queue.fail(queue, error))),
-				),
-				Effect.onInterrupt(() => {
-					const abortErr = new APIUserAbortError({ message: "Event stream was aborted." })
-					return Deferred.fail(opened, abortErr).pipe(
-						Effect.andThen(Queue.fail(queue, abortErr)),
+				Effect.onExit((exit) => {
+					if (Exit.isSuccess(exit)) {
+						return Deferred.succeed(opened, undefined).pipe(
+							Effect.andThen(Queue.end(queue)),
+							Effect.ignore,
+						)
+					}
+					if (Cause.hasInterruptsOnly(exit.cause)) {
+						const abortErr = new APIUserAbortError({ message: "Event stream was aborted." })
+						return Deferred.fail(opened, abortErr).pipe(
+							Effect.andThen(Queue.fail(queue, abortErr)),
+							Effect.ignore,
+						)
+					}
+					return Deferred.failCause(opened, exit.cause).pipe(
+						Effect.andThen(Queue.failCause(queue, exit.cause)),
 						Effect.ignore,
 					)
 				}),
+				Effect.ignore,
+				Effect.catchDefect(() => Effect.void),
 			)
 		})
 
@@ -652,7 +661,8 @@ export const executeSseStreamPromise = <Event>(
 			const abortErr = new APIUserAbortError({ message: "Event stream was aborted." })
 			runtime.runFork(() =>
 				Deferred.fail(opened, abortErr).pipe(
-					Effect.andThen(Queue.fail(queue, abortErr)),
+					Effect.andThen(Queue.failCause(queue, Cause.fail(abortErr))),
+					Effect.andThen(Queue.shutdown(queue)),
 					Effect.andThen(Fiber.interrupt(fiber)),
 					Effect.ignore,
 				),
@@ -680,11 +690,37 @@ export const executeSseStreamPromise = <Event>(
 			cleanup()
 			controller.signal.removeEventListener("abort", abortStream)
 			controller.abort()
-			await runtime.runPromise(Fiber.interrupt(fiber))
+			await runtime.runPromise(
+				Queue.end(queue).pipe(
+					Effect.andThen(Queue.shutdown(queue)),
+					Effect.andThen(Fiber.interrupt(fiber)),
+					Effect.ignore,
+				),
+			)
 		}
 
 		const nextItem = async (): Promise<IteratorResult<IsoDateTimes<Event>, undefined>> => {
+			if (closedByConsumer) {
+				cleanup()
+				controller.signal.removeEventListener("abort", abortStream)
+				return { value: undefined, done: true }
+			}
+			if (controller.signal.aborted) {
+				cleanup()
+				controller.signal.removeEventListener("abort", abortStream)
+				throw new APIUserAbortError({ message: "Event stream was aborted." })
+			}
 			const takeExit = await runtime.runPromiseExit(Queue.take(queue))
+			if (closedByConsumer) {
+				cleanup()
+				controller.signal.removeEventListener("abort", abortStream)
+				return { value: undefined, done: true }
+			}
+			if (controller.signal.aborted) {
+				cleanup()
+				controller.signal.removeEventListener("abort", abortStream)
+				throw new APIUserAbortError({ message: "Event stream was aborted." })
+			}
 			if (Exit.isSuccess(takeExit)) {
 				return { value: toIsoJson(takeExit.value), done: false }
 			}

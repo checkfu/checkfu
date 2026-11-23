@@ -565,6 +565,76 @@ const dispatchUserLine = (
 
 type SessionSnapshotResponse = Effect.Success<ReturnType<typeof fetchSessionStatusWithRetry>>
 
+const resolveCursorBaselineFromPrefix = (
+	client: CheckfuClient,
+	sessionId: SessionId,
+	after: number,
+): Effect.Effect<
+	{
+		readonly status: ConnectState["status"]
+		readonly observedTurn: number
+		readonly settledTurn: number
+	},
+	CliFailure
+> =>
+	Effect.gen(function* () {
+		let pageCursor = 0
+		let lastSeenSeq = 0
+		let observedTurn = 0
+		let settledTurn = 0
+		let status: ConnectState["status"] = "idle"
+		while (true) {
+			const page = yield* client.api.sessions
+				.listEvents({
+					params: { session_id: sessionId },
+					query: {
+						...(pageCursor > 0 ? { after: pageCursor } : {}),
+						limit: 100,
+						order: "asc",
+					},
+				})
+				.pipe(Effect.mapError(formatClientError))
+			let reachedCursor = false
+			for (const entry of page.data) {
+				lastSeenSeq = Math.max(lastSeenSeq, entry.seq)
+				if (entry.seq > after) {
+					reachedCursor = true
+					break
+				}
+				if (entry.type === "session.status_running") {
+					observedTurn = entry.turn ?? observedTurn + 1
+					status = "running"
+				} else if (entry.type === "session.status_idle") {
+					const idleTurn = entry.turn ?? observedTurn
+					observedTurn = Math.max(observedTurn, idleTurn)
+					settledTurn = Math.max(settledTurn, idleTurn)
+					status = "idle"
+				} else if (
+					entry.type === "session.status_terminated" ||
+					entry.type === "session.archived"
+				) {
+					status = "terminated"
+				}
+			}
+			if (
+				reachedCursor ||
+				!page.has_more ||
+				page.next_cursor === null ||
+				page.next_cursor <= pageCursor ||
+				page.next_cursor >= after
+			) {
+				break
+			}
+			pageCursor = page.next_cursor
+		}
+		if (after > lastSeenSeq) {
+			return yield* usageError(
+				`--after cursor ${after} is beyond the latest session event sequence (${lastSeenSeq}).`,
+			)
+		}
+		return { status, observedTurn, settledTurn }
+	})
+
 const resolveCursorBaseline = (
 	client: CheckfuClient,
 	sessionId: SessionId,
@@ -597,10 +667,12 @@ const resolveCursorBaseline = (
 	}
 	return Effect.gen(function* () {
 		// Walk backwards from `after` (`order: "desc"` with `after: cursor` yields `seq < cursor`):
-		// the nearest `session.status_running` or `session.status_idle` carries `turn` directly,
-		// avoiding any full history scan or suffix-consistency reconciliation.
+		// the nearest `session.status_running` or `session.status_idle` carries `turn` directly
+		// on updated servers; if talking to an older /v1 server that omits `turn`, fall back to
+		// an ascending prefix scan up to `after`.
 		let cursor = after + 1
 		let status: ConnectState["status"] | undefined
+		let sawMissingTurn = false
 		while (true) {
 			const page = yield* client.api.sessions
 				.listEvents({
@@ -614,6 +686,10 @@ const resolveCursorBaseline = (
 					continue
 				}
 				if (entry.type === "session.status_running") {
+					if (entry.turn === undefined) {
+						sawMissingTurn = true
+						break
+					}
 					return {
 						status: status ?? "running",
 						observedTurn: entry.turn,
@@ -622,6 +698,10 @@ const resolveCursorBaseline = (
 					}
 				}
 				if (entry.type === "session.status_idle") {
+					if (entry.turn === undefined) {
+						sawMissingTurn = true
+						break
+					}
 					return {
 						status: status ?? "idle",
 						observedTurn: entry.turn,
@@ -629,6 +709,9 @@ const resolveCursorBaseline = (
 						latestSession: initialSession,
 					}
 				}
+			}
+			if (sawMissingTurn) {
+				break
 			}
 			if (!page.has_more || page.next_cursor === null || page.next_cursor >= cursor) {
 				return {
@@ -639,6 +722,12 @@ const resolveCursorBaseline = (
 				}
 			}
 			cursor = page.next_cursor
+		}
+
+		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after)
+		return {
+			...prefix,
+			latestSession: initialSession,
 		}
 	})
 }

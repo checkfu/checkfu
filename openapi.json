@@ -8232,7 +8232,7 @@
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "turn"],
+						"required": ["id", "seq", "type", "created_at"],
 						"additionalProperties": false
 					},
 					{
@@ -8432,7 +8432,7 @@
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "stop_reason", "turn"],
+						"required": ["id", "seq", "type", "created_at", "stop_reason"],
 						"additionalProperties": false
 					},
 					{

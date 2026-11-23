@@ -373,19 +373,21 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 					HttpClientError.HttpClientError | Sse.SseError
 				> = response.stream.pipe(
 					Stream.decodeText(),
-					Stream.mapEffect((chunk) =>
-						Effect.suspend(() => {
-							chunkEvents = []
-							healthTracker.feed(chunk)
-							const parseError = parser.feed(chunk)
-							if (parseError !== undefined) {
-								return Effect.fail(parseError)
-							}
-							return Effect.succeed(chunkEvents)
-						}),
-					),
-					Stream.flatMap((items) =>
-						items.length > 0 ? Stream.fromIterable(items).pipe(Stream.rechunk(1)) : Stream.empty,
+					Stream.flatMap((chunk) =>
+						Stream.unwrap(
+							Effect.sync(() => {
+								chunkEvents = []
+								healthTracker.feed(chunk)
+								const parseError = parser.feed(chunk)
+								const emitted =
+									chunkEvents.length > 0
+										? Stream.fromIterable(chunkEvents).pipe(Stream.rechunk(1))
+										: Stream.empty
+								return parseError !== undefined
+									? Stream.concat(emitted, Stream.fail(parseError))
+									: emitted
+							}),
+						),
 					),
 				)
 

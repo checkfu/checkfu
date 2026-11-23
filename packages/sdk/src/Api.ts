@@ -505,10 +505,10 @@ export const UserInterruptSessionEvent = wireSessionEvent(
 	"user.interrupt",
 	SessionEventFields["user.interrupt"],
 )
-export const SessionStatusRunningEvent = wireSessionEvent(
-	"session.status_running",
-	SessionEventFields["session.status_running"],
-)
+export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
+	...SessionEventFields["session.status_running"],
+	turn: Schema.optionalKey(PositiveInt),
+})
 export const SpanModelRequestStartEvent = wireSessionEvent(
 	"span.model_request_start",
 	SessionEventFields["span.model_request_start"],
@@ -525,10 +525,10 @@ export const SpanModelRequestEndEvent = wireSessionEvent(
 	"span.model_request_end",
 	SessionEventFields["span.model_request_end"],
 )
-export const SessionStatusIdleEvent = wireSessionEvent(
-	"session.status_idle",
-	SessionEventFields["session.status_idle"],
-)
+export const SessionStatusIdleEvent = wireSessionEvent("session.status_idle", {
+	...SessionEventFields["session.status_idle"],
+	turn: Schema.optionalKey(PositiveInt),
+})
 export const SessionErrorSessionEvent = wireSessionEvent(
 	"session.error",
 	SessionEventFields["session.error"],
