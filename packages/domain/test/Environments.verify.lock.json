@@ -41,6 +41,10 @@
 			"Environments.EnvironmentViewMatchesEnvironment": {
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Environment.every((e) => {\n\t\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\t\tif (e.state.status === \"\" || e.state.status === \"deleted\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === e.id,\n\t\t\t\t\t\tview.state.version === e.state.version,\n\t\t\t\t\t\tview.state.name === e.state.name,\n\t\t\t\t\t\t!!view.state.archived_at === (e.state.status === \"archived\"),\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.EnvironmentView.every((v) =>\n\t\t\t\t\tm.Environment.some((e) =>\n\t\t\t\t\t\t[e.id === v.id, e.state.status !== \"\", e.state.status !== \"deleted\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Environment.ConfiguredExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.description === null, s.config === null].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.config !== null].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

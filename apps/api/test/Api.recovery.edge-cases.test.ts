@@ -1,6 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
 import { AgentVersionByNumberView } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
-import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
 import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
@@ -633,7 +632,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 		}
 	})
 
-	it("replays a settled Pi turn before checking mutable policy, API key, or view prerequisites", async () => {
+	it("replays a settled Pi turn before checking API key or view prerequisites", async () => {
 		let modelCalls = 0
 		const backends = new Map<string, ReturnType<typeof createInMemoryPiDurableBackend>>()
 		const models = makeScriptedPiModels(async (model, context) => {
@@ -683,28 +682,6 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						: real.waitFor(key, predicate, options),
 			})),
 		)
-		const BrokenEnvView = Layer.effect(
-			EnvironmentView,
-			Effect.map(EnvironmentView, (real) => ({
-				...real,
-				get: (ref, options) =>
-					breakViews
-						? Effect.fail(
-								new Domain.ConsistencyTimeout({
-									view: "EnvironmentView",
-									key: ref.id,
-									stream: `Environment/${ref.id}`,
-									version: 2,
-								}),
-							)
-						: real.get(ref, options),
-				waitFor: (ref, predicate, options) =>
-					breakViews
-						? Effect.fail(new Domain.WaitTimeout({ view: "EnvironmentView", key: ref.id }))
-						: real.waitFor(ref, predicate, options),
-			})),
-		)
-
 		const CheckfuLive = Checkfu.layer(
 			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
 		).pipe(Layer.provide(executorLayer))
@@ -782,30 +759,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					})
 					expect(modelCalls).toBe(1)
 
-					// 2. Now tighten the environment to block OpenAI, delete/break views, and build a
-					//    restarted provider with NO OPENAI_API_KEY configured.
-					const tightenRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/environments/${env.id}`,
-						headers: AUTH_HEADERS,
-						body: {
-							version: 1,
-							config: {
-								type: "cloud",
-								networking: {
-									type: "limited",
-									allow_mcp_servers: false,
-									allow_package_managers: false,
-									allowed_hosts: ["api.anthropic.com"],
-								},
-							},
-						},
-					})
-					expect(tightenRes.status).toBe(200)
-
+					// 2. Now break views and build a restarted provider with NO OPENAI_API_KEY configured.
 					const restartedProviderLayer = Layer.fresh(PiDurableModelProviderLive).pipe(
 						Layer.provide(BrokenVersionView),
-						Layer.provide(BrokenEnvView),
 						Layer.provide(executorLayer),
 						Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
 						Layer.provideMerge(
@@ -821,8 +777,8 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						),
 					)
 
-					// 3. Replaying turn 1 recovers Pi's saved reply even with broken views, blocked
-					//    environment policy, and missing OPENAI_API_KEY (and makes 0 new model calls).
+					// 3. Replaying turn 1 recovers Pi's saved reply even with broken views and a
+					//    missing OPENAI_API_KEY (and makes 0 new model calls).
 					breakViews = true
 					const replayed = yield* ModelProvider.pipe(
 						Effect.flatMap((restarted) =>
@@ -842,9 +798,8 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					expect(modelCalls).toBe(1)
 
 					// 4. An unsubmitted turn 2 on the same restarted provider hits the broken view,
-					//    then (once views recover) enforces the tightened environment policy, and
-					//    (once the environment allows OpenAI again) hits missing_api_key_error —
-					//    proving every prerequisite check was genuinely bypassed ONLY by turn 1 replay.
+					//    then (once views recover) hits missing_api_key_error — proving every
+					//    prerequisite check was genuinely bypassed ONLY by turn 1 replay.
 					const brokenViewTurn2 = yield* Effect.flip(
 						ModelProvider.pipe(
 							Effect.flatMap((restarted) =>
@@ -864,34 +819,6 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					expect(providerError(brokenViewTurn2).error_type).toBe("agent_version_not_found")
 
 					breakViews = false
-					const blockedTurn2 = yield* Effect.flip(
-						ModelProvider.pipe(
-							Effect.flatMap((restarted) =>
-								restarted.generate({
-									session_id: SessionId.make(session.id),
-									agent_id: agent.id,
-									agent_version: 1,
-									environment_id: env.id,
-									turn: 2,
-									generation: 0,
-									input: ["new turn after tighten"],
-								}),
-							),
-							Effect.provide(restartedProviderLayer),
-						),
-					)
-					expect(providerError(blockedTurn2).error_type).toBe("environment_network_blocked")
-
-					const reopenRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/environments/${env.id}`,
-						headers: AUTH_HEADERS,
-						body: {
-							version: 2,
-							config: { type: "cloud", networking: { type: "unrestricted" } },
-						},
-					})
-					expect(reopenRes.status).toBe(200)
 					const missingKeyTurn2 = yield* Effect.flip(
 						ModelProvider.pipe(
 							Effect.flatMap((restarted) =>

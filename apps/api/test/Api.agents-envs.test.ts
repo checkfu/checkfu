@@ -47,7 +47,6 @@ import {
 } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
@@ -69,21 +68,17 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CheckfuApi, withIdempotencyKey } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
-	EnvironmentPartialUpdateWaitTimeout,
 	IsSupportedAgentModel,
 	makeApiHandler,
 } from "../src/Http/Router.ts"
 import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHelpers.ts"
 import {
-	AgentVersionLookupTimeout,
 	HarnessCallFailed,
 	HarnessLimits,
 	PiDurableModelProviderLive,
-	conversationName,
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableModelProvider.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnRequest } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
@@ -93,7 +88,6 @@ import {
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	makeScriptedPiModels,
-	providerError,
 	readSseUntil,
 	sendAndSettle,
 	sendRequest,
@@ -536,7 +530,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(staleAgent.status).toBe(409)
 
-					// 2. Environment create returns 202 Pending; partial update waits for v1 instead of false 404.
+					// 2. Environment create returns 202 Pending; partial update is decided against committed v1 instead of false 404.
 					const createdEnv = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",
@@ -632,89 +626,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const finalState = yield* environments.get(EnvironmentId.make(env.id))
 					expect(finalState.status).toBe("deleted")
 					expect(finalState.version).toBe(2)
-				}).pipe(Effect.scoped, Effect.provide(layer)),
-			)
-		} finally {
-			await closeAll()
-		}
-	})
-
-	it("rechecks deletion when a partial environment update times out waiting for the view", async () => {
-		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
-			makeAssistantReply(model, null, "ok", 1, 1),
-		)
-		try {
-			await Effect.runPromise(
-				Effect.gen(function* () {
-					const environments = yield* Environment
-					const realEnvViews = yield* EnvironmentView
-
-					let simulateDeleteDuringWait = false
-					let waitForTimedOut = false
-					const racingEnvViews = {
-						...realEnvViews,
-						get: (
-							ref: Parameters<typeof realEnvViews.get>[0],
-							options?: Parameters<typeof realEnvViews.get>[1],
-						) =>
-							simulateDeleteDuringWait && options?.atLeast === undefined
-								? Effect.succeedNone
-								: realEnvViews.get(ref, options),
-						waitFor: (
-							ref: Parameters<typeof realEnvViews.waitFor>[0],
-							predicate: Parameters<typeof realEnvViews.waitFor>[1],
-							options: Parameters<typeof realEnvViews.waitFor>[2],
-						) =>
-							Effect.gen(function* () {
-								if (simulateDeleteDuringWait) {
-									simulateDeleteDuringWait = false
-									// Delete concurrently and project the tombstone before waiting so waitFor
-									// actually hits WaitTimeout on the absent view rather than matching stale v1.
-									const delReceipt = yield* environments.send(
-										new DeleteEnvironment({ environment_id: ref.id }),
-									)
-									yield* realEnvViews.get(ref, { atLeast: delReceipt })
-								}
-								return yield* realEnvViews.waitFor(ref, predicate, options).pipe(
-									Effect.tapError(() =>
-										Effect.sync(() => {
-											waitForTimedOut = true
-										}),
-									),
-								)
-							}),
-					} as unknown as typeof realEnvViews
-
-					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
-						Effect.provideService(EnvironmentView, racingEnvViews),
-						Effect.provideService(EnvironmentPartialUpdateWaitTimeout, "40 millis"),
-					)
-					const createRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/environments",
-						headers: AUTH_HEADERS,
-						body: { name: "Deleted During Wait Env" },
-					})
-					expect(createRes.status).toBe(201)
-					const env = (yield* Effect.promise(() => createRes.json())) as { id: string }
-
-					simulateDeleteDuringWait = true
-					const updateRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/environments/${env.id}`,
-						headers: AUTH_HEADERS,
-						body: { version: 1, name: "Partial Rename" },
-					})
-					expect(updateRes.status).toBe(404)
-					expect(waitForTimedOut).toBe(true)
-					expect(yield* Effect.promise(() => updateRes.json())).toEqual({
-						type: "error",
-						error: {
-							type: "not_found_error",
-							message: `Environment ${env.id} not found.`,
-						},
-						request_id: updateRes.headers.get("request-id"),
-					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -939,9 +850,11 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 										new UpdateEnvironment({
 											environment_id: ref.id,
 											expected_version: 2,
-											name: "Writer B Env v3",
-											description: "Desc B",
-											config: { type: "cloud", networking: { type: "unrestricted" } },
+											changes: {
+												name: "Writer B Env v3",
+												description: "Desc B",
+												config: { type: "cloud", networking: { type: "unrestricted" } },
+											},
 										}),
 									)
 									return yield* realEnvViews.get(ref, { atLeast: v3Receipt })
@@ -1187,9 +1100,128 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		}
 	})
 
-	it("enforces limited-environment networking before model calls and honors updates, lag, and deletions", async () => {
+	it("decides partial environment updates in the domain and maps each refusal", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const limited = {
+						type: "cloud",
+						networking: {
+							type: "limited",
+							allow_mcp_servers: false,
+							allow_package_managers: true,
+							allowed_hosts: ["api.openai.com"],
+						},
+					}
+					const unrestricted = { type: "cloud", networking: { type: "unrestricted" } }
+					const update = (id: string, body: unknown) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/environments/${id}`,
+							headers: AUTH_HEADERS,
+							body,
+						})
+					const errorOf = (res: Response) =>
+						Effect.map(
+							Effect.promise(() => res.json()),
+							(body) => (body as { error: { type: string; message: string } }).error,
+						)
+
+					const createRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Sandbox", description: "First draft", config: limited },
+					})
+					expect(createRes.status).toBe(201)
+					const env = (yield* Effect.promise(() => createRes.json())) as { id: string }
+
+					const steps = [
+						[{ name: "Renamed" }, { name: "Renamed", description: "First draft", config: limited }],
+						[
+							{ description: "Second draft" },
+							{ name: "Renamed", description: "Second draft", config: limited },
+						],
+						[
+							{ config: unrestricted },
+							{ name: "Renamed", description: "Second draft", config: unrestricted },
+						],
+						[{ description: null }, { name: "Renamed", description: null, config: unrestricted }],
+						[
+							{ name: "Locked Down", config: limited },
+							{ name: "Locked Down", description: null, config: limited },
+						],
+						[{}, { name: "Locked Down", description: null, config: limited }],
+					] as const
+					for (const [index, [fields, expected]] of steps.entries()) {
+						const res = yield* update(env.id, { version: index + 1, ...fields })
+						expect(res.status).toBe(200)
+						expect(yield* Effect.promise(() => res.json())).toMatchObject({
+							id: env.id,
+							version: index + 2,
+							archived_at: null,
+							...expected,
+						})
+					}
+
+					const missing = yield* update("env_never_created", { version: 1, name: "Missing" })
+					expect(missing.status).toBe(404)
+					expect(yield* errorOf(missing)).toEqual({
+						type: "not_found_error",
+						message: "Environment does not exist.",
+					})
+
+					const stale = yield* update(env.id, { version: 1, name: "Stale" })
+					expect(stale.status).toBe(409)
+					expect((yield* errorOf(stale)).message).toBe(
+						"Environment version does not match expected_version.",
+					)
+
+					const archiveRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/environments/${env.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveRes.status).toBe(200)
+					const archived = yield* update(env.id, { version: 7, name: "After Archive" })
+					expect(archived.status).toBe(409)
+					expect((yield* errorOf(archived)).message).toBe(
+						"Environment is archived and cannot be modified.",
+					)
+
+					const getRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/environments/${env.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(yield* Effect.promise(() => getRes.json())).toMatchObject({
+						version: 7,
+						name: "Locked Down",
+						description: null,
+						config: limited,
+					})
+
+					const deleteRes = yield* sendRequest(apiFetch, {
+						method: "DELETE",
+						path: `/v1/environments/${env.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(deleteRes.status).toBe(200)
+					expect((yield* update(env.id, { version: 7, name: "After Delete" })).status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("runs turns whatever allowed_hosts says and keeps a session running after its environment is archived or deleted", async () => {
 		const calledProviders: Array<string> = []
-		const { layer, closeAll, requests } = makePiDurableTestLayer(async (model, context) => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) => {
 			calledProviders.push(model.provider)
 			return makeAssistantReply(
 				model,
@@ -1204,279 +1236,17 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const provider = yield* ModelProvider
+					const write = (method: string, path: string, body?: unknown) =>
+						sendRequest(apiFetch, { method, path, body, headers: AUTH_HEADERS })
 
-					const openaiAgentRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/agents",
-						headers: AUTH_HEADERS,
-						body: { name: "OpenAI Agent", model: "gpt-4o-mini" },
+					const agentRes = yield* write("POST", "/v1/agents", {
+						name: "Anthropic Agent",
+						model: "anthropic/claude-sonnet-4-5",
 					})
-					const openaiAgent = (yield* Effect.promise(() => openaiAgentRes.json())) as { id: string }
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
 
-					const anthropicAgentRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/agents",
-						headers: AUTH_HEADERS,
-						body: { name: "Anthropic Agent", model: "anthropic/claude-sonnet-4-5" },
-					})
-					const anthropicAgent = (yield* Effect.promise(() => anthropicAgentRes.json())) as {
-						id: string
-					}
-
-					// Limited environment allowing ONLY api.openai.com.
-					const limitedEnvRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/environments",
-						headers: AUTH_HEADERS,
-						body: {
-							name: "OpenAI-Only Env",
-							config: {
-								type: "cloud",
-								networking: {
-									type: "limited",
-									allow_mcp_servers: false,
-									allow_package_managers: false,
-									allowed_hosts: ["api.openai.com"],
-								},
-							},
-						},
-					})
-					expect(limitedEnvRes.status).toBe(201)
-					const limitedEnv = (yield* Effect.promise(() => limitedEnvRes.json())) as { id: string }
-
-					// 1. OpenAI session succeeds in the OpenAI-only limited environment.
-					const openaiSessRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/sessions",
-						headers: AUTH_HEADERS,
-						body: { agent: openaiAgent.id, environment_id: limitedEnv.id },
-					})
-					expect(openaiSessRes.status).toBe(201)
-					const openaiSession = (yield* Effect.promise(() => openaiSessRes.json())) as {
-						id: string
-					}
-					yield* sendAndSettle(apiFetch, openaiSession.id, ["hello openai"], 1)
-					expect(calledProviders).toEqual(["openai"])
-
-					// 2. Anthropic session in the same OpenAI-only limited environment is blocked BEFORE
-					//    dispatching to Pi (0 Anthropic calls), stays idle, and emits environment_network_blocked.
-					const anthropicSessRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/sessions",
-						headers: AUTH_HEADERS,
-						body: { agent: anthropicAgent.id, environment_id: limitedEnv.id },
-					})
-					expect(anthropicSessRes.status).toBe(201)
-					const anthropicSession = (yield* Effect.promise(() => anthropicSessRes.json())) as {
-						id: string
-					}
-					const requestsBeforeBlock = requests.length
-					yield* sendAndSettle(apiFetch, anthropicSession.id, ["secret transcript"], 1)
-					expect(calledProviders).toEqual(["openai"])
-					expect(requests.length).toBe(requestsBeforeBlock)
-
-					const blockedEventsRes = yield* sendRequest(apiFetch, {
-						method: "GET",
-						path: `/v1/sessions/${anthropicSession.id}/events`,
-						headers: AUTH_HEADERS,
-					})
-					const blockedEvents = (yield* Effect.promise(() => blockedEventsRes.json())) as {
-						data: ReadonlyArray<{ type: string; error?: { type: string; message: string } }>
-					}
-					const blockedError = blockedEvents.data.find((e) => e.type === "session.error")
-					expect(blockedError?.error).toMatchObject({
-						type: "environment_network_blocked",
-					})
-					expect(blockedError?.error?.message).toContain("api.anthropic.com")
-
-					// 3. Updating the environment's allowed_hosts to include *.anthropic.com unblocks the
-					//    same session on the next turn.
-					const updateEnvRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/environments/${limitedEnv.id}`,
-						headers: AUTH_HEADERS,
-						body: {
-							version: 1,
-							config: {
-								type: "cloud",
-								networking: {
-									type: "limited",
-									allow_mcp_servers: false,
-									allow_package_managers: false,
-									allowed_hosts: ["API.OPENAI.COM.:443", "*.anthropic.com"],
-								},
-							},
-						},
-					})
-					expect(updateEnvRes.status).toBe(200)
-					yield* sendAndSettle(apiFetch, anthropicSession.id, ["now allowed"], 2)
-					expect(calledProviders).toEqual(["openai", "anthropic"])
-
-					// 4. Over-broad wildcards ("*", "*.com"), bare parent domain, and wrong ports do NOT match.
-					const strictEnvRes = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/environments",
-						headers: AUTH_HEADERS,
-						body: {
-							name: "Invalid Rules Env",
-							config: {
-								type: "cloud",
-								networking: {
-									type: "limited",
-									allow_mcp_servers: false,
-									allow_package_managers: false,
-									allowed_hosts: [
-										"*",
-										"*.com",
-										"openai.com",
-										"api.openai.com:8443",
-										"https://api.openai.com",
-									],
-								},
-							},
-						},
-					})
-					const strictEnv = (yield* Effect.promise(() => strictEnvRes.json())) as { id: string }
-					const blockedByStrict = yield* Effect.flip(
-						provider.generate({
-							session_id: SessionId.make("sess_strict_rules"),
-							agent_id: openaiAgent.id,
-							agent_version: 1,
-							environment_id: strictEnv.id,
-							turn: 1,
-							generation: 0,
-							input: ["blocked"],
-						}),
-					)
-					expect(providerError(blockedByStrict).error_type).toBe("environment_network_blocked")
-					expect(providerError(blockedByStrict).terminal).toBe(false)
-
-					// 5. Deleting an environment fails closed before dispatch (terminal: true, 0 model calls).
-					const delRes = yield* sendRequest(apiFetch, {
-						method: "DELETE",
-						path: `/v1/environments/${strictEnv.id}`,
-						headers: AUTH_HEADERS,
-					})
-					expect(delRes.status).toBe(200)
-					const deletedErr = yield* Effect.flip(
-						provider.generate({
-							session_id: SessionId.make("sess_deleted_env"),
-							agent_id: openaiAgent.id,
-							agent_version: 1,
-							environment_id: strictEnv.id,
-							turn: 1,
-							generation: 0,
-							input: ["after delete"],
-						}),
-					)
-					expect(providerError(deletedErr).error_type).toBe("environment_not_found")
-					expect(providerError(deletedErr).terminal).toBe(true)
-					expect(calledProviders).toEqual(["openai", "anthropic"])
-				}).pipe(Effect.scoped, Effect.provide(layer)),
-			)
-		} finally {
-			await closeAll()
-		}
-
-		// 6. If an environment tightens from unrestricted (v1) to limited (v2) while EnvironmentView
-		//    still lags at v1, generate MUST NOT dispatch against the stale v1 snapshot.
-		let laggedCalls = 0
-		let lagMode: "off" | "stale_timeout" | "stale_then_recover" = "off"
-		let staleV1: Option.Option<unknown> = Option.none()
-		let waitForCalls = 0
-		const LaggingEnvView = Layer.effect(
-			EnvironmentView,
-			Effect.map(EnvironmentView, (real) => ({
-				...real,
-				get: (ref: Parameters<typeof real.get>[0], options?: Parameters<typeof real.get>[1]) =>
-					lagMode !== "off" && options?.atLeast === undefined
-						? Effect.succeed(staleV1 as never)
-						: real.get(ref, options),
-				waitFor: (
-					ref: Parameters<typeof real.waitFor>[0],
-					predicate: Parameters<typeof real.waitFor>[1],
-					options: Parameters<typeof real.waitFor>[2],
-				) => {
-					if (lagMode !== "off") {
-						waitForCalls += 1
-						if (lagMode === "stale_timeout") {
-							return Effect.fail(new Domain.WaitTimeout({ view: "EnvironmentView", key: ref.id }))
-						}
-					}
-					return real.waitFor(ref, predicate, options)
-				},
-			})),
-		)
-		const neverCallExecutor = makePiTurnExecutorLayer({
-			recoverTurn: () => Effect.succeed(null),
-			runTurn: () => {
-				laggedCalls += 1
-				return Effect.die(new Error("must not dispatch model turn while tightened env lags"))
-			},
-			abortTurn: () => Effect.void,
-		})
-		const CheckfuLagLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(
-				Layer.provide(PiDurableModelProviderLive.pipe(Layer.provide(LaggingEnvView))),
-			),
-		).pipe(Layer.provide(neverCallExecutor))
-		const lagLayer = CheckfuLagLive.pipe(
-			Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
-			Layer.provide(Domain.InMemory),
-			Layer.provideMerge(Digest.layerWebCrypto),
-			Layer.provideMerge(SecureRandom.layerWebCrypto),
-			Layer.provideMerge(
-				ConfigProvider.layer(
-					ConfigProvider.fromUnknown({
-						CHECKFU_API_KEY: TEST_API_KEY,
-						OPENAI_API_KEY: "sk-openai-test",
-						ANTHROPIC_API_KEY: "sk-anthropic-test",
-					}),
-				),
-			),
-		)
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const { fetch: apiFetch } = yield* makeApiHandler
-				const environments = yield* Environment
-				const realEnvViews = yield* EnvironmentView
-
-				const agentRes = yield* sendRequest(apiFetch, {
-					method: "POST",
-					path: "/v1/agents",
-					headers: AUTH_HEADERS,
-					body: { name: "Anthropic Lag Agent", model: "anthropic/claude-sonnet-4-5" },
-				})
-				const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
-
-				const envRes = yield* sendRequest(apiFetch, {
-					method: "POST",
-					path: "/v1/environments",
-					headers: AUTH_HEADERS,
-					body: { name: "Tightened Env" },
-				})
-				const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
-				const envRef = Environment.ref(EnvironmentId.make(env.id))
-				staleV1 = yield* realEnvViews.get(envRef)
-				expect(Option.isSome(staleV1)).toBe(true)
-
-				const sessRes = yield* sendRequest(apiFetch, {
-					method: "POST",
-					path: "/v1/sessions",
-					headers: AUTH_HEADERS,
-					body: { agent: agent.id, environment_id: env.id },
-				})
-				expect(sessRes.status).toBe(201)
-				const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
-
-				// Commit v2 tightening networking to OpenAI-only.
-				yield* environments.send(
-					new UpdateEnvironment({
-						environment_id: EnvironmentId.make(env.id),
-						expected_version: 1,
-						name: "Tightened Env",
-						description: null,
+					const envRes = yield* write("POST", "/v1/environments", {
+						name: "OpenAI-Only Sandbox",
 						config: {
 							type: "cloud",
 							networking: {
@@ -1486,249 +1256,59 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								allowed_hosts: ["api.openai.com"],
 							},
 						},
-					}),
-				)
+					})
+					expect(envRes.status).toBe(201)
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-				// 6a. While EnvironmentView stays stuck at stale v1 (unrestricted) and waitFor times out,
-				//     the turn fails closed with environment_unavailable (never dispatches to Anthropic).
-				lagMode = "stale_timeout"
-				yield* sendAndSettle(apiFetch, session.id, ["must fail closed while lagging"], 1)
-				expect(waitForCalls).toBe(1)
-				expect(laggedCalls).toBe(0)
+					const sessRes = yield* write("POST", "/v1/sessions", {
+						agent: agent.id,
+						environment_id: env.id,
+					})
+					expect(sessRes.status).toBe(201)
+					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-				// 6b. When get() is still stale v1 but waitFor catches up to v2, the turn enforces v2's
-				//     limited policy and fails with environment_network_blocked (still 0 model calls).
-				lagMode = "stale_then_recover"
-				yield* sendAndSettle(apiFetch, session.id, ["must enforce v2 after waitFor"], 2)
-				expect(waitForCalls).toBe(2)
-				expect(laggedCalls).toBe(0)
+					yield* sendAndSettle(apiFetch, session.id, ["while limited"], 1)
+					expect(calledProviders).toEqual(["anthropic"])
 
-				const eventsRes = yield* sendRequest(apiFetch, {
-					method: "GET",
-					path: `/v1/sessions/${session.id}/events`,
-					headers: AUTH_HEADERS,
-				})
-				const events = (yield* Effect.promise(() => eventsRes.json())) as {
-					data: ReadonlyArray<{ type: string; error?: { type: string } }>
-				}
-				const errorTypes = events.data
-					.filter((e) => e.type === "session.error")
-					.map((e) => e.error?.type)
-				expect(errorTypes).toEqual(["environment_unavailable", "environment_network_blocked"])
-			}).pipe(Effect.scoped, Effect.provide(lagLayer)),
-		)
-	})
+					expect((yield* write("POST", `/v1/environments/${env.id}/archive`)).status).toBe(200)
+					yield* sendAndSettle(apiFetch, session.id, ["after archive"], 2)
+					expect(calledProviders).toEqual(["anthropic", "anthropic"])
 
-	it("rechecks outbound policy before submitting rebuilt history if the environment changes during the scan", async () => {
-		const runCase = async (mutation: "tighten" | "delete") => {
-			let modelCalls = 0
-			let triggerOnDescScan = false
-			let envIdToMutate: EnvironmentId | null = null
-			const seededRequests: Array<PiTurnRequest> = []
-			const backends = new Map<string, ReturnType<typeof createInMemoryPiDurableBackend>>()
-			const models = makeScriptedPiModels(async (model, context) => {
-				modelCalls += 1
-				return makeAssistantReply(model, null, `ok:${extractLastUserText(context)}`, 5, 2)
-			})
-			const getBackend = (conversation: string) => {
-				let backend = backends.get(conversation)
-				if (backend === undefined) {
-					backend = createInMemoryPiDurableBackend(models)
-					backends.set(conversation, backend)
-				}
-				return backend
-			}
-			const executorLayer = makePiTurnExecutorLayer({
-				recoverTurn: (conversation, operationId) =>
-					!backends.has(conversation)
-						? Effect.succeed(null)
-						: Effect.flatMap(
-								Effect.promise(() => getBackend(conversation)),
-								(backend) => recoverPiDurableTurn(backend, operationId),
-							),
-				runTurn: (conversation, request) =>
-					Effect.suspend(() => {
-						if (request.seed !== undefined) {
-							seededRequests.push(request)
-						}
-						return Effect.flatMap(
-							Effect.promise(() => getBackend(conversation)),
-							(backend) => runPiDurableTurn(backend, request),
-						)
-					}),
-				abortTurn: () => Effect.void,
-			})
-			const MutatingHistoryScanView = Layer.effect(
-				SessionView,
-				Effect.gen(function* () {
-					const real = yield* SessionView
-					const environments = yield* Environment
-					const envViews = yield* EnvironmentView
-					return {
-						...real,
-						list: (ref, options) =>
-							Effect.gen(function* () {
-								if (triggerOnDescScan && options?.order === "desc" && envIdToMutate !== null) {
-									triggerOnDescScan = false
-									const targetId = envIdToMutate
-									const receipt =
-										mutation === "tighten"
-											? yield* environments
-													.send(
-														new UpdateEnvironment({
-															environment_id: targetId,
-															expected_version: 1,
-															name: "Mutated During Scan",
-															description: null,
-															config: {
-																type: "cloud",
-																networking: {
-																	type: "limited",
-																	allow_mcp_servers: false,
-																	allow_package_managers: false,
-																	allowed_hosts: ["api.anthropic.com"],
-																},
-															},
-														}),
-													)
-													.pipe(Effect.orDie)
-											: yield* environments
-													.send(new DeleteEnvironment({ environment_id: targetId }))
-													.pipe(Effect.orDie)
-									yield* envViews
-										.get(Environment.ref(targetId), { atLeast: receipt })
-										.pipe(Effect.orDie)
-								}
-								return yield* real.list(ref, options)
-							}),
+					expect((yield* write("DELETE", `/v1/environments/${env.id}`)).status).toBe(200)
+					yield* sendAndSettle(apiFetch, session.id, ["after delete"], 3)
+					expect(calledProviders).toEqual(["anthropic", "anthropic", "anthropic"])
+
+					const sessionRes = yield* write("GET", `/v1/sessions/${session.id}`)
+					expect(yield* Effect.promise(() => sessionRes.json())).toMatchObject({
+						status: "idle",
+						turn: 3,
+					})
+					const eventsRes = yield* write("GET", `/v1/sessions/${session.id}/events`)
+					const events = (yield* Effect.promise(() => eventsRes.json())) as {
+						data: ReadonlyArray<{ type: string; content?: ReadonlyArray<{ text?: string }> }>
 					}
-				}),
+					expect(events.data.filter((e) => e.type === "session.error")).toHaveLength(0)
+					expect(
+						events.data.filter((e) => e.type === "agent.message").map((e) => e.content?.[0]?.text),
+					).toEqual([
+						"ok:anthropic:while limited",
+						"ok:anthropic:after archive",
+						"ok:anthropic:after delete",
+					])
+
+					const refused = yield* write("POST", "/v1/sessions", {
+						agent: agent.id,
+						environment_id: env.id,
+					})
+					expect(refused.status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
-			const CheckfuLive = Checkfu.layer(
-				SessionsHandlersLive.pipe(
-					Layer.provide(PiDurableModelProviderLive.pipe(Layer.provide(MutatingHistoryScanView))),
-				),
-			).pipe(Layer.provide(executorLayer))
-			const layer = CheckfuLive.pipe(
-				Layer.provide(Domain.InMemory),
-				Layer.provideMerge(Digest.layerWebCrypto),
-				Layer.provideMerge(SecureRandom.layerWebCrypto),
-				Layer.provideMerge(
-					ConfigProvider.layer(
-						ConfigProvider.fromUnknown({
-							CHECKFU_API_KEY: TEST_API_KEY,
-							OPENAI_API_KEY: "sk-openai-test",
-							ANTHROPIC_API_KEY: "sk-anthropic-test",
-						}),
-					),
-				),
-			)
-
-			try {
-				await Effect.runPromise(
-					Effect.gen(function* () {
-						const { fetch: apiFetch } = yield* makeApiHandler
-
-						const agentRes = yield* sendRequest(apiFetch, {
-							method: "POST",
-							path: "/v1/agents",
-							headers: AUTH_HEADERS,
-							body: { name: "OpenAI Agent", model: "gpt-4o-mini" },
-						})
-						const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
-
-						const envRes = yield* sendRequest(apiFetch, {
-							method: "POST",
-							path: "/v1/environments",
-							headers: AUTH_HEADERS,
-							body: { name: "Unrestricted Initially" },
-						})
-						const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
-						envIdToMutate = EnvironmentId.make(env.id)
-
-						const sessRes = yield* sendRequest(apiFetch, {
-							method: "POST",
-							path: "/v1/sessions",
-							headers: AUTH_HEADERS,
-							body: { agent: agent.id, environment_id: env.id },
-						})
-						const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
-
-						// Turn 1 succeeds while unrestricted.
-						yield* sendAndSettle(apiFetch, session.id, ["turn 1"], 1)
-						expect(modelCalls).toBe(1)
-
-						// Drop Pi state so Turn 2 returns `history_required` and scans SessionView.list(desc).
-						const conv = conversationName(session.id, 0)
-						const existingBackend = backends.get(conv)
-						backends.delete(conv)
-						if (existingBackend !== undefined) {
-							yield* Effect.promise(async () => (await existingBackend).close())
-						}
-
-						triggerOnDescScan = true
-						const sendRes = yield* sendRequest(apiFetch, {
-							method: "POST",
-							path: `/v1/sessions/${session.id}/events`,
-							headers: AUTH_HEADERS,
-							body: {
-								events: [{ type: "user.message", content: [{ type: "text", text: "turn 2" }] }],
-							},
-						})
-						expect(sendRes.status).toBe(200)
-
-						// Wait until session settles (idle on tighten, terminated on delete).
-						const expectedStatus = mutation === "tighten" ? "idle" : "terminated"
-						let settled = false
-						for (let attempt = 0; attempt < 400; attempt++) {
-							const res = yield* sendRequest(apiFetch, {
-								method: "GET",
-								path: `/v1/sessions/${session.id}`,
-								headers: AUTH_HEADERS,
-							})
-							const current = (yield* Effect.promise(() => res.json())) as {
-								status: string
-								turn: number
-							}
-							if (current.status === expectedStatus && current.turn === 2) {
-								settled = true
-								break
-							}
-							yield* Effect.sleep("5 millis")
-						}
-						expect(settled).toBe(true)
-
-						// Turn 2 must NEVER submit the rebuilt transcript or call the model.
-						expect(seededRequests).toHaveLength(0)
-						expect(modelCalls).toBe(1)
-
-						const eventsRes = yield* sendRequest(apiFetch, {
-							method: "GET",
-							path: `/v1/sessions/${session.id}/events`,
-							headers: AUTH_HEADERS,
-						})
-						const events = (yield* Effect.promise(() => eventsRes.json())) as {
-							data: ReadonlyArray<{ type: string; error?: { type: string } }>
-						}
-						expect(
-							events.data.filter((e) => e.type === "session.error").map((e) => e.error?.type),
-						).toEqual([
-							mutation === "tighten" ? "environment_network_blocked" : "environment_not_found",
-						])
-					}).pipe(Effect.scoped, Effect.provide(layer)),
-				)
-			} finally {
-				for (const b of backends.values()) {
-					await (await b).close()
-				}
-			}
+		} finally {
+			await closeAll()
 		}
-
-		await runCase("tighten")
-		await runCase("delete")
 	})
 
-	it("rechecks network policy before retrying an unadmitted RPC failure, while recovering an already-admitted turn", async () => {
+	it("retries an unadmitted RPC failure whatever happened to the environment during backoff, while recovering an already-admitted turn", async () => {
 		const runRetryCase = async (mode: "unadmitted-tighten" | "unadmitted-delete" | "admitted") => {
 			let modelCalls = 0
 			let runTurnCalls = 0
@@ -1851,15 +1431,17 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 												new UpdateEnvironment({
 													environment_id: targetId,
 													expected_version: 1,
-													name: "Mutated During Retry Backoff",
-													description: null,
-													config: {
-														type: "cloud",
-														networking: {
-															type: "limited",
-															allow_mcp_servers: false,
-															allow_package_managers: false,
-															allowed_hosts: ["api.anthropic.com"],
+													changes: {
+														name: "Mutated During Retry Backoff",
+														description: null,
+														config: {
+															type: "cloud",
+															networking: {
+																type: "limited",
+																allow_mcp_servers: false,
+																allow_package_managers: false,
+																allowed_hosts: ["api.anthropic.com"],
+															},
 														},
 													},
 												}),
@@ -1889,7 +1471,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						})
 						expect(sendRes.status).toBe(200)
 
-						const expectedStatus = mode === "unadmitted-delete" ? "terminated" : "idle"
 						let settled = false
 						for (let attempt = 0; attempt < 400; attempt++) {
 							const res = yield* sendRequest(apiFetch, {
@@ -1901,7 +1482,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								status: string
 								turn: number
 							}
-							if (current.status === expectedStatus && current.turn === 1) {
+							if (current.status === "idle" && current.turn === 1) {
 								settled = true
 								break
 							}
@@ -1909,9 +1490,10 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						}
 						expect(settled).toBe(true)
 
-						// Retry checked recoverTurn (initial + retry) and NEVER issued a second runTurn.
+						// Retry checked recoverTurn (initial + retry) and issued a second runTurn
+						// only when Pi had not admitted the first.
 						expect(recoverTurnCalls).toBe(2)
-						expect(runTurnCalls).toBe(1)
+						expect(runTurnCalls).toBe(mode === "admitted" ? 1 : 2)
 
 						const eventsRes = yield* sendRequest(apiFetch, {
 							method: "GET",
@@ -1925,25 +1507,15 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								content?: ReadonlyArray<{ text?: string }>
 							}>
 						}
-						const expectedModelCalls = mode === "admitted" ? 1 : 0
-						const expectedErrors =
-							mode === "admitted"
-								? []
-								: [
-										mode === "unadmitted-tighten"
-											? "environment_network_blocked"
-											: "environment_not_found",
-									]
-						const expectedReplies = mode === "admitted" ? ["Echo: hello"] : []
-						expect(modelCalls).toBe(expectedModelCalls)
+						expect(modelCalls).toBe(1)
 						expect(
 							events.data.filter((e) => e.type === "session.error").map((e) => e.error?.type),
-						).toEqual(expectedErrors)
+						).toEqual([])
 						expect(
 							events.data
 								.filter((e) => e.type === "agent.message")
 								.map((e) => e.content?.[0]?.text),
-						).toEqual(expectedReplies)
+						).toEqual(["Echo: hello"])
 					}).pipe(Effect.scoped, Effect.provide(layer)),
 				)
 			} finally {
@@ -3177,9 +2749,11 @@ describe("Agent and environment field length limits", () => {
 							new UpdateEnvironment({
 								environment_id: envId,
 								expected_version: 1,
-								name: "🚀".repeat(MAX_ENVIRONMENT_NAME_LENGTH),
-								description: "🚀".repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH),
-								config: { type: "cloud", networking: { type: "unrestricted" } },
+								changes: {
+									name: "🚀".repeat(MAX_ENVIRONMENT_NAME_LENGTH),
+									description: "🚀".repeat(MAX_ENVIRONMENT_DESCRIPTION_LENGTH),
+									config: { type: "cloud", networking: { type: "unrestricted" } },
+								},
 							}),
 						)
 						expect(
@@ -3255,9 +2829,12 @@ describe("Agent and environment field length limits", () => {
 				status: "active",
 				version: 1,
 				name: legacyEnvName,
+				description: legacyEnvDescription,
+				config: { type: "cloud", networking: { type: "unrestricted" } },
 			},
 		})
 		expect(decodedEnvSnapshot.name).toBe(legacyEnvName)
+		expect(decodedEnvSnapshot.description).toBe(legacyEnvDescription)
 
 		expect(
 			() =>
@@ -3296,9 +2873,11 @@ describe("Agent and environment field length limits", () => {
 				new UpdateEnvironment({
 					environment_id: EnvironmentId.make("env_cmd_reject"),
 					expected_version: 1,
-					name: "Valid Name",
-					description: legacyEnvDescription,
-					config: { type: "cloud", networking: { type: "unrestricted" } },
+					changes: {
+						name: "Valid Name",
+						description: legacyEnvDescription,
+						config: { type: "cloud", networking: { type: "unrestricted" } },
+					},
 				}),
 		).toThrow("Schema validation failed")
 
@@ -3486,9 +3065,11 @@ describe("Agent and environment field length limits", () => {
 							new UpdateEnvironment({
 								environment_id: doEnvId,
 								expected_version: 2,
-								name: "DO Repaired Env",
-								description: "Short env description",
-								config: { type: "cloud", networking: { type: "unrestricted" } },
+								changes: {
+									name: "DO Repaired Env",
+									description: "Short env description",
+									config: { type: "cloud", networking: { type: "unrestricted" } },
+								},
 							}),
 						)
 						const repairedEnvView = yield* envViews.get(Environment.ref(doEnvId), {
@@ -3680,40 +3261,24 @@ describe("Agent and environment field length limits", () => {
 					expect(repairedAgent.description).toBe("Short description")
 					expect(repairedAgent.system).toBe("Short system")
 
-					for (const [body, field, limit] of [
-						[
-							{ version: 1, name: "Repaired Env" },
-							"description",
-							MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
-						],
-						[{ version: 1, description: "Short description" }, "name", MAX_ENVIRONMENT_NAME_LENGTH],
-					] as const) {
-						const partialRes = yield* sendRequest(apiFetch, {
-							method: "POST",
-							path: `/v1/environments/${repairEnvId}`,
-							headers: AUTH_HEADERS,
-							body,
-						})
-						expect(partialRes.status).toBe(400)
-						const partialErr = (yield* Effect.promise(() => partialRes.json())) as {
-							type: string
-							error: { type: string; message: string }
-						}
-						expect(partialErr.type).toBe("error")
-						expect(partialErr.error.type).toBe("invalid_request_error")
-						expect(partialErr.error.message).toContain(field)
-						expect(partialErr.error.message).toContain(String(limit))
-					}
+					const renamedEnvRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/environments/${repairEnvId}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, name: "Repaired Env" },
+					})
+					expect(renamedEnvRes.status).toBe(200)
+					expect(yield* Effect.promise(() => renamedEnvRes.json())).toMatchObject({
+						version: 2,
+						name: "Repaired Env",
+						description: legacyEnvDescription,
+					})
 
 					const repairedEnvRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/environments/${repairEnvId}`,
 						headers: AUTH_HEADERS,
-						body: {
-							version: 1,
-							name: "Repaired Env",
-							description: "Short description",
-						},
+						body: { version: 2, description: "Short description" },
 					})
 					expect(repairedEnvRes.status).toBe(200)
 					const repairedEnv = (yield* Effect.promise(() => repairedEnvRes.json())) as {
@@ -3721,7 +3286,7 @@ describe("Agent and environment field length limits", () => {
 						name: string
 						description: string
 					}
-					expect(repairedEnv.version).toBe(2)
+					expect(repairedEnv.version).toBe(3)
 					expect(repairedEnv.name).toBe("Repaired Env")
 					expect(repairedEnv.description).toBe("Short description")
 
