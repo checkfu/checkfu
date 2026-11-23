@@ -80,6 +80,8 @@ const STANDING = {
 	"Environment.StatusIsKnown": "proved",
 	"Environment.CreatedExactlyWhenVersioned": "proved",
 	"Environment.ConfiguredExactlyWhenCreated": "proved",
+	"Environment.UpdateKeepsWhatItDoesNotName": "proved",
+	"Checkfu.EnvironmentViewConfigMatchesEnvironment": "checked",
 	"Environment.CreatedEnvironmentNeverReturnsToUninitialized": "proved",
 	"Environment.ArchivedNeverReactivates": "proved",
 	"Environment.DeletedStaysDeleted": "proved",
@@ -538,6 +540,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				EverySessionReferencesKnownEnvironment: true,
 				HostedViewsMatchAggregates: true,
 				TurnInputGenerationMatchesSession: true,
+				EnvironmentViewConfigMatchesEnvironment: true,
 			})
 		}
 
@@ -618,6 +621,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
+			EnvironmentViewConfigMatchesEnvironment: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -631,6 +635,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
+			EnvironmentViewConfigMatchesEnvironment: true,
 		})
 		const v2LookupRow = results.finalWorld.AgentVersionByNumberView.find(
 			(row) => row.state.version === 2,
@@ -651,6 +656,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
+			EnvironmentViewConfigMatchesEnvironment: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -662,6 +668,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesKnownEnvironment: false,
 			HostedViewsMatchAggregates: true,
 			TurnInputGenerationMatchesSession: true,
+			EnvironmentViewConfigMatchesEnvironment: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -678,6 +685,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
 			TurnInputGenerationMatchesSession: true,
+			EnvironmentViewConfigMatchesEnvironment: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -693,6 +701,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: true,
 			TurnInputGenerationMatchesSession: false,
+			EnvironmentViewConfigMatchesEnvironment: true,
 		})
 	})
 })

@@ -177,11 +177,13 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					if (isPending(result)) {
 						return result
 					}
-					const head = yield* present(
-						result,
-						404,
-						`Environment ${id} was deleted after the update committed.`,
-					)
+					const head = Option.getOrNull(result)
+					if (head === null) {
+						const latest = yield* environments.get(id)
+						return latest.status === "deleted"
+							? yield* reject(404, `Environment ${id} was deleted after the update committed.`)
+							: yield* reject(500, "Failed to load updated environment.")
+					}
 					if (head.version === receipt.reply.version && head.archived_at === null) {
 						return head
 					}

@@ -241,6 +241,14 @@
 			"Checkfu.AnIdempotencyKeyIsClaimed": {
 				"kind": "sometimes",
 				"source": "(m) => m.IdempotencyClaim.some((b) => b.state._tag === \"Claimed\")"
+			},
+			"Environment.UpdateKeepsWhatItDoesNotName": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"UpdateEnvironment\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (after.config === null || before.config === null) {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\tconst kept = after.config.networking\n\t\t\tconst asked =\n\t\t\t\tcommand.changes.config === undefined\n\t\t\t\t\t? before.config.networking\n\t\t\t\t\t: command.changes.config.networking\n\t\t\treturn [\n\t\t\t\tafter.name === (command.changes.name === undefined ? before.name : command.changes.name),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.changes.description === undefined\n\t\t\t\t\t\t? before.description\n\t\t\t\t\t\t: command.changes.description),\n\t\t\t\tkept.type === asked.type,\n\t\t\t\tkept.type !== \"limited\" ||\n\t\t\t\t\tasked.type !== \"limited\" ||\n\t\t\t\t\t(kept.allow_mcp_servers === asked.allow_mcp_servers &&\n\t\t\t\t\t\tkept.allow_package_managers === asked.allow_package_managers),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"Checkfu.EnvironmentViewConfigMatchesEnvironment": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.Environment.every((e) => {\n\t\t\t\tconst view = m.EnvironmentView.find((v) => v.id === e.id)\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\tif (e.state.config === null) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\tconst projected = view.state.config.networking\n\t\t\t\tconst committed = e.state.config.networking\n\t\t\t\treturn [\n\t\t\t\t\tview.state.description === e.state.description,\n\t\t\t\t\tprojected.type === committed.type,\n\t\t\t\t\tprojected.type !== \"limited\" ||\n\t\t\t\t\t\tcommitted.type !== \"limited\" ||\n\t\t\t\t\t\t(projected.allow_mcp_servers === committed.allow_mcp_servers &&\n\t\t\t\t\t\t\tprojected.allow_package_managers === committed.allow_package_managers &&\n\t\t\t\t\t\t\tprojected.allowed_hosts.length === committed.allowed_hosts.length &&\n\t\t\t\t\t\t\tprojected.allowed_hosts.every(\n\t\t\t\t\t\t\t\t(host, index) => host === committed.allowed_hosts[index],\n\t\t\t\t\t\t\t)),\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
 			}
 		}
 	}

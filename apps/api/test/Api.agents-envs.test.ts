@@ -1179,9 +1179,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 					const stale = yield* update(env.id, { version: 1, name: "Stale" })
 					expect(stale.status).toBe(409)
-					expect((yield* errorOf(stale)).message).toBe(
-						"Environment version does not match expected_version.",
-					)
+					expect((yield* errorOf(stale)).message).toBe("Environment version does not match.")
 
 					const archiveRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1323,9 +1321,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 					const stale = yield* update(agent.id, { version: 1, name: "Stale" })
 					expect(stale.status).toBe(409)
-					expect((yield* errorOf(stale)).message).toBe(
-						"Agent version does not match expected_version.",
-					)
+					expect((yield* errorOf(stale)).message).toBe("Agent version does not match.")
 
 					const archiveRes = yield* sendRequest(apiFetch, {
 						method: "POST",

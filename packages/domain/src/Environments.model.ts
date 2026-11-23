@@ -29,6 +29,30 @@ export class Environments extends Domain.Model("Environments", {
 					),
 				),
 			].every((ok) => ok),
+		EnvironmentViewConfigMatchesEnvironment: (m) =>
+			m.Environment.every((e) => {
+				const view = m.EnvironmentView.find((v) => v.id === e.id)
+				if (view === undefined) {
+					return true
+				}
+				if (e.state.config === null) {
+					return false
+				}
+				const projected = view.state.config.networking
+				const committed = e.state.config.networking
+				return [
+					view.state.description === e.state.description,
+					projected.type === committed.type,
+					projected.type !== "limited" ||
+						committed.type !== "limited" ||
+						(projected.allow_mcp_servers === committed.allow_mcp_servers &&
+							projected.allow_package_managers === committed.allow_package_managers &&
+							projected.allowed_hosts.length === committed.allowed_hosts.length &&
+							projected.allowed_hosts.every(
+								(host, index) => host === committed.allowed_hosts[index],
+							)),
+				].every((ok) => ok)
+			}),
 	},
 	sometimes: {
 		AnEnvironmentIsUpdated: (m) =>
