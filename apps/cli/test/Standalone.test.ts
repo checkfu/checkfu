@@ -60,6 +60,18 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			expect(call.stderr).not.toContain("planted")
 			expect(existsSync(join(hostile, "PRELOAD_RAN"))).toBe(false)
 
+			// Outside its checkout it calls itself by name, including from `/`, where a root
+			// worked out from the binary's virtual source path would wrongly match.
+			for (const cwd of [hostile, "/"]) {
+				const hint = spawnSync(binary, ["sessions", "retrieve", "--session-id", "sess_x"], {
+					cwd,
+					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
+					encoding: "utf8",
+					timeout: 30_000,
+				})
+				expect(hint.stderr).toContain("Run `checkfu deploy`")
+			}
+
 			const asBun = spawnSync(binary, ["--version"], {
 				cwd: hostile,
 				env: cleanEnv({ BUN_BE_BUN: "1" }),

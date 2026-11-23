@@ -1,4 +1,3 @@
-import { fileURLToPath, pathToFileURL } from "node:url"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
@@ -27,7 +26,7 @@ import {
 } from "../SavedConnection.ts"
 import { readIfPresent, removeIfPresent, restrictToOwner, writePrivate } from "../PrivateFile.ts"
 import { COMMAND } from "../Invocation.ts"
-import { isStandalone } from "../Standalone.ts"
+import { checkoutRoot, isStandalone } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 
 export const STACK_NAME = "Checkfu"
@@ -54,11 +53,8 @@ export interface Checkout {
 
 export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
 	defaultValue: () => ({
-		// The binary is built into `apps/cli/dist`, so it finds its checkout from its own
-		// path, and runs Alchemy by starting itself as a plain Bun.
-		root: isStandalone
-			? fileURLToPath(new URL("../../../", pathToFileURL(process.execPath)))
-			: fileURLToPath(new URL("../../../../", import.meta.url)),
+		root: checkoutRoot,
+		// The binary runs Alchemy by starting itself as a plain Bun.
 		runtime: process.execPath,
 		runtimeEnv: isStandalone ? { BUN_BE_BUN: "1" } : {},
 		readyWithin: "90 seconds",

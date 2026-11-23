@@ -1,3 +1,5 @@
+import { fileURLToPath, pathToFileURL } from "node:url"
+
 declare const CHECKFU_STANDALONE: boolean | undefined
 
 /**
@@ -8,3 +10,11 @@ declare const CHECKFU_STANDALONE: boolean | undefined
 export const isStandalone: boolean =
 	// oxlint-disable-next-line unicorn/no-typeof-undefined -- the identifier exists only once the build defines it; comparing it directly would throw everywhere else
 	typeof CHECKFU_STANDALONE !== "undefined" && CHECKFU_STANDALONE
+
+/**
+ * The checkout this CLI belongs to. The binary is built into `apps/cli/dist`, so it
+ * finds the checkout from its own path; its source lives in Bun's virtual filesystem.
+ */
+export const checkoutRoot: string = isStandalone
+	? fileURLToPath(new URL("../../../", pathToFileURL(process.execPath)))
+	: fileURLToPath(new URL("../../../", import.meta.url))
