@@ -622,6 +622,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					).rejects.toThrow(/Unregistered Pi durable document/),
 				)
 			}),
+		// Importing the whole Worker takes most of the default five seconds on a busy
+		// CI machine; the limit should fail a hang, not a slow import.
+		30_000,
 	)
 
 	it.effect(

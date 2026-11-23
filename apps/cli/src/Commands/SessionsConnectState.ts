@@ -133,57 +133,27 @@ const recordFirstFailure = (
 	message: string,
 ): TurnFailure => (current === undefined || turn < current.turn ? { turn, message } : current)
 
-const pruneSettledTurns = (
-	turns: ReadonlySet<number>,
-	settledTurn: number,
-): ReadonlySet<number> => {
-	if (turns.size === 0) {
-		return turns
-	}
-	let hasSettled = false
+const anySettled = (turns: Iterable<number>, settledTurn: number): boolean => {
 	for (const turn of turns) {
 		if (turn <= settledTurn) {
-			hasSettled = true
-			break
+			return true
 		}
 	}
-	if (!hasSettled) {
-		return turns
-	}
-	const next = new Set<number>()
-	for (const turn of turns) {
-		if (turn > settledTurn) {
-			next.add(turn)
-		}
-	}
-	return next
+	return false
 }
+
+const pruneSettledTurns = (turns: ReadonlySet<number>, settledTurn: number): ReadonlySet<number> =>
+	anySettled(turns, settledTurn)
+		? new Set(Array.from(turns).filter((turn) => turn > settledTurn))
+		: turns
 
 const pruneSettledErrors = (
 	errors: ReadonlyMap<number, string>,
 	settledTurn: number,
-): ReadonlyMap<number, string> => {
-	if (errors.size === 0) {
-		return errors
-	}
-	let hasSettled = false
-	for (const turn of errors.keys()) {
-		if (turn <= settledTurn) {
-			hasSettled = true
-			break
-		}
-	}
-	if (!hasSettled) {
-		return errors
-	}
-	const next = new Map<number, string>()
-	for (const [turn, message] of errors) {
-		if (turn > settledTurn) {
-			next.set(turn, message)
-		}
-	}
-	return next
-}
+): ReadonlyMap<number, string> =>
+	anySettled(errors.keys(), settledTurn)
+		? new Map(Array.from(errors).filter(([turn]) => turn > settledTurn))
+		: errors
 
 export const extractSubmittedMessageReceipt = (
 	data: ReadonlyArray<unknown>,
@@ -199,8 +169,12 @@ export const extractSubmittedMessageReceipt = (
 	if (typeof turn !== "number" || !Number.isInteger(turn) || turn < 1) {
 		return undefined
 	}
-	const queued = "queued" in first && typeof first.queued === "boolean" ? first.queued : undefined
-	return { turn, queued }
+	// Deployments older than the `queued` field send a receipt without it; a `queued`
+	// that is present but not a boolean is not a receipt at all.
+	if (!("queued" in first)) {
+		return { turn, queued: undefined }
+	}
+	return typeof first.queued === "boolean" ? { turn, queued: first.queued } : undefined
 }
 
 export const hasInterruptReceipt = (data: ReadonlyArray<unknown>): boolean => {

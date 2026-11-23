@@ -28,6 +28,8 @@ import {
 	usageError,
 } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
+import type { SavedConnection } from "./SavedConnection.ts"
+import { COMMAND } from "./Invocation.ts"
 
 export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5
@@ -105,7 +107,7 @@ const readBoundedResponseText = (
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 
-export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> =>
+const parseApiBase = (raw: string): Effect.Effect<URL, CliFailure> =>
 	Effect.gen(function* () {
 		const trimmed = raw.trim()
 		if (trimmed.length === 0) {
@@ -133,7 +135,12 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
 		} else if (protocol !== "https:") {
 			return yield* configError(`Unsupported API base URL scheme "${parsed.protocol}".`)
 		}
+		return parsed
+	})
 
+/** Turns a URL someone typed into the base the API lives under, dropping one trailing `/v1`. */
+export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> =>
+	Effect.map(parseApiBase(raw), (parsed) => {
 		let pathname = parsed.pathname.replace(/\/+$/, "")
 		if (pathname === "/v1") {
 			pathname = ""
@@ -143,6 +150,22 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
 		return `${parsed.origin}${pathname}`
 	})
 
+/**
+ * A saved URL is the exact base a key was verified against, so it is used as stored.
+ * Normalizing it a second time could strip another path segment and send the key
+ * somewhere that was never verified.
+ */
+const savedApiUrl = (saved: SavedConnection): Effect.Effect<string, CliFailure> =>
+	Effect.flatMap(parseApiBase(saved.url), (parsed) =>
+		`${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}` === saved.url
+			? Effect.succeed(saved.url)
+			: Effect.fail(
+					configError(
+						`The saved deployment URL is not in the form it is saved in. Run \`${COMMAND} login\` again.`,
+					),
+				),
+	)
+
 const optionalConfigString = (name: string): Effect.Effect<Option.Option<string>, CliFailure> =>
 	Config.option(Config.String(name)).pipe(
 		Effect.mapBoth({
@@ -151,39 +174,119 @@ const optionalConfigString = (name: string): Effect.Effect<Option.Option<string>
 		}),
 	)
 
-export const resolveBaseUrl = (
+export const explicitBaseUrl = (
 	baseUrlFlag: Option.Option<string>,
-): Effect.Effect<string, CliFailure> =>
+): Effect.Effect<Option.Option<string>, CliFailure> =>
 	Effect.gen(function* () {
 		if (Option.isSome(baseUrlFlag)) {
-			return yield* normalizeApiUrl(baseUrlFlag.value)
+			return baseUrlFlag
 		}
 		const apiUrl = yield* optionalConfigString("CHECKFU_API_URL")
-		if (Option.isSome(apiUrl)) {
-			return yield* normalizeApiUrl(apiUrl.value)
-		}
-		const url = yield* optionalConfigString("CHECKFU_URL")
-		if (Option.isSome(url)) {
-			return yield* normalizeApiUrl(url.value)
-		}
-		return DEFAULT_API_URL
+		return Option.isSome(apiUrl) ? apiUrl : yield* optionalConfigString("CHECKFU_URL")
 	})
 
-export const resolveApiKey: Effect.Effect<Redacted.Redacted<string>, CliFailure> = Config.option(
-	Config.Redacted("CHECKFU_API_KEY"),
-).pipe(
-	Effect.mapError((err) => configError(`Failed to read CHECKFU_API_KEY: ${err.message}`)),
-	Effect.flatMap((maybeKey) => {
-		if (Option.isNone(maybeKey) || Redacted.value(maybeKey.value).trim().length === 0) {
-			return Effect.fail(
-				configError(
-					"Missing CHECKFU_API_KEY environment variable. Export CHECKFU_API_KEY before calling the Checkfu API.",
+type LoadSaved<R> = Effect.Effect<Option.Option<SavedConnection>, CliFailure, R>
+
+export const resolveBaseUrl = <R = never>(
+	baseUrlFlag: Option.Option<string>,
+	loadSaved: LoadSaved<R> = Effect.succeedNone,
+): Effect.Effect<string, CliFailure, R> =>
+	Effect.gen(function* () {
+		const explicit = yield* explicitBaseUrl(baseUrlFlag)
+		if (Option.isSome(explicit)) {
+			return yield* normalizeApiUrl(explicit.value)
+		}
+		const saved = yield* loadSaved
+		return Option.isSome(saved) ? yield* savedApiUrl(saved.value) : DEFAULT_API_URL
+	})
+
+const MISSING_API_KEY = `Missing CHECKFU_API_KEY. Run \`${COMMAND} deploy\` or \`${COMMAND} login\` to save one, or export CHECKFU_API_KEY.`
+
+export const resolveApiKey = <R = never>(
+	baseUrl: string,
+	loadSaved: LoadSaved<R> = Effect.succeedNone,
+): Effect.Effect<Redacted.Redacted<string>, CliFailure, R> =>
+	Effect.gen(function* () {
+		const fromEnv = yield* Config.option(Config.Redacted("CHECKFU_API_KEY")).pipe(
+			Effect.mapBoth({
+				onFailure: (err) => configError(`Failed to read CHECKFU_API_KEY: ${err.message}`),
+				onSuccess: Option.flatMap((key) =>
+					Option.liftPredicate(Redacted.value(key).trim(), (trimmed) => trimmed.length > 0),
 				),
+			}),
+		)
+		if (Option.isSome(fromEnv)) {
+			return Redacted.make(fromEnv.value)
+		}
+		const saved = yield* loadSaved
+		if (Option.isNone(saved)) {
+			return yield* configError(MISSING_API_KEY)
+		}
+		const savedUrl = yield* savedApiUrl(saved.value)
+		if (savedUrl !== baseUrl) {
+			return yield* configError(
+				`The saved API key belongs to ${savedUrl} and is not sent to ${baseUrl}. Export CHECKFU_API_KEY for this URL, or run \`${COMMAND} login\`.`,
 			)
 		}
-		return Effect.succeed(Redacted.make(Redacted.value(maybeKey.value).trim()))
-	}),
-)
+		return Redacted.make(saved.value.api_key)
+	})
+
+const VERIFY_TIMEOUT = Duration.seconds(20)
+const decodeJsonOption = Schema.decodeOption(Schema.fromJsonString(Schema.Unknown))
+
+const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
+	Effect.gen(function* () {
+		const http = yield* HttpClient.HttpClient
+		const request = HttpClientRequest.get(`${baseUrl}/v1/agents/agent_unknown`)
+		const response = yield* http.execute(
+			Option.match(apiKey, {
+				onNone: () => request,
+				onSome: (key) => HttpClientRequest.bearerToken(request, key),
+			}),
+		)
+		const text = yield* readBoundedResponseText(
+			response,
+			MAX_SSE_ERROR_BODY_BYTES,
+			DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS,
+		)
+		const body = Option.getOrNull(decodeJsonOption(text))
+		return { status: response.status, error: isApiErrorEnvelope(body) ? body.error : undefined }
+	}).pipe(
+		Effect.scoped,
+		Effect.mapError((error) => networkFailure(`${baseUrl} is not reachable: ${error.message}`)),
+		Effect.timeoutOrElse({
+			duration: VERIFY_TIMEOUT,
+			orElse: () => Effect.fail(networkFailure(`${baseUrl} did not answer in time.`)),
+		}),
+	)
+
+/** An API key that can travel in an `Authorization` header unchanged. */
+export const isSendableApiKey = (apiKey: string): boolean => /^[!-~]+$/.test(apiKey)
+
+export const verifyApiKey = (
+	baseUrl: string,
+	apiKey: string,
+): Effect.Effect<void, CliFailure, HttpClient.HttpClient> =>
+	Effect.gen(function* () {
+		const notCheckfu = (status: number) =>
+			networkFailure(
+				`${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path.`,
+			)
+		// The key is only sent to a route that has just refused a request for lacking one.
+		const anonymous = yield* probeProtectedRoute(baseUrl, Option.none())
+		if (anonymous.status !== 401 || anonymous.error?.type !== "authentication_error") {
+			return yield* notCheckfu(anonymous.status)
+		}
+		const authed = yield* probeProtectedRoute(baseUrl, Option.some(apiKey))
+		if (authed.error === undefined) {
+			return yield* notCheckfu(authed.status)
+		}
+		if (authed.status !== 404 || authed.error.type !== "not_found_error") {
+			return yield* networkFailure(
+				`${baseUrl} rejected the API key (HTTP ${authed.status}): ${authed.error.message}`,
+			)
+		}
+	})
 
 export interface SessionStreamEvent {
 	readonly id: string | undefined
@@ -262,12 +365,18 @@ const parseSseData = (raw: string): Effect.Effect<Schema.JsonObject, CliFailure>
 		Effect.mapError((err) => networkFailure(`Invalid SSE event JSON payload: ${err.message}`)),
 	)
 
-export const makeCheckfuClient = (
+export const makeCheckfuClient = <R = never>(
 	baseUrlFlag: Option.Option<string>,
-): Effect.Effect<CheckfuClient, CliFailure, HttpClient.HttpClient | SecureRandom.SecureRandom> =>
+	loadSaved: LoadSaved<R> = Effect.succeedNone,
+): Effect.Effect<
+	CheckfuClient,
+	CliFailure,
+	HttpClient.HttpClient | SecureRandom.SecureRandom | R
+> =>
 	Effect.gen(function* () {
-		const baseUrl = yield* resolveBaseUrl(baseUrlFlag)
-		const apiKey = yield* resolveApiKey
+		const loadSavedOnce = yield* Effect.cached(loadSaved)
+		const baseUrl = yield* resolveBaseUrl(baseUrlFlag, loadSavedOnce)
+		const apiKey = yield* resolveApiKey(baseUrl, loadSavedOnce)
 		const rawHttpClient = yield* HttpClient.HttpClient
 		const existingRequestInit = Context.getOrUndefined(
 			yield* Effect.context(),

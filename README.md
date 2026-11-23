@@ -2,9 +2,40 @@
 
 Managed agents on Cloudflare, built on Pi Durable, Alchemy, and Effect.
 
+## Deploy your own
+
+You need [Bun](https://bun.sh) 1.4+, Node.js, a Cloudflare account, and an Anthropic or OpenAI API key. The Workers Paid plan is the safe choice: the free plan allows 10 ms of CPU per request, which an agent turn can exceed.
+
+```sh
+git clone https://github.com/checkfu/checkfu && cd checkfu
+bun install
+bun checkfu deploy
+```
+
+`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys one Worker with its Durable Objects to your account. It generates the API key for you and keeps the secrets in the checkout's `.env`. As soon as Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go. Both files are made owner-only on macOS and Linux; on Windows they are as private as the folder they are in.
+
+Then create an agent, an environment, and a session, and connect to it. Each command prints the ID the next one needs:
+
+```sh
+bun checkfu agents create --name Assistant --model claude-sonnet-5-5
+bun checkfu environments create --name default
+bun checkfu sessions create --agent-id <agent-id> --environment-id <environment-id>
+bun checkfu sessions connect <session-id>
+```
+
+Use `gpt-6.2-sol` if you deployed with an OpenAI key. A coding agent can drive the same steps from `bun checkfu --help` or `GET <your-url>/openapi.json`.
+
+After that:
+
+- **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. It stops before changing anything if your credentials now act on a different Cloudflare account than the one this checkout deployed that stage to; delete `.checkfu/deployment.json` if you mean to move it.
+- **Call the API from your own code** — the URL and key are in `~/.config/checkfu/config.json`; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`.
+- **Use it from another machine** — `bun checkfu --base-url https://<your-worker>.workers.dev login`.
+- **Deploy from CI** — export `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, a model provider key, and a persistent `CHECKFU_API_KEY` (the one from your first deploy, or `openssl rand -hex 32`), then run `bun checkfu deploy --yes`. Without a terminal the deploy refuses to invent an API key, because a fresh runner would rotate it on every run.
+- **Remove it** — `bun checkfu destroy --stage live` deletes the Worker and all of its data. It never picks a stage for you, and it only deletes a stage this checkout recorded deploying, in the account it deployed it to. For anything else, use Alchemy directly: `bun run destroy --stage <name>`.
+
 ## Run locally
 
-Initialize `.env` (if not present), then set `CHECKFU_API_KEY` plus `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`:
+Initialize `.env` (if not present), then set `CHECKFU_API_KEY` plus `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (a `.env` written by `bun checkfu deploy` already has them):
 
 ```sh
 [ -f .env ] || cp .env.example .env
@@ -14,7 +45,7 @@ bun run dev
 
 `bun run dev` prints the local Worker URL (for example `http://localhost:1337`). `GET /health` and `GET /openapi.json` are public; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`.
 
-## Quickstart
+## Quickstart with curl
 
 In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `.env` and `CHECKFU_MODEL` to match your provider key (`gpt-6.2-sol` for `OPENAI_API_KEY` or `claude-sonnet-5-5` for `ANTHROPIC_API_KEY`). This creates an agent, environment, and session, sends a message, and streams events from the start (`Ctrl-C` to exit):
 
@@ -52,11 +83,11 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 ## Commands
 
-- `node apps/cli/bin/checkfu.mjs --help` — run the Checkfu CLI from a **trusted Checkfu source checkout** (`agents`, `environments`, `sessions`, `sessions:events`).
+- `bun checkfu --help` (short for `node apps/cli/bin/checkfu.mjs --help`) — run the Checkfu CLI from a **trusted Checkfu source checkout** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
   - **Untrusted checkouts with `CHECKFU_API_KEY` exported:** invoke an independently installed Checkfu launcher using **absolute paths for both Node and `checkfu.mjs`** (e.g., `/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs --help` on POSIX or `C:\Program Files\nodejs\node.exe C:\Users\<user>\checkfu\apps\cli\bin\checkfu.mjs --help` on Windows). Never run a relative `apps/cli/bin/checkfu.mjs` inside an untrusted checkout.
   - **`PATH`-based `checkfu` bin (`#!/usr/bin/env node`):** requires both `checkfu` and `node` on `PATH` to resolve to trusted installations before the launcher starts (do not rely on the `PATH`-based bin when `PATH` may contain `.`, empty entries, or project-local directories). Once started, the launcher resolves Bun only from explicitly trusted installation roots (or `BUN_INSTALL` / `CHECKFU_BUN_PATH` outside the enclosing checkout) and pins `--no-env-file --config=<install>/bunfig.toml`.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI commands from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
-- `bun run deploy` — deploy to your default Cloudflare stage
+- `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy
   - The production stack refuses to build until that baseline is cut and committed, so every `alchemy` command with `--stage production` needs it: `deploy`, `logs`, `drift` and `destroy`. Run them from a checkout whose baseline is shipped.

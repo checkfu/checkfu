@@ -7,6 +7,7 @@ import type * as FileSystem from "effect/FileSystem"
 import type * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
+import type * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
@@ -269,6 +270,7 @@ export const invokeGeneratedOperation = (
 	CliFailure,
 	| Command.CommandContext<"checkfu">
 	| FileSystem.FileSystem
+	| Path.Path
 	| HttpClient.HttpClient
 	| SecureRandom.SecureRandom
 	| Stdio.Stdio
@@ -383,6 +385,7 @@ export const invokeGeneratedStream = (
 	CliFailure,
 	| Command.CommandContext<"checkfu">
 	| FileSystem.FileSystem
+	| Path.Path
 	| HttpClient.HttpClient
 	| SecureRandom.SecureRandom
 	| Stdio.Stdio

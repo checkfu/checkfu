@@ -2,11 +2,14 @@ import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
 import type * as HttpClient from "effect/http/HttpClient"
+import type * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
 import { makeCheckfuClient } from "./Client.ts"
 import type { CheckfuClient } from "./Client.ts"
 import type { CliFailure } from "./Errors.ts"
+import { readSavedConnection } from "./SavedConnection.ts"
 import { writeStdoutLine } from "./TerminalOutput.ts"
 import { OUTPUT_FORMATS, formatOutput } from "./Transform.ts"
 
@@ -14,7 +17,7 @@ export const SharedFlags = {
 	baseUrl: Flag.String("base-url").pipe(
 		Flag.withMetavar("URL"),
 		Flag.withDescription(
-			"Checkfu API base URL (defaults to CHECKFU_API_URL, CHECKFU_URL, or http://localhost:1337)",
+			"Checkfu API base URL (defaults to CHECKFU_API_URL, CHECKFU_URL, the saved deployment, or http://localhost:1337)",
 		),
 		Flag.optional,
 	),
@@ -44,10 +47,14 @@ export const RootCommand = Command.make("checkfu").pipe(
 export const getClient: Effect.Effect<
 	CheckfuClient,
 	CliFailure,
-	Command.CommandContext<"checkfu"> | HttpClient.HttpClient | SecureRandom.SecureRandom
+	| Command.CommandContext<"checkfu">
+	| HttpClient.HttpClient
+	| SecureRandom.SecureRandom
+	| FileSystem.FileSystem
+	| Path.Path
 > = Effect.gen(function* () {
 	const root = yield* RootCommand
-	return yield* makeCheckfuClient(root.baseUrl)
+	return yield* makeCheckfuClient(root.baseUrl, readSavedConnection)
 })
 
 export const renderOutput = (

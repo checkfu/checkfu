@@ -11,6 +11,7 @@ import * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
@@ -173,22 +174,14 @@ const sendConnectEventsWithRetry = <A>(
 	})
 
 const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId) =>
-	Effect.gen(function* () {
-		for (let attempt = 0; ; attempt++) {
-			const res = yield* Effect.result(
-				client.api.sessions.get({ params: { session_id: sessionId } }),
-			)
-			if (res._tag === "Success") {
-				return res.success
-			}
-			const err = res.failure
-			if (isRetryableLookupError(err) && attempt < MAX_SESSION_STATUS_LOOKUP_RETRIES) {
-				yield* Effect.sleep(Duration.millis(SESSION_STATUS_LOOKUP_RETRY_BASE_MS * 2 ** attempt))
-				continue
-			}
-			return yield* formatClientError(err)
-		}
-	})
+	client.api.sessions.get({ params: { session_id: sessionId } }).pipe(
+		Effect.retry({
+			while: isRetryableLookupError,
+			schedule: Schedule.exponential(Duration.millis(SESSION_STATUS_LOOKUP_RETRY_BASE_MS)),
+			times: MAX_SESSION_STATUS_LOOKUP_RETRIES,
+		}),
+		Effect.mapError(formatClientError),
+	)
 
 interface BoundedLineHooks {
 	readonly onChunkParsed?: (lines: ReadonlyArray<string>, pending: string) => void

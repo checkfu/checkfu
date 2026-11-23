@@ -4766,6 +4766,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					baseEnv[k] = v
 				}
 			}
+			baseEnv["CHECKFU_CONFIG_DIR"] = cleanDir
 			const pathEnvKey =
 				process.platform === "win32"
 					? (Object.keys(baseEnv).find((k) => k.toLowerCase() === "path") ?? "PATH")

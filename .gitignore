@@ -2,6 +2,7 @@
 node_modules/
 .turbo/
 .alchemy/
+.checkfu/
 .env
 .env.*
 !.env.example

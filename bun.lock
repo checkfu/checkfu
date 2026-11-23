@@ -55,14 +55,17 @@
         "checkfu": "./bin/checkfu.mjs",
       },
       "dependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
         "@checkfu/api": "workspace:*",
         "@checkfu/domain": "workspace:*",
         "@effect/platform-bun": "catalog:",
+        "alchemy": "catalog:",
         "effect": "catalog:",
         "yaml": "catalog:",
       },
       "devDependencies": {
         "@alchemy.run/domain": "catalog:",
+        "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
         "vitest": "catalog:",
       },

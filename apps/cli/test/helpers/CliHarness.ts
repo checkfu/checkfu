@@ -14,6 +14,7 @@ import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
@@ -28,6 +29,7 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import * as Terminal from "effect/Terminal"
 import { runCli } from "../../src/Cli.ts"
+import { Checkout } from "../../src/Commands/Deploy.ts"
 import { SigintCoordinator, makeSigintController } from "../../src/Signals.ts"
 import type { SigintController } from "../../src/Signals.ts"
 
@@ -36,6 +38,14 @@ export const TEST_API_KEY = "ck_cli_test_secret"
 const notFoundError = (method: string, filePath: string) =>
 	PlatformError.systemError({
 		_tag: "NotFound",
+		module: "FileSystem",
+		method,
+		pathOrDescriptor: filePath,
+	})
+
+const permissionDenied = (method: string, filePath: string) =>
+	PlatformError.systemError({
+		_tag: "PermissionDenied",
 		module: "FileSystem",
 		method,
 		pathOrDescriptor: filePath,
@@ -72,6 +82,12 @@ export interface CliRunOptions {
 	readonly stdoutIsTerminal?: boolean
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
+	readonly onChmod?: (filePath: string, mode: number) => void
+	readonly readyWithin?: Duration.Input
+	readonly spawn?: (args: ReadonlyArray<string>) => {
+		readonly exitCode: number
+		readonly stdout?: string
+	}
 	readonly terminalReads?: ReadonlyArray<Effect.Effect<string, Terminal.QuitError>>
 	readonly sigintController?: SigintController
 	readonly clock?: Clock.Clock
@@ -174,7 +190,11 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						const entry = files[filePath]
 						return typeof entry === "string"
 							? Effect.succeed(entry)
-							: Effect.fail(notFoundError("readFileString", filePath))
+							: Effect.fail(
+									entry === undefined
+										? notFoundError("readFileString", filePath)
+										: permissionDenied("readFileString", filePath),
+								)
 					},
 					stream: (filePath) => {
 						const entry = files[filePath]
@@ -183,7 +203,70 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						}
 						return typeof entry === "string" ? Stream.make(new TextEncoder().encode(entry)) : entry
 					},
+					exists: (filePath) => Effect.succeed(files[filePath] !== undefined),
+					writeFileString: (filePath, data) =>
+						Effect.sync(() => {
+							files[filePath] = data
+						}),
+					rename: (from, to) =>
+						Effect.sync(() => {
+							const entry = files[from]
+							if (entry !== undefined) {
+								files[to] = entry
+								delete files[from]
+							}
+						}),
+					makeDirectory: () => Effect.void,
+					chmod: (filePath, mode) => Effect.sync(() => options?.onChmod?.(filePath, mode)),
+					remove: (filePath) => {
+						const entry = files[filePath]
+						if (typeof entry !== "string") {
+							return Effect.fail(
+								entry === undefined
+									? notFoundError("remove", filePath)
+									: permissionDenied("remove", filePath),
+							)
+						}
+						return Effect.sync(() => {
+							delete files[filePath]
+						})
+					},
 				})
+
+				const spawnerLayer = Layer.succeed(
+					ChildProcessSpawner.ChildProcessSpawner,
+					ChildProcessSpawner.make((command) => {
+						if (command._tag !== "StandardCommand") {
+							return Effect.die("unused")
+						}
+						if (options?.spawn === undefined) {
+							return Effect.die("unused")
+						}
+						// Calls to the Alchemy query script reach `spawn` as `query <question> ...`.
+						const [program = "", ...rest] = command.args.map(String)
+						const result = options.spawn(
+							program.endsWith("alchemy-query.ts")
+								? [program, "query", ...rest]
+								: [program, ...rest],
+						)
+						const stdout = Stream.make(new TextEncoder().encode(result.stdout ?? ""))
+						return Effect.succeed(
+							ChildProcessSpawner.makeHandle({
+								pid: ChildProcessSpawner.ProcessId(1),
+								exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.exitCode)),
+								isRunning: Effect.succeed(false),
+								kill: () => Effect.void,
+								stdin: Sink.drain,
+								stdout,
+								stderr: Stream.empty,
+								all: stdout,
+								getInputFd: () => Sink.drain,
+								getOutputFd: () => Stream.empty,
+								unref: Effect.succeed(Effect.void),
+							}),
+						)
+					}),
+				)
 
 				const reads = [...(options?.terminalReads ?? [])]
 				let readIndex = 0
@@ -233,10 +316,12 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						stderr: () => collectSink(stderrChunks),
 					}),
 					terminalLayer,
-					Layer.succeed(
-						ChildProcessSpawner.ChildProcessSpawner,
-						ChildProcessSpawner.make(() => Effect.die("unused")),
-					),
+					spawnerLayer,
+					Layer.succeed(Checkout, {
+						root: "/checkout",
+						runtime: "bun",
+						readyWithin: options?.readyWithin ?? "300 millis",
+					}),
 					FetchHttpClient.layer.pipe(
 						Layer.provide(Layer.succeed(FetchHttpClient.Fetch, customFetch)),
 					),
