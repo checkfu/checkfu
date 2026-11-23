@@ -546,8 +546,20 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 
 		// Recorded before anything else can fail, so the record always names what was
 		// last deployed; its URL follows once Alchemy has been asked for it.
+		// A redeploy of the same target keeps the URL it already had, so `destroy` can
+		// still clear the saved login if this run never gets as far as reading it again.
+		const known = Option.filter(
+			record,
+			(previous) => previous.stage === stage && previous.account_id === accountId,
+		)
 		const deployed = { stage, profile: target.profile, account_id: accountId }
-		yield* writeDeploymentRecord(checkout, deployed)
+		yield* writeDeploymentRecord(checkout, {
+			...deployed,
+			...Option.match(known, {
+				onNone: () => ({}),
+				onSome: (previous) => (previous.url === undefined ? {} : { url: previous.url }),
+			}),
+		})
 		const url = yield* readDeployedUrl(target, stage, retry)
 		yield* writeDeploymentRecord(checkout, { ...deployed, url })
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)

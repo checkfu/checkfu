@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { providerForKey, readDotEnvValue, setDotEnvValue } from "../src/Commands/Deploy.ts"
 import { ChatDefaults } from "../src/SavedConnection.ts"
+import { COMMAND, invocation } from "../src/Standalone.ts"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 
 const DEPLOYED_URL = "https://checkfu.example.workers.dev"
@@ -142,6 +143,38 @@ describe("dotenv helpers", () => {
 	})
 })
 
+describe("the command printed for the user to run again", () => {
+	const source = {
+		standalone: false,
+		executable: "/opt/bun",
+		launcher: "/opt/checkfu/apps/cli/bin/checkfu.mjs",
+		checkoutRoot: "/opt/checkfu",
+	}
+
+	it("is the checkout shorthand only when standing in the checkout it runs from", () => {
+		expect(invocation({ ...source, workingDirectory: "/opt/checkfu" })).toBe("bun checkfu")
+		for (const workingDirectory of ["/work/other-checkout", "/opt/checkfu/apps/cli", undefined]) {
+			expect(invocation({ ...source, workingDirectory })).toBe(
+				"node /opt/checkfu/apps/cli/bin/checkfu.mjs",
+			)
+		}
+		expect(
+			invocation({ ...source, launcher: "/opt/my tools/checkfu.mjs", workingDirectory: "/x" }),
+		).toBe("node '/opt/my tools/checkfu.mjs'")
+	})
+
+	it("is the binary's own path when compiled", () => {
+		expect(
+			invocation({
+				...source,
+				standalone: true,
+				executable: "/usr/local/bin/checkfu",
+				workingDirectory: "/opt/checkfu",
+			}),
+		).toBe("/usr/local/bin/checkfu")
+	})
+})
+
 describe("checkfu deploy", () => {
 	const checkout = { "/checkout/alchemy.run.ts": "" }
 
@@ -176,7 +209,7 @@ describe("checkfu deploy", () => {
 				model: "claude-sonnet-5-5",
 			})
 			expect(result.stderr).toContain(`Checkfu is live at ${DEPLOYED_URL}`)
-			expect(result.stderr).toContain("bun checkfu chat")
+			expect(result.stderr).toContain(`${COMMAND} chat`)
 			expect(result.stderr).not.toContain(TEST_API_KEY)
 		}),
 	)
@@ -431,21 +464,21 @@ describe("checkfu deploy", () => {
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy([], { output: "error" }),
 			})
-			expect(named.errorMessage).toContain("Run `bun checkfu deploy --stage staging` again")
+			expect(named.errorMessage).toContain(`Run \`${COMMAND} deploy --stage staging\` again`)
 
 			const declined = yield* cli.run(["deploy", "--stage", "staging"], {
 				env: deployEnv,
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy([], { deployExitCode: 1 }),
 			})
-			expect(declined.errorMessage).toContain("Run `bun checkfu deploy --stage staging` again")
+			expect(declined.errorMessage).toContain(`Run \`${COMMAND} deploy --stage staging\` again`)
 
 			const bare = yield* cli.run(["deploy", "--yes"], {
 				env: deployEnv,
 				files: virtualFiles(checkout),
 				spawn: fakeAlchemy([], { output: "missing" }),
 			})
-			expect(bare.errorMessage).toContain("Run `bun checkfu deploy` again")
+			expect(bare.errorMessage).toContain(`Run \`${COMMAND} deploy\` again`)
 		}),
 	)
 
@@ -472,6 +505,32 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
+	it.live("keeps a redeployed stage's known URL until the new one has been read", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const saved = JSON.stringify({ url: DEPLOYED_URL, api_key: TEST_API_KEY })
+			const files = virtualFiles({
+				...checkout,
+				[RECORD_FILE]: record("live"),
+				[CONFIG_FILE]: saved,
+			})
+			yield* cli.run(["deploy", "--yes"], {
+				env: deployEnv,
+				files,
+				spawn: fakeAlchemy([], { output: "error" }),
+			})
+			expect(files[RECORD_FILE]).toBe(record("live"))
+
+			const destroyed = yield* cli.run(["destroy", "--yes", "--stage", "live"], {
+				env: deployEnv,
+				files,
+				spawn: fakeAlchemy([]),
+			})
+			expect(destroyed.errorMessage).toBeUndefined()
+			expect(files[CONFIG_FILE]).toBeUndefined()
+		}),
+	)
+
 	it.live(
 		"tightens a world-readable .env and pins its chat hint when the shell points elsewhere",
 		() =>
@@ -489,7 +548,7 @@ describe("checkfu deploy", () => {
 				expect(result.errorMessage).toBeUndefined()
 				expect(files[ENV_FILE]).toBe(dotenv)
 				expect(chmods).toContainEqual([ENV_FILE, 0o600])
-				expect(result.stderr).toContain(`bun checkfu --base-url ${DEPLOYED_URL} chat`)
+				expect(result.stderr).toContain(`${COMMAND} --base-url ${DEPLOYED_URL} chat`)
 			}),
 	)
 
@@ -1003,8 +1062,8 @@ describe("checkfu chat", () => {
 			expect(result.stdout).toContain("Echo: Hello")
 			expect(result.stderr).toContain("This agent will not be reused next time")
 			expect(creates.slice(0, 3)).toEqual(["/v1/agents", "/v1/environments", "/v1/sessions"])
-			expect(result.stderr).toMatch(
-				new RegExp(`bun checkfu --base-url ${DEPLOYED_URL} sessions connect sess_`),
+			expect(result.stderr).toContain(
+				`${COMMAND} --base-url ${DEPLOYED_URL} sessions connect sess_`,
 			)
 
 			const unreadable = yield* cli.run(["chat"], {
@@ -1015,7 +1074,7 @@ describe("checkfu chat", () => {
 			expect(unreadable.errorMessage).toBeUndefined()
 			expect(unreadable.stderr).toContain("Starting without remembered chat defaults")
 			expect(unreadable.stderr).toContain(
-				`Resume later with: bun checkfu --base-url ${DEPLOYED_URL} sessions connect sess_`,
+				`Resume later with: ${COMMAND} --base-url ${DEPLOYED_URL} sessions connect sess_`,
 			)
 		}),
 	)
