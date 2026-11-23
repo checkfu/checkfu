@@ -1943,6 +1943,17 @@ describe("turn engine", () => {
 		}
 	})
 
+	it("answers for a provider key only when the session object is bound to one", () => {
+		const backend = makePiHarnessBackend(
+			{} as unknown as Parameters<typeof makePiHarnessBackend>[0],
+			{} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+			{} as unknown as Parameters<typeof makePiHarnessBackend>[2],
+			{ openai: Redacted.make("sk-test"), anthropic: null },
+		)
+		expect(backend.hasApiKey("openai")).toBe(true)
+		expect(backend.hasApiKey("anthropic")).toBe(false)
+	})
+
 	it("keeps a queued abort alive when interrupted while submit holds the permit", async () => {
 		// 1. Directly exercise `PiSession.do.ts`'s `makePiHarnessBackend` abort path.
 		const cancelled = new Set<string>()
