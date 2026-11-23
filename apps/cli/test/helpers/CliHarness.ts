@@ -12,6 +12,7 @@ import type { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -105,6 +106,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		const CheckfuLive = Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(ModelProviderLive)))
 		const ServerLayer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(ConfigProvider.fromUnknown({ CHECKFU_API_KEY: TEST_API_KEY })),

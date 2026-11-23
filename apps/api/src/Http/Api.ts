@@ -499,12 +499,29 @@ export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$
 	),
 )
 
-const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u)).pipe(
-	Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
-		decode: SchemaGetter.transform(Number),
-		encode: SchemaGetter.transform(String),
-	}),
-)
+const EventListAfterFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u))
+	.annotate({
+		description:
+			"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+	})
+	.pipe(
+		Schema.decodeTo(
+			Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
+			{
+				decode: SchemaGetter.transform(Number),
+				encode: SchemaGetter.transform(String),
+			},
+		),
+	)
+
+const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u))
+	.annotate({ description: "Maximum number of events to return (1-100)" })
+	.pipe(
+		Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
+			decode: SchemaGetter.transform(Number),
+			encode: SchemaGetter.transform(String),
+		}),
+	)
 
 const agentParams = { agent_id: AgentId.annotate({ description: "Agent ID" }) }
 const environmentParams = {
@@ -881,17 +898,8 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("listEvents", "/v1/sessions/:session_id/events", {
 			params: sessionParams,
 			query: {
-				after: Schema.optionalKey(
-					CursorFromString.annotate({
-						description:
-							"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-					}),
-				),
-				limit: Schema.optionalKey(
-					EventListLimitFromString.annotate({
-						description: "Maximum number of events to return (1-100)",
-					}),
-				),
+				after: Schema.optionalKey(EventListAfterFromString),
+				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
 				),

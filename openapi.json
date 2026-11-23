@@ -7240,6 +7240,7 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
+							"pattern": "^\\d{1,15}$",
 							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
 						},
 						"required": false
@@ -7249,6 +7250,7 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
+							"pattern": "^(?:[1-9]\\d?|100)$",
 							"description": "Maximum number of events to return (1-100)"
 						},
 						"required": false

@@ -596,8 +596,8 @@ const resolveCursorBaselineFromPrefix = (
 				.listEvents({
 					params: { session_id: sessionId },
 					query: {
-						...(pageCursor > 0 ? { after: String(pageCursor) } : {}),
-						limit: "100",
+						...(pageCursor > 0 ? { after: pageCursor } : {}),
+						limit: 100,
 						order: "asc",
 					},
 				})
@@ -695,8 +695,8 @@ const resolveCursorBaseline = (
 						.listEvents({
 							params: { session_id: sessionId },
 							query: {
-								after: String(pageCursor),
-								limit: "100",
+								after: pageCursor,
+								limit: 100,
 								order: "asc",
 							},
 						})
@@ -785,7 +785,7 @@ const resolveCursorBaseline = (
 					const latestPage = yield* client.api.sessions
 						.listEvents({
 							params: { session_id: sessionId },
-							query: { limit: "1", order: "desc" },
+							query: { limit: 1, order: "desc" },
 						})
 						.pipe(Effect.mapError(formatClientError))
 					const latestEntry = latestPage.data[0]
@@ -877,7 +877,7 @@ export const sessionsConnectCommand = Command.make(
 				const latestPage = yield* client.api.sessions
 					.listEvents({
 						params: { session_id: sessionId },
-						query: { limit: "1", order: "desc" },
+						query: { limit: 1, order: "desc" },
 					})
 					.pipe(Effect.mapError(formatClientError))
 				const latestEntry = latestPage.data[0]
