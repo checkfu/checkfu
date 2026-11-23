@@ -58,6 +58,15 @@ export const versionedSnapshot = <Current extends number, S extends ServiceFreeS
 		}
 	}
 
+	const oldest = options.current - sorted.length
+	for (const [index, step] of sorted.entries()) {
+		if (step.version !== oldest + index) {
+			throw new Error(
+				`Previous snapshot versions must be consecutive and end at ${options.current - 1}: expected version ${oldest + index}, found ${step.version}`,
+			)
+		}
+	}
+
 	const currentEnvelope = Schema.Struct({
 		schema_version: Schema.Literal(options.current),
 		state: options.schema,
