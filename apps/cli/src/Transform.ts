@@ -65,233 +65,32 @@ export const normalizeJsonValue = (value: unknown): NormalizedValue => {
 	return String(value)
 }
 
-const splitTopLevel = (input: string, delimiter: string): Array<string> => {
-	const parts: Array<string> = []
-	let current = ""
-	let braceDepth = 0
-	let bracketDepth = 0
-	let inQuote: "'" | '"' | null = null
-	let escaped = false
+const segmentsOf = (path: string): ReadonlyArray<string> =>
+	path
+		.split(".")
+		.map((segment) => segment.trim())
+		.filter((segment) => segment.length > 0)
 
-	for (let i = 0; i < input.length; i++) {
-		const ch = input[i] ?? ""
-		if (escaped) {
-			current += ch
-			escaped = false
-			continue
-		}
-		if (ch === "\\") {
-			current += ch
-			escaped = true
-			continue
-		}
-		if (inQuote !== null) {
-			current += ch
-			if (ch === inQuote) {
-				inQuote = null
-			}
-			continue
-		}
-		if (ch === '"' || ch === "'") {
-			inQuote = ch
-			current += ch
-			continue
-		}
-		if (ch === "{") {
-			braceDepth++
-			current += ch
-			continue
-		}
-		if (ch === "}") {
-			if (braceDepth > 0) {
-				braceDepth--
-			}
-			current += ch
-			continue
-		}
-		if (ch === "[") {
-			bracketDepth++
-			current += ch
-			continue
-		}
-		if (ch === "]") {
-			if (bracketDepth > 0) {
-				bracketDepth--
-			}
-			current += ch
-			continue
-		}
-		if (ch === delimiter && braceDepth === 0 && bracketDepth === 0) {
-			parts.push(current)
-			current = ""
-			continue
-		}
-		current += ch
+const evaluatePath = (value: NormalizedValue, path: ReadonlyArray<string>): NormalizedValue => {
+	const [head, ...rest] = path
+	if (head === undefined) {
+		return value
 	}
-	if (current.length > 0 || parts.length > 0) {
-		parts.push(current)
-	}
-	return parts
-}
-
-interface ParsedSegment {
-	readonly value: string
-	readonly literal: boolean
-}
-
-const parseSegment = (segment: string): ParsedSegment => {
-	const trimmed = segment.trim()
-	if (
-		trimmed.length >= 2 &&
-		((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-			(trimmed.startsWith("'") && trimmed.endsWith("'")))
-	) {
-		return {
-			value: trimmed
-				.slice(1, -1)
-				.replaceAll(String.raw`\"`, '"')
-				.replaceAll(String.raw`\'`, "'"),
-			literal: true,
+	if (isNormalizedArray(value)) {
+		if (head === "#") {
+			return rest.length === 0
+				? value.length
+				: value.map((item) => evaluatePath(item, rest)).filter((item) => item !== undefined)
 		}
-	}
-	const unescaped = trimmed.replaceAll(String.raw`\.`, ".").replaceAll(String.raw`\#`, "#")
-	return {
-		value: unescaped,
-		literal: unescaped !== trimmed,
-	}
-}
-
-const unescapeSegment = (segment: string): string => parseSegment(segment).value
-
-const evaluateObjectLiteral = (value: NormalizedValue, body: string): NormalizedObject => {
-	const result: MutableNormalizedObject = {}
-	for (const rawEntry of splitTopLevel(body, ",")) {
-		const entry = rawEntry.trim()
-		if (entry.length === 0) {
-			continue
-		}
-		const colonIndex = findTopLevelColon(entry)
-		if (colonIndex === -1) {
-			const segments = splitTopLevel(entry, ".")
-			const last = segments.at(-1) ?? entry
-			const key = unescapeSegment(last)
-			setOwnProperty(result, key, evaluateNormalizedTransform(value, entry))
-		} else {
-			const key = unescapeSegment(entry.slice(0, colonIndex))
-			const expr = entry.slice(colonIndex + 1).trim()
-			setOwnProperty(result, key, evaluateNormalizedTransform(value, expr))
-		}
-	}
-	return result
-}
-
-const findTopLevelColon = (input: string): number => {
-	let braceDepth = 0
-	let bracketDepth = 0
-	let inQuote: "'" | '"' | null = null
-	let escaped = false
-	for (let i = 0; i < input.length; i++) {
-		const ch = input[i] ?? ""
-		if (escaped) {
-			escaped = false
-			continue
-		}
-		if (ch === "\\") {
-			escaped = true
-			continue
-		}
-		if (inQuote !== null) {
-			if (ch === inQuote) {
-				inQuote = null
-			}
-			continue
-		}
-		if (ch === '"' || ch === "'") {
-			inQuote = ch
-			continue
-		}
-		if (ch === "{") {
-			braceDepth++
-		} else if (ch === "}" && braceDepth > 0) {
-			braceDepth--
-		} else if (ch === "[") {
-			bracketDepth++
-		} else if (ch === "]" && bracketDepth > 0) {
-			bracketDepth--
-		} else if (ch === ":" && braceDepth === 0 && bracketDepth === 0) {
-			return i
-		}
-	}
-	return -1
-}
-
-const evaluateSegments = (
-	value: NormalizedValue,
-	segments: ReadonlyArray<string>,
-): NormalizedValue => {
-	let current: NormalizedValue = value
-	for (let i = 0; i < segments.length; i++) {
-		if (current === null || current === undefined) {
+		if (!/^-?\d+$/.test(head)) {
 			return undefined
 		}
-		const rawSegment = segments[i] ?? ""
-		const rawTrimmed = rawSegment.trim()
-		const rest = segments.slice(i + 1)
-
-		if (rawTrimmed === "@this" || rawTrimmed.length === 0) {
-			continue
-		}
-
-		if (rawTrimmed.startsWith("{") && rawTrimmed.endsWith("}")) {
-			current = evaluateObjectLiteral(current, rawTrimmed.slice(1, -1))
-			continue
-		}
-		if (rawTrimmed.startsWith("[") && rawTrimmed.endsWith("]")) {
-			current = splitTopLevel(rawTrimmed.slice(1, -1), ",")
-				.map((item) => item.trim())
-				.filter((item) => item.length > 0)
-				.map((item) => evaluateNormalizedTransform(current, item))
-			continue
-		}
-
-		const parsed = parseSegment(rawTrimmed)
-		if (!parsed.literal && parsed.value === "#") {
-			if (!isNormalizedArray(current)) {
-				return undefined
-			}
-			if (rest.length === 0) {
-				return current.length
-			}
-			const projected: Array<NormalizedValue> = []
-			for (const element of current) {
-				const mapped = evaluateSegments(element, rest)
-				if (mapped !== undefined) {
-					projected.push(mapped)
-				}
-			}
-			return projected
-		}
-
-		const segment = parsed.value
-
-		if (isNormalizedArray(current)) {
-			if (/^-?\d+$/.test(segment)) {
-				const rawIndex = Number(segment)
-				const idx = rawIndex < 0 ? current.length + rawIndex : rawIndex
-				current = idx >= 0 && idx < current.length ? current[idx] : undefined
-				continue
-			}
-			return undefined
-		}
-
-		if (isNormalizedObject(current)) {
-			current = Object.hasOwn(current, segment) ? current[segment] : undefined
-			continue
-		}
-
-		return undefined
+		const index = Number(head)
+		return evaluatePath(value[index < 0 ? value.length + index : index], rest)
 	}
-	return current
+	return isNormalizedObject(value) && Object.hasOwn(value, head)
+		? evaluatePath(value[head], rest)
+		: undefined
 }
 
 const evaluateNormalizedTransform = (
@@ -302,8 +101,19 @@ const evaluateNormalizedTransform = (
 	if (trimmed.length === 0) {
 		return value
 	}
-	const segments = splitTopLevel(trimmed, ".")
-	return evaluateSegments(value, segments)
+	if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+		return evaluatePath(value, segmentsOf(trimmed))
+	}
+	const picked: MutableNormalizedObject = {}
+	for (const entry of trimmed.slice(1, -1).split(",")) {
+		const colon = entry.indexOf(":")
+		const path = segmentsOf(colon === -1 ? entry : entry.slice(colon + 1))
+		const key = colon === -1 ? (path.at(-1) ?? "") : entry.slice(0, colon).trim()
+		if (key.length > 0) {
+			setOwnProperty(picked, key, evaluatePath(value, path))
+		}
+	}
+	return picked
 }
 
 export const evaluateTransform = (value: unknown, expression: string): NormalizedValue =>

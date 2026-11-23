@@ -1032,35 +1032,28 @@ describe("Transform and formatOutput", () => {
 		],
 	}
 
-	it("evaluates GJSON-style paths, indices, counts, projections, and object/array literals", () => {
+	it("evaluates paths, indices, counts, projections, and object picks", () => {
 		expect(evaluateTransform(sample, "id")).toBe("agt_123")
 		expect(evaluateTransform(sample, "model.id")).toBe("gpt-6.2-sol")
 		expect(evaluateTransform(sample, "data.0.content.0.text")).toBe("hi")
 		expect(evaluateTransform(sample, "data.-1.type")).toBe("agent.message")
 		expect(evaluateTransform(sample, "data.#")).toBe(2)
 		expect(evaluateTransform(sample, "data.#.type")).toEqual(["user.message", "agent.message"])
-		expect(evaluateTransform(sample, '{"#":id}."#"')).toBe("agt_123")
-		expect(evaluateTransform(sample, "{\"#\":id}.'#'")).toBe("agt_123")
-		expect(evaluateTransform(sample, String.raw`{"#":id}.\#`)).toBe("agt_123")
-		expect(evaluateTransform(sample, '{"#":data}."#".#')).toBe(2)
-		expect(evaluateTransform(sample, '{"@this":id}."@this"')).toBe("agt_123")
-		expect(
-			formatOutput(sample, {
-				format: "json",
-				transform: Option.some('{"#":id}."#"'),
-				rawOutput: false,
-				isTerminal: false,
-			}),
-		).toBe('"agt_123"')
 		expect(evaluateTransform(sample, "{id,model:model.id}")).toEqual({
 			id: "agt_123",
 			model: "gpt-6.2-sol",
 		})
-		expect(evaluateTransform(sample, "{id}.{id}")).toEqual({ id: "agt_123" })
-		expect(evaluateTransform(sample, "{id,name}.id")).toBe("agt_123")
-		expect(evaluateTransform(sample, "[id,name]")).toEqual(["agt_123", "Helper"])
-		expect(evaluateTransform(sample, "[id,name].[0]")).toEqual(["agt_123"])
-		expect(evaluateTransform(sample, "[id,name].1")).toBe("Helper")
+		expect(evaluateTransform(sample, "{id, model.id}")).toEqual({ id: "gpt-6.2-sol" })
+		expect(evaluateTransform(sample, "{id,name,missing}")).toEqual({
+			id: "agt_123",
+			name: "Helper",
+			missing: undefined,
+		})
+		expect(evaluateTransform(sample, ".id")).toBe("agt_123")
+		expect(evaluateTransform(sample, " model . id ")).toBe("gpt-6.2-sol")
+		expect(evaluateTransform(sample, "data.#.missing")).toEqual([])
+		expect(evaluateTransform(sample, "data.5.type")).toBeUndefined()
+		expect(evaluateTransform(sample, "id.length")).toBeUndefined()
 		expect(evaluateTransform(sample, "missing.path")).toBeUndefined()
 		expect(evaluateTransform(sample, "constructor")).toBeUndefined()
 		expect(evaluateTransform(sample, "toString")).toBeUndefined()
@@ -1325,12 +1318,6 @@ describe("Transform and formatOutput", () => {
 		)
 		expect(evaluatedObj).toEqual({ has_more: true, next_cursor: 42 })
 		expect(evalObjCalls).toBe(expectedObjectCount)
-
-		const [evaluatedArr, evalArrCalls] = countEntriesCalls(() =>
-			evaluateTransform(listResponse, "[has_more,next_cursor]"),
-		)
-		expect(evaluatedArr).toEqual([true, 42])
-		expect(evalArrCalls).toBe(expectedObjectCount)
 
 		const [projected, projCalls] = countEntriesCalls(() =>
 			evaluateTransform(listResponse, "data.#.id"),
