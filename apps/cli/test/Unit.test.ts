@@ -1233,8 +1233,16 @@ describe("Transform and formatOutput", () => {
 		expect(streamOut).toBe('{"a":1}')
 	})
 
-	it("preserves trailing newlines in YAML scalars and separates streamed YAML documents", () => {
-		for (const scalar of ["hello\n\n", "\n\n", "trailing   ", { text: "body\n\n" }]) {
+	it("preserves trailing newlines and leading BOMs in YAML scalars and separates streamed YAML documents", () => {
+		for (const scalar of [
+			"hello\n\n",
+			"\n\n",
+			"trailing   ",
+			{ text: "body\n\n" },
+			"\uFEFFbar",
+			"\uFEFF",
+			{ "\uFEFFkey": "\uFEFFval" },
+		]) {
 			const rendered = formatOutput(scalar, {
 				format: "yaml",
 				transform: Option.none(),
@@ -1243,6 +1251,14 @@ describe("Transform and formatOutput", () => {
 			})
 			expect(YAML.parse(`${rendered}\n`)).toEqual(scalar)
 		}
+		expect(
+			formatOutput("\uFEFFbar", {
+				format: "yaml",
+				transform: Option.none(),
+				rawOutput: false,
+				isTerminal: false,
+			}).startsWith('"'),
+		).toBe(true)
 
 		const events = [
 			{ id: "evt_1", seq: 1, type: "user.message", text: "first\n\n" },

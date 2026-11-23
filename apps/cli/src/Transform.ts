@@ -273,7 +273,10 @@ export const formatOutput = (value: unknown, options: FormatOptions): string => 
 		}
 		YAML.visit(doc, {
 			Scalar(_key, node) {
-				if (typeof node.value === "string" && hasUnsafeTerminalCodePoint(node.value)) {
+				if (
+					typeof node.value === "string" &&
+					(hasUnsafeTerminalCodePoint(node.value) || node.value.startsWith("\uFEFF"))
+				) {
 					node.type = YAML.Scalar.QUOTE_DOUBLE
 				}
 			},

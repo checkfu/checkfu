@@ -776,17 +776,27 @@ const dispatchUserLine = (
 					? !queued
 					: sendSnapshot.liveStatus === "idle" && turn === sendSnapshot.liveTurn + 1
 			const startedNow =
-				queued === false
+				state.liveStatus !== "terminated" &&
+				(queued === false
 					? state.liveTurn < turn
 					: initiatedFromIdle &&
 						state.liveStateVersion === sendSnapshot.liveStateVersion &&
-						state.liveStatus === "idle"
+						state.liveStatus === "idle")
+			const predecessorRunning =
+				!startedNow &&
+				state.liveStatus !== "terminated" &&
+				!initiatedFromIdle &&
+				turn >= 2 &&
+				state.liveTurn < turn - 1
+			const nextLiveStatus =
+				startedNow || predecessorRunning ? ("running" as const) : state.liveStatus
+			const nextLiveTurn = startedNow ? turn : predecessorRunning ? turn - 1 : state.liveTurn
 			if (!state.trackPipedTurns) {
-				return startedNow
+				return startedNow || predecessorRunning
 					? {
 							...state,
-							liveStatus: "running" as const,
-							liveTurn: turn,
+							liveStatus: nextLiveStatus,
+							liveTurn: nextLiveTurn,
 						}
 					: state
 			}
@@ -802,9 +812,15 @@ const dispatchUserLine = (
 				unsettledSubmittedTurns = nextSubmitted
 			}
 			let unsettledQueuedTurns = state.unsettledQueuedTurns
-			if (!initiatedFromIdle && turn > state.settledTurn && !unsettledQueuedTurns.has(turn)) {
+			if (!initiatedFromIdle && turn > state.settledTurn) {
+				if (!unsettledQueuedTurns.has(turn)) {
+					const nextQueued = new Set(unsettledQueuedTurns)
+					nextQueued.add(turn)
+					unsettledQueuedTurns = nextQueued
+				}
+			} else if (initiatedFromIdle && unsettledQueuedTurns.has(turn)) {
 				const nextQueued = new Set(unsettledQueuedTurns)
-				nextQueued.add(turn)
+				nextQueued.delete(turn)
 				unsettledQueuedTurns = nextQueued
 			}
 			return {
@@ -815,8 +831,8 @@ const dispatchUserLine = (
 				firstSubmittedTurnFailure,
 				pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
 				sendInFlight: false,
-				liveStatus: startedNow ? ("running" as const) : state.liveStatus,
-				liveTurn: startedNow ? turn : state.liveTurn,
+				liveStatus: nextLiveStatus,
+				liveTurn: nextLiveTurn,
 			}
 		})
 		return "continue" as const
@@ -1119,9 +1135,7 @@ export const sessionsConnectCommand = Command.make(
 			const terminal = yield* Terminal.Terminal
 			const client = yield* getClient()
 
-			const initialSession = yield* client.api.sessions
-				.get({ params: { session_id: sessionId } })
-				.pipe(Effect.mapError(formatClientError))
+			const initialSession = yield* fetchSessionStatusWithRetry(client, sessionId)
 
 			const rawStructuredMode =
 				root.format !== "auto" || Option.isSome(root.transform) || root.rawOutput

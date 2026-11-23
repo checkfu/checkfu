@@ -3444,4 +3444,263 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 			),
 		)
 	})
+
+	it("clears queued-turn markers when started later, interrupts predecessor turns from queued receipts, and retries transient startup lookups", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Message 2 queues turn 2 behind turn 1 (queued: true), turn 1 stops with refusal,
+					//    and message 3 starts turn 2 from idle (queued: false). Removing turn 2 from
+					//    unsettledQueuedTurns prevents a lagging GET snapshot from failing turn 2.
+					const turn1Started = yield* Deferred.make<void>()
+					const releaseTurn1 = yield* Deferred.make<void>()
+					const turn1SettledRefusal = yield* Deferred.make<void>()
+					const post3Returned = yield* Deferred.make<void>()
+					const clearQueueCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(turn1Started, undefined)
+									yield* Deferred.await(releaseTurn1)
+									return {
+										thinking: null,
+										text: "Refused turn 1",
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "refusal" as const },
+									}
+								}
+								return {
+									thinking: null,
+									text: `StartedAfterClear:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const clearQueueSessionId = yield* createReadySession(clearQueueCli)
+					const encoder = new TextEncoder()
+					let clearPosts = 0
+					let clearGets = 0
+					let post2Receipt: { readonly turn?: number; readonly queued?: boolean } | undefined
+					let post3Receipt: { readonly turn?: number; readonly queued?: boolean } | undefined
+
+					const clearStdin = Stream.concat(
+						Stream.make(encoder.encode("turn 1 msg\n")),
+						Stream.concat(
+							Stream.fromEffect(
+								Deferred.await(turn1Started).pipe(Effect.as(encoder.encode("queued turn 2\n"))),
+							),
+							Stream.fromEffect(
+								Deferred.await(turn1SettledRefusal).pipe(
+									Effect.andThen(Effect.sleep("25 millis")),
+									Effect.as(encoder.encode("starts turn 2\n")),
+								),
+							),
+						),
+					)
+
+					const clearRes = yield* clearQueueCli.run(
+						["sessions", "connect", "--session-id", clearQueueSessionId],
+						{
+							stdin: clearStdin,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									clearPosts += 1
+									const res = await next(request)
+									const parsed = (await res.clone().json()) as {
+										data?: ReadonlyArray<{ readonly turn?: number; readonly queued?: boolean }>
+									}
+									if (clearPosts === 2) {
+										post2Receipt = parsed.data?.[0]
+										// Release turn 1 to stop with refusal now that message 2 was queued
+										await Effect.runPromise(Deferred.succeed(releaseTurn1, undefined))
+									} else if (clearPosts === 3) {
+										post3Receipt = parsed.data?.[0]
+										await Effect.runPromise(Deferred.succeed(post3Returned, undefined))
+									}
+									return res
+								}
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${clearQueueSessionId}`)
+								) {
+									clearGets += 1
+									const res = await next(request)
+									if (clearGets > 1) {
+										const body = (await res.json()) as Record<string, unknown>
+										return new Response(JSON.stringify({ ...body, status: "idle", turn: 1 }), {
+											status: 200,
+											headers: { "content-type": "application/json" },
+										})
+									}
+									return res
+								}
+								if (!request.url.includes("/events/stream")) return next(request)
+								const res = await next(request)
+								if (res.status !== 200 || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								let sawFirstIdle = false
+								let heldAfterFirstIdle = false
+								const gated = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										const text = decoder.decode(chunk.value, { stream: true })
+										if (sawFirstIdle && !heldAfterFirstIdle) {
+											heldAfterFirstIdle = true
+											// Hold turn 2 SSE events until POST #3 receipt has returned and EOF settled
+											await Effect.runPromise(Deferred.await(post3Returned))
+											await new Promise((resolve) => setTimeout(resolve, 40))
+										}
+										controller.enqueue(chunk.value)
+										if (!sawFirstIdle && text.includes("session.status_idle")) {
+											sawFirstIdle = true
+											await Effect.runPromise(Deferred.succeed(turn1SettledRefusal, undefined))
+										}
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(gated, { status: 200, headers: res.headers })
+							},
+						},
+					)
+					expect(post2Receipt).toMatchObject({ turn: 2, queued: true })
+					expect(post3Receipt).toMatchObject({ turn: 2, queued: false })
+					expect(clearRes.exitCode).toBe(0)
+					expect(clearRes.stdout).toContain("StartedAfterClear:")
+					expect(clearRes.stderr).not.toContain("did not start")
+
+					// 2) Initial GET shows idle at turn 0, another client starts turn 1, and local TTY send
+					//    receives { turn: 2, queued: true } before SSE catches up -> first Ctrl-C interrupts turn 1
+					const otherTurn1Started = yield* Deferred.make<void>()
+					const otherTurn1Interrupted = yield* Deferred.make<void>()
+					const releaseSseStream = yield* Deferred.make<void>()
+					const ttyPredecessorSigint = makeSigintController()
+					const predCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(otherTurn1Started, undefined)
+									yield* Deferred.await(otherTurn1Interrupted)
+									return yield* Effect.fail({
+										_tag: "ModelRequestInterrupted" as const,
+										model_usage: { input_tokens: 2, output_tokens: 0 },
+									})
+								}
+								return {
+									thinking: null,
+									text: `Turn2:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+						interrupt: () => Deferred.succeed(otherTurn1Interrupted, undefined).pipe(Effect.asVoid),
+					})
+					const predSessionId = yield* createReadySession(predCli)
+					const connectedIdle = yield* Deferred.make<void>()
+					const otherStartedFiber = yield* Deferred.await(connectedIdle).pipe(
+						Effect.andThen(
+							predCli.run([
+								"sessions:events",
+								"send",
+								"--session-id",
+								predSessionId,
+								"--event",
+								JSON.stringify({
+									type: "user.message",
+									content: [{ type: "text", text: "other client turn 1" }],
+								}),
+							]),
+						),
+						Effect.forkChild,
+					)
+					let firstCtrlCConsumed = false
+					const predRes = yield* predCli.run(
+						["sessions", "connect", "--session-id", predSessionId],
+						{
+							stdinIsTerminal: true,
+							sigintController: ttyPredecessorSigint,
+							interceptFetch: async (next, request) => {
+								if (request.url.includes("/events/stream")) {
+									await Effect.runPromise(Deferred.succeed(connectedIdle, undefined))
+									await Effect.runPromise(Deferred.await(releaseSseStream))
+								}
+								return next(request)
+							},
+							terminalReads: [
+								Deferred.await(otherTurn1Started).pipe(Effect.as("local queued for turn 2")),
+								Effect.sync(() => {
+									firstCtrlCConsumed = ttyPredecessorSigint.handleSigint()
+								}).pipe(
+									Effect.andThen(Deferred.await(otherTurn1Interrupted)),
+									Effect.andThen(Deferred.succeed(releaseSseStream, undefined)),
+									Effect.andThen(Effect.sleep("30 millis")),
+									Effect.as("/exit"),
+								),
+							],
+						},
+					)
+					yield* Fiber.await(otherStartedFiber)
+					expect(predRes.exitCode).toBe(0)
+					expect(firstCtrlCConsumed).toBe(true)
+					expect(predRes.stderr).toContain("Interrupt requested.")
+
+					// 3) Transient 503 on initial connect GET (e.g. projection catching up after create)
+					//    retries via fetchSessionStatusWithRetry and connects cleanly
+					const startupRetryCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `StartupOk:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const startupSessionId = yield* createReadySession(startupRetryCli)
+					let startupGetCalls = 0
+					const startupRes = yield* startupRetryCli.run(
+						["sessions", "connect", "--session-id", startupSessionId],
+						{
+							stdin: "hello after 503\n",
+							interceptFetch: async (next, request) => {
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${startupSessionId}`)
+								) {
+									startupGetCalls += 1
+									if (startupGetCalls <= 2) {
+										return new Response(
+											JSON.stringify({
+												type: "error",
+												error: {
+													type: "service_unavailable",
+													message: "Session projection catching up.",
+												},
+												request_id: `req_startup_503_${startupGetCalls}`,
+											}),
+											{ status: 503, headers: { "content-type": "application/json" } },
+										)
+									}
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(startupGetCalls).toBe(3)
+					expect(startupRes.exitCode).toBe(0)
+					expect(startupRes.stdout).toContain("StartupOk:hello after 503")
+				}),
+			),
+		)
+	})
 })
