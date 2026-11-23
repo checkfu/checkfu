@@ -5,6 +5,27 @@ import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 export class Environments extends Domain.Model("Environments", {
 	aggregates: [Environment],
 	views: [EnvironmentView],
+	invariants: {
+		EnvironmentViewMatchesEnvironment: (m) =>
+			[
+				m.Environment.every((e) => {
+					const view = m.EnvironmentView.find((v) => v.id === e.id)
+					if (e.state.status === "" || e.state.status === "deleted") return view === undefined
+					if (view === undefined) return false
+					return [
+						view.state.id === e.id,
+						view.state.version === e.state.version,
+						view.state.name === e.state.name,
+						!!view.state.archived_at === (e.state.status === "archived"),
+					].every((ok) => ok)
+				}),
+				m.EnvironmentView.every((v) =>
+					m.Environment.some((e) =>
+						[e.id === v.id, e.state.status !== "", e.state.status !== "deleted"].every((ok) => ok),
+					),
+				),
+			].every((ok) => ok),
+	},
 	sometimes: {
 		AnEnvironmentIsUpdated: (m) =>
 			m.Environment.some((e) =>

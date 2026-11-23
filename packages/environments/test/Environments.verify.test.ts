@@ -14,6 +14,7 @@ const STANDING = {
 	"Environment.ArchivedNeverReactivates": "proved",
 	"Environment.DeletedStaysDeleted": "proved",
 	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
+	"Environments.EnvironmentViewMatchesEnvironment": "checked",
 	"Environments.AnEnvironmentIsUpdated": "reached",
 	"Environments.AnEnvironmentIsArchived": "reached",
 	"Environments.AnEnvironmentIsDeleted": "reached",
@@ -30,7 +31,7 @@ describe("Environments Z3 formal verification", () => {
 				apis: [EnvironmentsApi],
 				story,
 				instances: 1,
-				walks: { count: 20 },
+				walks: { count: 50 },
 				lock: "./Environments.verify.lock.json",
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),
@@ -38,6 +39,8 @@ describe("Environments Z3 formal verification", () => {
 		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
 			STANDING,
 		)
+		expect(report.undone).toEqual([])
+		expect(report.explored.aside).toEqual([])
 		expect(report.explored.disagreements).toEqual([])
 		expect(report.explored.agreement.compared).toBeGreaterThan(0)
 	}, 120_000)
