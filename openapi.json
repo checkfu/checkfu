@@ -745,6 +745,10 @@
 					"group": "agents",
 					"endpoint": "create"
 				},
+				"x-checkfu-mcp": {
+					"name": "agents_createAgent",
+					"destructive": false
+				},
 				"x-checkfu-cli": {
 					"fileFields": ["system", "description"],
 					"textOrObjectFields": ["model"],
@@ -1198,6 +1202,9 @@
 				"x-checkfu-endpoint": {
 					"group": "agents",
 					"endpoint": "get"
+				},
+				"x-checkfu-mcp": {
+					"name": "agents_getAgent"
 				}
 			},
 			"post": {
@@ -1822,6 +1829,9 @@
 					"group": "agents",
 					"endpoint": "update"
 				},
+				"x-checkfu-mcp": {
+					"name": "agents_updateAgent"
+				},
 				"x-checkfu-cli": {
 					"fileFields": ["system", "description"],
 					"textOrObjectFields": ["model"]
@@ -2290,6 +2300,9 @@
 				"x-checkfu-endpoint": {
 					"group": "agents",
 					"endpoint": "archive"
+				},
+				"x-checkfu-mcp": {
+					"name": "agents_archiveAgent"
 				},
 				"x-checkfu-idempotent": true
 			}
@@ -2970,6 +2983,10 @@
 					"group": "environments",
 					"endpoint": "create"
 				},
+				"x-checkfu-mcp": {
+					"name": "environments_createEnvironment",
+					"destructive": false
+				},
 				"x-checkfu-cli": {
 					"fileFields": ["description"],
 					"examples": [
@@ -3451,6 +3468,9 @@
 				"x-checkfu-endpoint": {
 					"group": "environments",
 					"endpoint": "get"
+				},
+				"x-checkfu-mcp": {
+					"name": "environments_getEnvironment"
 				}
 			},
 			"post": {
@@ -4132,6 +4152,9 @@
 					"group": "environments",
 					"endpoint": "update"
 				},
+				"x-checkfu-mcp": {
+					"name": "environments_updateEnvironment"
+				},
 				"x-checkfu-cli": {
 					"fileFields": ["description"]
 				}
@@ -4504,6 +4527,9 @@
 				"x-checkfu-endpoint": {
 					"group": "environments",
 					"endpoint": "delete"
+				},
+				"x-checkfu-mcp": {
+					"name": "environments_deleteEnvironment"
 				}
 			}
 		},
@@ -5002,6 +5028,9 @@
 				"x-checkfu-endpoint": {
 					"group": "environments",
 					"endpoint": "archive"
+				},
+				"x-checkfu-mcp": {
+					"name": "environments_archiveEnvironment"
 				},
 				"x-checkfu-idempotent": true
 			}
@@ -5716,6 +5745,10 @@
 					"group": "sessions",
 					"endpoint": "create"
 				},
+				"x-checkfu-mcp": {
+					"name": "sessions_createSession",
+					"destructive": false
+				},
 				"x-checkfu-cli": {
 					"textOrObjectFields": ["agent"],
 					"examples": [
@@ -6181,6 +6214,9 @@
 				"x-checkfu-endpoint": {
 					"group": "sessions",
 					"endpoint": "get"
+				},
+				"x-checkfu-mcp": {
+					"name": "sessions_getSession"
 				}
 			}
 		},
@@ -6663,6 +6699,9 @@
 				"x-checkfu-endpoint": {
 					"group": "sessions",
 					"endpoint": "archive"
+				},
+				"x-checkfu-mcp": {
+					"name": "sessions_archiveSession"
 				},
 				"x-checkfu-idempotent": true
 			}
@@ -7215,6 +7254,9 @@
 					"group": "sessions",
 					"endpoint": "sendEvents"
 				},
+				"x-checkfu-mcp": {
+					"name": "sessions_sendSessionEvents"
+				},
 				"x-checkfu-cli": {
 					"groupDescription": "Send, list, and stream session events",
 					"repeatArrayField": {
@@ -7645,6 +7687,9 @@
 				"x-checkfu-endpoint": {
 					"group": "sessions",
 					"endpoint": "listEvents"
+				},
+				"x-checkfu-mcp": {
+					"name": "sessions_listEvents"
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
@@ -8114,6 +8159,7 @@
 					"group": "sessions",
 					"endpoint": "streamEvents"
 				},
+				"x-checkfu-mcp": false,
 				"x-checkfu-cli": {
 					"intQueryParams": {
 						"after": {

@@ -56,6 +56,8 @@ const fakeAlchemy = (
 		readonly accountError?: string
 		readonly output?: "missing" | "error" | "silent"
 		readonly url?: string
+		/** The MCP Worker's URL, for a stack that deploys one. */
+		readonly mcp?: string
 		readonly deployExitCode?: number
 	} = {},
 ) => {
@@ -89,7 +91,13 @@ const fakeAlchemy = (
 				case "silent":
 					return { exitCode: 0, stdout: ALCHEMY_NOISE }
 				default:
-					return answer({ status: "found", value: { api: options.url ?? DEPLOYED_URL } })
+					return answer({
+						status: "found",
+						value: {
+							api: options.url ?? DEPLOYED_URL,
+							...(options.mcp === undefined ? {} : { mcp: options.mcp }),
+						},
+					})
 			}
 		}
 		if (command[0] === "profile") {
@@ -190,6 +198,15 @@ describe("checkfu deploy", () => {
 			expect(result.stderr).toContain(`${COMMAND} sessions connect <session-id>`)
 			expect(result.stderr).not.toContain("--base-url")
 			expect(result.stderr).not.toContain(TEST_API_KEY)
+			expect(result.stderr).not.toContain("MCP")
+
+			const withMcp = yield* cli.run(["deploy"], {
+				env: { CHECKFU_CONFIG_DIR: "/config", ANTHROPIC_API_KEY: "sk-ant-from-env" },
+				files,
+				spawn: fakeAlchemy([], { mcp: "https://checkfu-mcp.example.workers.dev/" }),
+			})
+			expect(withMcp.errorMessage).toBeUndefined()
+			expect(withMcp.stderr).toContain("  MCP        https://checkfu-mcp.example.workers.dev/mcp\n")
 		}),
 	)
 

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { dirname, join, relative, resolve } from "node:path"
 import { parse } from "@cloudflare/forge"
 import { generateCliFiles } from "./CliTransformer.ts"
+import { generateMcpFiles } from "./McpTransformer.ts"
 import { exportDeterministicOpenApiJson, renderOpenApiModule } from "./OpenApiExport.ts"
 import { generateSdkFiles } from "./SdkTransformer.ts"
 
@@ -19,6 +20,7 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 	using forge = parse(openApiJson)
 	const cliFiles = generateCliFiles(forge)
 	const sdkFiles = generateSdkFiles(forge)
+	const mcpFiles = generateMcpFiles(forge, openApiJson)
 
 	return [
 		{
@@ -35,6 +37,10 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 		})),
 		...sdkFiles.map((file) => ({
 			relativePath: `packages/sdk/src/generated/${file.path}`,
+			content: file.content,
+		})),
+		...mcpFiles.map((file) => ({
+			relativePath: `apps/mcp/src/generated/${file.path}`,
 			content: file.content,
 		})),
 	]

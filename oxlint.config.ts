@@ -183,6 +183,15 @@ export default defineConfig({
 			},
 		},
 		{
+			// The generated MCP tool manifest copies JSON Schema literals (numeric bounds,
+			// regular-expression patterns) verbatim from the OpenAPI document.
+			files: ["apps/mcp/src/generated/Tools.ts"],
+			rules: {
+				"unicorn/numeric-separators-style": "off",
+				"unicorn/prefer-string-raw": "off",
+			},
+		},
+		{
 			files: ["apps/api/src/Pi/PiDocRegistry.ts"],
 			rules: {
 				"no-restricted-imports": "off",

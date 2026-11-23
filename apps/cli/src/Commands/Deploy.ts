@@ -396,7 +396,7 @@ const AccountAnswer = Schema.Union([
 const OutputAnswer = Schema.Union([
 	Schema.Struct({
 		status: Schema.Literal("found"),
-		value: Schema.Struct({ api: Schema.String }),
+		value: Schema.Struct({ api: Schema.String, mcp: Schema.optionalKey(Schema.String) }),
 	}),
 	Schema.Struct({ status: Schema.Literal("missing") }),
 	AnswerError,
@@ -474,7 +474,7 @@ const readDeployedUrl = (target: Target, stage: string, retry: string) =>
 		const answer = yield* ask(target, OutputAnswer, ["output", `${STACK_NAME}/${stage}/output`])
 		switch (answer.status) {
 			case "found":
-				return yield* normalizeApiUrl(answer.value.api)
+				return { url: yield* normalizeApiUrl(answer.value.api), mcp: answer.value.mcp }
 			case "missing":
 				return yield* configError(
 					`Alchemy deployed "${stage}" but recorded no API URL for it. Run \`${retry}\` again.`,
@@ -561,7 +561,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				onSome: (previous) => (previous.url === undefined ? {} : { url: previous.url }),
 			}),
 		})
-		const url = yield* readDeployedUrl(target, stage, retry)
+		const { url, mcp } = yield* readDeployedUrl(target, stage, retry)
 		yield* writeDeploymentRecord(checkout, { ...deployed, url })
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)
 		yield* waitUntilReady(url, apiKey, checkout.readyWithin, retry)
@@ -580,6 +580,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				"",
 				`  API key    saved to ${file}`,
 				`  API docs   ${url}/openapi.json`,
+				...(mcp === undefined ? [] : [`  MCP        ${mcp.replace(/\/+$/, "")}/mcp`]),
 				"",
 				"Next, create an agent, an environment, and a session, then connect to it:",
 				"",

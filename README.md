@@ -12,7 +12,7 @@ bun install
 bun checkfu deploy
 ```
 
-`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys one Worker with its Durable Objects to your account. It generates the API key for you and keeps the secrets in the checkout's `.env`. As soon as Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go. Both files are made owner-only on macOS and Linux; on Windows they are as private as the folder they are in.
+`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys two Workers to your account: the API with its Durable Objects, and the MCP server. It generates the API key for you and keeps the secrets in the checkout's `.env`. As soon as Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go. Both files are made owner-only on macOS and Linux; on Windows they are as private as the folder they are in.
 
 Then create an agent, an environment, and a session, and connect to it. Each command prints the ID the next one needs:
 
@@ -28,10 +28,11 @@ Use `gpt-6.2-sol` if you deployed with an OpenAI key. A coding agent can drive t
 After that:
 
 - **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. It stops before changing anything if your credentials now act on a different Cloudflare account than the one this checkout deployed that stage to; delete `.checkfu/deployment.json` if you mean to move it.
+- **Use it over MCP** — `deploy` prints the MCP URL; add it to your client with the same key (see [MCP](#mcp)).
 - **Call the API from your own code** — the URL and key are in `~/.config/checkfu/config.json`; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`.
 - **Use it from another machine** — `bun checkfu --base-url https://<your-worker>.workers.dev login`.
 - **Deploy from CI** — export `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, a model provider key, and a persistent `CHECKFU_API_KEY` (the one from your first deploy, or `openssl rand -hex 32`), then run `bun checkfu deploy --yes`. Without a terminal the deploy refuses to invent an API key, because a fresh runner would rotate it on every run.
-- **Remove it** — `bun checkfu destroy --stage live` deletes the Worker and all of its data. It never picks a stage for you, and it only deletes a stage this checkout recorded deploying, in the account it deployed it to. For anything else, use Alchemy directly: `bun run destroy --stage <name>`.
+- **Remove it** — `bun checkfu destroy --stage live` deletes both Workers and all of their data. It never picks a stage for you, and it only deletes a stage this checkout recorded deploying, in the account it deployed it to. For anything else, use Alchemy directly: `bun run destroy --stage <name>`.
 
 ## Run locally
 
@@ -85,13 +86,30 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 `@checkfu/sdk` ([packages/sdk/README.md](packages/sdk/README.md)) provides an Effect-native client (`CheckfuClient` service + `Layer`s + `Stream`s + `Data.TaggedError`s) and a thin Promise / `AsyncIterable` facade (`new Checkfu(...)`) sharing the single-source `CheckfuApi` contract with the server and CLI.
 
+## MCP
+
+`bun run dev` also starts the MCP server and prints its URL as `mcp` (`http://localhost:1338` unless that port is taken). It offers one tool per API operation, generated from the same `CheckfuApi` contract as the CLI, and passes your `CHECKFU_API_KEY` through to the API:
+
+```sh
+CHECKFU_MCP_URL="<mcp URL printed by bun run dev>"
+CHECKFU_API_KEY="<same key from .env>"
+claude mcp add --transport http checkfu "$CHECKFU_MCP_URL/mcp" \
+  --header "Authorization: Bearer ${CHECKFU_API_KEY:?set CHECKFU_API_KEY first}"
+```
+
+`claude mcp add` saves that URL and the key. The entry outlives `bun run dev`, and Claude will keep sending the key to that port whatever is listening there later, so run `claude mcp remove checkfu` when you stop the dev server. Keep a saved entry only for a deployed `https://` URL.
+
+For a deployment, use the `MCP` URL that `bun checkfu deploy` prints and the key in `~/.config/checkfu/config.json`.
+
+The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpWorker`) next to the API and reaches it over a service binding.
+
 ## Commands
 
 - `bun checkfu --help` (short for `node apps/cli/bin/checkfu.mjs --help`) — run the Checkfu CLI from a **trusted Checkfu source checkout** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
   - **Untrusted checkouts with `CHECKFU_API_KEY` exported:** invoke an independently installed Checkfu launcher using **absolute paths for both Node and `checkfu.mjs`** (e.g., `/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs --help` on POSIX or `C:\Program Files\nodejs\node.exe C:\Users\<user>\checkfu\apps\cli\bin\checkfu.mjs --help` on Windows). Never run a relative `apps/cli/bin/checkfu.mjs` inside an untrusted checkout.
   - **`PATH`-based `checkfu` bin (`#!/usr/bin/env node`):** requires both `checkfu` and `node` on `PATH` to resolve to trusted installations before the launcher starts (do not rely on the `PATH`-based bin when `PATH` may contain `.`, empty entries, or project-local directories). Once started, the launcher resolves Bun only from explicitly trusted installation roots (or `BUN_INSTALL` / `CHECKFU_BUN_PATH` outside the enclosing checkout) and pins `--no-env-file --config=<install>/bunfig.toml`.
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
-- `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI and SDK artifacts from `CheckfuApi`
+- `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI, SDK, and MCP artifacts from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
 - `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy

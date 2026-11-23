@@ -40,8 +40,16 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 		},
 		Effect.gen(function* () {
 			const api = yield* ApiWorker
+			const mcp = yield* Cloudflare.Worker("McpWorker", {
+				main: import.meta.resolve("@checkfu/mcp/Worker"),
+				compatibility: { date: "2026-11-17" },
+				observability: { enabled: true },
+				env: { API: api },
+				dev: { port: 1338 },
+			})
 			return {
 				api: api.url.as<string>(),
+				mcp: mcp.url.as<string>(),
 			}
 		}),
 	)

@@ -10,6 +10,7 @@
 		"test": "vitest run --pool=threads --no-allowOnly"
 	},
 	"dependencies": {
+		"@checkfu/mcp": "workspace:*",
 		"@checkfu/sdk": "workspace:*",
 		"@cloudflare/forge": "catalog:",
 		"effect": "catalog:"
