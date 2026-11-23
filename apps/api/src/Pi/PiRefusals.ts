@@ -1,8 +1,8 @@
 import type {
-	ModelProviderError,
-	ModelProviderReply,
-	ModelRequestInterrupted,
-} from "@checkfu/domain/Session/ModelProvider.external"
+	TurnFailed,
+	HarnessReply,
+	TurnInterrupted,
+} from "@checkfu/domain/Session/Harness.external"
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import type { AnyModel, Api, AssistantMessage } from "@earendil-works/pi-ai"
 import type { Models } from "@earendil-works/pi-ai/models"
@@ -10,8 +10,8 @@ import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil
 import type { EntryId } from "@earendil-works/pi-durable"
 
 export type PiTurnOutcome =
-	| { readonly ok: true; readonly reply: ModelProviderReply }
-	| { readonly ok: false; readonly error: ModelProviderError | ModelRequestInterrupted }
+	| { readonly ok: true; readonly reply: HarnessReply }
+	| { readonly ok: false; readonly error: TurnFailed | TurnInterrupted }
 
 export interface UnansweredSubmissionInfo {
 	readonly reason: string
@@ -23,8 +23,8 @@ export interface UnansweredSubmissionInfo {
 export const PROVIDER_FAILURE_MESSAGE = "The model provider returned an error."
 export const DEFAULT_REFUSAL_TEXT = "The model refused to complete the request."
 
-const ABORTED_ERROR: ModelProviderError = {
-	_tag: "ModelProviderError",
+const ABORTED_ERROR: TurnFailed = {
+	_tag: "TurnFailed",
 	error_type: "model_request_aborted",
 	message: "Model request was aborted.",
 	terminal: false,
@@ -195,7 +195,7 @@ export const mapAssistantMessageToOutcome = (
 		return {
 			ok: false,
 			error: {
-				_tag: "ModelProviderError",
+				_tag: "TurnFailed",
 				error_type: "model_request_failed_error",
 				model_usage: modelUsage,
 				message: PROVIDER_FAILURE_MESSAGE,
@@ -227,7 +227,7 @@ export const mapAssistantMessageToOutcome = (
 		return {
 			ok: false,
 			error: {
-				_tag: "ModelProviderError",
+				_tag: "TurnFailed",
 				error_type: "empty_model_reply",
 				model_usage: modelUsage,
 				message: "Model provider returned an empty reply.",
@@ -257,18 +257,18 @@ export const mapAssistantMessageToOutcome = (
 export const mapUnansweredToError = (
 	reason: string | undefined,
 	submissionInfo: UnansweredSubmissionInfo | null,
-): ModelProviderError => {
+): TurnFailed => {
 	const effectiveReason = submissionInfo?.reason ?? reason ?? "model_error"
 	if (effectiveReason === "no_model") {
 		return {
-			_tag: "ModelProviderError",
+			_tag: "TurnFailed",
 			error_type: "unknown_model_error",
 			message: "The agent's model is not available.",
 			terminal: true,
 		}
 	}
 	return {
-		_tag: "ModelProviderError",
+		_tag: "TurnFailed",
 		error_type: "model_request_failed_error",
 		message: PROVIDER_FAILURE_MESSAGE,
 		terminal: false,

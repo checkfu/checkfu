@@ -13,9 +13,9 @@ import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
 	HarnessLimits,
-	PiDurableModelProviderLive,
+	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
-} from "../src/Pi/PiDurableModelProvider.ts"
+} from "../src/Pi/PiDurableHarness.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import {
 	DEFAULT_REFUSAL_TEXT,
@@ -187,7 +187,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -442,9 +442,9 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				),
 		})
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
-		const PiProviderLive = PiDurableModelProviderLive.pipe(
+		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
@@ -1001,7 +1001,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					}),
 			})
 			const normalizedLayer = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+				SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 			).pipe(
 				Layer.provide(normalizedExecutor),
 				Layer.provide(Domain.InMemory),
@@ -1241,7 +1241,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+				SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),

@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { AgentVersionByNumberView } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
-import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
@@ -20,11 +20,11 @@ import type { PiTurnRequest } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AgentVersionLookupTimeout,
 	HarnessLimits,
-	PiDurableModelProviderLive,
+	PiDurableHarnessLive,
 	SeedMaxScanPages,
 	conversationName,
 	makePiTurnExecutorLayer,
-} from "../src/Pi/PiDurableModelProvider.ts"
+} from "../src/Pi/PiDurableHarness.ts"
 import { PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
@@ -72,7 +72,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						return {
 							ok: false as const,
 							error: {
-								_tag: "ModelProviderError" as const,
+								_tag: "TurnFailed" as const,
 								error_type: "model_request_failed_error",
 								message: PROVIDER_FAILURE_MESSAGE,
 								terminal: false,
@@ -98,10 +98,10 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 		)
 		const CheckfuLive = Checkfu.layer(
 			SessionsHandlersLive.pipe(
-				Layer.provide(PiDurableModelProviderLive.pipe(Layer.provide(CountingSessionView))),
+				Layer.provide(PiDurableHarnessLive.pipe(Layer.provide(CountingSessionView))),
 			),
 		).pipe(Layer.provide(executorLayer))
-		const PiProviderLive = PiDurableModelProviderLive.pipe(
+		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(CountingSessionView),
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
@@ -372,9 +372,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				}),
 		})
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
-		const PiProviderLive = PiDurableModelProviderLive.pipe(
+		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
@@ -490,7 +490,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const provider = yield* ModelProvider
+					const provider = yield* Harness
 
 					const agentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -524,7 +524,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					// instead of skipping turn validation and calling the model.
 					const callsBefore = modelCalls
 					const staleErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make(session.id),
 							agent_id: agent.id,
 							agent_version: 1,
@@ -535,7 +535,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						}),
 					)
 					expect(staleErr).toMatchObject({
-						_tag: "ModelProviderError",
+						_tag: "TurnFailed",
 						error_type: "session_history_unavailable",
 						terminal: false,
 					})
@@ -543,7 +543,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 
 					// Unprojected future turn 99 with a 16,384-char prompt also fails turn validation.
 					const futureErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make(session.id),
 							agent_id: agent.id,
 							agent_version: 1,
@@ -554,7 +554,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 						}),
 					)
 					expect(futureErr).toMatchObject({
-						_tag: "ModelProviderError",
+						_tag: "TurnFailed",
 						error_type: "session_history_unavailable",
 						terminal: false,
 					})
@@ -683,9 +683,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			})),
 		)
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
-		const PiProviderLive = PiDurableModelProviderLive.pipe(
+		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
@@ -716,7 +716,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const provider = yield* ModelProvider
+					const provider = yield* Harness
 
 					const agentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -743,7 +743,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
 					// 1. Turn 1 runs and settles inside Pi.
-					const initialReply = yield* provider.generate({
+					const initialReply = yield* provider.runTurn({
 						session_id: SessionId.make(session.id),
 						agent_id: agent.id,
 						agent_version: 1,
@@ -760,7 +760,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					expect(modelCalls).toBe(1)
 
 					// 2. Now break views and build a restarted provider with NO OPENAI_API_KEY configured.
-					const restartedProviderLayer = Layer.fresh(PiDurableModelProviderLive).pipe(
+					const restartedProviderLayer = Layer.fresh(PiDurableHarnessLive).pipe(
 						Layer.provide(BrokenVersionView),
 						Layer.provide(executorLayer),
 						Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
@@ -780,9 +780,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					// 3. Replaying turn 1 recovers Pi's saved reply even with broken views and a
 					//    missing OPENAI_API_KEY (and makes 0 new model calls).
 					breakViews = true
-					const replayed = yield* ModelProvider.pipe(
+					const replayed = yield* Harness.pipe(
 						Effect.flatMap((restarted) =>
-							restarted.generate({
+							restarted.runTurn({
 								session_id: SessionId.make(session.id),
 								agent_id: agent.id,
 								agent_version: 1,
@@ -801,9 +801,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					//    then (once views recover) hits missing_api_key_error — proving every
 					//    prerequisite check was genuinely bypassed ONLY by turn 1 replay.
 					const brokenViewTurn2 = yield* Effect.flip(
-						ModelProvider.pipe(
+						Harness.pipe(
 							Effect.flatMap((restarted) =>
-								restarted.generate({
+								restarted.runTurn({
 									session_id: SessionId.make(session.id),
 									agent_id: agent.id,
 									agent_version: 1,
@@ -820,9 +820,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 
 					breakViews = false
 					const missingKeyTurn2 = yield* Effect.flip(
-						ModelProvider.pipe(
+						Harness.pipe(
 							Effect.flatMap((restarted) =>
-								restarted.generate({
+								restarted.runTurn({
 									session_id: SessionId.make(session.id),
 									agent_id: agent.id,
 									agent_version: 1,
@@ -874,9 +874,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			abortTurn: () => Effect.void,
 		})
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
-		const PiProviderLive = PiDurableModelProviderLive.pipe(
+		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
 			Layer.provide(CheckfuLive),
 		)
@@ -905,7 +905,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const { fetch: apiFetch } = yield* makeApiHandler
-				const provider = yield* ModelProvider
+				const provider = yield* Harness
 				const agentRes = yield* sendRequest(apiFetch, {
 					method: "POST",
 					path: "/v1/agents",
@@ -930,7 +930,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 
 				// 1. With nothing to recover, a zero attempt budget skips runTurn and fails HarnessUnavailable.
 				const unavailable = yield* Effect.flip(
-					provider.generate({
+					provider.runTurn({
 						session_id: SessionId.make(session.id),
 						agent_id: agent.id,
 						agent_version: 1,
@@ -947,7 +947,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				// 2. When the final read-only recovery probe finds a settled reply, it still recovers without calling runTurn.
 				recoverCalls = 0
 				recoverOnFinalProbe = true
-				const reply = yield* provider.generate({
+				const reply = yield* provider.runTurn({
 					session_id: SessionId.make(session.id),
 					agent_id: agent.id,
 					agent_version: 1,

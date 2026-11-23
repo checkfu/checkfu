@@ -521,7 +521,7 @@ const resolveSettledPiTurn = (
 				if (settled.reason === "aborted") {
 					yield* Effect.promise(() => backend.omitEntries(operationId))
 					const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
-					return { ok: false, error: { _tag: "ModelRequestInterrupted", model_usage: usage } }
+					return { ok: false, error: { _tag: "TurnInterrupted", model_usage: usage } }
 				}
 				const submissionInfo = yield* Effect.promise(() =>
 					backend.readUnansweredSubmission(operationId),
@@ -562,7 +562,7 @@ const resolveSettledPiTurn = (
 				return {
 					ok: false,
 					error: {
-						_tag: "ModelProviderError",
+						_tag: "TurnFailed",
 						error_type: "empty_model_reply",
 						message: "Pi durable completed without an assistant entry.",
 						model_usage: usage,
@@ -614,7 +614,7 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 		return null
 	}
 	if (probe === "cancelled") {
-		return { ok: false, error: { _tag: "ModelRequestInterrupted" } }
+		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
 	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))
 	return yield* resolveSettledPiTurn(backend, operationId, settled, "unknown")
@@ -630,7 +630,7 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 		return admitted
 	}
 	if (!admitted) {
-		return { ok: false, error: { _tag: "ModelRequestInterrupted" } }
+		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
 
 	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))

@@ -1,5 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
-import type { ModelProviderError } from "@checkfu/domain/Session/ModelProvider.external"
+import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import type { Api, AssistantMessage, Model, TranscriptContext } from "@earendil-works/pi-ai"
 import { createModels, createProvider } from "@earendil-works/pi-ai/models"
@@ -26,9 +26,9 @@ import type { PiTurnRequest } from "../../src/Pi/PiDurableEngine.ts"
 import {
 	HarnessCallFailed,
 	HarnessLimits,
-	PiDurableModelProviderLive,
+	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
-} from "../../src/Pi/PiDurableModelProvider.ts"
+} from "../../src/Pi/PiDurableHarness.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
@@ -232,9 +232,9 @@ export const makePiDurableTestLayer = (
 	})
 
 	const CheckfuLive = Checkfu.layer(
-		SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+		SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 	).pipe(Layer.provide(executorLayer))
-	const PiProviderLive = PiDurableModelProviderLive.pipe(
+	const PiProviderLive = PiDurableHarnessLive.pipe(
 		Layer.provide(executorLayer),
 		Layer.provide(CheckfuLive),
 	)
@@ -466,11 +466,11 @@ export const createIdleSession = (
 		}
 	})
 
-export const providerError = (error: { readonly _tag: string }): ModelProviderError => {
-	if (error._tag !== "ModelProviderError") {
+export const providerError = (error: { readonly _tag: string }): TurnFailed => {
+	if (error._tag !== "TurnFailed") {
 		throw new Error(`expected a provider error, got ${error._tag}`)
 	}
-	return error as ModelProviderError
+	return error as TurnFailed
 }
 
 export const waitForSession = (

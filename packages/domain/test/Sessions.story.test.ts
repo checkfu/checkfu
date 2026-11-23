@@ -35,11 +35,7 @@ import {
 	SessionAlreadyExists,
 	SessionCreated,
 } from "../src/Session/CreateSession.command.ts"
-import {
-	ModelProvider,
-	boundedModelProvider,
-	clampModelReply,
-} from "../src/Session/ModelProvider.external.ts"
+import { Harness, boundedHarness, clampHarnessReply } from "../src/Session/Harness.external.ts"
 import { FailModelRequest } from "../src/Session/FailModelRequest.command.ts"
 import { InterruptModelRequest } from "../src/Session/InterruptModelRequest.command.ts"
 import {
@@ -86,13 +82,13 @@ const StartTurnNoopLayer = Layer.mergeAll(
 )
 const aggregateStory = Story.make(Sessions, {
 	layer: Layer.mergeAll(StartTurnNoopLayer, RunTurnLive),
-	stub: [ModelProvider],
+	stub: [Harness],
 })
 const story = aggregateStory
 
 const fullStory = Story.make(Sessions, {
 	layer: SessionsHandlersLive,
-	stub: [ModelProvider],
+	stub: [Harness],
 })
 
 // The DO inbox redelivers failed rows. Request one redelivery here since
@@ -102,13 +98,13 @@ const retryCleanup = StopModelRequest.toLayer(StopModelRequest, {
 }).pipe(Layer.provide(StopModelRequestLive))
 const redeliveryStory = Story.make(Sessions, {
 	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, retryCleanup),
-	stub: [ModelProvider],
+	stub: [Harness],
 })
 
-const ModelProviderNoopLayer = ModelProvider.toLayer(
+const HarnessNoopLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
-		generate: () =>
+		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
 				text: "ok",
@@ -133,7 +129,7 @@ const createdEvent = new SessionCreated({
 describe("Sessions", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(Layer.build(Sessions.layer(SessionsHandlersLive))).pipe(
-			Effect.provide([Domain.InMemory, ModelProviderNoopLayer]),
+			Effect.provide([Domain.InMemory, HarnessNoopLayer]),
 		),
 	)
 
@@ -838,14 +834,14 @@ describe("Sessions", () => {
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
 				Story.replied({ turn: 1 }),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 2,
 					environment_id: "env_001",
 					turn: 1,
 				}),
-				Story.succeed(ModelProvider.generate, {
+				Story.succeed(Harness.runTurn, {
 					thinking: "Greeting the user",
 					text: "Hello!",
 					input_tokens: 10,
@@ -903,14 +899,14 @@ describe("Sessions", () => {
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
 				Story.replied({ turn: 2 }),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 2,
 					environment_id: "env_001",
 					turn: 2,
 				}),
-				Story.succeed(ModelProvider.generate, {
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "Got it.",
 					input_tokens: 20,
@@ -974,15 +970,15 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 1,
 			}),
-			Story.fail(ModelProvider.generate, {
-				_tag: "ModelProviderError",
+			Story.fail(Harness.runTurn, {
+				_tag: "TurnFailed",
 				error_type: "model_request_failed_error",
 				message: "429 rate limited",
 				terminal: false,
@@ -1019,15 +1015,15 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 2, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 2,
 			}),
-			Story.fail(ModelProvider.generate, {
-				_tag: "ModelProviderError",
+			Story.fail(Harness.runTurn, {
+				_tag: "TurnFailed",
 				error_type: "invalid_api_key_error",
 				message: "401 unauthorized",
 				terminal: true,
@@ -1048,8 +1044,8 @@ describe("Sessions", () => {
 				}),
 				new SessionStatusTerminated(),
 			),
-			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 2 }),
-			Story.succeed(ModelProvider.interrupt, undefined),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 2 }),
+			Story.succeed(Harness.interrupt, undefined),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
 				result: { status: "failed" },
@@ -1154,7 +1150,7 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -1164,7 +1160,7 @@ describe("Sessions", () => {
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Second" })),
 			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Second" }] })),
 			Story.replied({ turn: 2 }),
-			Story.succeed(ModelProvider.generate, {
+			Story.succeed(Harness.runTurn, {
 				thinking: null,
 				text: "Reply 1",
 				input_tokens: 5,
@@ -1187,14 +1183,14 @@ describe("Sessions", () => {
 				_tag: "Completed",
 				result: { status: "completed" },
 			}),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 2,
 			}),
-			Story.succeed(ModelProvider.generate, {
+			Story.succeed(Harness.runTurn, {
 				thinking: null,
 				text: "Reply 2",
 				input_tokens: 8,
@@ -1244,7 +1240,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 1,
@@ -1253,8 +1249,8 @@ describe("Sessions", () => {
 				}),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1 }),
-				Story.succeed(ModelProvider.interrupt, undefined),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
+				Story.succeed(Harness.interrupt, undefined),
 				Story.state(session, {
 					_tag: "Running",
 					turn: 1,
@@ -1262,7 +1258,7 @@ describe("Sessions", () => {
 					model_requests_started: 1,
 					pending_user_messages: 0,
 				}),
-				Story.fail(ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.fail(Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.then(
 					session,
 					new SpanModelRequestEnd({
@@ -1306,7 +1302,7 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
-			Story.call("turn-1", ModelProvider.generate, {
+			Story.call("turn-1", Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -1319,9 +1315,9 @@ describe("Sessions", () => {
 			Story.replied({ turn: 2 }),
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
 			Story.then(session, new UserInterrupt()),
-			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1 }),
-			Story.succeed(ModelProvider.interrupt, undefined),
-			Story.fail("turn-1", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
+			Story.succeed(Harness.interrupt, undefined),
+			Story.fail("turn-1", Harness.runTurn, { _tag: "TurnInterrupted" }),
 			Story.then(
 				session,
 				new SpanModelRequestEnd({
@@ -1337,7 +1333,7 @@ describe("Sessions", () => {
 				_tag: "Completed",
 				result: { status: "interrupted" },
 			}),
-			Story.call("turn-2", ModelProvider.generate, {
+			Story.call("turn-2", Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -1345,7 +1341,7 @@ describe("Sessions", () => {
 				turn: 2,
 				input: ["Actual prompt"],
 			}),
-			Story.succeed("turn-2", ModelProvider.generate, {
+			Story.succeed("turn-2", Harness.runTurn, {
 				thinking: null,
 				text: "Answer to actual prompt",
 				input_tokens: 9,
@@ -1397,8 +1393,8 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.fail(ModelProvider.generate, { _tag: "HarnessUnavailable" }),
+				Story.call(Harness.runTurn, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(Harness.runTurn, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
 					new SpanModelRequestEnd({
@@ -1422,9 +1418,9 @@ describe("Sessions", () => {
 				),
 				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
-				Story.call("cleanup", ModelProvider.interrupt, {
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.call("cleanup", Harness.interrupt, {
 					session_id: session.id,
 					turn: 1,
 					generation: 0,
@@ -1436,18 +1432,18 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 2, generation: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
 					generation: 1,
 					input: ["Second"],
 				}),
-				Story.succeed("cleanup", ModelProvider.interrupt, undefined),
+				Story.succeed("cleanup", Harness.interrupt, undefined),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 2, generation: 1 }),
-				Story.succeed(ModelProvider.interrupt, undefined),
-				Story.fail(ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 2, generation: 1 }),
+				Story.succeed(Harness.interrupt, undefined),
+				Story.fail(Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.then(
 					session,
 					new SpanModelRequestEnd({
@@ -1493,10 +1489,10 @@ describe("Sessions", () => {
 							Layer.provide(
 								Layer.mergeAll(
 									Domain.InMemory,
-									boundedModelProvider(
+									boundedHarness(
 										Effect.succeed({
 											interrupt: () => Effect.void,
-											generate: () => {
+											runTurn: () => {
 												if (mode === "synchronous throw") {
 													throw new Error("secret adapter failure")
 												}
@@ -1545,11 +1541,11 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.runTurn, { session_id: session.id, turn: 1, generation: 0 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
 					new SpanModelRequestEnd({
@@ -1572,9 +1568,9 @@ describe("Sessions", () => {
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(ModelProvider.interrupt, undefined),
-				Story.succeed(ModelProvider.generate, {
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.succeed(Harness.interrupt, undefined),
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "Too late to publish",
 					input_tokens: 4,
@@ -1607,7 +1603,7 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				request,
 			),
-			Story.call(ModelProvider.generate, { turn: 1, generation: 0 }),
+			Story.call(Harness.runTurn, { turn: 1, generation: 0 }),
 			Story.given(session, new SessionErrorEvent({ error: diagnostic })),
 			Story.view(TurnInput, session, {
 				agent_id: "agent_001",
@@ -1618,7 +1614,7 @@ describe("Sessions", () => {
 				input: ["First"],
 				unsent: [],
 			}),
-			Story.succeed(ModelProvider.generate, {
+			Story.succeed(Harness.runTurn, {
 				thinking: null,
 				text: "Done",
 				input_tokens: 1,
@@ -1761,8 +1757,8 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(ModelProvider.generate, {
+				Story.call(Harness.runTurn, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "Cut short",
 					truncated: true,
@@ -1790,13 +1786,13 @@ describe("Sessions", () => {
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
 				Story.state(session, { _tag: "Running", turn: 2, generation: 1 }),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
 					generation: 1,
 					input: ["Continue"],
 				}),
-				Story.succeed(ModelProvider.generate, {
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "The rest",
 					input_tokens: 6,
@@ -1932,7 +1928,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call("slow", ModelProvider.generate, {
+				Story.call("slow", Harness.runTurn, {
 					session_id: session.id,
 					turn: 1,
 					generation: 0,
@@ -1961,9 +1957,9 @@ describe("Sessions", () => {
 				),
 				Story.state(session, { _tag: "Idle", turn: 1, generation: 1 }),
 				Story.view(TurnInput, session, { turn: 1, harness_generation: 1, input: [] }),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(ModelProvider.interrupt, undefined),
-				Story.fail("slow", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.succeed(Harness.interrupt, undefined),
+				Story.fail("slow", Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.then(session),
 				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "aborted" } }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
@@ -1973,13 +1969,13 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 2, generation: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
 					generation: 1,
 					input: ["Next"],
 				}),
-				Story.succeed(ModelProvider.generate, {
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "Fresh",
 					input_tokens: 3,
@@ -2018,7 +2014,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call("first", ModelProvider.generate, {
+				Story.call("first", Harness.runTurn, {
 					session_id: session.id,
 					turn: 1,
 					generation: 0,
@@ -2026,7 +2022,7 @@ describe("Sessions", () => {
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Queued" })),
 				Story.then(session, new UserMessage({ content: [{ type: "text", text: "Queued" }] })),
 				Story.replied({ turn: 2 }),
-				Story.fail("first", ModelProvider.generate, { _tag: "HarnessUnavailable" }),
+				Story.fail("first", Harness.runTurn, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
 					new SpanModelRequestEnd({
@@ -2053,15 +2049,15 @@ describe("Sessions", () => {
 				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
 				Story.state(session, { _tag: "Running", turn: 2, generation: 1 }),
 				Story.view(TurnInput, session, { turn: 2, harness_generation: 1, input: ["Queued"] }),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(ModelProvider.interrupt, undefined),
-				Story.call("second", ModelProvider.generate, {
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.succeed(Harness.interrupt, undefined),
+				Story.call("second", Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
 					generation: 1,
 					input: ["Queued"],
 				}),
-				Story.succeed("second", ModelProvider.generate, {
+				Story.succeed("second", Harness.runTurn, {
 					thinking: null,
 					text: "Fresh",
 					input_tokens: 3,
@@ -2100,13 +2096,13 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: firstRequest }),
 				),
-				Story.call("first", ModelProvider.generate, { turn: 1, generation: 0 }),
+				Story.call("first", Harness.runTurn, { turn: 1, generation: 0 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call("slow-interrupt", ModelProvider.interrupt, { turn: 1, generation: 0 }),
+				Story.call("slow-interrupt", Harness.interrupt, { turn: 1, generation: 0 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
 				Story.then(session, new UserMessage({ content: [{ type: "text", text: "Next" }] })),
-				Story.fail("first", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.fail("first", Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.then(
 					session,
 					new SpanModelRequestEnd({
@@ -2118,7 +2114,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 2, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: secondRequest }),
 				),
-				Story.call("second", ModelProvider.generate, { turn: 2, generation: 0, input: ["Next"] }),
+				Story.call("second", Harness.runTurn, { turn: 2, generation: 0, input: ["Next"] }),
 				Story.advance("10 minutes"),
 				Story.then(
 					session,
@@ -2142,10 +2138,10 @@ describe("Sessions", () => {
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
-				Story.call("deadline", ModelProvider.interrupt, { turn: 2, generation: 0 }),
-				Story.succeed("deadline", ModelProvider.interrupt, undefined),
-				Story.fail("slow-interrupt", ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
-				Story.fail("second", ModelProvider.generate, { _tag: "ModelRequestInterrupted" }),
+				Story.call("deadline", Harness.interrupt, { turn: 2, generation: 0 }),
+				Story.succeed("deadline", Harness.interrupt, undefined),
+				Story.fail("slow-interrupt", Harness.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.fail("second", Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 			)
 		},
@@ -2261,7 +2257,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call("turn-1", ModelProvider.generate, {
+				Story.call("turn-1", Harness.runTurn, {
 					session_id: session.id,
 					turn: 1,
 					generation: 0,
@@ -2288,9 +2284,9 @@ describe("Sessions", () => {
 						generation: 1,
 					}),
 				),
-				Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
-				Story.call("redelivery", ModelProvider.interrupt, {
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
+				Story.call("redelivery", Harness.interrupt, {
 					session_id: session.id,
 					turn: 1,
 					generation: 0,
@@ -2303,12 +2299,12 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 2, generation: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
-				Story.call("turn-2", ModelProvider.generate, {
+				Story.call("turn-2", Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
 					generation: 1,
 				}),
-				Story.succeed("turn-2", ModelProvider.generate, {
+				Story.succeed("turn-2", Harness.runTurn, {
 					thinking: null,
 					text: "Fresh",
 					input_tokens: 3,
@@ -2326,8 +2322,8 @@ describe("Sessions", () => {
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
-				Story.succeed("redelivery", ModelProvider.interrupt, undefined),
-				Story.succeed("turn-1", ModelProvider.generate, {
+				Story.succeed("redelivery", Harness.interrupt, undefined),
+				Story.succeed("turn-1", Harness.runTurn, {
 					thinking: null,
 					text: "Too late",
 					input_tokens: 4,
@@ -2406,7 +2402,7 @@ describe("Sessions", () => {
 			}).pipe(
 				Effect.provide(
 					Sessions.layer(handlers).pipe(
-						Layer.provide(Layer.mergeAll(memory.layer, ModelProviderNoopLayer)),
+						Layer.provide(Layer.mergeAll(memory.layer, HarnessNoopLayer)),
 					),
 				),
 			),
@@ -2442,7 +2438,7 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -2451,9 +2447,9 @@ describe("Sessions", () => {
 			}),
 			Story.when(new SendUserInterrupt({ session_id: session.id })),
 			Story.then(session, new UserInterrupt()),
-			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1 }),
-			Story.succeed(ModelProvider.interrupt, undefined),
-			Story.succeed(ModelProvider.generate, {
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
+			Story.succeed(Harness.interrupt, undefined),
+			Story.succeed(Harness.runTurn, {
 				thinking: null,
 				text: "Finished anyway",
 				input_tokens: 12,
@@ -2522,7 +2518,7 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -2534,8 +2530,8 @@ describe("Sessions", () => {
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Queued during error" }] }),
 			),
-			Story.fail(ModelProvider.generate, {
-				_tag: "ModelProviderError",
+			Story.fail(Harness.runTurn, {
+				_tag: "TurnFailed",
 				error_type: "model_request_failed_error",
 				message: "429 rate limited",
 				terminal: false,
@@ -2566,14 +2562,14 @@ describe("Sessions", () => {
 				_tag: "Completed",
 				result: { status: "failed" },
 			}),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 2,
 			}),
-			Story.succeed(ModelProvider.generate, {
+			Story.succeed(Harness.runTurn, {
 				thinking: null,
 				text: "Recovered reply",
 				input_tokens: 6,
@@ -2598,7 +2594,7 @@ describe("Sessions", () => {
 		)
 	})
 
-	it("aborts RunTurn without calling ModelProvider when another caller owns request 1 even with the same request ID", async () => {
+	it("aborts RunTurn without calling Harness when another caller owns request 1 even with the same request ID", async () => {
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
 				const sessions = yield* Session
@@ -2639,10 +2635,10 @@ describe("Sessions", () => {
 						Layer.provide(
 							Layer.mergeAll(
 								Domain.InMemory,
-								ModelProvider.toLayer(
+								Harness.toLayer(
 									Effect.succeed({
 										interrupt: () => Effect.void,
-										generate: () => Effect.die("ModelProvider.generate must not be called"),
+										runTurn: () => Effect.die("Harness.runTurn must not be called"),
 									}),
 								),
 							),
@@ -2654,7 +2650,7 @@ describe("Sessions", () => {
 		expect(result).toEqual({ status: "aborted" })
 	})
 
-	it("aborts RunTurn without calling ModelProvider when another worker owns the same request ID at sequence 2", async () => {
+	it("aborts RunTurn without calling Harness when another worker owns the same request ID at sequence 2", async () => {
 		const result = await Effect.runPromise(
 			Effect.gen(function* () {
 				const sessions = yield* Session
@@ -2714,10 +2710,10 @@ describe("Sessions", () => {
 						Layer.provide(
 							Layer.mergeAll(
 								Domain.InMemory,
-								ModelProvider.toLayer(
+								Harness.toLayer(
 									Effect.succeed({
 										interrupt: () => Effect.void,
-										generate: () => Effect.die("ModelProvider.generate must not be called"),
+										runTurn: () => Effect.die("Harness.runTurn must not be called"),
 									}),
 								),
 							),
@@ -2752,7 +2748,7 @@ describe("Sessions", () => {
 				new SessionStatusRunning({ turn: 1, generation: 0 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
-			Story.call(ModelProvider.generate, {
+			Story.call(Harness.runTurn, {
 				session_id: session.id,
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -2771,12 +2767,12 @@ describe("Sessions", () => {
 				new SessionStatusTerminated(),
 				new SessionArchived(),
 			),
-			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-			Story.fail(ModelProvider.interrupt, { _tag: "HarnessUnavailable" }),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+			Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 			Story.state(session, { _tag: "Terminated", archived: true }),
-			Story.call(ModelProvider.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-			Story.succeed(ModelProvider.interrupt, undefined),
-			Story.succeed(ModelProvider.generate, {
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+			Story.succeed(Harness.interrupt, undefined),
+			Story.succeed(Harness.runTurn, {
 				thinking: null,
 				text: "Late reply",
 				input_tokens: 5,
@@ -2842,7 +2838,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 1,
@@ -2866,8 +2862,8 @@ describe("Sessions", () => {
 					}),
 				),
 				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "other_req_2" })),
-				Story.fail(ModelProvider.generate, {
-					_tag: "ModelProviderError",
+				Story.fail(Harness.runTurn, {
+					_tag: "TurnFailed",
 					error_type: "invalid_api_key_error",
 					message: "stale terminal failure",
 					terminal: true,
@@ -2913,7 +2909,7 @@ describe("Sessions", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					agent_id: "agent_001",
 					agent_version: 1,
@@ -2925,7 +2921,7 @@ describe("Sessions", () => {
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Queued after refusal" }] }),
 				),
-				Story.succeed(ModelProvider.generate, {
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "I cannot assist with that.",
 					input_tokens: 4,
@@ -3380,10 +3376,10 @@ describe("Sessions", () => {
 						Layer.provide(
 							Layer.mergeAll(
 								Domain.InMemory,
-								boundedModelProvider(
+								boundedHarness(
 									Effect.succeed({
 										interrupt: () => Effect.void,
-										generate: () => {
+										runTurn: () => {
 											callCount += 1
 											if (callCount === 1) {
 												return Effect.succeed({
@@ -3396,7 +3392,7 @@ describe("Sessions", () => {
 											}
 											if (callCount === 2) {
 												return Effect.fail({
-													_tag: "ModelProviderError" as const,
+													_tag: "TurnFailed" as const,
 													error_type: "e".repeat(MAX_ERROR_TYPE_LENGTH + 100),
 													message: "m".repeat(MAX_ERROR_MESSAGE_LENGTH + 1000),
 													terminal: false,
@@ -3514,18 +3510,18 @@ describe("Sessions", () => {
 			output_tokens: 1,
 		}
 		const cut = await Effect.runPromise(
-			clampModelReply({ ...oversized, stop_reason: { type: "end_turn" } }),
+			clampHarnessReply({ ...oversized, stop_reason: { type: "end_turn" } }),
 		)
 		expect(cut.text.length).toBe(MAX_MESSAGE_TEXT_LENGTH)
 		expect(cut.stop_reason).toEqual({ type: "budget_reached" })
 
 		const refusal = await Effect.runPromise(
-			clampModelReply({ ...oversized, stop_reason: { type: "refusal" } }),
+			clampHarnessReply({ ...oversized, stop_reason: { type: "refusal" } }),
 		)
 		expect(refusal.stop_reason).toEqual({ type: "refusal" })
 
 		const whole = await Effect.runPromise(
-			clampModelReply({ ...oversized, text: "short", stop_reason: { type: "end_turn" } }),
+			clampHarnessReply({ ...oversized, text: "short", stop_reason: { type: "end_turn" } }),
 		)
 		expect(whole.stop_reason).toEqual({ type: "end_turn" })
 	})

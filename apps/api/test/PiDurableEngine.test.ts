@@ -4,7 +4,7 @@ import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
 import { CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
-import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai"
 import { createRegistry } from "@earendil-works/pi-durable"
@@ -68,7 +68,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const provider = yield* ModelProvider
+					const provider = yield* Harness
 
 					const openaiRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -107,7 +107,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
 					const missingKeyErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make("sess_test"),
 							agent_id: openaiAgent.id,
 							agent_version: 1,
@@ -121,7 +121,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					expect(providerError(missingKeyErr).terminal).toBe(false)
 
 					const unsupportedModelErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make("sess_test"),
 							agent_id: geminiAgent.id,
 							agent_version: 1,
@@ -200,7 +200,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		expect(mapAssistantMessageToOutcome(authErrMsg, usage)).toEqual({
 			ok: false,
 			error: {
-				_tag: "ModelProviderError",
+				_tag: "TurnFailed",
 				error_type: "model_request_failed_error",
 				message: PROVIDER_FAILURE_MESSAGE,
 				terminal: false,
@@ -239,7 +239,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			expect(turn1).toEqual({
 				ok: false,
 				error: {
-					_tag: "ModelProviderError",
+					_tag: "TurnFailed",
 					error_type: "model_request_failed_error",
 					message: PROVIDER_FAILURE_MESSAGE,
 					terminal: false,
@@ -585,7 +585,7 @@ describe("turn engine", () => {
 				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "never sent"))),
 			).toMatchObject({
 				ok: false,
-				error: { _tag: "ModelRequestInterrupted" },
+				error: { _tag: "TurnInterrupted" },
 			})
 			expect(calls()).toBe(0)
 		} finally {
@@ -599,7 +599,7 @@ describe("turn engine", () => {
 			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "stop me")))
 			await started
 			await Effect.runPromise(backend.abort("turn:1"))
-			expect(await running).toMatchObject({ ok: false, error: { _tag: "ModelRequestInterrupted" } })
+			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
 		} finally {
 			await backend.close()
 		}
@@ -821,7 +821,7 @@ describe("turn engine", () => {
 					proceed()
 					expect(yield* Fiber.join(running)).toMatchObject({
 						ok: false,
-						error: { _tag: "ModelRequestInterrupted" },
+						error: { _tag: "TurnInterrupted" },
 					})
 					yield* Fiber.join(aborting)
 					expect(yield* Effect.promise(() => backend.hasSubmission("turn:1"))).toBe(false)
@@ -2009,7 +2009,7 @@ describe("turn engine", () => {
 
 		// 2. End-to-end against `InMemoryPiDurableBackend`: interrupt abort while `admitPiTurn`
 		// is paused inside `submit()` (after the final fence check) and verify recovery sees
-		// `ModelRequestInterrupted` instead of a completed reply.
+		// `TurnInterrupted` instead of a completed reply.
 		let markEnteredSubmit!: () => void
 		const enteredSubmit = new Promise<void>((resolve) => {
 			markEnteredSubmit = resolve
@@ -2082,12 +2082,12 @@ describe("turn engine", () => {
 						const outcome = yield* Fiber.join(turnFiber)
 						expect(outcome).toMatchObject({
 							ok: false,
-							error: { _tag: "ModelRequestInterrupted" },
+							error: { _tag: "TurnInterrupted" },
 						})
 						const recovered = yield* recoverPiDurableTurn(backend, "turn:1")
 						expect(recovered).toMatchObject({
 							ok: false,
-							error: { _tag: "ModelRequestInterrupted" },
+							error: { _tag: "TurnInterrupted" },
 						})
 					} finally {
 						releaseSubmit()

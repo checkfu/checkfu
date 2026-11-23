@@ -45,7 +45,7 @@ import {
 	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
 	MAX_ENVIRONMENT_NAME_LENGTH,
 } from "@checkfu/domain/Environment/EnvironmentTypes"
-import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
@@ -75,9 +75,9 @@ import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHe
 import {
 	HarnessCallFailed,
 	HarnessLimits,
-	PiDurableModelProviderLive,
+	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
-} from "../src/Pi/PiDurableModelProvider.ts"
+} from "../src/Pi/PiDurableHarness.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AUTH_HEADERS,
@@ -272,7 +272,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const provider = yield* ModelProvider
+					const provider = yield* Harness
 
 					// Create agent v1 -> update to v2
 					const v1Res = yield* sendRequest(apiFetch, {
@@ -329,7 +329,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					}
 					expect(pinnedSession.agent).toEqual({ id: agentV1.id, version: 1 })
 
-					const reply = yield* provider.generate({
+					const reply = yield* provider.runTurn({
 						session_id: SessionId.make("sess_pinned_version"),
 						agent_id: agentV1.id,
 						agent_version: 1,
@@ -1496,7 +1496,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			})
 
 			const CheckfuLive = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableModelProviderLive))),
+				SessionsHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
 			).pipe(Layer.provide(executorLayer))
 			const layer = CheckfuLive.pipe(
 				Layer.provide(Domain.InMemory),
@@ -1704,7 +1704,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableModelProviderLive))),
+			SessionsHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),

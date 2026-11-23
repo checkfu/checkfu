@@ -9,7 +9,7 @@ import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
 import { CreateSession } from "@checkfu/domain/Session/CreateSession.command"
-import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
@@ -28,7 +28,7 @@ import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
 import { MAX_AGENT_BODY_BYTES, handled, toApiError } from "../src/Http/HttpHelpers.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
-import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableModelProvider.ts"
+import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableHarness.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
@@ -394,7 +394,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const provider = yield* ModelProvider
+					const provider = yield* Harness
 
 					const hugeEnvRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -428,7 +428,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const okAgent = (yield* Effect.promise(() => okAgentRes.json())) as { id: string }
 
 					const emptyTurnErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make("sess_missing_events"),
 							agent_id: okAgent.id,
 							agent_version: 1,
@@ -443,7 +443,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 
 					const session = yield* createIdleSession(apiFetch)
 					const unseenTurnErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make(session.id),
 							agent_id: okAgent.id,
 							agent_version: 1,

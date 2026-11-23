@@ -3,11 +3,7 @@ import * as Effect from "effect/Effect"
 import { AbandonTurn } from "./AbandonTurn.command.ts"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { SessionStatusIdle } from "./CommitModelReply.command.ts"
-import {
-	DEFAULT_MODEL_TIMEOUT_MS,
-	TURN_TIMEOUT,
-	TURN_TIMEOUT_MESSAGE,
-} from "./ModelProvider.external.ts"
+import { DEFAULT_TURN_TIMEOUT_MS, TURN_TIMEOUT, TURN_TIMEOUT_MESSAGE } from "./Harness.external.ts"
 import { RunTurn, turnKey } from "./RunTurn.saga.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
@@ -48,7 +44,7 @@ export const StartTurnLive = StartTurn.toLayer(
 					error_type: TURN_TIMEOUT,
 					message: TURN_TIMEOUT_MESSAGE,
 				}),
-				{ after: DEFAULT_MODEL_TIMEOUT_MS, commandId: TURN_DEADLINE },
+				{ after: DEFAULT_TURN_TIMEOUT_MS, commandId: TURN_DEADLINE },
 			)
 			yield* runs.start(turnKey(source.id, state.turn), {
 				session_id: source.id,
