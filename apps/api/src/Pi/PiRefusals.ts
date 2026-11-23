@@ -127,7 +127,7 @@ export const mapAssistantMessageToOutcome = (
 ): PiTurnOutcome => {
 	const refusal = isRefusalAssistantMessage(message)
 
-	if (!refusal && message.stopReason === "error") {
+	if (message.stopReason === "error") {
 		return {
 			ok: false,
 			error: {
@@ -143,12 +143,9 @@ export const mapAssistantMessageToOutcome = (
 		return { ok: false, error: { ...ABORTED_ERROR, model_usage: modelUsage } }
 	}
 
-	const effective =
-		refusal && message.stopReason === "error" ? normalizeRefusalAssistantMessage(message) : message
-
 	const thinkingParts: Array<string> = []
 	const textParts: Array<string> = []
-	for (const block of effective.content) {
+	for (const block of message.content) {
 		if (block.type === "thinking" && block.thinking.length > 0) {
 			thinkingParts.push(block.thinking)
 		} else if (block.type === "text" && block.text.length > 0) {
@@ -157,7 +154,7 @@ export const mapAssistantMessageToOutcome = (
 	}
 
 	const rawText = textParts.join("")
-	const text = rawText.length > 0 ? rawText : refusal ? refusalFallbackText(effective) : ""
+	const text = rawText.length > 0 ? rawText : refusal ? refusalFallbackText(message) : ""
 
 	if (text.length === 0) {
 		return {

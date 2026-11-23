@@ -5,7 +5,7 @@ import {
 	MemoryStorage,
 	ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable"
-import type { Cursor, Id, Storage } from "@earendil-works/pi-durable"
+import type { Id, Storage } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
@@ -18,18 +18,8 @@ import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
 import { CHECKFU_PI_DOCS, beginTurnUsage, settleTurnUsage } from "../../src/Pi/PiTurnUsage.ts"
 
-export interface InMemoryEntryScanCall {
-	readonly minEntryId?: number
-	readonly maxEntryId?: number
-	readonly order?: string
-	readonly limit: number
-}
-
 export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly storage: InMemoryStorage
-	readonly countEntries: () => Promise<number>
-	readonly getScanEntryCalls: () => ReadonlyArray<InMemoryEntryScanCall>
-	readonly clearScanEntryCalls: () => void
 	readonly close: () => Promise<void>
 	/** Ends this object as a reset does: nothing it does afterwards reaches the storage. */
 	readonly retire: () => void
@@ -38,7 +28,6 @@ export interface InMemoryPiDurableBackend extends PiDurableBackend {
 export type InMemoryStorage = InstrumentedMemoryStorage
 
 class InstrumentedMemoryStorage extends MemoryStorage {
-	readonly scanEntryCalls: Array<InMemoryEntryScanCall> = []
 	readonly cancelledOps = new Set<string>()
 
 	override commit(
@@ -62,21 +51,6 @@ class InstrumentedMemoryStorage extends MemoryStorage {
 			}
 		}
 		return super.commit(batches, receive, context)
-	}
-
-	override scanEntries(
-		query: Parameters<Storage["scanEntries"]>[0],
-		limit: Parameters<Storage["scanEntries"]>[1],
-		cursor: Parameters<Storage["scanEntries"]>[2],
-		context: Parameters<Storage["scanEntries"]>[3],
-	): ReturnType<Storage["scanEntries"]> {
-		this.scanEntryCalls.push({
-			...(query.minEntryId === undefined ? {} : { minEntryId: query.minEntryId }),
-			...(query.maxEntryId === undefined ? {} : { maxEntryId: query.maxEntryId }),
-			...(query.order === undefined ? {} : { order: query.order }),
-			limit,
-		})
-		return super.scanEntries(query, limit, cursor, context)
 	}
 }
 
@@ -182,7 +156,6 @@ export const createInMemoryPiDurableBackend = async (
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
 	const shared = object.storage ?? new InstrumentedMemoryStorage()
-	const { scanEntryCalls } = shared
 	const storage = new ObjectStorage(shared)
 	// Kept with the storage, as the session object's fence table is, so it survives a reset.
 	const cancelledOps = {
@@ -296,25 +269,6 @@ export const createInMemoryPiDurableBackend = async (
 		readAnswerEntry: (operationId) => readAssistantMessageFromStorage(pi, storage, operationId),
 		omitEntries: (operationId) => omitTurnEntriesFromStorage(pi, storage, operationId),
 		finalizePrevious: (operationId) => finalizeSettledTurnFromStorage(pi, storage, operationId),
-		countEntries: async () => {
-			let total = 0
-			let cursor: Cursor | undefined
-			do {
-				const page = await storage.scanEntries(
-					{ conversationId: ROOT_CONVERSATION_ID },
-					256,
-					cursor,
-					BACKGROUND_CONTEXT,
-				)
-				total += page.items.length
-				cursor = page.next
-			} while (cursor !== undefined)
-			return total
-		},
-		getScanEntryCalls: () => [...scanEntryCalls],
-		clearScanEntryCalls: () => {
-			scanEntryCalls.length = 0
-		},
 		close: () => pi.close(BACKGROUND_CONTEXT),
 		retire: () => {
 			storage.retire()
