@@ -4579,7 +4579,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 		)
 	})
 
-	it("keeps API key destination independent of cwd .env and bunfig.toml, skips replayed SSE sequence numbers, and rechecks lagging running snapshots", async () => {
+	it("keeps credentials and runtime selection isolated from untrusted nested checkouts, cwd .env, and bunfig.toml", async () => {
 		// 1) Untrusted working directory .env / .env.local AND bunfig.toml preloads must NEVER
 		//    hijack CHECKFU_API_URL / CHECKFU_URL or execute project-controlled code
 		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
@@ -4889,13 +4889,15 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				}),
 			])
 		}
+	}, 25_000)
 
+	it("skips replayed SSE sequence numbers and rechecks lagging running snapshots", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 2) Replayed SSE frames (duplicate seq for session.status_running) on reconnect must NOT
-					//    double-count observedTurn and prematurely settle queued turn 2
+					// Replayed SSE frames (duplicate seq for session.status_running) on reconnect must NOT
+					// double-count observedTurn and prematurely settle queued turn 2
 					const turn1Gate = yield* Deferred.make<void>()
 					const replayCli = yield* makeTestServer({
 						generate: (args) =>
@@ -5245,5 +5247,5 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				}),
 			),
 		)
-	})
+	}, 15_000)
 })

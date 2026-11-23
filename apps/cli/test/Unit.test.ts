@@ -1,3 +1,6 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -2212,6 +2215,170 @@ describe("resolveBunExecutable", () => {
 					candidate === "/tmp/untrusted/..sneaky/bun" || candidate === "/opt/homebrew/bin/bun",
 				realpath: (target) => target,
 				pathExists: (target) => target === "/tmp/untrusted/.git",
+			}),
+		).toBeNull()
+	})
+
+	it("excludes project-sensitive version-manager shims and non-binary scripts while allowing concrete installations and home/root overrides", () => {
+		// 1) Project-sensitive shim directories (~/.asdf/shims, ~/.local/share/mise/shims,
+		//    ~/.proto/shims, ~/.volta/bin) are skipped even when first on PATH, in favor of
+		//    concrete Bun installations
+		const shimAndConcrete = new Set([
+			"/Users/alice/.asdf/shims/bun",
+			"/Users/alice/.local/share/mise/shims/bun",
+			"/Users/alice/.proto/shims/bun",
+			"/Users/alice/.volta/bin/bun",
+			"/Users/alice/.bun/bin/bun",
+		])
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/tmp/untrusted-repo",
+				homedir: "/Users/alice",
+				env: {
+					PATH: [
+						"/Users/alice/.asdf/shims",
+						"/Users/alice/.local/share/mise/shims",
+						"/Users/alice/.proto/shims",
+						"/Users/alice/.volta/bin",
+						"/Users/alice/.bun/bin",
+					].join(":"),
+				},
+				isExecutableFile: (candidate) => shimAndConcrete.has(candidate),
+				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted-repo/.git",
+			}),
+		).toBe("/Users/alice/.bun/bin/bun")
+
+		// Concrete version-manager install bin directories directly on PATH ARE accepted
+		expect(
+			resolveBunExecutable({
+				platform: "linux",
+				cwd: "/tmp/untrusted-repo",
+				homedir: "/home/alice",
+				env: {
+					PATH: "/home/alice/.asdf/shims:/home/alice/.asdf/installs/bun/1.4.2/bin",
+				},
+				isExecutableFile: (candidate) =>
+					candidate === "/home/alice/.asdf/shims/bun" ||
+					candidate === "/home/alice/.asdf/installs/bun/1.4.2/bin/bun",
+				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted-repo/.git",
+			}),
+		).toBe("/home/alice/.asdf/installs/bun/1.4.2/bin/bun")
+
+		// CHECKFU_BUN_PATH pointing to an asdf/mise/proto/volta shim fails closed
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/tmp/untrusted-repo",
+				homedir: "/Users/alice",
+				env: {
+					PATH: "/Users/alice/.bun/bin",
+					CHECKFU_BUN_PATH: "/Users/alice/.asdf/shims/bun",
+				},
+				isExecutableFile: (candidate) => shimAndConcrete.has(candidate),
+				realpath: (target) => target,
+				pathExists: (target) => target === "/tmp/untrusted-repo/.git",
+			}),
+		).toBeNull()
+
+		// 2) Real-filesystem binary header check rejects executable `#!/bin/sh` wrapper scripts
+		//    even inside an explicit BUN_INSTALL or CHECKFU_BUN_PATH outside the checkout
+		const tempRoot = mkdtempSync(join(tmpdir(), "checkfu-shim-header-"))
+		try {
+			const fakeInstallBin = join(tempRoot, "install", "bin")
+			const workDir = join(tempRoot, "work")
+			mkdirSync(fakeInstallBin, { recursive: true })
+			mkdirSync(workDir, { recursive: true })
+			const scriptBun = join(fakeInstallBin, process.platform === "win32" ? "bun.exe" : "bun")
+			writeFileSync(scriptBun, "#!/bin/sh\necho SHIM_EXECUTED >&2\nexit 91\n")
+			if (process.platform !== "win32") {
+				chmodSync(scriptBun, 0o755)
+			}
+			expect(
+				resolveBunExecutable({
+					cwd: workDir,
+					homedir: join(tempRoot, "empty-home"),
+					env: {
+						PATH: fakeInstallBin,
+						CHECKFU_BUN_PATH: scriptBun,
+					},
+				}),
+			).toBeNull()
+		} finally {
+			rmSync(tempRoot, { recursive: true, force: true })
+		}
+
+		// 3) Broad-ancestor exception ($HOME and / / C:\) applies to CHECKFU_BUN_PATH and BUN_INSTALL
+		//    while still enforcing exact-cwd, node_modules, and checkout exclusions
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/Users/alice",
+				homedir: "/Users/alice",
+				env: { CHECKFU_BUN_PATH: "/Users/alice/.bun/bin/bun" },
+				isExecutableFile: (candidate) => candidate === "/Users/alice/.bun/bin/bun",
+				realpath: (target) => target,
+				pathExists: () => false,
+			}),
+		).toBe("/Users/alice/.bun/bin/bun")
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/",
+				homedir: "/Users/alice",
+				env: { CHECKFU_BUN_PATH: "/opt/homebrew/bin/bun" },
+				isExecutableFile: (candidate) => candidate === "/opt/homebrew/bin/bun",
+				realpath: (target) => target,
+				pathExists: () => false,
+			}),
+		).toBe("/opt/homebrew/bin/bun")
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/",
+				homedir: "/Users/alice",
+				env: { PATH: "", BUN_INSTALL: "/opt/custom" },
+				isExecutableFile: (candidate) => candidate === "/opt/custom/bin/bun",
+				realpath: (target) => target,
+				pathExists: () => false,
+			}),
+		).toBe("/opt/custom/bin/bun")
+		expect(
+			resolveBunExecutable({
+				platform: "win32",
+				cwd: "C:\\",
+				homedir: String.raw`C:\Users\alice`,
+				env: { CHECKFU_BUN_PATH: String.raw`C:\Program Files\Bun\bin\bun.exe` },
+				isExecutableFile: (candidate) =>
+					candidate.toLowerCase() === String.raw`c:\program files\bun\bin\bun.exe`,
+				realpath: (target) => target,
+				pathExists: () => false,
+			}),
+		).toBe(String.raw`C:\Program Files\Bun\bin\bun.exe`)
+
+		// Exact cwd and node_modules remain rejected even from $HOME or /
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/Users/alice",
+				homedir: "/Users/alice",
+				env: { CHECKFU_BUN_PATH: "/Users/alice/bun" },
+				isExecutableFile: (candidate) => candidate === "/Users/alice/bun",
+				realpath: (target) => target,
+				pathExists: () => false,
+			}),
+		).toBeNull()
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/",
+				homedir: "/Users/alice",
+				env: { CHECKFU_BUN_PATH: "/tmp/proj/node_modules/.bin/bun" },
+				isExecutableFile: (candidate) => candidate === "/tmp/proj/node_modules/.bin/bun",
+				realpath: (target) => target,
+				pathExists: () => false,
 			}),
 		).toBeNull()
 	})

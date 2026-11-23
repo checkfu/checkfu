@@ -1,4 +1,13 @@
-import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs"
+import {
+	accessSync,
+	closeSync,
+	constants,
+	existsSync,
+	openSync,
+	readSync,
+	realpathSync,
+	statSync,
+} from "node:fs"
 import { homedir as defaultHomedir } from "node:os"
 import path from "node:path"
 
@@ -16,7 +25,37 @@ const CHECKOUT_MARKERS = [
 	"turbo.json",
 ]
 
+const MACHO_MAGICS = [
+	[0xfe, 0xed, 0xfa, 0xce],
+	[0xfe, 0xed, 0xfa, 0xcf],
+	[0xce, 0xfa, 0xed, 0xfe],
+	[0xcf, 0xfa, 0xed, 0xfe],
+	[0xca, 0xfe, 0xba, 0xbe],
+	[0xbe, 0xba, 0xfe, 0xca],
+]
+
+const isNativeBinaryHeader = (bytes, bytesRead, platform) => {
+	if (platform === "win32") {
+		return bytesRead >= 2 && bytes[0] === 0x4d && bytes[1] === 0x5a
+	}
+	if (bytesRead < 4) {
+		return false
+	}
+	if (platform === "darwin") {
+		return MACHO_MAGICS.some(
+			(magic) =>
+				bytes[0] === magic[0] &&
+				bytes[1] === magic[1] &&
+				bytes[2] === magic[2] &&
+				bytes[3] === magic[3],
+		)
+	}
+	// Linux / other POSIX ELF executable ("\x7fELF")
+	return bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46
+}
+
 const defaultIsExecutableFile = (candidate, platform) => {
+	let fd
 	try {
 		if (!statSync(candidate).isFile()) {
 			return false
@@ -24,9 +63,20 @@ const defaultIsExecutableFile = (candidate, platform) => {
 		if (platform !== "win32") {
 			accessSync(candidate, constants.X_OK)
 		}
-		return true
+		fd = openSync(candidate, "r")
+		const header = new Uint8Array(4)
+		const bytesRead = readSync(fd, header, 0, 4, 0)
+		return isNativeBinaryHeader(header, bytesRead, platform)
 	} catch {
 		return false
+	} finally {
+		if (fd !== undefined) {
+			try {
+				closeSync(fd)
+			} catch {
+				// ignore close errors
+			}
+		}
 	}
 }
 
@@ -250,8 +300,93 @@ export const resolveBunExecutable = (options = {}) => {
 		return false
 	}
 
+	const isBroadAncestorDir = (dir) => {
+		const resolved = pathModule.resolve(dir)
+		if (homeKeys.has(canonicalKey(resolved)) || pathModule.dirname(resolved) === resolved) {
+			return true
+		}
+		const realDir = safeRealpath(resolved)
+		return (
+			realDir !== undefined &&
+			(homeKeys.has(canonicalKey(realDir)) || pathModule.dirname(realDir) === realDir)
+		)
+	}
+
+	const isCwdBroadAncestor = isBroadAncestorDir(normalizedCwd)
+
+	// Exclude version-manager shim directories that inspect cwd/project files
+	// (such as .tool-versions, mise.toml, .prototools, or package.json) to pick
+	// which executable to run. Concrete version-manager install directories
+	// (e.g. ~/.asdf/installs, ~/.local/share/mise/installs, ~/.proto/tools) remain allowed.
+	const projectSensitiveShimRootKeys = new Set()
+	const addShimRoot = (dir) => {
+		const resolved = isTrustedAbsolutePath(dir, platform, pathModule)
+		if (resolved === undefined) {
+			return
+		}
+		projectSensitiveShimRootKeys.add(canonicalKey(resolved))
+		const realDir = safeRealpath(resolved)
+		if (realDir !== undefined) {
+			projectSensitiveShimRootKeys.add(canonicalKey(realDir))
+		}
+	}
+	if (trustedHome !== undefined) {
+		addShimRoot(pathModule.join(trustedHome, ".asdf", "shims"))
+		addShimRoot(pathModule.join(trustedHome, ".local", "share", "mise", "shims"))
+		addShimRoot(pathModule.join(trustedHome, ".proto", "shims"))
+		addShimRoot(pathModule.join(trustedHome, ".volta", "bin"))
+	}
+	for (const { envVar, segments } of [
+		{ envVar: "ASDF_DATA_DIR", segments: ["shims"] },
+		{ envVar: "MISE_DATA_DIR", segments: ["shims"] },
+		{ envVar: "XDG_DATA_HOME", segments: ["mise", "shims"] },
+		{ envVar: "PROTO_HOME", segments: ["shims"] },
+		{ envVar: "VOLTA_HOME", segments: ["bin"] },
+	]) {
+		const rawVal = getEnvValue(env, envVar, platform)
+		if (rawVal !== undefined) {
+			const base = isTrustedAbsolutePath(rawVal, platform, pathModule)
+			if (base !== undefined) {
+				addShimRoot(pathModule.join(base, ...segments))
+			}
+		}
+	}
+	if (platform === "win32") {
+		const localAppData = getEnvValue(env, "LOCALAPPDATA", platform)
+		if (localAppData !== undefined) {
+			const ladDir = isTrustedAbsolutePath(localAppData, platform, pathModule)
+			if (ladDir !== undefined) {
+				addShimRoot(pathModule.join(ladDir, "mise", "shims"))
+				addShimRoot(pathModule.join(ladDir, "Volta", "bin"))
+			}
+		}
+	}
+
+	const isWithinAnyRoot = (target, rootKeys) => {
+		const key = canonicalKey(target)
+		for (const rootKey of rootKeys) {
+			if (isPathEqualOrWithin(key, rootKey)) {
+				return true
+			}
+		}
+		const realTarget = safeRealpath(target)
+		if (realTarget === undefined) {
+			return false
+		}
+		const realKey = canonicalKey(realTarget)
+		for (const rootKey of rootKeys) {
+			if (isPathEqualOrWithin(realKey, rootKey)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	const isProjectSensitiveShim = (target) => isWithinAnyRoot(target, projectSensitiveShimRootKeys)
+
 	// Explicit operator override (`CHECKFU_BUN_PATH`): validated strictly and fail-closed
-	// so misconfigured or checkout-local overrides never silently fall through.
+	// so misconfigured, shim, or checkout-local overrides never silently fall through.
+	// Applies the same broad-ancestor exception as automatic discovery when cwd is $HOME or /.
 	const rawExplicitBun = getEnvValue(env, "CHECKFU_BUN_PATH", platform)
 	if (rawExplicitBun !== undefined && rawExplicitBun.trim().length > 0) {
 		const explicitPath = isTrustedAbsolutePath(rawExplicitBun, platform, pathModule)
@@ -268,12 +403,13 @@ export const resolveBunExecutable = (options = {}) => {
 		if (
 			hasNodeModulesSegment(explicitPath, platform) ||
 			hasNodeModulesSegment(realExplicit, platform) ||
+			isProjectSensitiveShim(explicitPath) ||
+			isProjectSensitiveShim(realExplicit) ||
 			isExactWorkingDirectory(pathModule.dirname(explicitPath)) ||
 			isExactWorkingDirectory(pathModule.dirname(realExplicit)) ||
 			isInsideEnclosingCheckout(explicitPath) ||
 			isInsideEnclosingCheckout(realExplicit) ||
-			isInsideCwdTree(explicitPath) ||
-			isInsideCwdTree(realExplicit)
+			(!isCwdBroadAncestor && (isInsideCwdTree(explicitPath) || isInsideCwdTree(realExplicit)))
 		) {
 			return null
 		}
@@ -281,7 +417,7 @@ export const resolveBunExecutable = (options = {}) => {
 	}
 
 	// Explicitly trusted installation bin directories, dynamic versioned bin roots (e.g.
-	// /nix/store, mise/asdf/proto installs, CI toolcaches), and symlink target roots.
+	// /nix/store, concrete mise/asdf/proto install trees, CI toolcaches), and symlink target roots.
 	const trustedBinDirKeys = new Set()
 	const trustedDynamicBinRootKeys = new Set()
 	const trustedTargetRootKeys = new Set()
@@ -291,7 +427,9 @@ export const resolveBunExecutable = (options = {}) => {
 		const resolvedRoot = isTrustedAbsolutePath(rootDir, platform, pathModule)
 		if (
 			resolvedRoot === undefined ||
+			isBroadAncestorDir(resolvedRoot) ||
 			hasNodeModulesSegment(resolvedRoot, platform) ||
+			isProjectSensitiveShim(resolvedRoot) ||
 			isInsideEnclosingCheckout(resolvedRoot)
 		) {
 			return undefined
@@ -300,7 +438,9 @@ export const resolveBunExecutable = (options = {}) => {
 		const realRoot = safeRealpath(resolvedRoot)
 		if (
 			realRoot !== undefined &&
+			!isBroadAncestorDir(realRoot) &&
 			!hasNodeModulesSegment(realRoot, platform) &&
+			!isProjectSensitiveShim(realRoot) &&
 			!isInsideEnclosingCheckout(realRoot)
 		) {
 			trustedTargetRootKeys.add(canonicalKey(realRoot))
@@ -318,6 +458,7 @@ export const resolveBunExecutable = (options = {}) => {
 		if (
 			realRoot !== undefined &&
 			!hasNodeModulesSegment(realRoot, platform) &&
+			!isProjectSensitiveShim(realRoot) &&
 			!isInsideEnclosingCheckout(realRoot)
 		) {
 			trustedDynamicBinRootKeys.add(canonicalKey(realRoot))
@@ -333,6 +474,7 @@ export const resolveBunExecutable = (options = {}) => {
 		if (
 			resolvedBin === undefined ||
 			hasNodeModulesSegment(resolvedBin, platform) ||
+			isProjectSensitiveShim(resolvedBin) ||
 			isExactWorkingDirectory(resolvedBin) ||
 			isInsideEnclosingCheckout(resolvedBin)
 		) {
@@ -343,6 +485,7 @@ export const resolveBunExecutable = (options = {}) => {
 		if (
 			realBin !== undefined &&
 			!hasNodeModulesSegment(realBin, platform) &&
+			!isProjectSensitiveShim(realBin) &&
 			!isExactWorkingDirectory(realBin) &&
 			!isInsideEnclosingCheckout(realBin)
 		) {
@@ -354,8 +497,8 @@ export const resolveBunExecutable = (options = {}) => {
 	const defaultUserBunRoot =
 		trustedHome !== undefined ? pathModule.join(trustedHome, ".bun") : undefined
 
-	// Trust BUN_INSTALL only when absolute, without node_modules, and outside both
-	// the enclosing checkout and cwd (unless it matches the user's ~/.bun install root).
+	// Trust BUN_INSTALL only when absolute, without node_modules or shim dirs, and outside
+	// the enclosing checkout (applying the broad-ancestor exception when cwd is $HOME or /).
 	const rawBunInstall = getEnvValue(env, "BUN_INSTALL", platform)
 	if (rawBunInstall !== undefined) {
 		const bunInstallDir = isTrustedAbsolutePath(rawBunInstall, platform, pathModule)
@@ -366,15 +509,16 @@ export const resolveBunExecutable = (options = {}) => {
 		if (
 			bunInstallDir !== undefined &&
 			!hasNodeModulesSegment(bunInstallDir, platform) &&
+			!isProjectSensitiveShim(bunInstallDir) &&
 			!isExactWorkingDirectory(bunInstallDir) &&
 			!isInsideEnclosingCheckout(bunInstallDir) &&
-			(isDefaultUserBun || !isInsideCwdTree(bunInstallDir))
+			(isCwdBroadAncestor || isDefaultUserBun || !isInsideCwdTree(bunInstallDir))
 		) {
 			registerTrustedInstall(pathModule.join(bunInstallDir, "bin"), bunInstallDir)
 		}
 	}
 
-	// Hosted CI toolcaches (e.g. GitHub Actions RUNNER_TOOL_CACHE) when outside checkout/cwd
+	// Hosted CI toolcaches (e.g. GitHub Actions RUNNER_TOOL_CACHE) when outside checkout
 	for (const toolCacheEnv of ["RUNNER_TOOL_CACHE", "AGENT_TOOLSDIRECTORY"]) {
 		const rawCache = getEnvValue(env, toolCacheEnv, platform)
 		if (rawCache !== undefined) {
@@ -382,8 +526,9 @@ export const resolveBunExecutable = (options = {}) => {
 			if (
 				cacheDir !== undefined &&
 				!hasNodeModulesSegment(cacheDir, platform) &&
+				!isProjectSensitiveShim(cacheDir) &&
 				!isInsideEnclosingCheckout(cacheDir) &&
-				!isInsideCwdTree(cacheDir)
+				(isCwdBroadAncestor || !isInsideCwdTree(cacheDir))
 			) {
 				addTrustedDynamicBinRoot(cacheDir)
 			}
@@ -427,9 +572,8 @@ export const resolveBunExecutable = (options = {}) => {
 		}
 
 		if (trustedHome !== undefined) {
-			const scoopRoot = pathModule.join(trustedHome, "scoop")
-			registerTrustedInstall(pathModule.join(scoopRoot, "shims"), scoopRoot)
-			registerTrustedInstall(pathModule.join(scoopRoot, "apps", "bun", "current"), scoopRoot)
+			const scoopBunCurrent = pathModule.join(trustedHome, "scoop", "apps", "bun", "current")
+			registerTrustedInstall(scoopBunCurrent, pathModule.join(trustedHome, "scoop", "apps", "bun"))
 		}
 
 		const chocoInstall = getEnvValue(env, "ChocolateyInstall", platform)
@@ -458,40 +602,13 @@ export const resolveBunExecutable = (options = {}) => {
 		if (trustedHome !== undefined) {
 			const nixProfile = pathModule.join(trustedHome, ".nix-profile")
 			registerTrustedInstall(pathModule.join(nixProfile, "bin"), nixProfile)
-			const miseRoot = pathModule.join(trustedHome, ".local", "share", "mise")
-			registerTrustedInstall(pathModule.join(miseRoot, "shims"), miseRoot)
-			addTrustedDynamicBinRoot(pathModule.join(miseRoot, "installs"))
-			const asdfRoot = pathModule.join(trustedHome, ".asdf")
-			registerTrustedInstall(pathModule.join(asdfRoot, "shims"), asdfRoot)
-			addTrustedDynamicBinRoot(pathModule.join(asdfRoot, "installs"))
-			const protoRoot = pathModule.join(trustedHome, ".proto")
-			registerTrustedInstall(pathModule.join(protoRoot, "shims"), protoRoot)
-			addTrustedDynamicBinRoot(pathModule.join(protoRoot, "tools"))
-			const voltaRoot = pathModule.join(trustedHome, ".volta")
-			registerTrustedInstall(pathModule.join(voltaRoot, "bin"), voltaRoot)
+			// Only concrete version-manager install directories — never cwd-reading shim dirs
+			addTrustedDynamicBinRoot(pathModule.join(trustedHome, ".local", "share", "mise", "installs"))
+			addTrustedDynamicBinRoot(pathModule.join(trustedHome, ".asdf", "installs"))
+			addTrustedDynamicBinRoot(pathModule.join(trustedHome, ".proto", "tools"))
 			const localBin = pathModule.join(trustedHome, ".local", "bin")
 			registerTrustedInstall(localBin, localBin)
 		}
-	}
-
-	const isWithinAnyRoot = (target, rootKeys) => {
-		const key = canonicalKey(target)
-		for (const rootKey of rootKeys) {
-			if (isPathEqualOrWithin(key, rootKey)) {
-				return true
-			}
-		}
-		const realTarget = safeRealpath(target)
-		if (realTarget === undefined) {
-			return false
-		}
-		const realKey = canonicalKey(realTarget)
-		for (const rootKey of rootKeys) {
-			if (isPathEqualOrWithin(realKey, rootKey)) {
-				return true
-			}
-		}
-		return false
 	}
 
 	const isTrustedBinDir = (dir) => {
@@ -508,13 +625,6 @@ export const resolveBunExecutable = (options = {}) => {
 
 	const isWithinTrustedTargetRoot = (target) => isWithinAnyRoot(target, trustedTargetRootKeys)
 
-	const isCwdBroadAncestor =
-		homeKeys.has(canonicalKey(normalizedCwd)) ||
-		pathModule.dirname(normalizedCwd) === normalizedCwd ||
-		(resolvedRealCwd !== undefined &&
-			(homeKeys.has(canonicalKey(resolvedRealCwd)) ||
-				pathModule.dirname(resolvedRealCwd) === resolvedRealCwd))
-
 	const candidateDirs = []
 	const seenDirs = new Set()
 	const addTrustedCandidateDir = (rawDir) => {
@@ -522,6 +632,7 @@ export const resolveBunExecutable = (options = {}) => {
 		if (
 			resolved === undefined ||
 			hasNodeModulesSegment(resolved, platform) ||
+			isProjectSensitiveShim(resolved) ||
 			isExactWorkingDirectory(resolved) ||
 			isInsideEnclosingCheckout(resolved) ||
 			(!isCwdBroadAncestor && isInsideCwdTree(resolved)) ||
@@ -562,6 +673,8 @@ export const resolveBunExecutable = (options = {}) => {
 			if (
 				hasNodeModulesSegment(candidate, platform) ||
 				hasNodeModulesSegment(realCandidate, platform) ||
+				isProjectSensitiveShim(candidate) ||
+				isProjectSensitiveShim(realCandidate) ||
 				isExactWorkingDirectory(pathModule.dirname(candidate)) ||
 				isExactWorkingDirectory(pathModule.dirname(realCandidate)) ||
 				isInsideEnclosingCheckout(candidate) ||
