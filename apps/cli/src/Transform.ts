@@ -65,36 +65,44 @@ export const normalizeJsonValue = (value: unknown): NormalizedValue => {
 	return String(value)
 }
 
-const evaluatePath = (value: NormalizedValue, path: ReadonlyArray<string>): NormalizedValue => {
-	const [raw, ...rest] = path
-	if (raw === undefined) {
-		return value
-	}
-	if (value === null || value === undefined) {
-		return undefined
-	}
-	const head = raw.trim()
-	if (head.length === 0) {
-		return evaluatePath(value, rest)
-	}
-	if (head === "#") {
-		if (!isNormalizedArray(value)) {
+const evaluatePath = (
+	value: NormalizedValue,
+	path: ReadonlyArray<string>,
+	start: number = 0,
+): NormalizedValue => {
+	let current = value
+	for (let index = start; index < path.length; index++) {
+		if (current === null || current === undefined) {
 			return undefined
 		}
-		return rest.length === 0
-			? value.length
-			: value.map((item) => evaluatePath(item, rest)).filter((item) => item !== undefined)
-	}
-	if (isNormalizedArray(value)) {
-		if (!/^-?\d+$/.test(head)) {
-			return undefined
+		const segment = (path[index] ?? "").trim()
+		if (segment.length === 0) {
+			continue
 		}
-		const index = Number(head)
-		return evaluatePath(value[index < 0 ? value.length + index : index], rest)
+		if (segment === "#") {
+			if (!isNormalizedArray(current)) {
+				return undefined
+			}
+			return index === path.length - 1
+				? current.length
+				: current
+						.map((item) => evaluatePath(item, path, index + 1))
+						.filter((item) => item !== undefined)
+		}
+		if (isNormalizedArray(current)) {
+			if (!/^-?\d+$/.test(segment)) {
+				return undefined
+			}
+			const position = Number(segment)
+			current = current[position < 0 ? current.length + position : position]
+		} else {
+			current =
+				isNormalizedObject(current) && Object.hasOwn(current, segment)
+					? current[segment]
+					: undefined
+		}
 	}
-	return isNormalizedObject(value) && Object.hasOwn(value, head)
-		? evaluatePath(value[head], rest)
-		: undefined
+	return current
 }
 
 const pathOf = (text: string): ReadonlyArray<string> => {

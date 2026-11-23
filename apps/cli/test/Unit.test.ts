@@ -1178,6 +1178,13 @@ describe("Transform and formatOutput", () => {
 		}
 	})
 
+	it("walks a path of any length without growing the stack", () => {
+		expect(evaluateTransform({ id: 1 }, `${".".repeat(20_000)}id`)).toBe(1)
+		expect(evaluateTransform({ a: [{ b: 1 }, { b: 2 }] }, `a.#${".".repeat(20_000)}b`)).toEqual([
+			1, 2,
+		])
+	})
+
 	it("evaluates @this to nothing wherever it appears as a path segment", () => {
 		for (const expression of [
 			"@this",
