@@ -8,8 +8,10 @@ import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
 import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import * as Sse from "effect/encoding/Sse"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
@@ -227,7 +229,7 @@ export const makePiDurableTestLayer = (
 	)
 
 	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
-		Layer.provide(
+		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
 				baseDelayMs: 1,
@@ -236,6 +238,7 @@ export const makePiDurableTestLayer = (
 			}),
 		),
 		Layer.provide(Domain.InMemory),
+		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 	)
@@ -333,40 +336,34 @@ export const readSseUntil = async (
 	const reader = response.body?.getReader()
 	if (!reader) throw new Error("Expected SSE response body stream")
 	const decoder = new TextDecoder()
-	let buffer = ""
 	const collected: Array<{
 		readonly id: string
 		readonly event: string
 		readonly data: Record<string, unknown>
 	}> = []
+	let done = false
+	const parser = Sse.makeParser((parsed) => {
+		if (done || parsed._tag !== "Event") return
+		const data = JSON.parse(parsed.data) as { readonly type: string } & Record<string, unknown>
+		collected.push({ id: parsed.id ?? "", event: parsed.event, data })
+		if (predicate(data)) {
+			done = true
+			parser.reset()
+		}
+	})
 
 	try {
-		while (true) {
+		while (!done) {
 			const chunk = await reader.read()
 			if (chunk.done) break
-			buffer += decoder.decode(chunk.value, { stream: true })
-			let boundary = buffer.indexOf("\n\n")
-			while (boundary !== -1) {
-				const frame = buffer.slice(0, boundary)
-				buffer = buffer.slice(boundary + 2)
-				let id = ""
-				let event = ""
-				let dataRaw = ""
-				for (const line of frame.split("\n")) {
-					if (line.startsWith("id: ")) id = line.slice(4)
-					else if (line.startsWith("event: ")) event = line.slice(7)
-					else if (line.startsWith("data: ")) dataRaw += line.slice(6)
-				}
-				if (dataRaw.length > 0) {
-					const data = JSON.parse(dataRaw) as { readonly type: string } & Record<string, unknown>
-					collected.push({ id, event, data })
-					if (predicate(data)) {
-						await reader.cancel()
-						return collected
-					}
-				}
-				boundary = buffer.indexOf("\n\n")
-			}
+			const error = parser.feed(decoder.decode(chunk.value, { stream: true }))
+			if (error !== undefined) throw error
+		}
+		if (done) {
+			await reader.cancel()
+		} else {
+			const tailError = parser.feed(decoder.decode())
+			if (tailError !== undefined) throw tailError
 		}
 	} finally {
 		reader.releaseLock()

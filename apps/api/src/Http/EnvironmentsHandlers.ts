@@ -7,6 +7,7 @@ import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentVi
 import { UpdateEnvironment } from "@checkfu/environments/Environment/UpdateEnvironment.command"
 import { EnvironmentDescription, EnvironmentName } from "@checkfu/environments/EnvironmentTypes"
 import * as Context from "effect/Context"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -43,6 +44,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const environments = yield* Environment
 		const environmentViews = yield* EnvironmentView
 		const eventBatches = yield* EventBatch
+		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 
 		return handlers
@@ -54,13 +56,19 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					let id: EnvironmentId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						const commandId = yield* claimCreate(eventBatches, "environment", idempotencyKey, {
-							name: payload.name,
-							description,
-							config,
-						})
+						const commandId = yield* claimCreate(
+							eventBatches,
+							digest,
+							"environment",
+							idempotencyKey,
+							{
+								name: payload.name,
+								description,
+								config,
+							},
+						)
 						id = EnvironmentId.make(
-							idempotentId("env", ["create", "environment", "id", idempotencyKey]),
+							yield* idempotentId(digest, "env", ["create", "environment", "id", idempotencyKey]),
 						)
 						sendOptions = { commandId }
 					} else {

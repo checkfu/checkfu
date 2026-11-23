@@ -18,6 +18,7 @@ import {
 	AgentSystem,
 } from "@checkfu/agents/AgentTypes"
 import * as Context from "effect/Context"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -69,6 +70,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const agentViews = yield* AgentView
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const eventBatches = yield* EventBatch
+		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const isSupportedModel = yield* IsSupportedAgentModel
 		const unsupportedModel = (model: AgentModel) => reject(400, `Unsupported model "${model.id}".`)
@@ -137,12 +139,14 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					let versionId: AgentVersionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						id = AgentId.make(idempotentId("agent", ["create", "agent", "id", idempotencyKey]))
-						versionId = AgentVersionId.make(
-							idempotentId("aver", ["create", "agent", "version", idempotencyKey]),
+						id = AgentId.make(
+							yield* idempotentId(digest, "agent", ["create", "agent", "id", idempotencyKey]),
 						)
-						const batchId = createClaimId("agent", idempotencyKey)
-						const fingerprint = createFingerprint({
+						versionId = AgentVersionId.make(
+							yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
+						)
+						const batchId = yield* createClaimId(digest, "agent", idempotencyKey)
+						const fingerprint = yield* createFingerprint(digest, {
 							name: payload.name,
 							model,
 							system,
@@ -163,7 +167,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						} else {
 							yield* claimIdempotency(eventBatches, batchId, fingerprint)
 						}
-						sendOptions = { commandId: createCommandId("agent", idempotencyKey) }
+						sendOptions = { commandId: yield* createCommandId(digest, "agent", idempotencyKey) }
 					} else {
 						yield* supported(model)
 						id = AgentId.make(yield* randomId(random, "agent"))

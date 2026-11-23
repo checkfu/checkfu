@@ -3,6 +3,7 @@ import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -183,6 +184,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -437,7 +439,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			Layer.provide(CheckfuLive),
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
-			Layer.provide(
+			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
 					baseDelayMs: 1,
@@ -446,6 +448,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -971,6 +974,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			).pipe(
 				Layer.provide(normalizedExecutor),
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
 					ConfigProvider.layer(
@@ -1205,6 +1209,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
 					ConfigProvider.layer(
