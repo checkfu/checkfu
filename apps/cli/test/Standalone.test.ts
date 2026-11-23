@@ -26,9 +26,12 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 	it("ignores .env and bunfig preloads in the current directory and can run as Bun", () => {
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-standalone-"))
 		try {
-			// Built through the documented root script, into a scratch path so a binary
-			// someone has already built in `apps/cli/dist` is left alone.
-			const binary = join(scratch, "checkfu")
+			// Built through the documented root script, into a scratch copy of the layout
+			// (`<checkout>/apps/cli/dist/checkfu`) so a binary someone has already built in
+			// the real `apps/cli/dist` is left alone.
+			const checkout = join(scratch, "checkout")
+			const binary = join(checkout, "apps", "cli", "dist", "checkfu")
+			mkdirSync(join(checkout, "apps", "cli", "dist"), { recursive: true })
 			const build = spawnSync(
 				resolveBunExecutable() ?? "bun",
 				["run", "checkfu:build", "--outfile", binary],
@@ -60,16 +63,20 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			expect(call.stderr).not.toContain("planted")
 			expect(existsSync(join(hostile, "PRELOAD_RAN"))).toBe(false)
 
-			// Outside its checkout it calls itself by name, including from `/`, where a root
-			// worked out from the binary's virtual source path would wrongly match.
-			for (const cwd of [hostile, "/"]) {
+			// It names the checkout script only when standing in its own checkout. From `/`
+			// a root worked out from the binary's virtual source path would wrongly match.
+			for (const [cwd, name] of [
+				[hostile, "checkfu"],
+				["/", "checkfu"],
+				[checkout, "bun checkfu"],
+			] as const) {
 				const hint = spawnSync(binary, ["sessions", "retrieve", "--session-id", "sess_x"], {
 					cwd,
 					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
 					encoding: "utf8",
 					timeout: 30_000,
 				})
-				expect(hint.stderr).toContain("Run `checkfu deploy`")
+				expect(hint.stderr).toContain(`Run \`${name} deploy\``)
 			}
 
 			const asBun = spawnSync(binary, ["--version"], {
