@@ -1,4 +1,5 @@
-import type { Api, Model, Provider, StreamOptions } from "@earendil-works/pi-ai"
+import { envApiKeyAuth } from "@earendil-works/pi-ai"
+import type { Model, Provider, StreamOptions } from "@earendil-works/pi-ai"
 import * as anthropicMessages from "@earendil-works/pi-ai/api/anthropic-messages"
 import * as openAIResponses from "@earendil-works/pi-ai/api/openai-responses"
 import { createModels, createProvider } from "@earendil-works/pi-ai/models"
@@ -106,26 +107,6 @@ export const localDevBaseUrl = (envName: string) =>
 export const providerBaseUrls = Effect.map(localDevBaseUrl(OPENAI_BASE_URL_ENV), (openai) => ({
 	openai,
 }))
-
-const staticEnvApiKeyAuth = (name: string, envVar: string) => ({
-	name,
-	login: () => Promise.reject(new Error(`Interactive login is not supported for ${name}.`)),
-	resolve: async ({
-		ctx,
-		signal,
-	}: {
-		readonly ctx: { readonly env: (key: string) => Promise<string | undefined> }
-		readonly signal: AbortSignal
-	}) => {
-		signal.throwIfAborted()
-		const apiKey = await ctx.env(envVar)
-		signal.throwIfAborted()
-		if (apiKey !== undefined && apiKey.length > 0) {
-			return { auth: { apiKey }, source: envVar }
-		}
-		return undefined
-	},
-})
 
 const isObject = (value: unknown): value is object => typeof value === "object" && value !== null
 
@@ -237,7 +218,7 @@ export const createOpenAIProvider = (baseUrl?: string | null): Provider<"openai-
 		name: "OpenAI",
 		baseUrl: resolvedBaseUrl,
 		auth: {
-			apiKey: staticEnvApiKeyAuth("OpenAI API key", PROVIDER_API_KEY_ENV.openai),
+			apiKey: envApiKeyAuth("OpenAI API key", [PROVIDER_API_KEY_ENV.openai]),
 		},
 		models,
 		api: {
@@ -292,7 +273,7 @@ export const createAnthropicProvider = (): Provider<"anthropic-messages"> =>
 		name: "Anthropic",
 		baseUrl: DEFAULT_ANTHROPIC_BASE_URL,
 		auth: {
-			apiKey: staticEnvApiKeyAuth("Anthropic API key", PROVIDER_API_KEY_ENV.anthropic),
+			apiKey: envApiKeyAuth("Anthropic API key", [PROVIDER_API_KEY_ENV.anthropic]),
 		},
 		models: Object.values(ANTHROPIC_MODELS),
 		api: {
