@@ -21,6 +21,8 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
+import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import { optionalSecret } from "../Secrets.ts"
 import {
 	AgentBodyLimit,
@@ -67,37 +69,16 @@ const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined 
 	}
 }
 
-interface RejectionAnnotationInfo {
-	readonly httpApiStatus?: number
-	readonly description?: string
-}
-
-const rejectionAnnotationInfo = (err: unknown): RejectionAnnotationInfo | undefined => {
-	if (typeof err !== "object" || err === null) {
+// A rejection is a schema class, so its status and description are annotations on its AST.
+const rejectionAnnotationInfo = (err: unknown) => {
+	const rejection = Predicate.isObject(err) && "constructor" in err ? err.constructor : undefined
+	if (!Schema.isSchema(rejection)) {
 		return undefined
 	}
-	const ctor: unknown = "constructor" in err ? err.constructor : undefined
-	if ((typeof ctor !== "function" && typeof ctor !== "object") || ctor === null) {
-		return undefined
-	}
-	if (!("annotations" in ctor)) {
-		return undefined
-	}
-	const annotations = ctor.annotations
-	if (typeof annotations !== "object" || annotations === null) {
-		return undefined
-	}
-	const httpApiStatus =
-		"httpApiStatus" in annotations && typeof annotations.httpApiStatus === "number"
-			? annotations.httpApiStatus
-			: undefined
-	const description =
-		"description" in annotations && typeof annotations.description === "string"
-			? annotations.description
-			: undefined
+	const httpApiStatus = SchemaAST.resolveAt<unknown>("httpApiStatus")(rejection.ast)
 	return {
-		...(httpApiStatus === undefined ? {} : { httpApiStatus }),
-		...(description === undefined ? {} : { description }),
+		httpApiStatus: typeof httpApiStatus === "number" ? httpApiStatus : undefined,
+		description: SchemaAST.resolveDescription(rejection.ast),
 	}
 }
 
@@ -277,6 +258,78 @@ export const createCommandId = (
 		idempotencyKey,
 		stringifyCanonicalJson(payload),
 	])
+
+/**
+ * The id a create gives its resource, and the command id it sends under. With an
+ * `Idempotency-Key` both are derived from the key, and the command id from the body
+ * as well: a retry of the same body replays its receipt, and a different body reaches
+ * the resource the key already made, whose AlreadyExists answers 409.
+ */
+export const createIdentity = (
+	services: {
+		readonly digest: Digest.Digest["Service"]
+		readonly random: SecureRandom.SecureRandom["Service"]
+	},
+	resource: PendingResourceType,
+	prefix: string,
+	idempotencyKey: string | undefined,
+	payload: unknown,
+) =>
+	Effect.gen(function* () {
+		if (idempotencyKey === undefined) {
+			return { id: yield* randomId(services.random, prefix), sendOptions: undefined }
+		}
+		const id = yield* idempotentId(services.digest, prefix, [
+			"create",
+			resource,
+			"id",
+			idempotencyKey,
+		])
+		const commandId = yield* createCommandId(services.digest, resource, idempotencyKey, payload)
+		return { id, sendOptions: { commandId } }
+	})
+
+/**
+ * Reads a resource through its view. A view that has no row yet is not proof the
+ * resource is missing, so `missing` asks the aggregate (and fails with 404), and
+ * `projected` then waits for the row. `missingFirst` asks the aggregate before
+ * trusting the view, for a resource whose row can outlive it.
+ */
+export const readExisting = <S, E1, R1, E2, R2, E3, R3>(options: {
+	readonly current: Effect.Effect<Option.Option<S | null>, E1, R1>
+	readonly missing: Effect.Effect<void, E2, R2>
+	readonly projected: Effect.Effect<S | null, E3, R3>
+	readonly missingFirst?: boolean
+}) =>
+	Effect.gen(function* () {
+		if (options.missingFirst === true) {
+			yield* options.missing
+		}
+		const found = Option.getOrNull(yield* options.current)
+		if (found !== null) {
+			return found
+		}
+		yield* options.missing
+		const projected = yield* options.projected.pipe(Effect.tapError(() => options.missing))
+		// A wait matches fields of the row, so it never yields a missing one.
+		return projected ?? (yield* Effect.die(new Error("A view wait matched no row.")))
+	})
+
+/** Sends an archive command and returns the resource as its view shows it afterwards. */
+export const archiveAndRead = <const T extends PendingResourceType, Receipt, S, E1, R1, E2, R2>(
+	id: string,
+	type: T,
+	label: string,
+	archive: Effect.Effect<Receipt, E1, R1>,
+	read: (receipt: Receipt) => Effect.Effect<Option.Option<S | null>, E2, R2>,
+) =>
+	Effect.gen(function* () {
+		const result = yield* read(yield* archive).pipe(orPending(id, type))
+		if (isPending(result)) {
+			return result
+		}
+		return yield* present(result, 404, `${label} ${id} not found.`)
+	})
 
 // Ephemeral-keyed HMAC-SHA-256 verification via `Mac.Mac` (`Mac.layerWebCrypto`)
 // delegates tag comparison to native `crypto.subtle.verify("HMAC", ...)` instead

@@ -17,14 +17,13 @@ import { makeLister } from "./Listing.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	bestEffortAfterCommit,
-	createCommandId,
+	createIdentity,
 	handled,
-	idempotentId,
 	isPending,
 	orPending,
-	present,
-	randomId,
+	readExisting,
 	reject,
 } from "./HttpHelpers.ts"
 
@@ -41,29 +40,23 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
 
-		const retrieve = (id: EnvironmentId) =>
-			Effect.gen(function* () {
-				const checkExists = Effect.gen(function* () {
-					const committed = yield* environments.get(id)
-					if (committed.status === "" || committed.status === "deleted") {
-						return yield* reject(404, `Environment ${id} not found.`)
-					}
-				})
-				yield* checkExists
-				const ref = Environment.ref(id)
-				const found = Option.getOrNull(yield* environmentViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const projected = yield* environmentViews
-					.waitFor(ref, { version: { gte: 1 } }, { timeout: yield* EnvironmentReadWaitTimeout })
-					.pipe(Effect.tapErrorTag("WaitTimeout", () => checkExists))
-				if (projected === null) {
-					yield* checkExists
-					return yield* reject(503, `Environment ${id} projection is not ready.`)
-				}
-				return projected
+		// The aggregate is asked first: a view that lags a DELETE must not bring a deleted environment
+		// back.
+		const retrieve = (id: EnvironmentId) => {
+			const ref = Environment.ref(id)
+			return readExisting({
+				missingFirst: true,
+				current: environmentViews.get(ref),
+				missing: Effect.flatMap(environments.get(id), (committed) =>
+					committed.status === "" || committed.status === "deleted"
+						? reject(404, `Environment ${id} not found.`)
+						: Effect.void,
+				),
+				projected: Effect.flatMap(EnvironmentReadWaitTimeout, (timeout) =>
+					environmentViews.waitFor(ref, { version: { gte: 1 } }, { timeout }),
+				),
 			})
+		}
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -71,22 +64,15 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					const idempotencyKey = headers["idempotency-key"]
 					const description = payload.description ?? null
 					const config = payload.config ?? DEFAULT_ENVIRONMENT_CONFIG
-					let id: EnvironmentId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						id = EnvironmentId.make(
-							yield* idempotentId(digest, "env", ["create", "environment", "id", idempotencyKey]),
-						)
-						sendOptions = {
-							commandId: yield* createCommandId(digest, "environment", idempotencyKey, {
-								name: payload.name,
-								description,
-								config,
-							}),
-						}
-					} else {
-						id = EnvironmentId.make(yield* randomId(random, "env"))
-					}
+					const identity = yield* createIdentity(
+						{ digest, random },
+						"environment",
+						"env",
+						idempotencyKey,
+						{ name: payload.name, description, config },
+					)
+					const id = EnvironmentId.make(identity.id)
+					const sendOptions = identity.sendOptions
 					const receipt = yield* environments
 						.send(
 							new CreateEnvironment({
@@ -208,17 +194,14 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 				}).pipe(handled),
 			)
 			.handle("archive", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.environment_id
-					const receipt = yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
-					const result = yield* environmentViews
-						.get(Environment.ref(id), { atLeast: receipt })
-						.pipe(orPending(id, "environment"))
-					if (isPending(result)) {
-						return result
-					}
-					return yield* present(result, 404, `Environment ${id} not found.`)
-				}).pipe(handled),
+				archiveAndRead(
+					params.environment_id,
+					"environment",
+					"Environment",
+					environments.send(new ArchiveEnvironment({ environment_id: params.environment_id })),
+					(receipt) =>
+						environmentViews.get(Environment.ref(params.environment_id), { atLeast: receipt }),
+				).pipe(handled),
 			)
 	}),
 )
