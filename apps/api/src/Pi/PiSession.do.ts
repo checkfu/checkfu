@@ -5,7 +5,7 @@ import type { PiHarness } from "agents/harness/pi"
 import type { Lifecycle } from "agents/lifecycle"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
-import { createPiHarnessSettings } from "./PiContextBudget.ts"
+import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import {
 	abortPiDurableTurn,
 	finalizeSettledTurnFromStorage,
@@ -168,7 +168,7 @@ export const PiSessionLive = PiSession.make(
 								models: rejectRefusalCompactions(models),
 								registry: createCheckfuRegistry(),
 								onWake,
-								settings: createPiHarnessSettings(models),
+								settings: PI_HARNESS_SETTINGS,
 							},
 							context,
 						)

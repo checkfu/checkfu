@@ -8,7 +8,7 @@ import {
 import type { Cursor, Id, Storage } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
-import { createPiHarnessSettings } from "../../src/Pi/PiContextBudget.ts"
+import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
 import {
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
@@ -195,15 +195,14 @@ export const createInMemoryPiDurableBackend = async (
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
 
-	const settings = createPiHarnessSettings(models)
 	const pi = await PiHarnessRuntime.open(
 		storage,
 		{
 			models: rejectRefusalCompactions(models),
 			registry,
 			settings: {
-				...settings,
-				retry: { ...settings.retry, baseDelayMs: retryBaseDelayMs },
+				...PI_HARNESS_SETTINGS,
+				retry: { ...PI_HARNESS_SETTINGS.retry, baseDelayMs: retryBaseDelayMs },
 			},
 		},
 		BACKGROUND_CONTEXT,

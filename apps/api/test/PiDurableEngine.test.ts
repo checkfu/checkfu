@@ -21,7 +21,10 @@ import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import { createPiHarnessSettings } from "../src/Pi/PiContextBudget.ts"
+import {
+	PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
+	PI_HARNESS_SETTINGS,
+} from "../src/Pi/PiContextBudget.ts"
 import {
 	AbortGrace,
 	abortPiDurableTurn,
@@ -344,13 +347,22 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 	})
 
 	it("sizes compaction thresholds below small-context models like gpt-4 and compacts instead of overflowing", async () => {
-		const catalog = createPiModels({ openai: null, anthropic: null })
-		const settings = createPiHarnessSettings(catalog)
-		const gpt4Policy = settings.compaction.modelOverrides?.["openai/gpt-4"]
-		expect(gpt4Policy).toBeDefined()
-		expect(gpt4Policy?.backgroundTokens).toBe(0)
-		expect(gpt4Policy?.reserveTokens).toBeLessThan(8192)
-		expect(gpt4Policy?.keepRecentTokens).toBeLessThan(8192 - (gpt4Policy?.reserveTokens ?? 0))
+		// Every model too small for Pi's default thresholds has thresholds of its own that fit.
+		const overrides: Readonly<
+			Record<string, { readonly reserveTokens: number; readonly keepRecentTokens: number }>
+		> = PI_HARNESS_SETTINGS.compaction.modelOverrides
+		const small = createPiModels({ openai: null, anthropic: null })
+			.getModels()
+			.filter((model) => model.contextWindow < PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW)
+		expect(small.map((model) => `${model.provider}/${model.id}`).toSorted()).toEqual(
+			Object.keys(overrides).toSorted(),
+		)
+		for (const model of small) {
+			const policy = overrides[`${model.provider}/${model.id}`]
+			expect((policy?.reserveTokens ?? 0) + (policy?.keepRecentTokens ?? 0)).toBeLessThan(
+				model.contextWindow,
+			)
+		}
 
 		let compactionCalls = 0
 		const turnMessageCounts: Array<number> = []
