@@ -1,6 +1,5 @@
 import type { PiTool, PiToolCall, PiToolResult } from "@cloudflare/computer/tools/pi-ai"
 import type { Extension, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
 export type WorkspaceTool = PiTool
@@ -15,7 +14,29 @@ export const WORKSPACE_EXTENSION = "checkfu.workspace"
 const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 
 const WORKSPACE_PROMPT =
-	"You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths."
+	"You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths, and the git tool for version control."
+
+export const GIT_TOOL: WorkspaceTool = {
+	name: "git",
+	description:
+		'Run a git command in the workspace. `args` is everything after `git`, one argument per item, for example ["status"] or ["commit", "-m", "Fix the parser"]. `cwd` is the absolute path of the repository to run it in. fetch, pull and push reach only the repositories mounted in this session, and their credentials are supplied for you.',
+	parameters: {
+		type: "object",
+		properties: {
+			args: { type: "array", items: { type: "string" }, minItems: 1 },
+			cwd: { type: "string" },
+		},
+		required: ["args", "cwd"],
+		additionalProperties: false,
+	},
+}
+
+export const decodeGitToolArguments = Schema.decodeUnknownOption(
+	Schema.Struct({
+		args: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+		cwd: Schema.String.check(Schema.isMinLength(1)),
+	}),
+)
 
 /**
  * The largest image `read` sends inline. A tool result is stored as one row of the session's
@@ -32,7 +53,7 @@ const RESULT_LINES = 2000
 
 // A page of `read` is sent as a JSON string. Escaping turns one byte into at most six characters
 // (a control character as \u00XX), and the page's offsets and flags follow it.
-export const READ_PAGE_BYTES = 48 * 1024
+const READ_PAGE_BYTES = 48 * 1024
 const READ_RESULT_BYTES = READ_PAGE_BYTES * 6 + 4 * 1024
 
 export const WORKSPACE_TOOL_OPTIONS = {
@@ -159,7 +180,10 @@ const DECLARATIONS_ONLY = {
 
 export const workspaceToolDeclarations = async (): Promise<ReadonlyArray<WorkspaceTool>> => {
 	const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
-	return createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools
+	return [
+		...createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools,
+		GIT_TOOL,
+	]
 }
 
 const INTERRUPTED: ToolExecutionResult = {

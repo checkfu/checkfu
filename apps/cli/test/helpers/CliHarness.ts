@@ -126,12 +126,13 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				runTurn: effective.generate,
 				interrupt: effective.interrupt,
 				discardWorkspace: () => Effect.void,
+				storeRepositoryToken: () => Effect.void,
 			}),
 		)
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
 		)
-		const ServerLayer = CheckfuLive.pipe(
+		const ServerLayer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),

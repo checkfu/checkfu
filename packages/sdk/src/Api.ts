@@ -30,12 +30,19 @@ import {
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
+	GitHubRepositoryResource,
+	MAX_SESSION_REPOSITORIES,
 	NonEmptyString,
 	PositiveInt,
+	RepositoryCheckout,
+	RepositoryMountPath,
+	RepositoryToken,
+	RepositoryUrl,
 	ResourceId,
 	ResourceListCursor,
 	SessionEventFields,
 	SessionId,
+	SessionResourceId,
 	SessionSnapshot,
 	SessionTitle,
 	TextBlocks,
@@ -362,6 +369,32 @@ const AgentReference = Schema.Union([
 	Schema.Struct({ id: ResourceId, version: Schema.optionalKey(PositiveInt) }),
 ])
 
+export const GitHubRepositoryParams = Schema.Struct({
+	type: Schema.Literal("github_repository"),
+	url: RepositoryUrl.annotate({
+		description: "Repository URL, https://github.com/<owner>/<repository>",
+	}),
+	authorization_token: Schema.optionalKey(
+		RepositoryToken.annotate({
+			description: "GitHub token used to clone and push. Never returned.",
+		}),
+	),
+	checkout: Schema.optionalKey(
+		Schema.NullOr(RepositoryCheckout).annotate({
+			description: "Branch or commit to check out. Defaults to the default branch.",
+		}),
+	),
+	mount_path: Schema.optionalKey(
+		RepositoryMountPath.annotate({
+			description: "Where the repository is cloned. Defaults to /workspace/<repository>.",
+		}),
+	),
+})
+
+const CreateSessionResources = Schema.Array(GitHubRepositoryParams).check(
+	Schema.isMaxLength(MAX_SESSION_REPOSITORIES),
+)
+
 const CreateSessionCommonFields = {
 	agent_version: Schema.optionalKey(
 		PositiveInt.annotate({ description: "Optional pinned agent version" }),
@@ -369,6 +402,11 @@ const CreateSessionCommonFields = {
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
 		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
+	),
+	resources: Schema.optionalKey(
+		CreateSessionResources.annotate({
+			description: "Repositories to mount in the session's workspace",
+		}),
 	),
 }
 
@@ -462,9 +500,23 @@ export const EnvironmentDeleted = Schema.Struct({
 })
 export type EnvironmentDeleted = typeof EnvironmentDeleted.Type
 
+export const SessionResourceItem = Schema.Struct({
+	...GitHubRepositoryResource.fields,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type SessionResourceItem = typeof SessionResourceItem.Type
+
+export const UpdateSessionResourceBody = Schema.Struct({
+	authorization_token: RepositoryToken.annotate({
+		description: "New GitHub token for the repository. Never returned.",
+	}),
+})
+
 export const SessionResource = Schema.Struct({
-	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
+	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version", "resources"]),
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
+	resources: Schema.Array(SessionResourceItem),
 })
 export type Session = typeof SessionResource.Type
 
@@ -750,6 +802,10 @@ const environmentParams = {
 const sessionParams = { session_id: SessionId.annotate({ description: "Session ID" }) }
 const automationParams = {
 	automation_id: AutomationId.annotate({ description: "Automation ID" }),
+}
+const sessionResourceParams = {
+	...sessionParams,
+	resource_id: SessionResourceId.annotate({ description: "Session resource ID" }),
 }
 
 const IdempotencyHeaders = Schema.Struct({
@@ -1195,6 +1251,58 @@ const Sessions = HttpApiGroup.make("sessions")
 						},
 					],
 				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listResources", "/v1/sessions/:session_id/resources", {
+			params: sessionParams,
+			success: Schema.Struct({ data: Schema.Array(SessionResourceItem) }),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List session resources")
+			.annotate(OpenApi.Description, "List what is mounted in a session's workspace")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.resources",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "listResources" },
+				"x-checkfu-mcp": { name: "sessions_listResources" },
+				"x-checkfu-cli": {
+					groupDescription: "List session resources and rotate their credentials",
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getResource", "/v1/sessions/:session_id/resources/:resource_id", {
+			params: sessionResourceParams,
+			success: SessionResourceItem,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a session resource")
+			.annotate(OpenApi.Description, "Retrieve one resource mounted in a session's workspace")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.resources",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "getResource" },
+				"x-checkfu-mcp": { name: "sessions_getResource" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("updateResource", "/v1/sessions/:session_id/resources/:resource_id", {
+			params: sessionResourceParams,
+			payload: UpdateSessionResourceBody,
+			success: SessionResourceItem,
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Rotate a repository's token")
+			.annotate(
+				OpenApi.Description,
+				"Replace the GitHub token a mounted repository clones and pushes with",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.resources",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "updateResource" },
+				"x-checkfu-mcp": false,
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage sessions")

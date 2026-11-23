@@ -39,6 +39,8 @@ import {
 	harnessCall,
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
+import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
@@ -173,6 +175,20 @@ export const makeScriptedPiModels = (
 	return models
 }
 
+/** The hosted model plus the harness port the HTTP layer hands repository tokens to. */
+export const checkfuWithHarness = <E, R>(
+	executor: Layer.Layer<PiTurnExecutor, E, R>,
+	harness = PiDurableHarnessLive,
+) => {
+	const hosted = Checkfu.layer(
+		CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(harness)),
+	).pipe(Layer.provide(executor))
+	return Layer.mergeAll(
+		hosted,
+		PiDurableHarnessLive.pipe(Layer.provide(executor), Layer.provide(hosted)),
+	)
+}
+
 export const makePiDurableTestLayer = (
 	handler: (
 		model: Model<Api>,
@@ -256,6 +272,12 @@ export const makePiDurableTestLayer = (
 	const unreachable = new Set<string>()
 	const conversations: Array<string> = []
 	const discardedWorkspaces: Array<string> = []
+	const preparedWorkspaces: Array<{
+		readonly sessionId: string
+		readonly repositories: ReadonlyArray<RepositoryMount>
+	}> = []
+	const repositoryTokens = new Map<string, string>()
+	const preparations: Array<WorkspacePreparation> = []
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -285,6 +307,15 @@ export const makePiDurableTestLayer = (
 				),
 		},
 		{
+			prepareWorkspace: (sessionId, repositories) =>
+				Effect.sync(() => {
+					preparedWorkspaces.push({ sessionId, repositories })
+					return preparations.shift() ?? { ok: true }
+				}),
+			storeRepositoryToken: (sessionId, resourceId, token) =>
+				Effect.sync(() => {
+					repositoryTokens.set(`${sessionId}/${resourceId}`, token)
+				}),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -344,6 +375,9 @@ export const makePiDurableTestLayer = (
 		conversations,
 		resets,
 		discardedWorkspaces,
+		preparedWorkspaces,
+		repositoryTokens,
+		preparations,
 	}
 }
 

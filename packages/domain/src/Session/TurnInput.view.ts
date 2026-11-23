@@ -6,12 +6,14 @@ import { SessionStatusIdle } from "./CommitModelReply.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { Session } from "./Session.aggregate.ts"
+import { SessionResources } from "./SessionResource.ts"
 import { MessageText, NonNegativeInt, PositiveInt, ResourceId } from "./SessionTypes.ts"
 
 export const TurnInputState = Schema.Struct({
 	agent_id: ResourceId,
 	agent_version: PositiveInt,
 	environment_id: ResourceId,
+	resources: SessionResources,
 	turn: NonNegativeInt,
 	input: Schema.Array(MessageText),
 	unsent: Schema.Array(MessageText),
@@ -42,6 +44,7 @@ export class TurnInput extends Domain.View("TurnInput", {
 						agent_id: e.agent_id,
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,
+						resources: e.resources,
 						turn: 0,
 						input: [],
 						unsent: [],

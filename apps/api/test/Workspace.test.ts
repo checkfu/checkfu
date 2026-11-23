@@ -125,6 +125,7 @@ describe("session workspace", () => {
 			"write",
 			"edit",
 			"delete",
+			"git",
 		])
 		expect(declared.every(({ description }) => description.length > 0)).toBe(true)
 	})

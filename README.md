@@ -112,6 +112,31 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 
 Every session has a durable workspace: a filesystem that lasts for the whole session and survives restarts. The agent works in it with `read`, `ls`, `find`, `grep`, `write`, `edit` and `delete` tools, starting from `/workspace`. The workspace runs in the harness Worker, beside the session object whose tools use it, and the API reaches it only through that Worker. It is discarded when the session terminates.
 
+### GitHub repositories
+
+Mount repositories when you create a session. Each is cloned into the workspace before the first turn, at `/workspace/<repository>` unless you set `mount_path`:
+
+```sh
+curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/sessions" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" -H "Content-Type: application/json" \
+  -d "$(jq -n --arg agent "$AGENT_ID" --arg env "$ENV_ID" --arg token "$GITHUB_TOKEN" '{
+    agent: $agent,
+    environment_id: $env,
+    resources: [{
+      type: "github_repository",
+      url: "https://github.com/acme/api",
+      authorization_token: $token,
+      checkout: {type: "branch", name: "main"}
+    }]
+  }')"
+```
+
+- `authorization_token` is optional for public repositories. It is held only by the session's workspace, is never returned or shown to the model, and is erased with the workspace. Replace it with `POST /v1/sessions/{session_id}/resources/{resource_id}`.
+- `checkout` takes a branch (`{type: "branch", name}`) or a full commit (`{type: "commit", sha}`); the default branch is used without it. A branch is cloned at its latest commit only.
+- The agent has a `git` tool: it can commit in the workspace and fetch, pull and push to the session's mounted repositories. No other repository is reachable.
+- A session takes up to 8 repositories. Their mount paths must be inside `/workspace` and must not contain one another.
+- If a clone fails, the turn ends with a `session.error` of type `repository_unavailable`, and the next turn tries again.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

@@ -46,12 +46,15 @@ const optionalConfigString = (name: string): Config.Config<string | null> =>
 
 const EXPLICIT_LOOPBACK_PORT = /^http:\/\/(?:127\.0\.0\.1|\[::1\]):(\d+)(?:\/|$)/i
 
-export const parseLoopbackBaseUrl = (raw: string): string => {
+export const parseLoopbackBaseUrl = (
+	raw: string,
+	envName: string = OPENAI_BASE_URL_ENV,
+): string => {
 	let parsed: URL
 	try {
 		parsed = new URL(raw)
 	} catch {
-		throw new TypeError(`Invalid ${OPENAI_BASE_URL_ENV}: must be a valid URL.`)
+		throw new TypeError(`Invalid ${envName}: must be a valid URL.`)
 	}
 	const portMatch = EXPLICIT_LOOPBACK_PORT.exec(raw)
 	const portNumber = portMatch?.[1] === undefined ? Number.NaN : Number(portMatch[1])
@@ -70,7 +73,7 @@ export const parseLoopbackBaseUrl = (raw: string): string => {
 		raw.includes("#")
 	) {
 		throw new TypeError(
-			`Refusing non-loopback ${OPENAI_BASE_URL_ENV}: only http://127.0.0.1:<port> or http://[::1]:<port> URLs are allowed.`,
+			`Refusing non-loopback ${envName}: only http://127.0.0.1:<port> or http://[::1]:<port> URLs are allowed.`,
 		)
 	}
 	const pathname = parsed.pathname.replace(/\/+$/, "")
@@ -82,41 +85,48 @@ const resolveOpenAIBaseUrl = (override?: string | null): string =>
 		? DEFAULT_OPENAI_BASE_URL
 		: parseLoopbackBaseUrl(override)
 
-export const providerBaseUrls = Effect.gen(function* () {
-	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
-	if (Option.isSome(alchemyContext)) {
-		if (!alchemyContext.value.dev) {
-			return { openai: null }
+/**
+ * Reads a base-URL override that only local development may set: it must be a
+ * loopback URL, and it is ignored by production stages and by deployed plans.
+ */
+export const localDevBaseUrl = (envName: string) =>
+	Effect.gen(function* () {
+		const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
+		if (Option.isSome(alchemyContext)) {
+			if (!alchemyContext.value.dev) {
+				return null
+			}
+			const stage = yield* Effect.serviceOption(Stage)
+			if (Option.isSome(stage) && stage.value === "production") {
+				return null
+			}
+			const raw = yield* optionalConfigString(envName)
+			if (raw === null) {
+				return null
+			}
+			const baseUrl = parseLoopbackBaseUrl(raw, envName)
+			const runtimeContext = yield* CurrentRuntimeContext
+			yield* (
+				runtimeContext?.set(LOCAL_DEV_SIGNAL_ENV, Output.literal(LOCAL_DEV_SIGNAL_VALUE)) ??
+				Effect.void
+			)
+			return baseUrl
 		}
-		const stage = yield* Effect.serviceOption(Stage)
-		if (Option.isSome(stage) && stage.value === "production") {
-			return { openai: null }
+		const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
+		if (runtimeStage === "production") {
+			return null
 		}
-		const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
-		if (rawOpenAI === null) {
-			return { openai: null }
+		const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
+		if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) {
+			return null
 		}
-		const openai = parseLoopbackBaseUrl(rawOpenAI)
-		const runtimeContext = yield* CurrentRuntimeContext
-		yield* (
-			runtimeContext?.set(LOCAL_DEV_SIGNAL_ENV, Output.literal(LOCAL_DEV_SIGNAL_VALUE)) ??
-			Effect.void
-		)
-		return { openai }
-	}
-	const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
-	if (runtimeStage === "production") {
-		return { openai: null }
-	}
-	const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
-	if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) {
-		return { openai: null }
-	}
-	const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
-	return {
-		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),
-	}
-}).pipe(Effect.orDie)
+		const raw = yield* optionalConfigString(envName)
+		return raw === null ? null : parseLoopbackBaseUrl(raw, envName)
+	}).pipe(Effect.orDie)
+
+export const providerBaseUrls = Effect.map(localDevBaseUrl(OPENAI_BASE_URL_ENV), (openai) => ({
+	openai,
+}))
 
 const staticEnvApiKeyAuth = (name: string, envVar: string) => ({
 	name,

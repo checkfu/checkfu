@@ -14,13 +14,16 @@ import {
 	measureBundle,
 } from "./BundleBudget.ts"
 import { removeStage } from "./StageCleanup.ts"
+import { startFakeGitHubServer } from "./FakeGitHubServer.ts"
+import type { FakeGitHubServer } from "./FakeGitHubServer.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
-import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
+import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
 const TEST_OPENAI_KEY = "sk-workerd-fake-key"
 const TEST_ANTHROPIC_KEY = "sk-ant-workerd-fake-key"
+const TEST_GITHUB_TOKEN = "ghp_workerd_fake_token"
 const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
 }
@@ -132,7 +135,7 @@ const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyAr
 	return Object.keys(saved.props?.env ?? {})
 }
 
-const startAlchemyDev = async (openAIBaseUrl: string) => {
+const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
@@ -144,6 +147,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				`OPENAI_API_KEY=${TEST_OPENAI_KEY}`,
 				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
+				`CHECKFU_GITHUB_BASE_URL=${gitHubBaseUrl}`,
 				"",
 			].join("\n"),
 			{ flag: "wx", mode: 0o600 },
@@ -158,6 +162,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.OPENAI_API_KEY
 	delete childEnv.ANTHROPIC_API_KEY
 	delete childEnv.CHECKFU_OPENAI_BASE_URL
+	delete childEnv.CHECKFU_GITHUB_BASE_URL
 	delete childEnv.CHECKFU_LOCAL_DEV
 	delete childEnv.ALCHEMY_STAGE
 	delete childEnv.ALCHEMY_PROFILE
@@ -301,6 +306,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
+	let fakeGitHub: FakeGitHubServer
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
@@ -429,7 +435,12 @@ describe("PiSession real Durable Object under workerd", () => {
 			outputTokens: 9,
 		}))
 
-		const worker = await startAlchemyDev(fakeOpenAI.baseUrl)
+		fakeGitHub = await startFakeGitHubServer([
+			{ name: "acme/api", files: { "README.md": "# Acme API\n" }, token: TEST_GITHUB_TOKEN },
+			{ name: "acme/secret", files: { "KEYS.md": "do not read\n" }, token: "ghp_another_token" },
+		])
+
+		const worker = await startAlchemyDev(fakeOpenAI.baseUrl, fakeGitHub.baseUrl)
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
@@ -455,6 +466,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	afterAll(async () => {
 		await stopWorker?.()
 		await fakeOpenAI?.close()
+		await fakeGitHub?.close()
 	}, 30_000)
 
 	it("serves the OpenAPI document as a static asset, without running the Worker", async () => {
@@ -678,6 +690,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			"write",
 			"edit",
 			"delete",
+			"git",
 		])
 		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
 
@@ -726,6 +739,118 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
 	}, 60_000)
+	it("clones a private repository with its token, lets the agent commit and push, and reaches no other repository", async () => {
+		const repo = "/workspace/api"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Read the readme.": [
+					{ kind: "tool_call", name: "read", arguments: { path: `${repo}/README.md` } },
+				],
+				"Add a changelog and push it.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${repo}/CHANGELOG.md`, content: "## 1.0.1\n" },
+					},
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["add", "CHANGELOG.md"], cwd: repo },
+					},
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["commit", "-m", "Add changelog"], cwd: repo },
+					},
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["push", "origin", "main"], cwd: repo },
+					},
+				],
+				"Clone the secret repository.": [
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: {
+							args: ["clone", "https://github.com/acme/secret", "/workspace/secret"],
+							cwd: "/workspace",
+						},
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.at(-1) ?? ""}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		const session = await createResource<
+			SessionResource & {
+				readonly resources: ReadonlyArray<{ readonly id: string; readonly mount_path: string }>
+			}
+		>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		expect(session.resources.map((resource) => resource.mount_path)).toEqual([repo])
+		expect(JSON.stringify(session)).not.toContain(TEST_GITHUB_TOKEN)
+
+		const turn = async (text: string, number: number) => {
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 60_000)
+			const replies = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message")
+			return replies.at(-1)?.content?.[0]?.text ?? ""
+		}
+
+		expect(await turn("Read the readme.", 1)).toContain("# Acme API")
+		const basic = `Basic ${Buffer.from(`x-access-token:${TEST_GITHUB_TOKEN}`).toString("base64")}`
+		expect(fakeGitHub.requests.length).toBeGreaterThan(0)
+		expect(fakeGitHub.requests.map((request) => request.authorization)).toEqual(
+			fakeGitHub.requests.map(() => basic),
+		)
+		expect(fakeGitHub.requests.map((request) => request.status)).toEqual(
+			fakeGitHub.requests.map(() => 200),
+		)
+
+		await turn("Add a changelog and push it.", 2)
+		expect(
+			fakeGitHub.git("acme/api", "log", "--format=%s|%an|%ae", "main").trim().split("\n"),
+		).toEqual(["Add changelog|Checkfu|agent@checkfu.com", "Initial commit|Owner|owner@example.com"])
+		expect(fakeGitHub.git("acme/api", "show", "main:CHANGELOG.md")).toBe("## 1.0.1\n")
+
+		const refusal = await turn("Clone the secret repository.", 3)
+		expect(refusal).toContain("Done: ")
+		expect(refusal).not.toBe("Done: ")
+		expect(
+			fakeGitHub.requests.filter((request) => request.path.startsWith("/acme/secret")),
+		).toEqual([])
+
+		const requests = fakeOpenAI.requests.slice(startCount)
+		expect(requests[0]?.toolNames).toContain("git")
+		expect(
+			requests[0]?.messages.some((message) =>
+				message.text.includes(`- ${repo}: https://github.com/acme/api (default branch)`),
+			),
+		).toBe(true)
+		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(TEST_GITHUB_TOKEN)
+		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(basic)
+	}, 180_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"

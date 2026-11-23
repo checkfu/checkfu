@@ -2175,6 +2175,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					JSON.stringify({
 						id: "sess_subproc",
 						type: "session",
+						resources: [],
 						status: "idle",
 						agent: { id: "agent_1", version: 1 },
 						environment_id: "env_1",
@@ -3043,6 +3044,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						JSON.stringify({
 							id: "sess_pty",
 							type: "session",
+							resources: [],
 							status: "running",
 							turn: 1,
 							usage: { input_tokens: 0, output_tokens: 0 },
@@ -4496,6 +4498,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					JSON.stringify({
 						id: "sess_env",
 						type: "session",
+						resources: [],
 						status: "idle",
 						turn: 0,
 						usage: { input_tokens: 0, output_tokens: 0 },

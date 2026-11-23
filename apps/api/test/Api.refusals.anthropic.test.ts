@@ -21,7 +21,7 @@ import { createPiModels } from "../src/Pi/PiModels.ts"
 import { DEFAULT_REFUSAL_TEXT, PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
-	TEST_API_KEY,
+	checkfuWithHarness,
 	extractLastUserText,
 	makeAssistantReply,
 	makePiDurableTestLayer,
@@ -29,6 +29,7 @@ import {
 	readSseUntil,
 	sendAndSettle,
 	sendRequest,
+	TEST_API_KEY,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
@@ -189,7 +190,11 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(PiDurableHarnessLive),
 			),
 		).pipe(Layer.provide(executorLayer))
-		const layer = CheckfuLive.pipe(
+		const HarnessLive = PiDurableHarnessLive.pipe(
+			Layer.provide(executorLayer),
+			Layer.provide(CheckfuLive),
+		)
+		const layer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -1056,13 +1061,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 								)
 					}),
 			})
-			const normalizedLayer = Checkfu.layer(
-				CheckfuHandlersLive.pipe(
-					Layer.provide(ListingStore.memory),
-					Layer.provide(PiDurableHarnessLive),
-				),
-			).pipe(
-				Layer.provide(normalizedExecutor),
+			const normalizedLayer = checkfuWithHarness(normalizedExecutor).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -1267,13 +1266,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 								)
 					}),
 			})
-			const unnormalizedLayer = Checkfu.layer(
-				CheckfuHandlersLive.pipe(
-					Layer.provide(ListingStore.memory),
-					Layer.provide(PiDurableHarnessLive),
-				),
-			).pipe(
-				Layer.provide(unnormalizedExecutor),
+			const unnormalizedLayer = checkfuWithHarness(unnormalizedExecutor).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),

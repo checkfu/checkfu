@@ -35,6 +35,14 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
+			prepareWorkspace: (sessionId, repositories) =>
+				harnessCall(Effect.suspend(() => workspace(sessionId).prepare(repositories))).pipe(
+					Effect.withSpan("SessionWorkspace.prepare"),
+				),
+			storeRepositoryToken: (sessionId, resourceId, token) =>
+				harnessCall(
+					Effect.suspend(() => workspace(sessionId).storeRepositoryToken(resourceId, token)),
+				).pipe(Effect.withSpan("SessionWorkspace.storeRepositoryToken")),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),
@@ -51,9 +59,16 @@ const CheckfuLive = Checkfu.layer(
 	),
 ).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
 
+// The HTTP layer hands repository tokens to the same harness the session policies use.
+const HarnessLive = PiDurableHarnessLive.pipe(
+	Layer.provide(PiSessionExecutorLive),
+	Layer.provide(CheckfuLive),
+)
+
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
+	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,

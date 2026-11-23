@@ -178,9 +178,11 @@ describe("Checkfu MCP server", () => {
 				"environments_updateEnvironment",
 				"sessions_archiveSession",
 				"sessions_createSession",
+				"sessions_getResource",
 				"sessions_getSession",
 				"sessions_listEvents",
 				"sessions_listSessions",
+				"sessions_listResources",
 				"sessions_sendSessionEvents",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
@@ -219,9 +221,11 @@ describe("Checkfu MCP server", () => {
 				environments_updateEnvironment: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
+				sessions_getResource: "read-only, additive, repeatable",
 				sessions_getSession: "read-only, additive, repeatable",
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
+				sessions_listResources: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
@@ -388,11 +392,23 @@ describe("Checkfu MCP server", () => {
 				environments_updateEnvironment: { ...environment, body: { version: 1, config } },
 				sessions_archiveSession: session,
 				sessions_createSession: {
-					body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
+					body: {
+						agent: { id: "agent_1", version: 1 },
+						environment_id: "env_1",
+						resources: [
+							{
+								type: "github_repository",
+								url: "https://github.com/acme/api",
+								checkout: { type: "branch", name: "main" },
+							},
+						],
+					},
 				},
+				sessions_getResource: { path: { session_id: "sess_1", resource_id: "sesrsc_1" } },
 				sessions_getSession: session,
 				sessions_listEvents: { ...session, query: { limit: "5" } },
 				sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
+				sessions_listResources: session,
 				sessions_sendSessionEvents: {
 					...session,
 					body: {

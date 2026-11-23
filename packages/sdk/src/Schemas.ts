@@ -268,6 +268,114 @@ export const SessionEventFields = {
 
 export type SessionEventType = keyof typeof SessionEventFields
 
+// ---------------------------------------------------------------------------
+// Session resources
+// ---------------------------------------------------------------------------
+
+export const MAX_SESSION_REPOSITORIES = 8
+export const MAX_MOUNT_PATH_LENGTH = 1024
+export const MAX_BRANCH_NAME_LENGTH = 255
+export const REPOSITORY_MOUNT_ROOT = "/workspace"
+
+export const SessionResourceId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+).pipe(Schema.brand("SessionResourceId"))
+export type SessionResourceId = typeof SessionResourceId.Type
+
+// A path segment other than "." and "..", with no slash, backslash or control character.
+// Written without lookaround and without Unicode classes, so that every engine a client
+// validates the published schema with can run it.
+const SEGMENT_CHAR = String.raw`[^/\\\u0000-\u001f\u007f-\u009f]`
+const SEGMENT_START = String.raw`[^/\\.\u0000-\u001f\u007f-\u009f]`
+const PATH_SEGMENT = String.raw`(?:${SEGMENT_START}${SEGMENT_CHAR}*|\.${SEGMENT_START}${SEGMENT_CHAR}*|\.\.${SEGMENT_CHAR}+)`
+
+/** An absolute path whose every segment is a name. */
+export const ABSOLUTE_PATH = new RegExp(`^(?:/${PATH_SEGMENT})+$`, "u")
+
+export const MountPath = Schema.String.check(
+	Schema.isMaxLength(MAX_MOUNT_PATH_LENGTH),
+	Schema.isPattern(ABSOLUTE_PATH),
+)
+
+export const RepositoryMountPath = MountPath.check(
+	Schema.isPattern(/^\/workspace\/./u, {
+		expected: `a path inside ${REPOSITORY_MOUNT_ROOT}`,
+	}),
+)
+
+const REPOSITORY_URL =
+	/^https:\/\/github\.com\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/u
+
+const isRepositoryName = (url: string): boolean => {
+	const name = url.slice(url.lastIndexOf("/") + 1)
+	return name !== "." && name !== ".." && !name.endsWith(".git")
+}
+
+export const RepositoryUrl = Schema.String.check(
+	Schema.isMaxLength(MAX_MOUNT_PATH_LENGTH),
+	Schema.isPattern(REPOSITORY_URL, {
+		expected: "a repository URL of the form https://github.com/<owner>/<repository>",
+	}),
+	Schema.makeFilter(isRepositoryName, {
+		expected: "a repository name without a trailing .git",
+	}),
+)
+
+export const MAX_REPOSITORY_TOKEN_LENGTH = 4096
+
+// Held only by the session's workspace: no event, view or saga step carries it.
+export const RepositoryToken = Schema.Redacted(
+	Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_REPOSITORY_TOKEN_LENGTH)),
+)
+export type RepositoryToken = typeof RepositoryToken.Type
+
+export const RepositoryCheckout = Schema.Union([
+	Schema.Struct({
+		type: Schema.Literal("branch"),
+		name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_BRANCH_NAME_LENGTH)),
+	}),
+	Schema.Struct({
+		type: Schema.Literal("commit"),
+		sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/u)),
+	}),
+])
+export type RepositoryCheckout = typeof RepositoryCheckout.Type
+
+export const GitHubRepositoryResource = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("github_repository"),
+	url: RepositoryUrl,
+	mount_path: RepositoryMountPath,
+	checkout: Schema.NullOr(RepositoryCheckout),
+})
+export type GitHubRepositoryResource = typeof GitHubRepositoryResource.Type
+
+export const SessionMount = GitHubRepositoryResource
+export type SessionMount = typeof SessionMount.Type
+
+export const mountsOverlap = (a: string, b: string): boolean =>
+	a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+
+const haveDisjointMounts = (resources: ReadonlyArray<SessionMount>): boolean =>
+	resources.every((resource, index) =>
+		resources
+			.slice(index + 1)
+			.every((other) => !mountsOverlap(resource.mount_path, other.mount_path)),
+	)
+
+const haveDistinctIds = (resources: ReadonlyArray<SessionMount>): boolean =>
+	new Set(resources.map((resource) => resource.id)).size === resources.length
+
+export const SessionMounts = Schema.Array(SessionMount).check(
+	Schema.isMaxLength(MAX_SESSION_REPOSITORIES),
+	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),
+	Schema.makeFilter(haveDisjointMounts, {
+		expected: "mount paths that are neither equal nor inside one another",
+	}),
+)
+export type SessionMounts = typeof SessionMounts.Type
+
 export const SessionSnapshot = Schema.Struct({
 	id: SessionId,
 	type: Schema.Literal("session"),
@@ -276,6 +384,7 @@ export const SessionSnapshot = Schema.Struct({
 	agent_version: PositiveInt,
 	environment_id: Schema.String,
 	title: Schema.NullOr(Schema.String),
+	resources: SessionMounts,
 	turn: NonNegativeInt,
 	usage: ModelUsage,
 	created_at: Schema.DateTimeUtc,

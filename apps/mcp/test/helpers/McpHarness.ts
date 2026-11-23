@@ -37,10 +37,15 @@ export const makeTestServer = Effect.gen(function* () {
 				}),
 			interrupt: () => Effect.void,
 			discardWorkspace: () => Effect.void,
+			storeRepositoryToken: () => Effect.void,
 		}),
 	)
-	const ApiLayer = Checkfu.layer(
-		CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
+	// The HTTP layer hands repository tokens to the harness, so it needs the port too.
+	const ApiLayer = Layer.mergeAll(
+		Checkfu.layer(
+			CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
+		),
+		HarnessLive,
 	).pipe(
 		Layer.provide(Domain.InMemory),
 		Layer.provideMerge(Digest.layerWebCrypto),
