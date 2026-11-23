@@ -3,12 +3,13 @@ import * as Schema from "effect/Schema"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
-import { NonEmptyString, NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
+import { NonEmptyString, NonNegativeInt, PositiveInt, SessionEventFields } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 
-export class SpanModelRequestStart extends Domain.Event("span.model_request_start", {
-	model_request_start_id: NonEmptyString,
-}) {}
+export class SpanModelRequestStart extends Domain.Event(
+	"span.model_request_start",
+	SessionEventFields["span.model_request_start"],
+) {}
 
 export class DuplicateModelRequest extends Domain.Rejection(
 	"DuplicateModelRequest",

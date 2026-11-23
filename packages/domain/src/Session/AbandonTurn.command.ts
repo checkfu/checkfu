@@ -7,12 +7,13 @@ import {
 	ErrorType,
 	NonNegativeInt,
 	PositiveInt,
-	SessionErrorBody,
+	SessionEventFields,
 } from "./SessionTypes.ts"
 
-export class SessionErrorEvent extends Domain.Event("session.error", {
-	error: SessionErrorBody,
-}) {}
+export class SessionErrorEvent extends Domain.Event(
+	"session.error",
+	SessionEventFields["session.error"],
+) {}
 
 export class TurnAbandoned extends Domain.Event("turn.abandoned", {
 	turn: PositiveInt,

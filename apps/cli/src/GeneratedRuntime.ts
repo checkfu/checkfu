@@ -1,17 +1,20 @@
-import { CheckfuApi } from "@checkfu/api/Http/Api"
-import type { ApiError } from "@checkfu/api/Http/Api"
+import { CheckfuApi } from "@checkfu/sdk/Api"
+import type { ApiError } from "@checkfu/sdk/Api"
+import { APIConnectionError } from "@checkfu/sdk/Errors"
+import type { ApiSseError } from "@checkfu/sdk/Sse"
+import { validatePathSegment as sdkValidatePathSegment } from "@checkfu/sdk/Transport"
 import type * as Command from "effect/cli/Command"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientError from "effect/http/HttpClientError"
+import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import type * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { validateSessionEventData } from "./Client.ts"
 import { formatClientError, isApiErrorEnvelope, usageError } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { diagnoseSessionCreateNotFound, ensureIdempotencyKeyHeader } from "./Hooks.ts"
@@ -76,18 +79,8 @@ const lookupEndpoint = (
 }
 
 const validatePathSegment = (value: string, label: string): Effect.Effect<string, CliFailure> => {
-	if (
-		value.length === 0 ||
-		value === "." ||
-		value === ".." ||
-		value.includes("/") ||
-		value.includes("\\")
-	) {
-		return Effect.fail(
-			usageError(`Invalid ${label}: must be a single non-empty path segment (not "." or "..").`),
-		)
-	}
-	return Effect.succeed(value)
+	const err = sdkValidatePathSegment(value, label)
+	return err === undefined ? Effect.succeed(value) : Effect.fail(usageError(err))
 }
 
 const decodeWithTop = (
@@ -346,36 +339,14 @@ export const invokeGeneratedOperation = (
 		yield* renderOutput(result)
 	})
 
-const resolveEndpointPath = (
-	template: string,
-	params: Readonly<Record<string, string>>,
-	label: string,
-): Effect.Effect<string, CliFailure> =>
-	Effect.gen(function* () {
-		let invalidReason: string | undefined
-		const resolved = template.replaceAll(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
-			const value = params[name]
-			if (value === undefined) {
-				invalidReason = `Missing required path parameter "${name}" for ${label}.`
-				return ""
-			}
-			if (
-				value.length === 0 ||
-				value === "." ||
-				value === ".." ||
-				value.includes("/") ||
-				value.includes("\\")
-			) {
-				invalidReason = `Invalid path parameter "${name}" for ${label}: must be a single non-empty path segment (not "." or "..").`
-				return ""
-			}
-			return encodeURIComponent(value)
-		})
-		if (invalidReason !== undefined) {
-			return yield* usageError(invalidReason)
-		}
-		return resolved
-	})
+type UntypedStreamMethod = (request: {
+	readonly params?: unknown
+	readonly query?: unknown
+	readonly headers?: unknown
+	readonly responseMode: "response-only"
+}) => Effect.Effect<HttpClientResponse.HttpClientResponse, ApiSseError>
+
+const decodeGenericStreamJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 export const invokeGeneratedStream = (
 	spec: GeneratedOperationDescriptor,
@@ -394,63 +365,61 @@ export const invokeGeneratedStream = (
 		const endpoint = yield* lookupEndpoint(spec.apiGroup, spec.apiEndpoint)
 		const parts = yield* collectRequestParts(spec, rawFlags)
 
-		if (endpoint.params !== undefined) {
-			yield* decodeWithTop(endpoint.params, parts.params, `${spec.cliLabel} params`)
-		}
-		if (endpoint.query !== undefined) {
-			yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
-		}
-		if (endpoint.headers !== undefined) {
-			yield* decodeWithTop(endpoint.headers, parts.headers, `${spec.cliLabel} headers`)
-		}
-
-		const resolvedPath = yield* resolveEndpointPath(endpoint.path, parts.params, spec.cliLabel)
-		const afterRaw = parts.query["after"]
-		const isSessionStream = spec.apiGroup === "sessions" && spec.apiEndpoint === "streamEvents"
-		let lastEmittedSeq: number | undefined
-		if (isSessionStream && afterRaw !== undefined) {
-			const parsedAfter = Number(afterRaw)
-			if (Number.isInteger(parsedAfter) && parsedAfter >= 0) {
-				lastEmittedSeq = parsedAfter
-			}
-		}
+		const decodedParams =
+			endpoint.params !== undefined
+				? yield* decodeWithTop(endpoint.params, parts.params, `${spec.cliLabel} params`)
+				: undefined
+		const decodedQuery =
+			endpoint.query !== undefined
+				? yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
+				: undefined
+		const decodedHeaders =
+			endpoint.headers !== undefined
+				? yield* decodeWithTop(endpoint.headers, parts.headers, `${spec.cliLabel} headers`)
+				: undefined
 
 		const client = yield* getClient
+		if (spec.apiGroup === "sessions" && spec.apiEndpoint === "streamEvents") {
+			const sessionId = parts.params["session_id"] ?? ""
+			const afterRaw = parts.query["after"]
+			const after = afterRaw === undefined ? undefined : Number(afterRaw)
+			yield* client
+				.streamSessionEvents(sessionId, {
+					...(after === undefined ? {} : { after }),
+					...(Object.keys(parts.headers).length > 0 ? { headers: parts.headers } : {}),
+				})
+				.pipe(Stream.runForEach((event) => renderOutput(event, { streaming: true })))
+			return
+		}
+
+		const clientGroups = client.api as unknown as Record<
+			string,
+			Record<string, UntypedStreamMethod> | undefined
+		>
+		const method = clientGroups[spec.apiGroup]?.[spec.apiEndpoint]
+		if (method === undefined) {
+			return yield* usageError(`Client method ${spec.apiGroup}.${spec.apiEndpoint} is unavailable.`)
+		}
 		yield* client
-			.streamEndpointEvents({
-				method: endpoint.method,
-				path: resolvedPath,
-				query: parts.query,
-				headers: parts.headers,
-				...(afterRaw !== undefined ? { initialCursor: afterRaw, cursorQueryParam: "after" } : {}),
-				...(isSessionStream
-					? {
-							monotonicNumericCursor: true,
-							validateEventData: validateSessionEventData,
-							isTerminalEvent: (data: Schema.JsonObject) => data["type"] === "session.archived",
-						}
-					: {}),
-			})
-			.pipe(
-				Stream.runForEach((event) =>
-					Effect.gen(function* () {
-						if (isSessionStream) {
-							const rawSeq = event.data["seq"]
-							const eventSeq =
-								typeof rawSeq === "number" && Number.isInteger(rawSeq) && rawSeq >= 0
-									? rawSeq
-									: undefined
-							if (eventSeq !== undefined) {
-								if (lastEmittedSeq !== undefined && eventSeq <= lastEmittedSeq) {
-									return
-								}
-								yield* renderOutput(event.data, { streaming: true })
-								lastEmittedSeq = eventSeq
-								return
-							}
-						}
-						yield* renderOutput(event.data, { streaming: true })
+			.streamApiSse({
+				open: () =>
+					method({
+						...(decodedParams === undefined ? {} : { params: decodedParams }),
+						...(decodedQuery === undefined ? {} : { query: decodedQuery }),
+						...(decodedHeaders === undefined ? {} : { headers: decodedHeaders }),
+						responseMode: "response-only",
 					}),
-				),
-			)
+				decodeEvent: (rawData) =>
+					decodeGenericStreamJson(rawData).pipe(
+						Effect.mapError(
+							(err) =>
+								new APIConnectionError({
+									message: `Invalid SSE event payload: ${err.message}`,
+									cause: err,
+								}),
+						),
+					),
+				...(Object.keys(parts.headers).length > 0 ? { options: { headers: parts.headers } } : {}),
+			})
+			.pipe(Stream.runForEach((event) => renderOutput(event, { streaming: true })))
 	})

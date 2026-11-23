@@ -32,6 +32,7 @@
         "@alchemy.run/cloudflare": "catalog:",
         "@alchemy.run/domain": "catalog:",
         "@checkfu/domain": "workspace:*",
+        "@checkfu/sdk": "workspace:*",
         "@checkfu/snapshots": "workspace:*",
         "@distilled.cloud/cloudflare": "catalog:",
         "@earendil-works/chord": "catalog:",
@@ -56,8 +57,7 @@
       },
       "dependencies": {
         "@alchemy.run/cloudflare": "catalog:",
-        "@checkfu/api": "workspace:*",
-        "@checkfu/domain": "workspace:*",
+        "@checkfu/sdk": "workspace:*",
         "@effect/platform-bun": "catalog:",
         "alchemy": "catalog:",
         "effect": "catalog:",
@@ -65,6 +65,8 @@
       },
       "devDependencies": {
         "@alchemy.run/domain": "catalog:",
+        "@checkfu/api": "workspace:*",
+        "@checkfu/domain": "workspace:*",
         "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
         "vitest": "catalog:",
@@ -75,12 +77,24 @@
       "version": "0.0.0",
       "dependencies": {
         "@alchemy.run/domain": "catalog:",
+        "@checkfu/sdk": "workspace:*",
         "@checkfu/snapshots": "workspace:*",
         "alchemy": "catalog:",
         "effect": "catalog:",
       },
       "devDependencies": {
         "@effect/platform-node": "catalog:",
+        "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/sdk": {
+      "name": "@checkfu/sdk",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+      "devDependencies": {
         "@effect/vitest": "catalog:",
         "vitest": "catalog:",
       },
@@ -99,7 +113,7 @@
       "name": "@checkfu/forge",
       "version": "0.0.0",
       "dependencies": {
-        "@checkfu/api": "workspace:*",
+        "@checkfu/sdk": "workspace:*",
         "@cloudflare/forge": "catalog:",
         "effect": "catalog:",
       },
@@ -253,6 +267,8 @@
     "@checkfu/domain": ["@checkfu/domain@workspace:packages/domain"],
 
     "@checkfu/forge": ["@checkfu/forge@workspace:tools/forge"],
+
+    "@checkfu/sdk": ["@checkfu/sdk@workspace:packages/sdk"],
 
     "@checkfu/snapshots": ["@checkfu/snapshots@workspace:packages/snapshots"],
 

@@ -10,31 +10,30 @@ import {
 	NonEmptyString,
 	NonNegativeInt,
 	PositiveInt,
+	SessionEventFields,
 	StopReason,
-	TextBlocks,
 	ThinkingText,
 } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 
-export class AgentThinking extends Domain.Event("agent.thinking", {
-	thinking: Schema.String,
-}) {}
+export class AgentThinking extends Domain.Event(
+	"agent.thinking",
+	SessionEventFields["agent.thinking"],
+) {}
 
-export class AgentMessage extends Domain.Event("agent.message", {
-	content: TextBlocks,
-	truncated: Schema.optionalKey(Schema.Literal(true)),
-}) {}
+export class AgentMessage extends Domain.Event(
+	"agent.message",
+	SessionEventFields["agent.message"],
+) {}
 
-export class SpanModelRequestEnd extends Domain.Event("span.model_request_end", {
-	model_request_start_id: NonEmptyString,
-	model_usage: ModelUsage,
-	is_error: Schema.NullOr(Schema.Boolean),
-}) {}
+export class SpanModelRequestEnd extends Domain.Event(
+	"span.model_request_end",
+	SessionEventFields["span.model_request_end"],
+) {}
 
 export class SessionStatusIdle extends Domain.Event("session.status_idle", {
-	stop_reason: StopReason,
-	turn: PositiveInt,
+	...SessionEventFields["session.status_idle"],
 	generation: NonNegativeInt,
 }) {}
 

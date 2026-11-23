@@ -18,6 +18,7 @@
 		"@alchemy.run/cloudflare": "catalog:",
 		"@alchemy.run/domain": "catalog:",
 		"@checkfu/domain": "workspace:*",
+		"@checkfu/sdk": "workspace:*",
 		"@checkfu/snapshots": "workspace:*",
 		"@distilled.cloud/cloudflare": "catalog:",
 		"@earendil-works/chord": "catalog:",

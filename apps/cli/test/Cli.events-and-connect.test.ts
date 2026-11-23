@@ -507,7 +507,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					})
 					expect(badJson.exitCode).toBe(1)
 					expect(badJsonRequests).toBe(1)
-					expect(badJson.stderr).toContain("Invalid SSE event JSON payload")
+					expect(badJson.stderr).toContain("Invalid SSE event payload")
 
 					// 3) >6 consecutive healthy long-lived idle keepalive rotations stay connected and deliver all events promptly
 					let rotationRequests = 0
@@ -1946,8 +1946,8 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sigintAfterDelayedReceipt).toBe(false)
 					expect(delayedRes.stderr).not.toContain("Interrupt requested.")
 
-					// 9) Resuming near the head with --after N uses the head+suffix path instead of
-					//    scanning history from sequence 0
+					// 9) Resuming near the head with --after N reads wire `turn` via a single descending
+					//    lookup from `after + 1` without scanning history from sequence 0 or forward
 					const resumeCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -1981,18 +1981,22 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(headSeq).toBeGreaterThan(5)
 
 					const ascQueries: Array<string> = []
+					const descBaselineQueries: Array<string> = []
 					const resumed = yield* resumeCli.run(
 						["sessions", "connect", "--session-id", resumeSessionId, "--after", String(headSeq)],
 						{
 							stdin: "four\n",
 							interceptFetch: async (next, request) => {
 								const url = new URL(request.url)
-								if (
-									request.method === "GET" &&
-									url.pathname.endsWith("/events") &&
-									url.searchParams.get("order") === "asc"
-								) {
-									ascQueries.push(url.search)
+								if (request.method === "GET" && url.pathname.endsWith("/events")) {
+									if (url.searchParams.get("order") === "asc") {
+										ascQueries.push(url.search)
+									} else if (
+										url.searchParams.get("order") === "desc" &&
+										url.searchParams.get("after") !== null
+									) {
+										descBaselineQueries.push(url.search)
+									}
 								}
 								return next(request)
 							},
@@ -2001,8 +2005,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(resumed.exitCode).toBe(0)
 					expect(resumed.stdout).toContain("T4:four")
 					expect(resumed.stdout).not.toContain("T1:one")
-					expect(ascQueries).toHaveLength(1)
-					expect(ascQueries[0]).toContain(`after=${headSeq}`)
+					expect(ascQueries).toHaveLength(0)
+					expect(descBaselineQueries).toHaveLength(1)
+					expect(descBaselineQueries[0]).toContain(`after=${headSeq + 1}`)
 				}),
 			),
 		)
@@ -2296,7 +2301,7 @@ describe("CLI sessions:events and sessions connect", () => {
 				})
 			})
 		}
-	})
+	}, 15_000)
 
 	it("handles replayed refusal before a fresh turn, preserves uncertainty across retry errors, stops stalled TTY sends on archive, and flushes valid lines before chunk overflow", async () => {
 		await Effect.runPromise(
@@ -2978,7 +2983,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"cache-control": "no-cache",
 					})
 					res.write(
-						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+						'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
 					)
 					openSseResponses.push(res)
 					return
@@ -3493,7 +3498,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							"cache-control": "no-cache",
 						})
 						res.write(
-							'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+							'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
 						)
 						openSseResponses.push(res)
 						return
@@ -4280,6 +4285,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(headSeq - resumeAfter).toBeLessThanOrEqual(resumeAfter)
 
 					let syntheticHead = headSeq
+					let descBaselineQueries = 0
 					let suffixPagesServed = 0
 					let prefixPagesServed = 0
 					const [busyDuration, busyResumeRes] = yield* Effect.timed(
@@ -4319,6 +4325,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 												}),
 												{ status: 200, headers: { "content-type": "application/json" } },
 											)
+										}
+										if (order === "desc" && afterParam === String(resumeAfter + 1)) {
+											descBaselineQueries += 1
 										}
 										if (
 											order === "asc" &&
@@ -4369,9 +4378,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					)
 					expect(busyResumeRes.exitCode).toBe(0)
 					expect(Duration.toMillis(busyDuration)).toBeLessThan(1500)
-					expect(suffixPagesServed).toBeGreaterThanOrEqual(1)
-					expect(suffixPagesServed).toBeLessThanOrEqual(10)
-					expect(prefixPagesServed).toBeGreaterThanOrEqual(1)
+					expect(descBaselineQueries).toBe(1)
+					expect(suffixPagesServed).toBe(0)
+					expect(prefixPagesServed).toBe(0)
 				}),
 			),
 		)
@@ -5299,7 +5308,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(malformedConnect.exitCode).toBe(1)
-					expect(malformedConnect.stderr).toContain("Invalid SSE session event payload")
+					expect(malformedConnect.stderr).toContain("Invalid SSE event payload")
 
 					const malformedStream = yield* malformedCli.run(
 						["sessions:events", "stream", "--session-id", malformedSessionId],
@@ -5316,7 +5325,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					expect(malformedStream.exitCode).toBe(1)
-					expect(malformedStream.stderr).toContain("Invalid SSE session event payload")
+					expect(malformedStream.stderr).toContain("Invalid SSE event payload")
 				}),
 			),
 		)
@@ -5884,6 +5893,130 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(res.exitCode).toBe(1)
 					expect(res.stdout).toContain("Reply-1:first turn")
 					expect(res.stderr).toContain("ended before buffered input was submitted")
+				}),
+			),
+		)
+	})
+
+	it("connects and resumes cleanly against a legacy /v1 server omitting turn from status events", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `LegacyT${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const sessionId = yield* createReadySession(cli)
+
+					const stripTurnFromStatusEvents = async (
+						next: (request: Request) => Promise<Response>,
+						request: Request,
+					): Promise<Response> => {
+						const url = new URL(request.url)
+						if (request.method === "GET" && url.pathname.endsWith("/events")) {
+							const real = await next(request)
+							if (real.status !== 200) {
+								return real
+							}
+							const body = (await real.json()) as {
+								readonly data: Array<{ readonly type?: string; readonly turn?: number }>
+								readonly has_more: boolean
+								readonly next_cursor: number | null
+							}
+							const stripped = body.data.map((entry) => {
+								if (
+									entry.type === "session.status_running" ||
+									entry.type === "session.status_idle"
+								) {
+									const { turn: _omitted, ...rest } = entry
+									return rest
+								}
+								return entry
+							})
+							return new Response(JSON.stringify({ ...body, data: stripped }), {
+								status: 200,
+								headers: { "content-type": "application/json" },
+							})
+						}
+						if (request.method === "GET" && url.pathname.endsWith("/events/stream")) {
+							const real = await next(request)
+							if (real.status !== 200 || real.body === null) {
+								return real
+							}
+							const reader = real.body.getReader()
+							const decoder = new TextDecoder()
+							const encoder = new TextEncoder()
+							const strippedBody = new ReadableStream<Uint8Array>({
+								async pull(controller) {
+									const chunk = await reader.read()
+									if (chunk.done) {
+										controller.close()
+										return
+									}
+									const text = decoder.decode(chunk.value, { stream: true })
+									const rewritten = text.replaceAll(/"turn":\d+,?/g, "").replaceAll(",}", "}")
+									controller.enqueue(encoder.encode(rewritten))
+								},
+								cancel(reason) {
+									return reader.cancel(reason)
+								},
+							})
+							return new Response(strippedBody, { status: 200, headers: real.headers })
+						}
+						return next(request)
+					}
+
+					// 1) Initial live connect against legacy status events without `turn`
+					const firstTurn = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdin: "hello legacy\n",
+						interceptFetch: stripTurnFromStatusEvents,
+					})
+					expect(firstTurn.exitCode).toBe(0)
+					expect(firstTurn.stdout).toContain("LegacyT1:hello legacy")
+
+					const latestList = JSON.parse(
+						(yield* cli.run([
+							"sessions:events",
+							"list",
+							"--session-id",
+							sessionId,
+							"--limit",
+							"1",
+							"--order",
+							"desc",
+						])).stdout,
+					) as { data: Array<{ seq: number }> }
+					const headSeq = latestList.data[0]?.seq ?? 0
+					expect(headSeq).toBeGreaterThan(0)
+
+					// 2) Resume with --after headSeq falls back cleanly to prefix scan when `turn` is omitted
+					let prefixScanSeen = false
+					const resumed = yield* cli.run(
+						["sessions", "connect", "--session-id", sessionId, "--after", String(headSeq)],
+						{
+							stdin: "second legacy\n",
+							interceptFetch: async (next, request) => {
+								const url = new URL(request.url)
+								if (
+									request.method === "GET" &&
+									url.pathname.endsWith("/events") &&
+									url.searchParams.get("order") === "asc"
+								) {
+									prefixScanSeen = true
+								}
+								return stripTurnFromStatusEvents(next, request)
+							},
+						},
+					)
+					expect(resumed.exitCode).toBe(0)
+					expect(prefixScanSeen).toBe(true)
+					expect(resumed.stdout).toContain("LegacyT2:second legacy")
 				}),
 			),
 		)

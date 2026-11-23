@@ -502,4 +502,24 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		// Stream ends unexpectedly with no target turn
 		expect(resolveStreamEndedError(pipedIdleInitial())).toBe("Event stream ended unexpectedly.")
 	})
+
+	it("uses wire turn directly on session.status_running and session.status_idle when present", () => {
+		const { state: resumedRunning } = runSequence(ttyIdleInitial(0), [
+			{ _tag: "event", event: { seq: 15, type: "session.status_running", turn: 4 } },
+		])
+		expect(resumedRunning.observedTurn).toBe(4)
+		expect(resumedRunning.liveTurn).toBe(4)
+		expect(resumedRunning.liveStatus).toBe("running")
+
+		const { state: resumedIdle } = runSequence(ttyIdleInitial(0), [
+			{
+				_tag: "event",
+				event: { seq: 16, type: "session.status_idle", turn: 4, stopReason: "end_turn" },
+			},
+		])
+		expect(resumedIdle.observedTurn).toBe(4)
+		expect(resumedIdle.settledTurn).toBe(4)
+		expect(resumedIdle.liveTurn).toBe(4)
+		expect(resumedIdle.liveStatus).toBe("idle")
+	})
 })

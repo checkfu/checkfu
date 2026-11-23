@@ -1,5 +1,4 @@
-import { AgentId } from "@checkfu/domain/Agent/Agent.id"
-import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { AgentId, EnvironmentId } from "@checkfu/sdk/Schemas"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -9,13 +8,6 @@ import { apiFailure, isApiErrorEnvelope } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { isPlainRecord } from "./Input.ts"
 import { writeStderrLine } from "./TerminalOutput.ts"
-
-const isRoutablePathSegment = (value: string): boolean =>
-	value.length > 0 &&
-	value !== "." &&
-	value !== ".." &&
-	!value.includes("/") &&
-	!value.includes("\\")
 
 const extractAgentId = (payload: unknown): string | undefined => {
 	if (!isPlainRecord(payload)) {
@@ -38,7 +30,7 @@ export const diagnoseSessionCreateNotFound = (
 ): Effect.Effect<CliFailure> =>
 	Effect.gen(function* () {
 		const rawAgentId = extractAgentId(payload)
-		if (rawAgentId !== undefined && isRoutablePathSegment(rawAgentId)) {
+		if (rawAgentId !== undefined) {
 			const decodedAgent = Schema.decodeOption(AgentId)(rawAgentId)
 			if (Option.isSome(decodedAgent)) {
 				const agentCheck = yield* Effect.result(
@@ -59,7 +51,7 @@ export const diagnoseSessionCreateNotFound = (
 			isPlainRecord(payload) && typeof payload["environment_id"] === "string"
 				? payload["environment_id"]
 				: undefined
-		if (envId !== undefined && isRoutablePathSegment(envId)) {
+		if (envId !== undefined) {
 			const decodedEnv = Schema.decodeOption(EnvironmentId)(envId)
 			if (Option.isSome(decodedEnv)) {
 				const envCheck = yield* Effect.result(

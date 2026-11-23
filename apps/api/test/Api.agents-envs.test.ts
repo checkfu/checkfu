@@ -65,7 +65,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
-import { CheckfuApi, withIdempotencyKey } from "../src/Http/Api.ts"
+import { CheckfuApi } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
 	IsSupportedAgentModel,
@@ -2206,6 +2206,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 					const generatedClient = yield* makeApiTestClient(apiFetch)
 					const clientAgent = yield* generatedClient.agents.create({
+						headers: {},
 						payload: { name: "Generated Client Agent", model: "gpt-4o-mini" },
 					})
 					expect("pending" in clientAgent).toBe(false)
@@ -2215,16 +2216,19 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						httpClient: makeApiTestHttpClient(apiFetch),
 					})
 					const clientAgentUnkeyed2 = yield* directRawClient.agents.create({
+						headers: {},
 						payload: { name: "Generated Client Agent", model: "gpt-4o-mini" },
 					})
 					expect(clientAgentUnkeyed2.id).not.toBe(clientAgent.id)
 
 					const clientEnv = yield* directRawClient.environments.create({
+						headers: {},
 						payload: { name: "Generated Client Env" },
 					})
 					expect("pending" in clientEnv).toBe(false)
 					expect(clientEnv.id).toMatch(/^env_/)
 					const clientSession = yield* directRawClient.sessions.create({
+						headers: {},
 						payload: { agent: clientAgent.id, environment_id: clientEnv.id },
 					})
 					expect("pending" in clientSession).toBe(false)
@@ -2233,23 +2237,33 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const agentCountBeforeClientKey = new Set(sentAgentIds).size
 					dropNextAgentReceipt = true
 					const lostClientAgent = yield* generatedClient.agents
-						.create({ payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" } })
-						.pipe(withIdempotencyKey("client-agent-key-1"), Effect.flip)
+						.create({
+							headers: { "idempotency-key": "client-agent-key-1" },
+							payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" },
+						})
+						.pipe(Effect.flip)
 					expect(lostClientAgent).toMatchObject({
 						type: "error",
 						error: { type: "internal_error" },
 					})
-					const clientKeyedAgent1 = yield* generatedClient.agents
-						.create({ payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" } })
-						.pipe(withIdempotencyKey("client-agent-key-1"))
-					const clientKeyedAgent2 = yield* generatedClient.agents
-						.create({ payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" } })
-						.pipe(withIdempotencyKey("client-agent-key-1"))
+					const [clientKeyedAgent1, clientKeyedAgentRes] = yield* generatedClient.agents.create({
+						headers: { "idempotency-key": "client-agent-key-1" },
+						payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" },
+						responseMode: "decoded-and-response",
+					})
+					expect(clientKeyedAgentRes.status).toBe(201)
+					const clientKeyedAgent2 = yield* generatedClient.agents.create({
+						headers: { "idempotency-key": "client-agent-key-1" },
+						payload: { name: "Client Keyed Agent", model: "gpt-4o-mini" },
+					})
 					expect(clientKeyedAgent2).toEqual(clientKeyedAgent1)
 					expect(new Set(sentAgentIds).size).toBe(agentCountBeforeClientKey + 1)
 					const clientKeyedAgentConflict = yield* generatedClient.agents
-						.create({ payload: { name: "Different Client Keyed Agent", model: "gpt-4o-mini" } })
-						.pipe(withIdempotencyKey("client-agent-key-1"), Effect.flip)
+						.create({
+							headers: { "idempotency-key": "client-agent-key-1" },
+							payload: { name: "Different Client Keyed Agent", model: "gpt-4o-mini" },
+						})
+						.pipe(Effect.flip)
 					expect(clientKeyedAgentConflict).toMatchObject({
 						type: "error",
 						error: { type: "conflict_error" },
@@ -2257,8 +2271,11 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 					const agentSendsBeforeBadClientKey = sentAgentIds.length
 					const invalidClientKey = yield* generatedClient.agents
-						.create({ payload: { name: "Invalid Client Key Agent", model: "gpt-4o-mini" } })
-						.pipe(withIdempotencyKey("  bad  "), Effect.flip)
+						.create({
+							headers: { "idempotency-key": "  bad  " },
+							payload: { name: "Invalid Client Key Agent", model: "gpt-4o-mini" },
+						})
+						.pipe(Effect.flip)
 					expect(invalidClientKey).toMatchObject({ _tag: "SchemaError" })
 					const invalidResponseOnlyKey = yield* generatedClient.agents
 						.create({
@@ -2266,81 +2283,39 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							headers: { "idempotency-key": "  bad  " },
 							responseMode: "response-only",
 						})
-						.pipe(Effect.catchTag("SchemaError", (error) => Effect.succeed(error._tag)))
-					expect(invalidResponseOnlyKey).toBe("SchemaError")
-					expect(sentAgentIds).toHaveLength(agentSendsBeforeBadClientKey)
-
-					const agentCountBeforeInlineHeaders = new Set(sentAgentIds).size
-					const [clientInlineAgent1, clientInlineAgentRes] = yield* generatedClient.agents.create({
-						payload: { name: "Client Inline Headers Agent", model: "gpt-4o-mini" },
-						headers: { "idempotency-key": "client-agent-inline-key-1" },
-						responseMode: "decoded-and-response",
-					})
-					expect(clientInlineAgentRes.status).toBe(201)
-					const clientInlineAgent2 = yield* generatedClient.agents
-						.create({
-							payload: { name: "Client Inline Headers Agent", model: "gpt-4o-mini" },
-							headers: { "idempotency-key": "client-agent-inline-key-1" },
-						})
-						.pipe(withIdempotencyKey("client-agent-key-1"))
-					expect(clientInlineAgent2).toEqual(clientInlineAgent1)
-					expect(new Set(sentAgentIds).size).toBe(agentCountBeforeInlineHeaders + 1)
-					const clientInlineAgentConflict = yield* generatedClient.agents
-						.create({
-							payload: { name: "Different Inline Headers Agent", model: "gpt-4o-mini" },
-							headers: { "idempotency-key": "client-agent-inline-key-1" },
-						})
 						.pipe(Effect.flip)
-					expect(clientInlineAgentConflict).toMatchObject({
-						type: "error",
-						error: { type: "conflict_error" },
-					})
+					expect(invalidResponseOnlyKey).toMatchObject({ _tag: "SchemaError" })
+					expect(sentAgentIds).toHaveLength(agentSendsBeforeBadClientKey)
 
 					const envCountBeforeClientKey = new Set(sentEnvironmentIds).size
 					dropNextEnvReceipt = true
 					const lostClientEnv = yield* generatedClient.environments
-						.create({ payload: { name: "Client Keyed Env" } })
-						.pipe(withIdempotencyKey("client-env-key-1"), Effect.flip)
+						.create({
+							headers: { "idempotency-key": "client-env-key-1" },
+							payload: { name: "Client Keyed Env" },
+						})
+						.pipe(Effect.flip)
 					expect(lostClientEnv).toMatchObject({
 						type: "error",
 						error: { type: "internal_error" },
 					})
-					const clientKeyedEnv1 = yield* generatedClient.environments
-						.create({ payload: { name: "Client Keyed Env" } })
-						.pipe(withIdempotencyKey("client-env-key-1"))
-					const clientKeyedEnv2 = yield* generatedClient.environments
-						.create({ payload: { name: "Client Keyed Env" } })
-						.pipe(withIdempotencyKey("client-env-key-1"))
+					const clientKeyedEnv1 = yield* generatedClient.environments.create({
+						headers: { "idempotency-key": "client-env-key-1" },
+						payload: { name: "Client Keyed Env" },
+					})
+					const clientKeyedEnv2 = yield* generatedClient.environments.create({
+						headers: { "idempotency-key": "client-env-key-1" },
+						payload: { name: "Client Keyed Env" },
+					})
 					expect(clientKeyedEnv2).toEqual(clientKeyedEnv1)
 					expect(new Set(sentEnvironmentIds).size).toBe(envCountBeforeClientKey + 1)
 					const clientKeyedEnvConflict = yield* generatedClient.environments
-						.create({ payload: { name: "Different Client Keyed Env" } })
-						.pipe(withIdempotencyKey("client-env-key-1"), Effect.flip)
-					expect(clientKeyedEnvConflict).toMatchObject({
-						type: "error",
-						error: { type: "conflict_error" },
-					})
-
-					const envCountBeforeInlineHeaders = new Set(sentEnvironmentIds).size
-					const clientInlineEnv1 = yield* generatedClient.environments.create({
-						payload: { name: "Client Inline Headers Env" },
-						headers: { "idempotency-key": "client-env-inline-key-1" },
-					})
-					const clientInlineEnv2 = yield* generatedClient.environments
 						.create({
-							payload: { name: "Client Inline Headers Env" },
-							headers: { "idempotency-key": "client-env-inline-key-1" },
-						})
-						.pipe(withIdempotencyKey("client-env-key-1"))
-					expect(clientInlineEnv2).toEqual(clientInlineEnv1)
-					expect(new Set(sentEnvironmentIds).size).toBe(envCountBeforeInlineHeaders + 1)
-					const clientInlineEnvConflict = yield* generatedClient.environments
-						.create({
-							payload: { name: "Different Inline Headers Env" },
-							headers: { "idempotency-key": "client-env-inline-key-1" },
+							headers: { "idempotency-key": "client-env-key-1" },
+							payload: { name: "Different Client Keyed Env" },
 						})
 						.pipe(Effect.flip)
-					expect(clientInlineEnvConflict).toMatchObject({
+					expect(clientKeyedEnvConflict).toMatchObject({
 						type: "error",
 						error: { type: "conflict_error" },
 					})

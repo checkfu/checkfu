@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve } from "node:path"
 import { parse } from "@cloudflare/forge"
 import { generateCliFiles } from "./CliTransformer.ts"
 import { exportDeterministicOpenApiJson, renderOpenApiModule } from "./OpenApiExport.ts"
+import { generateSdkFiles } from "./SdkTransformer.ts"
 
 const THIS_DIR = import.meta.dirname
 export const REPO_ROOT = resolve(THIS_DIR, "../../..")
@@ -17,6 +18,7 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 	const openApiJson = exportDeterministicOpenApiJson()
 	using forge = parse(openApiJson)
 	const cliFiles = generateCliFiles(forge)
+	const sdkFiles = generateSdkFiles(forge)
 
 	return [
 		{
@@ -29,6 +31,10 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 		},
 		...cliFiles.map((file) => ({
 			relativePath: `apps/cli/src/generated/${file.path}`,
+			content: file.content,
+		})),
+		...sdkFiles.map((file) => ({
+			relativePath: `packages/sdk/src/generated/${file.path}`,
 			content: file.content,
 		})),
 	]
