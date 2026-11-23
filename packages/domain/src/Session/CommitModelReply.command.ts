@@ -8,6 +8,7 @@ import {
 	MessageText,
 	ModelUsage,
 	NonEmptyString,
+	NonNegativeInt,
 	PositiveInt,
 	StopReason,
 	TextBlocks,
@@ -33,6 +34,8 @@ export class SpanModelRequestEnd extends Domain.Event("span.model_request_end", 
 
 export class SessionStatusIdle extends Domain.Event("session.status_idle", {
 	stop_reason: StopReason,
+	turn: PositiveInt,
+	generation: NonNegativeInt,
 }) {}
 
 export class CommitModelReply extends Domain.Command("CommitModelReply", {

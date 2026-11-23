@@ -452,7 +452,7 @@ describe("Checkfu unified hosted model stories", () => {
 				Story.then(
 					sessionV1,
 					new UserMessage({ content: [{ type: "text", text: "Hello Checkfu" }] }),
-					new SessionStatusRunning(),
+					new SessionStatusRunning({ turn: 1, generation: 0 }),
 				),
 				Story.then(sessionV1, new SpanModelRequestStart({ model_request_start_id: reqId })),
 				Story.call(ModelProvider.generate, {
@@ -477,7 +477,7 @@ describe("Checkfu unified hosted model stories", () => {
 						model_usage: { input_tokens: 10, output_tokens: 5 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
 				),
 				Story.saga(RunTurn, turnKey(sessionV1.id, 1), {
 					_tag: "Completed",

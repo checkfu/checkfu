@@ -362,14 +362,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("lets a view change shape only when its version increased", () =>
 		Effect.gen(function* () {
-			const id = "view:Checkfu.TurnInput@v1"
+			const id = "view:Checkfu.TurnInput@v2"
 			expect(persistedShapes.map((shape) => shape.id)).toContain(id)
 			const earlier = viewShapeId("Checkfu", "TurnInput", 0)
-			const later = viewShapeId("Checkfu", "TurnInput", 2)
+			const later = viewShapeId("Checkfu", "TurnInput", 3)
 
 			expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
 
-			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v2" }] }))
+			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v3" }] }))
 			expect(downgraded.length).toBe(1)
 			expect(downgraded[0]).toContain("only ever increases")
 
@@ -398,7 +398,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("blocks a view version bump whose new state breaks queued policy deliveries", () =>
 		Effect.gen(function* () {
-			const viewId = "view:Checkfu.TurnInput@v1"
+			const viewId = "view:Checkfu.TurnInput@v2"
 			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
 			const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
 			expect(persistedShapes.map((shape) => shape.id)).toEqual(
@@ -413,7 +413,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					if (shape.id === viewId) {
 						return {
 							...shape,
-							id: viewShapeId("Checkfu", "TurnInput", 2),
+							id: viewShapeId("Checkfu", "TurnInput", 3),
 							schema: nextState as unknown as PersistedShape["schema"],
 						}
 					}
@@ -423,7 +423,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					return shape
 				})
 
-			// Even with TurnInput bumped to v2, adding a required field breaks queued deliveries.
+			// Even with TurnInput bumped to v3, adding a required field breaks queued deliveries.
 			const breaking = upgradedTurnInput(
 				Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
 			)

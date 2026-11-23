@@ -35,7 +35,7 @@ export const SessionSnapshot = Schema.Struct({
 export type SessionSnapshot = typeof SessionSnapshot.Type
 
 export class SessionView extends Domain.View("SessionView", {
-	version: 1,
+	version: 2,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(SessionSnapshot),
@@ -77,13 +77,13 @@ export class SessionView extends Domain.View("SessionView", {
 		"user.message": (state, _e, ctx) => (state === null ? null : { ...state, updated_at: ctx.at }),
 		"user.interrupt": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
-		"session.status_running": (state, _e, ctx) =>
+		"session.status_running": (state, e, ctx) =>
 			state === null
 				? null
 				: {
 						...state,
 						status: "running" as const,
-						turn: state.turn + 1,
+						turn: e.turn,
 						updated_at: ctx.at,
 					},
 		"span.model_request_start": (state, _e, ctx) =>

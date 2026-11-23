@@ -3,7 +3,7 @@ import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import * as Schema from "effect/Schema"
-import { MessageText, PositiveInt } from "./SessionTypes.ts"
+import { MessageText, NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
 
 export class UserMessage extends Domain.Event("user.message", {
 	content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: MessageText })).check(
@@ -11,7 +11,10 @@ export class UserMessage extends Domain.Event("user.message", {
 	),
 }) {}
 
-export class SessionStatusRunning extends Domain.Event("session.status_running") {}
+export class SessionStatusRunning extends Domain.Event("session.status_running", {
+	turn: PositiveInt,
+	generation: NonNegativeInt,
+}) {}
 
 export class PendingMessageQueueFull extends Domain.Rejection(
 	"PendingMessageQueueFull",
