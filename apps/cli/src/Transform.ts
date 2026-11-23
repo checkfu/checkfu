@@ -65,16 +65,17 @@ export const normalizeJsonValue = (value: unknown): NormalizedValue => {
 	return String(value)
 }
 
-const segmentsOf = (path: string): ReadonlyArray<string> =>
-	path
-		.split(".")
-		.map((segment) => segment.trim())
-		.filter((segment) => segment.length > 0)
-
 const evaluatePath = (value: NormalizedValue, path: ReadonlyArray<string>): NormalizedValue => {
-	const [head, ...rest] = path
-	if (head === undefined) {
+	const [raw, ...rest] = path
+	if (raw === undefined) {
 		return value
+	}
+	if (value === null || value === undefined) {
+		return undefined
+	}
+	const head = raw.trim()
+	if (head.length === 0) {
+		return evaluatePath(value, rest)
 	}
 	if (head === "#") {
 		if (!isNormalizedArray(value)) {
@@ -96,6 +97,11 @@ const evaluatePath = (value: NormalizedValue, path: ReadonlyArray<string>): Norm
 		: undefined
 }
 
+const pathOf = (text: string): ReadonlyArray<string> => {
+	const trimmed = text.trim()
+	return trimmed.length === 0 ? [] : trimmed.split(".")
+}
+
 const UNSUPPORTED_SYNTAX = /[{}[\]"'\\]/
 
 const evaluateNormalizedTransform = (
@@ -103,28 +109,34 @@ const evaluateNormalizedTransform = (
 	expression: string,
 ): NormalizedValue => {
 	const trimmed = expression.trim()
-	if (trimmed.length === 0) {
-		return value
-	}
 	const pick = trimmed.startsWith("{") && trimmed.endsWith("}")
 	const body = pick ? trimmed.slice(1, -1) : trimmed
 	if (UNSUPPORTED_SYNTAX.test(body)) {
 		return undefined
 	}
+	const entries = (pick ? body.split(",") : [body])
+		.map((entry) => entry.trim())
+		.filter((entry) => !pick || entry.length > 0)
+		.map((entry) => {
+			const colon = pick ? entry.indexOf(":") : -1
+			const path = pathOf(colon === -1 ? entry : entry.slice(colon + 1))
+			return {
+				key: colon === -1 ? (path.at(-1) ?? "").trim() : entry.slice(0, colon).trim(),
+				path,
+			}
+		})
+	if (entries.some((entry) => entry.path.some((segment) => segment.trim() === "@this"))) {
+		return undefined
+	}
 	if (!pick) {
-		return evaluatePath(value, segmentsOf(body))
+		return evaluatePath(value, entries[0]?.path ?? [])
 	}
 	if (value === null || value === undefined) {
 		return undefined
 	}
 	const picked: MutableNormalizedObject = {}
-	for (const entry of body.split(",")) {
-		const colon = entry.indexOf(":")
-		const path = segmentsOf(colon === -1 ? entry : entry.slice(colon + 1))
-		const key = colon === -1 ? (path.at(-1) ?? "") : entry.slice(0, colon).trim()
-		if (key.length > 0) {
-			setOwnProperty(picked, key, evaluatePath(value, path))
-		}
+	for (const entry of entries) {
+		setOwnProperty(picked, entry.key, evaluatePath(value, entry.path))
 	}
 	return picked
 }

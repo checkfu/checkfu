@@ -1128,6 +1128,71 @@ describe("Transform and formatOutput", () => {
 		).toBe('{"__proto__":"kept","a":1}')
 	})
 
+	it("keeps the old evaluator's results for paths and picks, including empty segments", () => {
+		const cases: ReadonlyArray<readonly [unknown, string, unknown]> = [
+			[{ data: ["a", "b"] }, "data.#", 2],
+			[{ data: ["a", "b"] }, "data.#.", ["a", "b"]],
+			[{ data: ["a", null, "b"] }, "data.#.", ["a", "b"]],
+			[{ data: [{ id: 1 }, {}, { id: 3 }] }, "data.#.id", [1, 3]],
+			[{ data: [] }, "data.#", 0],
+			[{ data: [] }, "data.#.id", []],
+			[{ "#": 7 }, "#", undefined],
+			[{ a: { "#": 3 } }, "a.#", undefined],
+			[[1, 2, 3], "#", 3],
+			[[[1], [2, 3]], "#.#", [1, 2]],
+			[[1, 2, 3], "-1", 3],
+			[[1, 2, 3], "3", undefined],
+			[[1, 2, 3], "x", undefined],
+			[{ "0": "zero" }, "0", "zero"],
+			[{ id: 1 }, ".id", 1],
+			[{ a: { b: 2 } }, "a..b", 2],
+			[{ a: { b: 2 } }, " a . b ", 2],
+			[{ a: { b: 2 } }, "a.b.", 2],
+			[{ id: null }, "id", null],
+			[{ id: null }, "id.x", undefined],
+			["abc", "length", undefined],
+			[{ id: 1 }, "constructor", undefined],
+			[{ id: 1 }, "__proto__", undefined],
+			[null, "", null],
+			[null, "id", undefined],
+			[42, "", 42],
+			[{ id: 1 }, "", { id: 1 }],
+			[{ id: 1, name: "n", v: 2 }, "{id,name}", { id: 1, name: "n" }],
+			[{ id: 1 }, "{ id , missing }", { id: 1 }],
+			[{ a: { b: 2 } }, "{a.b}", { b: 2 }],
+			[{ a: { b: 2 } }, "{x:a.b,y:a}", { x: 2, y: { b: 2 } }],
+			[{ id: 1 }, "{id.}", { "": 1 }],
+			[{ id: 1 }, "{:id}", { "": 1 }],
+			[{ id: 1 }, "{k:}", { k: { id: 1 } }],
+			[{ id: 1 }, "{}", {}],
+			[{ id: 1 }, "{,id,}", { id: 1 }],
+			[{ id: 1 }, "{a:b:c}", {}],
+			[{ id: 1 }, "{@this:id}", { "@this": 1 }],
+			[[1, 2], "{n:#,first:0}", { n: 2, first: 1 }],
+			[null, "{id}", undefined],
+			[undefined, "{id}", undefined],
+			["abc", "{id}", {}],
+		]
+		for (const [value, expression, expected] of cases) {
+			expect([expression, evaluateTransform(value, expression)]).toEqual([expression, expected])
+		}
+	})
+
+	it("evaluates @this to nothing wherever it appears as a path segment", () => {
+		for (const expression of [
+			"@this",
+			"@this.id",
+			"data.#.@this",
+			"data.@this.0",
+			"{id,x:@this}",
+			"{@this}",
+		]) {
+			expect(
+				evaluateTransform({ "@this": 7, id: 1, data: [{ "@this": 1 }] }, expression),
+			).toBeUndefined()
+		}
+	})
+
 	it("formats auto, json, pretty, yaml, raw, and DateTime.Utc cleanly", () => {
 		expect(
 			formatOutput(sample, {
