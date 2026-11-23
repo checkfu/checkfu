@@ -1511,6 +1511,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 								id: "evt-a2",
 								type: "user.message",
 								turn: 2,
+								queued: true,
 								content: [{ type: "text", text: "msg-a2" }],
 							},
 						],
@@ -1543,12 +1544,14 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 								id: "evt-a1",
 								type: "user.message",
 								turn: 1,
+								queued: false,
 								content: [{ type: "text", text: "msg-a1" }],
 							},
 							{
 								id: "evt-a2",
 								type: "user.message",
 								turn: 2,
+								queued: true,
 								content: [{ type: "text", text: "msg-a2" }],
 							},
 						],
@@ -1643,8 +1646,18 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(keyRetryRes.status).toBe(200)
 					expect(yield* Effect.promise(() => keyRetryRes.json())).toEqual({
 						data: [
-							{ type: "user.message", turn: 1, content: [{ type: "text", text: "msg-b1" }] },
-							{ type: "user.message", turn: 2, content: [{ type: "text", text: "msg-b2" }] },
+							{
+								type: "user.message",
+								turn: 1,
+								queued: false,
+								content: [{ type: "text", text: "msg-b1" }],
+							},
+							{
+								type: "user.message",
+								turn: 2,
+								queued: true,
+								content: [{ type: "text", text: "msg-b2" }],
+							},
 						],
 					})
 					const settledB = yield* waitIdle(sessB.id, 2)

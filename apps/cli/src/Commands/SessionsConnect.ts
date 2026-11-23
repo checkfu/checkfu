@@ -136,13 +136,22 @@ const CONNECT_SEND_RETRY_BASE_MS = 100
 const isAmbiguousResponseStatus = (status: number): boolean =>
 	(status >= 200 && status < 300) || isTransientHttpStatus(status)
 
-const extractSubmittedTurn = (data: ReadonlyArray<unknown>): number | undefined => {
+interface SubmittedMessageReceipt {
+	readonly turn: number
+	readonly queued: boolean | undefined
+}
+
+const extractSubmittedMessageReceipt = (
+	data: ReadonlyArray<unknown>,
+): SubmittedMessageReceipt | undefined => {
 	const first = data[0]
 	if (typeof first !== "object" || first === null) return undefined
 	const record = first as Record<string, unknown>
 	if (record["type"] !== "user.message") return undefined
 	const turn = record["turn"]
-	return typeof turn === "number" && Number.isInteger(turn) && turn >= 1 ? turn : undefined
+	if (typeof turn !== "number" || !Number.isInteger(turn) || turn < 1) return undefined
+	const queued = typeof record["queued"] === "boolean" ? record["queued"] : undefined
+	return { turn, queued }
 }
 
 const hasInterruptReceipt = (data: ReadonlyArray<unknown>): boolean => {
@@ -753,22 +762,27 @@ const dispatchUserLine = (
 			}
 			return yield* res.failure.failure
 		}
-		const turn = extractSubmittedTurn(res.success.data)
-		if (turn === undefined) {
+		const receipt = extractSubmittedMessageReceipt(res.success.data)
+		if (receipt === undefined) {
 			yield* clearSendInFlight
 			return yield* networkFailure(
 				`Message response did not confirm a valid turn (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
 			)
 		}
+		const { turn, queued } = receipt
 		yield* Ref.update(stateRef, (state) => {
 			const initiatedFromIdle =
-				sendSnapshot.liveStatus === "idle" && turn === sendSnapshot.liveTurn + 1
-			const startedFromIdle =
-				initiatedFromIdle &&
-				state.liveStateVersion === sendSnapshot.liveStateVersion &&
-				state.liveStatus === "idle"
+				queued !== undefined
+					? !queued
+					: sendSnapshot.liveStatus === "idle" && turn === sendSnapshot.liveTurn + 1
+			const startedNow =
+				queued === false
+					? state.liveTurn < turn
+					: initiatedFromIdle &&
+						state.liveStateVersion === sendSnapshot.liveStateVersion &&
+						state.liveStatus === "idle"
 			if (!state.trackPipedTurns) {
-				return startedFromIdle
+				return startedNow
 					? {
 							...state,
 							liveStatus: "running" as const,
@@ -801,8 +815,8 @@ const dispatchUserLine = (
 				firstSubmittedTurnFailure,
 				pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
 				sendInFlight: false,
-				liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
-				liveTurn: startedFromIdle ? turn : state.liveTurn,
+				liveStatus: startedNow ? ("running" as const) : state.liveStatus,
+				liveTurn: startedNow ? turn : state.liveTurn,
 			}
 		})
 		return "continue" as const
@@ -866,6 +880,7 @@ const resolveCursorBaselineFromPrefix = (
 				reachedCursor ||
 				!page.has_more ||
 				page.next_cursor === null ||
+				page.next_cursor <= pageCursor ||
 				page.next_cursor >= after
 			) {
 				break
@@ -912,9 +927,11 @@ const resolveCursorBaseline = (
 	}
 	return Effect.gen(function* () {
 		// Derive the cursor baseline from the shorter side: when resuming near the head,
-		// scan only the suffix (after, head] and reconcile against a consistent head snapshot.
+		// scan only the bounded suffix (after, targetHeadSeq] and reconcile against a
+		// consistent head snapshot, falling back to the fixed prefix scan if the head moves.
 		if (headSeq - after <= after) {
 			let before = initialSession
+			let targetHeadSeq = headSeq
 			for (let attempt = 0; attempt < MAX_SUFFIX_CONSISTENCY_ATTEMPTS; attempt++) {
 				let pageCursor = after
 				let runningAfter = 0
@@ -924,6 +941,7 @@ const resolveCursorBaseline = (
 					| "session.status_terminated"
 					| "session.archived"
 					| undefined
+				let headMovedPastBoundary = false
 
 				while (true) {
 					const page = yield* client.api.sessions
@@ -936,7 +954,18 @@ const resolveCursorBaseline = (
 							},
 						})
 						.pipe(Effect.mapError(formatClientError))
+					let reachedBoundary = false
+					let lastPageSeq: number | undefined
 					for (const entry of page.data) {
+						const seq = typeof entry["seq"] === "number" ? entry["seq"] : undefined
+						if (seq !== undefined) {
+							lastPageSeq = seq
+							if (seq > targetHeadSeq) {
+								headMovedPastBoundary = true
+								reachedBoundary = true
+								break
+							}
+						}
 						const eventType = typeof entry["type"] === "string" ? entry["type"] : undefined
 						if (eventType === "session.status_running") {
 							runningAfter += 1
@@ -949,7 +978,23 @@ const resolveCursorBaseline = (
 							firstStatusAfter ??= eventType
 						}
 					}
-					if (!page.has_more || page.next_cursor === null) {
+					if (
+						!reachedBoundary &&
+						page.has_more &&
+						((lastPageSeq !== undefined && lastPageSeq >= targetHeadSeq) ||
+							(page.next_cursor !== null && page.next_cursor >= targetHeadSeq))
+					) {
+						headMovedPastBoundary = true
+						reachedBoundary = true
+					}
+					if (
+						reachedBoundary ||
+						!page.has_more ||
+						page.next_cursor === null ||
+						page.next_cursor <= pageCursor ||
+						page.next_cursor >= targetHeadSeq ||
+						(lastPageSeq !== undefined && lastPageSeq >= targetHeadSeq)
+					) {
 						break
 					}
 					pageCursor = page.next_cursor
@@ -957,6 +1002,7 @@ const resolveCursorBaseline = (
 
 				const afterSnap = yield* fetchSessionStatusWithRetry(client, sessionId)
 				const consistent =
+					!headMovedPastBoundary &&
 					before.turn === afterSnap.turn &&
 					before.status === afterSnap.status &&
 					(before.archived_at === null) === (afterSnap.archived_at === null)
@@ -988,7 +1034,22 @@ const resolveCursorBaseline = (
 						latestSession: afterSnap,
 					}
 				}
-				before = afterSnap
+				if (attempt + 1 < MAX_SUFFIX_CONSISTENCY_ATTEMPTS) {
+					const latestPage = yield* client.api.sessions
+						.listEvents({
+							params: { session_id: sessionId },
+							query: { limit: "1", order: "desc" },
+						})
+						.pipe(Effect.mapError(formatClientError))
+					const latestEntry = latestPage.data[0]
+					if (latestEntry !== undefined && typeof latestEntry["seq"] === "number") {
+						targetHeadSeq = Math.max(targetHeadSeq, latestEntry["seq"])
+					}
+					before = afterSnap
+					if (targetHeadSeq - after > after) {
+						break
+					}
+				}
 			}
 		}
 

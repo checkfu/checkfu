@@ -521,10 +521,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 												if (receipt.reply === undefined) {
 													return Effect.die(new Error("SendUserMessage receipt is missing reply."))
 												}
+												const queued = !receipt.events.some(
+													(event) => event._tag === "session.status_running",
+												)
 												return Effect.succeed({
 													type: "user.message" as const,
 													...(item.eventId === undefined ? {} : { id: item.eventId }),
 													turn: receipt.reply.turn,
+													queued,
 													content: [{ type: "text" as const, text: item.text }],
 												})
 											}),

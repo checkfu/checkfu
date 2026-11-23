@@ -36,6 +36,23 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(eventsListHelp.exitCode).toBe(0)
 					expect(eventsListHelp.stdout).toContain("selected order")
 					expect(eventsListHelp.stdout).toContain("desc")
+
+					// Global --version works on update commands without colliding with optimistic concurrency --current-version
+					const rootVer = yield* cli.run(["--version"], { env: {} })
+					expect(rootVer.exitCode).toBe(0)
+					expect(rootVer.stdout.trim()).toMatch(/^checkfu v\d+\.\d+\.\d+/)
+					for (const cmd of [
+						["agents", "update", "--version"],
+						["environments", "update", "--version"],
+					]) {
+						const ver = yield* cli.run(cmd, { env: {} })
+						expect(ver.exitCode).toBe(0)
+						expect(ver.stderr).toBe("")
+						expect(ver.stdout.trim()).toBe(rootVer.stdout.trim())
+					}
+					const agentUpdateHelp = yield* cli.run(["agents", "update", "--help"], { env: {} })
+					expect(agentUpdateHelp.exitCode).toBe(0)
+					expect(agentUpdateHelp.stdout).toContain("--current-version")
 				}),
 			),
 		)
@@ -156,7 +173,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"update",
 						"--agent-id",
 						agentId,
-						"--version",
+						"--current-version",
 						"1",
 						"--name",
 						"Alpha v2",
@@ -176,7 +193,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"update",
 						"--agent-id",
 						agentId,
-						"--version",
+						"--current-version",
 						"1",
 						"--name",
 						"Stale",
@@ -244,7 +261,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"update",
 						"--environment-id",
 						env.id,
-						"--version",
+						"--current-version",
 						"1",
 						"--description",
 						"Updated env",
@@ -513,7 +530,7 @@ describe("CLI help, errors, and resource commands", () => {
 							"update",
 							"--agent-id",
 							agent.id,
-							"--version",
+							"--current-version",
 							"1",
 							"--name",
 							"ShouldNotSucceed",

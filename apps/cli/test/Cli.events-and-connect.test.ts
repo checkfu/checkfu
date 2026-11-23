@@ -1986,7 +1986,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"update",
 						"--agent-id",
 						"agent_redirect",
-						"--version",
+						"--current-version",
 						"1",
 						"--name",
 						"ShouldNotChange",
@@ -3189,6 +3189,257 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					expect(terminalErrRes.exitCode).toBe(1)
 					expect(terminalErrRes.stderr).toContain("Turn 1 failed:")
 					expect(terminalErrRes.stderr).toContain("fatal context overflow")
+				}),
+			),
+		)
+	})
+
+	it("distinguishes started vs queued receipts on lagging session views and bounds resume suffix scans on busy sessions", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Piped message sent while CLI still sees turn 1 running, but arriving at the server
+					//    just after turn 1 stopped with refusal, actually starts turn 2 (queued: false).
+					//    Even if GET /sessions/:id lags showing turn 1 idle, connect must wait for turn 2
+					//    and print its reply rather than disconnecting with a false queued-turn failure.
+					const turn1Finished = yield* Deferred.make<void>()
+					const releaseSseAfterPost2 = yield* Deferred.make<void>()
+					const raceCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(turn1Finished, undefined)
+									return {
+										thinking: null,
+										text: "Refused turn 1",
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "refusal" as const },
+									}
+								}
+								return {
+									thinking: null,
+									text: `Started turn 2:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const raceSessionId = yield* createReadySession(raceCli)
+					const encoder = new TextEncoder()
+					let postIndex = 0
+					let getSessionCount = 0
+					let post2Receipt: { readonly turn?: number; readonly queued?: boolean } | undefined
+
+					const stagedStdin = Stream.concat(
+						Stream.make(encoder.encode("first turn\n")),
+						Stream.fromEffect(
+							// Wait until turn 1 has settled on the server (with refusal), while SSE still holds
+							// turn 1's session.status_idle so CLI still sees liveStatus === "running" at turn 1
+							Deferred.await(turn1Finished).pipe(
+								Effect.andThen(Effect.sleep("40 millis")),
+								Effect.as(encoder.encode("second starts fresh\n")),
+							),
+						),
+					)
+
+					const raceRes = yield* raceCli.run(
+						["sessions", "connect", "--session-id", raceSessionId],
+						{
+							stdin: stagedStdin,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									postIndex += 1
+									const res = await next(request)
+									if (postIndex === 2) {
+										const parsed = (await res.clone().json()) as {
+											data?: ReadonlyArray<{ readonly turn?: number; readonly queued?: boolean }>
+										}
+										post2Receipt = parsed.data?.[0]
+										await Effect.runPromise(Deferred.succeed(releaseSseAfterPost2, undefined))
+									}
+									return res
+								}
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${raceSessionId}`)
+								) {
+									getSessionCount += 1
+									const res = await next(request)
+									if (getSessionCount > 1) {
+										// Simulate a lagging SessionView projection still showing turn 1 idle
+										const body = (await res.json()) as Record<string, unknown>
+										return new Response(JSON.stringify({ ...body, status: "idle", turn: 1 }), {
+											status: 200,
+											headers: { "content-type": "application/json" },
+										})
+									}
+									return res
+								}
+								if (!request.url.includes("/events/stream")) return next(request)
+								const res = await next(request)
+								if (res.status !== 200 || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								let heldFirstIdle = false
+								const gated = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										const text = decoder.decode(chunk.value, { stream: true })
+										if (!heldFirstIdle && text.includes("session.status_idle")) {
+											heldFirstIdle = true
+											// Hold turn 1's idle event until POST #2 has committed and returned its receipt
+											await Effect.runPromise(Deferred.await(releaseSseAfterPost2))
+										}
+										controller.enqueue(chunk.value)
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(gated, { status: 200, headers: res.headers })
+							},
+						},
+					)
+					expect(post2Receipt).toMatchObject({ turn: 2, queued: false })
+					expect(raceRes.exitCode).toBe(0)
+					expect(raceRes.stdout).toContain("Started turn 2:second starts fresh")
+					expect(raceRes.stderr).not.toContain("did not start")
+
+					// 2) Resuming near head on a busy session bounds the suffix scan to the captured head
+					//    sequence and falls back to the fixed prefix scan instead of paging indefinitely
+					const busyCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `Busy-${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const busySessionId = yield* createReadySession(busyCli)
+					for (const msg of ["a", "b"]) {
+						expect(
+							(yield* busyCli.run(["sessions", "connect", "--session-id", busySessionId], {
+								stdin: `${msg}\n`,
+							})).exitCode,
+						).toBe(0)
+					}
+					const headPage = JSON.parse(
+						(yield* busyCli.run([
+							"sessions:events",
+							"list",
+							"--session-id",
+							busySessionId,
+							"--limit",
+							"1",
+							"--order",
+							"desc",
+						])).stdout,
+					) as { data: Array<{ seq: number }> }
+					const headSeq = headPage.data[0]?.seq ?? 0
+					const resumeAfter = Math.max(1, headSeq - 2)
+					expect(headSeq - resumeAfter).toBeLessThanOrEqual(resumeAfter)
+
+					let syntheticHead = headSeq
+					let suffixPagesServed = 0
+					let prefixPagesServed = 0
+					const [busyDuration, busyResumeRes] = yield* Effect.timed(
+						busyCli.run(
+							[
+								"sessions",
+								"connect",
+								"--session-id",
+								busySessionId,
+								"--after",
+								String(resumeAfter),
+							],
+							{
+								stdin: "/exit\n",
+								interceptFetch: async (next, request) => {
+									const url = new URL(request.url)
+									if (
+										request.method === "GET" &&
+										url.pathname === `/v1/sessions/${busySessionId}/events`
+									) {
+										const order = url.searchParams.get("order")
+										const afterParam = url.searchParams.get("after")
+										if (order === "desc" && url.searchParams.get("limit") === "1") {
+											return new Response(
+												JSON.stringify({
+													data: [
+														{
+															id: `evt_${syntheticHead}`,
+															seq: syntheticHead,
+															type: "user.message",
+															created_at: "2026-11-22T00:00:00.000Z",
+															content: [{ type: "text", text: "busy" }],
+														},
+													],
+													has_more: true,
+													next_cursor: syntheticHead,
+												}),
+												{ status: 200, headers: { "content-type": "application/json" } },
+											)
+										}
+										if (
+											order === "asc" &&
+											afterParam !== null &&
+											Number(afterParam) >= resumeAfter
+										) {
+											suffixPagesServed += 1
+											const cursor = Number(afterParam)
+											const nextSeq1 = cursor + 1
+											const nextSeq2 = cursor + 2
+											// Simulate live traffic continuously extending the log beyond targetHeadSeq
+											syntheticHead = Math.max(syntheticHead + 2, nextSeq2 + 1)
+											return new Response(
+												JSON.stringify({
+													data: [
+														{
+															id: `evt_${nextSeq1}`,
+															seq: nextSeq1,
+															type: "user.message",
+															created_at: "2026-11-22T00:00:00.000Z",
+															content: [{ type: "text", text: "live-1" }],
+														},
+														{
+															id: `evt_${nextSeq2}`,
+															seq: nextSeq2,
+															type: "user.message",
+															created_at: "2026-11-22T00:00:00.000Z",
+															content: [{ type: "text", text: "live-2" }],
+														},
+													],
+													has_more: true,
+													next_cursor: nextSeq2,
+												}),
+												{ status: 200, headers: { "content-type": "application/json" } },
+											)
+										}
+										if (
+											order === "asc" &&
+											(afterParam === null || Number(afterParam) < resumeAfter)
+										) {
+											prefixPagesServed += 1
+										}
+									}
+									return next(request)
+								},
+							},
+						),
+					)
+					expect(busyResumeRes.exitCode).toBe(0)
+					expect(Duration.toMillis(busyDuration)).toBeLessThan(1_500)
+					expect(suffixPagesServed).toBeGreaterThanOrEqual(1)
+					expect(suffixPagesServed).toBeLessThanOrEqual(10)
+					expect(prefixPagesServed).toBeGreaterThanOrEqual(1)
 				}),
 			),
 		)

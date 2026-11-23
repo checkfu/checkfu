@@ -220,6 +220,25 @@ const isObjectOrComplexUnion = (ty: Type): boolean => {
 	return false
 }
 
+const RESERVED_GLOBAL_FLAG_NAMES = new Set([
+	"help",
+	"version",
+	"wizard",
+	"completions",
+	"log-level",
+	"base-url",
+	"format",
+	"transform",
+	"raw-output",
+])
+
+const resolveCliFlagName = (field: Field): string => {
+	const raw = field.name.kebab()
+	if (raw === "version") return "current-version"
+	if (RESERVED_GLOBAL_FLAG_NAMES.has(raw)) return `param-${raw}`
+	return raw
+}
+
 const defaultMetavar = (flag: FlagSpec): string | undefined => {
 	if (flag.metavar !== undefined) return flag.metavar
 	if (flag.location === "path" || flag.flagName.endsWith("-id")) return "ID"
@@ -297,7 +316,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	for (const field of pathFields) {
 		pushFlag({
 			propName: field.name.camel(),
-			flagName: field.name.kebab(),
+			flagName: resolveCliFlagName(field),
 			wireName: field.wireName,
 			location: "path",
 			kind: "string",
@@ -310,10 +329,11 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	for (const field of queryFields) {
 		const intSpec = intQueryParams[field.wireName]
 		const literals = extractStringLiterals(field.type)
+		const flagName = resolveCliFlagName(field)
 		if (intSpec !== undefined || isIntegerScalar(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "query",
 				kind: "int",
@@ -326,7 +346,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (literals !== undefined) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "query",
 				kind: "literals",
@@ -337,7 +357,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (isBooleanScalar(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "query",
 				kind: "boolean",
@@ -347,7 +367,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "query",
 				kind: "string",
@@ -376,10 +396,11 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		}
 
 		const literals = extractStringLiterals(field.type)
+		const flagName = resolveCliFlagName(field)
 		if (fileFields.has(field.wireName)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "file-text",
@@ -392,7 +413,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (textOrObjectFields.has(field.wireName)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "text-or-object",
@@ -405,7 +426,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (isIntegerScalar(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "int",
@@ -415,7 +436,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (isBooleanScalar(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "boolean",
@@ -425,7 +446,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (literals !== undefined) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "literals",
@@ -436,7 +457,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else if (isObjectOrComplexUnion(field.type)) {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "structured",
@@ -449,7 +470,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		} else {
 			pushFlag({
 				propName: field.name.camel(),
-				flagName: field.name.kebab(),
+				flagName,
 				wireName: field.wireName,
 				location: "body",
 				kind: "string",
@@ -463,7 +484,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		for (const header of method.headers.fields) {
 			pushFlag({
 				propName: header.name.camel(),
-				flagName: header.name.kebab(),
+				flagName: resolveCliFlagName(header),
 				wireName: header.wireName.toLowerCase(),
 				location: "header",
 				kind: "string",

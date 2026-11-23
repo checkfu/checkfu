@@ -180,7 +180,7 @@ const agentsUpdateCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "version",
+			flagName: "current-version",
 			wireName: "version",
 			location: "body",
 			kind: "int",
@@ -225,7 +225,7 @@ const agentsUpdateCommand = CommandMake(
 	"update",
 	{
 		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
-		version: FlagInt("version").pipe(
+		version: FlagInt("current-version").pipe(
 			FlagWithMetavar("INT"),
 			FlagWithDescription("Current agent version for optimistic concurrency"),
 			FlagOptional,
@@ -432,7 +432,7 @@ const environmentsUpdateCommandSpec: GeneratedOperationDescriptor = {
 		},
 		{
 			propName: "version",
-			flagName: "version",
+			flagName: "current-version",
 			wireName: "version",
 			location: "body",
 			kind: "int",
@@ -472,7 +472,7 @@ const environmentsUpdateCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Environment ID"),
 		),
-		version: FlagInt("version").pipe(
+		version: FlagInt("current-version").pipe(
 			FlagWithMetavar("INT"),
 			FlagWithDescription("Current environment version for optimistic concurrency"),
 			FlagOptional,

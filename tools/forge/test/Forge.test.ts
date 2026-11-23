@@ -127,6 +127,9 @@ describe("Cloudflare Forge pipeline", () => {
 			'FlagWithDescription("Environment configuration object (JSON, YAML, or @file)")',
 		)
 		expect(cliCommands).toContain("accepts flags and/or JSON/YAML on stdin")
+		expect(cliCommands).toContain('FlagInt("current-version")')
+		expect(cliCommands).toContain('"flagName":"current-version","wireName":"version"')
+		expect(cliCommands).not.toContain('FlagInt("version")')
 	})
 
 	it("bypasses OpenApi.fromApi caching so nondeterministic OpenAPI generation is detected", () => {
