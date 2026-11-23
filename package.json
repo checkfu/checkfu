@@ -35,7 +35,7 @@
 		"generate:check": "bun tools/forge/src/Generate.ts --check",
 		"dev": "alchemy dev",
 		"deploy": "alchemy deploy",
-		"deploy:production": "alchemy deploy --stage production",
+		"deploy:production": "bun run persisted:check && alchemy deploy --stage production",
 		"destroy": "alchemy destroy",
 		"typecheck": "turbo run typecheck && effect-tsgo tsc --noEmit -p tsconfig.stack.json",
 		"test": "turbo run test",
