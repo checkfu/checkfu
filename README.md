@@ -57,6 +57,5 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
   - **`PATH`-based `checkfu` bin (`#!/usr/bin/env node`):** requires both `checkfu` and `node` on `PATH` to resolve to trusted installations before the launcher starts (do not rely on the `PATH`-based bin when `PATH` may contain `.`, empty entries, or project-local directories). Once started, the launcher resolves Bun only from explicitly trusted installation roots (or `BUN_INSTALL` / `CHECKFU_BUN_PATH` outside the enclosing checkout) and pins `--no-env-file --config=<install>/bunfig.toml`.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI commands from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
-- `bun run state:sync-observability` — one-time rollout to apply `alchemy.run.ts` observability settings (disabling invocation logs) to an existing Cloudflare state-store Worker
 - `bun run deploy` — deploy to your default Cloudflare stage
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy

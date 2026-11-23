@@ -1,12 +1,8 @@
-import * as Cloudflare from "@alchemy.run/cloudflare"
 import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
-import { Credentials } from "@distilled.cloud/cloudflare/Credentials"
-import * as workers from "@distilled.cloud/cloudflare/workers"
 import { describe, expect, it } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import { State } from "alchemy/State"
 import * as Cause from "effect/Cause"
-import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -16,18 +12,11 @@ import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import stack, {
 	CLOUDFLARE_STATE_OBSERVABILITY,
-	DEFAULT_STATE_STORE_WORKER_NAME,
 	markDeployProgramEvaluated,
 	shouldRequireShippedBaseline,
 	withProductionBaselineGate,
 	withProductionStateGate,
 } from "../../../alchemy.run.ts"
-import {
-	formatSyncStateStoreObservabilityResult,
-	makeSyncCloudflareApiLayer,
-	parseSyncCliArgs,
-	syncStateStoreObservability,
-} from "../../../scripts/sync-state-store-observability.ts"
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
 
 const expectRefusedDefect = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -392,195 +381,6 @@ describe("Alchemy stack and worker entry", () => {
 				})
 				expect(stateGateChecks).toBe(4)
 				expect(stateInitCalls).toBe(7)
-			}),
-	)
-
-	it.effect(
-		"syncs state-store observability onto existing current-version Workers without clobbering sibling settings",
-		() =>
-			Effect.gen(function* () {
-				const patched: Array<workers.PatchScriptSettingRequest> = []
-				const patchSetting = (input: workers.PatchScriptSettingRequest) => {
-					patched.push(input)
-					return Effect.succeed({})
-				}
-
-				// Existing store with previous default (invocationLogs: true) + extra settings to preserve.
-				const updated = yield* syncStateStoreObservability({
-					accountId: "acct_123",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-					desired: CLOUDFLARE_STATE_OBSERVABILITY,
-					getSetting: () =>
-						Effect.succeed({
-							observability: {
-								enabled: true,
-								headSamplingRate: 0.5,
-								redactQueryString: true,
-								logs: {
-									enabled: true,
-									invocationLogs: true,
-									destinations: ["log-dest"],
-									headSamplingRate: 0.25,
-									persist: true,
-								},
-								traces: {
-									enabled: true,
-									headSamplingRate: 0.1,
-									persist: true,
-									propagationPolicy: "authenticated",
-								},
-								issues: { enabled: true },
-							},
-						}),
-					patchSetting,
-				})
-				expect(updated.status).toBe("updated")
-				expect(patched).toHaveLength(1)
-				expect(patched[0]).toEqual({
-					accountId: "acct_123",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-					observability: {
-						enabled: true,
-						headSamplingRate: 0.5,
-						redactQueryString: true,
-						logs: {
-							enabled: true,
-							invocationLogs: false,
-							destinations: ["log-dest"],
-							headSamplingRate: 0.25,
-							persist: true,
-						},
-						traces: {
-							destinations: undefined,
-							enabled: true,
-							headSamplingRate: 0.1,
-							persist: true,
-							propagationPolicy: "authenticated",
-						},
-						issues: { enabled: true },
-					},
-				})
-
-				// Already up to date -> no PATCH call.
-				const unchanged = yield* syncStateStoreObservability({
-					accountId: "acct_123",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-					desired: CLOUDFLARE_STATE_OBSERVABILITY,
-					getSetting: () =>
-						Effect.succeed({
-							observability: {
-								enabled: true,
-								logs: { enabled: true, invocationLogs: false },
-							},
-						}),
-					patchSetting,
-				})
-				expect(unchanged).toEqual({
-					status: "unchanged",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-				})
-				expect(patched).toHaveLength(1)
-
-				// Dry-run -> reports planned observability without patching.
-				const dryRun = yield* syncStateStoreObservability({
-					accountId: "acct_123",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-					desired: CLOUDFLARE_STATE_OBSERVABILITY,
-					dryRun: true,
-					getSetting: () =>
-						Effect.succeed({
-							observability: {
-								enabled: true,
-								logs: { enabled: true, invocationLogs: true },
-							},
-						}),
-					patchSetting,
-				})
-				expect(dryRun.status).toBe("would-update")
-				expect(patched).toHaveLength(1)
-
-				// Missing Worker -> reports no changes and gives conditional bootstrap guidance.
-				const missing = yield* syncStateStoreObservability({
-					accountId: "acct_123",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-					desired: CLOUDFLARE_STATE_OBSERVABILITY,
-					getSetting: () =>
-						Effect.fail(
-							new workers.WorkerNotFound({
-								code: 10_007,
-								message: "workers.api.error.script_not_found",
-							}),
-						),
-					patchSetting,
-				})
-				expect(missing).toEqual({
-					status: "missing",
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-				})
-				const missingMessage = formatSyncStateStoreObservabilityResult(missing)
-				expect(missingMessage).toContain("no settings were changed")
-				expect(missingMessage).toContain("in this account")
-				expect(missingMessage).toContain("--yes")
-				expect(missingMessage).not.toContain("the next deploy will bootstrap it")
-
-				// Partially bootstrapped Worker (no deployed versions yet) -> treated as missing.
-				const versionless = yield* syncStateStoreObservability({
-					accountId: "acct_123",
-					scriptName: "custom-state",
-					desired: CLOUDFLARE_STATE_OBSERVABILITY,
-					getSetting: () =>
-						Effect.fail(
-							new workers.WorkerHasNoVersions({
-								code: 10_215,
-								message: "workers.api.error.script_has_no_versions",
-							}),
-						),
-					patchSetting,
-				})
-				expect(versionless).toEqual({ status: "missing", scriptName: "custom-state" })
-				const versionlessMessage = formatSyncStateStoreObservabilityResult(versionless)
-				expect(versionlessMessage).toContain("no settings were changed")
-				expect(versionlessMessage).not.toContain("When bootstrapped")
-				expect(patched).toHaveLength(1)
-
-				expect(parseSyncCliArgs([])).toEqual({
-					dryRun: false,
-					scriptName: DEFAULT_STATE_STORE_WORKER_NAME,
-					accountId: undefined,
-				})
-				expect(
-					parseSyncCliArgs(["--dry-run", "--worker-name", "custom-state", "--account-id=acct_999"]),
-				).toEqual({
-					dryRun: true,
-					scriptName: "custom-state",
-					accountId: "acct_999",
-				})
-				expect(() => parseSyncCliArgs(["--unknown"])).toThrow(/Unknown argument/)
-
-				// Explicit --account-id feeds Cloudflare credential resolution under CI + CLOUDFLARE_API_TOKEN
-				// without requiring CLOUDFLARE_ACCOUNT_ID to also be exported in the environment.
-				const ciAccountId = "0123456789abcdef0123456789abcdef"
-				const ciResolved = yield* Effect.gen(function* () {
-					const env = yield* yield* Cloudflare.CloudflareEnvironment
-					const creds = yield* yield* Credentials
-					return { env, creds }
-				}).pipe(
-					Effect.provide(
-						makeSyncCloudflareApiLayer(ciAccountId).pipe(
-							Layer.provide(
-								ConfigProvider.layer(
-									ConfigProvider.fromUnknown({
-										CI: "true",
-										CLOUDFLARE_API_TOKEN: "test-ci-token",
-									}),
-								),
-							),
-						),
-					),
-				)
-				expect(ciResolved.env.type).toBe("apiToken")
-				expect(ciResolved.env.accountId).toBe(ciAccountId)
-				expect(ciResolved.creds.type).toBe("apiToken")
 			}),
 	)
 })
