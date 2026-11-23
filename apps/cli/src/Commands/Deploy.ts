@@ -568,14 +568,10 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)
 		yield* waitUntilLive(url, checkout.readyWithin, retry)
 		yield* verifyApiKey(url, apiKey)
-		const file = yield* writeSavedConnection({
-			url,
-			api_key: apiKey,
-			model: provider.model,
-		})
+		const file = yield* writeSavedConnection({ url, api_key: apiKey })
 
-		// A bare `chat` goes wherever CHECKFU_API_URL or CHECKFU_URL points, so when one of
-		// them names another deployment the suggestion has to name this one.
+		// These commands go wherever CHECKFU_API_URL or CHECKFU_URL points, so say so when
+		// one of them names another deployment.
 		const exported = yield* explicitBaseUrl(Option.none())
 		const elsewhere =
 			Option.isSome(exported) &&
@@ -586,15 +582,21 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				`Checkfu is live at ${url}`,
 				"",
 				`  API key    saved to ${file}`,
-				`  Model      ${provider.model} (${provider.name})`,
 				`  API docs   ${url}/openapi.json`,
 				"",
-				"Talk to your first agent:",
+				"Next, create an agent, an environment, and a session, then connect to it:",
 				"",
-				elsewhere
-					? `  ${COMMAND} --base-url ${shellQuote(url)} chat    (this shell exports a different Checkfu URL)`
-					: `  ${COMMAND} chat`,
+				`  ${COMMAND} agents create --name Assistant --model ${provider.model}`,
+				`  ${COMMAND} environments create --name default`,
+				`  ${COMMAND} sessions create --agent-id <agent-id> --environment-id <environment-id>`,
+				`  ${COMMAND} sessions connect <session-id>`,
 				"",
+				...(elsewhere
+					? [
+							`This shell exports a different Checkfu URL. Unset it, or add \`--base-url ${shellQuote(url)}\` after \`${COMMAND}\`.`,
+							"",
+						]
+					: []),
 			].join("\n"),
 		)
 	}),

@@ -1,15 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { providerForKey, readDotEnvValue, setDotEnvValue } from "../src/Commands/Deploy.ts"
-import { ChatDefaults } from "../src/SavedConnection.ts"
 import { COMMAND, invocation } from "../src/Standalone.ts"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 
 const DEPLOYED_URL = "https://checkfu.example.workers.dev"
 const CONFIG_FILE = "/config/config.json"
-const CHAT_FILE = "/config/chat.json"
 const ENV_FILE = "/checkout/.env"
 const RECORD_FILE = "/checkout/.checkfu/deployment.json"
 const ACCOUNT = "0123456789abcdef0123456789abcdef"
@@ -206,10 +203,14 @@ describe("checkfu deploy", () => {
 			expect(JSON.parse(files[CONFIG_FILE] ?? "")).toEqual({
 				url: DEPLOYED_URL,
 				api_key: TEST_API_KEY,
-				model: "claude-sonnet-5-5",
 			})
 			expect(result.stderr).toContain(`Checkfu is live at ${DEPLOYED_URL}`)
-			expect(result.stderr).toContain(`${COMMAND} chat`)
+			// The next steps are the plain resource commands, with a model the deployed key can run.
+			expect(result.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model claude-sonnet-5-5`,
+			)
+			expect(result.stderr).toContain(`${COMMAND} sessions connect <session-id>`)
+			expect(result.stderr).not.toContain("--base-url")
 			expect(result.stderr).not.toContain(TEST_API_KEY)
 		}),
 	)
@@ -569,7 +570,7 @@ describe("checkfu deploy", () => {
 	)
 
 	it.live(
-		"tightens a world-readable .env and pins its chat hint when the shell points elsewhere",
+		"tightens a world-readable .env and warns when the shell points at another deployment",
 		() =>
 			Effect.gen(function* () {
 				const cli = yield* makeTestServer()
@@ -585,7 +586,7 @@ describe("checkfu deploy", () => {
 				expect(result.errorMessage).toBeUndefined()
 				expect(files[ENV_FILE]).toBe(dotenv)
 				expect(chmods).toContainEqual([ENV_FILE, 0o600])
-				expect(result.stderr).toContain(`${COMMAND} --base-url ${DEPLOYED_URL} chat`)
+				expect(result.stderr).toContain(`add \`--base-url ${DEPLOYED_URL}\` after \`${COMMAND}\``)
 			}),
 	)
 
@@ -861,30 +862,10 @@ describe("saved connection", () => {
 		}),
 	)
 
-	it.live("login keeps the default model of the same deployment", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const metadata = { model: "claude-sonnet-5-5" }
-			const files = virtualFiles({ [CONFIG_FILE]: saved({ ...metadata, api_key: "stale" }) })
-
-			const result = yield* cli.run(["--base-url", `${DEPLOYED_URL}/v1/`, "login"], {
-				env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
-				files,
-			})
-
-			expect(result.errorMessage).toBeUndefined()
-			expect(JSON.parse(files[CONFIG_FILE] ?? "")).toEqual({
-				url: DEPLOYED_URL,
-				api_key: TEST_API_KEY,
-				...metadata,
-			})
-		}),
-	)
-
 	it.live("login refuses to save when the URL does not answer like Checkfu", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const working = saved({ model: "gpt-6.2-sol" })
+			const working = saved()
 			for (const response of [
 				new Response("<html>Not Found</html>", { status: 404 }),
 				new Response(null, { status: 301, headers: { location: "https://elsewhere.example" } }),
@@ -930,7 +911,7 @@ describe("saved connection", () => {
 	it.live("login rejects a mistyped path prefix even though unknown routes answer 404", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const working = saved({ model: "gpt-6.2-sol" })
+			const working = saved()
 			for (const key of ["wrong", TEST_API_KEY]) {
 				const files = virtualFiles({ [CONFIG_FILE]: working })
 				const result = yield* cli.run(["--base-url", `${DEPLOYED_URL}/typo`, "login"], {
@@ -1028,179 +1009,6 @@ describe("saved connection", () => {
 
 			yield* cli.run(["logout"], { env: { CHECKFU_CONFIG_DIR: "/config" }, files })
 			expect(files[CONFIG_FILE]).toBeUndefined()
-		}),
-	)
-})
-
-describe("checkfu chat", () => {
-	const env = { CHECKFU_CONFIG_DIR: "/config" }
-	const connection = (model?: string, url = DEPLOYED_URL) =>
-		JSON.stringify({ url, api_key: TEST_API_KEY, ...(model ? { model } : {}) })
-	const defaults = (files: VirtualFiles) =>
-		Schema.decodeUnknownSync(Schema.fromJsonString(ChatDefaults))(files[CHAT_FILE])
-
-	it.live("creates an agent, environment, and session, then reuses them", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const files = virtualFiles({ [CONFIG_FILE]: connection("claude-sonnet-5-5") })
-
-			const first = yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			expect(first.errorMessage).toBeUndefined()
-			expect(first.stdout).toContain("Echo: Hello")
-			const remembered = defaults(files)
-			expect(remembered).toMatchObject({ url: DEPLOYED_URL, model: "claude-sonnet-5-5" })
-			expect(remembered.agents["claude-sonnet-5-5"]).toMatch(/^agent_/)
-			expect(remembered.environment_id).toMatch(/^env_/)
-
-			const second = yield* cli.run(["chat"], { env, files, stdin: "Again\n" })
-			expect(second.stdout).toContain("Echo: Again")
-			expect(defaults(files)).toEqual(remembered)
-			expect(files[CONFIG_FILE]).toBe(connection("claude-sonnet-5-5"))
-		}),
-	)
-
-	it.live("stays on the deployment it started with when the saved login changes mid-setup", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			for (const replacement of [undefined, connection("gpt-6.2-sol", "https://another.example")]) {
-				const files = virtualFiles({ [CONFIG_FILE]: connection("gpt-6.2-sol") })
-				const hosts = new Set<string>()
-				const result = yield* cli.run(["chat"], {
-					env,
-					files,
-					stdin: "Hello\n",
-					interceptFetch: (next, request) => {
-						hosts.add(new URL(request.url).origin)
-						if (replacement === undefined) {
-							delete files[CONFIG_FILE]
-						} else {
-							files[CONFIG_FILE] = replacement
-						}
-						return next(request)
-					},
-				})
-
-				expect(result.errorMessage).toBeUndefined()
-				expect(result.stdout).toContain("Echo: Hello")
-				expect([...hosts]).toEqual([DEPLOYED_URL])
-				expect(files[CONFIG_FILE]).toBe(replacement)
-				expect(files[CHAT_FILE]).not.toContain(TEST_API_KEY)
-			}
-		}),
-	)
-
-	it.live("keeps one agent per model and never reuses one whose model differs", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const files = virtualFiles({ [CONFIG_FILE]: connection("gpt-6.2-sol") })
-			yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			const gptAgent = defaults(files).agents["gpt-6.2-sol"]
-
-			yield* cli.run(["chat", "--model", "claude-sonnet-5-5"], { env, files, stdin: "Hello\n" })
-			const claudeAgent = defaults(files).agents["claude-sonnet-5-5"]
-			expect(claudeAgent).not.toBe(gptAgent)
-			expect(defaults(files).agents["gpt-6.2-sol"]).toBe(gptAgent)
-
-			const plain = yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			expect(plain.stderr).toContain(`agent ${gptAgent}@`)
-
-			files[CONFIG_FILE] = connection("claude-sonnet-5-5")
-			const switched = yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			expect(switched.stderr).toContain(`agent ${claudeAgent}@`)
-
-			files[CHAT_FILE] = JSON.stringify({
-				...defaults(files),
-				agents: { "claude-sonnet-5-5": gptAgent },
-			})
-			const mismatched = yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			expect(mismatched.errorMessage).toBeUndefined()
-			const replaced = defaults(files).agents["claude-sonnet-5-5"] ?? ""
-			expect(replaced).not.toBe(gptAgent)
-			const agent = yield* cli.run(["agents", "retrieve", "--agent-id", replaced], { env, files })
-			expect(agent.stdout).toContain('"model":{"id":"claude-sonnet-5-5"}')
-		}),
-	)
-
-	it.live("still chats when its defaults cannot be saved, and says how to resume", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const creates: Array<string> = []
-			const result = yield* cli.run(
-				["--base-url", DEPLOYED_URL, "chat", "--model", "gpt-6.2-sol"],
-				{
-					env: { CHECKFU_API_KEY: TEST_API_KEY },
-					stdin: "Hello\n",
-					interceptFetch: (next, request) => {
-						if (request.method === "POST") {
-							creates.push(new URL(request.url).pathname)
-						}
-						return next(request)
-					},
-				},
-			)
-			expect(result.errorMessage).toBeUndefined()
-			expect(result.stdout).toContain("Echo: Hello")
-			expect(result.stderr).toContain("This agent will not be reused next time")
-			expect(creates.slice(0, 3)).toEqual(["/v1/agents", "/v1/environments", "/v1/sessions"])
-			expect(result.stderr).toContain(
-				`${COMMAND} --base-url ${DEPLOYED_URL} sessions connect sess_`,
-			)
-
-			const unreadable = yield* cli.run(["chat"], {
-				env: { CHECKFU_CONFIG_DIR: "/config" },
-				files: { [CONFIG_FILE]: connection("gpt-6.2-sol"), [CHAT_FILE]: "{ not json" },
-				stdin: "Hello\n",
-			})
-			expect(unreadable.errorMessage).toBeUndefined()
-			expect(unreadable.stderr).toContain("Starting without remembered chat defaults")
-			expect(unreadable.stderr).toContain(
-				`Resume later with: ${COMMAND} --base-url ${DEPLOYED_URL} sessions connect sess_`,
-			)
-		}),
-	)
-
-	it.live("defaults to the last model used when the deployment has no default", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const files = virtualFiles({ [CONFIG_FILE]: connection() })
-
-			const missing = yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			expect(missing.errorMessage).toContain("--model")
-
-			yield* cli.run(["chat", "--model", "gpt-6.2-sol"], { env, files, stdin: "Hello\n" })
-			const plain = yield* cli.run(["chat"], { env, files, stdin: "Again\n" })
-			expect(plain.errorMessage).toBeUndefined()
-			expect(plain.stdout).toContain("Echo: Again")
-		}),
-	)
-
-	it.live("reports a failed lookup instead of creating duplicate resources", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const files = virtualFiles({ [CONFIG_FILE]: connection("gpt-6.2-sol") })
-			yield* cli.run(["chat"], { env, files, stdin: "Hello\n" })
-			const before = files[CHAT_FILE]
-
-			const creates: Array<string> = []
-			const result = yield* cli.run(["chat"], {
-				env,
-				files,
-				stdin: "Hello\n",
-				interceptFetch: (next, request) => {
-					if (request.method === "GET" && new URL(request.url).pathname.startsWith("/v1/agents/")) {
-						return Promise.resolve(errorEnvelope(429, "rate_limit_error"))
-					}
-					if (request.method === "POST") {
-						creates.push(new URL(request.url).pathname)
-					}
-					return next(request)
-				},
-			})
-
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("429")
-			expect(creates).toEqual([])
-			expect(files[CHAT_FILE]).toBe(before)
 		}),
 	)
 })

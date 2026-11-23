@@ -13,17 +13,8 @@ import { COMMAND } from "./Standalone.ts"
 export const SavedConnection = Schema.Struct({
 	url: Schema.String,
 	api_key: Schema.String,
-	model: Schema.optional(Schema.String),
 })
 export type SavedConnection = typeof SavedConnection.Type
-
-export const ChatDefaults = Schema.Struct({
-	url: Schema.String,
-	model: Schema.String,
-	environment_id: Schema.String,
-	agents: Schema.Record(Schema.String, Schema.String),
-})
-export type ChatDefaults = typeof ChatDefaults.Type
 
 const envDirectory = (name: string): Effect.Effect<Option.Option<string>> =>
 	Config.option(Config.String(name)).pipe(
@@ -116,11 +107,7 @@ const store = <A>(fileName: string, schema: Schema.Codec<A, unknown>) => {
 }
 
 const connection = store("config.json", SavedConnection)
-const chat = store("chat.json", ChatDefaults)
 
 export const readSavedConnection = connection.read
 export const writeSavedConnection = connection.write
-export const readChatDefaults = chat.read
-export const writeChatDefaults = chat.write
-
-export const removeSavedConnection = Effect.tap(connection.remove, () => chat.remove)
+export const removeSavedConnection = connection.remove

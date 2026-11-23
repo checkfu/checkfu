@@ -14,13 +14,16 @@ bun checkfu deploy
 
 `deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys one Worker with its Durable Objects to your account. It generates the API key for you and keeps the secrets in the checkout's `.env`. As soon as Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go. Both files are made owner-only on macOS and Linux; on Windows they are as private as the folder they are in.
 
-Then talk to an agent:
+Then create an agent, an environment, and a session, and connect to it. Each command prints the ID the next one needs:
 
 ```sh
-bun checkfu chat
+bun checkfu agents create --name Assistant --model claude-sonnet-5-5
+bun checkfu environments create --name default
+bun checkfu sessions create --agent-id <agent-id> --environment-id <environment-id>
+bun checkfu sessions connect <session-id>
 ```
 
-`chat` creates an assistant agent, an environment, and a session, and connects you to it. Everything it does is plain API: `bun checkfu agents create --help`, `bun checkfu sessions create --help`, or `GET <your-url>/openapi.json`.
+Use `gpt-6.2-sol` if you deployed with an OpenAI key. A coding agent can drive the same steps from `bun checkfu --help` or `GET <your-url>/openapi.json`.
 
 After that:
 
@@ -80,7 +83,7 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 ## Commands
 
-- `bun checkfu --help` (short for `node apps/cli/bin/checkfu.mjs --help`) — run the Checkfu CLI from a **trusted Checkfu source checkout** (`deploy`, `chat`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
+- `bun checkfu --help` (short for `node apps/cli/bin/checkfu.mjs --help`) — run the Checkfu CLI from a **trusted Checkfu source checkout** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
   - **Untrusted checkouts with `CHECKFU_API_KEY` exported:** invoke an independently installed Checkfu launcher using **absolute paths for both Node and `checkfu.mjs`** (e.g., `/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs --help` on POSIX or `C:\Program Files\nodejs\node.exe C:\Users\<user>\checkfu\apps\cli\bin\checkfu.mjs --help` on Windows). Never run a relative `apps/cli/bin/checkfu.mjs` inside an untrusted checkout.
   - **`PATH`-based `checkfu` bin (`#!/usr/bin/env node`):** requires both `checkfu` and `node` on `PATH` to resolve to trusted installations before the launcher starts (do not rely on the `PATH`-based bin when `PATH` may contain `.`, empty entries, or project-local directories). Once started, the launcher resolves Bun only from explicitly trusted installation roots (or `BUN_INSTALL` / `CHECKFU_BUN_PATH` outside the enclosing checkout) and pins `--no-env-file --config=<install>/bunfig.toml`.
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.

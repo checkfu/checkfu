@@ -8,12 +8,7 @@ import * as Stdio from "effect/Stdio"
 import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
 import { CliFailure, configError, usageError } from "../Errors.ts"
 import { RootCommand } from "../RootCommand.ts"
-import type { SavedConnection } from "../SavedConnection.ts"
-import {
-	readSavedConnection,
-	removeSavedConnection,
-	writeSavedConnection,
-} from "../SavedConnection.ts"
+import { removeSavedConnection, writeSavedConnection } from "../SavedConnection.ts"
 import { COMMAND } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 
@@ -57,15 +52,7 @@ export const loginCommand = Command.make("login", {}, () =>
 			)
 		}
 		yield* verifyApiKey(url, apiKey)
-		const saved = yield* readSavedConnection.pipe(
-			Effect.orElseSucceed(() => Option.none<SavedConnection>()),
-			Effect.map(Option.filter((connection) => connection.url === url)),
-		)
-		const file = yield* writeSavedConnection({
-			...Option.getOrUndefined(saved),
-			url,
-			api_key: apiKey,
-		})
+		const file = yield* writeSavedConnection({ url, api_key: apiKey })
 		yield* writeStderrLine(`Connected to ${url}. Saved to ${file}.`)
 	}),
 ).pipe(

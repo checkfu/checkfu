@@ -7,7 +7,6 @@ import type * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { chatCommand } from "./Commands/Chat.ts"
 import { deployCommand, destroyCommand } from "./Commands/Deploy.ts"
 import { loginCommand, logoutCommand } from "./Commands/Login.ts"
 import { sessionsConnectCommand } from "./Commands/SessionsConnect.ts"
@@ -21,7 +20,6 @@ export const CLI_VERSION = "0.0.0"
 export const CheckfuCli = RootCommand.pipe(
 	Command.withSubcommands([
 		deployCommand,
-		chatCommand,
 		loginCommand,
 		logoutCommand,
 		destroyCommand,
