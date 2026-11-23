@@ -104,6 +104,7 @@ export const readBoundedResponseText = (
 
 export interface NormalizeApiUrlOptions {
 	readonly allowInsecureHttp?: boolean | undefined
+	readonly stripApiVersionSuffix?: boolean | undefined
 }
 
 export const parseNormalizedApiUrl = (
@@ -145,10 +146,12 @@ export const parseNormalizedApiUrl = (
 	}
 
 	let pathname = parsed.pathname.replace(/\/+$/, "")
-	if (pathname === "/v1") {
-		pathname = ""
-	} else if (pathname.endsWith("/v1")) {
-		pathname = pathname.slice(0, -3)
+	if (options?.stripApiVersionSuffix !== false) {
+		if (pathname === "/v1") {
+			pathname = ""
+		} else if (pathname.endsWith("/v1")) {
+			pathname = pathname.slice(0, -3)
+		}
 	}
 	return { ok: true, url: `${parsed.origin}${pathname}` }
 }
@@ -421,16 +424,16 @@ export const shouldRetryError = (error: CheckfuSdkError, safety: RetrySafety): b
 		if (shouldRetryHeader === "false") {
 			return false
 		}
+		if (safety !== "idempotent") {
+			// For pre-commit-only operations, only retry a confirmed Checkfu 429 rate-limit
+			// rejection (with no partial/unconfirmed batch results). Positive retry hints from
+			// gateways or intermediaries cannot guarantee an unkeyed write did not commit.
+			return error.status === 429 && isApiErrorEnvelope(error.body)
+		}
 		if (shouldRetryHeader === "true") {
 			return true
 		}
-		if (safety === "idempotent") {
-			return error.status === 408 || error.status === 429 || error.status >= 500
-		}
-		// For pre-commit-only operations, only retry a confirmed Checkfu 429 rate-limit
-		// rejection (with no partial/unconfirmed batch results). Plain gateway 408/429/503
-		// or Checkfu 503 (e.g. view-consistency timeout) can occur after a write commits.
-		return error.status === 429 && isApiErrorEnvelope(error.body)
+		return error.status === 408 || error.status === 429 || error.status >= 500
 	}
 	if (error._tag === "APIConnectionTimeoutError" || error._tag === "APIConnectionError") {
 		return safety === "idempotent"

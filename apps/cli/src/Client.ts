@@ -16,6 +16,7 @@ import {
 	generateIdempotencyKey as sdkGenerateIdempotencyKey,
 	makeAuthorizedHttpClient,
 	normalizeApiUrl as sdkNormalizeApiUrl,
+	readBoundedResponseText,
 } from "@checkfu/sdk/Transport"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -25,7 +26,6 @@ import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -43,103 +43,8 @@ export type {
 	StreamSseOptions,
 }
 
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 const VERIFY_MAX_BODY_BYTES = 16 * 1024
 const VERIFY_BODY_TIMEOUT_MS = 2000
-
-const cancelResponseBody = (
-	response: HttpClientResponse.HttpClientResponse,
-): Effect.Effect<void> => {
-	const webResponse = HttpClientResponse.toWeb(response)
-	if (Option.isSome(webResponse) && webResponse.value.body !== null) {
-		const body = webResponse.value.body
-		return Effect.tryPromise({
-			try: () => body.cancel(),
-			catch: () => undefined,
-		}).pipe(Effect.ignore)
-	}
-	return Effect.void
-}
-
-const readBoundedResponseText = (
-	response: HttpClientResponse.HttpClientResponse,
-	maxBytes: number,
-	timeoutMs: number,
-): Effect.Effect<string> =>
-	Effect.gen(function* () {
-		const chunks: Array<Uint8Array> = []
-		let totalBytes = 0
-		let truncated = false
-		const readBody = response.stream.pipe(
-			Stream.takeUntil((chunk) => {
-				if (totalBytes + chunk.byteLength > maxBytes) {
-					const remaining = maxBytes - totalBytes
-					if (remaining > 0) {
-						chunks.push(chunk.subarray(0, remaining))
-						totalBytes += remaining
-					}
-					truncated = true
-					return true
-				}
-				chunks.push(chunk)
-				totalBytes += chunk.byteLength
-				return false
-			}),
-			Stream.runDrain,
-			Effect.ignore,
-			Effect.catchDefect(() => Effect.void),
-		)
-		const outcome = yield* Effect.race(
-			readBody.pipe(Effect.as("done" as const)),
-			Effect.sleep(Duration.millis(timeoutMs)).pipe(Effect.as("timeout" as const)),
-		)
-		const timedOut = outcome === "timeout"
-		if (truncated || timedOut) {
-			yield* cancelResponseBody(response)
-		}
-		if (totalBytes === 0) {
-			return ""
-		}
-		const merged = new Uint8Array(totalBytes)
-		let offset = 0
-		for (const chunk of chunks) {
-			merged.set(chunk, offset)
-			offset += chunk.byteLength
-		}
-		const decoded = new TextDecoder().decode(merged)
-		return truncated || timedOut ? `${decoded}…` : decoded
-	})
-
-const parseApiBase = (raw: string): Effect.Effect<URL, CliFailure> =>
-	Effect.gen(function* () {
-		const trimmed = raw.trim()
-		if (trimmed.length === 0) {
-			return yield* configError("API base URL must not be empty.")
-		}
-		const parsed = yield* Effect.try({
-			try: () => new URL(trimmed),
-			catch: () =>
-				configError("Invalid API base URL. Expected an http(s) URL without credentials."),
-		})
-		if (parsed.username.length > 0 || parsed.password.length > 0) {
-			return yield* configError("API base URL must not contain credentials.")
-		}
-		if (parsed.search.length > 0 || parsed.hash.length > 0) {
-			return yield* configError("API base URL must not contain query parameters or fragments.")
-		}
-		const protocol = parsed.protocol.toLowerCase()
-		const hostname = parsed.hostname.toLowerCase()
-		if (protocol === "http:") {
-			if (!LOOPBACK_HOSTS.has(hostname)) {
-				return yield* configError(
-					`Refusing to send API credentials over insecure HTTP to non-loopback host "${parsed.hostname}". Use https:// instead.`,
-				)
-			}
-		} else if (protocol !== "https:") {
-			return yield* configError(`Unsupported API base URL scheme "${parsed.protocol}".`)
-		}
-		return parsed
-	})
 
 /** Turns a URL someone typed into the base the API lives under, dropping one trailing `/v1`. */
 export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> =>
@@ -151,14 +56,17 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
  * somewhere that was never verified.
  */
 const savedApiUrl = (saved: SavedConnection): Effect.Effect<string, CliFailure> =>
-	Effect.flatMap(parseApiBase(saved.url), (parsed) =>
-		`${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}` === saved.url
-			? Effect.succeed(saved.url)
-			: Effect.fail(
-					configError(
-						`The saved deployment URL is not in the form it is saved in. Run \`${COMMAND} login\` again.`,
+	sdkNormalizeApiUrl(saved.url, { stripApiVersionSuffix: false }).pipe(
+		Effect.mapError((err) => configError(err.message)),
+		Effect.flatMap((normalized) =>
+			normalized === saved.url
+				? Effect.succeed(saved.url)
+				: Effect.fail(
+						configError(
+							`The saved deployment URL is not in the form it is saved in. Run \`${COMMAND} login\` again.`,
+						),
 					),
-				),
+		),
 	)
 
 const optionalConfigString = (name: string): Effect.Effect<Option.Option<string>, CliFailure> =>

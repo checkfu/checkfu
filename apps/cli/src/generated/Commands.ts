@@ -17,8 +17,8 @@ import {
 	withMetavar as FlagWithMetavar,
 } from "effect/cli/Flag"
 
-import { invokeGeneratedOperation, invokeGeneratedStream } from "../GeneratedRuntime.js"
-import type { GeneratedOperationDescriptor } from "../GeneratedRuntime.js"
+import { invokeGeneratedOperation, invokeGeneratedStream } from "../GeneratedRuntime.ts"
+import type { GeneratedOperationDescriptor } from "../GeneratedRuntime.ts"
 
 const agentsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "agents archive",

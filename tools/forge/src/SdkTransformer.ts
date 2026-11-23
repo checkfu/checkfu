@@ -121,8 +121,10 @@ const generateResourcesFile = (
 	const executePaginatedPagesEffect = runtimeMod.ident("executePaginatedPagesEffect")
 	const executePaginatedStreamEffect = runtimeMod.ident("executePaginatedStreamEffect")
 	const executeWithRetries = runtimeMod.ident("executeWithRetries")
+	const pendingUpdateReadiness = runtimeMod.ident("pendingUpdateReadiness")
 	const resolveCallIdempotencyKey = runtimeMod.ident("resolveCallIdempotencyKey")
 	const unwrapResponse = runtimeMod.ident("unwrapResponse")
+	const withPendingReadiness = runtimeMod.ident("withPendingReadiness")
 	const withResolvedIdempotencyKey = runtimeMod.ident("withResolvedIdempotencyKey")
 
 	const APIPromise = promiseRuntimeMod.ident("APIPromise").ty()
@@ -353,7 +355,7 @@ const generateResourcesFile = (
 			"> {",
 		)
 		out.indent(() => {
-			const emitInvoke = (): void => {
+			const emitRawInvoke = (): void => {
 				const safetyExpr =
 					op.retrySafety === "idempotency-key-gated"
 						? 'key !== undefined ? "idempotent" : "pre-commit-only"'
@@ -411,6 +413,29 @@ const generateResourcesFile = (
 						out('responseMode: "decoded-and-response",')
 					})
 					out("}),")
+				})
+				out(")")
+			}
+
+			const emitInvoke = (): void => {
+				if (!op.supportsPending) {
+					emitRawInvoke()
+					return
+				}
+				const bVar = hasBodyAndQuery ? "body" : "params"
+				out(withPendingReadiness, "(")
+				out.indent(() => {
+					emitRawInvoke()
+					out(",")
+					if (op.apiEndpoint === "create") {
+						out('{ kind: "create" },')
+					} else if (op.apiEndpoint === "archive") {
+						out('{ kind: "archive" },')
+					} else if (op.apiEndpoint === "update" && op.hasBody) {
+						out(pendingUpdateReadiness, "(", bVar, ", ", JSON.stringify(op.operationId), "),")
+					} else {
+						out('{ kind: "requires-until", operation: ', JSON.stringify(op.operationId), " },")
+					}
 				})
 				out(")")
 			}

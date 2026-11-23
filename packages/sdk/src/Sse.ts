@@ -9,7 +9,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { SessionEvent, statusOfErrorType } from "./Api.ts"
+import { CursorFromString, SessionEvent, statusOfErrorType } from "./Api.ts"
 import type { ApiError, CheckfuHttpApiClient } from "./Api.ts"
 import {
 	APIConnectionError,
@@ -25,6 +25,7 @@ import { SessionId } from "./Schemas.ts"
 import {
 	CurrentRequestTransportMeta,
 	cancelResponseBody,
+	lookupHeader,
 	mergeHeaderMaps,
 	parseRetryAfterMs,
 	readBoundedResponseText,
@@ -37,6 +38,7 @@ const DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS = 2000
 const DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS = 5000
 const MAX_SSE_ERROR_BODY_BYTES = 16 * 1024
 const MAX_SSE_NO_PROGRESS_DELAY_MS = 5000
+const MAX_SSE_ID_LINE_LENGTH = 10 * 1024 * 1024
 
 export type ApiSseError =
 	| ApiError
@@ -69,6 +71,7 @@ export interface ApiSseStreamConfig<Event, E extends ApiSseError = ApiSseError> 
 	readonly getCursor?: ((event: Event) => string | undefined) | undefined
 	readonly isCursorAdvance?: ((prev: string | undefined, next: string) => boolean) | undefined
 	readonly isTerminal?: ((event: Event) => boolean) | undefined
+	readonly defaultHeaders?: HeaderMap | undefined
 	readonly options?: StreamSseOptions | undefined
 }
 
@@ -77,6 +80,7 @@ class IncompleteSseFrameError extends Data.TaggedError("IncompleteSseFrameError"
 > {}
 
 const decodeUnknownJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+const decodeCursorOption = Schema.decodeUnknownOption(CursorFromString)
 const decodeSessionEventFromJsonString = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
 )
@@ -139,8 +143,10 @@ const retryDisconnectDelayMs = (
 	return base * 2 ** Math.min(attempt, 16)
 }
 
+type TrackerFrame = { readonly _tag: "Data" } | { readonly _tag: "IdOnly"; readonly id: string }
+
 interface SseFrameHealthTracker {
-	readonly feed: (chunk: string) => void
+	readonly feed: (chunk: string) => ReadonlyArray<TrackerFrame>
 	readonly hasIncompleteFrame: () => boolean
 	readonly sawCompletedKeepalive: () => boolean
 }
@@ -152,11 +158,24 @@ const makeSseFrameHealthTracker = (): SseFrameHealthTracker => {
 	let lineIsComment = false
 	let lineBuf = ""
 	let hasPendingFrameField = false
+	let frameHasData = false
+	let frameIdUpdate: string | undefined
 	let completedKeepalive = false
 
-	const finishLine = (line: string, isComment: boolean): void => {
+	const finishLine = (
+		line: string,
+		isComment: boolean,
+		completedFrames: Array<TrackerFrame>,
+	): void => {
 		if (line.length === 0) {
+			if (frameHasData) {
+				completedFrames.push({ _tag: "Data" })
+			} else if (frameIdUpdate !== undefined) {
+				completedFrames.push({ _tag: "IdOnly", id: frameIdUpdate })
+			}
 			hasPendingFrameField = false
+			frameHasData = false
+			frameIdUpdate = undefined
 			return
 		}
 		if (isComment) {
@@ -165,14 +184,29 @@ const makeSseFrameHealthTracker = (): SseFrameHealthTracker => {
 		}
 		const colon = line.indexOf(":")
 		const field = colon >= 0 ? line.slice(0, colon) : line
+		if (field === "data") {
+			frameHasData = true
+			hasPendingFrameField = true
+			return
+		}
+		if (field === "id") {
+			const rawValue = colon >= 0 ? line.slice(colon + 1) : ""
+			const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue
+			if (!value.includes("\0")) {
+				frameIdUpdate = value
+			}
+			hasPendingFrameField = true
+			return
+		}
 		if (field !== "retry") {
 			hasPendingFrameField = true
 		}
 	}
 
-	const feed = (rawChunk: string): void => {
+	const feed = (rawChunk: string): ReadonlyArray<TrackerFrame> => {
+		const completedFrames: Array<TrackerFrame> = []
 		if (rawChunk.length === 0) {
-			return
+			return completedFrames
 		}
 		let chunk = rawChunk
 		if (isFirstChunk && chunk.startsWith("\uFEFF")) {
@@ -189,7 +223,7 @@ const makeSseFrameHealthTracker = (): SseFrameHealthTracker => {
 			}
 			if (code === 13 || code === 10) {
 				discardLf = code === 13
-				finishLine(lineBuf, lineIsComment)
+				finishLine(lineBuf, lineIsComment, completedFrames)
 				lineBuf = ""
 				inLine = false
 				lineIsComment = false
@@ -199,10 +233,14 @@ const makeSseFrameHealthTracker = (): SseFrameHealthTracker => {
 				inLine = true
 				lineIsComment = code === 58
 			}
-			if (lineBuf.length < 16) {
+			if (
+				lineBuf.length < 16 ||
+				(lineBuf.startsWith("id:") && lineBuf.length < MAX_SSE_ID_LINE_LENGTH)
+			) {
 				lineBuf += chunk[i]
 			}
 		}
+		return completedFrames
 	}
 
 	return {
@@ -258,6 +296,7 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 
 	interface LoopState {
 		cursor: string | undefined
+		cursorReset: boolean
 		hasAttempted: boolean
 		attempt: number
 		noProgressCloses: number
@@ -266,6 +305,10 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 		done: boolean
 		notifiedOpen: boolean
 	}
+
+	type ParsedSseItem =
+		| { readonly _tag: "Data"; readonly data: string; readonly id: string | undefined }
+		| { readonly _tag: "IdOnly"; readonly id: string }
 
 	const openConnection = (loopState: LoopState): Stream.Stream<Event, CheckfuSdkError> =>
 		Stream.unwrap(
@@ -279,10 +322,13 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 				const reconnect = loopState.hasAttempted
 				loopState.hasAttempted = true
 
-				const extraHeaders =
-					reconnect && loopState.cursor !== undefined
+				const extraHeaders = !reconnect
+					? options?.headers
+					: loopState.cursor !== undefined
 						? mergeHeaderMaps(options?.headers, { "last-event-id": loopState.cursor })
-						: options?.headers
+						: loopState.cursorReset
+							? mergeHeaderMaps(options?.headers, { "last-event-id": null })
+							: options?.headers
 				let lastResponse: HttpClientResponse.HttpClientResponse | undefined
 				const outcome = yield* Effect.result(
 					config.open({ reconnect, cursor: loopState.cursor }).pipe(
@@ -354,22 +400,38 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 					}
 				}
 
-				let advancedCursor = false
+				const cursorAtStart = loopState.cursor
+				let sawDataEvent = false
 				let sawTerminal = false
 				let streamError: ApiSseError | IncompleteSseFrameError | undefined
 				let hasStreamError = false
 				const healthTracker = makeSseFrameHealthTracker()
-				let chunkEvents: Array<string> = []
+				let chunkEvents: Array<{ readonly data: string; readonly id: string | undefined }> = []
 				const parser = Sse.makeParser((parsed) => {
 					if (parsed._tag === "Retry") {
 						loopState.retryDelayMs = Math.max(0, Math.trunc(Duration.toMillis(parsed.duration)))
 					} else {
-						chunkEvents.push(parsed.data)
+						chunkEvents.push({ data: parsed.data, id: parsed.id })
 					}
 				})
 
-				const parsedPayloads: Stream.Stream<
-					string,
+				const applyGenericFrameId = (id: string): void => {
+					if (id === "") {
+						loopState.cursor = undefined
+						loopState.cursorReset = true
+						return
+					}
+					const advances = config.isCursorAdvance
+						? config.isCursorAdvance(loopState.cursor, id)
+						: id !== loopState.cursor
+					if (advances) {
+						loopState.cursor = id
+						loopState.cursorReset = false
+					}
+				}
+
+				const parsedItems: Stream.Stream<
+					ParsedSseItem,
 					HttpClientError.HttpClientError | Sse.SseError
 				> = response.stream.pipe(
 					Stream.decodeText(),
@@ -377,11 +439,32 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 						Stream.unwrap(
 							Effect.sync(() => {
 								chunkEvents = []
-								healthTracker.feed(chunk)
+								const trackerFrames = healthTracker.feed(chunk)
 								const parseError = parser.feed(chunk)
+								const items: Array<ParsedSseItem> = []
+								let dataIndex = 0
+								for (const frame of trackerFrames) {
+									if (frame._tag === "Data") {
+										const parsed = chunkEvents[dataIndex]
+										if (parsed === undefined) {
+											break
+										}
+										dataIndex += 1
+										items.push({ _tag: "Data", data: parsed.data, id: parsed.id })
+									} else if (config.getCursor === undefined) {
+										items.push(frame)
+									}
+								}
+								while (dataIndex < chunkEvents.length) {
+									const parsed = chunkEvents[dataIndex]
+									dataIndex += 1
+									if (parsed !== undefined) {
+										items.push({ _tag: "Data", data: parsed.data, id: parsed.id })
+									}
+								}
 								const emitted =
-									chunkEvents.length > 0
-										? Stream.fromIterable(chunkEvents).pipe(Stream.rechunk(1))
+									items.length > 0
+										? Stream.fromIterable(items).pipe(Stream.rechunk(1))
 										: Stream.empty
 								return parseError !== undefined
 									? Stream.concat(emitted, Stream.fail(parseError))
@@ -391,24 +474,40 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 					),
 				)
 
-				const eventsStream: Stream.Stream<Event, CheckfuSdkError> = parsedPayloads.pipe(
-					Stream.mapEffect((rawData) => config.decodeEvent(rawData)),
-					Stream.tap((event) =>
-						Effect.sync(() => {
-							const nextCursor = config.getCursor?.(event)
-							if (nextCursor !== undefined) {
-								const advances = config.isCursorAdvance
-									? config.isCursorAdvance(loopState.cursor, nextCursor)
-									: nextCursor !== loopState.cursor
-								if (advances) {
-									loopState.cursor = nextCursor
-									advancedCursor = true
+				const eventsStream: Stream.Stream<Event, CheckfuSdkError> = parsedItems.pipe(
+					Stream.mapEffect((item): Effect.Effect<Option.Option<Event>, CheckfuSdkError> => {
+						if (item._tag === "IdOnly") {
+							return Effect.sync(() => {
+								applyGenericFrameId(item.id)
+								return Option.none()
+							})
+						}
+						return config.decodeEvent(item.data).pipe(
+							Effect.map((event) => {
+								sawDataEvent = true
+								if (config.getCursor !== undefined) {
+									const nextCursor = config.getCursor(event)
+									if (nextCursor !== undefined) {
+										const advances = config.isCursorAdvance
+											? config.isCursorAdvance(loopState.cursor, nextCursor)
+											: nextCursor !== loopState.cursor
+										if (advances) {
+											loopState.cursor = nextCursor
+											loopState.cursorReset = false
+										}
+									}
+								} else if (item.id !== undefined) {
+									applyGenericFrameId(item.id)
 								}
-							}
-							if (config.isTerminal?.(event) === true) {
-								sawTerminal = true
-							}
-						}),
+								if (config.isTerminal?.(event) === true) {
+									sawTerminal = true
+								}
+								return Option.some(event)
+							}),
+						)
+					}),
+					Stream.flatMap((maybeEvent) =>
+						Option.isSome(maybeEvent) ? Stream.succeed(maybeEvent.value) : Stream.empty,
 					),
 					Stream.takeUntil((event) => config.isTerminal?.(event) === true),
 					Stream.catch((error) => {
@@ -424,8 +523,15 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 							loopState.done = true
 							return Stream.empty
 						}
+						const advancedCursor =
+							loopState.cursor !== undefined &&
+							loopState.cursor !== cursorAtStart &&
+							(config.isCursorAdvance
+								? config.isCursorAdvance(cursorAtStart, loopState.cursor)
+								: true)
 						const elapsedMs = Number((yield* Clock.monotonicTimeNanos) - openedAtNanos) / 1_000_000
 						const healthyIdle =
+							!sawDataEvent &&
 							!advancedCursor &&
 							healthTracker.sawCompletedKeepalive() &&
 							elapsedMs >= healthyIdleDurationMs
@@ -482,8 +588,18 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 		)
 
 	return Stream.suspend(() => {
+		const initialHeaderCursor =
+			config.initialCursor === undefined && config.getCursor === undefined
+				? lookupHeader(mergeHeaderMaps(config.defaultHeaders, options?.headers), "last-event-id")
+				: undefined
+		const initialCursor =
+			config.initialCursor ??
+			(typeof initialHeaderCursor === "string" && initialHeaderCursor.length > 0
+				? initialHeaderCursor
+				: undefined)
 		const loopState: LoopState = {
-			cursor: config.initialCursor,
+			cursor: initialCursor,
+			cursorReset: false,
 			hasAttempted: false,
 			attempt: 0,
 			noProgressCloses: 0,
@@ -502,6 +618,7 @@ export const streamSessionEvents = (
 	api: CheckfuHttpApiClient,
 	sessionId: string,
 	options?: StreamSessionEventsOptions,
+	defaultHeaders?: HeaderMap,
 ): Stream.Stream<SessionEvent, CheckfuSdkError> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
@@ -522,12 +639,31 @@ export const streamSessionEvents = (
 					message: "after must be a non-negative integer.",
 				})
 			}
-			let lastEmittedSeq: number | undefined = options?.after
+			// Match server precedence (`non-empty Last-Event-ID header > query after`) across
+			// both client defaultHeaders and per-call headers so filtering and reconnects agree.
+			const effectiveInitialHeaders = mergeHeaderMaps(defaultHeaders, options?.headers)
+			const rawHeaderLastEventId = lookupHeader(effectiveInitialHeaders, "last-event-id")
+			const headerLastEventId =
+				typeof rawHeaderLastEventId === "string" && rawHeaderLastEventId.length > 0
+					? rawHeaderLastEventId
+					: undefined
+			let effectiveCursor: number | undefined
+			if (headerLastEventId !== undefined) {
+				const parsedHeader = decodeCursorOption(headerLastEventId)
+				effectiveCursor = Option.isSome(parsedHeader) ? parsedHeader.value : undefined
+			} else {
+				effectiveCursor = options?.after
+			}
+			const sendQueryAfterOnInitialOpen = headerLastEventId === undefined
+			let lastEmittedSeq: number | undefined = effectiveCursor
 			return streamApiSse<SessionEvent>({
 				open: ({ cursor, reconnect }) =>
 					api.sessions.streamEvents({
 						params: { session_id: parsedSessionId },
-						query: !reconnect && cursor !== undefined ? { after: cursor } : {},
+						query:
+							sendQueryAfterOnInitialOpen && !reconnect && cursor !== undefined
+								? { after: cursor }
+								: {},
 						responseMode: "response-only",
 					}),
 				decodeEvent: (rawData) =>
@@ -540,10 +676,11 @@ export const streamSessionEvents = (
 								}),
 						),
 					),
-				...(options?.after !== undefined ? { initialCursor: String(options.after) } : {}),
+				...(effectiveCursor !== undefined ? { initialCursor: String(effectiveCursor) } : {}),
 				getCursor: (event) => String(event.seq),
 				isCursorAdvance: (prev, next) => prev === undefined || Number(next) > Number(prev),
 				isTerminal: (event) => event.type === "session.archived",
+				defaultHeaders,
 				options,
 			}).pipe(
 				Stream.filter((event) => {

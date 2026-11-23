@@ -19,6 +19,7 @@ import {
 	isCheckfuError,
 } from "./Errors.ts"
 import type { CheckfuConfigError, CheckfuSdkError } from "./Errors.ts"
+import { attachPendingReadiness, getPendingReadiness } from "./Runtime.ts"
 import type {
 	CursorPageEnvelope,
 	EffectSdkRuntime,
@@ -116,11 +117,17 @@ const normalizeDatesToJson = (value: unknown): Schema.Json => {
  * wire response so plain TypeScript callers of the Promise client receive plain
  * JSON objects.
  */
-export const toIsoJson = <T>(value: T): IsoDateTimes<T> =>
+export const toIsoJson = <T>(value: T): IsoDateTimes<T> => {
 	// Boundary conversion: `normalizeDatesToJson` preserves all wire keys/primitives
 	// and replaces every `DateTime.Utc` instance with its ISO-8601 string, matching `IsoDateTimes<T>`.
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-	normalizeDatesToJson(value) as IsoDateTimes<T>
+	const converted = normalizeDatesToJson(value) as IsoDateTimes<T>
+	const readiness = getPendingReadiness(value)
+	if (readiness !== undefined) {
+		attachPendingReadiness(converted, readiness)
+	}
+	return converted
+}
 
 export const isSignalAborted = (signal: AbortSignal | undefined): boolean =>
 	signal?.aborted === true

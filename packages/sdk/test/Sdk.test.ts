@@ -4,11 +4,16 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
+import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
 import { executeSseStreamPromise, makePromiseSdkRuntime } from "../src/PromiseRuntime.ts"
+import { attachPendingReadiness } from "../src/Runtime.ts"
+import { makeAuthorizedHttpClient } from "../src/Transport.ts"
 import {
 	APIConnectionError,
 	APIConnectionTimeoutError,
@@ -18,6 +23,7 @@ import {
 	AuthenticationError,
 	BadRequestError,
 	Checkfu,
+	CheckfuApi,
 	CheckfuClient,
 	CheckfuConfigError,
 	CheckfuError,
@@ -36,6 +42,7 @@ import {
 	isAPIError,
 	isPendingResource,
 	normalizeApiUrl,
+	streamApiSse,
 } from "../src/index.ts"
 import type { BodyOf, JsonResultOf, JsonSessionEvent, Op, ResultOf } from "../src/index.ts"
 
@@ -101,6 +108,7 @@ const sampleEnvironment = (overrides?: {
 	readonly id?: string
 	readonly version?: number
 	readonly name?: string
+	readonly archived_at?: string | null
 }) => ({
 	id: "env_1",
 	type: "environment" as const,
@@ -117,6 +125,7 @@ const sampleEnvironment = (overrides?: {
 const sampleSession = (overrides?: {
 	readonly id?: string
 	readonly status?: "idle" | "running" | "terminated"
+	readonly archived_at?: string | null
 }) => ({
 	id: "sess_1",
 	type: "session" as const,
@@ -1036,7 +1045,16 @@ describe("@checkfu/sdk", () => {
 		})
 
 		it("exports complete Forge-generated SDK_OPERATION_BINDINGS and Op type helpers", () => {
-			expect(SDK_OPERATION_BINDINGS.length).toBe(15)
+			const expectedEndpoints = Object.entries(CheckfuApi.groups)
+				.filter(([group]) => group !== "health")
+				.flatMap(([group, apiGroup]) =>
+					Object.keys(apiGroup.endpoints).map((endpoint) => `${group}.${endpoint}`),
+				)
+				.sort()
+			const boundEndpoints = SDK_OPERATION_BINDINGS.map(
+				(binding) => `${binding.apiGroup}.${binding.apiEndpoint}`,
+			).sort()
+			expect(boundEndpoints).toEqual(expectedEndpoints)
 			const ids = SDK_OPERATION_BINDINGS.map((b) => b.operationId)
 			expect(ids).toContain("agents.create")
 			expect(ids).toContain("sessions.events.list")
@@ -1767,6 +1785,588 @@ describe("@checkfu/sdk", () => {
 					expect(deliveredBeforeError).toEqual([1])
 					expect(oversizedErr._tag).toBe("APIConnectionError")
 					expect(oversizedErr.message).toContain("Event stream decode failed")
+				}),
+		)
+
+		it.live(
+			"restricts positive x-should-retry hints to idempotent writes and refuses unkeyed replay",
+			() =>
+				Effect.gen(function* () {
+					// 1) Unkeyed create with gateway 503 + x-should-retry: true must NOT retry
+					let unkeyedCreateCalls = 0
+					const gateway503HintFetch = (async () => {
+						unkeyedCreateCalls += 1
+						return new Response("upstream unavailable", {
+							status: 503,
+							headers: {
+								"content-type": "text/plain",
+								"x-should-retry": "true",
+								"retry-after-ms": "1",
+							},
+						})
+					}) as typeof globalThis.fetch
+
+					const createErr = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(client.agents.create({ name: "NoDup", model: "gpt-6.2-sol" }))
+					}).pipe(
+						Effect.provide(
+							makeEffectLayer(gateway503HintFetch, {
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+							}),
+						),
+					)
+					expect(createErr._tag).toBe("ServiceUnavailableError")
+					expect(unkeyedCreateCalls).toBe(1)
+
+					// 2) Unkeyed sessions.events.send with gateway 503 or plain 429 + x-should-retry: true must NOT retry
+					let unkeyedSendCalls = 0
+					const unkeyedSendFetch = (async () => {
+						unkeyedSendCalls += 1
+						return new Response("gateway throttled", {
+							status: 429,
+							headers: {
+								"content-type": "text/plain",
+								"x-should-retry": "true",
+								"retry-after-ms": "1",
+							},
+						})
+					}) as typeof globalThis.fetch
+
+					const sendErr = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(
+							client.sessions.events.send("sess_1", {
+								events: [{ type: "user.message", content: [{ type: "text", text: "once" }] }],
+							}),
+						)
+					}).pipe(
+						Effect.provide(
+							makeEffectLayer(unkeyedSendFetch, {
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+							}),
+						),
+					)
+					expect(sendErr._tag).toBe("RateLimitError")
+					expect(unkeyedSendCalls).toBe(1)
+
+					// 3) Keyed create with gateway 503 + x-should-retry: true IS idempotent and retries cleanly
+					let keyedCreateCalls = 0
+					const keyedRetryFetch = (async () => {
+						keyedCreateCalls += 1
+						if (keyedCreateCalls === 1) {
+							return new Response("upstream unavailable", {
+								status: 503,
+								headers: {
+									"content-type": "text/plain",
+									"x-should-retry": "true",
+									"retry-after-ms": "1",
+								},
+							})
+						}
+						return jsonResponse(sampleAgent({ id: "agent_keyed" }), 201)
+					}) as typeof globalThis.fetch
+
+					const created = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* client.agents.create({ name: "Safe", model: "gpt-6.2-sol" })
+					}).pipe(
+						Effect.provide(
+							makeEffectLayer(keyedRetryFetch, {
+								maxRetries: 2,
+								autoIdempotencyKey: true,
+							}),
+						),
+					)
+					expect(created.id).toBe("agent_keyed")
+					expect(keyedCreateCalls).toBe(2)
+
+					// 4) Unkeyed Checkfu 429 envelope with x-should-retry: false still suppresses retries
+					let suppressed429Calls = 0
+					const suppressed429Fetch = (async () => {
+						suppressed429Calls += 1
+						return jsonResponse(apiErrorBody("rate_limit_error", "quota exhausted"), 429, {
+							"x-should-retry": "false",
+							"retry-after-ms": "1",
+						})
+					}) as typeof globalThis.fetch
+
+					const suppressedErr = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(
+							client.agents.create({ name: "NoRetry", model: "gpt-6.2-sol" }),
+						)
+					}).pipe(
+						Effect.provide(
+							makeEffectLayer(suppressed429Fetch, {
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+							}),
+						),
+					)
+					expect(suppressedErr._tag).toBe("RateLimitError")
+					expect(suppressed429Calls).toBe(1)
+				}),
+		)
+
+		it.live(
+			"preserves opaque SSE frame IDs, ID-only updates, and empty ID resets for generic streams",
+			() =>
+				Effect.gen(function* () {
+					const seenLastEventIds: Array<string | null> = []
+					const seenContexts: Array<{
+						readonly reconnect: boolean
+						readonly cursor: string | undefined
+					}> = []
+					let connectionIndex = 0
+					const genericFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						seenLastEventIds.push(req.headers.get("last-event-id"))
+						connectionIndex += 1
+						if (connectionIndex === 1) {
+							// Opaque frame ID on data event + subsequent ID-only update before clean rotation
+							return new Response('id: tok_alpha\ndata: {"n":1}\n\nid: tok_beta\n\n', {
+								status: 200,
+								headers: { "content-type": "text/event-stream" },
+							})
+						}
+						if (connectionIndex === 2) {
+							// Data event inherits tok_beta, then ID-only reset clears Last-Event-ID
+							return new Response('data: {"n":2}\n\nid:\n\n', {
+								status: 200,
+								headers: { "content-type": "text/event-stream" },
+							})
+						}
+						if (connectionIndex === 3) {
+							// Data event sets tok_gamma, then data event with empty id resets Last-Event-ID
+							return new Response('id: tok_gamma\ndata: {"n":3}\n\nid:\ndata: {"n":4}\n\n', {
+								status: 200,
+								headers: { "content-type": "text/event-stream" },
+							})
+						}
+						// Final event with terminal marker
+						return new Response('id: tok_final\ndata: {"n":5,"done":true}\n\n', {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+					}) as typeof globalThis.fetch
+
+					const rawHttpClient = yield* HttpClient.HttpClient.pipe(
+						Effect.provide(
+							Layer.provide(
+								FetchHttpClient.layer,
+								Layer.succeed(FetchHttpClient.Fetch, genericFetch),
+							),
+						),
+					)
+					const defaultHeaders = { "Last-Event-ID": "tok_initial" }
+					const httpClient = makeAuthorizedHttpClient(rawHttpClient, Redacted.make("ck_test_key"), {
+						defaultHeaders,
+					})
+					const collected = yield* Stream.runCollect(
+						streamApiSse<{ readonly n: number; readonly done?: boolean }>({
+							open: (ctx) => {
+								seenContexts.push(ctx)
+								return httpClient.execute(HttpClientRequest.get("http://localhost:1337/stream"))
+							},
+							decodeEvent: (raw) =>
+								Effect.succeed(JSON.parse(raw) as { readonly n: number; readonly done?: boolean }),
+							isTerminal: (event) => event.done === true,
+							defaultHeaders,
+							options: {
+								baseReconnectDelayMs: 1,
+							},
+						}),
+					)
+					expect(Array.from(collected).map((e) => e.n)).toEqual([1, 2, 3, 4, 5])
+					expect(seenLastEventIds).toEqual(["tok_initial", "tok_beta", null, null])
+					expect(seenContexts).toEqual([
+						{ reconnect: false, cursor: "tok_initial" },
+						{ reconnect: true, cursor: "tok_beta" },
+						{ reconnect: true, cursor: undefined },
+						{ reconnect: true, cursor: undefined },
+					])
+				}),
+		)
+
+		it.live(
+			"uses the effective resume cursor across defaultHeaders, per-call Last-Event-ID, and after",
+			() =>
+				Effect.gen(function* () {
+					// 1) after: 100 + per-call Last-Event-ID: 50 -> server honors 50, SDK delivers 51..101 (no silent drop!)
+					const reqs1: Array<{
+						readonly after: string | null
+						readonly lastEventId: string | null
+					}> = []
+					const headerWinsFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						const url = new URL(req.url)
+						const header = req.headers.get("last-event-id")
+						const after = url.searchParams.get("after")
+						reqs1.push({ after, lastEventId: header })
+						const cursor = Number(header !== null && header.length > 0 ? header : (after ?? "0"))
+						const frames = [51, 52, 100, 101]
+							.flatMap((seq) =>
+								seq > cursor
+									? [
+											seq === 101
+												? sseFrame(sampleArchivedEvent(seq))
+												: sseFrame(sampleUserMessageEvent(seq)),
+										]
+									: [],
+							)
+							.join("")
+						return new Response(frames, {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+					}) as typeof globalThis.fetch
+
+					const delivered1 = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Stream.runCollect(
+							client.sessions.events.stream(
+								"sess_hdr_wins",
+								{ after: 100 },
+								{ headers: { "Last-Event-ID": "50" } },
+							),
+						)
+					}).pipe(Effect.provide(makeEffectLayer(headerWinsFetch)))
+					expect(Array.from(delivered1).map((e) => e.seq)).toEqual([51, 52, 100, 101])
+					expect(reqs1).toEqual([{ after: null, lastEventId: "50" }])
+
+					// 2) Same with defaultHeaders: { "Last-Event-ID": "50" } + after: 100
+					const deliveredDefault = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Stream.runCollect(
+							client.sessions.events.stream("sess_default_hdr", { after: 100 }),
+						)
+					}).pipe(
+						Effect.provide(
+							makeEffectLayer(headerWinsFetch, {
+								defaultHeaders: { "Last-Event-ID": "50" },
+							}),
+						),
+					)
+					expect(Array.from(deliveredDefault).map((e) => e.seq)).toEqual([51, 52, 100, 101])
+
+					// 3) Inverse: after: 50 + Last-Event-ID: 100 where connection 1 fails before any event arrives ->
+					//    reconnect MUST keep Last-Event-ID: 100 (never overwrite with 50!)
+					const reqs2: Array<{
+						readonly after: string | null
+						readonly lastEventId: string | null
+					}> = []
+					let inverseCalls = 0
+					const inverseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						const url = new URL(req.url)
+						reqs2.push({
+							after: url.searchParams.get("after"),
+							lastEventId: req.headers.get("last-event-id"),
+						})
+						inverseCalls += 1
+						if (inverseCalls === 1) {
+							return jsonResponse(apiErrorBody("service_unavailable", "retry"), 503, {
+								"retry-after-ms": "1",
+							})
+						}
+						return new Response(sseFrame(sampleArchivedEvent(101)), {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+					}) as typeof globalThis.fetch
+
+					const delivered2 = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Stream.runCollect(
+							client.sessions.events.stream(
+								"sess_inverse",
+								{ after: 50 },
+								{
+									baseReconnectDelayMs: 1,
+									headers: { "Last-Event-ID": "100" },
+								},
+							),
+						)
+					}).pipe(Effect.provide(makeEffectLayer(inverseFetch)))
+					expect(Array.from(delivered2).map((e) => e.seq)).toEqual([101])
+					expect(reqs2).toEqual([
+						{ after: null, lastEventId: "100" },
+						{ after: null, lastEventId: "100" },
+					])
+				}),
+		)
+
+		it.live(
+			"distinguishes ready archive and update mutations from stale existing projections in waitForPending",
+			() =>
+				Effect.gen(function* () {
+					let agentArchivePolls = 0
+					let agentUpdatePolls = 0
+					let envUpdatePolls = 0
+					let envArchivePolls = 0
+					let sessionArchivePolls = 0
+					const mutationFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						const url = new URL(req.url)
+						if (req.method === "POST" && url.pathname === "/v1/agents/agent_arch/archive") {
+							return jsonResponse({ id: "agent_arch", type: "agent", pending: true }, 202)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/agents/agent_arch") {
+							agentArchivePolls += 1
+							return jsonResponse(
+								sampleAgent({
+									id: "agent_arch",
+									archived_at: agentArchivePolls < 3 ? null : ISO_NOW,
+								}),
+							)
+						}
+						if (req.method === "POST" && url.pathname === "/v1/agents/agent_upd") {
+							return jsonResponse({ id: "agent_upd", type: "agent", pending: true }, 202)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/agents/agent_upd") {
+							agentUpdatePolls += 1
+							return jsonResponse(
+								sampleAgent({
+									id: "agent_upd",
+									version: agentUpdatePolls < 3 ? 2 : 3,
+									name: agentUpdatePolls < 3 ? "v2" : "v3",
+								}),
+							)
+						}
+						if (req.method === "POST" && url.pathname === "/v1/environments/env_upd") {
+							return jsonResponse({ id: "env_upd", type: "environment", pending: true }, 202)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/environments/env_upd") {
+							envUpdatePolls += 1
+							return jsonResponse(
+								sampleEnvironment({
+									id: "env_upd",
+									version: envUpdatePolls < 2 ? 1 : 2,
+									name: envUpdatePolls < 2 ? "old" : "new",
+								}),
+							)
+						}
+						if (req.method === "POST" && url.pathname === "/v1/environments/env_arch/archive") {
+							return jsonResponse({ id: "env_arch", type: "environment", pending: true }, 202)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/environments/env_arch") {
+							envArchivePolls += 1
+							return jsonResponse(
+								sampleEnvironment({
+									id: "env_arch",
+									archived_at: envArchivePolls < 2 ? null : ISO_NOW,
+								}),
+							)
+						}
+						if (req.method === "POST" && url.pathname === "/v1/sessions/sess_arch/archive") {
+							return jsonResponse({ id: "sess_arch", type: "session", pending: true }, 202)
+						}
+						if (req.method === "GET" && url.pathname === "/v1/sessions/sess_arch") {
+							sessionArchivePolls += 1
+							return jsonResponse(
+								sampleSession({
+									id: "sess_arch",
+									archived_at: sessionArchivePolls < 2 ? null : ISO_NOW,
+								}),
+							)
+						}
+						return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+					}) as typeof globalThis.fetch
+
+					const pollOpts = {
+						initialDelay: "1 millis" as const,
+						maxDelay: "2 millis" as const,
+						timeout: "2 seconds" as const,
+					}
+
+					// Effect client: archive & update skip stale pre-mutation projections
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const pendingAgentArch = yield* client.agents.archive("agent_arch")
+						const archivedAgent = yield* client.waitForPending(pendingAgentArch, pollOpts)
+						expect(archivedAgent.archived_at).not.toBeNull()
+						expect(agentArchivePolls).toBe(3)
+
+						const pendingAgentUpd = yield* client.agents.update("agent_upd", {
+							version: 2,
+							name: "v3",
+						})
+						const updatedAgent = yield* client.waitForPending(pendingAgentUpd, pollOpts)
+						expect(updatedAgent.version).toBe(3)
+						expect(updatedAgent.name).toBe("v3")
+						expect(agentUpdatePolls).toBe(3)
+
+						const pendingEnvUpd = yield* client.environments.update("env_upd", {
+							version: 1,
+							name: "new",
+						})
+						const updatedEnv = yield* client.waitForPending(pendingEnvUpd, pollOpts)
+						expect(updatedEnv.version).toBe(2)
+						expect(envUpdatePolls).toBe(2)
+
+						const pendingEnvArch = yield* client.environments.archive("env_arch")
+						const archivedEnv = yield* client.waitForPending(pendingEnvArch, pollOpts)
+						expect(archivedEnv.archived_at).not.toBeNull()
+						expect(envArchivePolls).toBe(2)
+
+						const pendingSessArch = yield* client.sessions.archive("sess_arch")
+						const archivedSess = yield* client.waitForPending(pendingSessArch, pollOpts)
+						expect(archivedSess.archived_at).not.toBeNull()
+						expect(sessionArchivePolls).toBe(2)
+
+						// Non-self-identifying pending mutation requires an explicit `until` predicate
+						const ambiguousPending = attachPendingReadiness(
+							{ id: "agent_arch", type: "agent" as const, pending: true as const },
+							{ kind: "requires-until", operation: "agents.customMutation" },
+						)
+						const cfgErr = yield* Effect.flip(client.waitForPending(ambiguousPending, pollOpts))
+						expect(cfgErr._tag).toBe("CheckfuConfigError")
+						expect(cfgErr.message).toContain("until")
+					}).pipe(Effect.provide(makeEffectLayer(mutationFetch, { maxRetries: 0 })))
+
+					// Promise client preserves mutation readiness across toIsoJson (both direct & .withResponse())
+					agentArchivePolls = 0
+					agentUpdatePolls = 0
+					yield* Effect.promise(async () => {
+						const promiseClient = new Checkfu({
+							apiKey: "ck_test_key",
+							baseUrl: "http://localhost:1337",
+							maxRetries: 0,
+							fetch: mutationFetch,
+						})
+						try {
+							const archivedRes = await promiseClient.agents.archive("agent_arch")
+							const archived = await promiseClient.waitForPending(archivedRes, pollOpts)
+							expect(archived.archived_at).toBe(ISO_NOW)
+							expect(agentArchivePolls).toBe(3)
+
+							const { data: updatePending } = await promiseClient.agents
+								.update("agent_upd", { version: 2, name: "v3" })
+								.withResponse()
+							const updated = await promiseClient.waitForPending(updatePending, pollOpts)
+							expect(updated.version).toBe(3)
+							expect(agentUpdatePolls).toBe(3)
+						} finally {
+							await promiseClient.close()
+						}
+					})
+				}),
+		)
+
+		it.live(
+			"normalizes trailing /v1 at most once across Promise/Effect construction and withOptions",
+			() =>
+				Effect.gen(function* () {
+					const seenUrls: Array<string> = []
+					const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						seenUrls.push(req.url)
+						return jsonResponse(sampleAgent())
+					}) as typeof globalThis.fetch
+
+					// Promise client constructed with gateway mounted at /tenant/v1 (API URL .../tenant/v1/v1)
+					yield* Effect.promise(async () => {
+						const client = new Checkfu({
+							apiKey: "ck_test_key",
+							baseUrl: "https://gateway.example/tenant/v1/v1",
+							fetch: mockFetch,
+						})
+						const cloned = client.withOptions({ maxRetries: 3 })
+						const overridden = cloned.withOptions({
+							baseUrl: "https://gateway.example/other/v1/v1",
+						})
+						try {
+							expect(client.baseUrl).toBe("https://gateway.example/tenant/v1")
+							expect(cloned.baseUrl).toBe("https://gateway.example/tenant/v1")
+							expect(overridden.baseUrl).toBe("https://gateway.example/other/v1")
+
+							await client.agents.retrieve("agent_1")
+							await cloned.agents.retrieve("agent_1")
+							await overridden.agents.retrieve("agent_1")
+
+							expect(seenUrls).toEqual([
+								"https://gateway.example/tenant/v1/v1/agents/agent_1",
+								"https://gateway.example/tenant/v1/v1/agents/agent_1",
+								"https://gateway.example/other/v1/v1/agents/agent_1",
+							])
+						} finally {
+							await overridden.close()
+							await cloned.close()
+							await client.close()
+						}
+					})
+
+					// Effect client construction & withOptions also strip trailing /v1 at most once
+					seenUrls.length = 0
+					yield* Effect.gen(function* () {
+						const effectClient = yield* CheckfuClient
+						const effectClone = yield* effectClient.withOptions({ maxRetries: 3 })
+						expect(effectClient.baseUrl).toBe("https://gateway.example/tenant/v1")
+						expect(effectClone.baseUrl).toBe("https://gateway.example/tenant/v1")
+						yield* effectClient.agents.retrieve("agent_1")
+						yield* effectClone.agents.retrieve("agent_1")
+					}).pipe(
+						Effect.provide(
+							makeEffectLayer(mockFetch, {
+								baseUrl: "https://gateway.example/tenant/v1/v1",
+							}),
+						),
+					)
+					expect(seenUrls).toEqual([
+						"https://gateway.example/tenant/v1/v1/agents/agent_1",
+						"https://gateway.example/tenant/v1/v1/agents/agent_1",
+					])
+				}),
+		)
+
+		it.live(
+			"does not treat a keepalive connection that replays an already-seen SSE event as healthyIdle",
+			() =>
+				Effect.gen(function* () {
+					let attempts = 0
+					const encoder = new TextEncoder()
+					const replayErrorFetch = (async () => {
+						attempts += 1
+						const body = new ReadableStream<Uint8Array>({
+							async start(controller) {
+								controller.enqueue(encoder.encode(": keepalive\n\n"))
+								await new Promise<void>((resolve) => {
+									setTimeout(resolve, 15)
+								})
+								// Replay already-seen event seq=5 (<= after: 5), then fail the body mid-stream
+								controller.enqueue(encoder.encode(sseFrame(sampleUserMessageEvent(5))))
+								controller.error(new TypeError("connection reset after replay"))
+							},
+						})
+						return new Response(body, {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+					}) as typeof globalThis.fetch
+
+					const err = yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						return yield* Effect.flip(
+							Stream.runCollect(
+								client.sessions.events.stream(
+									"sess_replay_budget",
+									{ after: 5 },
+									{
+										maxReconnectAttempts: 2,
+										baseReconnectDelayMs: 1,
+										healthyIdleDurationMs: 5,
+									},
+								),
+							),
+						)
+					}).pipe(Effect.provide(makeEffectLayer(replayErrorFetch)))
+
+					expect(err._tag).toBe("APIConnectionError")
+					// 1 initial attempt + 2 reconnects = 3 total attempts (attempt counter was NOT reset)
+					expect(attempts).toBe(3)
 				}),
 		)
 	})

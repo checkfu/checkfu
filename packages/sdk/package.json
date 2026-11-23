@@ -22,7 +22,7 @@
 	},
 	"scripts": {
 		"typecheck": "effect-tsgo tsc --noEmit",
-		"test": "vitest run --pool=threads --no-allowOnly"
+		"test": "vitest run --pool=threads --no-allowOnly && node test/NodeEsm.smoke.mjs"
 	},
 	"dependencies": {
 		"effect": "catalog:"

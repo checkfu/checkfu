@@ -14,7 +14,11 @@ import type {
 	Session,
 	SessionEvent,
 } from "./Api.ts"
-import { CheckfuClient, INTERNAL_EFFECT_RUNTIME } from "./Client.ts"
+import {
+	CheckfuClient,
+	INTERNAL_EFFECT_RUNTIME,
+	makeNormalizedCheckfuClientLayer,
+} from "./Client.ts"
 import type { CheckfuClientConfig } from "./Client.ts"
 import {
 	APIConnectionError,
@@ -139,7 +143,12 @@ interface ResolvedCheckfuOptions {
 	readonly autoIdempotencyKey: boolean
 }
 
-const resolveConstructorOptions = (options: CheckfuOptions | undefined): ResolvedCheckfuOptions => {
+const preNormalizedOptions = new WeakSet<CheckfuOptions>()
+
+const resolveConstructorOptions = (
+	options: CheckfuOptions | undefined,
+	stripApiVersionSuffix: boolean,
+): ResolvedCheckfuOptions => {
 	if (
 		options?.baseUrl !== undefined &&
 		options.baseURL !== undefined &&
@@ -157,7 +166,10 @@ const resolveConstructorOptions = (options: CheckfuOptions | undefined): Resolve
 		readEnvVar("CHECKFU_API_URL") ??
 		readEnvVar("CHECKFU_URL") ??
 		DEFAULT_API_URL
-	const parsedUrl = parseNormalizedApiUrl(rawBaseUrl, { allowInsecureHttp })
+	const parsedUrl = parseNormalizedApiUrl(rawBaseUrl, {
+		allowInsecureHttp,
+		stripApiVersionSuffix,
+	})
 	if (!parsedUrl.ok) {
 		throw new CheckfuConfigError({ message: parsedUrl.message })
 	}
@@ -231,8 +243,10 @@ export class Checkfu extends PromiseResources {
 	readonly #runtime: ManagedRuntime.ManagedRuntime<CheckfuClient, CheckfuConfigError>
 
 	constructor(options?: CheckfuOptions) {
-		const resolved = resolveConstructorOptions(options)
+		const stripApiVersionSuffix = options === undefined || !preNormalizedOptions.has(options)
+		const resolved = resolveConstructorOptions(options, stripApiVersionSuffix)
 		const layerConfig: CheckfuClientConfig & {
+			readonly baseUrl: string
 			readonly fetch?: typeof globalThis.fetch | undefined
 		} = {
 			apiKey: resolved.apiKey,
@@ -244,7 +258,7 @@ export class Checkfu extends PromiseResources {
 			autoIdempotencyKey: resolved.autoIdempotencyKey,
 			fetch: resolved.fetch,
 		}
-		const managed = ManagedRuntime.make(CheckfuClient.layerFetch(layerConfig))
+		const managed = ManagedRuntime.make(makeNormalizedCheckfuClientLayer(layerConfig))
 		const promiseRuntime = makePromiseSdkRuntime(
 			managed,
 			Effect.map(CheckfuClient, (client) => client[INTERNAL_EFFECT_RUNTIME]),
@@ -258,22 +272,26 @@ export class Checkfu extends PromiseResources {
 
 	withOptions(overrides: CheckfuOptions): Checkfu {
 		const mergedHeaders = mergeHeaderMaps(this.#config.defaultHeaders, overrides.defaultHeaders)
-		const baseUrl =
-			overrides.baseUrl !== undefined || overrides.baseURL !== undefined
-				? undefined
-				: this.#config.baseUrl
-		return new Checkfu({
+		const hasBaseOverride = overrides.baseUrl !== undefined || overrides.baseURL !== undefined
+		const nextOptions: CheckfuOptions = {
 			apiKey: overrides.apiKey ?? this.#config.apiKey,
-			...(baseUrl === undefined ? {} : { baseUrl }),
-			...(overrides.baseUrl === undefined ? {} : { baseUrl: overrides.baseUrl }),
-			...(overrides.baseURL === undefined ? {} : { baseURL: overrides.baseURL }),
+			...(hasBaseOverride
+				? {
+						...(overrides.baseUrl === undefined ? {} : { baseUrl: overrides.baseUrl }),
+						...(overrides.baseURL === undefined ? {} : { baseURL: overrides.baseURL }),
+					}
+				: { baseUrl: this.#config.baseUrl }),
 			allowInsecureHttp: overrides.allowInsecureHttp ?? this.#config.allowInsecureHttp,
 			maxRetries: overrides.maxRetries ?? this.#config.maxRetries,
 			timeout: overrides.timeout === undefined ? this.#config.timeout : overrides.timeout,
 			defaultHeaders: mergedHeaders,
 			fetch: overrides.fetch ?? this.#config.fetch,
 			autoIdempotencyKey: overrides.autoIdempotencyKey ?? this.#config.autoIdempotencyKey,
-		})
+		}
+		if (!hasBaseOverride) {
+			preNormalizedOptions.add(nextOptions)
+		}
+		return new Checkfu(nextOptions)
 	}
 
 	waitForPending(

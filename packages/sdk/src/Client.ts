@@ -223,6 +223,7 @@ const buildCheckfuClient = (params: {
 				const nextAllowInsecure = overrides.allowInsecureHttp ?? params.allowInsecureHttp
 				const nextBaseUrl = yield* normalizeApiUrl(overrides.baseUrl ?? params.baseUrl, {
 					allowInsecureHttp: nextAllowInsecure,
+					stripApiVersionSuffix: overrides.baseUrl !== undefined,
 				})
 				const nextApiKey =
 					overrides.apiKey === undefined ? params.apiKey : yield* normalizeApiKey(overrides.apiKey)
@@ -244,8 +245,9 @@ const buildCheckfuClient = (params: {
 		return new CheckfuSdkClient(runtime, withOptions)
 	})
 
-export const makeCheckfuSdkClient = (
+const makeCheckfuSdkClientInternal = (
 	config: CheckfuClientEnvConfig,
+	stripApiVersionSuffix: boolean,
 ): Effect.Effect<
 	CheckfuClientService,
 	CheckfuConfigError,
@@ -253,7 +255,10 @@ export const makeCheckfuSdkClient = (
 > =>
 	Effect.gen(function* () {
 		const allowInsecureHttp = config.allowInsecureHttp ?? false
-		const baseUrl = yield* resolveBaseUrl(config.baseUrl, { allowInsecureHttp })
+		const baseUrl = yield* resolveBaseUrl(config.baseUrl, {
+			allowInsecureHttp,
+			stripApiVersionSuffix,
+		})
 		const apiKey = yield* resolveApiKey(config.apiKey)
 		const maxRetries = yield* normalizeMaxRetries(config.maxRetries, DEFAULT_MAX_RETRIES)
 		const timeout = yield* resolveTimeout(config.timeout, Duration.millis(DEFAULT_TIMEOUT_MS))
@@ -278,6 +283,14 @@ export const makeCheckfuSdkClient = (
 		})
 	})
 
+export const makeCheckfuSdkClient = (
+	config: CheckfuClientEnvConfig,
+): Effect.Effect<
+	CheckfuClientService,
+	CheckfuConfigError,
+	HttpClient.HttpClient | SecureRandom.SecureRandom
+> => makeCheckfuSdkClientInternal(config, true)
+
 const fetchTransportLayer = (
 	fetchImpl?: typeof globalThis.fetch,
 ): Layer.Layer<HttpClient.HttpClient | SecureRandom.SecureRandom> => {
@@ -286,6 +299,13 @@ const fetchTransportLayer = (
 		? base
 		: Layer.provide(base, Layer.succeed(FetchHttpClient.Fetch, fetchImpl))
 }
+
+export const makeNormalizedCheckfuClientLayer = (
+	config: CheckfuClientConfig & CheckfuClientFetchOptions & { readonly baseUrl: string },
+): Layer.Layer<CheckfuClient, CheckfuConfigError> =>
+	Layer.effect(CheckfuClient, makeCheckfuSdkClientInternal(config, false)).pipe(
+		Layer.provide(fetchTransportLayer(config.fetch)),
+	)
 
 export class CheckfuClient extends Context.Service<CheckfuClient, CheckfuClientService>()(
 	"@checkfu/sdk/CheckfuClient",

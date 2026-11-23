@@ -448,6 +448,47 @@ export const executeWithRetries = <A, E>(
 		}
 	}).pipe(Effect.withSpan(spanName))
 
+export type PendingReadiness =
+	| { readonly kind: "create" }
+	| { readonly kind: "archive" }
+	| { readonly kind: "min-version"; readonly minVersion: number }
+	| { readonly kind: "requires-until"; readonly operation: string }
+
+const pendingReadinessByReceipt = new WeakMap<object, PendingReadiness>()
+
+export const attachPendingReadiness = <A>(value: A, readiness: PendingReadiness): A => {
+	if (typeof value === "object" && value !== null && "pending" in value && value.pending === true) {
+		pendingReadinessByReceipt.set(value, readiness)
+	}
+	return value
+}
+
+export const getPendingReadiness = (value: unknown): PendingReadiness | undefined =>
+	typeof value === "object" && value !== null ? pendingReadinessByReceipt.get(value) : undefined
+
+export const pendingUpdateReadiness = (body: unknown, operation: string): PendingReadiness => {
+	if (
+		typeof body === "object" &&
+		body !== null &&
+		"version" in body &&
+		typeof body.version === "number" &&
+		Number.isInteger(body.version) &&
+		body.version >= 1
+	) {
+		return { kind: "min-version", minVersion: body.version + 1 }
+	}
+	return { kind: "requires-until", operation }
+}
+
+export const withPendingReadiness = <A>(
+	effect: Effect.Effect<WithResponse<A>, CheckfuSdkError>,
+	readiness: PendingReadiness,
+): Effect.Effect<WithResponse<A>, CheckfuSdkError> =>
+	Effect.map(effect, (res) => {
+		attachPendingReadiness(res.data, readiness)
+		return res
+	})
+
 export function unwrapResponse<A>(
 	effect: Effect.Effect<WithResponse<A>, CheckfuSdkError>,
 	options: WithResponseRequestOptions,
@@ -577,10 +618,15 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 		const after = typeof rawAfter === "number" ? rawAfter : undefined
 		// Boundary dispatch: `sessions.streamEvents` decodes `SessionEvent`, matching `EndpointSseEvent<"sessions", "streamEvents">`.
 		// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-		return streamSessionEvents(runtime.raw, sessionId, {
-			...options,
-			...(after === undefined ? {} : { after }),
-		}) as Stream.Stream<EndpointSseEvent<G, E>, CheckfuSdkError>
+		return streamSessionEvents(
+			runtime.raw,
+			sessionId,
+			{
+				...options,
+				...(after === undefined ? {} : { after }),
+			},
+			runtime.defaultHeaders,
+		) as Stream.Stream<EndpointSseEvent<G, E>, CheckfuSdkError>
 	}
 	return Stream.unwrap(
 		Effect.gen(function* () {
@@ -617,9 +663,38 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 								}),
 						}),
 					),
+				defaultHeaders: runtime.defaultHeaders,
 				options,
 			})
 		}),
+	)
+}
+
+const isResourceReadyForMutation = <T>(
+	resource: T,
+	readiness: PendingReadiness | undefined,
+): boolean => {
+	if (
+		readiness === undefined ||
+		readiness.kind === "create" ||
+		readiness.kind === "requires-until"
+	) {
+		return true
+	}
+	if (typeof resource !== "object" || resource === null) {
+		return false
+	}
+	if (readiness.kind === "archive") {
+		return (
+			"archived_at" in resource &&
+			resource.archived_at !== null &&
+			resource.archived_at !== undefined
+		)
+	}
+	return (
+		"version" in resource &&
+		typeof resource.version === "number" &&
+		resource.version >= readiness.minVersion
 	)
 }
 
@@ -629,6 +704,12 @@ export const pollPending = <T>(
 	options?: WaitForPendingOptions<T>,
 ): Effect.Effect<T, CheckfuSdkError> =>
 	Effect.gen(function* () {
+		const readiness = getPendingReadiness(pending)
+		if (readiness?.kind === "requires-until" && options?.until === undefined) {
+			return yield* new CheckfuConfigError({
+				message: `waitForPending for pending ${readiness.operation} requires an explicit "until" predicate to distinguish the updated projection from existing state.`,
+			})
+		}
 		const timeoutDuration = Option.getOrElse(
 			options?.timeout === undefined ? Option.none() : Duration.fromInput(options.timeout),
 			() => Duration.millis(DEFAULT_PENDING_TIMEOUT_MS),
@@ -665,7 +746,10 @@ export const pollPending = <T>(
 			for (;;) {
 				const outcome = yield* Effect.result(fetchResource(pending.id, options?.requestOptions))
 				if (outcome._tag === "Success") {
-					if (options?.until === undefined || options.until(outcome.success)) {
+					if (
+						isResourceReadyForMutation(outcome.success, readiness) &&
+						(options?.until === undefined || options.until(outcome.success))
+					) {
 						return outcome.success
 					}
 				} else {
