@@ -430,7 +430,7 @@ const requireAccount = (target: Target, options: { readonly offerSignIn: boolean
 				)
 			case "error":
 				return yield* configError(
-					`Could not determine which Cloudflare account is in use: ${answer.message}. Nothing was changed.`,
+					`Could not determine which Cloudflare account is in use: ${answer.message.replace(/\.+$/, "")}. Nothing was changed.`,
 				)
 		}
 	})
@@ -459,7 +459,7 @@ const readDeployedUrl = (target: Target, stage: string) =>
 				)
 			case "error":
 				return yield* configError(
-					`"${stage}" is deployed, but its URL could not be read: ${answer.message}. Run \`bun checkfu deploy\` again to finish connecting.`,
+					`"${stage}" is deployed, but its URL could not be read: ${answer.message.replace(/\.+$/, "")}. Run \`bun checkfu deploy\` again to finish connecting.`,
 				)
 		}
 	})
