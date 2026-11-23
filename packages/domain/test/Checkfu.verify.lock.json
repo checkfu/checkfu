@@ -118,18 +118,6 @@
 				"kind": "transition",
 				"source": "({ before, after, events }) => {\n\t\t\tif (\n\t\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t\tbefore.open_model_request_id === null ||\n\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn)\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tconst endIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"span.model_request_end\" &&\n\t\t\t\t\tevent.model_request_start_id === before.open_model_request_id,\n\t\t\t)\n\t\t\tconst leaveIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.status_idle\" || event._tag === \"session.status_terminated\",\n\t\t\t)\n\t\t\treturn endIndex >= 0 && (leaveIndex < 0 || endIndex < leaveIndex)\n\t\t}"
 			},
-			"EventBatch.ClaimedBatchNeverReturnsToUnclaimed": {
-				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" || after._tag === \"Claimed\""
-			},
-			"EventBatch.ClaimedFingerprintNeverChanges": {
-				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" ||\n\t\t\t(after._tag === \"Claimed\" && after.fingerprint === before.fingerprint)"
-			},
-			"EventBatch.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": {
-				"kind": "transition",
-				"source": "({ before, after, command, events }) => {\n\t\t\tif (before._tag !== \"Unclaimed\" || after._tag !== \"Claimed\") {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.fingerprint === command.fingerprint,\n\t\t\t\tevents.length === 1,\n\t\t\t\tevents.every((event) => event.fingerprint === command.fingerprint),\n\t\t\t].every((ok) => ok)\n\t\t}"
-			},
 			"CreateAgent.NewAgentStartsAtVersionOne": {
 				"kind": "transition",
 				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"\",\n\t\t\t\t!before.version.minted,\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === 1,\n\t\t\t\tafter.agent.current_version_id === command.version_id,\n\t\t\t\tafter.version.minted,\n\t\t\t\tafter.version.version === 1,\n\t\t\t\tafter.version.agent_id === command.agent_id,\n\t\t\t].every((ok) => ok)"
@@ -169,10 +157,6 @@
 			"Checkfu.EveryTurnSettles": {
 				"kind": "eventually",
 				"source": "(m) => m.Session.every((s) => s.state._tag !== \"Running\")"
-			},
-			"Checkfu.AnEventBatchIsClaimed": {
-				"kind": "sometimes",
-				"source": "(m) => m.EventBatch.some((b) => b.state._tag === \"Claimed\")"
 			},
 			"Checkfu.ASessionIsAdmitted": {
 				"kind": "sometimes",
@@ -241,6 +225,22 @@
 			"Environment.ConfiguredExactlyWhenCreated": {
 				"kind": "invariant",
 				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.description === null, s.config === null].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.config !== null].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" || after._tag === \"Claimed\""
+			},
+			"IdempotencyClaim.ClaimedFingerprintNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" ||\n\t\t\t(after._tag === \"Claimed\" && after.fingerprint === before.fingerprint)"
+			},
+			"IdempotencyClaim.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": {
+				"kind": "transition",
+				"source": "({ before, after, command, events }) => {\n\t\t\tif (before._tag !== \"Unclaimed\" || after._tag !== \"Claimed\") {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.fingerprint === command.fingerprint,\n\t\t\t\tevents.length === 1,\n\t\t\t\tevents.every((event) => event.fingerprint === command.fingerprint),\n\t\t\t].every((ok) => ok)\n\t\t}"
+			},
+			"Checkfu.AnIdempotencyKeyIsClaimed": {
+				"kind": "sometimes",
+				"source": "(m) => m.IdempotencyClaim.some((b) => b.state._tag === \"Claimed\")"
 			}
 		}
 	}

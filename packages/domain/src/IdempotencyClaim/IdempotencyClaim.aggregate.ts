@@ -2,24 +2,24 @@ import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import {
-	BatchFingerprint,
-	ClaimEventBatch,
-	EventBatchClaimed,
+	RequestFingerprint,
+	ClaimIdempotencyKey,
+	IdempotencyKeyClaimed,
 	IdempotencyKeyConflict,
-} from "./ClaimEventBatch.command.ts"
-import { EventBatchId } from "./EventBatch.id.ts"
+} from "./ClaimIdempotencyKey.command.ts"
+import { IdempotencyClaimId } from "./IdempotencyClaim.id.ts"
 
-export const EVENT_BATCH_STATE_SCHEMA_VERSION = 1 as const
+export const IDEMPOTENCY_CLAIM_STATE_SCHEMA_VERSION = 1 as const
 
-export const EventBatchState = Schema.Union([
+export const IdempotencyClaimState = Schema.Union([
 	Schema.TaggedStruct("Unclaimed", {}),
-	Schema.TaggedStruct("Claimed", { fingerprint: BatchFingerprint }),
+	Schema.TaggedStruct("Claimed", { fingerprint: RequestFingerprint }),
 ])
-export type EventBatchState = typeof EventBatchState.Type
+export type IdempotencyClaimState = typeof IdempotencyClaimState.Type
 
-export const EventBatchStateSnapshot = versionedSnapshot({
-	current: EVENT_BATCH_STATE_SCHEMA_VERSION,
-	schema: EventBatchState,
+export const IdempotencyClaimStateSnapshot = versionedSnapshot({
+	current: IDEMPOTENCY_CLAIM_STATE_SCHEMA_VERSION,
+	schema: IdempotencyClaimState,
 })
 
 /**
@@ -27,14 +27,14 @@ export const EventBatchStateSnapshot = versionedSnapshot({
  * commands run, rejecting mismatched retries with 409 while allowing identical
  * retries to resume.
  */
-export class EventBatch extends Domain.Aggregate("EventBatch", {
-	id: EventBatchId,
-	state: EventBatchStateSnapshot,
+export class IdempotencyClaim extends Domain.Aggregate("IdempotencyClaim", {
+	id: IdempotencyClaimId,
+	state: IdempotencyClaimStateSnapshot,
 	initial: { _tag: "Unclaimed" as const },
-	commands: [ClaimEventBatch],
-	keyOf: (cmd) => cmd.batch_id,
+	commands: [ClaimIdempotencyKey],
+	keyOf: (cmd) => cmd.claim_id,
 	transitions: {
-		ClaimedBatchNeverReturnsToUnclaimed: ({ before, after }) =>
+		ClaimNeverReturnsToUnclaimed: ({ before, after }) =>
 			before._tag !== "Claimed" || after._tag === "Claimed",
 		ClaimedFingerprintNeverChanges: ({ before, after }) =>
 			before._tag !== "Claimed" ||
@@ -53,18 +53,18 @@ export class EventBatch extends Domain.Aggregate("EventBatch", {
 		},
 	},
 	decide: {
-		ClaimEventBatch: (state, cmd, ctx) => {
+		ClaimIdempotencyKey: (state, cmd, ctx) => {
 			if (state._tag === "Unclaimed") {
-				return [new EventBatchClaimed({ fingerprint: cmd.fingerprint })]
+				return [new IdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })]
 			}
 			if (state.fingerprint === cmd.fingerprint) {
 				return []
 			}
-			return new IdempotencyKeyConflict({ batch_id: ctx.id })
+			return new IdempotencyKeyConflict({ claim_id: ctx.id })
 		},
 	},
 	evolve: {
-		"event_batch.claimed": (_state, event) => ({
+		"idempotency_key.claimed": (_state, event) => ({
 			_tag: "Claimed" as const,
 			fingerprint: event.fingerprint,
 		}),

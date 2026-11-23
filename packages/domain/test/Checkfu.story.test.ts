@@ -57,13 +57,13 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu } from "../src/Checkfu.model.ts"
 import {
-	BatchFingerprint,
-	ClaimEventBatch,
-	EventBatchClaimed,
+	RequestFingerprint,
+	ClaimIdempotencyKey,
+	IdempotencyKeyClaimed,
 	IdempotencyKeyConflict,
-} from "../src/EventBatch/ClaimEventBatch.command.ts"
-import { EventBatch } from "../src/EventBatch/EventBatch.aggregate.ts"
-import { EventBatchId } from "../src/EventBatch/EventBatch.id.ts"
+} from "../src/IdempotencyClaim/ClaimIdempotencyKey.command.ts"
+import { IdempotencyClaim } from "../src/IdempotencyClaim/IdempotencyClaim.aggregate.ts"
+import { IdempotencyClaimId } from "../src/IdempotencyClaim/IdempotencyClaim.id.ts"
 import {
 	AdmitSession,
 	AgentVersionNotFound,
@@ -117,20 +117,20 @@ describe("Checkfu unified hosted model stories", () => {
 			const sessionV1 = Session.ref(SessionId.make("sess_verify_v1"))
 			const sessionLatest = Session.ref(SessionId.make("sess_verify_latest"))
 			const sessionRejected = Session.ref(SessionId.make("sess_verify_rejected"))
-			const batch = EventBatch.ref(EventBatchId.make("batch_verify_1"))
+			const batch = IdempotencyClaim.ref(IdempotencyClaimId.make("batch_verify_1"))
 			const reqId = `${sessionV1.id}:turn:1:req:1`
 			const envConfig = { type: "cloud" as const, networking: { type: "unrestricted" as const } }
 
 			return story(
 				Story.clock(t0),
 
-				// EventBatch idempotency: initial claim, identical retry no-op, conflicting fingerprint 409.
-				Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: "fp_alpha" })),
-				Story.then(batch, new EventBatchClaimed({ fingerprint: "fp_alpha" })),
-				Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: "fp_alpha" })),
+				// IdempotencyClaim idempotency: initial claim, identical retry no-op, conflicting fingerprint 409.
+				Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: "fp_alpha" })),
+				Story.then(batch, new IdempotencyKeyClaimed({ fingerprint: "fp_alpha" })),
+				Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: "fp_alpha" })),
 				Story.then(batch),
-				Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: "fp_beta" })),
-				Story.rejected(new IdempotencyKeyConflict({ batch_id: batch.id })),
+				Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: "fp_beta" })),
+				Story.rejected(new IdempotencyKeyConflict({ claim_id: batch.id })),
 
 				// Reject admission before Agent exists.
 				Story.when(
@@ -507,7 +507,7 @@ describe("Checkfu unified hosted model stories", () => {
 	it("allows zero-event retries only for matching fingerprints and rejects every distinct fingerprint pair with IdempotencyKeyConflict", async () => {
 		const distinctCount = await Effect.runPromise(
 			Effect.gen(function* () {
-				const fingerprintArb = Arbitrary.schema(BatchFingerprint)
+				const fingerprintArb = Arbitrary.schema(RequestFingerprint)
 				const left = yield* Arbitrary.sampleEffect(fingerprintArb, {
 					count: 50,
 					seed: "event-batch-fp-left",
@@ -526,13 +526,13 @@ describe("Checkfu unified hosted model stories", () => {
 				let count = 0
 				for (let index = 0; index < pairs.length; index++) {
 					const [fp1, fp2] = pairs[index]!
-					const batch = EventBatch.ref(EventBatchId.make(`batch_prop_${index}`))
+					const batch = IdempotencyClaim.ref(IdempotencyClaimId.make(`batch_prop_${index}`))
 					if (fp1 === fp2) {
 						yield* story(
-							Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: fp1 })),
-							Story.then(batch, new EventBatchClaimed({ fingerprint: fp1 })),
+							Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
+							Story.then(batch, new IdempotencyKeyClaimed({ fingerprint: fp1 })),
 							Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-							Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: fp2 })),
+							Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp2 })),
 							Story.then(batch),
 							Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
 						)
@@ -540,16 +540,16 @@ describe("Checkfu unified hosted model stories", () => {
 					}
 					count += 1
 					yield* story(
-						Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: fp1 })),
-						Story.then(batch, new EventBatchClaimed({ fingerprint: fp1 })),
+						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
+						Story.then(batch, new IdempotencyKeyClaimed({ fingerprint: fp1 })),
 						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: fp1 })),
+						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
 						Story.then(batch),
 						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: fp2 })),
-						Story.rejected(new IdempotencyKeyConflict({ batch_id: batch.id })),
+						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp2 })),
+						Story.rejected(new IdempotencyKeyConflict({ claim_id: batch.id })),
 						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						Story.when(new ClaimEventBatch({ batch_id: batch.id, fingerprint: fp1 })),
+						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
 						Story.then(batch),
 						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
 					)

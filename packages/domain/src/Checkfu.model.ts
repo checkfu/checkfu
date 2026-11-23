@@ -8,7 +8,7 @@ import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
-import { EventBatch } from "./EventBatch/EventBatch.aggregate.ts"
+import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
 import { RunTurn } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
@@ -24,7 +24,7 @@ import { TurnInput } from "./Session/TurnInput.view.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [Agent, AgentVersion, Environment, Session, EventBatch],
+	aggregates: [Agent, AgentVersion, Environment, Session, IdempotencyClaim],
 	decisions: [CreateAgentDecision, UpdateAgentDecision, AdmitSessionDecision],
 	views: [
 		AgentView,
@@ -274,7 +274,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		}),
 	},
 	sometimes: {
-		AnEventBatchIsClaimed: (m) => m.EventBatch.some((b) => b.state._tag === "Claimed"),
+		AnIdempotencyKeyIsClaimed: (m) => m.IdempotencyClaim.some((b) => b.state._tag === "Claimed"),
 		ASessionIsAdmitted: (m) => m.Session.some((s) => s.state._tag === "Idle"),
 		AnAdmittedSessionCompletesATurn: (m) =>
 			m.Session.some((s) => s.state._tag === "Idle" && s.state.turn >= 1),
@@ -298,7 +298,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"SendUserMessage",
 		"SendUserInterrupt",
 		"ArchiveSession",
-		"ClaimEventBatch",
+		"ClaimIdempotencyKey",
 	],
 	views: [
 		"AgentView",

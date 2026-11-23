@@ -25,7 +25,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
+import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
@@ -229,7 +229,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
-		const eventBatches = yield* EventBatch
+		const idempotencyClaims = yield* IdempotencyClaim
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
 		const digest = yield* Digest.Digest
@@ -303,12 +303,18 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						const commandId = yield* claimCreate(eventBatches, digest, "session", idempotencyKey, {
-							agent_id: agentId,
-							agent_version: agentVersion,
-							environment_id: environmentId,
-							title,
-						})
+						const commandId = yield* claimCreate(
+							idempotencyClaims,
+							digest,
+							"session",
+							idempotencyKey,
+							{
+								agent_id: agentId,
+								agent_version: agentVersion,
+								environment_id: environmentId,
+								title,
+							},
+						)
 						id = SessionId.make(
 							yield* idempotentId(digest, "sess", ["create", "session", "id", idempotencyKey]),
 						)
@@ -459,7 +465,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (idempotencyKey !== undefined) {
 						const batchId = yield* sessionEventBatchId(digest, id, idempotencyKey)
 						const fingerprint = yield* eventBatchFingerprint(digest, prepared)
-						yield* claimIdempotency(eventBatches, batchId, fingerprint)
+						yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
 					}
 
 					const accepted: Array<unknown> = []
@@ -473,7 +479,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								: Effect.gen(function* () {
 										const claimId = yield* sessionEventClaimId(digest, id, eventId)
 										const fingerprint = yield* singleEventFingerprint(digest, item)
-										yield* claimIdempotency(eventBatches, claimId, fingerprint).pipe(
+										yield* claimIdempotency(idempotencyClaims, claimId, fingerprint).pipe(
 											Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
 										)
 									})

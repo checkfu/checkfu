@@ -21,9 +21,9 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
-import { ClaimEventBatch } from "@checkfu/domain/EventBatch/ClaimEventBatch.command"
-import { EventBatchId } from "@checkfu/domain/EventBatch/EventBatch.id"
-import type { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
+import { ClaimIdempotencyKey } from "@checkfu/domain/IdempotencyClaim/ClaimIdempotencyKey.command"
+import { IdempotencyClaimId } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.id"
+import type { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { optionalSecret } from "../Secrets.ts"
 import {
 	AgentBodyLimit,
@@ -249,8 +249,8 @@ export const idempotencyClaimId = (
 	digest: Digest.Digest["Service"],
 	prefix: string,
 	scope: ReadonlyArray<unknown>,
-): Effect.Effect<EventBatchId> =>
-	Effect.map(sha256Json(digest, scope), (hash) => EventBatchId.make(`${prefix}_${hash}`))
+): Effect.Effect<IdempotencyClaimId> =>
+	Effect.map(sha256Json(digest, scope), (hash) => IdempotencyClaimId.make(`${prefix}_${hash}`))
 
 export const idempotentId = (
 	digest: Digest.Digest["Service"],
@@ -280,16 +280,16 @@ export const createCommandId = (
 ) => idempotentCommandId(digest, `create-${resource}`, ["create", resource, idempotencyKey])
 
 export const claimIdempotency = (
-	eventBatches: Effect.Success<typeof EventBatch>,
-	batchId: EventBatchId,
+	idempotencyClaims: Effect.Success<typeof IdempotencyClaim>,
+	batchId: IdempotencyClaimId,
 	fingerprint: string,
 ) =>
-	eventBatches.send(new ClaimEventBatch({ batch_id: batchId, fingerprint }), {
+	idempotencyClaims.send(new ClaimIdempotencyKey({ claim_id: batchId, fingerprint }), {
 		commandId: `claim:${batchId}:${fingerprint}`,
 	})
 
 export const claimCreate = (
-	eventBatches: Effect.Success<typeof EventBatch>,
+	idempotencyClaims: Effect.Success<typeof IdempotencyClaim>,
 	digest: Digest.Digest["Service"],
 	resource: "agent" | "environment" | "session",
 	idempotencyKey: string,
@@ -298,7 +298,7 @@ export const claimCreate = (
 	Effect.gen(function* () {
 		const claimId = yield* createClaimId(digest, resource, idempotencyKey)
 		const fingerprint = yield* createFingerprint(digest, payload)
-		yield* claimIdempotency(eventBatches, claimId, fingerprint)
+		yield* claimIdempotency(idempotencyClaims, claimId, fingerprint)
 		return yield* createCommandId(digest, resource, idempotencyKey)
 	})
 
