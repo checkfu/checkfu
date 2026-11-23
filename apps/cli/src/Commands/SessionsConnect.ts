@@ -264,23 +264,40 @@ const splitBoundedLines = (
 				}),
 			)
 
+		const decoder = new TextDecoder("utf-8", { fatal: true })
+
 		const body = stdin.pipe(
 			Stream.mapError((err) => usageError(`Failed to read stdin: ${err.message}`)),
-			Stream.decodeText(),
+			Stream.mapEffect((chunk) =>
+				Effect.try({
+					try: () => decoder.decode(chunk, { stream: true }),
+					catch: () => usageError("stdin is not valid UTF-8."),
+				}),
+			),
 			Stream.flatMap(processChunk),
 		)
 
 		const flushTrailing = Stream.unwrap(
 			Effect.gen(function* () {
-				if (pending.length === 0) {
-					return Stream.empty
-				}
-				const last = pending
-				pending = ""
-				if (hooks?.onTrailingFlushed !== undefined) {
-					yield* hooks.onTrailingFlushed(last)
-				}
-				return Stream.make(last)
+				const tail = yield* Effect.try({
+					try: () => decoder.decode(),
+					catch: () => usageError("stdin is not valid UTF-8."),
+				})
+				const tailStream = tail.length > 0 ? processChunk(tail) : Stream.empty
+				const finalStream = Stream.unwrap(
+					Effect.gen(function* () {
+						if (pending.length === 0) {
+							return Stream.empty
+						}
+						const last = pending
+						pending = ""
+						if (hooks?.onTrailingFlushed !== undefined) {
+							yield* hooks.onTrailingFlushed(last)
+						}
+						return Stream.make(last)
+					}),
+				)
+				return Stream.concat(tailStream, finalStream)
 			}),
 		)
 
@@ -1204,13 +1221,22 @@ export const sessionsConnectCommand = Command.make(
 						if (settlementAction === "check_halted_queue") {
 							let haltedQueuedTurn = false
 							for (let checkAttempt = 0; ; checkAttempt++) {
-								const latestRes = yield* Effect.result(
-									fetchSessionStatusWithRetry(client, sessionId),
+								const lookupRace = yield* Effect.race(
+									Effect.result(fetchSessionStatusWithRetry(client, sessionId)).pipe(
+										Effect.map((result) => ({ _tag: "lookup" as const, result })),
+									),
+									Effect.race(
+										Deferred.await(waiter).pipe(Effect.as({ _tag: "event" as const })),
+										Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "event" as const })),
+									),
 								)
+								if (lookupRace._tag === "event") {
+									break
+								}
+								const latestRes = lookupRace.result
 								const refreshed = yield* Ref.get(stateRef)
 								if (latestRes._tag === "Failure") {
-									const refreshedAction = evaluatePipedSettlement(refreshed)
-									if (refreshedAction === "ended" || refreshedAction === "settled") {
+									if (evaluatePipedSettlement(refreshed) !== "check_halted_queue") {
 										break
 									}
 									yield* Ref.set(incompleteTurnRef, latestRes.failure)

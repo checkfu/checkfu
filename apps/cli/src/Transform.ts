@@ -163,7 +163,7 @@ const parseSegment = (segment: string): ParsedSegment => {
 
 const unescapeSegment = (segment: string): string => parseSegment(segment).value
 
-const evaluateObjectLiteral = (value: unknown, body: string): NormalizedObject => {
+const evaluateObjectLiteral = (value: NormalizedValue, body: string): NormalizedObject => {
 	const result: MutableNormalizedObject = {}
 	for (const rawEntry of splitTopLevel(body, ",")) {
 		const entry = rawEntry.trim()
@@ -175,11 +175,11 @@ const evaluateObjectLiteral = (value: unknown, body: string): NormalizedObject =
 			const segments = splitTopLevel(entry, ".")
 			const last = segments.at(-1) ?? entry
 			const key = unescapeSegment(last)
-			setOwnProperty(result, key, evaluateTransform(value, entry))
+			setOwnProperty(result, key, evaluateNormalizedTransform(value, entry))
 		} else {
 			const key = unescapeSegment(entry.slice(0, colonIndex))
 			const expr = entry.slice(colonIndex + 1).trim()
-			setOwnProperty(result, key, evaluateTransform(value, expr))
+			setOwnProperty(result, key, evaluateNormalizedTransform(value, expr))
 		}
 	}
 	return result
@@ -225,8 +225,11 @@ const findTopLevelColon = (input: string): number => {
 	return -1
 }
 
-const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): NormalizedValue => {
-	let current: NormalizedValue = normalizeJsonValue(value)
+const evaluateSegments = (
+	value: NormalizedValue,
+	segments: ReadonlyArray<string>,
+): NormalizedValue => {
+	let current: NormalizedValue = value
 	for (let i = 0; i < segments.length; i++) {
 		if (current === null || current === undefined) {
 			return undefined
@@ -247,7 +250,7 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): Norm
 			current = splitTopLevel(rawTrimmed.slice(1, -1), ",")
 				.map((item) => item.trim())
 				.filter((item) => item.length > 0)
-				.map((item) => evaluateTransform(current, item))
+				.map((item) => evaluateNormalizedTransform(current, item))
 			continue
 		}
 
@@ -291,14 +294,20 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): Norm
 	return current
 }
 
-export const evaluateTransform = (value: unknown, expression: string): NormalizedValue => {
+const evaluateNormalizedTransform = (
+	value: NormalizedValue,
+	expression: string,
+): NormalizedValue => {
 	const trimmed = expression.trim()
 	if (trimmed.length === 0) {
-		return normalizeJsonValue(value)
+		return value
 	}
 	const segments = splitTopLevel(trimmed, ".")
 	return evaluateSegments(value, segments)
 }
+
+export const evaluateTransform = (value: unknown, expression: string): NormalizedValue =>
+	evaluateNormalizedTransform(normalizeJsonValue(value), expression)
 
 export interface FormatOptions {
 	readonly format: OutputFormat
@@ -311,7 +320,7 @@ export interface FormatOptions {
 export const formatOutput = (value: unknown, options: FormatOptions): string => {
 	const normalized = normalizeJsonValue(value)
 	const transformed = Option.isSome(options.transform)
-		? evaluateTransform(normalized, options.transform.value)
+		? evaluateNormalizedTransform(normalized, options.transform.value)
 		: normalized
 
 	const effectiveFormat =

@@ -5156,13 +5156,16 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 								) {
 									raceGets += 1
 									if (raceGets === 2) {
-										// Pause the halted-queue GET until another client completes turn 2 AND
-										// archives the session so SSE finishes streamEndedDeferred while GET is in flight
+										// Pause the halted-queue GET until aborted by SSE progress or archivedRendered
 										await runPromise(Deferred.succeed(lookupInFlight, undefined))
-										await runPromise(Deferred.await(archivedRendered))
-										await new Promise((resolve) => {
-											setTimeout(resolve, 25)
+										await new Promise<void>((resolve) => {
+											const done = () => resolve()
+											request.signal.addEventListener("abort", done, { once: true })
+											void runPromise(Deferred.await(archivedRendered)).then(done)
 										})
+										if (request.signal.aborted) {
+											throw new DOMException("Aborted", "AbortError")
+										}
 									}
 									return next(request)
 								}
@@ -5201,8 +5204,8 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					yield* Fiber.await(otherClientDone)
-					// 3 GETs: startup lookup, paused halted-queue lookup, and session.status_terminated archive check
-					expect(raceGets).toBe(3)
+					// 2 GETs: startup lookup and halted-queue lookup aborted once SSE confirms turn 2 started
+					expect(raceGets).toBe(2)
 					expect(raceRes.exitCode).toBe(0)
 					expect(raceRes.stdout).toContain("CompletedTurn2:")
 
@@ -5244,6 +5247,363 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					)
 					expect(malformedStream.exitCode).toBe(1)
 					expect(malformedStream.stderr).toContain("Invalid SSE session event payload")
+				}),
+			),
+		)
+	}, 15_000)
+
+	it("aborts or ignores halted-queue status lookups once SSE confirms the turn started, while still failing when truly halted or given invalid UTF-8 stdin", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+					const encoder = new TextEncoder()
+
+					// 1) Halted-queue GET fails with 403 after SSE already delivered session.status_running
+					//    for turn 2 (refreshed settlement action is "wait", not "settled"): must not fail
+					//    the piped session and must wait for turn 2's reply
+					const failTurn1Running = yield* Deferred.make<void>()
+					const releaseFailTurn1 = yield* Deferred.make<void>()
+					const releaseFailTurn2 = yield* Deferred.make<void>()
+					const failLookupInFlight = yield* Deferred.make<void>()
+					const sseTurn2RunningDelivered = yield* Deferred.make<void>()
+					const failCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(failTurn1Running, undefined)
+									yield* Deferred.await(releaseFailTurn1)
+									return {
+										thinking: null,
+										text: "Refused turn 1",
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "refusal" as const },
+									}
+								}
+								yield* Deferred.await(releaseFailTurn2)
+								return {
+									thinking: null,
+									text: `RecoveredTurn2:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const failSessionId = yield* createReadySession(failCli)
+					const triggerFailTurn2 = yield* Deferred.await(failLookupInFlight).pipe(
+						Effect.andThen(
+							failCli.run([
+								"sessions:events",
+								"send",
+								"--session-id",
+								failSessionId,
+								"--event",
+								JSON.stringify({
+									type: "user.message",
+									content: [{ type: "text", text: "resume turn 2" }],
+								}),
+							]),
+						),
+						Effect.forkChild,
+					)
+					let failPosts = 0
+					let failGets = 0
+					let failGetAborted = false
+					const failStdin = Stream.concat(
+						Stream.make(encoder.encode("turn 1\n")),
+						Stream.fromEffect(
+							Deferred.await(failTurn1Running).pipe(Effect.as(encoder.encode("queued turn 2\n"))),
+						),
+					)
+					const failRes = yield* failCli.run(
+						["sessions", "connect", "--session-id", failSessionId],
+						{
+							stdin: failStdin,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									failPosts += 1
+									const res = await next(request)
+									if (failPosts === 2) {
+										await runPromise(Deferred.succeed(releaseFailTurn1, undefined))
+									}
+									return res
+								}
+								if (request.url.includes("/events/stream")) {
+									const res = await next(request)
+									if (res.status !== 200 || res.body === null) {
+										return res
+									}
+									const reader = res.body.getReader()
+									const decoder = new TextDecoder()
+									let sseBuffer = ""
+									const observed = new ReadableStream<Uint8Array>({
+										async pull(controller) {
+											const chunk = await reader.read()
+											if (chunk.done) {
+												controller.close()
+												return
+											}
+											sseBuffer += decoder.decode(chunk.value, { stream: true })
+											controller.enqueue(chunk.value)
+											if ((sseBuffer.match(/event: session\.status_running/g) ?? []).length >= 2) {
+												await runPromise(Deferred.succeed(sseTurn2RunningDelivered, undefined))
+											}
+										},
+										cancel(reason) {
+											return reader.cancel(reason)
+										},
+									})
+									return new Response(observed, { status: 200, headers: res.headers })
+								}
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${failSessionId}`)
+								) {
+									failGets += 1
+									if (failGets === 2) {
+										const releaseOnAbort = () => {
+											failGetAborted = true
+											void runPromise(Deferred.succeed(releaseFailTurn2, undefined))
+										}
+										request.signal.addEventListener("abort", releaseOnAbort, { once: true })
+										await runPromise(Deferred.succeed(failLookupInFlight, undefined))
+										await runPromise(Deferred.await(sseTurn2RunningDelivered))
+										if (!request.signal.aborted) {
+											await new Promise<void>((resolve) => {
+												const timer = setTimeout(resolve, 60)
+												request.signal.addEventListener(
+													"abort",
+													() => {
+														clearTimeout(timer)
+														resolve()
+													},
+													{ once: true },
+												)
+											})
+										}
+										if (request.signal.aborted) {
+											throw new DOMException("Aborted", "AbortError")
+										}
+										// Release turn 2 slightly after returning 403 so unpatched code hits 403 while
+										// state is "wait" (turn 2 running, not yet settled)
+										setTimeout(() => {
+											void runPromise(Deferred.succeed(releaseFailTurn2, undefined))
+										}, 20)
+										return new Response(
+											JSON.stringify({
+												type: "error",
+												error: {
+													type: "authentication_error",
+													message: "Simulated lookup failure",
+												},
+												request_id: "req_fail_401",
+											}),
+											{ status: 401, headers: { "content-type": "application/json" } },
+										)
+									}
+								}
+								return next(request)
+							},
+						},
+					)
+					yield* Fiber.await(triggerFailTurn2)
+					expect(failGets).toBe(2)
+					expect(failGetAborted).toBe(true)
+					expect(failRes.exitCode).toBe(0)
+					expect(failRes.stdout).toContain("RecoveredTurn2:")
+
+					// 2) Stalled halted-queue GET that never responds must be aborted once SSE confirms
+					//    turn 2 started so sessions connect exits promptly when turn 2 completes
+					const stallTurn1Running = yield* Deferred.make<void>()
+					const releaseStallTurn1 = yield* Deferred.make<void>()
+					const stallLookupInFlight = yield* Deferred.make<void>()
+					const stallCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(stallTurn1Running, undefined)
+									yield* Deferred.await(releaseStallTurn1)
+									return {
+										thinking: null,
+										text: "Refused turn 1",
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "refusal" as const },
+									}
+								}
+								return {
+									thinking: null,
+									text: `UnblockedTurn2:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const stallSessionId = yield* createReadySession(stallCli)
+					const triggerStallTurn2 = yield* Deferred.await(stallLookupInFlight).pipe(
+						Effect.andThen(
+							stallCli.run([
+								"sessions:events",
+								"send",
+								"--session-id",
+								stallSessionId,
+								"--event",
+								JSON.stringify({
+									type: "user.message",
+									content: [{ type: "text", text: "unblock turn 2" }],
+								}),
+							]),
+						),
+						Effect.forkChild,
+					)
+					let stallPosts = 0
+					let stallGets = 0
+					let stalledGetAborted = false
+					const stallStdin = Stream.concat(
+						Stream.make(encoder.encode("stall turn 1\n")),
+						Stream.fromEffect(
+							Deferred.await(stallTurn1Running).pipe(Effect.as(encoder.encode("stall queued 2\n"))),
+						),
+					)
+					const stallOutcome = yield* Effect.race(
+						stallCli
+							.run(["sessions", "connect", "--session-id", stallSessionId], {
+								stdin: stallStdin,
+								interceptFetch: async (next, request) => {
+									if (request.method === "POST" && request.url.endsWith("/events")) {
+										stallPosts += 1
+										const res = await next(request)
+										if (stallPosts === 2) {
+											await runPromise(Deferred.succeed(releaseStallTurn1, undefined))
+										}
+										return res
+									}
+									if (
+										request.method === "GET" &&
+										request.url.endsWith(`/sessions/${stallSessionId}`)
+									) {
+										stallGets += 1
+										if (stallGets === 2) {
+											await runPromise(Deferred.succeed(stallLookupInFlight, undefined))
+											return await new Promise<Response>((_resolve, reject) => {
+												request.signal.addEventListener(
+													"abort",
+													() => {
+														stalledGetAborted = true
+														reject(new DOMException("Aborted", "AbortError"))
+													},
+													{ once: true },
+												)
+											})
+										}
+									}
+									return next(request)
+								},
+							})
+							.pipe(Effect.map((res) => ({ _tag: "done" as const, res }))),
+						Effect.sleep("2 seconds").pipe(Effect.as({ _tag: "timeout" as const })),
+					)
+					yield* Fiber.await(triggerStallTurn2)
+					expect(stallOutcome._tag).toBe("done")
+					if (stallOutcome._tag === "done") {
+						expect(stallGets).toBe(2)
+						expect(stalledGetAborted).toBe(true)
+						expect(stallOutcome.res.exitCode).toBe(0)
+						expect(stallOutcome.res.stdout).toContain("UnblockedTurn2:")
+					}
+
+					// 3) When the queue truly remains halted (check_halted_queue), a lookup failure still propagates
+					const haltedTurn1Running = yield* Deferred.make<void>()
+					const releaseHaltedTurn1 = yield* Deferred.make<void>()
+					const haltedCli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(haltedTurn1Running, undefined)
+								yield* Deferred.await(releaseHaltedTurn1)
+								return {
+									thinking: null,
+									text: "Refused turn 1",
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "refusal" as const },
+								}
+							}),
+					})
+					const haltedSessionId = yield* createReadySession(haltedCli)
+					let haltedPosts = 0
+					let haltedGets = 0
+					const haltedStdin = Stream.concat(
+						Stream.make(encoder.encode("halted turn 1\n")),
+						Stream.fromEffect(
+							Deferred.await(haltedTurn1Running).pipe(
+								Effect.as(encoder.encode("halted queued 2\n")),
+							),
+						),
+					)
+					const haltedRes = yield* haltedCli.run(
+						["sessions", "connect", "--session-id", haltedSessionId],
+						{
+							stdin: haltedStdin,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									haltedPosts += 1
+									const res = await next(request)
+									if (haltedPosts === 2) {
+										await runPromise(Deferred.succeed(releaseHaltedTurn1, undefined))
+									}
+									return res
+								}
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${haltedSessionId}`)
+								) {
+									haltedGets += 1
+									if (haltedGets === 2) {
+										return new Response(
+											JSON.stringify({
+												type: "error",
+												error: {
+													type: "authentication_error",
+													message: "Halted lookup unauthorized",
+												},
+												request_id: "req_halted_401",
+											}),
+											{ status: 401, headers: { "content-type": "application/json" } },
+										)
+									}
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(haltedGets).toBe(2)
+					expect(haltedRes.exitCode).toBe(1)
+					expect(haltedRes.stderr).toContain("401")
+					expect(haltedRes.stderr).toContain("Halted lookup unauthorized")
+
+					// 4) Invalid UTF-8 on piped sessions connect stdin fails before issuing POST /events
+					const badUtf8Cli = yield* makeTestServer()
+					const badUtf8SessionId = yield* createReadySession(badUtf8Cli)
+					let badUtf8Posts = 0
+					const badUtf8Res = yield* badUtf8Cli.run(
+						["sessions", "connect", "--session-id", badUtf8SessionId],
+						{
+							stdin: Stream.make(new Uint8Array([0x68, 0x69, 0xff, 0x0a])),
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									badUtf8Posts += 1
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(badUtf8Res.exitCode).toBe(1)
+					expect(badUtf8Res.stderr).toContain("stdin")
+					expect(badUtf8Res.stderr).toContain("not valid UTF-8")
+					expect(badUtf8Posts).toBe(0)
 				}),
 			),
 		)

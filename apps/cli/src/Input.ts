@@ -50,6 +50,15 @@ const readBoundedBytes = <E extends { readonly message: string }>(
 		return merged
 	})
 
+const decodeUtf8Strict = (
+	bytes: Uint8Array,
+	sourceLabel: string,
+): Effect.Effect<string, CliFailure> =>
+	Effect.try({
+		try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+		catch: () => usageError(`${sourceLabel} is not valid UTF-8.`),
+	})
+
 export const resolveTextOrFile = (
 	raw: string,
 ): Effect.Effect<string, CliFailure, FileSystem.FileSystem> =>
@@ -66,7 +75,7 @@ export const resolveTextOrFile = (
 				`Failed to read file "${filePath}"`,
 				`File "${filePath}"`,
 			)
-			return new TextDecoder().decode(bytes)
+			return yield* decodeUtf8Strict(bytes, `File "${filePath}"`)
 		}
 		return raw
 	})
@@ -149,7 +158,7 @@ export const readPipedStdin: Effect.Effect<
 	if (bytes.byteLength === 0) {
 		return Option.none()
 	}
-	const text = new TextDecoder().decode(bytes)
+	const text = yield* decodeUtf8Strict(bytes, "stdin")
 	if (text.trim().length === 0) {
 		return Option.none()
 	}

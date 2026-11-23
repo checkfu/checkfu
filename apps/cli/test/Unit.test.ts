@@ -1883,6 +1883,69 @@ describe("Transform and formatOutput", () => {
 		}
 		expect(YAML.parse(`${ttyYaml}\n`)).toEqual(tricky)
 	})
+
+	it("normalizes output once before evaluating transform paths without recopying payloads per selected field", () => {
+		const listResponse = {
+			has_more: true,
+			next_cursor: 42,
+			data: [
+				{ id: "evt_1", type: "user.message", content: [{ type: "text", text: "one" }] },
+				{ id: "evt_2", type: "agent.message", content: [{ type: "text", text: "two" }] },
+				{ id: "evt_3", type: "session.status_idle", stop_reason: { type: "end_turn" } },
+			],
+		}
+		// 7 objects total: root + 3 events + 2 text content blocks + 1 stop_reason
+		const expectedObjectCount = 7
+		const countEntriesCalls = <A>(fn: () => A): readonly [A, number] => {
+			let calls = 0
+			const originalEntries = Object.entries
+			Object.entries = ((...args: Parameters<typeof Object.entries>) => {
+				calls += 1
+				return originalEntries(...args)
+			}) as typeof Object.entries
+			try {
+				return [fn(), calls] as const
+			} finally {
+				Object.entries = originalEntries
+			}
+		}
+
+		const [formatted, formatCalls] = countEntriesCalls(() =>
+			formatOutput(listResponse, {
+				format: "json",
+				transform: Option.some("{has_more,next_cursor}"),
+				rawOutput: false,
+				isTerminal: false,
+			}),
+		)
+		expect(formatted).toBe('{"has_more":true,"next_cursor":42}')
+		expect(formatCalls).toBe(expectedObjectCount)
+
+		const [evaluatedObj, evalObjCalls] = countEntriesCalls(() =>
+			evaluateTransform(listResponse, "{has_more,next_cursor}"),
+		)
+		expect(evaluatedObj).toEqual({ has_more: true, next_cursor: 42 })
+		expect(evalObjCalls).toBe(expectedObjectCount)
+
+		const [evaluatedArr, evalArrCalls] = countEntriesCalls(() =>
+			evaluateTransform(listResponse, "[has_more,next_cursor]"),
+		)
+		expect(evaluatedArr).toEqual([true, 42])
+		expect(evalArrCalls).toBe(expectedObjectCount)
+
+		const [projected, projCalls] = countEntriesCalls(() =>
+			evaluateTransform(listResponse, "data.#.id"),
+		)
+		expect(projected).toEqual(["evt_1", "evt_2", "evt_3"])
+		expect(projCalls).toBe(expectedObjectCount)
+
+		// Multiple references to the same branch reuse the single normalized value without recopying
+		const duplicated = evaluateTransform(listResponse, "{a:data,b:data}") as {
+			readonly a: unknown
+			readonly b: unknown
+		}
+		expect(duplicated.a).toBe(duplicated.b)
+	})
 })
 
 describe("resolveBunExecutable", () => {

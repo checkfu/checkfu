@@ -577,4 +577,91 @@ describe("CLI help, errors, and resource commands", () => {
 			),
 		)
 	})
+
+	it("rejects invalid UTF-8 in @file and stdin inputs before issuing API requests", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const encoder = new TextEncoder()
+
+					// 1) Invalid UTF-8 bytes in --system @file fail before issuing any HTTP request
+					let fileRequests = 0
+					const badFileRes = yield* cli.run(
+						[
+							"agents",
+							"create",
+							"--name",
+							"BadUtf8File",
+							"--model",
+							"gpt-6.2-sol",
+							"--system",
+							"@bad-utf8.txt",
+						],
+						{
+							files: {
+								"bad-utf8.txt": Stream.make(new Uint8Array([0x68, 0x69, 0xff, 0x21])),
+							},
+							interceptFetch: async (next, request) => {
+								fileRequests += 1
+								return next(request)
+							},
+						},
+					)
+					expect(badFileRes.exitCode).toBe(1)
+					expect(badFileRes.stdout).toBe("")
+					expect(badFileRes.stderr).toContain("bad-utf8.txt")
+					expect(badFileRes.stderr).toContain("not valid UTF-8")
+					expect(fileRequests).toBe(0)
+
+					// 2) Invalid UTF-8 byte inside a quoted JSON string on stdin fails before issuing any request
+					let stdinRequests = 0
+					const badJsonStdinBytes = new Uint8Array([
+						...encoder.encode('{"name":"Bad'),
+						0xff,
+						...encoder.encode('Name","model":"gpt-6.2-sol"}'),
+					])
+					const badStdinRes = yield* cli.run(["agents", "create"], {
+						stdin: Stream.make(badJsonStdinBytes),
+						interceptFetch: async (next, request) => {
+							stdinRequests += 1
+							return next(request)
+						},
+					})
+					expect(badStdinRes.exitCode).toBe(1)
+					expect(badStdinRes.stdout).toBe("")
+					expect(badStdinRes.stderr).toContain("stdin")
+					expect(badStdinRes.stderr).toContain("not valid UTF-8")
+					expect(stdinRequests).toBe(0)
+
+					// 3) Valid multi-byte UTF-8 split across chunks still decodes cleanly
+					const utf8PromptBytes = encoder.encode("Be concise: café 🚀")
+					const validFileRes = yield* cli.run(
+						[
+							"agents",
+							"create",
+							"--name",
+							"ValidUtf8File",
+							"--model",
+							"gpt-6.2-sol",
+							"--system",
+							"@utf8.txt",
+						],
+						{
+							files: {
+								"utf8.txt": Stream.fromIterable([
+									utf8PromptBytes.slice(0, 16),
+									utf8PromptBytes.slice(16),
+								]),
+							},
+						},
+					)
+					expect(validFileRes.exitCode).toBe(0)
+					expect((JSON.parse(validFileRes.stdout) as { system: string }).system).toBe(
+						"Be concise: café 🚀",
+					)
+				}),
+			),
+		)
+	})
 })
