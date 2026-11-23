@@ -12,9 +12,8 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { customDomains } from "./CustomDomain.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
-import { PiSession } from "./Pi/PiSession.do.ts"
+import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
-import { placedStub, placement } from "./Placement.ts"
 
 const harnessCall = <A, E, R>(
 	call: Effect.Effect<A, E, R>,
@@ -28,20 +27,20 @@ const harnessCall = <A, E, R>(
 const PiSessionExecutorLive = Layer.effect(
 	PiTurnExecutor,
 	Effect.gen(function* () {
-		const piSession = placedStub(yield* PiSession, yield* placement)
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
 		return {
 			recoverTurn: (conversation, operationId) =>
-				harnessCall(Effect.suspend(() => piSession(conversation).recoverTurn(operationId))).pipe(
-					Effect.withSpan("PiSession.recoverTurn"),
+				harnessCall(Effect.suspend(() => harness.recoverTurn(conversation, operationId))).pipe(
+					Effect.withSpan("PiHarness.recoverTurn"),
 				),
 			runTurn: (conversation, request) =>
-				harnessCall(Effect.suspend(() => piSession(conversation).runTurn(request))).pipe(
-					Effect.withSpan("PiSession.runTurn"),
+				harnessCall(Effect.suspend(() => harness.runTurn(conversation, request))).pipe(
+					Effect.withSpan("PiHarness.runTurn"),
 				),
 			abortTurn: (conversation, operationId) =>
-				harnessCall(Effect.suspend(() => piSession(conversation).abortTurn(operationId))).pipe(
+				harnessCall(Effect.suspend(() => harness.abortTurn(conversation, operationId))).pipe(
 					Effect.asVoid,
-					Effect.withSpan("PiSession.abortTurn"),
+					Effect.withSpan("PiHarness.abortTurn"),
 				),
 		}
 	}),
@@ -65,12 +64,7 @@ export const API_WORKER_PROPS = {
 		// and SSE polling streams interrupt cleanly when clients disconnect.
 		date: "2026-11-17",
 	},
-	// Exceed DEFAULT_TURN_TIMEOUT_MS (10m) + settle margin so deploys don't evict
-	// active PiSession/RunTurn Durable Objects mid-turn.
-	codeUpdateStrategy: {
-		mode: "deferred" as const,
-		maxDelay: "12 minutes" as const,
-	},
+	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	observability: {
 		// Keep top-level Workers Observability enabled when adding `issues`, since
 		// providing `observability` bypasses Alchemy's DEFAULT_OBSERVABILITY fallback.

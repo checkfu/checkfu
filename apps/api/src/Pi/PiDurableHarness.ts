@@ -24,9 +24,8 @@ import {
 	trailingCodePointCost,
 	trimTailToBudget,
 } from "./PiContextBudget.ts"
-import type { PiSeed, PiSeedMessage, PiTurnRequest, PiTurnResult } from "./PiDurableEngine.ts"
 import { resolveCatalogModel } from "./PiCatalog.ts"
-import type { PiTurnOutcome } from "./PiRefusals.ts"
+import type { PiSeed, PiSeedMessage, PiTurnOutcome, PiTurnRequest, PiTurnResult } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
 	HarnessCallFailed,

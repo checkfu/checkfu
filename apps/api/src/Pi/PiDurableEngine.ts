@@ -1,6 +1,6 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
-import type { Api, AssistantMessage, Usage } from "@earendil-works/pi-ai"
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai"
 import {
 	AssistantEntry,
 	ROOT_CONVERSATION_ID,
@@ -28,32 +28,11 @@ import {
 	mapUnansweredToError,
 	normalizeRefusalAssistantMessage,
 } from "./PiRefusals.ts"
-import type { PiTurnOutcome, UnansweredSubmissionInfo } from "./PiRefusals.ts"
+import type { UnansweredSubmissionInfo } from "./PiRefusals.ts"
 import { SeedState, clearSeedRebuild } from "./PiTurnUsage.ts"
 import type { BeginTurnUsageResult } from "./PiTurnUsage.ts"
 
-export interface PiTurnRequest {
-	readonly operationId: string
-	readonly turn: number
-	readonly provider: SupportedProvider
-	readonly modelId: string
-	readonly system: string | null
-	readonly text: string
-	readonly seed?: PiSeed
-}
-
-export interface PiSeedMessage {
-	readonly role: "user" | "assistant"
-	readonly text: string
-}
-
-export interface PiSeed {
-	readonly api: Api
-	readonly messages: ReadonlyArray<PiSeedMessage>
-	readonly trimmed?: boolean
-}
-
-export type PiTurnResult = PiTurnOutcome | "history_required"
+import type { PiSeed, PiTurnOutcome, PiTurnRequest, PiTurnResult } from "./PiTurn.ts"
 
 export type PiSeedContext = Pick<PiTurnRequest, "operationId" | "provider" | "modelId">
 

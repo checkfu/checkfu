@@ -113,6 +113,6 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI, SDK, and MCP artifacts from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
-- `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
+- `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds. Either way it creates two Workers: the API, which serves HTTP and hosts the domain model, and the Pi harness, which has no public URL, runs the model calls, and is the only one that holds `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy
   - The production stack refuses to build until that baseline is cut and committed, so every `alchemy` command with `--stage production` needs it: `deploy`, `logs`, `drift` and `destroy`. Run them from a checkout whose baseline is shipped.

@@ -23,7 +23,8 @@ import * as References from "effect/References"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { createPiHarnessSettings } from "../src/Pi/PiContextBudget.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
-import type { PiDurableBackend, PiTurnRequest, PiTurnResult } from "../src/Pi/PiDurableEngine.ts"
+import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
+import type { PiTurnRequest, PiTurnResult } from "../src/Pi/PiTurn.ts"
 import {
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,

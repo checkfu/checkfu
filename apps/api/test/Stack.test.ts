@@ -21,6 +21,7 @@ import stack, {
 	inProduction,
 } from "../../../alchemy.run.ts"
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
+import { PI_HARNESS_WORKER_PROPS } from "../src/Pi/PiHarnessWorker.ts"
 
 describe("Alchemy stack and worker entry", () => {
 	it.effect(
@@ -39,6 +40,12 @@ describe("Alchemy stack and worker entry", () => {
 					enabled: true,
 					issues: { enabled: true },
 				})
+				expect(PI_HARNESS_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
+				expect(PI_HARNESS_WORKER_PROPS.codeUpdateStrategy).toEqual(
+					API_WORKER_PROPS.codeUpdateStrategy,
+				)
+				expect(PI_HARNESS_WORKER_PROPS.workersDev).toBe(false)
+				expect(PI_HARNESS_WORKER_PROPS.observability).toEqual(API_WORKER_PROPS.observability)
 				expect(CLOUDFLARE_STATE_OBSERVABILITY).toEqual({
 					enabled: true,
 					logs: { enabled: true, invocationLogs: false },

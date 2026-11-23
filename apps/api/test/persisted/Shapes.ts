@@ -8,6 +8,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
+import { PiRecoveredTurn, PiTurnRequest, PiTurnResult } from "../../src/Pi/PiTurn.ts"
 
 export type PersistedSchema = Schema.Codec<unknown, unknown, never, never>
 
@@ -22,6 +23,7 @@ export type PersistedKind =
 	| "saga-step"
 	| "saga-result"
 	| "pi-doc"
+	| "harness-call"
 
 export const RULES: Readonly<Record<PersistedKind, string>> = {
 	event:
@@ -43,6 +45,8 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"A completed run keeps its result. Add a field only with a decoding default, or give the saga a new name.",
 	"pi-doc":
 		"Pi durable documents survive deployments and are read when resuming or replaying turns. Keep the document's scope and family fixed, and bump its `version` with a `migrate` handler whenever its fields change.",
+	"harness-call":
+		"The API Worker and the harness Worker deploy separately, and a running object can keep its old code for the whole code-update delay. The previous harness must be able to read this request and the previous API this result: add a field only as optional, and never start sending a change in the release that introduces it.",
 }
 
 export interface PersistedShape {
@@ -422,10 +426,21 @@ const PI_DOCS: ReadonlyArray<PersistedShape> = CHECKFU_PI_DOCS.map((spec): Persi
 	schema: piDocPersistedSchema(spec),
 }))
 
+const HARNESS_CALLS: ReadonlyArray<PersistedShape> = [
+	{ id: "harness-call:PiHarness.runTurn/request", kind: "harness-call", schema: PiTurnRequest },
+	{ id: "harness-call:PiHarness.runTurn/result", kind: "harness-call", schema: PiTurnResult },
+	{
+		id: "harness-call:PiHarness.recoverTurn/result",
+		kind: "harness-call",
+		schema: PiRecoveredTurn,
+	},
+]
+
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
 	...SAGA_STEPS,
 	...PI_DOCS,
+	...HARNESS_CALLS,
 ]
 
 export const registryProblems = (
@@ -456,6 +471,7 @@ export const registryProblems = (
 		"saga-step",
 		"saga-result",
 		"pi-doc",
+		"harness-call",
 	] as const) {
 		if (!shapes.some((shape) => shape.kind === kind)) {
 			problems.push(`no ${kind} shape was found`)

@@ -20,6 +20,7 @@ export interface BundleMeasurement {
 	readonly eagerFiles: ReadonlyArray<string>
 	readonly totalBytes: number
 	readonly startupCpuMs: number
+	readonly harnessSources: ReadonlyArray<string>
 }
 
 // Every sample is a cold import in plain Node, whatever the caller's environment: no compile
@@ -28,6 +29,22 @@ const probeEnv = (): NodeJS.ProcessEnv => {
 	const { NODE_OPTIONS: _ignored, ...inherited } = process.env
 	return { ...inherited, NODE_DISABLE_COMPILE_CACHE: "1" }
 }
+
+const HARNESS_SOURCE =
+	/node_modules\/(?:openai|agents|@anthropic-ai\/[^/]+|@earendil-works\/[^/]+)\/[^"]*/
+const MODEL_TABLE = /@earendil-works\/pi-ai\/dist\/(?:model-catalog|providers\/)/
+
+const harnessSources = (dir: string): ReadonlyArray<string> =>
+	readdirSync(dir)
+		.filter((name) => name.endsWith(".js.map"))
+		.flatMap((name) => {
+			const map = JSON.parse(readFileSync(join(dir, name), "utf8")) as {
+				readonly sources?: ReadonlyArray<string>
+			}
+			return map.sources ?? []
+		})
+		.filter((source) => HARNESS_SOURCE.test(source) && !MODEL_TABLE.test(source))
+		.toSorted()
 
 const probe = async (entry: string, resultFile: string, timeout: number) => {
 	const child = spawn(process.execPath, [PROBE, pathToFileURL(entry).href, resultFile], {
@@ -83,6 +100,7 @@ export const measureBundle = async (
 			eagerFiles: eager.map((file) => file.slice(root.length + 1)).toSorted(),
 			totalBytes: bytes(bundleFiles(root).filter((file) => !file.endsWith(".map"))),
 			startupCpuMs: Math.min(...samples.map((sample) => sample.cpuMs)),
+			harnessSources: harnessSources(root),
 		}
 	} finally {
 		rmSync(scratch, { recursive: true, force: true })
@@ -90,10 +108,19 @@ export const measureBundle = async (
 }
 
 export const API_WORKER_BUDGET = {
-	eagerBytes: 2_600_000,
-	totalBytes: 2_800_000,
+	eagerBytes: 1_350_000,
+	totalBytes: 1_350_000,
 	startupCpuMs: 1000,
 } as const
+
+export const PI_HARNESS_WORKER_BUDGET = {
+	eagerBytes: 2_000_000,
+	totalBytes: 2_150_000,
+	startupCpuMs: 1000,
+} as const
+
+export const HARNESS_SOURCES_HELP =
+	"The API Worker bundled code that belongs to the harness Worker. Import the harness through apps/api/src/Pi/PiHarness.ts, PiCatalog.ts or a type-only import, so the public Worker never loads provider SDKs or Pi."
 
 export const EAGER_BYTES_HELP =
 	"Every isolate, each Durable Object's included, parses and runs this code before its first event. Import what only one path needs from that path, or lower the budget if the bundle shrank."
