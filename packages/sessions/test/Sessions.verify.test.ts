@@ -76,78 +76,84 @@ describe("Sessions Z3 formal verification", () => {
 	// for external-call-only saga steps (ModelSearch.ts drops call.again when no command
 	// entry has again: true, and Script.redelivers ignores step.asked) and walk replay for
 	// StopModelRequest's intentional Effect.orDie retry on HarnessUnavailable.
-	it("proves every Session invariant and transition in Z3 and verifies turn execution with step reruns", async () => {
-		const report = await Effect.runPromise(
-			Verify.model(Sessions, {
-				apis: [SessionsApi],
-				instances: 1,
-				depth: 2,
-				budget: 20_000,
-				faults: { redeliver: true, reorder: true, rerun: true },
-				walks: { count: 25 },
-				lock: "./Sessions.verify.lock.json",
-				require: { proved: PROVED },
+	it.live(
+		"proves every Session invariant and transition in Z3 and verifies turn execution with step reruns",
+		() =>
+			Effect.gen(function* () {
+				const report = yield* Verify.model(Sessions, {
+					apis: [SessionsApi],
+					instances: 1,
+					depth: 2,
+					budget: 20_000,
+					faults: { redeliver: true, reorder: true, rerun: true },
+					walks: { count: 25 },
+					lock: "./Sessions.verify.lock.json",
+					require: { proved: PROVED },
+				})
+				expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
+					STANDING,
+				)
+				expect(report.undone).toEqual([])
+				expect(report.explored.aside).toEqual([])
+				expect(report.explored.truncated).toBe(false)
+				expect(report.explored.complete).toBe(2)
+				expect(report.explored.repeated).toContain(
+					"ModelProvider.generate, by RunTurn in its step generate-model-reply",
+				)
+				expect(report.explored.disagreements).toEqual([])
+				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		)
-		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
-			STANDING,
-		)
-		expect(report.undone).toEqual([])
-		expect(report.explored.aside).toEqual([])
-		expect(report.explored.truncated).toBe(false)
-		expect(report.explored.complete).toBe(2)
-		expect(report.explored.repeated).toContain(
-			"ModelProvider.generate, by RunTurn in its step generate-model-reply",
-		)
-		expect(report.explored.disagreements).toEqual([])
-		expect(report.explored.agreement.compared).toBeGreaterThan(0)
-	}, 240_000)
+		240_000,
+	)
 
-	it("replays representative depth-2 witnesses against the real in-memory model", async () => {
-		const report = await Effect.runPromise(
-			Verify.model(Sessions, {
-				apis: [SessionsApi],
-				story,
-				instances: 1,
-				depth: 2,
-				budget: 2_000,
-				faults: { redeliver: true, reorder: true, rerun: false },
-				walks: { count: 0 },
-				lock: "./Sessions.verify.lock.json",
-				require: { proved: PROVED },
+	it.live(
+		"replays representative depth-2 witnesses against the real in-memory model",
+		() =>
+			Effect.gen(function* () {
+				const report = yield* Verify.model(Sessions, {
+					apis: [SessionsApi],
+					story,
+					instances: 1,
+					depth: 2,
+					budget: 2_000,
+					faults: { redeliver: true, reorder: true, rerun: false },
+					walks: { count: 0 },
+					lock: "./Sessions.verify.lock.json",
+					require: { proved: PROVED },
+				})
+				expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
+					STANDING,
+				)
+				expect(report.undone).toEqual([])
+				expect(report.explored.aside).toEqual([])
+				expect(report.explored.truncated).toBe(false)
+				expect(report.explored.complete).toBe(2)
+				expect(report.unrun).toBe(0)
+				const replayedScripts = new Set(
+					report.runs
+						.filter((run) => run.failure === undefined)
+						.map((run) => Explore.script(run.story)),
+				)
+				const ruleWitnesses = new Map(report.rules.map((rule) => [rule.name, rule.story]))
+				const outcomeWitnesses = new Map(
+					report.explored.outcomes.map((outcome) => [
+						`${outcome.aggregate === undefined ? "" : `${outcome.aggregate}.`}${outcome.command} ${outcome.kind === "records" ? "→" : "✗"} ${outcome.tag}`,
+						outcome.story,
+					]),
+				)
+				const missingRules = REQUIRED_REPLAY_RULES.filter((name) => {
+					const witness = ruleWitnesses.get(name)
+					return witness === undefined || !replayedScripts.has(Explore.script(witness))
+				})
+				const missingOutcomes = REQUIRED_REPLAY_OUTCOMES.filter((name) => {
+					const witness = outcomeWitnesses.get(name)
+					return witness === undefined || !replayedScripts.has(Explore.script(witness))
+				})
+				expect(missingRules).toEqual([])
+				expect(missingOutcomes).toEqual([])
+				expect(report.explored.disagreements).toEqual([])
+				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		)
-		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
-			STANDING,
-		)
-		expect(report.undone).toEqual([])
-		expect(report.explored.aside).toEqual([])
-		expect(report.explored.truncated).toBe(false)
-		expect(report.explored.complete).toBe(2)
-		expect(report.unrun).toBe(0)
-		const replayedScripts = new Set(
-			report.runs
-				.filter((run) => run.failure === undefined)
-				.map((run) => Explore.script(run.story)),
-		)
-		const ruleWitnesses = new Map(report.rules.map((rule) => [rule.name, rule.story]))
-		const outcomeWitnesses = new Map(
-			report.explored.outcomes.map((outcome) => [
-				`${outcome.aggregate === undefined ? "" : `${outcome.aggregate}.`}${outcome.command} ${outcome.kind === "records" ? "→" : "✗"} ${outcome.tag}`,
-				outcome.story,
-			]),
-		)
-		const missingRules = REQUIRED_REPLAY_RULES.filter((name) => {
-			const witness = ruleWitnesses.get(name)
-			return witness === undefined || !replayedScripts.has(Explore.script(witness))
-		})
-		const missingOutcomes = REQUIRED_REPLAY_OUTCOMES.filter((name) => {
-			const witness = outcomeWitnesses.get(name)
-			return witness === undefined || !replayedScripts.has(Explore.script(witness))
-		})
-		expect(missingRules).toEqual([])
-		expect(missingOutcomes).toEqual([])
-		expect(report.explored.disagreements).toEqual([])
-		expect(report.explored.agreement.compared).toBeGreaterThan(0)
-	}, 120_000)
+		120_000,
+	)
 })

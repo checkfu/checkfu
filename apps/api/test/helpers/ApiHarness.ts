@@ -17,6 +17,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
+import * as Schedule from "effect/Schedule"
 import { Checkfu } from "../../src/Checkfu.model.ts"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import {
@@ -197,32 +198,37 @@ export const makePiDurableTestLayer = (
 	const conversations: Array<string> = []
 	const executorLayer = makePiTurnExecutorLayer({
 		recoverTurn: (conversation, operationId) =>
-			unreachable.has(conversation)
-				? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
-				: !backends.has(conversation)
-					? Effect.succeed(null)
+			Effect.suspend(() =>
+				unreachable.has(conversation)
+					? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+					: !backends.has(conversation)
+						? Effect.succeed(null)
+						: Effect.flatMap(
+								Effect.promise(() => getBackend(conversation)),
+								(backend) => recoverPiDurableTurn(backend, operationId),
+							),
+			),
+		runTurn: (conversation, request) =>
+			Effect.suspend(() => {
+				if (unreachable.has(conversation)) {
+					return Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+				}
+				requests.push(request)
+				conversations.push(conversation)
+				return Effect.flatMap(
+					Effect.promise(() => getBackend(conversation)),
+					(backend) => runPiDurableTurn(backend, request),
+				)
+			}),
+		abortTurn: (conversation, operationId) =>
+			Effect.suspend(() =>
+				unreachable.has(conversation)
+					? Effect.never
 					: Effect.flatMap(
 							Effect.promise(() => getBackend(conversation)),
-							(backend) => recoverPiDurableTurn(backend, operationId),
+							(backend) => Effect.asVoid(backend.abort(operationId)),
 						),
-		runTurn: (conversation, request) =>
-			unreachable.has(conversation)
-				? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
-				: Effect.suspend(() => {
-						requests.push(request)
-						conversations.push(conversation)
-						return Effect.flatMap(
-							Effect.promise(() => getBackend(conversation)),
-							(backend) => runPiDurableTurn(backend, request),
-						)
-					}),
-		abortTurn: (conversation, operationId) =>
-			unreachable.has(conversation)
-				? Effect.never
-				: Effect.flatMap(
-						Effect.promise(() => getBackend(conversation)),
-						(backend) => Effect.asVoid(backend.abort(operationId)),
-					),
+			),
 	})
 
 	const CheckfuLive = Checkfu.layer(
@@ -232,6 +238,23 @@ export const makePiDurableTestLayer = (
 		Layer.provide(executorLayer),
 		Layer.provide(CheckfuLive),
 	)
+
+	const closeAll = async () => {
+		const pending = [...backends.values()]
+		backends.clear()
+		const results = await Promise.allSettled(
+			pending.map(async (backendPromise) => {
+				const backend = await backendPromise
+				await backend.close()
+			}),
+		)
+		const firstFailure = results.find(
+			(result): result is PromiseRejectedResult => result.status === "rejected",
+		)
+		if (firstFailure !== undefined) {
+			throw firstFailure.reason
+		}
+	}
 
 	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
 		Layer.provideMerge(
@@ -243,17 +266,11 @@ export const makePiDurableTestLayer = (
 			}),
 		),
 		Layer.provide(Domain.InMemory),
+		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 	)
-
-	const closeAll = async () => {
-		for (const backendPromise of backends.values()) {
-			const backend = await backendPromise
-			await backend.close()
-		}
-	}
 
 	return { layer, closeAll, requests, forgetPiState, unreachable, conversations }
 }
@@ -443,6 +460,41 @@ export const providerError = (error: { readonly _tag: string }): ModelProviderEr
 	return error as ModelProviderError
 }
 
+export const waitForSession = (
+	apiFetch: Effect.Effect<
+		HttpServerResponse.HttpServerResponse,
+		never,
+		HttpServerRequest.HttpServerRequest
+	>,
+	sessionId: string,
+	predicate: (session: { readonly status: string; readonly turn: number }) => boolean,
+	description = "session did not reach expected state",
+) =>
+	Effect.gen(function* () {
+		const poll = Effect.gen(function* () {
+			const res = yield* sendRequest(apiFetch, {
+				method: "GET",
+				path: `/v1/sessions/${sessionId}`,
+				headers: AUTH_HEADERS,
+			})
+			return (yield* Effect.promise(() => res.json())) as {
+				readonly status: string
+				readonly turn: number
+			}
+		})
+		const current = yield* poll.pipe(
+			Effect.repeat({
+				schedule: Schedule.spaced("5 millis"),
+				times: 400,
+				until: predicate,
+			}),
+		)
+		if (!predicate(current)) {
+			return yield* Effect.die(new Error(description))
+		}
+		return current
+	})
+
 export const sendAndSettle = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
@@ -466,18 +518,10 @@ export const sendAndSettle = (
 			},
 		})
 		expect(sent.status).toBe(200)
-		for (let attempt = 0; attempt < 400; attempt++) {
-			const res = yield* sendRequest(apiFetch, {
-				method: "GET",
-				path: `/v1/sessions/${sessionId}`,
-				headers: AUTH_HEADERS,
-			})
-			const current = (yield* Effect.promise(() => res.json())) as {
-				status: string
-				turn: number
-			}
-			if (current.status === "idle" && current.turn === turn) return
-			yield* Effect.sleep("5 millis")
-		}
-		return yield* Effect.die(new Error(`turn ${turn} did not settle`))
+		yield* waitForSession(
+			apiFetch,
+			sessionId,
+			(current) => current.status === "idle" && current.turn === turn,
+			`turn ${turn} did not settle`,
+		)
 	})

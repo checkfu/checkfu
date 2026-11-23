@@ -238,6 +238,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			const text = extractLastUserText(context)
 			if (text === "slow-turn") {
 				await new Promise<void>((resolve) => {
+					if (signal?.aborted) {
+						resolve()
+						return
+					}
 					const onAbort = () => resolve()
 					signal?.addEventListener("abort", onAbort, { once: true })
 					void turnBlocked.then(() => {
