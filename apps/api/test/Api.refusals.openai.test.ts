@@ -742,7 +742,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		}
 	})
 
-	it("keeps OpenAI stream errors after response.incomplete(content_filter) or refusal on the error path", async () => {
+	it("reports an OpenAI stream that fails after response.incomplete(content_filter) as the refusal", async () => {
 		const originalFetch = globalThis.fetch
 		const realModels = createPiModels({
 			openai: Redacted.make("sk-openai-test"),
@@ -753,9 +753,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
 			sentBodies.push(body)
-			const isFailingTurn = JSON.stringify(body).includes(
-				"trigger incomplete content_filter then sse error",
-			)
+			const isFailingTurn = sentBodies.length === 1
 			const sse = isFailingTurn
 				? [
 						`event: response.created\ndata: ${JSON.stringify({
@@ -848,12 +846,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				}),
 			)
 			expect(turn1).toMatchObject({
-				ok: false,
-				error: {
-					error_type: "model_request_failed_error",
-					message: PROVIDER_FAILURE_MESSAGE,
-					terminal: false,
-				},
+				ok: true,
+				reply: { text: DEFAULT_REFUSAL_TEXT, stop_reason: { type: "refusal" } },
 			})
 
 			const turn2 = await Effect.runPromise(
@@ -867,11 +861,9 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				}),
 			)
 			expect(turn2).toMatchObject({ ok: true, reply: { text: "Clean OpenAI follow-up" } })
-			const lastRequest = sentBodies.at(-1)
-			expect(JSON.stringify(lastRequest)).not.toContain("Upstream stream failed after incomplete")
-			expect(JSON.stringify(lastRequest)).not.toContain(
-				"trigger incomplete content_filter then sse error",
-			)
+			const lastRequest = JSON.stringify(sentBodies.at(-1))
+			expect(lastRequest).toContain(DEFAULT_REFUSAL_TEXT)
+			expect(lastRequest).not.toContain("Upstream stream failed after incomplete")
 		} finally {
 			globalThis.fetch = originalFetch
 			await backend.close()
