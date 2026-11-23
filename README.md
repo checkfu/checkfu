@@ -88,3 +88,4 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
 - `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy
+  - The production stack refuses to build until that baseline is cut and committed, so every `alchemy` command with `--stage production` needs it: `deploy`, `logs`, `drift` and `destroy`. Run them from a checkout whose baseline is shipped.
