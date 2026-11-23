@@ -51,7 +51,7 @@ export default defineConfig({
 						importNames: ["Activity"],
 						allowTypeImports: true,
 						message:
-							"Declare RunTurn workflow activities through runTurnActivity in packages/sessions/src/Session/RunTurnActivities.ts so they are covered by Persisted.lock.json.",
+							"Declare RunTurn workflow activities through runTurnActivity in packages/domain/src/Session/RunTurnActivities.ts so they are covered by Persisted.lock.json.",
 					},
 				],
 			},
@@ -183,7 +183,7 @@ export default defineConfig({
 			},
 		},
 		{
-			files: ["packages/sessions/src/Session/RunTurnActivities.ts"],
+			files: ["packages/domain/src/Session/RunTurnActivities.ts"],
 			rules: {
 				"no-restricted-imports": "off",
 			},

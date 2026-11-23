@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { AgentModel, NonEmptyString, PositiveInt } from "../AgentTypes.ts"
+import { AgentModel, NonEmptyString, PositiveInt } from "./AgentTypes.ts"
 import { Agent } from "./Agent.aggregate.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"

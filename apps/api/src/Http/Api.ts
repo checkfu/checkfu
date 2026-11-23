@@ -1,5 +1,5 @@
-import { AgentId } from "@checkfu/agents/Agent/Agent.id"
-import { AgentSnapshot } from "@checkfu/agents/Agent/AgentView.view"
+import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import { AgentSnapshot } from "@checkfu/domain/Agent/AgentView.view"
 import {
 	AgentDescription,
 	AgentModel,
@@ -7,17 +7,17 @@ import {
 	AgentSystem,
 	NonEmptyString,
 	PositiveInt,
-} from "@checkfu/agents/AgentTypes"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { EnvironmentSnapshot } from "@checkfu/environments/Environment/EnvironmentView.view"
+} from "@checkfu/domain/Agent/AgentTypes"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { EnvironmentSnapshot } from "@checkfu/domain/Environment/EnvironmentView.view"
 import {
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentName,
-} from "@checkfu/environments/EnvironmentTypes"
-import { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { ResourceId, SessionTitle } from "@checkfu/sessions/Session/SessionTypes"
-import { SessionSnapshot } from "@checkfu/sessions/Session/SessionView.view"
+} from "@checkfu/domain/Environment/EnvironmentTypes"
+import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { ResourceId, SessionTitle } from "@checkfu/domain/Session/SessionTypes"
+import { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Function from "effect/Function"

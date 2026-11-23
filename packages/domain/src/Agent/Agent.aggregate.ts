@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { NonNegativeInt } from "../AgentTypes.ts"
+import { NonNegativeInt } from "./AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
 import { AgentArchived, ArchiveAgent } from "./ArchiveAgent.command.ts"

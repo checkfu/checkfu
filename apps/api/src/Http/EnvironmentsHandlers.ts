@@ -1,11 +1,14 @@
-import { ArchiveEnvironment } from "@checkfu/environments/Environment/ArchiveEnvironment.command"
-import { CreateEnvironment } from "@checkfu/environments/Environment/CreateEnvironment.command"
-import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
-import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
-import { UpdateEnvironment } from "@checkfu/environments/Environment/UpdateEnvironment.command"
-import { EnvironmentDescription, EnvironmentName } from "@checkfu/environments/EnvironmentTypes"
+import { ArchiveEnvironment } from "@checkfu/domain/Environment/ArchiveEnvironment.command"
+import { CreateEnvironment } from "@checkfu/domain/Environment/CreateEnvironment.command"
+import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
+import { UpdateEnvironment } from "@checkfu/domain/Environment/UpdateEnvironment.command"
+import {
+	EnvironmentDescription,
+	EnvironmentName,
+} from "@checkfu/domain/Environment/EnvironmentTypes"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -14,7 +17,7 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { EventBatch } from "../Checkfu.model.ts"
+import { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,

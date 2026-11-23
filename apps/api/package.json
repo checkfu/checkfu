@@ -17,9 +17,7 @@
 	"dependencies": {
 		"@alchemy.run/cloudflare": "catalog:",
 		"@alchemy.run/domain": "catalog:",
-		"@checkfu/agents": "workspace:*",
-		"@checkfu/environments": "workspace:*",
-		"@checkfu/sessions": "workspace:*",
+		"@checkfu/domain": "workspace:*",
 		"@checkfu/snapshots": "workspace:*",
 		"@distilled.cloud/cloudflare": "catalog:",
 		"@earendil-works/chord": "catalog:",
@@ -32,7 +30,6 @@
 	},
 	"devDependencies": {
 		"@effect/platform-bun": "catalog:",
-		"@effect/platform-node": "catalog:",
 		"@effect/vitest": "catalog:",
 		"vitest": "catalog:"
 	}

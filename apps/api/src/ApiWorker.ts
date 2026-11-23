@@ -1,6 +1,6 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
-import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import * as Alchemy from "alchemy"
 import * as Cause from "effect/Cause"
 import * as Digest from "effect/crypto/Digest"
@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
-import { Checkfu } from "./Checkfu.model.ts"
+import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import {
 	HarnessCallFailed,

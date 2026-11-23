@@ -2,48 +2,47 @@ import * as Domain from "@alchemy.run/domain"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
 import * as Verify from "@alchemy.run/domain/Verify"
-import { Agent } from "@checkfu/agents/Agent/Agent.aggregate"
-import { AgentId } from "@checkfu/agents/Agent/Agent.id"
-import { AgentVersion } from "@checkfu/agents/Agent/AgentVersion.aggregate"
-import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
+import { Agent } from "../src/Agent/Agent.aggregate.ts"
+import { AgentId } from "../src/Agent/Agent.id.ts"
+import { AgentVersion } from "../src/Agent/AgentVersion.aggregate.ts"
+import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
-} from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
-import { AgentVersionView } from "@checkfu/agents/Agent/AgentVersionView.view"
-import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
-import { ArchiveAgent } from "@checkfu/agents/Agent/ArchiveAgent.command"
-import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
-import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
-import { UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
-import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
-import { ArchiveEnvironment } from "@checkfu/environments/Environment/ArchiveEnvironment.command"
-import { CreateEnvironment } from "@checkfu/environments/Environment/CreateEnvironment.command"
-import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
-import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
-import { ArchiveSession } from "@checkfu/sessions/Session/ArchiveSession.command"
-import { ModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
-import { SendUserMessage } from "@checkfu/sessions/Session/SendUserMessage.command"
-import { Session } from "@checkfu/sessions/Session/Session.aggregate"
-import { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
-import { TurnInput } from "@checkfu/sessions/Session/TurnInput.view"
-import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+} from "../src/Agent/AgentVersionByNumberView.view.ts"
+import { AgentVersionView } from "../src/Agent/AgentVersionView.view.ts"
+import { AgentView } from "../src/Agent/AgentView.view.ts"
+import { ArchiveAgent } from "../src/Agent/ArchiveAgent.command.ts"
+import { CreateAgent } from "../src/Agent/CreateAgent.command.ts"
+import { CreateAgentDecision } from "../src/Agent/CreateAgent.decision.ts"
+import { UpdateAgent } from "../src/Agent/UpdateAgent.command.ts"
+import { UpdateAgentDecision } from "../src/Agent/UpdateAgent.decision.ts"
+import { ArchiveEnvironment } from "../src/Environment/ArchiveEnvironment.command.ts"
+import { CreateEnvironment } from "../src/Environment/CreateEnvironment.command.ts"
+import { DeleteEnvironment } from "../src/Environment/DeleteEnvironment.command.ts"
+import { Environment } from "../src/Environment/Environment.aggregate.ts"
+import { EnvironmentId } from "../src/Environment/Environment.id.ts"
+import { EnvironmentView } from "../src/Environment/EnvironmentView.view.ts"
+import { ArchiveSession } from "../src/Session/ArchiveSession.command.ts"
+import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
+import { SendUserMessage } from "../src/Session/SendUserMessage.command.ts"
+import { Session } from "../src/Session/Session.aggregate.ts"
+import { SessionId } from "../src/Session/Session.id.ts"
+import { SessionView } from "../src/Session/SessionView.view.ts"
+import { TurnInput } from "../src/Session/TurnInput.view.ts"
+import { SessionsHandlersLive } from "../src/Sessions.model.ts"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { Checkfu, CheckfuDomainApi } from "../src/Checkfu.model.ts"
+import { EventBatch } from "../src/EventBatch/EventBatch.aggregate.ts"
 import {
 	AdmitSession,
-	AdmitSessionDecision,
 	BoundedAgentId,
 	BoundedEnvironmentId,
-	Checkfu,
-	CheckfuDomainApi,
-	EventBatch,
-} from "../src/Checkfu.model.ts"
+} from "../src/Session/AdmitSession.command.ts"
+import { AdmitSessionDecision } from "../src/Session/AdmitSession.decision.ts"
 
 /**
  * Focused cross-domain exploration surface for the unified hosted model.
@@ -184,7 +183,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		])
 		const report = await Effect.runPromise(
 			Verify.model(Checkfu, {
-				source: new URL("./Checkfu.verify.source.ts", import.meta.url),
 				apis: [CheckfuLifecycleApi],
 				instances: 1,
 				depth: 3,

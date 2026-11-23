@@ -1,4 +1,4 @@
-import type { ModelUsage } from "@checkfu/sessions/Session/SessionTypes"
+import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { Api, AssistantMessage, Usage } from "@earendil-works/pi-ai"
 import {

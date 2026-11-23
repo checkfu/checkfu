@@ -1,11 +1,11 @@
-import { RUN_TURN_ACTIVITIES } from "@checkfu/sessions/Session/RunTurn.saga"
+import { RUN_TURN_ACTIVITIES } from "@checkfu/domain/Session/RunTurn.saga"
 import { copyJson } from "@earendil-works/chord/json"
 import type { JsonObject } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
-import { Checkfu } from "../../src/Checkfu.model.ts"
+import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 
