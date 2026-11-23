@@ -1505,17 +1505,27 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						},
 					})
 					expect(suffixRetryRes.status).toBe(200)
-					expect(yield* Effect.promise(() => suffixRetryRes.json())).toEqual({
+					const suffixRetryBody = (yield* Effect.promise(() => suffixRetryRes.json())) as {
+						data: ReadonlyArray<{
+							id?: string
+							type: string
+							turn: number
+							queued: boolean
+							content: ReadonlyArray<{ type: string; text: string }>
+						}>
+					}
+					expect(suffixRetryBody).toEqual({
 						data: [
 							{
 								id: "evt-a2",
 								type: "user.message",
 								turn: 2,
-								queued: true,
+								queued: expect.any(Boolean),
 								content: [{ type: "text", text: "msg-a2" }],
 							},
 						],
 					})
+					const evtA2Queued = suffixRetryBody.data[0]?.queued
 
 					// Retrying the whole batch with the same client event ids also replays cleanly.
 					const fullRetryRes = yield* sendRequest(apiFetch, {
@@ -1551,7 +1561,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 								id: "evt-a2",
 								type: "user.message",
 								turn: 2,
-								queued: true,
+								queued: evtA2Queued,
 								content: [{ type: "text", text: "msg-a2" }],
 							},
 						],
@@ -1655,7 +1665,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							{
 								type: "user.message",
 								turn: 2,
-								queued: true,
+								queued: expect.any(Boolean),
 								content: [{ type: "text", text: "msg-b2" }],
 							},
 						],

@@ -1136,72 +1136,197 @@ export const sessionsConnectCommand = Command.make(
 					return
 				}
 
+				type PipedStdinItem =
+					| { readonly _tag: "line"; readonly line: string }
+					| { readonly _tag: "eof" }
+					| { readonly _tag: "error"; readonly failure: CliFailure }
+
 				let explicitExit = false
-				const queuedLines: Array<string> = []
+				let stdinReachedEof = false
 				let pendingPartial = ""
-				const pipedInputEffect = splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
-					onChunkParsed: (lines, pending) => {
-						queuedLines.push(...lines)
+				let postStopPending: Deferred.Deferred<void> | undefined
+				const stdinQueue = yield* Queue.bounded<PipedStdinItem>(64)
+
+				const stdinReaderFiber = yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
+					onChunkParsed: (_lines, pending) => {
 						pendingPartial = pending
 					},
-					onTrailingFlushed: (last) =>
+					onPendingAfterLines: (pending) => {
+						pendingPartial = pending
+						if (postStopPending !== undefined && pending.trim().length > 0) {
+							return Deferred.succeed(postStopPending, undefined).pipe(Effect.asVoid)
+						}
+						return Effect.void
+					},
+					onTrailingFlushed: () =>
 						Effect.sync(() => {
-							queuedLines.push(last)
 							pendingPartial = ""
 						}),
 				}).pipe(
-					Stream.takeUntil((line) => isExitCommand(line.trim())),
-					Stream.runForEach((line) =>
-						Effect.gen(function* () {
-							queuedLines.shift()
-							if (explicitExit) {
-								return
-							}
-							const trimmed = line.trim()
-							if (trimmed.length === 0) {
-								return
-							}
-							if (isExitCommand(trimmed)) {
-								explicitExit = true
-								return
-							}
-							const state = yield* Ref.get(stateRef)
-							if (state.ended) {
-								return yield* networkFailure(
-									`Cannot send input: session ${session.id} has already ended.`,
-								)
-							}
-							const action = yield* dispatchUserLine(client, sessionId, line, stateRef, {
-								failOnInterruptError: true,
-								onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
-							})
-							if (action === "exit") {
-								explicitExit = true
-							}
+					Stream.runForEach((line) => Queue.offer(stdinQueue, { _tag: "line", line })),
+					Effect.andThen(
+						Effect.sync(() => {
+							stdinReachedEof = true
 						}),
 					),
+					Effect.andThen(Queue.offer(stdinQueue, { _tag: "eof" })),
+					Effect.catch((error) => Queue.offer(stdinQueue, { _tag: "error", failure: error })),
+					Effect.forkChild,
 				)
-				const inputRaceOutcome = yield* Effect.raceFirst(
-					pipedInputEffect.pipe(Effect.as("stdin_done" as const)),
-					Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
-				)
-				if (inputRaceOutcome === "stopped" && !explicitExit) {
-					const streamErr = yield* Ref.get(streamFailedRef)
-					const existingIncomplete = yield* Ref.get(incompleteTurnRef)
-					if (streamErr === null && existingIncomplete === null) {
-						const firstUnprocessed = [...queuedLines, pendingPartial]
-							.map((entry) => entry.trim())
-							.find((entry) => entry.length > 0)
-						if (firstUnprocessed !== undefined && !isExitCommand(firstUnprocessed)) {
-							const currentState = yield* Ref.get(stateRef)
+
+				const dispatchLoop = Effect.gen(function* () {
+					while (true) {
+						const item = yield* Queue.take(stdinQueue)
+						if (item._tag === "eof") {
+							return "stdin_eof" as const
+						}
+						if (item._tag === "error") {
+							return yield* item.failure
+						}
+						if (explicitExit) {
+							return "explicit_exit" as const
+						}
+						const trimmed = item.line.trim()
+						if (trimmed.length === 0) {
+							continue
+						}
+						if (isExitCommand(trimmed)) {
+							explicitExit = true
+							return "explicit_exit" as const
+						}
+						const state = yield* Ref.get(stateRef)
+						if (state.ended) {
 							return yield* networkFailure(
-								currentState.ended
-									? `Cannot send input: session ${session.id} ended before buffered input was submitted.`
-									: "Event stream ended before buffered input was submitted.",
+								`Cannot send input: session ${session.id} has already ended.`,
 							)
 						}
+						const action = yield* dispatchUserLine(client, sessionId, item.line, stateRef, {
+							failOnInterruptError: true,
+							onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
+						})
+						if (action === "exit") {
+							explicitExit = true
+							return "explicit_exit" as const
+						}
 					}
+				})
+
+				const failUnreadBufferedInput = Effect.gen(function* () {
+					const currentState = yield* Ref.get(stateRef)
+					return yield* networkFailure(
+						currentState.ended
+							? `Cannot send input: session ${session.id} ended before buffered input was submitted.`
+							: "Event stream ended before buffered input was submitted.",
+					)
+				})
+
+				const inspectPipedItemAfterStop = (
+					item: PipedStdinItem,
+				): Effect.Effect<"continue" | "done", CliFailure> => {
+					if (item._tag === "error") {
+						return Effect.fail(item.failure)
+					}
+					if (item._tag === "eof") {
+						stdinReachedEof = true
+						return Effect.succeed("done" as const)
+					}
+					const trimmed = item.line.trim()
+					if (trimmed.length === 0) {
+						return Effect.succeed("continue" as const)
+					}
+					if (isExitCommand(trimmed)) {
+						explicitExit = true
+						return Effect.succeed("done" as const)
+					}
+					return failUnreadBufferedInput
 				}
+
+				yield* Effect.gen(function* () {
+					const inputRaceOutcome = yield* Effect.raceFirst(
+						dispatchLoop,
+						Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
+					)
+					if (inputRaceOutcome !== "stopped" || explicitExit) {
+						return
+					}
+					const streamErr = yield* Ref.get(streamFailedRef)
+					const existingIncomplete = yield* Ref.get(incompleteTurnRef)
+					if (streamErr !== null || existingIncomplete !== null) {
+						return
+					}
+
+					// First inspect anything already pulled by the concurrent stdin reader.
+					const bufferedItems = yield* Queue.clear(stdinQueue)
+					for (const item of bufferedItems) {
+						if ((yield* inspectPipedItemAfterStop(item)) === "done") {
+							return
+						}
+					}
+					const trimmedPending = pendingPartial.trim()
+					if (trimmedPending.length > 0 && !isExitCommand(trimmedPending)) {
+						return yield* failUnreadBufferedInput
+					}
+					if (stdinReachedEof) {
+						return
+					}
+
+					// The dispatch loop was cancelled before stdin reached EOF; briefly probe the
+					// still-attached stdin reader so unread input waiting in the next pipe chunk
+					// is detected rather than silently dropped with exit code 0.
+					const pendingSignal = yield* Deferred.make<void>()
+					postStopPending = pendingSignal
+					if (pendingPartial.trim().length > 0) {
+						yield* Deferred.succeed(pendingSignal, undefined)
+					}
+					const probeDeadline = yield* Deferred.make<void>()
+					const probeTimer = yield* Effect.sleep(Duration.millis(50)).pipe(
+						Effect.andThen(Deferred.succeed(probeDeadline, undefined)),
+						Effect.forkChild,
+					)
+					yield* Effect.gen(function* () {
+						while (!stdinReachedEof) {
+							const probed = yield* Effect.race(
+								Queue.take(stdinQueue).pipe(
+									Effect.map((item) => ({ _tag: "item" as const, item })),
+								),
+								Effect.race(
+									Deferred.await(pendingSignal).pipe(Effect.as({ _tag: "pending" as const })),
+									Deferred.await(probeDeadline).pipe(Effect.as({ _tag: "idle" as const })),
+								),
+							)
+							if (probed._tag === "item") {
+								if ((yield* inspectPipedItemAfterStop(probed.item)) === "done") {
+									return
+								}
+								continue
+							}
+							const pendingNow = pendingPartial.trim()
+							if (probed._tag === "pending") {
+								if (pendingNow.length > 0 && !isExitCommandPrefix(pendingNow)) {
+									return yield* failUnreadBufferedInput
+								}
+								// Wait for either the line/EOF to arrive or the probe window to finish
+								const afterPrefix = yield* Effect.race(
+									Queue.take(stdinQueue).pipe(
+										Effect.map((item) => ({ _tag: "item" as const, item })),
+									),
+									Deferred.await(probeDeadline).pipe(Effect.as({ _tag: "idle" as const })),
+								)
+								if (afterPrefix._tag === "item") {
+									if ((yield* inspectPipedItemAfterStop(afterPrefix.item)) === "done") {
+										return
+									}
+									continue
+								}
+							}
+							const finalPending = pendingPartial.trim()
+							if (finalPending.length > 0 && !isExitCommand(finalPending)) {
+								return yield* failUnreadBufferedInput
+							}
+							return
+						}
+					}).pipe(Effect.ensuring(Fiber.interrupt(probeTimer)))
+				}).pipe(Effect.ensuring(Fiber.interrupt(stdinReaderFiber)))
 
 				if (!explicitExit) {
 					while (true) {
@@ -1220,15 +1345,18 @@ export const sessionsConnectCommand = Command.make(
 						if (settlementAction === "check_halted_queue") {
 							let haltedQueuedTurn = false
 							for (let checkAttempt = 0; ; checkAttempt++) {
+								const lookupFiber = yield* Effect.result(
+									fetchSessionStatusWithRetry(client, sessionId),
+								).pipe(Effect.forkChild)
 								const lookupRace = yield* Effect.race(
-									Effect.result(fetchSessionStatusWithRetry(client, sessionId)).pipe(
+									Fiber.join(lookupFiber).pipe(
 										Effect.map((result) => ({ _tag: "lookup" as const, result })),
 									),
 									Effect.race(
 										Deferred.await(waiter).pipe(Effect.as({ _tag: "event" as const })),
 										Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "event" as const })),
 									),
-								)
+								).pipe(Effect.ensuring(Fiber.interrupt(lookupFiber)))
 								if (lookupRace._tag === "event") {
 									break
 								}

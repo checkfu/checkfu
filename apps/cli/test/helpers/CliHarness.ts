@@ -1,13 +1,13 @@
 import * as Domain from "@alchemy.run/domain"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
-import { boundedModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type {
-	ModelProviderError,
-	ModelProviderReply,
-	ModelRequestInterrupted,
+	HarnessReply,
 	HarnessUnavailable,
-} from "@checkfu/domain/Session/ModelProvider.external"
+	TurnFailed,
+	TurnInterrupted,
+} from "@checkfu/domain/Session/Harness.external"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import * as Clock from "effect/Clock"
@@ -57,10 +57,7 @@ export interface ModelTurnInput {
 export interface ModelHandler {
 	readonly generate?: (
 		args: ModelTurnInput,
-	) => Effect.Effect<
-		ModelProviderReply,
-		ModelProviderError | ModelRequestInterrupted | HarnessUnavailable
-	>
+	) => Effect.Effect<HarnessReply, TurnFailed | TurnInterrupted | HarnessUnavailable>
 	readonly interrupt?: (args: {
 		readonly session_id: SessionId
 		readonly turn: number
@@ -110,8 +107,13 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			generate: handler?.generate ?? defaultModelHandler.generate,
 			interrupt: handler?.interrupt ?? defaultModelHandler.interrupt,
 		}
-		const ModelProviderLive = boundedModelProvider(Effect.succeed(effective))
-		const CheckfuLive = Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(ModelProviderLive)))
+		const HarnessLive = boundedHarness(
+			Effect.succeed({
+				runTurn: effective.generate,
+				interrupt: effective.interrupt,
+			}),
+		)
+		const CheckfuLive = Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(HarnessLive)))
 		const ServerLayer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),

@@ -345,7 +345,7 @@ describe("CLI sessions:events and sessions connect", () => {
 								yield* Deferred.succeed(started, undefined)
 								yield* Deferred.await(interrupted)
 								return yield* Effect.fail({
-									_tag: "ModelRequestInterrupted" as const,
+									_tag: "TurnInterrupted" as const,
 									model_usage: { input_tokens: 2, output_tokens: 0 },
 								})
 							}),
@@ -827,7 +827,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					const terminalCli = yield* makeTestServer({
 						generate: () =>
 							Effect.fail({
-								_tag: "ModelProviderError" as const,
+								_tag: "TurnFailed" as const,
 								error_type: "authentication_error",
 								message: "Invalid provider key",
 								terminal: true,
@@ -890,7 +890,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						generate: (args) => {
 							if (args.turn === 1) {
 								return Effect.fail({
-									_tag: "ModelProviderError" as const,
+									_tag: "TurnFailed" as const,
 									error_type: "rate_limit_error",
 									message: "Rate limited",
 									terminal: false,
@@ -1176,7 +1176,7 @@ describe("CLI sessions:events and sessions connect", () => {
 								yield* Deferred.succeed(turn2Started, undefined)
 								yield* Deferred.await(turn2Interrupted)
 								return yield* Effect.fail({
-									_tag: "ModelRequestInterrupted" as const,
+									_tag: "TurnInterrupted" as const,
 									model_usage: { input_tokens: 2, output_tokens: 0 },
 								})
 							}),
@@ -1425,7 +1425,7 @@ describe("CLI sessions:events and sessions connect", () => {
 								yield* Deferred.succeed(idleTurnStarted, undefined)
 								yield* Deferred.await(idleTurnInterrupted)
 								return yield* Effect.fail({
-									_tag: "ModelRequestInterrupted" as const,
+									_tag: "TurnInterrupted" as const,
 									model_usage: { input_tokens: 2, output_tokens: 0 },
 								})
 							}),
@@ -2861,6 +2861,11 @@ describe("CLI sessions:events and sessions connect", () => {
 			readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 		) as { readonly bin?: Record<string, string> }
 		const bunLock = readFileSync(new URL("../../../bun.lock", import.meta.url), "utf8")
+		const turboConfig = JSON.parse(
+			readFileSync(new URL("../../../turbo.json", import.meta.url), "utf8"),
+		) as {
+			readonly tasks?: Record<string, { readonly passThroughEnv?: ReadonlyArray<string> }>
+		}
 		const binScript = readFileSync(new URL("../bin/checkfu.mjs", import.meta.url), "utf8")
 		const cliBunfig = readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")
 		expect(readme).toContain("node apps/cli/bin/checkfu.mjs --help")
@@ -2888,19 +2893,52 @@ describe("CLI sessions:events and sessions connect", () => {
 		expect(bunLock).toMatch(
 			/"apps\/cli":\s*\{[\s\S]*?"bin":\s*\{\s*"checkfu":\s*"\.\/bin\/checkfu\.mjs",?\s*\}/,
 		)
+		const cliTestPassThroughEnv = turboConfig.tasks?.["@checkfu/cli#test"]?.passThroughEnv ?? []
+		for (const envVar of [
+			"CHECKFU_BUN_PATH",
+			"BUN_INSTALL",
+			"RUNNER_TOOL_CACHE",
+			"AGENT_TOOLSDIRECTORY",
+		]) {
+			expect(cliTestPassThroughEnv).toContain(envVar)
+		}
+
+		// Ordinary documented launcher invocation works regardless of symlink privileges
+		const launcherPath = fileURLToPath(new URL("../bin/checkfu.mjs", import.meta.url))
+		const directHelpRes = spawnSync("node", [launcherPath, "--help"], {
+			encoding: "utf8",
+			timeout: 10_000,
+		})
+		expect(directHelpRes.status).toBe(0)
+		expect(directHelpRes.stdout).toContain("sessions")
 
 		// Symlinked launcher resolves through realpathSync(fileURLToPath(import.meta.url))
+		// when the platform permits creating file symlinks (Windows requires Developer Mode or elevation)
 		const symlinkDir = mkdtempSync(join(tmpdir(), "checkfu-launcher-link-"))
 		try {
 			const symlinkPath = join(symlinkDir, "checkfu-link.mjs")
-			symlinkSync(fileURLToPath(new URL("../bin/checkfu.mjs", import.meta.url)), symlinkPath)
-			const helpRes = spawnSync("node", [symlinkPath, "--help"], {
-				cwd: symlinkDir,
-				encoding: "utf8",
-				timeout: 10_000,
-			})
-			expect(helpRes.status).toBe(0)
-			expect(helpRes.stdout).toContain("sessions")
+			let symlinkCreated = false
+			try {
+				symlinkSync(launcherPath, symlinkPath)
+				symlinkCreated = true
+			} catch (error) {
+				const code =
+					typeof error === "object" && error !== null && "code" in error
+						? String((error as { readonly code?: unknown }).code)
+						: undefined
+				if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES")) {
+					throw error
+				}
+			}
+			if (symlinkCreated) {
+				const helpRes = spawnSync("node", [symlinkPath, "--help"], {
+					cwd: symlinkDir,
+					encoding: "utf8",
+					timeout: 10_000,
+				})
+				expect(helpRes.status).toBe(0)
+				expect(helpRes.stdout).toContain("sessions")
+			}
 		} finally {
 			rmSync(symlinkDir, { recursive: true, force: true })
 		}
@@ -3772,7 +3810,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						generate: (args) =>
 							args.turn === 2
 								? Effect.fail({
-										_tag: "ModelProviderError" as const,
+										_tag: "TurnFailed" as const,
 										error_type: "upstream_error" as const,
 										message: "turn 2 provider boom",
 										terminal: false,
@@ -4064,7 +4102,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					const terminalErrCli = yield* makeTestServer({
 						generate: () =>
 							Effect.fail({
-								_tag: "ModelProviderError" as const,
+								_tag: "TurnFailed" as const,
 								error_type: "invalid_request_error" as const,
 								message: "fatal context overflow",
 								terminal: true,
@@ -4492,7 +4530,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									yield* Deferred.succeed(otherTurn1Started, undefined)
 									yield* Deferred.await(otherTurn1Interrupted)
 									return yield* Effect.fail({
-										_tag: "ModelRequestInterrupted" as const,
+										_tag: "TurnInterrupted" as const,
 										model_usage: { input_tokens: 2, output_tokens: 0 },
 									})
 								}
@@ -5183,12 +5221,17 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									raceGets += 1
 									if (raceGets === 2) {
 										// Pause the halted-queue GET until aborted by SSE progress or archivedRendered
-										await runPromise(Deferred.succeed(lookupInFlight, undefined))
-										await new Promise<void>((resolve) => {
+										const paused = new Promise<void>((resolve) => {
+											if (request.signal.aborted) {
+												resolve()
+												return
+											}
 											const done = () => resolve()
 											request.signal.addEventListener("abort", done, { once: true })
 											void runPromise(Deferred.await(archivedRendered)).then(done)
 										})
+										await runPromise(Deferred.succeed(lookupInFlight, undefined))
+										await paused
 										if (request.signal.aborted) {
 											throw new DOMException("Aborted", "AbortError")
 										}
@@ -5513,17 +5556,19 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									) {
 										stallGets += 1
 										if (stallGets === 2) {
-											await runPromise(Deferred.succeed(stallLookupInFlight, undefined))
-											return await new Promise<Response>((_resolve, reject) => {
-												request.signal.addEventListener(
-													"abort",
-													() => {
-														stalledGetAborted = true
-														reject(new DOMException("Aborted", "AbortError"))
-													},
-													{ once: true },
-												)
+											const waitForAbort = new Promise<Response>((_resolve, reject) => {
+												const onAbort = () => {
+													stalledGetAborted = true
+													reject(new DOMException("Aborted", "AbortError"))
+												}
+												if (request.signal.aborted) {
+													onAbort()
+													return
+												}
+												request.signal.addEventListener("abort", onAbort, { once: true })
 											})
+											await runPromise(Deferred.succeed(stallLookupInFlight, undefined))
+											return await waitForAbort
 										}
 									}
 									return next(request)
@@ -5654,14 +5699,14 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									yield* Deferred.succeed(turn1Started, undefined)
 									yield* Deferred.await(turn1Interrupted)
 									return yield* Effect.fail({
-										_tag: "ModelRequestInterrupted" as const,
+										_tag: "TurnInterrupted" as const,
 										model_usage: { input_tokens: 2, output_tokens: 0 },
 									})
 								}
 								yield* Deferred.succeed(turn2Started, undefined)
 								yield* Deferred.await(turn2Interrupted)
 								return yield* Effect.fail({
-									_tag: "ModelRequestInterrupted" as const,
+									_tag: "TurnInterrupted" as const,
 									model_usage: { input_tokens: 2, output_tokens: 0 },
 								})
 							}),
@@ -5753,6 +5798,91 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(eventsRes.exitCode).toBe(0)
 					const eventTypes = JSON.parse(eventsRes.stdout) as Array<string>
 					expect(eventTypes.filter((t) => t === "user.interrupt")).toHaveLength(2)
+				}),
+			),
+		)
+	})
+
+	it("detects unread piped input waiting in a subsequent chunk when the session ends after an earlier turn settles", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+					const encoder = new TextEncoder()
+					const cli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `Reply-${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const sessionId = yield* createReadySession(cli)
+					const turn1Rendered = yield* Deferred.make<void>()
+					const releaseSecondChunk = yield* Deferred.make<void>()
+
+					const archiver = yield* Deferred.await(turn1Rendered).pipe(
+						Effect.andThen(Effect.sleep("25 millis")),
+						Effect.andThen(cli.run(["sessions", "archive", "--session-id", sessionId])),
+						Effect.forkChild,
+					)
+
+					// Chunk 1 settles cleanly; chunk 2 becomes readable in the pipe right when session.archived arrives.
+					// Unpatched raceFirst cancels splitBoundedLines before chunk 2 is pulled and exits 0.
+					const pipedStdin = Stream.concat(
+						Stream.make(encoder.encode("first turn\n")),
+						Stream.fromEffect(
+							Deferred.await(releaseSecondChunk).pipe(
+								Effect.as(encoder.encode("second unread turn\n")),
+							),
+						),
+					)
+
+					const res = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdin: pipedStdin,
+						onStdoutChunk: (chunk) =>
+							chunk.includes("Reply-1:first turn")
+								? Deferred.succeed(turn1Rendered, undefined).pipe(Effect.asVoid)
+								: Effect.void,
+						interceptFetch: async (next, request) => {
+							if (!request.url.includes("/events/stream")) {
+								return next(request)
+							}
+							const response = await next(request)
+							if (response.status !== 200 || response.body === null) {
+								return response
+							}
+							const reader = response.body.getReader()
+							const decoder = new TextDecoder()
+							const observed = new ReadableStream<Uint8Array>({
+								async pull(controller) {
+									const chunk = await reader.read()
+									if (chunk.done) {
+										controller.close()
+										return
+									}
+									const text = decoder.decode(chunk.value, { stream: true })
+									controller.enqueue(chunk.value)
+									if (text.includes("session.archived")) {
+										setTimeout(() => {
+											void runPromise(Deferred.succeed(releaseSecondChunk, undefined))
+										}, 5)
+									}
+								},
+								cancel(reason) {
+									return reader.cancel(reason)
+								},
+							})
+							return new Response(observed, { status: 200, headers: response.headers })
+						},
+					})
+					yield* Fiber.await(archiver)
+
+					expect(res.exitCode).toBe(1)
+					expect(res.stdout).toContain("Reply-1:first turn")
+					expect(res.stderr).toContain("ended before buffered input was submitted")
 				}),
 			),
 		)
