@@ -1341,6 +1341,133 @@ describe("normalizeApiUrl", () => {
 					)
 				}).pipe(Effect.provide(makeLayer(genericSchemaFreeFetch)))
 				expect(Array.from(genericSchemaFreeEvents).map((e) => e.data)).toEqual([{ seq: 2 }])
+
+				// 22) Healthy long-lived idle connections that end with a body-read reset or incomplete
+				//     frame reset the retry budget (surviving >=6 periodic proxy resets while preserving
+				//     the Last-Event-ID resume cursor), while immediate failures stay strictly bounded
+				let resetNowNanos = 1_000_000_000n
+				const resetSleepsMs: Array<number> = []
+				const resetClock: Clock.Clock = {
+					currentTimeMillisUnsafe: () => Number(resetNowNanos / 1_000_000n),
+					currentTimeMillis: Effect.sync(() => Number(resetNowNanos / 1_000_000n)),
+					currentTimeNanosUnsafe: () => resetNowNanos,
+					currentTimeNanos: Effect.sync(() => resetNowNanos),
+					monotonicTimeNanosUnsafe: () => resetNowNanos,
+					monotonicTimeNanos: Effect.sync(() => resetNowNanos),
+					sleep: (duration) =>
+						Effect.sync(() => {
+							const ms = Duration.toMillis(duration)
+							resetSleepsMs.push(ms)
+							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+						}),
+				}
+				let longResetCalls = 0
+				const longResetLastIds: Array<string | null> = []
+				const longResetFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = input instanceof Request ? input : new Request(input, init)
+					longResetLastIds.push(req.headers.get("last-event-id"))
+					longResetCalls += 1
+					if (longResetCalls === 1) {
+						return new Response(sseSessionFrame(1, "user.message"), {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (longResetCalls <= 8) {
+						let step = 0
+						const body = new ReadableStream<Uint8Array>({
+							pull(controller) {
+								if (step === 0) {
+									step = 1
+									controller.enqueue(encoder.encode(": keepalive\n\n"))
+								} else {
+									// Connection stayed healthy for 60s before proxy reset or truncated frame
+									resetNowNanos += 60_000_000_000n
+									if (longResetCalls % 2 === 0) {
+										controller.error(new TypeError("proxy idle reset"))
+									} else {
+										controller.enqueue(encoder.encode('data: {"partial'))
+										controller.close()
+									}
+								}
+							},
+						})
+						return new Response(body, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(sseSessionFrame(2, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+
+				const longResetEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(client.streamSessionEvents("sess_long_idle_resets"))
+				}).pipe(
+					Effect.provide(makeLayer(longResetFetch)),
+					Effect.provideService(Clock.Clock, resetClock),
+				)
+				expect(longResetCalls).toBe(9)
+				expect(longResetLastIds).toEqual([null, "1", "1", "1", "1", "1", "1", "1", "1"])
+				// Conn 1 advanced cursor (0ms); conns 2..8 each stayed open 60s before reset (250ms each)
+				expect(resetSleepsMs).toEqual([250, 250, 250, 250, 250, 250, 250])
+				expect(Array.from(longResetEvents).map((e) => e.seq)).toEqual([1, 2])
+
+				// Immediate body-read resets still fail after maxReconnectAttempts (default 5 -> 6 calls)
+				let immediateResetCalls = 0
+				const immediateResetLastIds: Array<string | null> = []
+				const immediateResetSleepsMs: Array<number> = []
+				const immediateResetClock: Clock.Clock = {
+					currentTimeMillisUnsafe: () => Number(resetNowNanos / 1_000_000n),
+					currentTimeMillis: Effect.sync(() => Number(resetNowNanos / 1_000_000n)),
+					currentTimeNanosUnsafe: () => resetNowNanos,
+					currentTimeNanos: Effect.sync(() => resetNowNanos),
+					monotonicTimeNanosUnsafe: () => resetNowNanos,
+					monotonicTimeNanos: Effect.sync(() => resetNowNanos),
+					sleep: (duration) =>
+						Effect.sync(() => {
+							const ms = Duration.toMillis(duration)
+							immediateResetSleepsMs.push(ms)
+							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+						}),
+				}
+				const immediateResetFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = input instanceof Request ? input : new Request(input, init)
+					immediateResetLastIds.push(req.headers.get("last-event-id"))
+					immediateResetCalls += 1
+					let step = 0
+					const body = new ReadableStream<Uint8Array>({
+						pull(controller) {
+							if (step === 0) {
+								step = 1
+								controller.enqueue(encoder.encode(": keepalive\n\n"))
+							} else {
+								controller.error(new TypeError("immediate proxy reset"))
+							}
+						},
+					})
+					return new Response(body, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+
+				const immediateResetErr = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(client.streamSessionEvents("sess_immediate_resets", { after: 4 })),
+					)
+				}).pipe(
+					Effect.provide(makeLayer(immediateResetFetch)),
+					Effect.provideService(Clock.Clock, immediateResetClock),
+				)
+				expect(immediateResetCalls).toBe(6)
+				expect(immediateResetLastIds).toEqual([null, "4", "4", "4", "4", "4"])
+				expect(immediateResetSleepsMs).toEqual([250, 500, 1000, 2000, 4000])
+				expect(immediateResetErr._tag).toBe("CliFailure")
 			}),
 		)
 	})
@@ -1414,6 +1541,19 @@ describe("Transform and formatOutput", () => {
 		expect(evaluateTransform(sample, "data.-1.type")).toBe("agent.message")
 		expect(evaluateTransform(sample, "data.#")).toBe(2)
 		expect(evaluateTransform(sample, "data.#.type")).toEqual(["user.message", "agent.message"])
+		expect(evaluateTransform(sample, '{"#":id}."#"')).toBe("agt_123")
+		expect(evaluateTransform(sample, "{\"#\":id}.'#'")).toBe("agt_123")
+		expect(evaluateTransform(sample, '{"#":id}.\\#')).toBe("agt_123")
+		expect(evaluateTransform(sample, '{"#":data}."#".#')).toBe(2)
+		expect(evaluateTransform(sample, '{"@this":id}."@this"')).toBe("agt_123")
+		expect(
+			formatOutput(sample, {
+				format: "json",
+				transform: Option.some('{"#":id}."#"'),
+				rawOutput: false,
+				isTerminal: false,
+			}),
+		).toBe('"agt_123"')
 		expect(evaluateTransform(sample, "{id,model:model.id}")).toEqual({
 			id: "agt_123",
 			model: "gpt-6.2-sol",

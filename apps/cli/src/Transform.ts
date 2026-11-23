@@ -98,17 +98,31 @@ const splitTopLevel = (input: string, delimiter: string): Array<string> => {
 	return parts
 }
 
-const unescapeSegment = (segment: string): string => {
+interface ParsedSegment {
+	readonly value: string
+	readonly literal: boolean
+}
+
+const parseSegment = (segment: string): ParsedSegment => {
 	const trimmed = segment.trim()
 	if (
 		trimmed.length >= 2 &&
 		((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
 			(trimmed.startsWith("'") && trimmed.endsWith("'")))
 	) {
-		return trimmed.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\'", "'")
+		return {
+			value: trimmed.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\'", "'"),
+			literal: true,
+		}
 	}
-	return trimmed.replaceAll("\\.", ".")
+	const unescaped = trimmed.replaceAll("\\.", ".").replaceAll("\\#", "#")
+	return {
+		value: unescaped,
+		literal: unescaped !== trimmed,
+	}
 }
+
+const unescapeSegment = (segment: string): string => parseSegment(segment).value
 
 const evaluateObjectLiteral = (value: unknown, body: string): Record<string, unknown> => {
 	const result: Record<string, unknown> = {}
@@ -184,9 +198,8 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 			continue
 		}
 
-		const segment = unescapeSegment(rawTrimmed)
-
-		if (segment === "#") {
+		const parsed = parseSegment(rawTrimmed)
+		if (!parsed.literal && parsed.value === "#") {
 			if (!Array.isArray(current)) return undefined
 			if (rest.length === 0) return current.length
 			const projected: Array<unknown> = []
@@ -196,6 +209,8 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 			}
 			return projected
 		}
+
+		const segment = parsed.value
 
 		if (Array.isArray(current)) {
 			if (/^-?\d+$/.test(segment)) {

@@ -470,6 +470,16 @@ export const makeCheckfuClient = (
 						let sawKeepalive = false
 						let terminalReached = false
 						let handledError = false
+						// Separate cursor progress ("where do we resume?") from connection health
+						// ("was this connection healthy enough to reset retry/no-progress budgets?"):
+						// a quiet connection delivering keepalives for >= healthyIdleDurationNanos is
+						// healthy even though its resume cursor has not changed.
+						const assessConnectionHealth = (closedAtNanos: bigint) => {
+							const advanced = hasCursorProgress()
+							const healthyIdle =
+								!sawEvent && closedAtNanos - connectedAtNanos >= healthyIdleDurationNanos
+							return { advanced, healthyIdle, healthy: advanced || healthyIdle }
+						}
 						let isFirstChunk = true
 						let discardLeadingLf = false
 						let pendingLine = ""
@@ -644,17 +654,25 @@ export const makeCheckfuClient = (
 								),
 								Stream.catch((err) => {
 									if (err instanceof StreamBodyReadError) {
-										const nextAttempt = (hasCursorProgress() ? 0 : loopState.attempt) + 1
-										if (nextAttempt <= maxReconnects) {
-											handledError = true
-											loopState.useHeader = true
-											loopState.attempt = nextAttempt
-											loopState.pendingDelayMs =
-												(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
-											return Stream.empty
-										}
-										loopState.done = true
-										return Stream.fail(formatClientError(err.error))
+										return Stream.unwrap(
+											Effect.gen(function* () {
+												const health = assessConnectionHealth(yield* Clock.monotonicTimeNanos)
+												const nextAttempt = (health.healthy ? 0 : loopState.attempt) + 1
+												if (nextAttempt <= maxReconnects) {
+													handledError = true
+													loopState.useHeader = true
+													loopState.attempt = nextAttempt
+													if (health.healthy) {
+														loopState.noProgressCloses = 0
+													}
+													loopState.pendingDelayMs =
+														(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
+													return Stream.empty
+												}
+												loopState.done = true
+												return Stream.fail(formatClientError(err.error))
+											}),
+										)
 									}
 									loopState.done = true
 									return Stream.fail(formatClientError(err))
@@ -670,10 +688,10 @@ export const makeCheckfuClient = (
 									return Stream.empty
 								}
 								const hasIncompleteFrame = pendingLine.length > 0 || hasPendingEventFields
-								const advanced = hasCursorProgress()
+								const health = assessConnectionHealth(yield* Clock.monotonicTimeNanos)
 								loopState.useHeader = true
 								if (hasIncompleteFrame) {
-									const nextAttempt = (advanced ? 0 : loopState.attempt) + 1
+									const nextAttempt = (health.healthy ? 0 : loopState.attempt) + 1
 									if (nextAttempt > maxReconnects) {
 										loopState.done = true
 										return Stream.fail(
@@ -681,29 +699,28 @@ export const makeCheckfuClient = (
 										)
 									}
 									loopState.attempt = nextAttempt
+									if (health.healthy) {
+										loopState.noProgressCloses = 0
+									}
 									loopState.pendingDelayMs =
 										(loopState.retryDelayMs ?? baseDelayMs) * 2 ** (nextAttempt - 1)
 									return Stream.empty
 								}
-								if (advanced) {
+								if (health.advanced) {
 									loopState.attempt = 0
 									loopState.noProgressCloses = 0
 									loopState.pendingDelayMs = loopState.retryDelayMs ?? 0
 									return Stream.empty
 								}
 								// Clean close without advancing the cursor:
-								// - Normal long-lived idle connections (stayed open >= healthyIdleDurationMs
-								//   without replaying non-advancing events) reset the no-progress streak and
+								// - Healthy long-lived idle connections reset the no-progress streak and
 								//   reconnect promptly.
 								// - Consecutive short heartbeat-only/empty closes or repeated non-advancing
 								//   event closes apply capped exponential backoff even if the server sent
 								//   `retry: 0`.
 								loopState.attempt = 0
 								const floorBaseMs = Math.max(baseDelayMs, 1)
-								const closedAtNanos = yield* Clock.monotonicTimeNanos
-								const isHealthyLongIdle =
-									!sawEvent && closedAtNanos - connectedAtNanos >= healthyIdleDurationNanos
-								if (isHealthyLongIdle) {
+								if (health.healthyIdle) {
 									loopState.noProgressCloses = 0
 									const minIdleDelayMs = sawKeepalive ? Math.min(floorBaseMs, 50) : floorBaseMs
 									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, minIdleDelayMs)
