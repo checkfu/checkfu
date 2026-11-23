@@ -383,7 +383,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						agent_version: 1,
 						environment_id: env.id,
 						turn: 1,
-						generation: 0,
 						input: ["New question"],
 					})
 					expect(reply.text).toBe("Seeded reply")

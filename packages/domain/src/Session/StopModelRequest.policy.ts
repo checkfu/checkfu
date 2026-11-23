@@ -26,9 +26,7 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 			if (state === null || state.turn === 0) {
 				return
 			}
-			const generation =
-				event._tag === "turn.abandoned" ? event.generation : state.harness_generation
-			const interrupt = harness.interrupt({ session_id: source.id, turn: state.turn, generation })
+			const interrupt = harness.interrupt({ session_id: source.id, turn: state.turn })
 			if (event._tag === "user.interrupt") {
 				yield* interrupt.pipe(
 					Effect.catchTag("HarnessUnavailable", () =>

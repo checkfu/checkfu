@@ -411,7 +411,6 @@ describe("interrupted turns and turn recovery", () => {
 						agent_version: 1,
 						environment_id: env.id,
 						turn: 1,
-						generation: 0,
 						input: ["before restart"],
 					})
 					expect(initialReply).toMatchObject({
@@ -452,7 +451,6 @@ describe("interrupted turns and turn recovery", () => {
 								agent_version: 1,
 								environment_id: env.id,
 								turn: 1,
-								generation: 0,
 								input: ["before restart"],
 							}),
 						),
@@ -473,7 +471,6 @@ describe("interrupted turns and turn recovery", () => {
 									agent_version: 1,
 									environment_id: env.id,
 									turn: 2,
-									generation: 0,
 									input: ["unsubmitted while views broken"],
 								}),
 							),
@@ -492,7 +489,6 @@ describe("interrupted turns and turn recovery", () => {
 									agent_version: 1,
 									environment_id: env.id,
 									turn: 2,
-									generation: 0,
 									input: ["new turn without api key"],
 								}),
 							),

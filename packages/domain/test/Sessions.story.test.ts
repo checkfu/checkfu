@@ -159,7 +159,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.replied({ turn: 1 }),
 			Story.state(session, {
@@ -199,7 +199,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 12, output_tokens: 5 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
@@ -214,20 +214,20 @@ describe("Sessions", () => {
 				session,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "Turn 1" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: "evt_req" }),
 				new SpanModelRequestEnd({
 					model_request_start_id: "evt_req",
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Turn 2" })),
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Turn 2" }] }),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusRunning({ turn: 2 }),
 			),
 			Story.replied({ turn: 2 }),
 			Story.when(
@@ -304,7 +304,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 		)
@@ -329,7 +329,7 @@ describe("Sessions", () => {
 				session,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.when(commit(1, "evt_unknown")),
 			Story.rejected(
@@ -448,7 +448,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
@@ -461,7 +461,7 @@ describe("Sessions", () => {
 				session,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Second" })),
 			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Second" }] })),
@@ -489,7 +489,7 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Run" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 				),
 				Story.replied({ turn: 1 }),
 				Story.when(
@@ -526,7 +526,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 3, output_tokens: 2 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
@@ -563,7 +563,7 @@ describe("Sessions", () => {
 				session,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: "req_1" }),
 			),
 			Story.when(failExhausted),
@@ -578,7 +578,6 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 0,
 				}),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
@@ -588,7 +587,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Retry" }] }),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusRunning({ turn: 2 }),
 			),
 			Story.replied({ turn: 2 }),
 			Story.when(
@@ -663,7 +662,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Work" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.replied({ turn: 1 }),
 			Story.when(
@@ -740,14 +739,14 @@ describe("Sessions", () => {
 				sessionA,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "A" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: "x:1:y" }),
 			),
 			Story.given(
 				sessionB,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "B" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.when(
 				new RecordModelRequestStart({
@@ -767,7 +766,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 			Story.when(commit(sessionA.id, "x:1:y")),
 			Story.then(
@@ -778,7 +777,7 @@ describe("Sessions", () => {
 					model_usage: usage,
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 		)
 	})
@@ -830,7 +829,7 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
 				Story.replied({ turn: 1 }),
@@ -857,7 +856,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 10, output_tokens: 4 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
@@ -879,7 +878,7 @@ describe("Sessions", () => {
 				}),
 				Story.emitted(SessionView, session, [
 					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 					new AgentThinking({ thinking: "Greeting the user" }),
 					new AgentMessage({ content: [{ type: "text", text: "Hello!" }] }),
@@ -888,14 +887,14 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 10, output_tokens: 4 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				]),
 				Story.clock(t2),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Follow up" })),
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Follow up" }] }),
-					new SessionStatusRunning({ turn: 2, generation: 0 }),
+					new SessionStatusRunning({ turn: 2 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
 				Story.replied({ turn: 2 }),
@@ -921,7 +920,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 20, output_tokens: 6 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
 				),
 				Story.saga(RunTurn, turn2Key, {
 					_tag: "Completed",
@@ -967,7 +966,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
 			Story.call(Harness.runTurn, {
@@ -1000,7 +999,6 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 0,
 				}),
 			),
 			Story.saga(RunTurn, turn1Key, {
@@ -1012,7 +1010,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Second" }] }),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
 			Story.call(Harness.runTurn, {
@@ -1071,7 +1069,7 @@ describe("Sessions", () => {
 			Story.state(session, { _tag: "Terminated", archived: true }),
 			Story.emitted(SessionView, session, [
 				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 				new SpanModelRequestEnd({
 					model_request_start_id: req1,
@@ -1088,10 +1086,9 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 0,
 				}),
 				new UserMessage({ content: [{ type: "text", text: "Second" }] }),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 				new SpanModelRequestEnd({
 					model_request_start_id: req2,
@@ -1147,7 +1144,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
 			Story.call(Harness.runTurn, {
@@ -1175,8 +1172,8 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 5, output_tokens: 2 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
 			Story.saga(RunTurn, turn1Key, {
@@ -1205,7 +1202,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 8, output_tokens: 3 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
 			),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
@@ -1237,7 +1234,7 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Long task" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
 				Story.call(Harness.runTurn, {
@@ -1266,7 +1263,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
 				),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
@@ -1299,7 +1296,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Wrong prompt" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
 			Story.call("turn-1", Harness.runTurn, {
@@ -1325,8 +1322,8 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 0, output_tokens: 0 },
 					is_error: true,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, generation: 0 }),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
+				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
 			Story.saga(RunTurn, turn1Key, {
@@ -1356,7 +1353,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 9, output_tokens: 5 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
 			),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
@@ -1390,10 +1387,10 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "First" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(Harness.runTurn, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.runTurn, { session_id: session.id, turn: 1 }),
 				Story.fail(Harness.runTurn, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
@@ -1409,39 +1406,36 @@ describe("Sessions", () => {
 							retry_status: { type: "exhausted" },
 						},
 					}),
-					new TurnAbandoned({ turn: 1, generation: 0 }),
+					new TurnAbandoned({ turn: 1 }),
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 1,
-						generation: 1,
 					}),
 				),
 				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.call("cleanup", Harness.interrupt, {
 					session_id: session.id,
 					turn: 1,
-					generation: 0,
 				}),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Second" })),
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Second" }] }),
-					new SessionStatusRunning({ turn: 2, generation: 1 }),
+					new SessionStatusRunning({ turn: 2 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
 				Story.call(Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
-					generation: 1,
 					input: ["Second"],
 				}),
 				Story.succeed("cleanup", Harness.interrupt, undefined),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 2, generation: 1 }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 2 }),
 				Story.succeed(Harness.interrupt, undefined),
 				Story.fail(Harness.runTurn, { _tag: "TurnInterrupted" }),
 				Story.then(
@@ -1451,7 +1445,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2, generation: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2 }),
 				),
 				Story.saga(RunTurn, turn2Key, { _tag: "Completed", result: { status: "interrupted" } }),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
@@ -1538,13 +1532,13 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Long task" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
-				Story.call(Harness.runTurn, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.runTurn, { session_id: session.id, turn: 1 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.then(
 					session,
@@ -1560,15 +1554,14 @@ describe("Sessions", () => {
 							retry_status: { type: "exhausted" },
 						},
 					}),
-					new TurnAbandoned({ turn: 1, generation: 0 }),
+					new TurnAbandoned({ turn: 1 }),
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 1,
-						generation: 1,
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 				Story.succeed(Harness.interrupt, undefined),
 				Story.succeed(Harness.runTurn, {
 					thinking: null,
@@ -1584,7 +1577,7 @@ describe("Sessions", () => {
 		},
 	)
 
-	it.effect("keeps a retrying diagnostic on the current generation", () => {
+	it.effect("leaves the turn running when a retrying diagnostic is recorded", () => {
 		const session = Session.ref("sess_retry_diagnostic")
 		const request = new SpanModelRequestStart({
 			model_request_start_id: turnKey(session.id, 1) + ":req:1",
@@ -1600,17 +1593,16 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				request,
 			),
-			Story.call(Harness.runTurn, { turn: 1, generation: 0 }),
+			Story.call(Harness.runTurn, { turn: 1 }),
 			Story.given(session, new SessionErrorEvent({ error: diagnostic })),
 			Story.view(TurnInput, session, {
 				agent_id: "agent_001",
 				agent_version: 1,
 				environment_id: "env_001",
 				turn: 1,
-				harness_generation: 0,
 				input: ["First"],
 				unsent: [],
 			}),
@@ -1629,16 +1621,16 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 1, output_tokens: 1 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
 	})
 
 	it.effect(
-		"keeps the generation across turns that complete, are interrupted or exhaust their retries",
+		"runs turn after turn whether each completes, is interrupted or exhausts its retries",
 		() => {
-			const session = Session.ref("sess_generation_kept")
+			const session = Session.ref("sess_turns_kept")
 			const usage = { input_tokens: 1, output_tokens: 1 }
 			const text = (value: string) => new UserMessage({ content: [{ type: "text", text: value }] })
 			const start = (turn: number) =>
@@ -1656,9 +1648,9 @@ describe("Sessions", () => {
 				})
 			return story(
 				Story.given(session, createdEvent),
-				Story.state(session, { _tag: "Idle", turn: 0, generation: 0 }),
+				Story.state(session, { _tag: "Idle", turn: 0 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "One" })),
-				Story.then(session, text("One"), new SessionStatusRunning({ turn: 1, generation: 0 })),
+				Story.then(session, text("One"), new SessionStatusRunning({ turn: 1 })),
 				Story.when(start(1)),
 				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_1" })),
 				Story.when(
@@ -1677,11 +1669,11 @@ describe("Sessions", () => {
 					session,
 					new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
 					end(1, false),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				),
-				Story.state(session, { _tag: "Idle", turn: 1, generation: 0 }),
+				Story.state(session, { _tag: "Idle", turn: 1 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Two" })),
-				Story.then(session, text("Two"), new SessionStatusRunning({ turn: 2, generation: 0 })),
+				Story.then(session, text("Two"), new SessionStatusRunning({ turn: 2 })),
 				Story.when(start(2)),
 				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_2" })),
 				Story.when(
@@ -1696,11 +1688,11 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					end(2, true),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 2 }),
 				),
-				Story.state(session, { _tag: "Idle", turn: 2, generation: 0 }),
+				Story.state(session, { _tag: "Idle", turn: 2 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Three" })),
-				Story.then(session, text("Three"), new SessionStatusRunning({ turn: 3, generation: 0 })),
+				Story.then(session, text("Three"), new SessionStatusRunning({ turn: 3 })),
 				Story.when(start(3)),
 				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_3" })),
 				Story.when(
@@ -1728,17 +1720,15 @@ describe("Sessions", () => {
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 3,
-						generation: 0,
 					}),
 				),
-				Story.state(session, { _tag: "Idle", turn: 3, generation: 0 }),
-				Story.view(TurnInput, session, { turn: 3, harness_generation: 0 }),
+				Story.state(session, { _tag: "Idle", turn: 3 }),
+				Story.view(TurnInput, session, { turn: 3 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Four" })),
-				Story.then(session, text("Four"), new SessionStatusRunning({ turn: 4, generation: 0 })),
-				Story.state(session, { _tag: "Running", turn: 4, generation: 0 }),
+				Story.then(session, text("Four"), new SessionStatusRunning({ turn: 4 })),
+				Story.state(session, { _tag: "Running", turn: 4 }),
 				Story.view(TurnInput, session, {
 					turn: 4,
-					harness_generation: 0,
 					input: ["Four"],
 					last_reply_turn: 1,
 				}),
@@ -1746,352 +1736,331 @@ describe("Sessions", () => {
 		},
 	)
 
-	it.effect(
-		"retires the generation after a truncated reply and runs the next turn under the new one",
-		() => {
-			const session = Session.ref("sess_generation_truncated")
-			const req1 = `${turnKey(session.id, 1)}:req:1`
-			const req2 = `${turnKey(session.id, 2)}:req:1`
-			return fullStory(
-				Story.clock(t0),
-				Story.given(session, createdEvent),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Long" })),
-				Story.then(
-					session,
-					new UserMessage({ content: [{ type: "text", text: "Long" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
-					new SpanModelRequestStart({ model_request_start_id: req1 }),
-				),
-				Story.call(Harness.runTurn, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(Harness.runTurn, {
-					thinking: null,
-					text: "Cut short",
-					truncated: true,
-					input_tokens: 5,
-					output_tokens: 2,
-					stop_reason: { type: "end_turn" },
-				}),
-				Story.then(
-					session,
-					new AgentMessage({ content: [{ type: "text", text: "Cut short" }], truncated: true }),
-					new SpanModelRequestEnd({
-						model_request_start_id: req1,
-						model_usage: { input_tokens: 5, output_tokens: 2 },
-						is_error: false,
-					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 1 }),
-				),
-				Story.state(session, { _tag: "Idle", turn: 1, generation: 1 }),
-				Story.view(TurnInput, session, { turn: 1, harness_generation: 1, input: [] }),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Continue" })),
-				Story.then(
-					session,
-					new UserMessage({ content: [{ type: "text", text: "Continue" }] }),
-					new SessionStatusRunning({ turn: 2, generation: 1 }),
-					new SpanModelRequestStart({ model_request_start_id: req2 }),
-				),
-				Story.state(session, { _tag: "Running", turn: 2, generation: 1 }),
-				Story.call(Harness.runTurn, {
-					session_id: session.id,
-					turn: 2,
-					generation: 1,
-					input: ["Continue"],
-				}),
-				Story.succeed(Harness.runTurn, {
-					thinking: null,
-					text: "The rest",
-					input_tokens: 6,
-					output_tokens: 3,
-					stop_reason: { type: "end_turn" },
-				}),
-				Story.then(
-					session,
-					new AgentMessage({ content: [{ type: "text", text: "The rest" }] }),
-					new SpanModelRequestEnd({
-						model_request_start_id: req2,
-						model_usage: { input_tokens: 6, output_tokens: 3 },
-						is_error: false,
-					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
-				),
-				Story.state(session, { _tag: "Idle", turn: 2, generation: 1 }),
-				Story.view(TurnInput, session, { turn: 2, harness_generation: 1 }),
-			)
-		},
-	)
-
-	it.effect(
-		"stamps session.status_idle and session.status_running with one generation when a queued message drains",
-		() => {
-			const session = Session.ref("sess_generation_drain")
-			const usage = { input_tokens: 1, output_tokens: 1 }
-			const text = (value: string) => new UserMessage({ content: [{ type: "text", text: value }] })
-			const start = (turn: number) =>
-				new RecordModelRequestStart({
-					session_id: session.id,
-					turn,
-					request_seq: 1,
-					model_request_start_id: `req_${turn}`,
-				})
-			const commit = (turn: number, truncated: boolean) =>
-				new CommitModelReply({
-					session_id: session.id,
-					turn,
-					request_seq: 1,
-					model_request_start_id: `req_${turn}`,
-					thinking: null,
-					text: "Reply",
-					...(truncated ? { truncated: true as const } : {}),
-					model_usage: usage,
-					stop_reason: { type: "end_turn" },
-				})
-			const end = (turn: number) =>
+	it.effect("ends a turn whose reply was truncated and runs the next one", () => {
+		const session = Session.ref("sess_turns_truncated")
+		const req1 = `${turnKey(session.id, 1)}:req:1`
+		const req2 = `${turnKey(session.id, 2)}:req:1`
+		return fullStory(
+			Story.clock(t0),
+			Story.given(session, createdEvent),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Long" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "Long" }] }),
+				new SessionStatusRunning({ turn: 1 }),
+				new SpanModelRequestStart({ model_request_start_id: req1 }),
+			),
+			Story.call(Harness.runTurn, { session_id: session.id, turn: 1 }),
+			Story.succeed(Harness.runTurn, {
+				thinking: null,
+				text: "Cut short",
+				truncated: true,
+				input_tokens: 5,
+				output_tokens: 2,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Cut short" }], truncated: true }),
 				new SpanModelRequestEnd({
-					model_request_start_id: `req_${turn}`,
-					model_usage: usage,
+					model_request_start_id: req1,
+					model_usage: { input_tokens: 5, output_tokens: 2 },
 					is_error: false,
-				})
-			return story(
-				Story.given(
-					session,
-					createdEvent,
-					text("One"),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
-					new SpanModelRequestStart({ model_request_start_id: "req_1" }),
-					text("Two"),
-				),
-				Story.when(commit(1, false)),
-				Story.then(
-					session,
-					new AgentMessage({ content: [{ type: "text", text: "Reply" }] }),
-					end(1),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
-					new SessionStatusRunning({ turn: 2, generation: 0 }),
-				),
-				Story.state(session, { _tag: "Running", turn: 2, generation: 0 }),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Three" })),
-				Story.then(session, text("Three")),
-				Story.when(start(2)),
-				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_2" })),
-				Story.when(commit(2, true)),
-				Story.then(
-					session,
-					new AgentMessage({ content: [{ type: "text", text: "Reply" }], truncated: true }),
-					end(2),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
-					new SessionStatusRunning({ turn: 3, generation: 1 }),
-				),
-				Story.state(session, { _tag: "Running", turn: 3, generation: 1 }),
-				Story.view(TurnInput, session, { turn: 3, harness_generation: 1, input: ["Three"] }),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Four" })),
-				Story.then(session, text("Four")),
-				Story.when(
-					new AbandonTurn({
-						session_id: session.id,
-						turn: 3,
-						error_type: "model_request_timeout",
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+			),
+			Story.state(session, { _tag: "Idle", turn: 1 }),
+			Story.view(TurnInput, session, { turn: 1, input: [] }),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Continue" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "Continue" }] }),
+				new SessionStatusRunning({ turn: 2 }),
+				new SpanModelRequestStart({ model_request_start_id: req2 }),
+			),
+			Story.state(session, { _tag: "Running", turn: 2 }),
+			Story.call(Harness.runTurn, {
+				session_id: session.id,
+				turn: 2,
+				input: ["Continue"],
+			}),
+			Story.succeed(Harness.runTurn, {
+				thinking: null,
+				text: "The rest",
+				input_tokens: 6,
+				output_tokens: 3,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "The rest" }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: req2,
+					model_usage: { input_tokens: 6, output_tokens: 3 },
+					is_error: false,
+				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+			),
+			Story.state(session, { _tag: "Idle", turn: 2 }),
+			Story.view(TurnInput, session, { turn: 2 }),
+		)
+	})
+
+	it.effect("starts the next turn in the same commit when a queued message drains", () => {
+		const session = Session.ref("sess_turns_drain")
+		const usage = { input_tokens: 1, output_tokens: 1 }
+		const text = (value: string) => new UserMessage({ content: [{ type: "text", text: value }] })
+		const start = (turn: number) =>
+			new RecordModelRequestStart({
+				session_id: session.id,
+				turn,
+				request_seq: 1,
+				model_request_start_id: `req_${turn}`,
+			})
+		const commit = (turn: number, truncated: boolean) =>
+			new CommitModelReply({
+				session_id: session.id,
+				turn,
+				request_seq: 1,
+				model_request_start_id: `req_${turn}`,
+				thinking: null,
+				text: "Reply",
+				...(truncated ? { truncated: true as const } : {}),
+				model_usage: usage,
+				stop_reason: { type: "end_turn" },
+			})
+		const end = (turn: number) =>
+			new SpanModelRequestEnd({
+				model_request_start_id: `req_${turn}`,
+				model_usage: usage,
+				is_error: false,
+			})
+		return story(
+			Story.given(
+				session,
+				createdEvent,
+				text("One"),
+				new SessionStatusRunning({ turn: 1 }),
+				new SpanModelRequestStart({ model_request_start_id: "req_1" }),
+				text("Two"),
+			),
+			Story.when(commit(1, false)),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Reply" }] }),
+				end(1),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				new SessionStatusRunning({ turn: 2 }),
+			),
+			Story.state(session, { _tag: "Running", turn: 2 }),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Three" })),
+			Story.then(session, text("Three")),
+			Story.when(start(2)),
+			Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_2" })),
+			Story.when(commit(2, true)),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Reply" }], truncated: true }),
+				end(2),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+				new SessionStatusRunning({ turn: 3 }),
+			),
+			Story.state(session, { _tag: "Running", turn: 3 }),
+			Story.view(TurnInput, session, { turn: 3, input: ["Three"] }),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Four" })),
+			Story.then(session, text("Four")),
+			Story.when(
+				new AbandonTurn({
+					session_id: session.id,
+					turn: 3,
+					error_type: "model_request_timeout",
+					message: "Model request timed out.",
+				}),
+			),
+			Story.then(
+				session,
+				new SessionErrorEvent({
+					error: {
+						type: "model_request_timeout",
 						message: "Model request timed out.",
-					}),
-				),
-				Story.then(
-					session,
-					new SessionErrorEvent({
-						error: {
-							type: "model_request_timeout",
-							message: "Model request timed out.",
-							retry_status: { type: "exhausted" },
-						},
-					}),
-					new TurnAbandoned({ turn: 3, generation: 1 }),
-					new SessionStatusIdle({
-						stop_reason: { type: "retries_exhausted" },
-						turn: 3,
-						generation: 2,
-					}),
-					new SessionStatusRunning({ turn: 4, generation: 2 }),
-				),
-				Story.state(session, { _tag: "Running", turn: 4, generation: 2 }),
-				Story.view(TurnInput, session, { turn: 4, harness_generation: 2, input: ["Four"] }),
-			)
-		},
-	)
+						retry_status: { type: "exhausted" },
+					},
+				}),
+				new TurnAbandoned({ turn: 3 }),
+				new SessionStatusIdle({
+					stop_reason: { type: "retries_exhausted" },
+					turn: 3,
+				}),
+				new SessionStatusRunning({ turn: 4 }),
+			),
+			Story.state(session, { _tag: "Running", turn: 4 }),
+			Story.view(TurnInput, session, { turn: 4, input: ["Four"] }),
+		)
+	})
 
-	it.effect(
-		"retires the generation when a turn passes its deadline and runs the next turn under the new one",
-		() => {
-			const session = Session.ref("sess_generation_deadline")
-			const turn1Key = turnKey(session.id, 1)
-			const req1 = `${turn1Key}:req:1`
-			const req2 = `${turnKey(session.id, 2)}:req:1`
-			return fullStory(
-				Story.clock(t0),
-				Story.given(session, createdEvent),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Slow" })),
-				Story.then(
-					session,
-					new UserMessage({ content: [{ type: "text", text: "Slow" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
-					new SpanModelRequestStart({ model_request_start_id: req1 }),
-				),
-				Story.call("slow", Harness.runTurn, {
-					session_id: session.id,
+	it.effect("abandons a turn that passes its deadline and runs the next one", () => {
+		const session = Session.ref("sess_turns_deadline")
+		const turn1Key = turnKey(session.id, 1)
+		const req1 = `${turn1Key}:req:1`
+		const req2 = `${turnKey(session.id, 2)}:req:1`
+		return fullStory(
+			Story.clock(t0),
+			Story.given(session, createdEvent),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Slow" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "Slow" }] }),
+				new SessionStatusRunning({ turn: 1 }),
+				new SpanModelRequestStart({ model_request_start_id: req1 }),
+			),
+			Story.call("slow", Harness.runTurn, {
+				session_id: session.id,
+				turn: 1,
+				last_reply_turn: 0,
+			}),
+			Story.advance("10 minutes"),
+			Story.then(
+				session,
+				new SpanModelRequestEnd({
+					model_request_start_id: req1,
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				new SessionErrorEvent({
+					error: {
+						type: "model_request_timeout",
+						message: "Model request timed out.",
+						retry_status: { type: "exhausted" },
+					},
+				}),
+				new TurnAbandoned({ turn: 1 }),
+				new SessionStatusIdle({
+					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 0,
-					last_reply_turn: 0,
 				}),
-				Story.advance("10 minutes"),
-				Story.then(
-					session,
-					new SpanModelRequestEnd({
-						model_request_start_id: req1,
-						model_usage: { input_tokens: 0, output_tokens: 0 },
-						is_error: true,
-					}),
-					new SessionErrorEvent({
-						error: {
-							type: "model_request_timeout",
-							message: "Model request timed out.",
-							retry_status: { type: "exhausted" },
-						},
-					}),
-					new TurnAbandoned({ turn: 1, generation: 0 }),
-					new SessionStatusIdle({
-						stop_reason: { type: "retries_exhausted" },
-						turn: 1,
-						generation: 1,
-					}),
-				),
-				Story.state(session, { _tag: "Idle", turn: 1, generation: 1 }),
-				Story.view(TurnInput, session, {
-					turn: 1,
-					harness_generation: 1,
-					input: [],
-					last_reply_turn: 0,
+			),
+			Story.state(session, { _tag: "Idle", turn: 1 }),
+			Story.view(TurnInput, session, {
+				turn: 1,
+				input: [],
+				last_reply_turn: 0,
+			}),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
+			Story.succeed(Harness.interrupt, undefined),
+			Story.fail("slow", Harness.runTurn, { _tag: "TurnInterrupted" }),
+			Story.then(session),
+			Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "aborted" } }),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "Next" }] }),
+				new SessionStatusRunning({ turn: 2 }),
+				new SpanModelRequestStart({ model_request_start_id: req2 }),
+			),
+			Story.call(Harness.runTurn, {
+				session_id: session.id,
+				turn: 2,
+				input: ["Next"],
+				last_reply_turn: 0,
+			}),
+			Story.succeed(Harness.runTurn, {
+				thinking: null,
+				text: "Fresh",
+				input_tokens: 3,
+				output_tokens: 1,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Fresh" }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: req2,
+					model_usage: { input_tokens: 3, output_tokens: 1 },
+					is_error: false,
 				}),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(Harness.interrupt, undefined),
-				Story.fail("slow", Harness.runTurn, { _tag: "TurnInterrupted" }),
-				Story.then(session),
-				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "aborted" } }),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
-				Story.then(
-					session,
-					new UserMessage({ content: [{ type: "text", text: "Next" }] }),
-					new SessionStatusRunning({ turn: 2, generation: 1 }),
-					new SpanModelRequestStart({ model_request_start_id: req2 }),
-				),
-				Story.call(Harness.runTurn, {
-					session_id: session.id,
-					turn: 2,
-					generation: 1,
-					input: ["Next"],
-					last_reply_turn: 0,
-				}),
-				Story.succeed(Harness.runTurn, {
-					thinking: null,
-					text: "Fresh",
-					input_tokens: 3,
-					output_tokens: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-				Story.then(
-					session,
-					new AgentMessage({ content: [{ type: "text", text: "Fresh" }] }),
-					new SpanModelRequestEnd({
-						model_request_start_id: req2,
-						model_usage: { input_tokens: 3, output_tokens: 1 },
-						is_error: false,
-					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
-				),
-				Story.state(session, { _tag: "Idle", turn: 2, generation: 1 }),
-				Story.view(TurnInput, session, { last_reply_turn: 2 }),
-			)
-		},
-	)
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+			),
+			Story.state(session, { _tag: "Idle", turn: 2 }),
+			Story.view(TurnInput, session, { last_reply_turn: 2 }),
+		)
+	})
 
-	it.effect(
-		"interrupts the retired generation when an unreachable turn drains straight into its successor",
-		() => {
-			const session = Session.ref("sess_generation_unreachable_drain")
-			const turn1Key = turnKey(session.id, 1)
-			const req1 = `${turn1Key}:req:1`
-			const req2 = `${turnKey(session.id, 2)}:req:1`
-			return fullStory(
-				Story.clock(t0),
-				Story.given(session, createdEvent),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "First" })),
-				Story.then(
-					session,
-					new UserMessage({ content: [{ type: "text", text: "First" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
-					new SpanModelRequestStart({ model_request_start_id: req1 }),
-				),
-				Story.call("first", Harness.runTurn, {
-					session_id: session.id,
+	it.effect("interrupts an unreachable turn that drains straight into its successor", () => {
+		const session = Session.ref("sess_turns_unreachable_drain")
+		const turn1Key = turnKey(session.id, 1)
+		const req1 = `${turn1Key}:req:1`
+		const req2 = `${turnKey(session.id, 2)}:req:1`
+		return fullStory(
+			Story.clock(t0),
+			Story.given(session, createdEvent),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "First" })),
+			Story.then(
+				session,
+				new UserMessage({ content: [{ type: "text", text: "First" }] }),
+				new SessionStatusRunning({ turn: 1 }),
+				new SpanModelRequestStart({ model_request_start_id: req1 }),
+			),
+			Story.call("first", Harness.runTurn, {
+				session_id: session.id,
+				turn: 1,
+			}),
+			Story.when(new SendUserMessage({ session_id: session.id, text: "Queued" })),
+			Story.then(session, new UserMessage({ content: [{ type: "text", text: "Queued" }] })),
+			Story.replied({ turn: 2 }),
+			Story.fail("first", Harness.runTurn, { _tag: "HarnessUnavailable" }),
+			Story.then(
+				session,
+				new SpanModelRequestEnd({
+					model_request_start_id: req1,
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				new SessionErrorEvent({
+					error: {
+						type: "harness_unavailable",
+						message: "The agent runtime could not be reached.",
+						retry_status: { type: "exhausted" },
+					},
+				}),
+				new TurnAbandoned({ turn: 1 }),
+				new SessionStatusIdle({
+					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 0,
 				}),
-				Story.when(new SendUserMessage({ session_id: session.id, text: "Queued" })),
-				Story.then(session, new UserMessage({ content: [{ type: "text", text: "Queued" }] })),
-				Story.replied({ turn: 2 }),
-				Story.fail("first", Harness.runTurn, { _tag: "HarnessUnavailable" }),
-				Story.then(
-					session,
-					new SpanModelRequestEnd({
-						model_request_start_id: req1,
-						model_usage: { input_tokens: 0, output_tokens: 0 },
-						is_error: true,
-					}),
-					new SessionErrorEvent({
-						error: {
-							type: "harness_unavailable",
-							message: "The agent runtime could not be reached.",
-							retry_status: { type: "exhausted" },
-						},
-					}),
-					new TurnAbandoned({ turn: 1, generation: 0 }),
-					new SessionStatusIdle({
-						stop_reason: { type: "retries_exhausted" },
-						turn: 1,
-						generation: 1,
-					}),
-					new SessionStatusRunning({ turn: 2, generation: 1 }),
-					new SpanModelRequestStart({ model_request_start_id: req2 }),
-				),
-				Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
-				Story.state(session, { _tag: "Running", turn: 2, generation: 1 }),
-				Story.view(TurnInput, session, { turn: 2, harness_generation: 1, input: ["Queued"] }),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
-				Story.succeed(Harness.interrupt, undefined),
-				Story.call("second", Harness.runTurn, {
-					session_id: session.id,
-					turn: 2,
-					generation: 1,
-					input: ["Queued"],
+				new SessionStatusRunning({ turn: 2 }),
+				new SpanModelRequestStart({ model_request_start_id: req2 }),
+			),
+			Story.saga(RunTurn, turn1Key, { _tag: "Completed", result: { status: "failed" } }),
+			Story.state(session, { _tag: "Running", turn: 2 }),
+			Story.view(TurnInput, session, { turn: 2, input: ["Queued"] }),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
+			Story.succeed(Harness.interrupt, undefined),
+			Story.call("second", Harness.runTurn, {
+				session_id: session.id,
+				turn: 2,
+				input: ["Queued"],
+			}),
+			Story.succeed("second", Harness.runTurn, {
+				thinking: null,
+				text: "Fresh",
+				input_tokens: 3,
+				output_tokens: 1,
+				stop_reason: { type: "end_turn" },
+			}),
+			Story.then(
+				session,
+				new AgentMessage({ content: [{ type: "text", text: "Fresh" }] }),
+				new SpanModelRequestEnd({
+					model_request_start_id: req2,
+					model_usage: { input_tokens: 3, output_tokens: 1 },
+					is_error: false,
 				}),
-				Story.succeed("second", Harness.runTurn, {
-					thinking: null,
-					text: "Fresh",
-					input_tokens: 3,
-					output_tokens: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-				Story.then(
-					session,
-					new AgentMessage({ content: [{ type: "text", text: "Fresh" }] }),
-					new SpanModelRequestEnd({
-						model_request_start_id: req2,
-						model_usage: { input_tokens: 3, output_tokens: 1 },
-						is_error: false,
-					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
-				),
-				Story.state(session, { _tag: "Idle", turn: 2, generation: 1 }),
-				Story.view(TurnInput, session, { turn: 2, harness_generation: 1 }),
-			)
-		},
-	)
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
+			),
+			Story.state(session, { _tag: "Idle", turn: 2 }),
+			Story.view(TurnInput, session, { turn: 2 }),
+		)
+	})
 
 	it.effect(
 		"starts the successor and fires its deadline while an older interrupt is outstanding",
@@ -2106,13 +2075,13 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "First" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: firstRequest }),
 				),
-				Story.call("first", Harness.runTurn, { turn: 1, generation: 0 }),
+				Story.call("first", Harness.runTurn, { turn: 1 }),
 				Story.when(new SendUserInterrupt({ session_id: session.id })),
 				Story.then(session, new UserInterrupt()),
-				Story.call("slow-interrupt", Harness.interrupt, { turn: 1, generation: 0 }),
+				Story.call("slow-interrupt", Harness.interrupt, { turn: 1 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
 				Story.then(session, new UserMessage({ content: [{ type: "text", text: "Next" }] })),
 				Story.fail("first", Harness.runTurn, { _tag: "TurnInterrupted" }),
@@ -2123,11 +2092,11 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1, generation: 0 }),
-					new SessionStatusRunning({ turn: 2, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "interrupted" }, turn: 1 }),
+					new SessionStatusRunning({ turn: 2 }),
 					new SpanModelRequestStart({ model_request_start_id: secondRequest }),
 				),
-				Story.call("second", Harness.runTurn, { turn: 2, generation: 0, input: ["Next"] }),
+				Story.call("second", Harness.runTurn, { turn: 2, input: ["Next"] }),
 				Story.advance("10 minutes"),
 				Story.then(
 					session,
@@ -2143,15 +2112,14 @@ describe("Sessions", () => {
 							retry_status: { type: "exhausted" },
 						},
 					}),
-					new TurnAbandoned({ turn: 2, generation: 0 }),
+					new TurnAbandoned({ turn: 2 }),
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 2,
-						generation: 1,
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
-				Story.call("deadline", Harness.interrupt, { turn: 2, generation: 0 }),
+				Story.call("deadline", Harness.interrupt, { turn: 2 }),
 				Story.succeed("deadline", Harness.interrupt, undefined),
 				Story.fail("slow-interrupt", Harness.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.fail("second", Harness.runTurn, { _tag: "TurnInterrupted" }),
@@ -2184,17 +2152,16 @@ describe("Sessions", () => {
 			Story.then(
 				unopened,
 				new UserMessage({ content: [{ type: "text", text: "Run" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.when(abandon(unopened.id)),
 			Story.then(
 				unopened,
 				error,
-				new TurnAbandoned({ turn: 1, generation: 0 }),
+				new TurnAbandoned({ turn: 1 }),
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 1,
 				}),
 			),
 			Story.when(
@@ -2212,7 +2179,7 @@ describe("Sessions", () => {
 			Story.then(
 				opened,
 				new UserMessage({ content: [{ type: "text", text: "Run" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 			),
 			Story.when(
 				new RecordModelRequestStart({
@@ -2232,11 +2199,10 @@ describe("Sessions", () => {
 					is_error: true,
 				}),
 				error,
-				new TurnAbandoned({ turn: 1, generation: 0 }),
+				new TurnAbandoned({ turn: 1 }),
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 1,
 				}),
 			),
 			Story.state(opened, { _tag: "Idle", turn: 1 }),
@@ -2267,13 +2233,12 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Slow" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
 				Story.call("turn-1", Harness.runTurn, {
 					session_id: session.id,
 					turn: 1,
-					generation: 0,
 				}),
 				Story.advance("10 minutes"),
 				Story.then(
@@ -2290,32 +2255,29 @@ describe("Sessions", () => {
 							retry_status: { type: "exhausted" },
 						},
 					}),
-					new TurnAbandoned({ turn: 1, generation: 0 }),
+					new TurnAbandoned({ turn: 1 }),
 					new SessionStatusIdle({
 						stop_reason: { type: "retries_exhausted" },
 						turn: 1,
-						generation: 1,
 					}),
 				),
-				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+				Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 				Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 				Story.call("redelivery", Harness.interrupt, {
 					session_id: session.id,
 					turn: 1,
-					generation: 0,
 				}),
 				Story.state(session, { _tag: "Idle", turn: 1 }),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Next" })),
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Next" }] }),
-					new SessionStatusRunning({ turn: 2, generation: 1 }),
+					new SessionStatusRunning({ turn: 2 }),
 					new SpanModelRequestStart({ model_request_start_id: req2 }),
 				),
 				Story.call("turn-2", Harness.runTurn, {
 					session_id: session.id,
 					turn: 2,
-					generation: 1,
 				}),
 				Story.succeed("turn-2", Harness.runTurn, {
 					thinking: null,
@@ -2332,7 +2294,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 3, output_tokens: 1 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2 }),
 				Story.succeed("redelivery", Harness.interrupt, undefined),
@@ -2421,7 +2383,7 @@ describe("Sessions", () => {
 			),
 		)
 		expect(state).toEqual({
-			completed: { _tag: "Idle", turn: 1, generation: 0 },
+			completed: { _tag: "Idle", turn: 1 },
 			archived: { _tag: "Terminated", archived: true },
 			afterCompletion: "AlreadyCancelled",
 			afterArchive: "AlreadyCancelled",
@@ -2448,7 +2410,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Almost done" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
 			Story.call(Harness.runTurn, {
@@ -2477,7 +2439,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 12, output_tokens: 6 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 			),
 			Story.saga(RunTurn, turn1Key, {
 				_tag: "Completed",
@@ -2498,7 +2460,7 @@ describe("Sessions", () => {
 				session,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "Initial" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				...queued,
 			),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Overflow" })),
@@ -2528,7 +2490,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
 			Story.call(Harness.runTurn, {
@@ -2566,9 +2528,8 @@ describe("Sessions", () => {
 				new SessionStatusIdle({
 					stop_reason: { type: "retries_exhausted" },
 					turn: 1,
-					generation: 0,
 				}),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusRunning({ turn: 2 }),
 				new SpanModelRequestStart({ model_request_start_id: req2 }),
 			),
 			Story.saga(RunTurn, turn1Key, {
@@ -2597,7 +2558,7 @@ describe("Sessions", () => {
 					model_usage: { input_tokens: 6, output_tokens: 3 },
 					is_error: false,
 				}),
-				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2 }),
 			),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
@@ -2638,7 +2599,6 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					generation: 0,
 					input: ["Hello"],
 				})
 				return yield* run.result
@@ -2713,7 +2673,6 @@ describe("Sessions", () => {
 					agent_version: 1,
 					environment_id: "env_001",
 					turn: 1,
-					generation: 0,
 					input: ["Hello"],
 				})
 				return yield* run.result
@@ -2758,7 +2717,7 @@ describe("Sessions", () => {
 			Story.then(
 				session,
 				new UserMessage({ content: [{ type: "text", text: "Work" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 			),
 			Story.call(Harness.runTurn, {
@@ -2780,10 +2739,10 @@ describe("Sessions", () => {
 				new SessionStatusTerminated(),
 				new SessionArchived(),
 			),
-			Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
 			Story.state(session, { _tag: "Terminated", archived: true }),
-			Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
+			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.succeed(Harness.interrupt, undefined),
 			Story.succeed(Harness.runTurn, {
 				thinking: null,
@@ -2799,7 +2758,7 @@ describe("Sessions", () => {
 			}),
 			Story.emitted(SessionView, session, [
 				new UserMessage({ content: [{ type: "text", text: "Work" }] }),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
+				new SessionStatusRunning({ turn: 1 }),
 				new SpanModelRequestStart({ model_request_start_id: req1 }),
 				new SpanModelRequestEnd({
 					model_request_start_id: req1,
@@ -2848,7 +2807,7 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Race" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
 				Story.call(Harness.runTurn, {
@@ -2919,7 +2878,7 @@ describe("Sessions", () => {
 				Story.then(
 					session,
 					new UserMessage({ content: [{ type: "text", text: "Disallowed" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 					new SpanModelRequestStart({ model_request_start_id: req1 }),
 				),
 				Story.call(Harness.runTurn, {
@@ -2949,7 +2908,7 @@ describe("Sessions", () => {
 						model_usage: { input_tokens: 4, output_tokens: 6 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1 }),
 				),
 				Story.saga(RunTurn, turn1Key, {
 					_tag: "Completed",
@@ -2966,7 +2925,6 @@ describe("Sessions", () => {
 		const wire = encode({
 			_tag: "Running",
 			turn: 1,
-			generation: 0,
 			open_model_request_id: "req_1",
 			model_requests_started: 1,
 			pending_user_messages: 2,
@@ -2976,7 +2934,6 @@ describe("Sessions", () => {
 			state: {
 				_tag: "Running",
 				turn: 1,
-				generation: 0,
 				open_model_request_id: "req_1",
 				model_requests_started: 1,
 				pending_user_messages: 2,
@@ -2985,7 +2942,6 @@ describe("Sessions", () => {
 		expect(decode(wire)).toEqual({
 			_tag: "Running",
 			turn: 1,
-			generation: 0,
 			open_model_request_id: "req_1",
 			model_requests_started: 1,
 			pending_user_messages: 2,
@@ -2994,7 +2950,7 @@ describe("Sessions", () => {
 			Exit.isFailure(
 				Schema.decodeExit(SessionStateSnapshot)({
 					schema_version: 2,
-					state: { _tag: "Idle", turn: 0, generation: 0 },
+					state: { _tag: "Idle", turn: 0 },
 				}),
 			),
 		).toBe(true)
@@ -3005,12 +2961,7 @@ describe("Sessions", () => {
 		const text = (value: string) => new UserMessage({ content: [{ type: "text", text: value }] })
 		return story(
 			Story.clock(t0),
-			Story.given(
-				session,
-				createdEvent,
-				text("First"),
-				new SessionStatusRunning({ turn: 1, generation: 0 }),
-			),
+			Story.given(session, createdEvent, text("First"), new SessionStatusRunning({ turn: 1 })),
 			Story.view(TurnInput, session, {
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -3030,9 +2981,9 @@ describe("Sessions", () => {
 			}),
 			Story.given(
 				session,
-				new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1, generation: 0 }),
+				new SessionStatusIdle({ stop_reason: { type: "refusal" }, turn: 1 }),
 				text("After refusal"),
-				new SessionStatusRunning({ turn: 2, generation: 0 }),
+				new SessionStatusRunning({ turn: 2 }),
 			),
 			Story.view(TurnInput, session, {
 				agent_id: "agent_001",

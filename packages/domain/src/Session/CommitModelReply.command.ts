@@ -8,7 +8,6 @@ import {
 	MessageText,
 	ModelUsage,
 	NonEmptyString,
-	NonNegativeInt,
 	PositiveInt,
 	SessionEventFields,
 	StopReason,
@@ -32,10 +31,10 @@ export class SpanModelRequestEnd extends Domain.Event(
 	SessionEventFields["span.model_request_end"],
 ) {}
 
-export class SessionStatusIdle extends Domain.Event("session.status_idle", {
-	...SessionEventFields["session.status_idle"],
-	generation: NonNegativeInt,
-}) {}
+export class SessionStatusIdle extends Domain.Event(
+	"session.status_idle",
+	SessionEventFields["session.status_idle"],
+) {}
 
 export class CommitModelReply extends Domain.Command("CommitModelReply", {
 	input: {
