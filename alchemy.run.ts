@@ -10,16 +10,6 @@ export const CLOUDFLARE_STATE_OBSERVABILITY = {
 	logs: { enabled: true, invocationLogs: false },
 } as const
 
-const state = Layer.unwrap(
-	Effect.map(Alchemy.AlchemyContext, (ctx) =>
-		ctx.dev
-			? Alchemy.localState()
-			: Cloudflare.state({
-					observability: CLOUDFLARE_STATE_OBSERVABILITY,
-				}),
-	),
-)
-
 export const inProduction = <E, R>(check: Effect.Effect<void, E, R>) =>
 	Effect.gen(function* () {
 		const ctx = yield* Alchemy.AlchemyContext
@@ -38,10 +28,17 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 		"Checkfu",
 		{
 			providers: Layer.mergeAll(Cloudflare.providers(), DomainCloudflare.providers()),
-			state,
+			state: Layer.unwrap(
+				Effect.gen(function* () {
+					yield* inProduction(baseline)
+					const ctx = yield* Alchemy.AlchemyContext
+					return ctx.dev
+						? Alchemy.localState()
+						: Cloudflare.state({ observability: CLOUDFLARE_STATE_OBSERVABILITY })
+				}),
+			),
 		},
 		Effect.gen(function* () {
-			yield* inProduction(baseline)
 			const api = yield* ApiWorker
 			return {
 				api: api.url.as<string>(),

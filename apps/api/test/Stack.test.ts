@@ -11,6 +11,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import type * as Scope from "effect/Scope"
 import stack, {
 	CLOUDFLARE_STATE_OBSERVABILITY,
 	checkfuStack,
@@ -107,23 +108,27 @@ describe("Alchemy stack and worker entry", () => {
 		}),
 	)
 
-	it.live("refuses to plan a production deploy before any network call", () =>
+	it.live("refuses every way of addressing production before any network call", () =>
 		Effect.gen(function* () {
 			let requests = 0
-			const exit = yield* Alchemist.plan({
-				operation: "deploy",
-				stack: checkfuStack(Effect.die(new Error("baseline refused"))),
-				stage: "production",
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(Alchemist.layer()),
-				Effect.provideService(FetchHttpClient.Fetch, () => {
-					requests += 1
-					return Promise.reject(new Error("no network in this test"))
-				}),
-				Effect.exit,
+			const stack = checkfuStack(Effect.die(new Error("baseline refused")))
+			const refused = <A, E>(operation: Effect.Effect<A, E, Alchemist.Services | Scope.Scope>) =>
+				operation.pipe(
+					Effect.scoped,
+					Effect.provide(Alchemist.layer()),
+					Effect.provideService(FetchHttpClient.Fetch, () => {
+						requests += 1
+						return Promise.reject(new Error("no network in this test"))
+					}),
+					Effect.exit,
+					Effect.map((exit) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "not refused")),
+				)
+			const production = { stack, stage: "production" }
+			expect(yield* refused(Alchemist.plan({ ...production, operation: "deploy" }))).toContain(
+				"baseline refused",
 			)
-			expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "planned").toContain(
+			expect(yield* refused(Alchemist.Drift.scan(production))).toContain("baseline refused")
+			expect(yield* refused(Alchemist.plan({ ...production, operation: "destroy" }))).toContain(
 				"baseline refused",
 			)
 			expect(requests).toBe(0)
