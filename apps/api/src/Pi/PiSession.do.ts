@@ -2,23 +2,14 @@ import * as Cloudflare from "@alchemy.run/cloudflare"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
-import type { Lifecycle } from "agents/lifecycle"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
-import {
-	abortPiDurableTurn,
-	finalizeSettledTurnFromStorage,
-	omitTurnEntriesFromStorage,
-	readAssistantMessageFromStorage,
-	recoverPiDurableTurn,
-	runPiDurableTurn,
-} from "./PiDurableEngine.ts"
+import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
-import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
 type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
@@ -31,7 +22,6 @@ class PiSessionHost {
 }
 
 export const makePiHarnessBackend = (
-	lifecycle: Lifecycle,
 	harness: PiHarness,
 	fence: SqliteTurnFence,
 	apiKeys: Effect.Success<typeof providerApiKeys>,
@@ -46,22 +36,8 @@ export const makePiHarnessBackend = (
 		hasApiKey: (provider) => apiKeys[provider] !== null,
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
-		beginUsage: async (operationId, turn, finalizedPrevious) =>
-			beginTurnUsage(await harness.pi(), operationId, turn, finalizedPrevious),
-		settleUsage: async (operationId) => settleTurnUsage(await harness.pi(), operationId),
-		hasSubmission: async (operationId) => {
-			await lifecycle.start()
-			const storage = await harness.storage()
-			return (
-				(await storage.submissionByRequest(
-					ROOT_CONVERSATION_ID,
-					operationId,
-					BACKGROUND_CONTEXT,
-				)) !== undefined
-			)
-		},
+		pi: () => harness.pi(),
 		ensureRoot: async (agent) => {
-			await lifecycle.start()
 			const pi = await harness.pi()
 			const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
 			if (conversation === undefined) {
@@ -71,11 +47,9 @@ export const makePiHarnessBackend = (
 			}
 		},
 		submit: async (text, operationId) => {
-			await lifecycle.start()
 			await harness.submit(text, { operationId, whenBusy: "followUp", onAbort: "keep" })
 		},
 		wait: async (operationId, signal) => {
-			await lifecycle.start()
 			const result = await harness.wait(operationId, signal === undefined ? {} : { signal })
 			return result.status === "done"
 				? { status: "done" }
@@ -93,31 +67,12 @@ export const makePiHarnessBackend = (
 					fence.markCancelled(operationId)
 					return withLock(
 						Effect.promise(async () => {
-							await lifecycle.start()
 							await harness.abort({ operationId })
 							return true
 						}),
 					)
 				}),
 			),
-		readAnswerEntry: async (operationId) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			const storage = await harness.storage()
-			return readAssistantMessageFromStorage(pi, storage, operationId)
-		},
-		omitEntries: async (operationId) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			const storage = await harness.storage()
-			await omitTurnEntriesFromStorage(pi, storage, operationId)
-		},
-		finalizePrevious: async (operationId) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			const storage = await harness.storage()
-			await finalizeSettledTurnFromStorage(pi, storage, operationId)
-		},
 	}
 }
 
@@ -166,7 +121,7 @@ export const PiSessionLive = PiSession.make(
 				const fence = new SqliteTurnFence({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 				})
-				const backend = makePiHarnessBackend(lifecycle, harness, fence, apiKeys, () => {
+				const backend = makePiHarnessBackend(harness, fence, apiKeys, () => {
 					rawCtx.abort("A turn did not stop when aborted")
 				})
 

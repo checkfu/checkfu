@@ -2,7 +2,7 @@ import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
-import type { AgentChange, EntryId, Harness, Storage } from "@earendil-works/pi-durable"
+import type { AgentChange, EntryId, Harness } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -11,21 +11,16 @@ import * as Fiber from "effect/Fiber"
 import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import type { SupportedProvider } from "./PiCatalog.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
-import type { BeginTurnUsageResult } from "./PiTurnUsage.ts"
+import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
+/** What differs between the session object and a test double; the engine does the rest on Pi. */
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 	readonly hasApiKey: (provider: SupportedProvider) => boolean
 	readonly isCancelled: (operationId: string) => boolean
-	readonly beginUsage: (
-		operationId: string,
-		turn: number,
-		finalizedPrevious?: string,
-	) => Promise<BeginTurnUsageResult>
-	readonly settleUsage: (operationId: string) => Promise<ModelUsage>
-	readonly hasSubmission: (operationId: string) => Promise<boolean>
+	readonly pi: () => Promise<Harness>
 	readonly ensureRoot: (agent: AgentChange) => Promise<void>
 	readonly submit: (text: string, operationId: string) => Promise<void>
 	readonly wait: (
@@ -36,21 +31,16 @@ export interface PiDurableBackend {
 	>
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
 	readonly reset: Effect.Effect<never>
-	readonly readAnswerEntry: (operationId: string) => Promise<AssistantMessage | null>
-	readonly omitEntries: (operationId: string) => Promise<void>
-	readonly finalizePrevious: (operationId: string) => Promise<void>
 }
 
-export const readAssistantMessageFromStorage = async (
+const submissionOf = (pi: Harness, operationId: string) =>
+	pi.commit((tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, operationId), BACKGROUND_CONTEXT)
+
+const readAssistantMessage = async (
 	pi: Harness,
-	storage: Storage,
 	operationId: string,
 ): Promise<AssistantMessage | null> => {
-	const record = await storage.submissionByRequest(
-		ROOT_CONVERSATION_ID,
-		operationId,
-		BACKGROUND_CONTEXT,
-	)
+	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input" || record.status !== "done") {
 		return null
 	}
@@ -75,16 +65,8 @@ export const readAssistantMessageFromStorage = async (
  * records as interrupted or failed, whether the interrupt or failure landed
  * before or after Pi placed the user entry.
  */
-export const omitTurnEntriesFromStorage = async (
-	pi: Harness,
-	storage: Storage,
-	operationId: string,
-): Promise<void> => {
-	const record = await storage.submissionByRequest(
-		ROOT_CONVERSATION_ID,
-		operationId,
-		BACKGROUND_CONTEXT,
-	)
+const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> => {
+	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input") {
 		return
 	}
@@ -125,27 +107,19 @@ const ZERO_MODEL_USAGE: ModelUsage = { input_tokens: 0, output_tokens: 0 }
  * context and omits unanswered or non-committable turns before admitting a
  * successor turn.
  */
-export const finalizeSettledTurnFromStorage = async (
-	pi: Harness,
-	storage: Storage,
-	operationId: string,
-): Promise<void> => {
-	const record = await storage.submissionByRequest(
-		ROOT_CONVERSATION_ID,
-		operationId,
-		BACKGROUND_CONTEXT,
-	)
+const finalizeSettledTurn = async (pi: Harness, operationId: string): Promise<void> => {
+	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input") {
 		return
 	}
 	if (record.status === "unanswered") {
-		await omitTurnEntriesFromStorage(pi, storage, operationId)
+		await omitTurnEntries(pi, operationId)
 		return
 	}
 	if (record.status === "done") {
-		const answer = await readAssistantMessageFromStorage(pi, storage, operationId)
+		const answer = await readAssistantMessage(pi, operationId)
 		if (answer === null || !mapAssistantMessageToOutcome(answer, ZERO_MODEL_USAGE).ok) {
-			await omitTurnEntriesFromStorage(pi, storage, operationId)
+			await omitTurnEntries(pi, operationId)
 		}
 	}
 }
@@ -237,7 +211,8 @@ const admitPiTurnUnderWay = (
 		while (true) {
 			const admitted = yield* backend.withLock(
 				Effect.promise(async () => {
-					if (await backend.hasSubmission(operationId)) {
+					const pi = await backend.pi()
+					if ((await submissionOf(pi, operationId)) !== undefined) {
 						return true
 					}
 					if (backend.isCancelled(operationId)) {
@@ -251,7 +226,7 @@ const admitPiTurnUnderWay = (
 						return false
 					}
 					while (true) {
-						const turnState = await backend.beginUsage(operationId, request.turn, finalizedPrevious)
+						const turnState = await beginTurnUsage(pi, operationId, request.turn, finalizedPrevious)
 						if (turnState.status === "stale") {
 							return false
 						}
@@ -259,7 +234,7 @@ const admitPiTurnUnderWay = (
 							return { waitingFor: turnState.operationId }
 						}
 						if (turnState.status === "finalize") {
-							await backend.finalizePrevious(turnState.operationId)
+							await finalizeSettledTurn(pi, turnState.operationId)
 							finalizedPrevious = turnState.operationId
 							continue
 						}
@@ -268,7 +243,7 @@ const admitPiTurnUnderWay = (
 					// A turn the session never published a reply for (abandoned, failed or interrupted)
 					// must not reach the model, whatever Pi made of it.
 					for (const unpublished of request.unpublishedOperationIds ?? []) {
-						await backend.omitEntries(unpublished)
+						await omitTurnEntries(pi, unpublished)
 					}
 					if (backend.isCancelled(operationId)) {
 						return false
@@ -298,14 +273,15 @@ const resolveSettledPiTurn = (
 ): Effect.Effect<PiTurnOutcome> =>
 	Effect.uninterruptible(
 		Effect.gen(function* () {
+			const pi = yield* Effect.promise(() => backend.pi())
 			if (settled.status === "unanswered") {
 				if (settled.reason === "aborted") {
-					yield* Effect.promise(() => backend.omitEntries(operationId))
-					const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
+					yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+					const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 					return { ok: false, error: { _tag: "TurnInterrupted", model_usage: usage } }
 				}
-				yield* Effect.promise(() => backend.omitEntries(operationId))
-				const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 				yield* Effect.logWarning("pi turn unanswered").pipe(
 					Effect.annotateLogs({
 						operationId,
@@ -319,10 +295,10 @@ const resolveSettledPiTurn = (
 				}
 			}
 
-			const assistantMessage = yield* Effect.promise(() => backend.readAnswerEntry(operationId))
+			const assistantMessage = yield* Effect.promise(() => readAssistantMessage(pi, operationId))
 			if (assistantMessage === null) {
-				yield* Effect.promise(() => backend.omitEntries(operationId))
-				const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 				return {
 					ok: false,
 					error: {
@@ -335,9 +311,9 @@ const resolveSettledPiTurn = (
 				}
 			}
 			if (!mapAssistantMessageToOutcome(assistantMessage, ZERO_MODEL_USAGE).ok) {
-				yield* Effect.promise(() => backend.omitEntries(operationId))
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
 			}
-			const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
+			const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 			return mapAssistantMessageToOutcome(assistantMessage, usage)
 		}),
 	)
@@ -359,7 +335,7 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	}
 	const probe = yield* backend.withLock(
 		Effect.promise(async () => {
-			if (await backend.hasSubmission(operationId)) {
+			if ((await submissionOf(await backend.pi(), operationId)) !== undefined) {
 				return "submitted" as const
 			}
 			return backend.isCancelled(operationId) ? ("cancelled" as const) : ("absent" as const)
