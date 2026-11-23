@@ -35,7 +35,7 @@ export const PiTurnReply = Schema.Struct({
 	stop_reason: ModelStopReason,
 })
 
-// The harness sends a provider's error as it got it; the API clamps it to the domain's limits.
+// Not held to the domain's length limits: the API clamps a failure after it arrives.
 export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
 	error_type: Schema.String,
 	message: Schema.String,
