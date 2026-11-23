@@ -1,4 +1,4 @@
-import { AbandonTurn, TurnAbandoned } from "./AbandonTurn.command.ts"
+import { AbandonTurn, SessionErrorEvent, TurnAbandoned } from "./AbandonTurn.command.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
 import {
@@ -6,26 +6,22 @@ import {
 	SessionArchived,
 	SessionStatusTerminated,
 } from "./ArchiveSession.command.ts"
-import { CommitModelReply } from "./CommitModelReply.command.ts"
-import { CompleteTurn, SessionStatusIdle } from "./CompleteTurn.command.ts"
+import {
+	AgentMessage,
+	AgentThinking,
+	CommitModelReply,
+	SessionStatusIdle,
+	SpanModelRequestEnd,
+} from "./CommitModelReply.command.ts"
 import { CreateSession, SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
-import { OpenModelRequests } from "./OpenModelRequests.rejection.ts"
-import { AgentMessage, RecordAgentMessage } from "./RecordAgentMessage.command.ts"
-import { AgentThinking, RecordAgentThinking } from "./RecordAgentThinking.command.ts"
-import {
-	RecordModelRequestEnd,
-	SpanModelRequestEnd,
-	UnknownModelRequest,
-} from "./RecordModelRequestEnd.command.ts"
 import {
 	DuplicateModelRequest,
 	OutOfOrderModelRequest,
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
-import { RecordSessionError, SessionErrorEvent } from "./RecordSessionError.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -40,6 +36,7 @@ import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import { NonEmptyString, NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
 import type { StopReason, ModelUsage } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
+import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
 export const SESSION_STATE_SCHEMA_VERSION = 1 as const
@@ -145,15 +142,10 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserMessage,
 		SendUserInterrupt,
 		RecordModelRequestStart,
-		RecordAgentThinking,
-		RecordAgentMessage,
-		RecordModelRequestEnd,
-		CompleteTurn,
 		CommitModelReply,
 		FailModelRequest,
 		InterruptModelRequest,
 		AbandonTurn,
-		RecordSessionError,
 		ArchiveSession,
 	],
 	keyOf: (cmd) => cmd.session_id,
@@ -291,59 +283,6 @@ export class Session extends Domain.Aggregate("Session", {
 			return [new SpanModelRequestStart({ model_request_start_id: cmd.model_request_start_id })]
 		},
 
-		RecordAgentThinking: (state, cmd, ctx) => {
-			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			return running._tag === "Running" ? [new AgentThinking({ thinking: cmd.thinking })] : running
-		},
-
-		RecordAgentMessage: (state, cmd, ctx) => {
-			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			return running._tag === "Running"
-				? [new AgentMessage({ content: [{ type: "text", text: cmd.text }] })]
-				: running
-		},
-
-		RecordModelRequestEnd: (state, cmd, ctx) => {
-			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") {
-				return running
-			}
-			if (
-				running.open_model_request_id !== cmd.model_request_start_id ||
-				running.model_requests_started !== cmd.request_seq
-			) {
-				return new UnknownModelRequest({
-					session_id: ctx.id,
-					model_request_start_id: cmd.model_request_start_id,
-				})
-			}
-			return [
-				new SpanModelRequestEnd({
-					model_request_start_id: cmd.model_request_start_id,
-					model_usage: cmd.model_usage,
-					is_error: cmd.is_error,
-				}),
-			]
-		},
-
-		CompleteTurn: (state, cmd, ctx) => {
-			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") {
-				return running
-			}
-			if (running.open_model_request_id !== null) {
-				return new OpenModelRequests({
-					session_id: ctx.id,
-					open_model_request_id: running.open_model_request_id,
-				})
-			}
-			const idle = new SessionStatusIdle({ stop_reason: cmd.stop_reason })
-			if (shouldDrainQueue(running.pending_user_messages, cmd.stop_reason)) {
-				return [idle, new SessionStatusRunning()]
-			}
-			return [idle]
-		},
-
 		CommitModelReply: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
 			if (running._tag !== "Running") {
@@ -448,57 +387,6 @@ export class Session extends Domain.Aggregate("Session", {
 				return []
 			}
 			return abandonTurn(state, cmd.error_type, cmd.message, { input_tokens: 0, output_tokens: 0 })
-		},
-
-		RecordSessionError: (state, cmd, ctx) => {
-			const active = requireActive(state, ctx.id)
-			if (active._tag !== "Idle" && active._tag !== "Running") {
-				return active
-			}
-			const errorEvent = new SessionErrorEvent({ error: cmd.error })
-			const terminateWithError = () =>
-				active._tag === "Running" && active.open_model_request_id !== null
-					? [
-							new SpanModelRequestEnd({
-								model_request_start_id: active.open_model_request_id,
-								model_usage: { input_tokens: 0, output_tokens: 0 },
-								is_error: true,
-							}),
-							errorEvent,
-							new SessionStatusTerminated(),
-						]
-					: [errorEvent, new SessionStatusTerminated()]
-			if (cmd.turn !== null) {
-				if (active._tag !== "Running") {
-					return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
-				}
-				if (active.turn !== cmd.turn) {
-					return new StaleTurn({
-						session_id: ctx.id,
-						active_turn: active.turn,
-						received_turn: cmd.turn,
-					})
-				}
-				if (cmd.error.retry_status.type === "terminal") {
-					return terminateWithError()
-				}
-				if (cmd.error.retry_status.type === "exhausted") {
-					if (active.open_model_request_id !== null) {
-						return new OpenModelRequests({
-							session_id: ctx.id,
-							open_model_request_id: active.open_model_request_id,
-						})
-					}
-					const stop_reason = { type: "retries_exhausted" as const }
-					const idle = new SessionStatusIdle({ stop_reason })
-					if (shouldDrainQueue(active.pending_user_messages, stop_reason)) {
-						return [errorEvent, idle, new SessionStatusRunning()]
-					}
-					return [errorEvent, idle]
-				}
-				return [errorEvent]
-			}
-			return cmd.error.retry_status.type === "terminal" ? terminateWithError() : [errorEvent]
 		},
 
 		ArchiveSession: (state, _cmd, ctx) => {

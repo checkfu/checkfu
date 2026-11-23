@@ -12,19 +12,18 @@ import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
 import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"
 import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { SessionErrorEvent } from "@checkfu/domain/Session/AbandonTurn.command"
 import {
 	SessionArchived,
 	SessionStatusTerminated,
 } from "@checkfu/domain/Session/ArchiveSession.command"
-import { SessionStatusIdle } from "@checkfu/domain/Session/CompleteTurn.command"
-import { AgentMessage } from "@checkfu/domain/Session/RecordAgentMessage.command"
-import { AgentThinking } from "@checkfu/domain/Session/RecordAgentThinking.command"
-import { SpanModelRequestEnd } from "@checkfu/domain/Session/RecordModelRequestEnd.command"
-import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
 import {
-	RecordSessionError,
-	SessionErrorEvent,
-} from "@checkfu/domain/Session/RecordSessionError.command"
+	AgentMessage,
+	AgentThinking,
+	SessionStatusIdle,
+	SpanModelRequestEnd,
+} from "@checkfu/domain/Session/CommitModelReply.command"
+import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -61,6 +60,11 @@ import {
 	readSseUntil,
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
+
+const testNotice = (message: string) =>
+	new SessionErrorEvent({
+		error: { type: "test_notice", message, retry_status: { type: "retrying" } },
+	})
 
 describe("Session event batching, interrupts, and SSE streaming", () => {
 	it("reports the confirmed prefix of a batch without logging user message text when a later command fails unexpectedly", async () => {
@@ -779,18 +783,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const extraErrors = SSE_CATCHUP_PAGE_SIZE + 15
 					let lastReceipt: { readonly stream: string; readonly version: number } | undefined
 					for (let i = 1; i <= extraErrors; i++) {
-						const receipt = yield* sessions.send(
-							new RecordSessionError({
-								session_id: sessionId,
-								turn: null,
-								error: {
-									type: "test_notice",
-									message: `Event ${i}`,
-									retry_status: { type: "retrying" },
-								},
-							}),
-						)
-						lastReceipt = receipt.commits[0]
+						lastReceipt = yield* sessions.import(sessionId, [testNotice(`Event ${i}`)], {
+							commandId: `test-notice-${i}`,
+							expectedVersion: lastReceipt?.version ?? 1,
+						})
 					}
 					if (lastReceipt !== undefined) {
 						yield* sessionViews.get(Session.ref(sessionId), { atLeast: lastReceipt })
@@ -815,17 +811,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 
 					// Let the reader catch up before appending another event.
 					yield* Effect.sleep("50 millis")
-					yield* sessions.send(
-						new RecordSessionError({
-							session_id: sessionId,
-							turn: null,
-							error: {
-								type: "test_notice",
-								message: "Live after catchup",
-								retry_status: { type: "retrying" },
-							},
-						}),
-					)
+					yield* sessions.import(sessionId, [testNotice("Live after catchup")], {
+						commandId: "test-notice-live",
+						expectedVersion: lastReceipt?.version ?? 1,
+					})
 
 					const allFrames = yield* Effect.promise(() => readerPromise)
 					// SessionView emits extraErrors (115) + 1 live = 116 frames, strictly sequential with no gaps or duplicates
@@ -2135,17 +2124,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(getCalls).toBe(0)
 
 					// Emit one live event: stream must wake via snapshot and fetch a single list page.
-					yield* sessions.send(
-						new RecordSessionError({
-							session_id: sessionId,
-							turn: null,
-							error: {
-								type: "test_notice",
-								message: "Wake idle stream",
-								retry_status: { type: "retrying" },
-							},
-						}),
-					)
+					yield* sessions.import(sessionId, [testNotice("Wake idle stream")], {
+						commandId: "test-notice-wake",
+						expectedVersion: 1,
+					})
 					const frames = yield* Effect.promise(() => readerPromise)
 					expect(frames).toHaveLength(1)
 					expect(listCalls).toBe(1)

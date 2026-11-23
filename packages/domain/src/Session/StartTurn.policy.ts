@@ -2,7 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import * as Effect from "effect/Effect"
 import { AbandonTurn } from "./AbandonTurn.command.ts"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
-import { SessionStatusIdle } from "./CompleteTurn.command.ts"
+import { SessionStatusIdle } from "./CommitModelReply.command.ts"
 import {
 	DEFAULT_MODEL_TIMEOUT_MS,
 	TURN_TIMEOUT,

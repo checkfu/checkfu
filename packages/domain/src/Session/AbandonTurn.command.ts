@@ -1,10 +1,12 @@
 import * as Domain from "@alchemy.run/domain"
-import { SessionStatusIdle } from "./CompleteTurn.command.ts"
-import { SpanModelRequestEnd } from "./RecordModelRequestEnd.command.ts"
-import { SessionErrorEvent } from "./RecordSessionError.command.ts"
+import { SessionStatusIdle, SpanModelRequestEnd } from "./CommitModelReply.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
-import { ErrorMessage, ErrorType, PositiveInt } from "./SessionTypes.ts"
+import { ErrorMessage, ErrorType, PositiveInt, SessionErrorBody } from "./SessionTypes.ts"
+
+export class SessionErrorEvent extends Domain.Event("session.error", {
+	error: SessionErrorBody,
+}) {}
 
 export class TurnAbandoned extends Domain.Event("turn.abandoned") {}
 
