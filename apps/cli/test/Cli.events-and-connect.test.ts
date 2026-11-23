@@ -1,5 +1,13 @@
 import { spawn, spawnSync } from "node:child_process"
-import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+	chmodSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs"
 import * as Http from "node:http"
 import { tmpdir } from "node:os"
 import { basename, delimiter, join } from "node:path"
@@ -2854,6 +2862,8 @@ describe("CLI sessions:events and sessions connect", () => {
 		const binScript = readFileSync(new URL("../bin/checkfu.mjs", import.meta.url), "utf8")
 		const cliBunfig = readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")
 		expect(readme).toContain("node apps/cli/bin/checkfu.mjs --help")
+		expect(readme).toContain("trusted absolute Node")
+		expect(readme).toContain("#!/usr/bin/env node")
 		expect(readme).not.toContain("apps/cli/src/main.ts")
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
@@ -3222,6 +3232,61 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				expect(pidStreamResult.timedOut).toBe(false)
 				expect(pidStreamResult.rc).toBe(130)
 				expect(pidStreamResult.output).toContain("session.status_running")
+
+				// 3) Non-TTY (all streams redirected) PID-targeted SIGINT cancels a long-lived stream cleanly
+				const nodeExecutable = basename(process.execPath).toLowerCase().startsWith("node")
+					? process.execPath
+					: "node"
+				const nonTtyStreamResult = await new Promise<{
+					readonly code: number | null
+					readonly signal: NodeJS.Signals | null
+					readonly timedOut: boolean
+					readonly stdout: string
+				}>((resolve, reject) => {
+					const child = spawn(
+						nodeExecutable,
+						[
+							"apps/cli/bin/checkfu.mjs",
+							"sessions:events",
+							"stream",
+							"--session-id",
+							"sess_pty",
+							"--base-url",
+							`http://127.0.0.1:${port}`,
+						],
+						{
+							cwd: repoRoot,
+							env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+							stdio: ["ignore", "pipe", "pipe"],
+						},
+					)
+					let stdout = ""
+					let sent = false
+					let timedOut = false
+					const timer = setTimeout(() => {
+						timedOut = true
+						child.kill("SIGKILL")
+					}, 4500)
+					child.stdout.setEncoding("utf8")
+					child.stdout.on("data", (chunk: string) => {
+						stdout += chunk
+						if (!sent && stdout.includes("session.status_running")) {
+							sent = true
+							child.kill("SIGINT")
+						}
+					})
+					child.on("error", (err) => {
+						clearTimeout(timer)
+						reject(err)
+					})
+					child.on("close", (code, signal) => {
+						clearTimeout(timer)
+						resolve({ code, signal, timedOut, stdout })
+					})
+				})
+				expect(nonTtyStreamResult.timedOut).toBe(false)
+				expect(nonTtyStreamResult.code).toBe(130)
+				expect(nonTtyStreamResult.stdout).toContain("session.status_running")
 			} finally {
 				for (const res of openSseResponses) {
 					res.end()
@@ -4327,14 +4392,25 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
 			)
 			writeFileSync(join(untrustedDir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
-			// Plant untrusted `bun` / `bun.exe` decoys inside cwd; the launcher must resolve Bun
-			// from trusted absolute PATH/install directories and never execute cwd binaries
+			// Plant untrusted `node` / `bun` decoys in cwd AND under `<cwd>/node_modules/.bin`
+			// (matching package-runner prepended PATH entries). Invoking checkfu.mjs through a
+			// trusted absolute Node path must never execute any cwd or project-local binary.
+			const projectLocalBinDir = join(untrustedDir, "node_modules", ".bin")
+			mkdirSync(projectLocalBinDir, { recursive: true })
+			const fakePosixNode = join(untrustedDir, "node")
 			const fakePosixBun = join(untrustedDir, "bun")
+			const fakeLocalBinBun = join(projectLocalBinDir, "bun")
+			writeFileSync(fakePosixNode, '#!/bin/sh\necho "FAKE_NODE_EXECUTED" >&2\nexit 97\n')
 			writeFileSync(fakePosixBun, '#!/bin/sh\necho "FAKE_BUN_EXECUTED" >&2\nexit 98\n')
+			writeFileSync(fakeLocalBinBun, '#!/bin/sh\necho "FAKE_LOCAL_BUN_EXECUTED" >&2\nexit 96\n')
 			if (process.platform !== "win32") {
+				chmodSync(fakePosixNode, 0o755)
 				chmodSync(fakePosixBun, 0o755)
+				chmodSync(fakeLocalBinBun, 0o755)
 			}
+			writeFileSync(join(untrustedDir, "node.exe"), "not-a-trusted-node-executable")
 			writeFileSync(join(untrustedDir, "bun.exe"), "not-a-trusted-bun-executable")
+			writeFileSync(join(projectLocalBinDir, "bun.exe"), "not-a-trusted-bun-executable")
 			const baseEnv: Record<string, string> = {}
 			for (const [k, v] of Object.entries(process.env)) {
 				if (v !== undefined && !k.startsWith("CHECKFU_")) {
@@ -4347,7 +4423,13 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					: "PATH"
 			const poisonedPathEnv = {
 				...baseEnv,
-				[pathEnvKey]: ["", ".", untrustedDir, baseEnv[pathEnvKey] ?? ""].join(delimiter),
+				[pathEnvKey]: ["", ".", untrustedDir, projectLocalBinDir, baseEnv[pathEnvKey] ?? ""].join(
+					delimiter,
+				),
+			} satisfies Record<string, string>
+			const projectLocalPathEnv = {
+				...baseEnv,
+				[pathEnvKey]: [projectLocalBinDir, baseEnv[pathEnvKey] ?? ""].join(delimiter),
 			} satisfies Record<string, string>
 
 			const runSubprocess = (
@@ -4380,25 +4462,16 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					child.on("close", (status) => resolve({ status, stdout, stderr }))
 				})
 
-			// Always exercise the real cross-platform `apps/cli/bin/checkfu.mjs` entry point
-			// (direct via shebang on POSIX, via Node on Windows — never bypassing the bin)
 			const nodeExecutable = basename(process.execPath).toLowerCase().startsWith("node")
 				? process.execPath
 				: "node"
-			const invokeLauncher = (
-				cliArgs: ReadonlyArray<string>,
-				env: Record<string, string>,
-				cwd = untrustedDir,
-			) =>
-				process.platform === "win32"
-					? runSubprocess(nodeExecutable, [binPath, ...cliArgs], env, cwd)
-					: runSubprocess(binPath, cliArgs, env, cwd)
 
-			// 1a) Supported launcher (`apps/cli/bin/checkfu.mjs`) resolves Bun from trusted absolute
-			//     directories (ignoring cwd decoys and relative/cwd PATH entries) and pins --no-env-file
-			//     and --config=... before Bun starts, ignoring cwd .env* and bunfig.toml preloads
-			const launcherResult = await invokeLauncher(
-				["sessions", "retrieve", "--session-id", "sess_env"],
+			// 1a) Trusted absolute Node invocation (`<abs-node> apps/cli/bin/checkfu.mjs`) protects
+			//     credentials even when PATH contains empty/relative/cwd/node_modules/.bin entries
+			//     and untrusted `node`, `bun`, `.env*`, and `bunfig.toml` decoys exist in cwd
+			const launcherResult = await runSubprocess(
+				nodeExecutable,
+				[binPath, "sessions", "retrieve", "--session-id", "sess_env"],
 				{
 					...poisonedPathEnv,
 					CHECKFU_API_KEY: "ck_exported_secret",
@@ -4407,7 +4480,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			)
 			expect(launcherResult.status).toBe(0)
 			expect(launcherResult.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(launcherResult.stderr).not.toContain("FAKE_NODE_EXECUTED")
 			expect(launcherResult.stderr).not.toContain("FAKE_BUN_EXECUTED")
+			expect(launcherResult.stderr).not.toContain("FAKE_LOCAL_BUN_EXECUTED")
 			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 
@@ -4424,9 +4499,10 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			expect(launcherNoEnv.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(evilHits).toBe(0)
 
-			// 1c) Installed/symlinked bin invocation (symlink via realpathSync on POSIX, `node bin/checkfu.mjs`
-			//     on Windows) resolves the pinned bunfig relative to the real launcher path and routes only to
-			//     the explicit --base-url ephemeral server
+			// 1c) Installed/symlinked `#!/usr/bin/env node` bin invocation (on a trusted Node PATH that
+			//     still includes a package-runner-prepended `<cwd>/node_modules/.bin` containing a decoy
+			//     `bun`) resolves the pinned bunfig relative to the real launcher path, skips the
+			//     project-local Bun decoy, and routes only to the explicit --base-url ephemeral server
 			const explicitUrlArgs = [
 				"sessions",
 				"retrieve",
@@ -4436,7 +4512,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				`http://127.0.0.1:${legitPort}`,
 			]
 			const explicitUrlEnv = {
-				...baseEnv,
+				...projectLocalPathEnv,
 				CHECKFU_API_KEY: "ck_exported_secret",
 			}
 			const installedBinResult =
@@ -4449,6 +4525,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						})()
 			expect(installedBinResult.status).toBe(0)
 			expect(installedBinResult.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(installedBinResult.stderr).not.toContain("FAKE_LOCAL_BUN_EXECUTED")
 			expect(legitHits).toBe(2)
 			expect(evilHits).toBe(0)
 

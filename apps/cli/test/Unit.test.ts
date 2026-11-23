@@ -11,6 +11,7 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
 import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
+import { createLauncherSigintBridge } from "../bin/sigint-bridge.mjs"
 import {
 	DEFAULT_API_URL,
 	makeCheckfuClient,
@@ -1882,7 +1883,7 @@ describe("Transform and formatOutput", () => {
 })
 
 describe("resolveBunExecutable", () => {
-	it("resolves trusted absolute Bun paths on Windows while excluding cwd, relative, and drive-relative entries", () => {
+	it("resolves trusted absolute Bun paths on Windows while excluding cwd, project-local trees, relative, and drive-relative entries", () => {
 		const winExecutables = new Set([
 			String.raw`c:\untrusted\repo\bun.exe`,
 			String.raw`c:\untrusted\repo\sub\bun.exe`,
@@ -1892,8 +1893,9 @@ describe("resolveBunExecutable", () => {
 		])
 		const isWinExec = (candidate: string) => winExecutables.has(candidate.toLowerCase())
 
-		// Excludes bare cwd, relative, empty, drive-relative (\bin, C:bin), and explicit cwd entries
-		// (any casing / trailing slash / ..) before selecting quoted absolute PATH entry
+		// Excludes bare cwd, relative, empty, drive-relative (\bin, C:bin), explicit cwd entries,
+		// AND absolute project-local directories like <cwd>\node_modules\.bin before selecting
+		// the quoted absolute PATH entry
 		const resolved = resolveBunExecutable({
 			platform: "win32",
 			cwd: String.raw`C:\untrusted\repo`,
@@ -1910,6 +1912,8 @@ describe("resolveBunExecutable", () => {
 					String.raw`C:\untrusted\repo`,
 					"c:\\UNTRUSTED\\REPO\\",
 					String.raw`C:\untrusted\repo\..\repo`,
+					String.raw`C:\untrusted\repo\node_modules\.bin`,
+					String.raw`c:\UNTRUSTED\REPO\sub`,
 					String.raw`"C:\Program Files\Bun\bin"`,
 				].join(";"),
 			},
@@ -1918,9 +1922,11 @@ describe("resolveBunExecutable", () => {
 		})
 		expect(resolved).toBe(String.raw`C:\Program Files\Bun\bin\bun.exe`)
 
-		// Running from %USERPROFILE% still resolves %USERPROFILE%\.bun\bin\bun.exe while skipping %USERPROFILE%\bun.exe
+		// Running from %USERPROFILE% excludes %USERPROFILE%\bun.exe and %USERPROFILE%\node_modules\.bin\bun.exe
+		// while still resolving the explicitly trusted %USERPROFILE%\.bun\bin\bun.exe
 		const homeExecutables = new Set([
 			String.raw`c:\users\alice\bun.exe`,
+			String.raw`c:\users\alice\node_modules\.bin\bun.exe`,
 			String.raw`c:\users\alice\.bun\bin\bun.exe`,
 		])
 		expect(
@@ -1928,31 +1934,43 @@ describe("resolveBunExecutable", () => {
 				platform: "win32",
 				cwd: String.raw`C:\Users\alice`,
 				homedir: String.raw`C:\Users\alice`,
-				env: { Path: String.raw`C:\Users\alice;.` },
+				env: {
+					Path: [
+						String.raw`C:\Users\alice`,
+						String.raw`C:\Users\alice\node_modules\.bin`,
+						".",
+					].join(";"),
+				},
 				isExecutableFile: (candidate) => homeExecutables.has(candidate.toLowerCase()),
 				realpath: (target) => target,
 			}),
 		).toBe(String.raw`C:\Users\alice\.bun\bin\bun.exe`)
 
-		// Falls back to trusted absolute BUN_INSTALL\bin, while ignoring relative or cwd-rooted BUN_INSTALL
+		// Falls back to trusted absolute BUN_INSTALL\bin, while ignoring relative or project-local BUN_INSTALL
 		const installExecutables = new Set([
 			String.raw`c:\untrusted\repo\bun.exe`,
 			String.raw`c:\untrusted\repo\bin\bun.exe`,
+			String.raw`c:\untrusted\repo\.bun\bin\bun.exe`,
 			String.raw`c:\tools\bun\bin\bun.exe`,
 		])
-		expect(
-			resolveBunExecutable({
-				platform: "win32",
-				cwd: String.raw`C:\untrusted\repo`,
-				homedir: String.raw`C:\Users\alice`,
-				env: {
-					PATH: String.raw`.;C:\untrusted\repo`,
-					BUN_INSTALL: String.raw`C:\untrusted\repo`,
-				},
-				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
-				realpath: (target) => target,
-			}),
-		).toBeNull()
+		for (const untrustedBunInstall of [
+			String.raw`C:\untrusted\repo`,
+			String.raw`C:\untrusted\repo\.bun`,
+		]) {
+			expect(
+				resolveBunExecutable({
+					platform: "win32",
+					cwd: String.raw`C:\untrusted\repo`,
+					homedir: String.raw`C:\Users\alice`,
+					env: {
+						PATH: String.raw`.;C:\untrusted\repo;C:\untrusted\repo\node_modules\.bin`,
+						BUN_INSTALL: untrustedBunInstall,
+					},
+					isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
+					realpath: (target) => target,
+				}),
+			).toBeNull()
+		}
 		expect(
 			resolveBunExecutable({
 				platform: "win32",
@@ -1968,18 +1986,27 @@ describe("resolveBunExecutable", () => {
 		).toBe(String.raw`C:\tools\bun\bin\bun.exe`)
 	})
 
-	it("resolves trusted absolute Bun paths on POSIX while excluding empty/relative PATH entries and cwd symlinks", () => {
+	it("resolves trusted absolute Bun paths on POSIX while excluding project-local PATH entries and symlinks into the project tree", () => {
 		const posixExecutables = new Set([
 			"/private/var/folders/untrusted/bun",
 			"/var/folders/untrusted/bun",
+			"/var/folders/untrusted/node_modules/.bin/bun",
+			"/private/var/folders/untrusted/node_modules/.bin/bun",
 			"/tmp/symlink-bin/bun",
+			"/tmp/symlink-nested-bin/bun",
 			"/opt/bun/bin/bun",
 		])
 		const posixRealpaths = new Map<string, string>([
 			["/var/folders/untrusted", "/private/var/folders/untrusted"],
 			["/private/var/folders/untrusted", "/private/var/folders/untrusted"],
+			[
+				"/var/folders/untrusted/node_modules/.bin",
+				"/private/var/folders/untrusted/node_modules/.bin",
+			],
 			["/tmp/symlink-bin", "/tmp/symlink-bin"],
 			["/tmp/symlink-bin/bun", "/private/var/folders/untrusted/bun"],
+			["/tmp/symlink-nested-bin", "/tmp/symlink-nested-bin"],
+			["/tmp/symlink-nested-bin/bun", "/private/var/folders/untrusted/node_modules/evil/bun"],
 			["/opt/bun/bin", "/opt/bun/bin"],
 			["/opt/bun/bin/bun", "/opt/bun/bin/bun"],
 		])
@@ -1988,26 +2015,169 @@ describe("resolveBunExecutable", () => {
 			cwd: "/var/folders/untrusted",
 			homedir: "/Users/alice",
 			env: {
-				PATH: ":/private/var/folders/untrusted:.:./bin:/tmp/symlink-bin:/opt/bun/bin:",
+				PATH: [
+					"",
+					"/private/var/folders/untrusted",
+					"/var/folders/untrusted/node_modules/.bin",
+					"/private/var/folders/untrusted/node_modules/.bin",
+					".",
+					"./bin",
+					"/tmp/symlink-bin",
+					"/tmp/symlink-nested-bin",
+					"/opt/bun/bin",
+					"",
+				].join(":"),
 			},
 			isExecutableFile: (candidate) => posixExecutables.has(candidate),
 			realpath: (target) => posixRealpaths.get(target) ?? target,
 		})
 		expect(resolved).toBe("/opt/bun/bin/bun")
 
-		// Fails closed with null when only cwd/relative candidates exist
+		// Running from $HOME excludes $HOME/node_modules/.bin and symlinks escaping ~/.bun into $HOME,
+		// while resolving legitimate ~/.bun/bin/bun
+		const homeExecutables = new Set([
+			"/Users/alice/node_modules/.bin/bun",
+			"/Users/alice/.bun/bin/bun",
+		])
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/Users/alice",
+				homedir: "/Users/alice",
+				env: { PATH: "/Users/alice/node_modules/.bin:/Users/alice/.bun/bin" },
+				isExecutableFile: (candidate) => homeExecutables.has(candidate),
+				realpath: (target) =>
+					target === "/Users/alice/.bun/bin/bun" ? "/Users/alice/evil/bun" : target,
+			}),
+		).toBeNull()
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/Users/alice",
+				homedir: "/Users/alice",
+				env: { PATH: "/Users/alice/node_modules/.bin:/Users/alice/.bun/bin" },
+				isExecutableFile: (candidate) => homeExecutables.has(candidate),
+				realpath: (target) => target,
+			}),
+		).toBe("/Users/alice/.bun/bin/bun")
+
+		// Running from / allows explicitly trusted Homebrew installation symlinked into /opt/homebrew/Cellar
+		// while still rejecting arbitrary directories like /tmp/random
+		expect(
+			resolveBunExecutable({
+				platform: "darwin",
+				cwd: "/",
+				homedir: "/Users/alice",
+				env: { PATH: "/tmp/random:/opt/homebrew/bin" },
+				isExecutableFile: (candidate) =>
+					candidate === "/tmp/random/bun" || candidate === "/opt/homebrew/bin/bun",
+				realpath: (target) =>
+					target === "/opt/homebrew/bin/bun" ? "/opt/homebrew/Cellar/bun/1.4.2/bin/bun" : target,
+			}),
+		).toBe("/opt/homebrew/bin/bun")
+
+		// Fails closed with null when only project-local/relative candidates exist
 		expect(
 			resolveBunExecutable({
 				platform: "linux",
 				cwd: "/tmp/untrusted",
 				homedir: "/home/alice",
 				env: {
-					PATH: ".:./bin:/tmp/untrusted",
-					BUN_INSTALL: "./relative-bun",
+					PATH: ".:./bin:/tmp/untrusted:/tmp/untrusted/node_modules/.bin",
+					BUN_INSTALL: "/tmp/untrusted/.bun",
 				},
-				isExecutableFile: (candidate) => candidate === "/tmp/untrusted/bun",
+				isExecutableFile: (candidate) =>
+					candidate === "/tmp/untrusted/bun" ||
+					candidate === "/tmp/untrusted/node_modules/.bin/bun" ||
+					candidate === "/tmp/untrusted/.bun/bin/bun",
 				realpath: (target) => target,
 			}),
 		).toBeNull()
+	})
+})
+
+describe("createLauncherSigintBridge", () => {
+	it("retains non-TTY startup SIGINT for IPC delivery on readiness when the child survives the OS signal", () => {
+		let ipcSigints = 0
+		let osSigints = 0
+		const connected = true
+		const bridge = createLauncherSigintBridge({
+			hasTerminal: false,
+			isChildAlive: () => true,
+			isConnected: () => connected,
+			sendIpcSigint: () => {
+				ipcSigints += 1
+				return true
+			},
+			forwardOsSigint: () => {
+				osSigints += 1
+			},
+		})
+
+		// Non-TTY SIGINT arrives after main.ts installed onOsSigint (ignoring OS SIGINT)
+		// but before the launcher processes checkfu:sigint-ready:
+		// OS SIGINT is forwarded (in case Bun hasn't installed onOsSigint yet) AND the
+		// interrupt is queued so it delivers via IPC once readiness arrives.
+		bridge.onSigint()
+		expect(osSigints).toBe(1)
+		expect(ipcSigints).toBe(0)
+
+		bridge.onReady()
+		expect(ipcSigints).toBe(1)
+		expect(osSigints).toBe(1)
+
+		// Subsequent non-TTY SIGINTs in steady state go solely over IPC (no duplicate OS SIGINT)
+		bridge.onSigint()
+		expect(ipcSigints).toBe(2)
+		expect(osSigints).toBe(1)
+	})
+
+	it("queues TTY startup SIGINT without double-forwarding and falls back to OS SIGINT after disconnect", () => {
+		let ipcSigints = 0
+		let osSigints = 0
+		let connected = true
+		const ttyBridge = createLauncherSigintBridge({
+			hasTerminal: true,
+			isChildAlive: () => true,
+			isConnected: () => connected,
+			sendIpcSigint: () => {
+				ipcSigints += 1
+				return true
+			},
+			forwardOsSigint: () => {
+				osSigints += 1
+			},
+		})
+
+		// 1st TTY SIGINT before ready queues for IPC without forwarding OS SIGINT
+		ttyBridge.onSigint()
+		expect(osSigints).toBe(0)
+		expect(ipcSigints).toBe(0)
+		ttyBridge.onReady()
+		expect(ipcSigints).toBe(1)
+		expect(osSigints).toBe(0)
+
+		// After disconnect, SIGINT falls back to forwarding OS SIGINT
+		connected = false
+		ttyBridge.onDisconnect()
+		ttyBridge.onSigint()
+		expect(osSigints).toBe(1)
+		expect(ipcSigints).toBe(1)
+
+		// 2nd TTY SIGINT while still stuck pre-ready forwards OS SIGINT
+		let stuckOsSigints = 0
+		const stuckTtyBridge = createLauncherSigintBridge({
+			hasTerminal: true,
+			isChildAlive: () => true,
+			isConnected: () => true,
+			sendIpcSigint: () => true,
+			forwardOsSigint: () => {
+				stuckOsSigints += 1
+			},
+		})
+		stuckTtyBridge.onSigint()
+		expect(stuckOsSigints).toBe(0)
+		stuckTtyBridge.onSigint()
+		expect(stuckOsSigints).toBe(1)
 	})
 })
