@@ -81,7 +81,6 @@ export interface CliRunOptions {
 	readonly stdoutIsTerminal?: boolean
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
-	readonly cloudflareProfiles?: ReadonlyArray<string>
 	readonly spawn?: (args: ReadonlyArray<string>) => {
 		readonly exitCode: number
 		readonly stdout?: string
@@ -237,14 +236,16 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						if (command._tag !== "StandardCommand") {
 							return Effect.die("unused")
 						}
-						const args = command.args.map(String)
-						const listsProfiles = args[0]?.endsWith("cloudflare-profiles.ts") === true
-						if (options?.spawn === undefined && !listsProfiles) {
+						if (options?.spawn === undefined) {
 							return Effect.die("unused")
 						}
-						const result = listsProfiles
-							? { exitCode: 0, stdout: JSON.stringify(options?.cloudflareProfiles ?? []) }
-							: (options?.spawn?.(args) ?? { exitCode: 1 })
+						// Calls to the Alchemy query script reach `spawn` as `query <question> ...`.
+						const [program = "", ...rest] = command.args.map(String)
+						const result = options.spawn(
+							program.endsWith("alchemy-query.ts")
+								? [program, "query", ...rest]
+								: [program, ...rest],
+						)
 						const stdout = Stream.make(new TextEncoder().encode(result.stdout ?? ""))
 						return Effect.succeed(
 							ChildProcessSpawner.makeHandle({

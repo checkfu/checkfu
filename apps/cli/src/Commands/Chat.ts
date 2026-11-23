@@ -145,7 +145,9 @@ export const chatCommand = Command.make(
 			const target = Option.isSome((yield* RootCommand).baseUrl)
 				? ` --base-url ${shellQuote(client.baseUrl)}`
 				: ""
-			yield* writeStderrLine(`Resume later with: checkfu${target} sessions connect ${sessionId}`)
+			yield* writeStderrLine(
+				`Resume later with: checkfu${target} sessions connect ${shellQuote(sessionId)}`,
+			)
 			return yield* connectToSession(client, sessionId)
 		}),
 ).pipe(

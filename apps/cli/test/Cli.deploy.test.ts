@@ -11,8 +11,10 @@ const CONFIG_FILE = "/config/config.json"
 const CHAT_FILE = "/config/chat.json"
 const ENV_FILE = "/checkout/.env"
 const RECORD_FILE = "/checkout/.checkfu/deployment.json"
-const record = (stage: string, profile = "default", url = DEPLOYED_URL) =>
-	`${JSON.stringify({ stage, profile, url }, null, "\t")}\n`
+const ACCOUNT = "0123456789abcdef0123456789abcdef"
+const OTHER_ACCOUNT = "fedcba9876543210fedcba9876543210"
+const record = (stage: string, profile = "default", account = ACCOUNT, url = DEPLOYED_URL) =>
+	`${JSON.stringify({ stage, profile, account_id: account, url }, null, "\t")}\n`
 
 interface VirtualFiles {
 	[path: string]: string
@@ -22,35 +24,76 @@ const virtualFiles = (initial: VirtualFiles = {}): VirtualFiles => ({ ...initial
 
 const deployEnv = {
 	CHECKFU_CONFIG_DIR: "/config",
-	CLOUDFLARE_API_TOKEN: "cf-token",
-	CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+	CHECKFU_API_KEY: TEST_API_KEY,
+	OPENAI_API_KEY: "sk-proj-x",
 }
 
 const SHARED = ["--env-file", ENV_FILE, "--profile", "default"]
+const ASK_ACCOUNT = ["query", "account", "default", ENV_FILE]
+const askOutput = (stage: string, profile = "default") => [
+	"query",
+	"output",
+	profile,
+	ENV_FILE,
+	`Checkfu/${stage}/output`,
+]
+
+// What Alchemy really prints on stdout ahead of a result when it takes credentials
+// from the environment (captured from alchemy 2.0.0-beta.87).
+const ALCHEMY_NOISE =
+	"[12:22:22.304] INFO: Cloudflare: using environment variables (CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN).\n"
 
 const fakeAlchemy = (
 	calls: Array<ReadonlyArray<string>>,
 	options: {
-		readonly deployExitCode?: number
+		/** The account Alchemy resolves; `null` is a profile with no Cloudflare connection. */
+		readonly account?: string | null
+		/** The account that becomes connected once the sign-in has run. */
+		readonly accountAfterSignIn?: string
+		readonly accountError?: string
+		readonly output?: "missing" | "error" | "silent"
 		readonly url?: string
-		readonly checkEnvExitCode?: number
-		readonly onSignIn?: () => void
+		readonly deployExitCode?: number
 	} = {},
 ) => {
+	let account = options.account === undefined ? ACCOUNT : options.account
+	const answer = (value: unknown) => ({
+		exitCode: 0,
+		stdout: `${ALCHEMY_NOISE}\n@checkfu ${JSON.stringify(value)}\n`,
+	})
 	return (args: ReadonlyArray<string>) => {
 		const command = args.slice(1)
 		calls.push(command)
-		switch (command[0]) {
-			case "state":
-				return { exitCode: 0, stdout: JSON.stringify({ api: options.url ?? DEPLOYED_URL }) }
-			case "provider":
-				return { exitCode: options.checkEnvExitCode ?? 1 }
-			case "profile":
-				options.onSignIn?.()
-				return { exitCode: 0 }
-			default:
-				return { exitCode: options.deployExitCode ?? 0 }
+		if (command[0] === "query" && command[1] === "account") {
+			if (options.accountError !== undefined) {
+				return answer({ status: "error", message: options.accountError })
+			}
+			return answer(
+				account === null
+					? {
+							status: "not-configured",
+							message: "Provider 'Cloudflare' is not configured in profile 'default'.",
+						}
+					: { status: "connected", account_id: account },
+			)
 		}
+		if (command[0] === "query") {
+			switch (options.output) {
+				case "missing":
+					return answer({ status: "missing" })
+				case "error":
+					return answer({ status: "error", message: "StateStoreError: store is out of date" })
+				case "silent":
+					return { exitCode: 0, stdout: ALCHEMY_NOISE }
+				default:
+					return answer({ status: "found", value: { api: options.url ?? DEPLOYED_URL } })
+			}
+		}
+		if (command[0] === "profile") {
+			account = options.accountAfterSignIn ?? account
+			return { exitCode: 0 }
+		}
+		return { exitCode: options.deployExitCode ?? 0 }
 	}
 }
 
@@ -95,25 +138,28 @@ describe("dotenv helpers", () => {
 })
 
 describe("checkfu deploy", () => {
-	it.live("generates the API key, deploys, verifies, and saves the connection", () =>
+	const checkout = { "/checkout/alchemy.run.ts": "" }
+
+	it.live("prepares secrets, deploys, records the deployment, and saves the connection", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			const calls: Array<ReadonlyArray<string>> = []
 			const files = virtualFiles({
-				"/checkout/alchemy.run.ts": "",
+				...checkout,
 				[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=\n`,
 			})
 
 			const result = yield* cli.run(["deploy"], {
-				env: { ...deployEnv, ANTHROPIC_API_KEY: "sk-ant-from-env" },
+				env: { CHECKFU_CONFIG_DIR: "/config", ANTHROPIC_API_KEY: "sk-ant-from-env" },
 				files,
 				spawn: fakeAlchemy(calls),
 			})
 
 			expect(result.errorMessage).toBeUndefined()
 			expect(calls).toEqual([
+				ASK_ACCOUNT,
 				["deploy", "--stage", "live", ...SHARED],
-				["state", "read", "Checkfu/live/output", "--no-input", ...SHARED],
+				askOutput("live"),
 			])
 			expect(files[ENV_FILE]).toBe(
 				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=\nANTHROPIC_API_KEY=sk-ant-from-env\n`,
@@ -130,209 +176,97 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
-	it.live("writes a generated API key into .env when none is set", () =>
+	it.live("generates an API key at a terminal and keeps an exported one otherwise", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
-
-			const result = yield* cli.run(["deploy", "--yes", "--stage", "staging"], {
-				env: { ...deployEnv, OPENAI_API_KEY: "sk-proj-from-env" },
-				files,
+			const generated = virtualFiles(checkout)
+			const rejected = yield* cli.run(["deploy", "--yes"], {
+				env: { CHECKFU_CONFIG_DIR: "/config", OPENAI_API_KEY: "sk-proj-from-env" },
+				files: generated,
 				stdinIsTerminal: true,
-				cloudflareProfiles: ["default"],
 				spawn: fakeAlchemy([]),
 			})
-
-			expect(files[ENV_FILE]).toMatch(
+			expect(generated[ENV_FILE]).toMatch(
 				/^CHECKFU_API_KEY=ck_[0-9a-f]{64}\nOPENAI_API_KEY=sk-proj-from-env\n$/,
 			)
 			// The in-memory API only accepts TEST_API_KEY, so the freshly generated key is rejected.
-			expect(result.errorMessage).toContain("rejected the API key")
-			expect(files[CONFIG_FILE]).toBeUndefined()
-		}),
-	)
+			expect(rejected.errorMessage).toContain("rejected the API key")
+			expect(generated[CONFIG_FILE]).toBeUndefined()
 
-	it.live("keeps an exported API key instead of rotating it on a clean checkout", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
-
-			const result = yield* cli.run(["deploy", "--yes"], {
-				env: { ...deployEnv, CHECKFU_API_KEY: TEST_API_KEY, OPENAI_API_KEY: "sk-proj-from-env" },
-				files,
-				spawn: fakeAlchemy([]),
-			})
-
-			expect(result.errorMessage).toBeUndefined()
-			expect(files[ENV_FILE]).toBe(
-				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-from-env\n`,
-			)
-			expect(JSON.parse(files[CONFIG_FILE] ?? "").api_key).toBe(TEST_API_KEY)
-		}),
-	)
-
-	it.live("leaves an unreadable .env untouched and does not deploy", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["deploy"], {
-				env: { ...deployEnv, OPENAI_API_KEY: "sk-proj-from-env" },
-				files: { "/checkout/alchemy.run.ts": "", [ENV_FILE]: Stream.empty },
-				spawn: fakeAlchemy(calls),
-			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain(`Could not read ${ENV_FILE}`)
-			expect(calls).toEqual([])
-		}),
-	)
-
-	it.live("leaves the credential decision to Alchemy when no terminal is attached", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["deploy", "--yes"], {
-				env: {
-					CHECKFU_CONFIG_DIR: "/config",
-					CHECKFU_API_KEY: TEST_API_KEY,
-					OPENAI_API_KEY: "sk-proj-x",
-					CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
-					CLOUDFLARE_API_KEY: "global-key",
-					CLOUDFLARE_EMAIL: "ops@example.com",
-				},
-				files: { "/checkout/alchemy.run.ts": "" },
-				spawn: fakeAlchemy(calls),
-			})
-			expect(result.errorMessage).toBeUndefined()
-			expect(calls.map((call) => call[0])).toEqual(["deploy", "state"])
-		}),
-	)
-
-	const terminalDeploy = {
-		env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY, OPENAI_API_KEY: "sk-x" },
-		stdinIsTerminal: true,
-	}
-
-	it.live("skips the sign-in when Alchemy accepts the environment credentials", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["deploy"], {
-				...terminalDeploy,
-				files: { "/checkout/alchemy.run.ts": "" },
-				spawn: fakeAlchemy(calls, { checkEnvExitCode: 0 }),
-			})
-			expect(result.errorMessage).toBeUndefined()
-			expect(calls.slice(0, 2)).toEqual([
-				["provider", "check-env", "--provider", "Cloudflare", ...SHARED],
-				["deploy", "--stage", "live", ...SHARED],
-			])
-		}),
-	)
-
-	it.live("checks, signs in to, and deploys with the profile the checkout selects", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const work = ["--env-file", ENV_FILE, "--profile", "work"]
-			const dotenv = `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-x\nALCHEMY_PROFILE=work\n`
-
-			const connected: Array<ReadonlyArray<string>> = []
-			yield* cli.run(["deploy"], {
-				env: { CHECKFU_CONFIG_DIR: "/config", ALCHEMY_PROFILE: "shell" },
-				stdinIsTerminal: true,
-				cloudflareProfiles: ["work"],
-				files: { "/checkout/alchemy.run.ts": "", [ENV_FILE]: dotenv },
-				spawn: fakeAlchemy(connected),
-			})
-			expect(connected[0]).toEqual(["deploy", "--stage", "live", ...work])
-
-			const profiles: Array<string> = ["shell"]
-			const signedIn: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["deploy"], {
-				env: { CHECKFU_CONFIG_DIR: "/config", ALCHEMY_PROFILE: "shell" },
-				stdinIsTerminal: true,
-				cloudflareProfiles: profiles,
-				files: { "/checkout/alchemy.run.ts": "", [ENV_FILE]: dotenv },
-				spawn: fakeAlchemy(signedIn, { onSignIn: () => profiles.push("work") }),
-			})
-			expect(result.errorMessage).toBeUndefined()
-			expect(signedIn.slice(0, 3)).toEqual([
-				["provider", "check-env", "--provider", "Cloudflare", ...work],
-				["profile", "edit", "--add", "Cloudflare", ...work],
-				["deploy", "--stage", "live", ...work],
-			])
-		}),
-	)
-
-	it.live("stops when the sign-in is cancelled", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["deploy"], {
-				...terminalDeploy,
-				files: { "/checkout/alchemy.run.ts": "" },
-				spawn: fakeAlchemy(calls),
-			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("sign-in did not finish")
-			expect(calls.map((call) => call[0])).toEqual(["provider", "profile"])
-		}),
-	)
-
-	it.live("saves nothing when the deploy fails", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const files = virtualFiles({
-				"/checkout/alchemy.run.ts": "",
-				[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`,
-			})
-
-			const result = yield* cli.run(["deploy"], {
+			const exported = virtualFiles(checkout)
+			const kept = yield* cli.run(["deploy", "--yes"], {
 				env: deployEnv,
-				files,
-				spawn: fakeAlchemy([], { deployExitCode: 3 }),
-			})
-
-			expect(result.exitCode).toBe(3)
-			expect(files[CONFIG_FILE]).toBeUndefined()
-		}),
-	)
-
-	it.live("asks for a provider key only when a terminal is attached", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const result = yield* cli.run(["deploy"], {
-				env: { ...deployEnv, CHECKFU_API_KEY: TEST_API_KEY },
-				files: { "/checkout/alchemy.run.ts": "" },
+				files: exported,
 				spawn: fakeAlchemy([]),
 			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("ANTHROPIC_API_KEY or OPENAI_API_KEY")
+			expect(kept.errorMessage).toBeUndefined()
+			expect(exported[ENV_FILE]).toBe(`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`)
+
+			const calls: Array<ReadonlyArray<string>> = []
+			const noTerminal = virtualFiles(checkout)
+			const refused = yield* cli.run(["deploy", "--yes"], {
+				env: { CHECKFU_CONFIG_DIR: "/config", OPENAI_API_KEY: "sk-proj-from-env" },
+				files: noTerminal,
+				spawn: fakeAlchemy(calls),
+			})
+			expect(refused.errorMessage).toContain("export a persistent CHECKFU_API_KEY")
+			expect(calls).toEqual([])
+			expect(noTerminal[ENV_FILE]).toBeUndefined()
 		}),
 	)
 
-	it.live("refuses to invent an API key without a terminal", () =>
+	it.live("stops before deploying on secrets it cannot use as written", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const calls: Array<ReadonlyArray<string>> = []
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
-			const result = yield* cli.run(["deploy", "--yes"], {
-				env: { ...deployEnv, OPENAI_API_KEY: "sk-proj-from-env" },
-				files,
-				spawn: fakeAlchemy(calls),
-			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("export a persistent CHECKFU_API_KEY")
-			expect(calls).toEqual([])
-			expect(files[ENV_FILE]).toBeUndefined()
+			const cases = [
+				{
+					files: { ...checkout, [ENV_FILE]: Stream.empty },
+					env: deployEnv,
+					message: `Could not read ${ENV_FILE}`,
+				},
+				{
+					files: {
+						...checkout,
+						[ENV_FILE]: `CHECKFU_API_KEY="${TEST_API_KEY} "\nOPENAI_API_KEY=sk-proj-x\n`,
+					},
+					env: { CHECKFU_CONFIG_DIR: "/config" },
+					message: "CHECKFU_API_KEY in .env has leading or trailing whitespace",
+				},
+				{
+					files: {
+						...checkout,
+						[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`,
+					},
+					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: "shell-key" },
+					message: "differs from the one in .env",
+				},
+				{
+					files: checkout,
+					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
+					message: "ANTHROPIC_API_KEY or OPENAI_API_KEY",
+				},
+			]
+			for (const { files, env, message } of cases) {
+				const calls: Array<ReadonlyArray<string>> = []
+				const result = yield* cli.run(["deploy", "--yes"], {
+					env,
+					files: { ...files },
+					spawn: fakeAlchemy(calls),
+				})
+				expect(result.exitCode).toBe(1)
+				expect(result.errorMessage).toContain(message)
+				expect(result.errorMessage).not.toContain("shell-key")
+				expect(calls).toEqual([])
+			}
 		}),
 	)
 
 	it.live("deploys the exact exported key even when it needs quoting", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
+			const files = virtualFiles(checkout)
 			yield* cli.run(["deploy", "--yes"], {
-				env: { ...deployEnv, CHECKFU_API_KEY: "key#with$&", OPENAI_API_KEY: "sk-proj-x" },
+				env: { ...deployEnv, CHECKFU_API_KEY: "key#with$&" },
 				files,
 				spawn: fakeAlchemy([]),
 			})
@@ -340,120 +274,164 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
-	it.live("refuses a padded key in .env rather than verifying a different value", () =>
+	it.live(
+		"reports Alchemy's answer when Cloudflare is not connected and there is no terminal",
+		() =>
+			Effect.gen(function* () {
+				const cli = yield* makeTestServer()
+				const calls: Array<ReadonlyArray<string>> = []
+				const result = yield* cli.run(["deploy", "--yes"], {
+					env: deployEnv,
+					files: checkout,
+					spawn: fakeAlchemy(calls, { account: null }),
+				})
+				expect(result.exitCode).toBe(1)
+				expect(result.errorMessage).toContain("is not configured in profile 'default'")
+				expect(calls.map((call) => call[0])).toEqual(["query"])
+			}),
+	)
+
+	it.live("signs in at a terminal, then deploys with the profile the checkout selects", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
+			const work = ["--env-file", ENV_FILE, "--profile", "work"]
+			const askWork = ["query", "account", "work", ENV_FILE]
 			const calls: Array<ReadonlyArray<string>> = []
-			const dotenv = `CHECKFU_API_KEY="${TEST_API_KEY} "\nOPENAI_API_KEY=sk-proj-x\n`
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "", [ENV_FILE]: dotenv })
-			const result = yield* cli.run(["deploy", "--yes"], {
-				env: deployEnv,
-				files,
-				spawn: fakeAlchemy(calls),
+			const files = virtualFiles({
+				...checkout,
+				[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-x\nALCHEMY_PROFILE=work\n`,
 			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain(
-				"CHECKFU_API_KEY in .env has leading or trailing whitespace",
-			)
-			expect(calls).toEqual([])
-			expect(files[ENV_FILE]).toBe(dotenv)
+			const result = yield* cli.run(["deploy"], {
+				env: { CHECKFU_CONFIG_DIR: "/config", ALCHEMY_PROFILE: "shell" },
+				stdinIsTerminal: true,
+				files,
+				spawn: fakeAlchemy(calls, { account: null, accountAfterSignIn: ACCOUNT }),
+			})
+			expect(result.errorMessage).toBeUndefined()
+			expect(calls).toEqual([
+				askWork,
+				["profile", "edit", "--add", "Cloudflare", ...work],
+				askWork,
+				["deploy", "--stage", "live", ...work],
+				askOutput("live", "work"),
+			])
+			expect(files[RECORD_FILE]).toBe(record("live", "work"))
+
+			const cancelled: Array<ReadonlyArray<string>> = []
+			const stopped = yield* cli.run(["deploy"], {
+				env: deployEnv,
+				stdinIsTerminal: true,
+				files: checkout,
+				spawn: fakeAlchemy(cancelled, { account: null }),
+			})
+			expect(stopped.errorMessage).toContain("sign-in did not finish")
+			expect(cancelled.map((call) => call[0])).toEqual(["query", "profile", "query"])
 		}),
 	)
 
-	it.live("records the stage only once Alchemy has deployed it", () =>
+	it.live("does not deploy when the account in use cannot be determined", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const env = { ...deployEnv, CHECKFU_API_KEY: TEST_API_KEY, OPENAI_API_KEY: "sk-proj-x" }
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
-
-			yield* cli.run(["deploy", "--stage", "staging"], {
-				env,
-				files,
-				spawn: fakeAlchemy([], { deployExitCode: 1 }),
+			const calls: Array<ReadonlyArray<string>> = []
+			const result = yield* cli.run(["deploy", "--yes"], {
+				env: deployEnv,
+				files: checkout,
+				spawn: fakeAlchemy(calls, { accountError: "AuthError: Cloudflare OAuth refresh failed" }),
 			})
-			expect(files[RECORD_FILE]).toBeUndefined()
+			expect(result.exitCode).toBe(1)
+			expect(result.errorMessage).toContain("Cloudflare OAuth refresh failed")
+			expect(result.errorMessage).toContain("Nothing was changed")
+			expect(calls.map((call) => call[0])).toEqual(["query"])
+		}),
+	)
 
-			yield* cli.run(["deploy", "--yes"], { env, files, spawn: fakeAlchemy([]) })
+	it.live("records the deployment only once Alchemy has deployed it", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles(checkout)
+			const declined = { env: deployEnv, files, spawn: fakeAlchemy([], { deployExitCode: 3 }) }
+
+			const first = yield* cli.run(["deploy", "--stage", "staging"], declined)
+			expect(first.exitCode).toBe(3)
+			expect(files[RECORD_FILE]).toBeUndefined()
+			expect(files[CONFIG_FILE]).toBeUndefined()
+
+			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy([]) })
 			expect(files[RECORD_FILE]).toBe(record("live"))
 
-			yield* cli.run(["deploy", "--stage", "staging"], {
-				env,
-				files,
-				spawn: fakeAlchemy([], { deployExitCode: 1 }),
-			})
+			yield* cli.run(["deploy", "--stage", "staging"], declined)
 			expect(files[RECORD_FILE]).toBe(record("live"))
 
 			const next: Array<ReadonlyArray<string>> = []
-			yield* cli.run(["deploy", "--yes"], { env, files, spawn: fakeAlchemy(next) })
-			expect(next.slice(0, 2)).toEqual([
-				["state", "read", "Checkfu/live/output", "--no-input", ...SHARED],
-				["deploy", "--stage", "live", "--yes", ...SHARED],
-			])
+			yield* cli.run(["deploy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy(next) })
+			expect(next[1]).toEqual(["deploy", "--stage", "live", "--yes", ...SHARED])
 		}),
 	)
 
-	it.live("refuses an implicit upgrade when the account in use holds a different deployment", () =>
+	it.live("refuses an implicit upgrade in a different account before touching it", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const env = { ...deployEnv, CHECKFU_API_KEY: TEST_API_KEY, OPENAI_API_KEY: "sk-proj-x" }
 			const saved = JSON.stringify({ url: DEPLOYED_URL, api_key: TEST_API_KEY })
-			const elsewhere = { url: "https://checkfu.other-account.workers.dev" }
 			const files = virtualFiles({
-				"/checkout/alchemy.run.ts": "",
+				...checkout,
 				[RECORD_FILE]: record("live"),
 				[CONFIG_FILE]: saved,
 			})
+			const elsewhere = { account: OTHER_ACCOUNT, url: "https://checkfu.other.workers.dev" }
 
 			const calls: Array<ReadonlyArray<string>> = []
 			const result = yield* cli.run(["deploy", "--yes"], {
-				env,
+				env: deployEnv,
 				files,
 				spawn: fakeAlchemy(calls, elsewhere),
 			})
 			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("Nothing was deployed")
-			expect(calls.map((call) => call[0])).toEqual(["state"])
+			expect(result.errorMessage).toContain(`act on account ${OTHER_ACCOUNT}`)
+			expect(result.errorMessage).toContain("Nothing was changed")
+			expect(calls).toEqual([ASK_ACCOUNT])
 			expect(files[RECORD_FILE]).toBe(record("live"))
 			expect(files[CONFIG_FILE]).toBe(saved)
 
 			const explicit: Array<ReadonlyArray<string>> = []
 			const onPurpose = yield* cli.run(["deploy", "--yes", "--stage", "live"], {
-				env,
+				env: deployEnv,
 				files,
 				spawn: fakeAlchemy(explicit, elsewhere),
 			})
 			expect(onPurpose.errorMessage).toBeUndefined()
-			expect(explicit[0]?.[0]).toBe("deploy")
-			expect(files[RECORD_FILE]).toBe(record("live", "default", elsewhere.url))
+			expect(explicit[1]?.[0]).toBe("deploy")
+			expect(files[RECORD_FILE]).toBe(record("live", "default", OTHER_ACCOUNT, elsewhere.url))
 		}),
 	)
 
-	it.live("stops when the shell exports a different API key than the one being deployed", () =>
+	it.live("separates a deployed stage whose URL could not be read from a finished deploy", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["deploy", "--yes"], {
-				env: { ...deployEnv, CHECKFU_API_KEY: "shell-key" },
-				files: {
-					"/checkout/alchemy.run.ts": "",
-					[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`,
-				},
-				spawn: fakeAlchemy(calls),
-			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("differs from the one in .env")
-			expect(result.errorMessage).not.toContain("shell-key")
-			expect(result.errorMessage).not.toContain(TEST_API_KEY)
-			expect(calls).toEqual([])
+			for (const [output, message] of [
+				["error", "its URL could not be read: StateStoreError: store is out of date"],
+				["missing", "recorded no API URL"],
+				["silent", "its URL could not be read: Alchemy gave no usable answer"],
+			] as const) {
+				const files = virtualFiles(checkout)
+				const result = yield* cli.run(["deploy", "--yes"], {
+					env: deployEnv,
+					files,
+					spawn: fakeAlchemy([], { output }),
+				})
+				expect(result.exitCode).toBe(1)
+				expect(result.errorMessage).toContain(message)
+				expect(files[RECORD_FILE]).toBeUndefined()
+				expect(files[CONFIG_FILE]).toBeUndefined()
+			}
 		}),
 	)
 
 	it.live("gives up on a deployment that accepts connections but never answers", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
+			const files = virtualFiles(checkout)
 			const result = yield* cli.run(["deploy", "--yes"], {
-				env: { ...deployEnv, CHECKFU_API_KEY: TEST_API_KEY, OPENAI_API_KEY: "sk-proj-x" },
+				env: deployEnv,
 				files,
 				spawn: fakeAlchemy([]),
 				interceptFetch: () => Promise.withResolvers<Response>().promise,
@@ -478,21 +456,22 @@ describe("checkfu deploy", () => {
 describe("checkfu destroy", () => {
 	const savedLive = JSON.stringify({ url: DEPLOYED_URL, api_key: TEST_API_KEY })
 	const liveCheckout = { "/checkout/alchemy.run.ts": "", [RECORD_FILE]: record("live") }
+	const env = { CHECKFU_CONFIG_DIR: "/config" }
 	const PROFILE = ["--profile", "default"]
 
-	it.live("forgets the record and the saved connection of the deployment it destroyed", () =>
+	it.live("destroys the recorded deployment and forgets it, without opening Alchemy state", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			const files = virtualFiles({ ...liveCheckout, [CONFIG_FILE]: savedLive })
 			const calls: Array<ReadonlyArray<string>> = []
 			const result = yield* cli.run(["destroy", "--yes"], {
-				env: deployEnv,
+				env,
 				files,
 				spawn: fakeAlchemy(calls),
 			})
 			expect(result.errorMessage).toBeUndefined()
 			expect(calls).toEqual([
-				["state", "read", "Checkfu/live/output", "--no-input", ...PROFILE],
+				["query", "account", "default", ""],
 				["destroy", "--stage", "live", "--yes", ...PROFILE],
 			])
 			expect(files[CONFIG_FILE]).toBeUndefined()
@@ -504,54 +483,70 @@ describe("checkfu destroy", () => {
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			const files = virtualFiles({ "/checkout/alchemy.run.ts": "" })
-			const env = { ...deployEnv, CHECKFU_API_KEY: TEST_API_KEY, OPENAI_API_KEY: "sk-proj-x" }
-			const work = ["--env-file", ENV_FILE, "--profile", "work"]
 			yield* cli.run(["deploy", "--yes", "--stage", "staging"], {
-				env: { ...env, ALCHEMY_PROFILE: "work" },
+				env: { ...deployEnv, ALCHEMY_PROFILE: "work" },
 				files,
 				spawn: fakeAlchemy([]),
 			})
 			expect(files[RECORD_FILE]).toBe(record("staging", "work"))
 
-			yield* cli.run(["--base-url", "https://another.example", "login"], { env, files })
-			yield* cli.run(["logout"], { env, files })
+			yield* cli.run(["--base-url", "https://another.example", "login"], { env: deployEnv, files })
+			yield* cli.run(["logout"], { env: deployEnv, files })
 
 			const calls: Array<ReadonlyArray<string>> = []
-			yield* cli.run(["destroy", "--yes"], { env, files, spawn: fakeAlchemy(calls) })
+			yield* cli.run(["destroy", "--yes"], { env: deployEnv, files, spawn: fakeAlchemy(calls) })
 			expect(calls).toEqual([
-				["state", "read", "Checkfu/staging/output", "--no-input", ...work],
-				["destroy", "--stage", "staging", "--yes", ...work],
+				["query", "account", "work", ENV_FILE],
+				["destroy", "--stage", "staging", "--yes", "--env-file", ENV_FILE, "--profile", "work"],
 			])
 		}),
 	)
 
-	it.live("refuses an implicit destroy when the account in use holds a different deployment", () =>
+	it.live("refuses an implicit destroy in a different or undetermined account", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
-			const files = virtualFiles({ ...liveCheckout, [CONFIG_FILE]: savedLive })
-			const calls: Array<ReadonlyArray<string>> = []
-			const result = yield* cli.run(["destroy", "--yes"], {
-				env: deployEnv,
-				files,
-				spawn: fakeAlchemy(calls, { url: "https://checkfu.other-account.workers.dev" }),
-			})
-			expect(result.exitCode).toBe(1)
-			expect(result.errorMessage).toContain("Nothing was deleted")
-			expect(calls.map((call) => call[0])).toEqual(["state"])
-			expect(files[RECORD_FILE]).toBe(record("live"))
-			expect(files[CONFIG_FILE]).toBe(savedLive)
-
-			const explicit: Array<ReadonlyArray<string>> = []
-			const forced = yield* cli.run(["destroy", "--yes", "--stage", "live"], {
-				env: deployEnv,
-				files,
-				spawn: fakeAlchemy(explicit, { url: "https://checkfu.other-account.workers.dev" }),
-			})
-			expect(forced.errorMessage).toBeUndefined()
-			expect(explicit.at(-1)).toEqual(["destroy", "--stage", "live", "--yes", ...PROFILE])
-			expect(files[RECORD_FILE]).toBe(record("live"))
-			expect(files[CONFIG_FILE]).toBe(savedLive)
+			for (const [options, message] of [
+				[{ account: OTHER_ACCOUNT }, `act on account ${OTHER_ACCOUNT}`],
+				[
+					{ accountError: "StateStoreError: unreachable" },
+					"Could not determine which Cloudflare account",
+				],
+				[{ account: null }, "is not configured in profile"],
+			] as const) {
+				const files = virtualFiles({ ...liveCheckout, [CONFIG_FILE]: savedLive })
+				const calls: Array<ReadonlyArray<string>> = []
+				const result = yield* cli.run(["destroy", "--yes"], {
+					env,
+					files,
+					stdinIsTerminal: true,
+					spawn: fakeAlchemy(calls, options),
+				})
+				expect(result.exitCode).toBe(1)
+				expect(result.errorMessage).toContain(message)
+				expect(calls.map((call) => call[0])).toEqual(["query"])
+				expect(files[RECORD_FILE]).toBe(record("live"))
+				expect(files[CONFIG_FILE]).toBe(savedLive)
+			}
 		}),
+	)
+
+	it.live(
+		"destroys another account's stage only when it is named, and keeps this checkout's record",
+		() =>
+			Effect.gen(function* () {
+				const cli = yield* makeTestServer()
+				const files = virtualFiles({ ...liveCheckout, [CONFIG_FILE]: savedLive })
+				const calls: Array<ReadonlyArray<string>> = []
+				const result = yield* cli.run(["destroy", "--yes", "--stage", "live"], {
+					env,
+					files,
+					spawn: fakeAlchemy(calls, { account: OTHER_ACCOUNT }),
+				})
+				expect(result.errorMessage).toBeUndefined()
+				expect(calls.at(-1)).toEqual(["destroy", "--stage", "live", "--yes", ...PROFILE])
+				expect(files[RECORD_FILE]).toBe(record("live"))
+				expect(files[CONFIG_FILE]).toBe(savedLive)
+			}),
 	)
 
 	it.live("refuses to guess a stage when the checkout has no record of a deployment", () =>
@@ -559,29 +554,13 @@ describe("checkfu destroy", () => {
 			const cli = yield* makeTestServer()
 			const calls: Array<ReadonlyArray<string>> = []
 			const result = yield* cli.run(["destroy", "--yes"], {
-				env: deployEnv,
+				env,
 				files: { "/checkout/alchemy.run.ts": "", [CONFIG_FILE]: savedLive },
 				spawn: fakeAlchemy(calls),
 			})
 			expect(result.exitCode).toBe(1)
 			expect(result.errorMessage).toContain("Pass --stage")
 			expect(calls).toEqual([])
-		}),
-	)
-
-	it.live("passes --env-file only when the checkout has a .env", () =>
-		Effect.gen(function* () {
-			const cli = yield* makeTestServer()
-			const withEnv: Array<ReadonlyArray<string>> = []
-			yield* cli.run(["destroy", "--yes"], {
-				env: deployEnv,
-				files: { ...liveCheckout, [ENV_FILE]: "A=1\n" },
-				spawn: fakeAlchemy(withEnv),
-			})
-			expect(withEnv).toEqual([
-				["state", "read", "Checkfu/live/output", "--no-input", ...SHARED],
-				["destroy", "--stage", "live", "--yes", ...SHARED],
-			])
 		}),
 	)
 })

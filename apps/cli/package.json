@@ -17,6 +17,7 @@
 		"test": "vitest run --pool=threads --no-allowOnly"
 	},
 	"dependencies": {
+		"@alchemy.run/cloudflare": "catalog:",
 		"@checkfu/api": "workspace:*",
 		"@checkfu/domain": "workspace:*",
 		"@effect/platform-bun": "catalog:",

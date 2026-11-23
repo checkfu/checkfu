@@ -55,6 +55,7 @@
         "checkfu": "./bin/checkfu.mjs",
       },
       "dependencies": {
+        "@alchemy.run/cloudflare": "catalog:",
         "@checkfu/api": "workspace:*",
         "@checkfu/domain": "workspace:*",
         "@effect/platform-bun": "catalog:",

@@ -12,7 +12,7 @@ bun install
 bun checkfu deploy
 ```
 
-`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys one Worker with its Durable Objects to your account. It generates the API key for you and keeps the secrets in the checkout's `.env`. Once Alchemy has deployed, it records what this checkout now manages (stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go.
+`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys one Worker with its Durable Objects to your account. It generates the API key for you and keeps the secrets in the checkout's `.env`. Once Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go.
 
 Then talk to an agent:
 
@@ -24,11 +24,11 @@ bun checkfu chat
 
 After that:
 
-- **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. Like `destroy`, it stops if the Cloudflare account in use does not hold the deployment this checkout recorded.
+- **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. Like `destroy`, it stops before changing anything if your credentials now act on a different Cloudflare account than the one this checkout deployed to.
 - **Call the API from your own code** — the URL and key are in `~/.config/checkfu/config.json`; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`.
 - **Use it from another machine** — `bun checkfu --base-url https://<your-worker>.workers.dev login`.
 - **Deploy from CI** — export `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, a model provider key, and a persistent `CHECKFU_API_KEY` (the one from your first deploy, or `openssl rand -hex 32`), then run `bun checkfu deploy --yes`. Without a terminal the deploy refuses to invent an API key, because a fresh runner would rotate it on every run.
-- **Remove it** — `bun checkfu destroy` deletes the Worker and all of its data. It only acts on the deployment this checkout recorded: if the Cloudflare account in use does not hold that exact deployment, or the checkout has no record, it stops and asks for an explicit `--stage` rather than guessing.
+- **Remove it** — `bun checkfu destroy` deletes the Worker and all of its data. It only acts on the deployment this checkout recorded: if your credentials act on a different Cloudflare account, or the checkout has no record, it stops and asks for an explicit `--stage` rather than guessing.
 
 ## Run locally
 

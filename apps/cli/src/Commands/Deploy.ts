@@ -43,8 +43,6 @@ type ModelProvider = (typeof MODEL_PROVIDERS)[number]
 export const providerForKey = (key: string): ModelProvider =>
 	key.startsWith("sk-ant-") ? MODEL_PROVIDERS[0] : MODEL_PROVIDERS[1]
 
-const CLOUDFLARE = "Cloudflare"
-
 export interface Checkout {
 	readonly root: string
 	/** The Bun that runs Alchemy, with any extra environment it needs to behave as Bun. */
@@ -135,13 +133,18 @@ const yesFlag = Flag.Boolean("yes").pipe(
 )
 
 /**
- * The deployment this checkout manages: written only after Alchemy reports a
- * successful deploy, and the sole source of the stage and profile that a bare
- * `deploy` or `destroy` assumes. It is deliberately not part of the saved login;
+ * The deployment this checkout manages, identified by Cloudflare account and stage.
+ * Written only after Alchemy reports a successful deploy, and the sole source of the
+ * stage and profile that a bare `deploy` or `destroy` assumes. It is deliberately not part of the saved login;
  * which API the CLI talks to and what this checkout manages change independently.
  */
 const DeploymentRecord = Schema.fromJsonString(
-	Schema.Struct({ stage: Schema.String, profile: Schema.String, url: Schema.String }),
+	Schema.Struct({
+		stage: Schema.String,
+		profile: Schema.String,
+		account_id: Schema.String,
+		url: Schema.String,
+	}),
 	{ space: "\t" },
 )
 type DeploymentRecord = typeof DeploymentRecord.Type
@@ -171,7 +174,11 @@ const requireCheckout = Effect.gen(function* () {
 	const checkout = yield* Checkout
 	const hasStack = yield* fs
 		.exists(path.join(checkout.root, "alchemy.run.ts"))
-		.pipe(Effect.orElseSucceed(() => false))
+		.pipe(
+			Effect.mapError((error) =>
+				configError(`Could not look for the checkout at ${checkout.root}: ${error.message}`),
+			),
+		)
 	if (!hasStack) {
 		return yield* usageError(
 			"This command deploys from a Checkfu source checkout. Clone https://github.com/checkfu/checkfu, run `bun install`, then `bun checkfu deploy`.",
@@ -181,47 +188,92 @@ const requireCheckout = Effect.gen(function* () {
 })
 
 /**
- * One Alchemy invocation context. Every command in a run gets the same checkout,
- * env file, and profile, so the sign-in, the deploy, and the state lookup can never
+ * One Alchemy invocation context. Every call in a run gets the same checkout, env
+ * file, and profile, so the sign-in, the account lookup, and the deploy can never
  * disagree about which account they act on.
  */
 interface Target {
 	readonly checkout: Checkout
-	readonly shared: ReadonlyArray<string>
 	readonly profile: string
+	readonly envFile: Option.Option<string>
 }
 
-const alchemy = (
-	target: Target,
-	args: ReadonlyArray<string>,
-	output: "inherit" | "pipe" | "quiet",
-) =>
-	Effect.map(Path.Path, (path) =>
-		ChildProcess.make(
-			target.checkout.runtime,
-			[
-				path.join(target.checkout.root, "node_modules", "alchemy", "bin", "cli.js"),
-				...args,
-				...target.shared,
-			],
-			{
-				cwd: target.checkout.root,
-				env: target.checkout.runtimeEnv,
-				extendEnv: true,
-				stdin: output === "inherit" ? "inherit" : "ignore",
-				stdout: output === "inherit" ? "inherit" : "pipe",
-				stderr: output === "quiet" ? "ignore" : "inherit",
-			},
-		),
-	)
+const inCheckout = (target: Target) => ({
+	cwd: target.checkout.root,
+	env: target.checkout.runtimeEnv,
+	extendEnv: true,
+})
 
-const run = (target: Target, args: ReadonlyArray<string>, output: "inherit" | "quiet") =>
+/** Runs an Alchemy command attached to the terminal and returns its exit code. */
+const run = (target: Target, args: ReadonlyArray<string>) =>
 	Effect.gen(function* () {
+		const path = yield* Path.Path
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		return yield* spawner
-			.exitCode(yield* alchemy(target, args, output))
+			.exitCode(
+				ChildProcess.make(
+					target.checkout.runtime,
+					[
+						path.join(target.checkout.root, "node_modules", "alchemy", "bin", "cli.js"),
+						...args,
+						...Option.match(target.envFile, {
+							onNone: () => [],
+							onSome: (envFile) => ["--env-file", envFile],
+						}),
+						"--profile",
+						target.profile,
+					],
+					{ ...inCheckout(target), stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+				),
+			)
 			.pipe(Effect.mapError((error) => configError(`Could not start Alchemy: ${error}`)))
 	})
+
+const ANSWER_PREFIX = "@checkfu "
+
+/**
+ * Asks Alchemy a question through `apps/cli/scripts/alchemy-query.ts`, which calls
+ * Alchemy's own functions and answers on one marked line. Alchemy's console output is
+ * never parsed, and a question that could not be answered is an `error` answer, never
+ * a missing one.
+ */
+const ask = <A>(
+	target: Target,
+	answers: Schema.Codec<A, unknown>,
+	question: ReadonlyArray<string>,
+): Effect.Effect<
+	A | { readonly status: "error"; readonly message: string },
+	never,
+	ChildProcessSpawner.ChildProcessSpawner | Path.Path
+> =>
+	Effect.gen(function* () {
+		const path = yield* Path.Path
+		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+		const [name = "", ...rest] = question
+		const stdout = yield* spawner
+			.string(
+				ChildProcess.make(
+					target.checkout.runtime,
+					[
+						path.join(target.checkout.root, "apps", "cli", "scripts", "alchemy-query.ts"),
+						name,
+						target.profile,
+						Option.getOrElse(target.envFile, () => ""),
+						...rest,
+					],
+					{ ...inCheckout(target), stdin: "ignore", stderr: "ignore" },
+				),
+			)
+			.pipe(Effect.mapError((error) => `the query could not be run (${error.message})`))
+		const line = stdout.split("\n").findLast((candidate) => candidate.startsWith(ANSWER_PREFIX))
+		return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(answers))(
+			line?.slice(ANSWER_PREFIX.length),
+		).pipe(
+			Effect.mapError(
+				() => "Alchemy gave no usable answer; run `bun install` if this checkout is new",
+			),
+		)
+	}).pipe(Effect.catch((error) => Effect.succeed({ status: "error" as const, message: error })))
 
 const envValue = (name: string): Effect.Effect<string> =>
 	Config.option(Config.String(name)).pipe(
@@ -239,11 +291,10 @@ const resolveTarget = (
 		const dotenv = Option.getOrElse(yield* readIfPresent(envFile), () => "")
 		const fromFile = yield* readDotEnvValue(dotenv, "ALCHEMY_PROFILE")
 		const fromShell = yield* envValue("ALCHEMY_PROFILE")
-		const profile = fromFile || fromShell || Option.getOrUndefined(record)?.profile || "default"
 		return {
 			checkout,
-			profile,
-			shared: [...(dotenv.length > 0 ? ["--env-file", envFile] : []), "--profile", profile],
+			profile: fromFile || fromShell || Option.getOrUndefined(record)?.profile || "default",
+			envFile: dotenv.length > 0 ? Option.some(envFile) : Option.none(),
 		} satisfies Target
 	})
 
@@ -322,114 +373,96 @@ const prepareEnvFile = (envFile: string) =>
 		return { apiKey, provider }
 	})
 
-const ProfileNames = Schema.fromJsonString(Schema.Array(Schema.String))
+const AnswerError = Schema.Struct({ status: Schema.Literal("error"), message: Schema.String })
 
-/** Alchemy profiles with a Cloudflare account connected, or none when that cannot be read. */
-const cloudflareProfiles = (checkout: Checkout) =>
-	Effect.gen(function* () {
-		const path = yield* Path.Path
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const stdout = yield* spawner.string(
-			ChildProcess.make(
-				checkout.runtime,
-				[path.join(checkout.root, "apps", "cli", "scripts", "cloudflare-profiles.ts")],
-				{
-					cwd: checkout.root,
-					env: checkout.runtimeEnv,
-					extendEnv: true,
-					stdin: "ignore",
-					stderr: "ignore",
-				},
-			),
-		)
-		return yield* Schema.decodeEffect(ProfileNames)(stdout)
-	}).pipe(Effect.option)
+const AccountAnswer = Schema.Union([
+	Schema.Struct({ status: Schema.Literal("connected"), account_id: Schema.String }),
+	Schema.Struct({ status: Schema.Literal("not-configured"), message: Schema.String }),
+	AnswerError,
+])
+
+const OutputAnswer = Schema.Union([
+	Schema.Struct({
+		status: Schema.Literal("found"),
+		value: Schema.Struct({ api: Schema.String }),
+	}),
+	Schema.Struct({ status: Schema.Literal("missing") }),
+	AnswerError,
+])
 
 /**
- * Offers the browser sign-in when someone is at a terminal and Alchemy has no
- * Cloudflare credentials. It never blocks a deploy on its own judgement: which
- * credentials count is Alchemy's call, made by `provider check-env` and the deploy.
+ * The Cloudflare account Alchemy will act on, as Alchemy itself resolves it. Finding
+ * it out changes nothing in any account. At a terminal, a profile with no Cloudflare
+ * connection gets Alchemy's browser sign-in first.
  */
-const offerCloudflareSignIn = (target: Target) =>
+const requireAccount = (target: Target, options: { readonly offerSignIn: boolean }) =>
 	Effect.gen(function* () {
-		if (!(yield* (yield* Stdio.Stdio).stdinIsTerminal)) {
-			return
-		}
-		const signedIn = Effect.map(
-			cloudflareProfiles(target.checkout),
-			Option.match({
-				onNone: () => true,
-				onSome: (profiles) => profiles.includes(target.profile),
-			}),
-		)
-		if (yield* signedIn) {
-			return
-		}
-		if ((yield* run(target, ["provider", "check-env", "--provider", CLOUDFLARE], "quiet")) === 0) {
-			return
-		}
-		yield* writeStderrLine(
-			[
-				"Checkfu deploys into your own Cloudflare account. Sign in first:",
-				"",
-				"  1. Choose OAuth and keep All Scopes.",
-				'  2. In the browser, switch on "Account API Token Provisioning" before you approve.',
-				"",
-			].join("\n"),
-		)
-		const exitCode = yield* run(target, ["profile", "edit", "--add", CLOUDFLARE], "inherit")
-		if (exitCode !== 0 || !(yield* signedIn)) {
-			return yield* new CliFailure({
-				message: "Cloudflare sign-in did not finish. Run `bun checkfu deploy` again to retry.",
-				exitCode: exitCode === 0 ? 1 : exitCode,
-			})
-		}
-	})
-
-const StackOutput = Schema.fromJsonString(Schema.Struct({ api: Schema.String }))
-
-const readDeployedUrl = (target: Target, stage: string, mode: "pipe" | "quiet" = "pipe") =>
-	Effect.gen(function* () {
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const stdout = yield* spawner
-			.string(
-				yield* alchemy(
-					target,
-					["state", "read", `${STACK_NAME}/${stage}/output`, "--no-input"],
-					mode,
-				),
+		let answer = yield* ask(target, AccountAnswer, ["account"])
+		if (
+			answer.status === "not-configured" &&
+			options.offerSignIn &&
+			(yield* (yield* Stdio.Stdio).stdinIsTerminal)
+		) {
+			yield* writeStderrLine(
+				[
+					"Checkfu deploys into your own Cloudflare account. Sign in first:",
+					"",
+					"  1. Choose OAuth and keep All Scopes.",
+					'  2. In the browser, switch on "Account API Token Provisioning" before you approve.',
+					"",
+				].join("\n"),
 			)
-			.pipe(Effect.mapError((error) => configError(`Could not read deploy output: ${error}`)))
-		const output = yield* Schema.decodeEffect(StackOutput)(stdout).pipe(
-			Effect.mapError(() =>
-				configError("The deploy finished but did not report an API URL. Run it again."),
-			),
-		)
-		return yield* normalizeApiUrl(output.api)
+			const exitCode = yield* run(target, ["profile", "edit", "--add", "Cloudflare"])
+			answer = yield* ask(target, AccountAnswer, ["account"])
+			if (exitCode !== 0 || answer.status === "not-configured") {
+				return yield* new CliFailure({
+					message: "Cloudflare sign-in did not finish. Run `bun checkfu deploy` again to retry.",
+					exitCode: exitCode === 0 ? 1 : exitCode,
+				})
+			}
+		}
+		switch (answer.status) {
+			case "connected":
+				return answer.account_id
+			case "not-configured":
+				return yield* configError(
+					`${answer.message} Sign in by running \`bun checkfu deploy\` in a terminal, or export CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.`,
+				)
+			case "error":
+				return yield* configError(
+					`Could not determine which Cloudflare account is in use: ${answer.message}. Nothing was changed.`,
+				)
+		}
 	})
 
 /**
- * A stage taken from the record rather than typed by the operator is only acted on
- * when the Cloudflare account in use holds exactly the deployment that was recorded.
- * Otherwise changed credentials would silently point the command at another account.
+ * A stage taken from the record rather than typed by the operator is only acted on in
+ * the account it was deployed to. Otherwise changed credentials would silently point
+ * the command at another account's deployment of the same name.
  */
-const requireRecordedDeployment = (
-	target: Target,
-	record: DeploymentRecord,
-	found: Option.Option<string>,
-	consequence: string,
-) =>
-	Option.contains(found, record.url)
+const requireRecordedAccount = (target: Target, record: DeploymentRecord, accountId: string) =>
+	record.account_id === accountId
 		? Effect.void
 		: usageError(
-				`This checkout deployed "${record.stage}" at ${record.url}, but the Cloudflare account in use (profile "${target.profile}") has ${Option.match(
-					found,
-					{
-						onNone: () => `no "${record.stage}" deployment`,
-						onSome: (url) => `"${record.stage}" at ${url}`,
-					},
-				)}. ${consequence} Check ALCHEMY_PROFILE and your Cloudflare credentials, or pass --stage to act on this account on purpose.`,
+				`This checkout deployed "${record.stage}" to Cloudflare account ${record.account_id}, but the credentials in use (profile "${target.profile}") act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials, or pass --stage to act on this account on purpose.`,
 			)
+
+const readDeployedUrl = (target: Target, stage: string) =>
+	Effect.gen(function* () {
+		const answer = yield* ask(target, OutputAnswer, ["output", `${STACK_NAME}/${stage}/output`])
+		switch (answer.status) {
+			case "found":
+				return yield* normalizeApiUrl(answer.value.api)
+			case "missing":
+				return yield* configError(
+					`Alchemy deployed "${stage}" but recorded no API URL for it. Run \`bun checkfu deploy\` again.`,
+				)
+			case "error":
+				return yield* configError(
+					`"${stage}" is deployed, but its URL could not be read: ${answer.message}. Run \`bun checkfu deploy\` again to finish connecting.`,
+				)
+		}
+	})
 
 const waitUntilLive = (url: string, within: Duration.Input) =>
 	Effect.gen(function* () {
@@ -467,21 +500,17 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 
 		const { apiKey, provider } = yield* prepareEnvFile(envFile)
 		const target = yield* resolveTarget(checkout, envFile, record)
-		yield* offerCloudflareSignIn(target)
+		const accountId = yield* requireAccount(target, { offerSignIn: true })
 		if (Option.isNone(input.stage) && Option.isSome(record)) {
-			yield* requireRecordedDeployment(
-				target,
-				record.value,
-				yield* readDeployedUrl(target, stage, "quiet").pipe(Effect.option),
-				"Nothing was deployed.",
-			)
+			yield* requireRecordedAccount(target, record.value, accountId)
 		}
 
-		const exitCode = yield* run(
-			target,
-			["deploy", "--stage", stage, ...(input.yes ? ["--yes"] : [])],
-			"inherit",
-		)
+		const exitCode = yield* run(target, [
+			"deploy",
+			"--stage",
+			stage,
+			...(input.yes ? ["--yes"] : []),
+		])
 		if (exitCode !== 0) {
 			return yield* new CliFailure({
 				message: "Deploy did not finish. Run `bun checkfu deploy` again when you are ready.",
@@ -492,7 +521,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		const url = yield* readDeployedUrl(target, stage)
 		yield* writePrivate(
 			yield* deploymentRecordPath(checkout),
-			`${yield* Schema.encodeEffect(DeploymentRecord)({ stage, profile: target.profile, url }).pipe(Effect.orDie)}\n`,
+			`${yield* Schema.encodeEffect(DeploymentRecord)({ stage, profile: target.profile, account_id: accountId, url }).pipe(Effect.orDie)}\n`,
 		)
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)
 		yield* waitUntilLive(url, checkout.readyWithin)
@@ -527,36 +556,39 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 	Effect.gen(function* () {
 		const path = yield* Path.Path
 		const checkout = yield* requireCheckout
-		const envFile = path.join(checkout.root, ".env")
 		const record = yield* readDeploymentRecord(checkout)
-		const target = yield* resolveTarget(checkout, envFile, record)
-
 		const stage = Option.getOrElse(input.stage, () => Option.getOrUndefined(record)?.stage)
 		if (stage === undefined) {
 			return yield* usageError(
 				"This checkout has no record of a deployment, so there is no stage to assume. Pass --stage with the one to delete.",
 			)
 		}
-		const deployedUrl = yield* readDeployedUrl(target, stage, "quiet").pipe(Effect.option)
+		const target = yield* resolveTarget(checkout, path.join(checkout.root, ".env"), record)
+		const accountId = yield* requireAccount(target, { offerSignIn: false })
 		if (Option.isNone(input.stage) && Option.isSome(record)) {
-			yield* requireRecordedDeployment(target, record.value, deployedUrl, "Nothing was deleted.")
+			yield* requireRecordedAccount(target, record.value, accountId)
 		}
 
-		const exitCode = yield* run(
-			target,
-			["destroy", "--stage", stage, ...(input.yes ? ["--yes"] : [])],
-			"inherit",
-		)
+		const exitCode = yield* run(target, [
+			"destroy",
+			"--stage",
+			stage,
+			...(input.yes ? ["--yes"] : []),
+		])
 		if (exitCode !== 0) {
 			return yield* new CliFailure({ message: "Destroy did not finish.", exitCode })
 		}
 		yield* writeStderrLine(`Removed the "${stage}" deployment and all of its data.`)
-		if (Option.isSome(record) && Option.contains(deployedUrl, record.value.url)) {
+		if (
+			Option.isSome(record) &&
+			record.value.stage === stage &&
+			record.value.account_id === accountId
+		) {
 			yield* removeIfPresent(yield* deploymentRecordPath(checkout))
-		}
-		const saved = yield* readSavedConnection
-		if (Option.isSome(saved) && Option.contains(deployedUrl, saved.value.url)) {
-			yield* removeSavedConnection
+			const saved = yield* readSavedConnection
+			if (Option.isSome(saved) && saved.value.url === record.value.url) {
+				yield* removeSavedConnection
+			}
 		}
 	}),
 ).pipe(
