@@ -32,7 +32,8 @@ const probeEnv = (): NodeJS.ProcessEnv => {
 
 const HARNESS_SOURCE =
 	/node_modules\/(?:openai|agents|@anthropic-ai\/[^/]+|@earendil-works\/[^/]+)\/[^"]*/
-const MODEL_TABLE = /@earendil-works\/pi-ai\/dist\/(?:model-catalog|providers\/)/
+const MODEL_TABLE =
+	/@earendil-works\/pi-ai\/dist\/(?:model-catalog\.js|providers\/(?:data\/[^/]+\.json|[^/]+\.models\.js))$/
 
 const harnessSources = (dir: string): ReadonlyArray<string> =>
 	readdirSync(dir)

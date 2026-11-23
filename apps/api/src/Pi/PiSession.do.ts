@@ -152,9 +152,7 @@ export interface PiSessionShape {
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
 }
 
-export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShape>()("PiSession", {
-	transferredFrom: "ApiWorker",
-}) {}
+export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShape>()("PiSession") {}
 
 export const PiSessionLive = PiSession.make(
 	Effect.map(

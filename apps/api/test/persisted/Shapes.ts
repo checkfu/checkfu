@@ -46,7 +46,7 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 	"pi-doc":
 		"Pi durable documents survive deployments and are read when resuming or replaying turns. Keep the document's scope and family fixed, and bump its `version` with a `migrate` handler whenever its fields change.",
 	"harness-call":
-		"The API Worker and the harness Worker deploy separately, and a running object can keep its old code for the whole code-update delay. The previous harness must be able to read this request and the previous API this result: add a field only as optional, and never start sending a change in the release that introduces it.",
+		"The API Worker and the harness Worker deploy separately, and a running object can keep its old code for the whole code-update delay, so each side meets the other's previous build. The lock proves only that this build reads the shape the last one sent. That the last build tolerates this one is yours to check: add a field only as optional, and start sending it one release after the reader ships.",
 }
 
 export interface PersistedShape {

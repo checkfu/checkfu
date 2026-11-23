@@ -24,7 +24,7 @@ const harnessCall = <A, E, R>(
 			: Effect.fail(new HarnessCallFailed({ cause })),
 	)
 
-const PiSessionExecutorLive = Layer.effect(
+const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
 	Effect.gen(function* () {
 		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
@@ -48,7 +48,7 @@ const PiSessionExecutorLive = Layer.effect(
 
 const CheckfuLive = Checkfu.layer(
 	SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
-).pipe(Layer.provide(PiSessionExecutorLive), Layer.provide(PlacedDurableObjects))
+).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,

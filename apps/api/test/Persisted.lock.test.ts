@@ -581,10 +581,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(registered.toSorted()).toEqual(declaredBeforeWorkerImport.toSorted())
 				expect(new Set(declaredBeforeWorkerImport).size).toBe(declaredBeforeWorkerImport.length)
 
-				// Importing the deploy entry point (ApiWorker -> PiSession -> PiDurableEngine) MUST
+				// Importing the deploy entry point (PiHarnessWorker -> PiSession -> PiDurableEngine) MUST
 				// enumerate the exact same Pi document IDs as the standalone persisted:cut / persisted:check
 				// entry point (Shapes.ts -> PiDocRegistry.ts).
-				yield* Effect.promise(() => import("../src/ApiWorker.ts"))
+				yield* Effect.promise(() => import("../src/Pi/PiHarnessWorker.ts"))
 				const declaredAfterWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
 					piDocShapeId(spec.token.definition.kind),
 				)

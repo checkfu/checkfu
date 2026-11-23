@@ -1,8 +1,5 @@
-import {
-	ModelStopReason,
-	TurnFailed,
-	TurnInterrupted,
-} from "@checkfu/domain/Session/Harness.external"
+import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
+import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
@@ -38,9 +35,20 @@ export const PiTurnReply = Schema.Struct({
 	stop_reason: ModelStopReason,
 })
 
+// The harness sends a provider's error as it got it; the API clamps it to the domain's limits.
+export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
+	error_type: Schema.String,
+	message: Schema.String,
+	terminal: Schema.Boolean,
+	model_usage: Schema.optionalKey(ModelUsage),
+})
+
 export const PiTurnOutcome = Schema.Union([
 	Schema.Struct({ ok: Schema.Literal(true), reply: PiTurnReply }),
-	Schema.Struct({ ok: Schema.Literal(false), error: Schema.Union([TurnFailed, TurnInterrupted]) }),
+	Schema.Struct({
+		ok: Schema.Literal(false),
+		error: Schema.Union([PiTurnFailed, TurnInterrupted]),
+	}),
 ])
 export type PiTurnOutcome = typeof PiTurnOutcome.Type
 

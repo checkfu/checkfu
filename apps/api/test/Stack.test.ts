@@ -41,11 +41,15 @@ describe("Alchemy stack and worker entry", () => {
 					issues: { enabled: true },
 				})
 				expect(PI_HARNESS_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
-				expect(PI_HARNESS_WORKER_PROPS.codeUpdateStrategy).toEqual(
-					API_WORKER_PROPS.codeUpdateStrategy,
-				)
+				expect(PI_HARNESS_WORKER_PROPS.codeUpdateStrategy).toEqual({
+					mode: "deferred",
+					maxDelay: "12 minutes",
+				})
 				expect(PI_HARNESS_WORKER_PROPS.workersDev).toBe(false)
-				expect(PI_HARNESS_WORKER_PROPS.observability).toEqual(API_WORKER_PROPS.observability)
+				expect(PI_HARNESS_WORKER_PROPS.observability).toEqual({
+					enabled: true,
+					issues: { enabled: true },
+				})
 				expect(CLOUDFLARE_STATE_OBSERVABILITY).toEqual({
 					enabled: true,
 					logs: { enabled: true, invocationLogs: false },
