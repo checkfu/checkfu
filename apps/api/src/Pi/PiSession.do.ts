@@ -178,7 +178,6 @@ export const PiSessionLive = PiSession.make(
 				const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
 				const fence = new SqliteTurnFence({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
-					transaction: (run) => rawCtx.storage.transactionSync(run),
 				})
 				const backend = makePiHarnessBackend(lifecycle, harness, fence, apiKeys, () => {
 					rawCtx.abort("A turn did not stop when aborted")

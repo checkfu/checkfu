@@ -1,57 +1,29 @@
 export interface SqlExecutor {
 	exec(query: string, ...bindings: ReadonlyArray<unknown>): Iterable<object>
-	transaction(run: () => void): void
 }
 
-export type Migration = ReadonlyArray<string>
-
-export const MIGRATIONS: ReadonlyArray<Migration> = [
-	["CREATE TABLE checkfu_cancelled_ops (operation_id TEXT PRIMARY KEY)"],
-]
-
-const applyMigrations = (sql: SqlExecutor, migrations: ReadonlyArray<Migration>): void => {
-	sql.exec("CREATE TABLE IF NOT EXISTS checkfu_fence_migrations (id INTEGER PRIMARY KEY)")
-	const applied = new Set<unknown>(
-		[...sql.exec("SELECT id FROM checkfu_fence_migrations")].map((row) =>
-			"id" in row ? row.id : undefined,
-		),
-	)
-	migrations.forEach((statements, index) => {
-		const id = index + 1
-		if (applied.has(id)) {
-			return
-		}
-		sql.transaction(() => {
-			for (const statement of statements) {
-				sql.exec(statement)
-			}
-			sql.exec("INSERT INTO checkfu_fence_migrations (id) VALUES (?)", id)
-		})
-	})
-}
+export const CANCELLED_OPS_TABLE =
+	"CREATE TABLE IF NOT EXISTS checkfu_cancelled_ops (operation_id TEXT PRIMARY KEY)"
 
 export class SqliteTurnFence {
 	readonly #sql: SqlExecutor
-	readonly #migrations: ReadonlyArray<Migration>
-	#initialized = false
+	#created = false
 
-	constructor(sql: SqlExecutor, migrations: ReadonlyArray<Migration> = MIGRATIONS) {
+	constructor(sql: SqlExecutor) {
 		this.#sql = sql
-		this.#migrations = migrations
 	}
 
-	#ensureTables(): void {
-		if (this.#initialized) {
-			return
+	#table(): SqlExecutor {
+		if (!this.#created) {
+			this.#sql.exec(CANCELLED_OPS_TABLE)
+			this.#created = true
 		}
-		applyMigrations(this.#sql, this.#migrations)
-		this.#initialized = true
+		return this.#sql
 	}
 
 	isCancelled(operationId: string): boolean {
-		this.#ensureTables()
 		const rows = [
-			...this.#sql.exec(
+			...this.#table().exec(
 				"SELECT 1 FROM checkfu_cancelled_ops WHERE operation_id = ? LIMIT 1",
 				operationId,
 			),
@@ -60,8 +32,7 @@ export class SqliteTurnFence {
 	}
 
 	markCancelled(operationId: string): void {
-		this.#ensureTables()
-		this.#sql.exec(
+		this.#table().exec(
 			"INSERT OR IGNORE INTO checkfu_cancelled_ops (operation_id) VALUES (?)",
 			operationId,
 		)

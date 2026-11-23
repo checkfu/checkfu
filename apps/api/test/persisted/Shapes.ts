@@ -9,6 +9,7 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
+import { CANCELLED_OPS_TABLE } from "../../src/Pi/TurnFence.ts"
 
 export type PersistedSchema = Schema.Codec<unknown, unknown, never, never>
 
@@ -24,6 +25,7 @@ export type PersistedKind =
 	| "saga-result"
 	| "pi-doc"
 	| "harness-call"
+	| "session-table"
 
 export const RULES: Readonly<Record<PersistedKind, string>> = {
 	event:
@@ -45,6 +47,8 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"A completed run keeps its result. Add a field only with a decoding default, or give the saga a new name.",
 	"pi-doc":
 		"Pi durable documents survive deployments and are read when resuming or replaying turns. Keep the document's scope and family fixed, and bump its `version` with a `migrate` handler whenever its fields change.",
+	"session-table":
+		"The table already exists in every session object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"harness-call":
 		"The API Worker and the harness Worker deploy separately, and a running object can keep its old code for the whole code-update delay, so each side meets the other's previous build. The lock proves only that this build reads the shape the last one sent. That the last build tolerates this one is yours to check: add a field only as optional, and start sending it one release after the reader ships.",
 }
@@ -60,6 +64,7 @@ interface TaggedSchema extends PersistedSchema {
 }
 interface CommandClass extends TaggedSchema {
 	readonly reply: PersistedSchema | undefined
+	readonly rejects: ReadonlyArray<unknown>
 }
 interface AggregateClass {
 	readonly aggregateName: string
@@ -100,12 +105,6 @@ interface ModelClass {
 	readonly sagas?: ReadonlyArray<SagaClass>
 }
 
-// Only commands submitted with aggregate.schedule are persisted for later delivery.
-const SCHEDULED_COMMANDS = new Set([
-	"Checkfu.Session/AbandonTurn",
-	"Checkfu.Automation/FireAutomation",
-])
-
 const commandReply = (model: string, command: CommandClass): PersistedShape => ({
 	id: `command-reply:${model}/${command.tag}`,
 	kind: "command-reply",
@@ -127,9 +126,15 @@ const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
 		}
 		for (const command of aggregate.definition.commands) {
 			shapes.push(commandReply(model.modelName, command))
-			const name = `${owner}/${command.tag}`
-			if (SCHEDULED_COMMANDS.has(name)) {
-				shapes.push({ id: `scheduled-command:${name}`, kind: "scheduled-command", schema: command })
+			// Only a command that cannot reject can be scheduled, and a scheduled command is
+			// stored until it is delivered. Every such command is locked, scheduled today or not,
+			// so one scheduled later is already covered.
+			if (command.rejects.length === 0) {
+				shapes.push({
+					id: `scheduled-command:${owner}/${command.tag}`,
+					kind: "scheduled-command",
+					schema: command,
+				})
 			}
 		}
 	}
@@ -436,11 +441,20 @@ const HARNESS_CALLS: ReadonlyArray<PersistedShape> = Object.entries(PiHarnessCal
 	],
 )
 
+const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
+	{
+		id: "session-table:checkfu_cancelled_ops",
+		kind: "session-table",
+		schema: Schema.Literal(CANCELLED_OPS_TABLE),
+	},
+]
+
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
 	...SAGA_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,
+	...SESSION_TABLES,
 ]
 
 export const registryProblems = (
@@ -472,6 +486,7 @@ export const registryProblems = (
 		"saga-result",
 		"pi-doc",
 		"harness-call",
+		"session-table",
 	] as const) {
 		if (!shapes.some((shape) => shape.kind === kind)) {
 			problems.push(`no ${kind} shape was found`)
