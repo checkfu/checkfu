@@ -11,9 +11,21 @@
 		"test": {
 			"dependsOn": ["^typecheck"]
 		},
+		"@checkfu/api#typecheck": {
+			"dependsOn": ["^typecheck"],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/alchemy.run.ts",
+				"$TURBO_ROOT$/scripts/sync-state-store-observability.ts"
+			]
+		},
 		"@checkfu/api#test": {
 			"dependsOn": ["^typecheck"],
-			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/alchemy.run.ts"]
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/alchemy.run.ts",
+				"$TURBO_ROOT$/scripts/sync-state-store-observability.ts"
+			]
 		}
 	}
 }

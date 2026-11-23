@@ -10,9 +10,26 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Tracer from "effect/Tracer"
 
+export const DEFAULT_STATE_STORE_WORKER_NAME = "alchemy-state-store" as const
+
+/**
+ * Observability settings for the Cloudflare state-store Worker.
+ * `Cloudflare.state()` applies this when bootstrapping or upgrading the store;
+ * existing current-version stores can be updated once with
+ * `bun run state:sync-observability`.
+ */
+export const CLOUDFLARE_STATE_OBSERVABILITY = {
+	enabled: true,
+	logs: { enabled: true, invocationLogs: false },
+} as const
+
 const rawState = Layer.unwrap(
 	Effect.map(Alchemy.AlchemyContext, (ctx) =>
-		ctx.dev ? Alchemy.localState() : Cloudflare.state(),
+		ctx.dev
+			? Alchemy.localState()
+			: Cloudflare.state({
+					observability: CLOUDFLARE_STATE_OBSERVABILITY,
+				}),
 	),
 )
 
