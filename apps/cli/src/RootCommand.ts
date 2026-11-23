@@ -40,15 +40,14 @@ export const RootCommand = Command.make("checkfu").pipe(
 	Command.withSharedFlags(SharedFlags),
 )
 
-export const getClient = (): Effect.Effect<
+export const getClient: Effect.Effect<
 	CheckfuClient,
 	CliFailure,
 	Command.CommandContext<"checkfu"> | HttpClient.HttpClient | SecureRandom.SecureRandom
-> =>
-	Effect.gen(function* () {
-		const root = yield* RootCommand
-		return yield* makeCheckfuClient(root.baseUrl)
-	})
+> = Effect.gen(function* () {
+	const root = yield* RootCommand
+	return yield* makeCheckfuClient(root.baseUrl)
+})
 
 export const renderOutput = (
 	value: unknown,

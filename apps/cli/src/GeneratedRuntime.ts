@@ -158,7 +158,7 @@ const collectRequestParts = (
 			if (repeatFlag !== undefined) {
 				const rawList = rawFlags[repeatFlag.propName]
 				const items = Array.isArray(rawList) ? rawList : []
-				const stdinVal = yield* readPipedStdin()
+				const stdinVal = yield* readPipedStdin
 				if (items.length > 0 && Option.isSome(stdinVal)) {
 					return yield* usageError(
 						`Provide ${repeatFlag.wireName} via either --${repeatFlag.flagName} or stdin, not both.`,
@@ -284,7 +284,7 @@ export const invokeGeneratedOperation = (
 			}
 		}
 
-		const client = yield* getClient()
+		const client = yield* getClient
 
 		if (endpoint.headers !== undefined) {
 			const effectiveHeaders =
@@ -389,7 +389,7 @@ export const invokeGeneratedStream = (
 		const afterRaw = parts.query["after"]
 		const isSessionStream = spec.apiGroup === "sessions" && spec.apiEndpoint === "streamEvents"
 
-		const client = yield* getClient()
+		const client = yield* getClient
 		yield* client
 			.streamEndpointEvents({
 				method: endpoint.method,

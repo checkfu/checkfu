@@ -686,7 +686,7 @@ const dispatchUserLine = (
 		if (trimmed === "/exit" || trimmed === "/quit") return "exit" as const
 
 		if (trimmed === "/interrupt") {
-			const key = yield* client.generateIdempotencyKey()
+			const key = yield* client.generateIdempotencyKey
 			const res = yield* Effect.result(
 				sendConnectEventsWithRetry(
 					client.api.sessions.sendEvents({
@@ -726,7 +726,7 @@ const dispatchUserLine = (
 			return "continue" as const
 		}
 
-		const key = yield* client.generateIdempotencyKey()
+		const key = yield* client.generateIdempotencyKey
 		const sendSnapshot = yield* Ref.modify(stateRef, (state) => [
 			{
 				liveStatus: state.liveStatus,
@@ -1149,7 +1149,7 @@ export const sessionsConnectCommand = Command.make(
 			const root = yield* RootCommand
 			const stdio = yield* Stdio.Stdio
 			const terminal = yield* Terminal.Terminal
-			const client = yield* getClient()
+			const client = yield* getClient
 
 			const initialSession = yield* fetchSessionStatusWithRetry(client, sessionId)
 
@@ -1321,7 +1321,7 @@ export const sessionsConnectCommand = Command.make(
 							}
 						} else {
 							const lateStdin = yield* Effect.race(
-								Fiber.join(stdinCheckFiber).pipe(Effect.map(Option.some)),
+								Fiber.join(stdinCheckFiber).pipe(Effect.asSome),
 								Effect.sleep("20 millis").pipe(Effect.as(Option.none())),
 							)
 							if (Option.isSome(lateStdin)) {

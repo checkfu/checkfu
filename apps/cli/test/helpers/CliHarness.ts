@@ -111,16 +111,16 @@ export const makeTestServer = (handler?: ModelHandler) =>
 
 		const apiContext = yield* Layer.build(ServerLayer)
 		const api = yield* makeApiHandler.pipe(Effect.provide(apiContext))
+		const runWithApi = Effect.runPromiseWith(apiContext)
 
 		const dispatchWeb = (request: Request): Promise<Response> =>
-			Effect.runPromise(
+			runWithApi(
 				api.fetch.pipe(
 					Effect.provideService(
 						HttpServerRequest.HttpServerRequest,
 						HttpServerRequest.fromWeb(request),
 					),
 					Effect.map((response) => HttpServerResponse.toWeb(response)),
-					Effect.provide(apiContext),
 				),
 			)
 

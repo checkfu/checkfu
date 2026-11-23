@@ -754,6 +754,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Two piped messages where turn 1 finishes with refusal (does not drain queue):
 					//    must not hang waiting for turn 2, and must exit non-zero reporting queued turn 2 did not start.
 					//    A subsequent piped message starting turn 2 cleanly on --after 0 must still succeed.
@@ -797,7 +798,7 @@ describe("CLI sessions:events and sessions connect", () => {
 										data?: Array<{ turn?: number }>
 									} | null
 									if (body?.data?.[0]?.turn === 2) {
-										await Effect.runPromise(Deferred.succeed(releaseTurn1, undefined))
+										await runPromise(Deferred.succeed(releaseTurn1, undefined))
 									}
 								}
 								return res
@@ -911,7 +912,7 @@ describe("CLI sessions:events and sessions connect", () => {
 									} | null
 									if (body?.data?.[0]?.turn === 2) {
 										sawQueuedSecond = true
-										await Effect.runPromise(Deferred.succeed(lookupFailRelease, undefined))
+										await runPromise(Deferred.succeed(lookupFailRelease, undefined))
 									}
 								}
 								return res
@@ -952,6 +953,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Indented code lines preserve leading/trailing whitespace and suppress local echo
 					const receivedInputs: Array<string> = []
 					const wsCli = yield* makeTestServer({
@@ -1126,7 +1128,7 @@ describe("CLI sessions:events and sessions connect", () => {
 										controller.enqueue(chunk.value)
 										if (!idleSignaled && text.includes("session.status_idle")) {
 											idleSignaled = true
-											await Effect.runPromise(Deferred.succeed(idleFrameDelivered, undefined))
+											await runPromise(Deferred.succeed(idleFrameDelivered, undefined))
 										}
 									},
 									cancel(reason) {
@@ -1175,7 +1177,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							stdin: Stream.never,
 							interceptFetch: async (next, request) => {
 								if (!request.url.includes("/events/stream")) return next(request)
-								await Effect.runPromise(Deferred.succeed(streamConnected, undefined))
+								await runPromise(Deferred.succeed(streamConnected, undefined))
 								const real = await next(request)
 								if (real.status !== 200 || real.body === null) return real
 								const reader = real.body.getReader()
@@ -1229,6 +1231,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Starting from idle, pressing Ctrl-C right after POST acceptance (before SSE delivers
 					//    session.status_running) must still interrupt the accepted turn rather than disconnecting
 					const idleCtrlCSigint = makeSigintController()
@@ -1519,7 +1522,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							stdin: Stream.never,
 							interceptFetch: async (next, request) => {
 								if (request.url.includes("/events/stream")) {
-									await Effect.runPromise(Deferred.succeed(archiveLookupConnected, undefined))
+									await runPromise(Deferred.succeed(archiveLookupConnected, undefined))
 									return next(request)
 								}
 								if (
@@ -1594,6 +1597,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Delayed queued turn-2 receipt arriving AFTER SSE delivers turn 1's idle(refusal)
 					//    must NOT mark turn 2 as running
 					const delayedReceiptSigint = makeSigintController()
@@ -1629,8 +1633,8 @@ describe("CLI sessions:events and sessions connect", () => {
 									if (delayedPosts === 2) {
 										// Release turn 1 to stop with refusal and hold the queued receipt until
 										// SSE has delivered session.status_idle(refusal)
-										await Effect.runPromise(Deferred.succeed(releaseDelayedTurn1, undefined))
-										await Effect.runPromise(Deferred.await(delayedIdleDelivered))
+										await runPromise(Deferred.succeed(releaseDelayedTurn1, undefined))
+										await runPromise(Deferred.await(delayedIdleDelivered))
 										await new Promise((resolve) => setTimeout(resolve, 30))
 									}
 									return res
@@ -1652,7 +1656,7 @@ describe("CLI sessions:events and sessions connect", () => {
 										controller.enqueue(chunk.value)
 										if (!idleSignaled && text.includes("session.status_idle")) {
 											idleSignaled = true
-											await Effect.runPromise(Deferred.succeed(delayedIdleDelivered, undefined))
+											await runPromise(Deferred.succeed(delayedIdleDelivered, undefined))
 										}
 									},
 									cancel(reason) {
@@ -1741,6 +1745,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Interrupted piped send (e.g. session archived mid-POST) prints the generated
 					//    Idempotency-Key to stderr and exits non-zero
 					const intCli = yield* makeTestServer()
@@ -1756,7 +1761,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						interceptFetch: async (next, request) => {
 							if (request.method === "POST" && request.url.endsWith("/events")) {
 								interruptedKey = request.headers.get("idempotency-key") ?? ""
-								await Effect.runPromise(Deferred.succeed(postInFlight, undefined))
+								await runPromise(Deferred.succeed(postInFlight, undefined))
 								return await new Promise<Response>((_resolve, reject) => {
 									const abort = () => reject(new DOMException("Aborted", "AbortError"))
 									if (request.signal.aborted) {
@@ -2032,6 +2037,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) After turn 1 stops with refusal, sending turn 2 from idle while replaying turn 1
 					//    must NOT fail turn 2 even if sessions.get temporarily reports stale idle at turn 1
 					const replayRefusalCli = yield* makeTestServer({
@@ -2144,7 +2150,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							interceptFetch: async (next, request) => {
 								if (request.method === "POST" && request.url.endsWith("/events")) {
 									ttyInterruptedKey = request.headers.get("idempotency-key") ?? ""
-									await Effect.runPromise(Deferred.succeed(ttyPostStalled, undefined))
+									await runPromise(Deferred.succeed(ttyPostStalled, undefined))
 									return await new Promise<Response>((_resolve, reject) => {
 										const abort = () => reject(new DOMException("Aborted", "AbortError"))
 										if (request.signal.aborted) {
@@ -2256,7 +2262,7 @@ describe("CLI sessions:events and sessions connect", () => {
 										controller.enqueue(encoder.encode(text))
 										if (!idleSignaled && text.includes("session.status_idle")) {
 											idleSignaled = true
-											await Effect.runPromise(Deferred.succeed(turn1Settled, undefined))
+											await runPromise(Deferred.succeed(turn1Settled, undefined))
 										}
 									},
 									cancel(reason) {
@@ -2282,6 +2288,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) With two piped messages, if turn 2's session.status_idle starts rendering before
 					//    the input loop installs its final waiter, resolving the current waiter after output
 					//    must wake the loop instead of hanging on a stale deferred
@@ -2321,7 +2328,7 @@ describe("CLI sessions:events and sessions connect", () => {
 										postCount += 1
 										const res = await next(request)
 										if (postCount === 2) {
-											await Effect.runPromise(Deferred.await(turn2IdleRendering))
+											await runPromise(Deferred.await(turn2IdleRendering))
 										}
 										return res
 									}
@@ -2420,6 +2427,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Ended session replay with buffered non-newline piped input (open pipe, no EOF)
 					//    reports unsent input instead of exiting 0
 					const encoder = new TextEncoder()
@@ -2504,8 +2512,8 @@ describe("CLI sessions:events and sessions connect", () => {
 									: Effect.void,
 							interceptFetch: async (next, request) => {
 								if (request.method === "POST" && request.url.endsWith("/events")) {
-									await Effect.runPromise(Deferred.succeed(localPostStarted, undefined))
-									await Effect.runPromise(Deferred.await(otherMessageRendered))
+									await runPromise(Deferred.succeed(localPostStarted, undefined))
+									await runPromise(Deferred.await(otherMessageRendered))
 									return new Response(
 										JSON.stringify({
 											type: "error",
@@ -2727,6 +2735,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					const encoder = new TextEncoder()
 					let turnCount = 0
 					const cli = yield* makeTestServer({
@@ -2760,7 +2769,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 							),
 							interceptFetch: async (next, request) => {
 								if (request.url.includes("/events/stream")) {
-									await Effect.runPromise(Deferred.succeed(streamReady, undefined))
+									await runPromise(Deferred.succeed(streamReady, undefined))
 								}
 								return next(request)
 							},
@@ -2971,7 +2980,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 										controller.enqueue(chunk.value)
 										if (!signaledTurn2 && text.includes("retries_exhausted")) {
 											signaledTurn2 = true
-											await Effect.runPromise(Deferred.succeed(turn2Done, undefined))
+											await runPromise(Deferred.succeed(turn2Done, undefined))
 										}
 									},
 									cancel(reason) {
@@ -2996,6 +3005,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					const cli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -3159,7 +3169,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 												},
 											})}\n\n`
 											text = `${text}${retryErr}`
-											await Effect.runPromise(Deferred.succeed(retryErrDelivered, undefined))
+											await runPromise(Deferred.succeed(retryErrDelivered, undefined))
 										}
 										controller.enqueue(encoder.encode(text))
 									},
@@ -3207,6 +3217,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Piped message sent while CLI still sees turn 1 running, but arriving at the server
 					//    just after turn 1 stopped with refusal, actually starts turn 2 (queued: false).
 					//    Even if GET /sessions/:id lags showing turn 1 idle, connect must wait for turn 2
@@ -3266,7 +3277,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 											data?: ReadonlyArray<{ readonly turn?: number; readonly queued?: boolean }>
 										}
 										post2Receipt = parsed.data?.[0]
-										await Effect.runPromise(Deferred.succeed(releaseSseAfterPost2, undefined))
+										await runPromise(Deferred.succeed(releaseSseAfterPost2, undefined))
 									}
 									return res
 								}
@@ -3303,7 +3314,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 										if (!heldFirstIdle && text.includes("session.status_idle")) {
 											heldFirstIdle = true
 											// Hold turn 1's idle event until POST #2 has committed and returned its receipt
-											await Effect.runPromise(Deferred.await(releaseSseAfterPost2))
+											await runPromise(Deferred.await(releaseSseAfterPost2))
 										}
 										controller.enqueue(chunk.value)
 									},
@@ -3458,6 +3469,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 1) Message 2 queues turn 2 behind turn 1 (queued: true), turn 1 stops with refusal,
 					//    and message 3 starts turn 2 from idle (queued: false). Removing turn 2 from
 					//    unsettledQueuedTurns prevents a lagging GET snapshot from failing turn 2.
@@ -3524,10 +3536,10 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 									if (clearPosts === 2) {
 										post2Receipt = parsed.data?.[0]
 										// Release turn 1 to stop with refusal now that message 2 was queued
-										await Effect.runPromise(Deferred.succeed(releaseTurn1, undefined))
+										await runPromise(Deferred.succeed(releaseTurn1, undefined))
 									} else if (clearPosts === 3) {
 										post3Receipt = parsed.data?.[0]
-										await Effect.runPromise(Deferred.succeed(post3Returned, undefined))
+										await runPromise(Deferred.succeed(post3Returned, undefined))
 									}
 									return res
 								}
@@ -3564,13 +3576,13 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 										if (sawFirstIdle && !heldAfterFirstIdle) {
 											heldAfterFirstIdle = true
 											// Hold turn 2 SSE events until POST #3 receipt has returned and EOF settled
-											await Effect.runPromise(Deferred.await(post3Returned))
+											await runPromise(Deferred.await(post3Returned))
 											await new Promise((resolve) => setTimeout(resolve, 40))
 										}
 										controller.enqueue(chunk.value)
 										if (!sawFirstIdle && text.includes("session.status_idle")) {
 											sawFirstIdle = true
-											await Effect.runPromise(Deferred.succeed(turn1SettledRefusal, undefined))
+											await runPromise(Deferred.succeed(turn1SettledRefusal, undefined))
 										}
 									},
 									cancel(reason) {
@@ -3640,8 +3652,8 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 							sigintController: ttyPredecessorSigint,
 							interceptFetch: async (next, request) => {
 								if (request.url.includes("/events/stream")) {
-									await Effect.runPromise(Deferred.succeed(connectedIdle, undefined))
-									await Effect.runPromise(Deferred.await(releaseSseStream))
+									await runPromise(Deferred.succeed(connectedIdle, undefined))
+									await runPromise(Deferred.await(releaseSseStream))
 								}
 								return next(request)
 							},
@@ -3865,6 +3877,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context())
 					// 2) Replayed SSE frames (duplicate seq for session.status_running) on reconnect must NOT
 					//    double-count observedTurn and prematurely settle queued turn 2
 					const turn1Gate = yield* Deferred.make<void>()
@@ -3933,7 +3946,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 										if (!replayedPrefix) {
 											replayedPrefix = true
 											controller.enqueue(encoder.encode(savedInitialFrames))
-											await Effect.runPromise(Deferred.succeed(turn1Gate, undefined))
+											await runPromise(Deferred.succeed(turn1Gate, undefined))
 											return
 										}
 										const chunk = await reader.read()
@@ -3993,7 +4006,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 									lagPosts += 1
 									const res = await next(request)
 									if (lagPosts === 2) {
-										await Effect.runPromise(Deferred.succeed(releaseLagTurn1, undefined))
+										await runPromise(Deferred.succeed(releaseLagTurn1, undefined))
 									}
 									return res
 								}

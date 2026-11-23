@@ -120,30 +120,33 @@ export const resolveStructuredInput = (
 ): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	resolveTextOrFile(raw).pipe(Effect.flatMap((text) => parseJsonOrYaml(text, label)))
 
-export const readPipedStdin = (): Effect.Effect<Option.Option<unknown>, CliFailure, Stdio.Stdio> =>
-	Effect.gen(function* () {
-		const stdio = yield* Stdio.Stdio
-		if (yield* stdio.stdinIsTerminal) {
-			return Option.none()
-		}
-		const bytes = yield* readBoundedBytes(
-			stdio.stdin,
-			MAX_INPUT_BYTES,
-			"Failed to read stdin",
-			"stdin payload",
-		)
-		if (bytes.byteLength === 0) return Option.none()
-		const text = new TextDecoder().decode(bytes)
-		if (text.trim().length === 0) return Option.none()
-		const parsed = yield* parseJsonOrYaml(text, "stdin")
-		return Option.some(parsed)
-	})
+export const readPipedStdin: Effect.Effect<
+	Option.Option<unknown>,
+	CliFailure,
+	Stdio.Stdio
+> = Effect.gen(function* () {
+	const stdio = yield* Stdio.Stdio
+	if (yield* stdio.stdinIsTerminal) {
+		return Option.none()
+	}
+	const bytes = yield* readBoundedBytes(
+		stdio.stdin,
+		MAX_INPUT_BYTES,
+		"Failed to read stdin",
+		"stdin payload",
+	)
+	if (bytes.byteLength === 0) return Option.none()
+	const text = new TextDecoder().decode(bytes)
+	if (text.trim().length === 0) return Option.none()
+	const parsed = yield* parseJsonOrYaml(text, "stdin")
+	return Option.some(parsed)
+})
 
 export const readPipedStdinRecord = (
 	label: string,
 ): Effect.Effect<Record<string, unknown>, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
-		const input = yield* readPipedStdin()
+		const input = yield* readPipedStdin
 		if (Option.isNone(input)) return {}
 		if (!isPlainRecord(input.value)) {
 			return yield* usageError(`Expected a JSON or YAML object on stdin for ${label}.`)

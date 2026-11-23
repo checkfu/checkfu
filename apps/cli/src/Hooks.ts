@@ -32,11 +32,11 @@ export const diagnoseSessionCreateNotFound = (
 	Effect.gen(function* () {
 		const rawAgentId = extractAgentId(payload)
 		if (rawAgentId !== undefined && isRoutablePathSegment(rawAgentId)) {
-			const decodedAgent = Schema.decodeUnknownOption(AgentId)(rawAgentId)
+			const decodedAgent = Schema.decodeOption(AgentId)(rawAgentId)
 			if (Option.isSome(decodedAgent)) {
 				const agentCheck = yield* Effect.result(
 					client.api.agents.get({ params: { agent_id: decodedAgent.value } }),
-				).pipe(Effect.catchDefect(() => Effect.succeed(undefined)))
+				).pipe(Effect.catchDefect(() => Effect.undefined))
 				if (
 					agentCheck !== undefined &&
 					agentCheck._tag === "Failure" &&
@@ -53,11 +53,11 @@ export const diagnoseSessionCreateNotFound = (
 				? payload["environment_id"]
 				: undefined
 		if (envId !== undefined && isRoutablePathSegment(envId)) {
-			const decodedEnv = Schema.decodeUnknownOption(EnvironmentId)(envId)
+			const decodedEnv = Schema.decodeOption(EnvironmentId)(envId)
 			if (Option.isSome(decodedEnv)) {
 				const envCheck = yield* Effect.result(
 					client.api.environments.get({ params: { environment_id: decodedEnv.value } }),
-				).pipe(Effect.catchDefect(() => Effect.succeed(undefined)))
+				).pipe(Effect.catchDefect(() => Effect.undefined))
 				if (
 					envCheck !== undefined &&
 					envCheck._tag === "Failure" &&
@@ -78,7 +78,7 @@ export const ensureIdempotencyKeyHeader = (
 ): Effect.Effect<Record<string, string>, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		if (headers["idempotency-key"] !== undefined) return headers
-		const key = yield* client.generateIdempotencyKey()
+		const key = yield* client.generateIdempotencyKey
 		yield* writeStderrLine(`Idempotency-Key: ${key}`)
 		return { ...headers, "idempotency-key": key }
 	})

@@ -142,8 +142,10 @@ export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> 
 
 const optionalConfigString = (name: string): Effect.Effect<Option.Option<string>, CliFailure> =>
 	Config.option(Config.String(name)).pipe(
-		Effect.map(Option.filter((value) => value.trim().length > 0)),
-		Effect.mapError((err) => configError(`Failed to read ${name}: ${err.message}`)),
+		Effect.mapBoth({
+			onSuccess: Option.filter((value) => value.trim().length > 0),
+			onFailure: (err) => configError(`Failed to read ${name}: ${err.message}`),
+		}),
 	)
 
 export const resolveBaseUrl = (
@@ -164,20 +166,21 @@ export const resolveBaseUrl = (
 		return DEFAULT_API_URL
 	})
 
-export const resolveApiKey = (): Effect.Effect<Redacted.Redacted<string>, CliFailure> =>
-	Config.option(Config.Redacted("CHECKFU_API_KEY")).pipe(
-		Effect.mapError((err) => configError(`Failed to read CHECKFU_API_KEY: ${err.message}`)),
-		Effect.flatMap((maybeKey) => {
-			if (Option.isNone(maybeKey) || Redacted.value(maybeKey.value).trim().length === 0) {
-				return Effect.fail(
-					configError(
-						"Missing CHECKFU_API_KEY environment variable. Export CHECKFU_API_KEY before calling the Checkfu API.",
-					),
-				)
-			}
-			return Effect.succeed(Redacted.make(Redacted.value(maybeKey.value).trim()))
-		}),
-	)
+export const resolveApiKey: Effect.Effect<Redacted.Redacted<string>, CliFailure> = Config.option(
+	Config.Redacted("CHECKFU_API_KEY"),
+).pipe(
+	Effect.mapError((err) => configError(`Failed to read CHECKFU_API_KEY: ${err.message}`)),
+	Effect.flatMap((maybeKey) => {
+		if (Option.isNone(maybeKey) || Redacted.value(maybeKey.value).trim().length === 0) {
+			return Effect.fail(
+				configError(
+					"Missing CHECKFU_API_KEY environment variable. Export CHECKFU_API_KEY before calling the Checkfu API.",
+				),
+			)
+		}
+		return Effect.succeed(Redacted.make(Redacted.value(maybeKey.value).trim()))
+	}),
+)
 
 export interface SessionStreamEvent {
 	readonly id: string | undefined
@@ -217,7 +220,7 @@ export interface CheckfuClient {
 		sessionId: string,
 		options?: StreamSessionEventsOptions,
 	) => Stream.Stream<SessionStreamEvent, CliFailure>
-	readonly generateIdempotencyKey: () => Effect.Effect<string>
+	readonly generateIdempotencyKey: Effect.Effect<string>
 }
 
 const parseSeq = (id: string | undefined, data: Record<string, unknown>): number | undefined => {
@@ -254,7 +257,7 @@ export const makeCheckfuClient = (
 ): Effect.Effect<CheckfuClient, CliFailure, HttpClient.HttpClient | SecureRandom.SecureRandom> =>
 	Effect.gen(function* () {
 		const baseUrl = yield* resolveBaseUrl(baseUrlFlag)
-		const apiKey = yield* resolveApiKey()
+		const apiKey = yield* resolveApiKey
 		const rawHttpClient = yield* HttpClient.HttpClient
 		const existingRequestInit = Context.getOrUndefined(
 			yield* Effect.context(),
@@ -269,9 +272,10 @@ export const makeCheckfuClient = (
 					...existingRequestInit,
 					redirect: "manual",
 				}).pipe(
-					Effect.flatMap((response) => {
-						if (isRedirectStatus(response.status)) {
-							return cancelResponseBody(response).pipe(
+					Effect.filterOrElse(
+						(response) => !isRedirectStatus(response.status),
+						(response) =>
+							cancelResponseBody(response).pipe(
 								Effect.andThen(
 									Effect.fail(
 										new HttpClientError.HttpClientError({
@@ -283,10 +287,8 @@ export const makeCheckfuClient = (
 										}),
 									),
 								),
-							)
-						}
-						return Effect.succeed(response)
-					}),
+							),
+					),
 				),
 			),
 			HttpClient.mapRequest(HttpClientRequest.bearerToken(bearerValue)),
@@ -297,11 +299,10 @@ export const makeCheckfuClient = (
 			httpClient: authedHttpClient,
 		})
 
-		const generateIdempotencyKey = (): Effect.Effect<string> =>
-			Effect.map(
-				random.randomBytes(12),
-				(bytes) => `cli_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`,
-			)
+		const generateIdempotencyKey: Effect.Effect<string> = Effect.map(
+			random.randomBytes(12),
+			(bytes) => `cli_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`,
+		)
 
 		const streamEndpointEvents = (
 			requestSpec: EndpointSseRequest,
@@ -408,7 +409,7 @@ export const makeCheckfuClient = (
 							const parsedError = yield* Effect.try({
 								try: () => JSON.parse(bodyText) as unknown,
 								catch: () => undefined,
-							}).pipe(Effect.catch(() => Effect.succeed(undefined)))
+							}).pipe(Effect.orElseSucceed(() => undefined))
 
 							loopState.done = true
 							if (isApiErrorEnvelope(parsedError)) {
@@ -683,9 +684,7 @@ export const makeCheckfuClient = (
 					done: false,
 				}
 				return Stream.unfold(loopState, (state) =>
-					state.done
-						? Effect.succeed(undefined)
-						: Effect.succeed([openConnection(state), state] as const),
+					state.done ? Effect.undefined : Effect.succeed([openConnection(state), state] as const),
 				).pipe(Stream.flatten)
 			})
 		}
