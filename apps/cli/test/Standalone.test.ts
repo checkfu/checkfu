@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { once } from "node:events"
 import { createServer } from "node:http"
@@ -96,26 +97,27 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 
 	it("stops on an interrupt even when its parent holds an IPC channel", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-standalone-"))
-		const binary = join(scratch, "checkfu")
-		const build = spawnSync(
-			resolveBunExecutable() ?? "bun",
-			["run", "checkfu:build", "--outfile", binary],
-			{ cwd: repoRoot, encoding: "utf8", timeout: 60_000 },
-		)
-		expect(build.status, build.stderr).toBe(0)
-
 		// A server that accepts the request and never answers keeps the command pending.
 		// Its first request is also the signal that the CLI is up and has its handlers
 		// installed, so the interrupt is not sent into a process that is still starting.
 		const server = createServer(() => undefined)
 		const requested = once(server, "request")
-		await new Promise<void>((resolve) => {
-			server.listen(0, "127.0.0.1", resolve)
-		})
+		let child: ChildProcess | undefined
+		// Everything started here is stopped in `finally`, whichever step fails.
 		try {
+			const binary = join(scratch, "checkfu")
+			const build = spawnSync(
+				resolveBunExecutable() ?? "bun",
+				["run", "checkfu:build", "--outfile", binary],
+				{ cwd: repoRoot, encoding: "utf8", timeout: 60_000 },
+			)
+			expect(build.status, build.stderr).toBe(0)
+
+			server.listen(0, "127.0.0.1")
+			await once(server, "listening")
 			const address = server.address()
 			const port = typeof address === "object" && address !== null ? address.port : 0
-			const child = spawn(
+			child = spawn(
 				binary,
 				["--base-url", `http://127.0.0.1:${port}`, "sessions", "retrieve", "--session-id", "s"],
 				{
@@ -123,19 +125,18 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 					env: cleanEnv({ CHECKFU_API_KEY: "key", CHECKFU_CONFIG_DIR: join(scratch, "config") }),
 				},
 			)
-			const exited = new Promise<number | null>((resolve) => {
-				child.on("exit", (code) => {
-					resolve(code)
-				})
-			})
+			const exited = once(child, "exit").then(([code]) => code as number | null)
 			expect(await Promise.race([requested.then(() => "requested"), sleep(30_000)])).toBe(
 				"requested",
 			)
 			child.kill("SIGINT")
-			const outcome = await Promise.race([exited, sleep(5000).then(() => "still running")])
-			child.kill("SIGKILL")
-			expect(outcome).toBe(130)
+			expect(await Promise.race([exited, sleep(5000).then(() => "still running")])).toBe(130)
 		} finally {
+			if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+				const gone = once(child, "exit")
+				child.kill("SIGKILL")
+				await gone
+			}
 			server.closeAllConnections()
 			server.close()
 			rmSync(scratch, { recursive: true, force: true })
