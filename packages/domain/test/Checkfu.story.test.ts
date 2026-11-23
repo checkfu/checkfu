@@ -182,10 +182,12 @@ describe("Checkfu unified hosted model stories", () => {
 						agent_id: agent.id,
 						expected_version: 1,
 						next_version_id: v2.id,
-						name: "Verified Agent v2",
-						model: { id: "gpt-4o-mini" },
-						system: "Be extra concise.",
-						description: null,
+						changes: {
+							name: "Verified Agent v2",
+							model: { id: "gpt-4o-mini" },
+							system: "Be extra concise.",
+							description: null,
+						},
 					}),
 				),
 				Story.then(

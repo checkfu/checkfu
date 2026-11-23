@@ -659,10 +659,12 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 											agent_id: ref.id,
 											expected_version: 2,
 											next_version_id: AgentVersionId.make("aver_writer_b_v3"),
-											name: "Writer B v3",
-											model: { id: "gpt-4o" },
-											system: "System B",
-											description: "Desc B",
+											changes: {
+												name: "Writer B v3",
+												model: { id: "gpt-4o" },
+												system: "System B",
+												description: "Desc B",
+											},
 										}),
 									)
 									const v3Commit = v3Receipt.commits.find(
@@ -1212,6 +1214,137 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(deleteRes.status).toBe(200)
 					expect((yield* update(env.id, { version: 7, name: "After Delete" })).status).toBe(404)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("decides partial agent updates in the domain and maps each refusal", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const update = (id: string, body: unknown) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/agents/${id}`,
+							headers: AUTH_HEADERS,
+							body,
+						})
+					const errorOf = (res: Response) =>
+						Effect.map(
+							Effect.promise(() => res.json()),
+							(body) => (body as { error: { type: string; message: string } }).error,
+						)
+
+					const createRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: {
+							name: "Planner",
+							model: "gpt-4o-mini",
+							system: "Plan.",
+							description: "Plans work",
+						},
+					})
+					expect(createRes.status).toBe(201)
+					const agent = (yield* Effect.promise(() => createRes.json())) as { id: string }
+
+					const mini = { id: "gpt-4o-mini" }
+					const full = { id: "gpt-4o" }
+					const steps = [
+						[
+							{ name: "Planner II" },
+							{ name: "Planner II", model: mini, system: "Plan.", description: "Plans work" },
+						],
+						[
+							{ model: "gpt-4o" },
+							{ name: "Planner II", model: full, system: "Plan.", description: "Plans work" },
+						],
+						[
+							{ system: "Plan well." },
+							{ name: "Planner II", model: full, system: "Plan well.", description: "Plans work" },
+						],
+						[
+							{ description: "Plans all" },
+							{ name: "Planner II", model: full, system: "Plan well.", description: "Plans all" },
+						],
+						[
+							{ system: null },
+							{ name: "Planner II", model: full, system: null, description: "Plans all" },
+						],
+						[
+							{ description: null },
+							{ name: "Planner II", model: full, system: null, description: null },
+						],
+						[
+							{ name: "Planner III", model: mini, system: "" },
+							{ name: "Planner III", model: mini, system: "", description: null },
+						],
+					] as const
+					for (const [index, [fields, expected]] of steps.entries()) {
+						const res = yield* update(agent.id, { version: index + 1, ...fields })
+						expect(res.status).toBe(200)
+						expect(yield* Effect.promise(() => res.json())).toMatchObject({
+							id: agent.id,
+							version: index + 2,
+							archived_at: null,
+							...expected,
+						})
+					}
+
+					const head = { name: "Planner III", model: mini, system: "", description: null }
+					for (const fields of [{}, { name: "Planner III" }, { model: mini, description: null }]) {
+						const res = yield* update(agent.id, { version: 8, ...fields })
+						expect(res.status).toBe(200)
+						expect(yield* Effect.promise(() => res.json())).toMatchObject({
+							id: agent.id,
+							version: 8,
+							...head,
+						})
+					}
+
+					const unsupported = yield* update(agent.id, { version: 8, model: "not-a-model" })
+					expect(unsupported.status).toBe(400)
+					expect((yield* errorOf(unsupported)).message).toBe('Unsupported model "not-a-model".')
+
+					const missing = yield* update("agent_never_created", { version: 1, name: "Missing" })
+					expect(missing.status).toBe(404)
+					expect(yield* errorOf(missing)).toEqual({
+						type: "not_found_error",
+						message: "Agent does not exist.",
+					})
+
+					const stale = yield* update(agent.id, { version: 1, name: "Stale" })
+					expect(stale.status).toBe(409)
+					expect((yield* errorOf(stale)).message).toBe(
+						"Agent version does not match expected_version.",
+					)
+
+					const archiveRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${agent.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archiveRes.status).toBe(200)
+					const archived = yield* update(agent.id, { version: 8, name: "After Archive" })
+					expect(archived.status).toBe(409)
+					expect((yield* errorOf(archived)).message).toBe(
+						"Agent is archived and cannot be modified.",
+					)
+
+					const getRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/agents/${agent.id}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(yield* Effect.promise(() => getRes.json())).toMatchObject({ version: 8, ...head })
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -2683,10 +2816,12 @@ describe("Agent and environment field length limits", () => {
 								agent_id: agentId,
 								expected_version: 1,
 								next_version_id: v2Id,
-								name: "🚀".repeat(MAX_AGENT_NAME_LENGTH),
-								model: { id: "anthropic/claude-sonnet-4-5" },
-								system: "🚀".repeat(MAX_AGENT_SYSTEM_LENGTH),
-								description: "🚀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+								changes: {
+									name: "🚀".repeat(MAX_AGENT_NAME_LENGTH),
+									model: { id: "anthropic/claude-sonnet-4-5" },
+									system: "🚀".repeat(MAX_AGENT_SYSTEM_LENGTH),
+									description: "🚀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+								},
 							}),
 						)
 						expect(
@@ -2853,10 +2988,12 @@ describe("Agent and environment field length limits", () => {
 					agent_id: AgentId.make("agent_cmd_reject"),
 					expected_version: 1,
 					next_version_id: AgentVersionId.make("aver_cmd_reject_2"),
-					name: "Valid Name",
-					model: { id: "openai/gpt-4o-mini" },
-					system: legacyAgentSystem,
-					description: null,
+					changes: {
+						name: "Valid Name",
+						model: { id: "openai/gpt-4o-mini" },
+						system: legacyAgentSystem,
+						description: null,
+					},
 				}),
 		).toThrow("Schema validation failed")
 		expect(
@@ -3049,10 +3186,12 @@ describe("Agent and environment field length limits", () => {
 								agent_id: doAgentId,
 								expected_version: 2,
 								next_version_id: doV3Id,
-								name: "DO Repaired Agent",
-								model: { id: "openai/gpt-4o-mini" },
-								system: "Short system",
-								description: "Short description",
+								changes: {
+									name: "DO Repaired Agent",
+									model: { id: "openai/gpt-4o-mini" },
+									system: "Short system",
+									description: "Short description",
+								},
 							}),
 						)
 						const repairedView = yield* agentViews.get(Agent.ref(doAgentId), {
@@ -3159,39 +3298,19 @@ describe("Agent and environment field length limits", () => {
 					expect(legacyAgent.description).toBe(legacyAgentDescription)
 					expect(legacyAgent.system).toBe(legacyAgentSystem)
 
-					for (const [body, field, limit] of [
-						[
-							{ version: 1, name: "Repaired Agent", description: "Short description" },
-							"system",
-							MAX_AGENT_SYSTEM_LENGTH,
-						],
-						[
-							{ version: 1, name: "Repaired Agent", system: "Short system" },
-							"description",
-							MAX_AGENT_DESCRIPTION_LENGTH,
-						],
-						[
-							{ version: 1, description: "Short description", system: "Short system" },
-							"name",
-							MAX_AGENT_NAME_LENGTH,
-						],
-					] as const) {
-						const partialRes = yield* sendRequest(apiFetch, {
-							method: "POST",
-							path: `/v1/agents/${repairAgentId}`,
-							headers: AUTH_HEADERS,
-							body,
-						})
-						expect(partialRes.status).toBe(400)
-						const partialErr = (yield* Effect.promise(() => partialRes.json())) as {
-							type: string
-							error: { type: string; message: string }
-						}
-						expect(partialErr.type).toBe("error")
-						expect(partialErr.error.type).toBe("invalid_request_error")
-						expect(partialErr.error.message).toContain(field)
-						expect(partialErr.error.message).toContain(String(limit))
-					}
+					const renamedAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${repairAgentId}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, name: "Repaired Agent" },
+					})
+					expect(renamedAgentRes.status).toBe(200)
+					expect(yield* Effect.promise(() => renamedAgentRes.json())).toMatchObject({
+						version: 2,
+						name: "Repaired Agent",
+						description: legacyAgentDescription,
+						system: legacyAgentSystem,
+					})
 
 					const repairEnvId = EnvironmentId.make("env_legacy_repair")
 					const repairEnvImport = yield* environments.import(
@@ -3242,12 +3361,7 @@ describe("Agent and environment field length limits", () => {
 						method: "POST",
 						path: `/v1/agents/${repairAgentId}`,
 						headers: AUTH_HEADERS,
-						body: {
-							version: 1,
-							name: "Repaired Agent",
-							description: "Short description",
-							system: "Short system",
-						},
+						body: { version: 2, description: "Short description", system: "Short system" },
 					})
 					expect(repairedAgentRes.status).toBe(200)
 					const repairedAgent = (yield* Effect.promise(() => repairedAgentRes.json())) as {
@@ -3256,7 +3370,7 @@ describe("Agent and environment field length limits", () => {
 						description: string
 						system: string
 					}
-					expect(repairedAgent.version).toBe(2)
+					expect(repairedAgent.version).toBe(3)
 					expect(repairedAgent.name).toBe("Repaired Agent")
 					expect(repairedAgent.description).toBe("Short description")
 					expect(repairedAgent.system).toBe("Short system")
