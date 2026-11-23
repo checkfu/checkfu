@@ -27,6 +27,7 @@ import * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
 import { MAX_AGENT_BODY_BYTES, handled, toApiError } from "../src/Http/HttpHelpers.ts"
+import { OPENAPI_DOCUMENT_JSON } from "../src/Http/OpenApiDocument.generated.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableHarness.ts"
 import {
@@ -383,6 +384,78 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		} finally {
 			await closeAuthed()
 			await closeUnconfigured()
+		}
+	})
+
+	it("rejects missing and wrong credentials on every operation outside the public allow-list", async () => {
+		const publicPaths = ["/health"]
+		const spec = JSON.parse(OPENAPI_DOCUMENT_JSON) as {
+			readonly paths: Record<string, Record<string, { readonly operationId?: string }>>
+		}
+		const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
+			Object.keys(methods).map((method) => ({
+				label: `${method.toUpperCase()} ${path}`,
+				method: method.toUpperCase(),
+				path,
+				requestPath: path.replaceAll(/\{[^}]+\}/g, "missing"),
+			})),
+		)
+		const guarded = operations.filter((operation) => !publicPaths.includes(operation.path))
+		expect(operations.length - guarded.length).toBe(publicPaths.length)
+		expect(guarded.length).toBeGreaterThanOrEqual(15)
+		expect(guarded.filter((operation) => !operation.path.startsWith("/v1/"))).toEqual([])
+
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const attempts: ReadonlyArray<Record<string, string>> = [
+						{},
+						{ authorization: "Bearer wrong-key" },
+						{ "x-api-key": "wrong-key" },
+					]
+					for (const operation of guarded) {
+						for (const headers of attempts) {
+							const res = yield* sendRequest(apiFetch, {
+								method: operation.method,
+								path: operation.requestPath,
+								headers,
+							})
+							expect(`${operation.label} -> ${res.status}`).toBe(`${operation.label} -> 401`)
+							expect(res.headers.get("www-authenticate")).toBe("Bearer")
+						}
+					}
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("fails closed with 503 when CHECKFU_API_KEY is set to an empty string", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(
+			async (model) => makeAssistantReply(model, null, "unused", 1, 1),
+			{ CHECKFU_API_KEY: "" },
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const res = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/sessions/missing",
+						headers: AUTH_HEADERS,
+					})
+					expect(res.status).toBe(503)
+					const health = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
+					expect(health.status).toBe(200)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
 		}
 	})
 
