@@ -16,7 +16,12 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import { readIfPresent, removeIfPresent, writePrivate } from "../src/PrivateFile.ts"
+import {
+	readIfPresent,
+	removeIfPresent,
+	restrictToOwner,
+	writePrivate,
+} from "../src/PrivateFile.ts"
 
 const RealFiles = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer, SecureRandom.layerWebCrypto)
 
@@ -33,6 +38,12 @@ describe("private files", () => {
 
 				expect(readFileSync(file, "utf8")).toBe("SECRET=2\n")
 				expect(readdirSync(directory)).toEqual([".env"])
+				if (process.platform !== "win32") {
+					expect(statSync(file).mode & 0o777).toBe(0o600)
+				}
+
+				chmodSync(file, 0o644)
+				yield* restrictToOwner(file)
 				if (process.platform !== "win32") {
 					expect(statSync(file).mode & 0o777).toBe(0o600)
 				}

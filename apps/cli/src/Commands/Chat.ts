@@ -12,7 +12,7 @@ import { getClient } from "../RootCommand.ts"
 import type { ChatDefaults } from "../SavedConnection.ts"
 import { readChatDefaults, readSavedConnection, writeChatDefaults } from "../SavedConnection.ts"
 import { COMMAND } from "../Standalone.ts"
-import { writeStderrLine } from "../TerminalOutput.ts"
+import { shellQuote, writeStderrLine } from "../TerminalOutput.ts"
 import { MODEL_PROVIDERS } from "./Deploy.ts"
 import { connectToSession } from "./SessionsConnect.ts"
 
@@ -20,9 +20,6 @@ const decodeId = <A>(schema: Schema.Codec<A, string>, label: string, raw: string
 	Schema.decodeEffect(schema)(raw).pipe(
 		Effect.mapError(() => configError(`The API returned an unexpected ${label} ID.`)),
 	)
-
-const shellQuote = (value: string): string =>
-	/^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`
 
 const isNotFound = (error: unknown): boolean =>
 	isApiErrorEnvelope(error) && error.error.type === "not_found_error"

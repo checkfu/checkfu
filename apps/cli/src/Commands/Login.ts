@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Stdio from "effect/Stdio"
-import { explicitBaseUrl, normalizeApiUrl, verifyApiKey } from "../Client.ts"
+import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
 import { CliFailure, configError, usageError } from "../Errors.ts"
 import { RootCommand } from "../RootCommand.ts"
 import type { SavedConnection } from "../SavedConnection.ts"
@@ -51,6 +51,11 @@ export const loginCommand = Command.make("login", {}, () =>
 		}
 		const url = yield* normalizeApiUrl(explicit.value)
 		const apiKey = yield* apiKeyFromEnvOrPrompt
+		if (!isSendableApiKey(apiKey)) {
+			return yield* configError(
+				"That API key cannot be sent in an HTTP header: it must be printable ASCII with no spaces or line breaks.",
+			)
+		}
 		yield* verifyApiKey(url, apiKey)
 		const saved = yield* readSavedConnection.pipe(
 			Effect.orElseSucceed(() => Option.none<SavedConnection>()),

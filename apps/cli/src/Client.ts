@@ -239,6 +239,9 @@ const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
 		}),
 	)
 
+/** An API key that can travel in an `Authorization` header unchanged. */
+export const isSendableApiKey = (apiKey: string): boolean => /^[!-~]+$/.test(apiKey)
+
 export const verifyApiKey = (
 	baseUrl: string,
 	apiKey: string,
@@ -248,15 +251,16 @@ export const verifyApiKey = (
 			networkFailure(
 				`${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path.`,
 			)
+		// The key is only sent to a route that has just refused a request for lacking one.
 		const anonymous = yield* probeProtectedRoute(baseUrl, Option.none())
-		if (anonymous.error === undefined || anonymous.error.type === "not_found_error") {
+		if (anonymous.status !== 401 || anonymous.error?.type !== "authentication_error") {
 			return yield* notCheckfu(anonymous.status)
 		}
 		const authed = yield* probeProtectedRoute(baseUrl, Option.some(apiKey))
 		if (authed.error === undefined) {
 			return yield* notCheckfu(authed.status)
 		}
-		if (authed.error.type !== "not_found_error") {
+		if (authed.status !== 404 || authed.error.type !== "not_found_error") {
 			return yield* networkFailure(
 				`${baseUrl} rejected the API key (HTTP ${authed.status}): ${authed.error.message}`,
 			)

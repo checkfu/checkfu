@@ -31,6 +31,20 @@ export const removeIfPresent = (
 		),
 	)
 
+/** Makes an existing file readable and writable by its owner only. */
+export const restrictToOwner = (
+	file: string,
+): Effect.Effect<void, CliFailure, FileSystem.FileSystem> =>
+	Effect.flatMap(FileSystem.FileSystem, (fs) =>
+		fs
+			.chmod(file, 0o600)
+			.pipe(
+				Effect.mapError((error) =>
+					configError(`Could not restrict ${file} to its owner: ${error.message}`),
+				),
+			),
+	)
+
 /**
  * Replaces `file` with an owner-only copy in one step: the contents are written to a
  * new 0600 file beside it and renamed over it, so they never sit in a file that

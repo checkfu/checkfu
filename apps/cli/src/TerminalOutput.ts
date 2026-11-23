@@ -29,6 +29,10 @@ export const escapeTerminalControlCharacters = (value: string): string =>
 export const stringifyTerminalSafeJson = (value: unknown, space?: number): string =>
 	(JSON.stringify(value, null, space) ?? "null").replaceAll(UNSAFE_IN_JSON, unicodeEscape)
 
+/** Quotes a value for pasting into a POSIX shell command. */
+export const shellQuote = (value: string): string =>
+	/^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`
+
 export const writeStdout = (text: string): Effect.Effect<void, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const stdio = yield* Stdio.Stdio

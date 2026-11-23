@@ -19,16 +19,16 @@ import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
-import { normalizeApiUrl, verifyApiKey } from "../Client.ts"
+import { explicitBaseUrl, isSendableApiKey, normalizeApiUrl, verifyApiKey } from "../Client.ts"
 import { CliFailure, configError, networkFailure, usageError } from "../Errors.ts"
 import {
 	readSavedConnection,
 	removeSavedConnection,
 	writeSavedConnection,
 } from "../SavedConnection.ts"
-import { readIfPresent, removeIfPresent, writePrivate } from "../PrivateFile.ts"
+import { readIfPresent, removeIfPresent, restrictToOwner, writePrivate } from "../PrivateFile.ts"
 import { COMMAND, isStandalone } from "../Standalone.ts"
-import { writeStderrLine } from "../TerminalOutput.ts"
+import { shellQuote, writeStderrLine } from "../TerminalOutput.ts"
 
 export const STACK_NAME = "Checkfu"
 export const DEFAULT_STAGE = "live"
@@ -121,7 +121,7 @@ export const setDotEnvValue = (
 const stageFlag = Flag.String("stage").pipe(
 	Flag.withMetavar("NAME"),
 	Flag.withDescription(
-		`Deployment stage (defaults to the one this checkout last deployed; a first deploy uses "${DEFAULT_STAGE}")`,
+		`Deployment stage. deploy defaults to the one this checkout last deployed, or "${DEFAULT_STAGE}" the first time; destroy requires it`,
 	),
 	Flag.optional,
 )
@@ -134,8 +134,9 @@ const yesFlag = Flag.Boolean("yes").pipe(
 
 /**
  * The deployment this checkout manages, identified by Cloudflare account and stage.
- * Written only after Alchemy reports a successful deploy, and the sole source of the
- * stage and profile that a bare `deploy` or `destroy` assumes. It is deliberately not part of the saved login;
+ * Written the moment Alchemy reports a successful deploy, so it always names the last
+ * thing this checkout deployed. A bare `deploy` takes its stage from it; `destroy`
+ * deletes nothing that it does not name. It is deliberately not part of the saved login;
  * which API the CLI talks to and what this checkout manages change independently.
  */
 const DeploymentRecord = Schema.fromJsonString(
@@ -143,7 +144,8 @@ const DeploymentRecord = Schema.fromJsonString(
 		stage: Schema.String,
 		profile: Schema.String,
 		account_id: Schema.String,
-		url: Schema.String,
+		// Absent between a successful deploy and reading its URL back.
+		url: Schema.optional(Schema.String),
 	}),
 	{ space: "\t" },
 )
@@ -370,9 +372,13 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 			contents = yield* setDotEnvValue(contents, provider.env, key)
 		}
 
-		if (contents !== original) {
-			yield* writePrivate(envFile, contents)
+		if (!isSendableApiKey(apiKey)) {
+			return yield* configError(
+				`${API_KEY_ENV} cannot be sent in an HTTP header: it must be printable ASCII with no spaces or line breaks. Nothing was deployed.`,
+			)
 		}
+		// Owner-only either way: a hand-written .env usually starts out world-readable.
+		yield* contents === original ? restrictToOwner(envFile) : writePrivate(envFile, contents)
 		return { apiKey, provider }
 	})
 
@@ -439,14 +445,26 @@ const requireAccount = (target: Target, signIn: Option.Option<{ readonly retry: 
 	})
 
 /**
- * A stage taken from the record rather than typed by the operator is only acted on in
- * the account it was deployed to. Otherwise changed credentials would silently point
- * the command at another account's deployment of the same name.
+ * A stage this checkout has deployed is only ever touched in the account it was
+ * deployed to. Otherwise changed credentials would silently point the command at
+ * another account's deployment of the same name.
  */
-const differentAccount = (record: DeploymentRecord, accountId: string) =>
-	usageError(
-		`This checkout deployed "${record.stage}" to Cloudflare account ${record.account_id}, but the credentials in use act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials, or pass --stage to act on this account on purpose.`,
-	)
+const requireRecordedAccount = (
+	record: Option.Option<DeploymentRecord>,
+	stage: string,
+	accountId: string,
+) =>
+	Option.isSome(record) && record.value.stage === stage && record.value.account_id !== accountId
+		? usageError(
+				`This checkout deployed "${stage}" to Cloudflare account ${record.value.account_id}, but the credentials in use act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials.`,
+			)
+		: Effect.void
+
+const writeDeploymentRecord = (checkout: Checkout, record: DeploymentRecord) =>
+	Effect.gen(function* () {
+		const contents = yield* Schema.encodeEffect(DeploymentRecord)(record).pipe(Effect.orDie)
+		yield* writePrivate(yield* deploymentRecordPath(checkout), `${contents}\n`)
+	})
 
 const readDeployedUrl = (target: Target, stage: string, retry: string) =>
 	Effect.gen(function* () {
@@ -508,13 +526,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			yield* resolveTarget(checkout, envFile, record),
 			Option.some({ retry }),
 		)
-		if (
-			Option.isNone(input.stage) &&
-			Option.isSome(record) &&
-			record.value.account_id !== accountId
-		) {
-			return yield* differentAccount(record.value, accountId)
-		}
+		yield* requireRecordedAccount(record, stage, accountId)
 		const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
 		// Resolved again because preparing the secrets may have created the env file.
 		const target = yield* resolveTarget(checkout, envFile, record)
@@ -532,11 +544,12 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			})
 		}
 
+		// Recorded before anything else can fail, so the record always names what was
+		// last deployed; its URL follows once Alchemy has been asked for it.
+		const deployed = { stage, profile: target.profile, account_id: accountId }
+		yield* writeDeploymentRecord(checkout, deployed)
 		const url = yield* readDeployedUrl(target, stage, retry)
-		yield* writePrivate(
-			yield* deploymentRecordPath(checkout),
-			`${yield* Schema.encodeEffect(DeploymentRecord)({ stage, profile: target.profile, account_id: accountId, url }).pipe(Effect.orDie)}\n`,
-		)
+		yield* writeDeploymentRecord(checkout, { ...deployed, url })
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)
 		yield* waitUntilLive(url, checkout.readyWithin, retry)
 		yield* verifyApiKey(url, apiKey)
@@ -546,6 +559,12 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			model: provider.model,
 		})
 
+		// A bare `chat` goes wherever CHECKFU_API_URL or CHECKFU_URL points, so when one of
+		// them names another deployment the suggestion has to name this one.
+		const exported = yield* explicitBaseUrl(Option.none())
+		const elsewhere =
+			Option.isSome(exported) &&
+			!Option.contains(yield* Effect.option(normalizeApiUrl(exported.value)), url)
 		yield* writeStderrLine(
 			[
 				"",
@@ -557,7 +576,9 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				"",
 				"Talk to your first agent:",
 				"",
-				`  ${COMMAND} chat`,
+				elsewhere
+					? `  ${COMMAND} --base-url ${shellQuote(url)} chat    (this shell exports a different Checkfu URL)`
+					: `  ${COMMAND} chat`,
 				"",
 			].join("\n"),
 		)
@@ -570,22 +591,28 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 	Effect.gen(function* () {
 		const path = yield* Path.Path
 		const checkout = yield* requireCheckout
-		const record = yield* readDeploymentRecord(checkout)
-		const stage = Option.getOrElse(input.stage, () => Option.getOrUndefined(record)?.stage)
-		if (stage === undefined) {
+		const record = Option.getOrUndefined(yield* readDeploymentRecord(checkout))
+
+		// Deleting takes two agreeing witnesses: the operator names the stage, and this
+		// checkout recorded deploying it. Nothing is ever chosen on the operator's behalf.
+		if (Option.isNone(input.stage)) {
 			return yield* usageError(
-				"This checkout has no record of a deployment, so there is no stage to assume. Pass --stage with the one to delete.",
+				`Name the stage to delete: \`${COMMAND} destroy --stage <name>\`.${record === undefined ? "" : ` This checkout last deployed "${record.stage}".`}`,
 			)
 		}
-		const target = yield* resolveTarget(checkout, path.join(checkout.root, ".env"), record)
-		const accountId = yield* requireAccount(target, Option.none())
-		if (
-			Option.isNone(input.stage) &&
-			Option.isSome(record) &&
-			record.value.account_id !== accountId
-		) {
-			return yield* differentAccount(record.value, accountId)
+		const stage = input.stage.value
+		if (record?.stage !== stage) {
+			return yield* usageError(
+				`This checkout has no record of deploying "${stage}"${record === undefined ? "" : ` (it last deployed "${record.stage}")`}. Nothing was deleted. To delete a deployment made elsewhere, use Alchemy directly: \`bun run destroy --stage ${stage}\`.`,
+			)
 		}
+		const target = yield* resolveTarget(
+			checkout,
+			path.join(checkout.root, ".env"),
+			Option.some(record),
+		)
+		const accountId = yield* requireAccount(target, Option.none())
+		yield* requireRecordedAccount(Option.some(record), stage, accountId)
 
 		const exitCode = yield* run(target, [
 			"destroy",
@@ -597,18 +624,14 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 			return yield* new CliFailure({ message: "Destroy did not finish.", exitCode })
 		}
 		yield* writeStderrLine(`Removed the "${stage}" deployment and all of its data.`)
-		if (
-			Option.isSome(record) &&
-			record.value.stage === stage &&
-			record.value.account_id === accountId
-		) {
-			yield* removeIfPresent(yield* deploymentRecordPath(checkout))
-			const saved = yield* readSavedConnection
-			if (Option.isSome(saved) && saved.value.url === record.value.url) {
-				yield* removeSavedConnection
-			}
+		yield* removeIfPresent(yield* deploymentRecordPath(checkout))
+		const saved = yield* readSavedConnection
+		if (Option.isSome(saved) && saved.value.url === record.url) {
+			yield* removeSavedConnection
 		}
 	}),
 ).pipe(
-	Command.withDescription("Delete a deployment and all of its data from your Cloudflare account"),
+	Command.withDescription(
+		"Delete a deployment this checkout made, and all of its data, from your Cloudflare account",
+	),
 )

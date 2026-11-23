@@ -81,6 +81,7 @@ export interface CliRunOptions {
 	readonly stdoutIsTerminal?: boolean
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
+	readonly onChmod?: (filePath: string, mode: number) => void
 	readonly spawn?: (args: ReadonlyArray<string>) => {
 		readonly exitCode: number
 		readonly stdout?: string
@@ -214,7 +215,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 							}
 						}),
 					makeDirectory: () => Effect.void,
-					chmod: () => Effect.void,
+					chmod: (filePath, mode) => Effect.sync(() => options?.onChmod?.(filePath, mode)),
 					remove: (filePath) => {
 						const entry = files[filePath]
 						if (typeof entry !== "string") {
