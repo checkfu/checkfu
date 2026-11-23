@@ -70,7 +70,9 @@ const releaseStdin = () => {
 
 const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	let exitSignalCode: number | undefined
-	const launchedViaIpc = typeof process.send === "function"
+	// Only the Node launcher speaks this protocol. The binary has no launcher, so an IPC
+	// channel from whatever started it must not be taken for one.
+	const launchedViaIpc = !isStandalone && typeof process.send === "function"
 	let launcherOwnsSigint = launchedViaIpc && process.connected
 	let finished = false
 

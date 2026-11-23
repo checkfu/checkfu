@@ -1,7 +1,9 @@
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
@@ -87,6 +89,49 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			})
 			expect(asBun.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/)
 		} finally {
+			rmSync(scratch, { recursive: true, force: true })
+		}
+	}, 120_000)
+
+	it("stops on an interrupt even when its parent holds an IPC channel", async () => {
+		const scratch = mkdtempSync(join(tmpdir(), "checkfu-standalone-"))
+		const binary = join(scratch, "checkfu")
+		const build = spawnSync(
+			resolveBunExecutable() ?? "bun",
+			["run", "checkfu:build", "--outfile", binary],
+			{ cwd: repoRoot, encoding: "utf8", timeout: 60_000 },
+		)
+		expect(build.status, build.stderr).toBe(0)
+
+		// A server that accepts the request and never answers keeps the command pending.
+		const server = createServer(() => undefined)
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve)
+		})
+		try {
+			const address = server.address()
+			const port = typeof address === "object" && address !== null ? address.port : 0
+			const child = spawn(
+				binary,
+				["--base-url", `http://127.0.0.1:${port}`, "sessions", "retrieve", "--session-id", "s"],
+				{
+					stdio: ["ignore", "ignore", "ignore", "ipc"],
+					env: cleanEnv({ CHECKFU_API_KEY: "key", CHECKFU_CONFIG_DIR: join(scratch, "config") }),
+				},
+			)
+			const exited = new Promise<number | null>((resolve) => {
+				child.on("exit", (code) => {
+					resolve(code)
+				})
+			})
+			await sleep(1500)
+			child.kill("SIGINT")
+			const outcome = await Promise.race([exited, sleep(5000).then(() => "still running")])
+			child.kill("SIGKILL")
+			expect(outcome).toBe(130)
+		} finally {
+			server.closeAllConnections()
+			server.close()
 			rmSync(scratch, { recursive: true, force: true })
 		}
 	}, 120_000)
