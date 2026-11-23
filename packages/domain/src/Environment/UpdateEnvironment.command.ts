@@ -32,9 +32,11 @@ export class UpdateEnvironment extends Domain.Command("UpdateEnvironment", {
 	input: {
 		environment_id: EnvironmentId,
 		expected_version: PositiveInt,
-		name: EnvironmentName,
-		description: Schema.NullOr(EnvironmentDescription),
-		config: EnvironmentConfig,
+		changes: Schema.Struct({
+			name: Schema.optionalKey(EnvironmentName),
+			description: Schema.optionalKey(Schema.NullOr(EnvironmentDescription)),
+			config: Schema.optionalKey(EnvironmentConfig),
+		}),
 	},
 	events: [EnvironmentUpdated],
 	rejects: [EnvironmentNotFound, EnvironmentArchivedError, EnvironmentVersionConflict],

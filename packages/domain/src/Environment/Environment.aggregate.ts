@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { NonNegativeInt } from "./EnvironmentTypes.ts"
+import { EnvironmentConfig, NonNegativeInt } from "./EnvironmentTypes.ts"
 import { ArchiveEnvironment, EnvironmentArchived } from "./ArchiveEnvironment.command.ts"
 import {
 	CreateEnvironment,
@@ -22,6 +22,8 @@ export const EnvironmentState = Schema.Struct({
 	status: Schema.String,
 	version: NonNegativeInt,
 	name: Schema.String,
+	description: Schema.NullOr(Schema.String),
+	config: Schema.NullOr(EnvironmentConfig),
 })
 export type EnvironmentState = typeof EnvironmentState.Type
 
@@ -39,6 +41,8 @@ export class Environment extends Domain.Aggregate("Environment", {
 		status: "",
 		version: 0,
 		name: "",
+		description: null,
+		config: null,
 	},
 	commands: [CreateEnvironment, UpdateEnvironment, ArchiveEnvironment, DeleteEnvironment],
 	keyOf: (cmd) => cmd.environment_id,
@@ -54,6 +58,11 @@ export class Environment extends Domain.Aggregate("Environment", {
 			[
 				[s.status === "", s.version === 0, s.name === ""].every((ok) => ok),
 				[s.status !== "", s.version >= 1, s.name !== ""].every((ok) => ok),
+			].some((ok) => ok),
+		ConfiguredExactlyWhenCreated: (s) =>
+			[
+				[s.status === "", s.description === null, s.config === null].every((ok) => ok),
+				[s.status !== "", s.config !== null].every((ok) => ok),
 			].some((ok) => ok),
 	},
 	transitions: {
@@ -120,7 +129,7 @@ export class Environment extends Domain.Aggregate("Environment", {
 			]
 		},
 		UpdateEnvironment: (state, cmd, ctx) => {
-			if ([state.status === "", state.status === "deleted"].some((gone) => gone)) {
+			if (state.config === null || state.status === "deleted") {
 				return new EnvironmentNotFound({ environment_id: ctx.id })
 			}
 			if (state.status !== "active") {
@@ -136,9 +145,10 @@ export class Environment extends Domain.Aggregate("Environment", {
 			return [
 				new EnvironmentUpdated({
 					version: state.version + 1,
-					name: cmd.name,
-					description: cmd.description,
-					config: cmd.config,
+					name: cmd.changes.name === undefined ? state.name : cmd.changes.name,
+					description:
+						cmd.changes.description === undefined ? state.description : cmd.changes.description,
+					config: cmd.changes.config === undefined ? state.config : cmd.changes.config,
 				}),
 			]
 		},
@@ -169,6 +179,8 @@ export class Environment extends Domain.Aggregate("Environment", {
 						status: "active",
 						version: e.version,
 						name: e.name,
+						description: e.description,
+						config: e.config,
 					}
 				: state,
 		"environment.updated": (state, e) =>
@@ -177,6 +189,8 @@ export class Environment extends Domain.Aggregate("Environment", {
 						...state,
 						version: e.version,
 						name: e.name,
+						description: e.description,
+						config: e.config,
 					}
 				: state,
 		"environment.archived": (state) =>

@@ -237,6 +237,10 @@
 			"Checkfu.TurnInputGenerationMatchesSession": {
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Session.every((s) => {\n\t\t\t\tconst view = m.TurnInput.find((v) => v.id === s.id)\n\t\t\t\tif (s.state._tag !== \"Idle\" && s.state._tag !== \"Running\") {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\treturn view.state.harness_generation === s.state.generation\n\t\t\t})"
+			},
+			"Environment.ConfiguredExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.description === null, s.config === null].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.config !== null].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

@@ -5,10 +5,6 @@ import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
 import { UpdateEnvironment } from "@checkfu/domain/Environment/UpdateEnvironment.command"
-import {
-	EnvironmentDescription,
-	EnvironmentName,
-} from "@checkfu/domain/Environment/EnvironmentTypes"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -16,7 +12,6 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
 import { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import {
@@ -32,13 +27,8 @@ import {
 	reject,
 } from "./HttpHelpers.ts"
 
-const ValidatedEnvironmentFields = Schema.Struct({
-	name: EnvironmentName,
-	description: Schema.NullOr(EnvironmentDescription),
-})
-
-export const EnvironmentPartialUpdateWaitTimeout = Context.Reference<Duration.Input>(
-	"@checkfu/api/EnvironmentPartialUpdateWaitTimeout",
+export const EnvironmentReadWaitTimeout = Context.Reference<Duration.Input>(
+	"@checkfu/api/EnvironmentReadWaitTimeout",
 	{ defaultValue: () => "5 seconds" },
 )
 
@@ -161,11 +151,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 						return found
 					}
 					const projected = yield* environmentViews
-						.waitFor(
-							ref,
-							{ version: { gte: 1 } },
-							{ timeout: yield* EnvironmentPartialUpdateWaitTimeout },
-						)
+						.waitFor(ref, { version: { gte: 1 } }, { timeout: yield* EnvironmentReadWaitTimeout })
 						.pipe(Effect.tapErrorTag("WaitTimeout", () => checkExists))
 					if (projected === null) {
 						yield* checkExists
@@ -177,67 +163,12 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.environment_id
-					const committed = yield* environments.get(id)
-					if (committed.status === "" || committed.status === "deleted") {
-						return yield* reject(404, `Environment ${id} not found.`)
-					}
-					if (committed.status === "archived") {
-						return yield* reject(409, "Environment is archived.")
-					}
-					if (committed.version !== payload.version) {
-						return yield* reject(409, "Environment version does not match.")
-					}
-					let description = payload.description
-					let config = payload.config
-					if (description === undefined || config === undefined) {
-						const current = Option.getOrNull(yield* environmentViews.get(Environment.ref(id)))
-						let view = current !== null && current.version >= committed.version ? current : null
-						if (view === null) {
-							const checkStillUpdatable = Effect.gen(function* () {
-								const latest = yield* environments.get(id)
-								if (latest.status === "" || latest.status === "deleted") {
-									return yield* reject(404, `Environment ${id} not found.`)
-								}
-								if (latest.status === "archived") {
-									return yield* reject(409, "Environment is archived.")
-								}
-								if (latest.version !== payload.version) {
-									return yield* reject(409, "Environment version does not match.")
-								}
-							})
-							yield* checkStillUpdatable
-							view = yield* environmentViews
-								.waitFor(
-									Environment.ref(id),
-									{ version: { gte: committed.version } },
-									{ timeout: yield* EnvironmentPartialUpdateWaitTimeout },
-								)
-								.pipe(Effect.tapErrorTag("WaitTimeout", () => checkStillUpdatable))
-						}
-						if (view === null) {
-							return yield* reject(404, `Environment ${id} not found.`)
-						}
-						if (view.version !== payload.version) {
-							return yield* reject(409, "Environment version does not match.")
-						}
-						if (description === undefined) {
-							description = view.description
-						}
-						if (config === undefined) {
-							config = view.config
-						}
-					}
-					const nextFields = yield* Schema.decodeEffect(ValidatedEnvironmentFields)({
-						name: payload.name ?? committed.name,
-						description,
-					}).pipe(Effect.catch((error) => reject(400, error.message)))
+					const { version, ...changes } = payload
 					const receipt = yield* environments.send(
 						new UpdateEnvironment({
 							environment_id: id,
-							expected_version: payload.version,
-							name: nextFields.name,
-							description: nextFields.description,
-							config,
+							expected_version: version,
+							changes,
 						}),
 					)
 					const result = yield* environmentViews
@@ -246,22 +177,19 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					if (isPending(result)) {
 						return result
 					}
-					const head = Option.getOrNull(result)
-					if (head !== null) {
-						if (head.version === receipt.reply.version && head.archived_at === null) {
-							return head
-						}
-						// Another writer updated or archived the environment before this read;
-						// EnvironmentView only stores head, so the exact committed snapshot (including
-						// its event timestamp) is no longer available. Return 202 pending rather than
-						// leaking another writer's version or fabricating `updated_at`.
-						return { id, type: "environment" as const, pending: true as const }
+					const head = yield* present(
+						result,
+						404,
+						`Environment ${id} was deleted after the update committed.`,
+					)
+					if (head.version === receipt.reply.version && head.archived_at === null) {
+						return head
 					}
-					const latest = yield* environments.get(id)
-					if (latest.status === "deleted") {
-						return yield* reject(404, `Environment ${id} was deleted after the update committed.`)
-					}
-					return yield* reject(500, "Failed to load updated environment.")
+					// Another writer updated or archived the environment before this read;
+					// EnvironmentView only stores head, so the exact committed snapshot (including
+					// its event timestamp) is no longer available. Return 202 pending rather than
+					// leaking another writer's version or fabricating `updated_at`.
+					return { id, type: "environment" as const, pending: true as const }
 				}).pipe(handled),
 			)
 			.handle("delete", ({ params }) =>

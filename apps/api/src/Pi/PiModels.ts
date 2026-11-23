@@ -175,8 +175,7 @@ const discardResponseBody = (body: Response["body"]): void => {
 /**
  * Wraps provider `fetch` calls so outbound requests stay pinned to the
  * resolved provider origin and refuse HTTP redirects at the transport.
- * Prevents a redirect from an allowed provider host from sending transcripts
- * or API keys to a host excluded by a limited environment's `allowed_hosts`.
+ * Prevents a redirect from sending transcripts or API keys to another host.
  *
  * Only URL strings and native `URL` instances are accepted. The validated
  * destination is dispatched as an immutable normalized URL string (`parsed.href`)

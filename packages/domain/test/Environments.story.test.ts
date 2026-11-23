@@ -82,6 +82,8 @@ describe("Environments", () => {
 				status: "active",
 				version: 1,
 				name: "Default Cloud",
+				description: "Unrestricted sandbox",
+				config: unrestrictedConfig,
 			}),
 			Story.view(EnvironmentView, env, {
 				id: env.id,
@@ -99,9 +101,11 @@ describe("Environments", () => {
 				new UpdateEnvironment({
 					environment_id: env.id,
 					expected_version: 1,
-					name: "Locked Down Cloud",
-					description: "Limited egress",
-					config: limitedConfig,
+					changes: {
+						name: "Locked Down Cloud",
+						description: "Limited egress",
+						config: limitedConfig,
+					},
 				}),
 			),
 			Story.then(
@@ -118,6 +122,8 @@ describe("Environments", () => {
 				status: "active",
 				version: 2,
 				name: "Locked Down Cloud",
+				description: "Limited egress",
+				config: limitedConfig,
 			}),
 			Story.view(EnvironmentView, env, {
 				id: env.id,
@@ -133,6 +139,214 @@ describe("Environments", () => {
 		)
 	})
 
+	it.effect("updates only the fields a command names and keeps the rest", () => {
+		const env = Environment.ref("env_partial")
+		return story(
+			Story.clock(t0),
+			Story.state(env, { status: "", version: 0, name: "", description: null, config: null }),
+			Story.given(
+				env,
+				new EnvironmentCreated({
+					version: 1,
+					name: "Sandbox",
+					description: "First draft",
+					config: limitedConfig,
+				}),
+			),
+			Story.clock(t1),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 1,
+					changes: { name: "Renamed" },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 2,
+					name: "Renamed",
+					description: "First draft",
+					config: limitedConfig,
+				}),
+			),
+			Story.replied({ version: 2 }),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 2,
+					changes: { description: "Second draft" },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 3,
+					name: "Renamed",
+					description: "Second draft",
+					config: limitedConfig,
+				}),
+			),
+			Story.replied({ version: 3 }),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 3,
+					changes: { config: unrestrictedConfig },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 4,
+					name: "Renamed",
+					description: "Second draft",
+					config: unrestrictedConfig,
+				}),
+			),
+			Story.replied({ version: 4 }),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 4,
+					changes: { description: null },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 5,
+					name: "Renamed",
+					description: null,
+					config: unrestrictedConfig,
+				}),
+			),
+			Story.replied({ version: 5 }),
+			Story.state(env, {
+				status: "active",
+				version: 5,
+				name: "Renamed",
+				description: null,
+				config: unrestrictedConfig,
+			}),
+			Story.clock(t2),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 5,
+					changes: { name: "Locked Down", config: limitedConfig },
+				}),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 6,
+					name: "Locked Down",
+					description: null,
+					config: limitedConfig,
+				}),
+			),
+			Story.replied({ version: 6 }),
+			Story.when(
+				new UpdateEnvironment({ environment_id: env.id, expected_version: 6, changes: {} }),
+			),
+			Story.then(
+				env,
+				new EnvironmentUpdated({
+					version: 7,
+					name: "Locked Down",
+					description: null,
+					config: limitedConfig,
+				}),
+			),
+			Story.replied({ version: 7 }),
+			Story.state(env, {
+				status: "active",
+				version: 7,
+				name: "Locked Down",
+				description: null,
+				config: limitedConfig,
+			}),
+			Story.view(EnvironmentView, env, {
+				id: env.id,
+				type: "environment",
+				version: 7,
+				name: "Locked Down",
+				description: null,
+				config: limitedConfig,
+				created_at: t0,
+				updated_at: t2,
+				archived_at: null,
+			}),
+		)
+	})
+
+	it.effect("refuses a partial update of a missing, stale, archived or deleted environment", () => {
+		const missing = Environment.ref("env_partial_missing")
+		const env = Environment.ref("env_partial_refused")
+		return story(
+			Story.clock(t0),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: missing.id,
+					expected_version: 1,
+					changes: { name: "Missing" },
+				}),
+			),
+			Story.rejected(new EnvironmentNotFound({ environment_id: missing.id })),
+			Story.given(
+				env,
+				new EnvironmentCreated({
+					version: 1,
+					name: "Sandbox",
+					description: "Kept",
+					config: limitedConfig,
+				}),
+			),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 2,
+					changes: { description: null },
+				}),
+			),
+			Story.rejected(
+				new EnvironmentVersionConflict({
+					environment_id: env.id,
+					expected_version: 2,
+					current_version: 1,
+				}),
+			),
+			Story.when(new ArchiveEnvironment({ environment_id: env.id })),
+			Story.then(env, new EnvironmentArchived()),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 2,
+					changes: { name: "Archived" },
+				}),
+			),
+			Story.rejected(new EnvironmentArchivedError({ environment_id: env.id })),
+			Story.state(env, {
+				status: "archived",
+				version: 1,
+				name: "Sandbox",
+				description: "Kept",
+				config: limitedConfig,
+			}),
+			Story.when(new DeleteEnvironment({ environment_id: env.id })),
+			Story.then(env, new EnvironmentDeleted()),
+			Story.when(
+				new UpdateEnvironment({
+					environment_id: env.id,
+					expected_version: 1,
+					changes: { name: "Deleted" },
+				}),
+			),
+			Story.rejected(new EnvironmentNotFound({ environment_id: env.id })),
+		)
+	})
+
 	it.effect("enforces optimistic concurrency, idempotent archive, and permanent deletion", () => {
 		const missing = Environment.ref("env_missing")
 		const env = Environment.ref("env_002")
@@ -142,9 +356,7 @@ describe("Environments", () => {
 				new UpdateEnvironment({
 					environment_id: missing.id,
 					expected_version: 1,
-					name: "Missing",
-					description: null,
-					config: unrestrictedConfig,
+					changes: { name: "Missing", description: null, config: unrestrictedConfig },
 				}),
 			),
 			Story.rejected(new EnvironmentNotFound({ environment_id: missing.id })),
@@ -183,9 +395,7 @@ describe("Environments", () => {
 				new UpdateEnvironment({
 					environment_id: env.id,
 					expected_version: 2,
-					name: "Stale",
-					description: null,
-					config: limitedConfig,
+					changes: { name: "Stale", description: null, config: limitedConfig },
 				}),
 			),
 			Story.rejected(
@@ -205,9 +415,7 @@ describe("Environments", () => {
 				new UpdateEnvironment({
 					environment_id: env.id,
 					expected_version: 1,
-					name: "After Archive",
-					description: null,
-					config: limitedConfig,
+					changes: { name: "After Archive", description: null, config: limitedConfig },
 				}),
 			),
 			Story.rejected(new EnvironmentArchivedError({ environment_id: env.id })),

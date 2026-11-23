@@ -2,9 +2,6 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
-import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
-import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
 import {
 	DEFAULT_MODEL_TIMEOUT_MS,
 	boundedModelProvider,
@@ -18,7 +15,6 @@ import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Url from "effect/http/Url"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
@@ -136,188 +132,14 @@ const HISTORY_UNAVAILABLE: ModelProviderError = {
 	terminal: false,
 }
 
-const normalizeHost = (host: string): string =>
-	host.endsWith(".") ? host.slice(0, -1).toLowerCase() : host.toLowerCase()
-
-const IPV6_LITERAL_INNER = /^[0-9a-fA-F:.]+$/
-
-const parseAllowedHostEntry = (
-	trimmed: string,
-): { readonly host: string; readonly port: string | null } | null => {
-	if (trimmed.length === 0 || trimmed.includes("/") || trimmed.includes("://")) {
-		return null
-	}
-	if (trimmed.startsWith("[")) {
-		const closeBracket = trimmed.indexOf("]")
-		if (closeBracket === -1) {
-			return null
-		}
-		const inner = trimmed.slice(1, closeBracket)
-		if (!inner.includes(":") || !IPV6_LITERAL_INNER.test(inner)) {
-			return null
-		}
-		const bracketedHost = trimmed.slice(0, closeBracket + 1)
-		const rest = trimmed.slice(closeBracket + 1)
-		let port: string | null = null
-		if (rest.length > 0) {
-			if (!rest.startsWith(":")) {
-				return null
-			}
-			port = rest.slice(1)
-			if (!/^\d+$/.test(port)) {
-				return null
-			}
-		}
-		try {
-			const parsed = new URL(`http://${bracketedHost}`)
-			if (
-				parsed.username.length > 0 ||
-				parsed.password.length > 0 ||
-				parsed.port.length > 0 ||
-				parsed.pathname !== "/" ||
-				parsed.search.length > 0 ||
-				parsed.hash.length > 0 ||
-				!parsed.hostname.startsWith("[") ||
-				!parsed.hostname.endsWith("]")
-			) {
-				return null
-			}
-			return { host: parsed.hostname.toLowerCase(), port }
-		} catch {
-			return null
-		}
-	}
-	if (trimmed.includes("[") || trimmed.includes("]")) {
-		return null
-	}
-	const colonIndex = trimmed.lastIndexOf(":")
-	let hostPattern = trimmed
-	let port: string | null = null
-	if (colonIndex !== -1) {
-		port = trimmed.slice(colonIndex + 1)
-		if (!/^\d+$/.test(port)) {
-			return null
-		}
-		hostPattern = trimmed.slice(0, colonIndex)
-		if (hostPattern.includes(":")) {
-			return null
-		}
-	}
-	const host = normalizeHost(hostPattern)
-	return host.length === 0 ? null : { host, port }
-}
-
-const isAllowedHost = (targetUrl: URL, allowedHosts: ReadonlyArray<string>): boolean => {
-	if (targetUrl.protocol !== "https:" && targetUrl.protocol !== "http:") {
-		return false
-	}
-	const targetHost = normalizeHost(targetUrl.hostname)
-	if (targetHost.length === 0) {
-		return false
-	}
-	const targetPort = targetUrl.port || (targetUrl.protocol === "https:" ? "443" : "80")
-
-	return allowedHosts.some((rawEntry) => {
-		const parsed = parseAllowedHostEntry(rawEntry.trim())
-		if (parsed === null) {
-			return false
-		}
-		if (parsed.port !== null && parsed.port !== targetPort) {
-			return false
-		}
-		const rule = parsed.host
-		if (rule === targetHost) {
-			return true
-		}
-		if (rule.startsWith("*.")) {
-			const suffix = rule.slice(1)
-			// Require a concrete base domain (at least two labels after "*."), e.g. "*.openai.com".
-			if (suffix.length <= 1 || suffix.includes("*") || !suffix.slice(1).includes(".")) {
-				return false
-			}
-			return targetHost.endsWith(suffix) && targetHost.length > suffix.length
-		}
-		return false
-	})
-}
-
 export const PiDurableModelProviderLive = boundedModelProvider(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
-		const environments = yield* Environment
-		const environmentViews = yield* EnvironmentView
 		const sessionViews = yield* SessionView
 		const executor = yield* PiTurnExecutor
 		const apiKeys = yield* providerApiKeys
 		const baseUrls = yield* providerBaseUrls
 		const catalog = createPiModels(apiKeys, baseUrls)
-
-		const enforceEnvironmentNetworking = Effect.fn(
-			"PiDurableModelProvider.enforceEnvironmentNetworking",
-		)(function* (rawEnvironmentId: string, providerBaseUrl: string, lookupTimeout: Duration.Input) {
-			const envId = EnvironmentId.make(rawEnvironmentId)
-			const envState = yield* environments.get(envId)
-			if (envState.status === "" || envState.status === "deleted") {
-				return yield* Effect.fail<ModelProviderError>({
-					_tag: "ModelProviderError",
-					error_type: "environment_not_found",
-					message: `Environment ${rawEnvironmentId} is no longer available.`,
-					terminal: envState.status === "deleted",
-				})
-			}
-
-			const envRef = Environment.ref(envId)
-			let envSnapshot = Option.getOrNull(
-				yield* environmentViews.get(envRef).pipe(Effect.orElseSucceed(() => Option.none())),
-			)
-			if (envSnapshot === null || envSnapshot.version < envState.version) {
-				envSnapshot = yield* environmentViews
-					.waitFor(envRef, { version: { gte: envState.version } }, { timeout: lookupTimeout })
-					.pipe(Effect.orElseSucceed(() => null))
-			}
-			if (envSnapshot === null || envSnapshot.version < envState.version) {
-				const latest = yield* environments.get(envId)
-				if (latest.status === "deleted") {
-					return yield* Effect.fail<ModelProviderError>({
-						_tag: "ModelProviderError",
-						error_type: "environment_not_found",
-						message: `Environment ${rawEnvironmentId} is no longer available.`,
-						terminal: true,
-					})
-				}
-				return yield* Effect.fail<ModelProviderError>({
-					_tag: "ModelProviderError",
-					error_type: "environment_unavailable",
-					message: `Environment ${rawEnvironmentId} configuration is not ready.`,
-					terminal: false,
-				})
-			}
-
-			const { networking } = envSnapshot.config
-			if (networking.type !== "limited") {
-				return
-			}
-
-			const parsedUrlResult = Url.fromString(providerBaseUrl)
-			if (Result.isFailure(parsedUrlResult)) {
-				return yield* Effect.fail<ModelProviderError>({
-					_tag: "ModelProviderError",
-					error_type: "environment_network_blocked",
-					message: `Environment ${rawEnvironmentId} cannot verify the provider endpoint URL.`,
-					terminal: false,
-				})
-			}
-			const parsedUrl = parsedUrlResult.success
-
-			if (!isAllowedHost(parsedUrl, networking.allowed_hosts)) {
-				return yield* Effect.fail<ModelProviderError>({
-					_tag: "ModelProviderError",
-					error_type: "environment_network_blocked",
-					message: `Environment ${rawEnvironmentId} does not allow outbound requests to ${parsedUrl.hostname}.`,
-					terminal: false,
-				})
-			}
-		})
 
 		const messagesBeforeTurn = Effect.fn("PiDurableModelProvider.messagesBeforeTurn")(function* (
 			sessionId: string,
@@ -536,9 +358,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 					const operationId = turnOperationId(args.turn)
 
 					// Recover any already-admitted or settled Pi operation before checking
-					// mutable prerequisites (views, environment policy, API keys) so a replay
-					// after a RunTurn restart always records Pi's actual outcome instead of
-					// diverging from Pi's live conversation history.
+					// mutable prerequisites (views, API keys) so a replay after a RunTurn
+					// restart always records Pi's actual outcome instead of diverging from
+					// Pi's live conversation history.
 					const recovered = yield* withRetry(executor.recoverTurn(conversation, operationId)).pipe(
 						Effect.tapError((error) =>
 							Effect.logError("Harness unreachable", conversation, error.cause),
@@ -595,12 +417,6 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 						})
 					}
 
-					yield* enforceEnvironmentNetworking(
-						args.environment_id,
-						resolved.model.baseUrl,
-						lookupTimeout,
-					)
-
 					if (apiKeys[resolved.provider] === null) {
 						return yield* Effect.fail<ModelProviderError>({
 							_tag: "ModelProviderError",
@@ -626,18 +442,11 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 								const { attempt } = yield* Schedule.CurrentMetadata
 								if (attempt > 0) {
 									// After an ambiguous RPC failure, check whether Pi already admitted
-									// or settled this operation before rechecking mutable policy; if not
-									// admitted, revalidate the environment so revocations during backoff
-									// prevent dispatching the transcript under stale permissions.
+									// or settled this operation before submitting it again.
 									const recoveredAttempt = yield* executor.recoverTurn(conversation, operationId)
 									if (recoveredAttempt !== null) {
 										return recoveredAttempt
 									}
-									yield* enforceEnvironmentNetworking(
-										args.environment_id,
-										resolved.model.baseUrl,
-										lookupTimeout,
-									)
 								}
 								return yield* executor.runTurn(conversation, request)
 							})
@@ -682,11 +491,6 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 							system: version.system,
 							currentInput: userText,
 						}).pipe(Effect.mapError(() => HISTORY_UNAVAILABLE))
-						yield* enforceEnvironmentNetworking(
-							args.environment_id,
-							resolved.model.baseUrl,
-							lookupTimeout,
-						)
 						return yield* run({ api: resolved.model.api, messages, trimmed })
 					}).pipe(
 						Effect.timeoutOrElse({

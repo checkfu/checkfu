@@ -79,6 +79,7 @@ const STANDING = {
 	"AgentVersion.MintedVersionNeverChanges": "proved",
 	"Environment.StatusIsKnown": "proved",
 	"Environment.CreatedExactlyWhenVersioned": "proved",
+	"Environment.ConfiguredExactlyWhenCreated": "proved",
 	"Environment.CreatedEnvironmentNeverReturnsToUninitialized": "proved",
 	"Environment.ArchivedNeverReactivates": "proved",
 	"Environment.DeletedStaysDeleted": "proved",
