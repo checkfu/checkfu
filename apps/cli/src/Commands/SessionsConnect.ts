@@ -1083,7 +1083,7 @@ export const sessionsConnectCommand = Command.make(
 				}
 
 				if (isInteractiveTty) {
-					let interruptRequestedOnce = false
+					let interruptedLiveTurn: number | undefined
 					const interruptQueue = yield* Queue.unbounded<void>()
 
 					const interruptWorker = yield* Effect.forever(
@@ -1111,7 +1111,6 @@ export const sessionsConnectCommand = Command.make(
 							if (nextEvent.outcome._tag === "Failure") {
 								break
 							}
-							interruptRequestedOnce = false
 							const dispatchOutcome = yield* Effect.raceFirst(
 								dispatchUserLine(client, sessionId, nextEvent.outcome.success, stateRef, {
 									reportRecoverableSendErrors: true,
@@ -1127,8 +1126,8 @@ export const sessionsConnectCommand = Command.make(
 
 					yield* withSigintHandler(() => {
 						const current = Ref.getUnsafe(stateRef)
-						if (shouldInterruptOnCtrlC(current, interruptRequestedOnce)) {
-							interruptRequestedOnce = true
+						if (shouldInterruptOnCtrlC(current, interruptedLiveTurn)) {
+							interruptedLiveTurn = current.liveTurn
 							Queue.offerUnsafe(interruptQueue, undefined)
 							return true
 						}

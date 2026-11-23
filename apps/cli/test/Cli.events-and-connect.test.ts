@@ -2874,10 +2874,36 @@ describe("CLI sessions:events and sessions connect", () => {
 		expect(binScript).toContain("#!/usr/bin/env node")
 		expect(binScript).toContain("--no-env-file")
 		expect(binScript).toContain("--config=${bunfigPath}")
+		expect(binScript).toContain("fileURLToPath(import.meta.url)")
+		for (const launcherFile of [
+			"../bin/checkfu.mjs",
+			"../bin/resolve-bun.mjs",
+			"../bin/sigint-bridge.mjs",
+		]) {
+			const src = readFileSync(new URL(launcherFile, import.meta.url), "utf8")
+			expect(src).not.toContain("import.meta.filename")
+			expect(src).not.toContain("import.meta.dirname")
+		}
 		expect(cliBunfig).toContain("preload = []")
 		expect(bunLock).toMatch(
 			/"apps\/cli":\s*\{[\s\S]*?"bin":\s*\{\s*"checkfu":\s*"\.\/bin\/checkfu\.mjs",?\s*\}/,
 		)
+
+		// Symlinked launcher resolves through realpathSync(fileURLToPath(import.meta.url))
+		const symlinkDir = mkdtempSync(join(tmpdir(), "checkfu-launcher-link-"))
+		try {
+			const symlinkPath = join(symlinkDir, "checkfu-link.mjs")
+			symlinkSync(fileURLToPath(new URL("../bin/checkfu.mjs", import.meta.url)), symlinkPath)
+			const helpRes = spawnSync("node", [symlinkPath, "--help"], {
+				cwd: symlinkDir,
+				encoding: "utf8",
+				timeout: 10_000,
+			})
+			expect(helpRes.status).toBe(0)
+			expect(helpRes.stdout).toContain("sessions")
+		} finally {
+			rmSync(symlinkDir, { recursive: true, force: true })
+		}
 	})
 
 	it.runIf(ptySupported)(
@@ -5608,4 +5634,127 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			),
 		)
 	}, 15_000)
+
+	it("scopes the TTY Ctrl-C disconnect latch to the interrupted turn so a newly started queued turn is interrupted instead of disconnecting", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+					const turn1Started = yield* Deferred.make<void>()
+					const turn1Interrupted = yield* Deferred.make<void>()
+					const turn2Started = yield* Deferred.make<void>()
+					const turn2Interrupted = yield* Deferred.make<void>()
+					const turn2RunningObserved = yield* Deferred.make<void>()
+					const sigintController = makeSigintController()
+
+					const cli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(turn1Started, undefined)
+									yield* Deferred.await(turn1Interrupted)
+									return yield* Effect.fail({
+										_tag: "ModelRequestInterrupted" as const,
+										model_usage: { input_tokens: 2, output_tokens: 0 },
+									})
+								}
+								yield* Deferred.succeed(turn2Started, undefined)
+								yield* Deferred.await(turn2Interrupted)
+								return yield* Effect.fail({
+									_tag: "ModelRequestInterrupted" as const,
+									model_usage: { input_tokens: 2, output_tokens: 0 },
+								})
+							}),
+						interrupt: (args) =>
+							args.turn === 1
+								? Deferred.succeed(turn1Interrupted, undefined).pipe(Effect.asVoid)
+								: Deferred.succeed(turn2Interrupted, undefined).pipe(Effect.asVoid),
+					})
+					const sessionId = yield* createReadySession(cli)
+
+					let turn1FirstCtrlC = false
+					let turn2FirstCtrlC = false
+					let turn2SecondCtrlC = true
+
+					const result = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
+						stdinIsTerminal: true,
+						sigintController,
+						interceptFetch: async (next, request) => {
+							if (!request.url.includes("/events/stream")) {
+								return next(request)
+							}
+							const res = await next(request)
+							if (res.status !== 200 || res.body === null) {
+								return res
+							}
+							const reader = res.body.getReader()
+							const decoder = new TextDecoder()
+							let sseBuffer = ""
+							const observed = new ReadableStream<Uint8Array>({
+								async pull(controller) {
+									const chunk = await reader.read()
+									if (chunk.done) {
+										controller.close()
+										return
+									}
+									sseBuffer += decoder.decode(chunk.value, { stream: true })
+									controller.enqueue(chunk.value)
+									if ((sseBuffer.match(/event: session\.status_running/g) ?? []).length >= 2) {
+										await runPromise(Deferred.succeed(turn2RunningObserved, undefined))
+									}
+								},
+								cancel(reason) {
+									return reader.cancel(reason)
+								},
+							})
+							return new Response(observed, { status: 200, headers: res.headers })
+						},
+						terminalReads: [
+							// 1) Start turn 1
+							Effect.succeed("first turn"),
+							// 2) Queue turn 2 while turn 1 is still running
+							Deferred.await(turn1Started).pipe(Effect.as("already queued turn 2")),
+							// 3) No further terminal lines arrive before Ctrl-C interrupts turn 1 and then turn 2
+							Effect.gen(function* () {
+								yield* Effect.sleep("25 millis")
+								// Interrupt turn 1
+								turn1FirstCtrlC = sigintController.handleSigint()
+								yield* Deferred.await(turn1Interrupted)
+								// Wait for queued turn 2 to start AND be observed over SSE
+								yield* Deferred.await(turn2Started)
+								yield* Deferred.await(turn2RunningObserved)
+								yield* Effect.sleep("25 millis")
+								// First Ctrl-C during turn 2 must interrupt turn 2 instead of disconnecting
+								turn2FirstCtrlC = sigintController.handleSigint()
+								// Second Ctrl-C during the same turn 2 must still allow disconnecting
+								turn2SecondCtrlC = sigintController.handleSigint()
+								if (turn2FirstCtrlC) {
+									yield* Deferred.await(turn2Interrupted)
+									yield* Effect.sleep("40 millis")
+								}
+								return "/exit"
+							}),
+						],
+					})
+
+					expect(result.exitCode).toBe(0)
+					expect(turn1FirstCtrlC).toBe(true)
+					expect(turn2FirstCtrlC).toBe(true)
+					expect(turn2SecondCtrlC).toBe(false)
+
+					const eventsRes = yield* cli.run([
+						"sessions:events",
+						"list",
+						"--session-id",
+						sessionId,
+						"--transform",
+						"data.#.type",
+					])
+					expect(eventsRes.exitCode).toBe(0)
+					const eventTypes = JSON.parse(eventsRes.stdout) as Array<string>
+					expect(eventTypes.filter((t) => t === "user.interrupt")).toHaveLength(2)
+				}),
+			),
+		)
+	})
 })

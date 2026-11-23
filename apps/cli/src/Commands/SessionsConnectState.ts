@@ -488,8 +488,8 @@ export const markSessionEnded = (state: ConnectState): ConnectState =>
 
 export const shouldInterruptOnCtrlC = (
 	state: ConnectState,
-	interruptRequestedOnce: boolean,
-): boolean => state.liveStatus === "running" && !interruptRequestedOnce
+	interruptedLiveTurn: number | undefined,
+): boolean => state.liveStatus === "running" && interruptedLiveTurn !== state.liveTurn
 
 export const evaluatePipedSettlement = (state: ConnectState): PipedSettlementAction => {
 	if (state.ended) {

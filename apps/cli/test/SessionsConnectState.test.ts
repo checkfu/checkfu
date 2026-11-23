@@ -182,7 +182,7 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 				targetTurn: state.targetTurn,
 				settlement: evaluatePipedSettlement(state),
 				finalError: resolveFinalPipedError(state),
-				interruptOnCtrlC: shouldInterruptOnCtrlC(state, false),
+				interruptOnCtrlC: shouldInterruptOnCtrlC(state, undefined),
 			}).toEqual({
 				scenario: scenario.name,
 				observedTurn: 2,
@@ -289,8 +289,8 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 				case: tc.name,
 				liveStatus: state.liveStatus,
 				liveTurn: state.liveTurn,
-				firstCtrlC: shouldInterruptOnCtrlC(state, false),
-				secondCtrlC: shouldInterruptOnCtrlC(state, true),
+				firstCtrlC: shouldInterruptOnCtrlC(state, undefined),
+				secondCtrlC: shouldInterruptOnCtrlC(state, state.liveTurn),
 			}).toEqual({
 				case: tc.name,
 				liveStatus: tc.expectLiveStatus,
@@ -299,6 +299,21 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 				secondCtrlC: false,
 			})
 		}
+
+		// Interrupt latch is scoped to liveTurn: interrupting turn 1 still lets Ctrl-C interrupt turn 2
+		const { state: turn1Running } = runSequence(ttyIdleInitial(0), [
+			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+		])
+		expect(shouldInterruptOnCtrlC(turn1Running, undefined)).toBe(true)
+		expect(shouldInterruptOnCtrlC(turn1Running, turn1Running.liveTurn)).toBe(false)
+
+		const { state: turn2Running } = runSequence(turn1Running, [
+			{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "interrupted" } },
+			{ _tag: "event", event: { seq: 3, type: "session.status_running" } },
+		])
+		expect(turn2Running.liveTurn).toBe(2)
+		expect(shouldInterruptOnCtrlC(turn2Running, turn1Running.liveTurn)).toBe(true)
+		expect(shouldInterruptOnCtrlC(turn2Running, turn2Running.liveTurn)).toBe(false)
 	})
 
 	it("evaluates halted queued turns and lagging GET snapshots without false failures or hangs", () => {

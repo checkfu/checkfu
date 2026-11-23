@@ -10,10 +10,12 @@
 import { spawn } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { resolveBunExecutable } from "./resolve-bun.mjs"
 import { createLauncherSigintBridge } from "./sigint-bridge.mjs"
 
-const launcherPath = realpathSync(import.meta.filename)
+// oxlint-disable-next-line unicorn/prefer-import-meta-properties -- preserve compatibility with Node < 20.11 where import.meta.filename is undefined
+const launcherPath = realpathSync(fileURLToPath(import.meta.url))
 const cliRoot = resolve(dirname(launcherPath), "..")
 const bunfigPath = resolve(cliRoot, "bunfig.toml")
 const mainPath = resolve(cliRoot, "src", "main.ts")
