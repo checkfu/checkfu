@@ -5,6 +5,7 @@ import * as Console from "effect/Console"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Runtime from "effect/Runtime"
 import {
 	PersistedLockError,
 	PersistedServicesLive,
@@ -82,8 +83,11 @@ const persisted = Command.make("persisted").pipe(Command.withSubcommands([cut, c
 
 BunRuntime.runMain(
 	Command.run(persisted, { version: "0.0.0" }).pipe(
-		Effect.tapErrorTag("PersistedLockError", (error) => Console.error(error.message)),
+		Effect.catchTag("PersistedLockError", (error) =>
+			Console.error(error.message).pipe(
+				Effect.andThen(Effect.fail({ [Runtime.errorReported]: false })),
+			),
+		),
 		Effect.provide(PersistedServicesLive),
 	),
-	{ disableErrorReporting: true },
 )
