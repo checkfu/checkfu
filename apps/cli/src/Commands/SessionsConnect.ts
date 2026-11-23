@@ -52,19 +52,11 @@ const extractContentText = (data: Record<string, unknown>): string => {
 	return parts.join("\n")
 }
 
-interface LocalSentMessage {
-	readonly id: string
-	readonly text: string
-	readonly minSeq: number
-}
-
 interface ConnectState {
 	readonly status: "idle" | "running" | "terminated"
 	readonly liveStatus: "idle" | "running" | "terminated"
 	readonly liveTurn: number
 	readonly liveStateVersion: number
-	readonly connectHeadSeq: number
-	readonly lastObservedSeq: number
 	readonly observedTurn: number
 	readonly settledTurn: number
 	readonly latestSettledStopReason: string | undefined
@@ -74,7 +66,6 @@ interface ConnectState {
 	readonly latestTurnError: { readonly turn: number; readonly message: string } | undefined
 	readonly failedTurnErrors: ReadonlyMap<number, string>
 	readonly ended: boolean
-	readonly localSentMessages: ReadonlyArray<LocalSentMessage>
 }
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
@@ -183,6 +174,7 @@ const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId
 const splitBoundedLines = (
 	stdin: Stdio.Stdio["stdin"],
 	maxLineChars: number,
+	onPendingChange?: (pending: string) => Effect.Effect<void>,
 ): Stream.Stream<string, CliFailure> =>
 	Stream.suspend(() => {
 		let pending = ""
@@ -229,7 +221,17 @@ const splitBoundedLines = (
 					}
 					const emitted =
 						lines.length > 0 ? Stream.fromIterable(lines).pipe(Stream.rechunk(1)) : Stream.empty
-					return overflowed ? Stream.concat(emitted, Stream.fail(lineTooLongError())) : emitted
+					if (overflowed) {
+						return Stream.concat(emitted, Stream.fail(lineTooLongError()))
+					}
+					if (onPendingChange !== undefined) {
+						const snapshot = pending
+						return Stream.concat(
+							emitted,
+							Stream.unwrap(onPendingChange(snapshot).pipe(Effect.as(Stream.empty))),
+						)
+					}
+					return emitted
 				}),
 			)
 
@@ -240,10 +242,13 @@ const splitBoundedLines = (
 		)
 
 		const flushTrailing = Stream.unwrap(
-			Effect.sync(() => {
+			Effect.gen(function* () {
 				if (pending.length === 0) return Stream.empty
 				const last = pending
 				pending = ""
+				if (onPendingChange !== undefined) {
+					yield* onPendingChange("")
+				}
 				return Stream.make(last)
 			}),
 		)
@@ -256,27 +261,44 @@ type EndedStdinSignal =
 	| { readonly _tag: "exit" }
 	| { readonly _tag: "input"; readonly line: string }
 
-const inspectEndedPipedStdin = (stdio: Stdio.Stdio): Effect.Effect<EndedStdinSignal, CliFailure> =>
+const isExitCommand = (trimmed: string): boolean => trimmed === "/exit" || trimmed === "/quit"
+
+const isExitCommandPrefix = (trimmed: string): boolean =>
+	"/exit".startsWith(trimmed) || "/quit".startsWith(trimmed)
+
+const inspectEndedPipedStdin = (
+	stdio: Stdio.Stdio,
+	bufferedLineRef: Ref.Ref<string>,
+): Effect.Effect<EndedStdinSignal, CliFailure> =>
 	Effect.gen(function* () {
-		let signal: EndedStdinSignal = { _tag: "eof" }
-		yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH).pipe(
-			Stream.takeUntil((line) => {
-				const trimmed = line.trim()
-				return trimmed.length > 0
-			}),
-			Stream.runForEach((line) =>
-				Effect.sync(() => {
-					const trimmed = line.trim()
-					if (trimmed.length === 0) return
-					if (trimmed === "/exit" || trimmed === "/quit") {
-						signal = { _tag: "exit" }
-					} else {
-						signal = { _tag: "input", line: trimmed }
+		const earlyInput = yield* Deferred.make<EndedStdinSignal>()
+		const readLines = Effect.gen(function* () {
+			let signal: EndedStdinSignal = { _tag: "eof" }
+			yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, (pending) =>
+				Effect.gen(function* () {
+					yield* Ref.set(bufferedLineRef, pending)
+					const trimmed = pending.trim()
+					if (trimmed.length > 0 && !isExitCommandPrefix(trimmed)) {
+						yield* Deferred.succeed(earlyInput, { _tag: "input", line: trimmed })
 					}
 				}),
-			),
-		)
-		return signal
+			).pipe(
+				Stream.takeUntil((line) => line.trim().length > 0),
+				Stream.runForEach((line) =>
+					Effect.sync(() => {
+						const trimmed = line.trim()
+						if (trimmed.length === 0) return
+						if (isExitCommand(trimmed)) {
+							signal = { _tag: "exit" }
+						} else {
+							signal = { _tag: "input", line: trimmed }
+						}
+					}),
+				),
+			)
+			return signal
+		})
+		return yield* Effect.raceFirst(readLines, Deferred.await(earlyInput))
 	})
 
 const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
@@ -298,13 +320,6 @@ const renderConnectEvent = (
 	Effect.gen(function* () {
 		const data = event.data
 		const eventType = typeof data["type"] === "string" ? data["type"] : event.event
-		const eventSeq = event.seq
-
-		if (eventSeq !== undefined) {
-			yield* Ref.update(stateRef, (state) =>
-				eventSeq > state.lastObservedSeq ? { ...state, lastObservedSeq: eventSeq } : state,
-			)
-		}
 
 		if (rawStructuredMode) {
 			yield* renderOutput(data, { streaming: true })
@@ -313,18 +328,7 @@ const renderConnectEvent = (
 		switch (eventType) {
 			case "user.message": {
 				const text = extractContentText(data)
-				const wasLocal = yield* Ref.modify(stateRef, (state) => {
-					const idx = state.localSentMessages.findIndex(
-						(entry) => entry.text === text && (eventSeq === undefined || eventSeq > entry.minSeq),
-					)
-					if (idx === -1) return [false, state] as const
-					const next = [
-						...state.localSentMessages.slice(0, idx),
-						...state.localSentMessages.slice(idx + 1),
-					]
-					return [true, { ...state, localSentMessages: next }] as const
-				})
-				if (!rawStructuredMode && !wasLocal && text.length > 0) {
+				if (!rawStructuredMode && text.length > 0) {
 					yield* writeStdoutLine(`[you] ${escapeTerminalControlCharacters(text)}`)
 				}
 				break
@@ -528,28 +532,12 @@ const dispatchUserLine = (
 		}
 
 		const key = yield* client.generateIdempotencyKey()
-		const sendSnapshot = yield* Ref.modify(
-			stateRef,
-			(state) =>
-				[
-					{
-						liveStatus: state.liveStatus,
-						liveTurn: state.liveTurn,
-						liveStateVersion: state.liveStateVersion,
-					},
-					{
-						...state,
-						localSentMessages: [
-							...state.localSentMessages,
-							{
-								id: key,
-								text: line,
-								minSeq: Math.max(state.connectHeadSeq, state.lastObservedSeq),
-							},
-						],
-					},
-				] as const,
-		)
+		const currentState = yield* Ref.get(stateRef)
+		const sendSnapshot = {
+			liveStatus: currentState.liveStatus,
+			liveTurn: currentState.liveTurn,
+			liveStateVersion: currentState.liveStateVersion,
+		}
 		const res = yield* Effect.result(
 			sendConnectEventsWithRetry(
 				client.api.sessions.sendEvents({
@@ -564,10 +552,6 @@ const dispatchUserLine = (
 				Effect.onInterrupt(() => {
 					const msg = `Interrupted while sending message (delivery unconfirmed; retry safely with Idempotency-Key: ${key}).`
 					return Effect.all([
-						Ref.update(stateRef, (state) => ({
-							...state,
-							localSentMessages: state.localSentMessages.filter((entry) => entry.id !== key),
-						})),
 						writeStderrLine(msg).pipe(Effect.ignore),
 						options?.onInterruptedSend !== undefined
 							? options.onInterruptedSend(networkFailure(msg))
@@ -577,18 +561,10 @@ const dispatchUserLine = (
 			),
 		)
 		if (res._tag === "Failure") {
-			yield* Ref.update(stateRef, (state) => ({
-				...state,
-				localSentMessages: state.localSentMessages.filter((entry) => entry.id !== key),
-			}))
 			return yield* res.failure
 		}
 		const turn = extractSubmittedTurn(res.success.data)
 		if (turn === undefined) {
-			yield* Ref.update(stateRef, (state) => ({
-				...state,
-				localSentMessages: state.localSentMessages.filter((entry) => entry.id !== key),
-			}))
 			return yield* networkFailure(
 				`Message response did not confirm a valid turn (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
 			)
@@ -702,7 +678,6 @@ const resolveCursorBaseline = (
 		readonly observedTurn: number
 		readonly settledTurn: number
 		readonly latestSession: SessionSnapshotResponse
-		readonly connectHeadSeq: number
 	},
 	CliFailure
 > => {
@@ -712,7 +687,6 @@ const resolveCursorBaseline = (
 			observedTurn: 0,
 			settledTurn: 0,
 			latestSession: initialSession,
-			connectHeadSeq: headSeq,
 		})
 	}
 	if (after > headSeq) {
@@ -727,7 +701,6 @@ const resolveCursorBaseline = (
 		// scan only the suffix (after, head] and reconcile against a consistent head snapshot.
 		if (headSeq - after <= after) {
 			let before = initialSession
-			let latestHeadSeq = headSeq
 			for (let attempt = 0; attempt < MAX_SUFFIX_CONSISTENCY_ATTEMPTS; attempt++) {
 				let pageCursor = after
 				let runningAfter = 0
@@ -750,10 +723,6 @@ const resolveCursorBaseline = (
 						})
 						.pipe(Effect.mapError(formatClientError))
 					for (const entry of page.data) {
-						const seq = typeof entry["seq"] === "number" ? entry["seq"] : undefined
-						if (seq !== undefined) {
-							latestHeadSeq = Math.max(latestHeadSeq, seq)
-						}
 						const eventType = typeof entry["type"] === "string" ? entry["type"] : undefined
 						if (eventType === "session.status_running") {
 							runningAfter += 1
@@ -803,7 +772,6 @@ const resolveCursorBaseline = (
 						observedTurn,
 						settledTurn,
 						latestSession: afterSnap,
-						connectHeadSeq: latestHeadSeq,
 					}
 				}
 				before = afterSnap
@@ -814,7 +782,6 @@ const resolveCursorBaseline = (
 		return {
 			...prefix,
 			latestSession: initialSession,
-			connectHeadSeq: headSeq,
 		}
 	})
 }
@@ -885,10 +852,8 @@ export const sessionsConnectCommand = Command.make(
 				root.format !== "auto" || Option.isSome(root.transform) || root.rawOutput
 
 			const after = Option.getOrUndefined(input.after)
-			const initialEnded =
-				initialSession.status === "terminated" || initialSession.archived_at !== null
 			let headSeq = 0
-			if ((after !== undefined && after > 0) || !initialEnded) {
+			if (after !== undefined && after > 0) {
 				const latestPage = yield* client.api.sessions
 					.listEvents({
 						params: { session_id: sessionId },
@@ -909,7 +874,6 @@ export const sessionsConnectCommand = Command.make(
 				headSeq,
 			)
 			const session = baseline.latestSession
-			const connectHeadSeq = Math.max(after ?? 0, baseline.connectHeadSeq)
 			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
 			const isInteractiveTty = yield* stdio.stdinIsTerminal
 
@@ -922,8 +886,6 @@ export const sessionsConnectCommand = Command.make(
 				liveStatus: session.status,
 				liveTurn: session.turn,
 				liveStateVersion: 0,
-				connectHeadSeq,
-				lastObservedSeq: after ?? 0,
 				observedTurn: baseline.observedTurn,
 				settledTurn: baseline.settledTurn,
 				latestSettledStopReason: undefined,
@@ -933,7 +895,6 @@ export const sessionsConnectCommand = Command.make(
 				latestTurnError: undefined,
 				failedTurnErrors: new Map<number, string>(),
 				ended: initiallyEnded,
-				localSentMessages: [],
 			})
 
 			const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())
@@ -943,10 +904,13 @@ export const sessionsConnectCommand = Command.make(
 			const streamEndedDeferred = yield* Deferred.make<void>()
 			const stopConnectDeferred = yield* Deferred.make<void>()
 			const expectArchivedEvent = session.archived_at !== null
+			const endedBufferedLineRef = yield* Ref.make("")
 
 			const stdinCheckFiber =
 				initiallyEnded && !isInteractiveTty
-					? yield* Effect.result(inspectEndedPipedStdin(stdio)).pipe(Effect.forkChild)
+					? yield* Effect.result(inspectEndedPipedStdin(stdio, endedBufferedLineRef)).pipe(
+							Effect.forkChild,
+						)
 					: undefined
 
 			const streamFiber = yield* client
@@ -1053,6 +1017,11 @@ export const sessionsConnectCommand = Command.make(
 							)
 							if (Option.isSome(lateStdin)) {
 								yield* handleStdinOutcome(lateStdin.value)
+							} else {
+								const buffered = (yield* Ref.get(endedBufferedLineRef)).trim()
+								if (buffered.length > 0 && !isExitCommand(buffered)) {
+									return yield* unsentInputError
+								}
 							}
 						}
 					}).pipe(Effect.ensuring(Fiber.interrupt(stdinCheckFiber)))

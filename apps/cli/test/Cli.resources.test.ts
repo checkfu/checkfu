@@ -26,6 +26,16 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(eventsHelp.stdout).toContain("list")
 					expect(eventsHelp.stdout).toContain("stream")
 					expect(eventsHelp.stdout.toLowerCase()).not.toContain("beta")
+
+					const agentCreateHelp = yield* cli.run(["agents", "create", "--help"], { env: {} })
+					expect(agentCreateHelp.exitCode).toBe(0)
+					expect(agentCreateHelp.stdout).toContain("@file")
+					expect(agentCreateHelp.stdout).toContain("YAML")
+
+					const eventsListHelp = yield* cli.run(["sessions:events", "list", "--help"], { env: {} })
+					expect(eventsListHelp.exitCode).toBe(0)
+					expect(eventsListHelp.stdout).toContain("selected order")
+					expect(eventsListHelp.stdout).toContain("desc")
 				}),
 			),
 		)
@@ -307,6 +317,20 @@ describe("CLI help, errors, and resource commands", () => {
 					])
 					expect(badEnv.exitCode).toBe(1)
 					expect(badEnv.stderr).toContain('Environment "env_missing_env" was not found.')
+
+					// Unroutable dot-segment IDs in create payload skip diagnostic probes and preserve the 404
+					for (const badArgs of [
+						["sessions", "create", "--agent", "..", "--environment-id", envId],
+						["sessions", "create", "--agent", agentId, "--environment-id", ".."],
+						["sessions", "create", "--agent", ".", "--environment-id", ".."],
+					]) {
+						const dotRes = yield* cli.run(badArgs)
+						expect(dotRes.exitCode).toBe(1)
+						expect(dotRes.stdout).toBe("")
+						expect(dotRes.stderr).toContain("404 not_found_error")
+						expect(dotRes.stderr).not.toContain("Unexpected error")
+						expect(dotRes.stderr).not.toContain("Invalid path parameter")
+					}
 
 					// Create session with object --agent and --title
 					const created = yield* cli.run(

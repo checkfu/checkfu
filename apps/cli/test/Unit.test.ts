@@ -971,6 +971,68 @@ describe("normalizeApiUrl", () => {
 				expect(stalled400Err.message).toContain("HTTP 400")
 				expect(stalled400Err.message).toContain("partial diagnostic")
 				expect(stalled400Canceled).toBe(true)
+
+				// 16) Server `retry: 0` cannot bypass no-progress backoff or empty-close minimum delay
+				let retryZeroRepeatCalls = 0
+				const retryZeroRepeatFetch = (async () => {
+					retryZeroRepeatCalls++
+					if (retryZeroRepeatCalls <= 3) {
+						return new Response(
+							'retry: 0\n\nid: same_0\nevent: custom.ping\ndata: {"ok":true}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const [retryZeroRepeatDuration] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Stream.runCollect(
+							client.streamEndpointEvents(
+								{ method: "GET", path: "/v1/custom/retry-zero-repeat/stream" },
+								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(retryZeroRepeatFetch))),
+				)
+				expect(retryZeroRepeatCalls).toBe(4)
+				// Conn 1 advances undefined->same_0 (0ms), conn 2 repeats (30ms), conn 3 repeats (60ms)
+				expect(Duration.toMillis(retryZeroRepeatDuration)).toBeGreaterThanOrEqual(75)
+
+				let retryZeroEmptyCalls = 0
+				const retryZeroEmptyFetch = (async () => {
+					retryZeroEmptyCalls++
+					if (retryZeroEmptyCalls === 1) {
+						return new Response("retry: 0\n\n", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (retryZeroEmptyCalls === 2) {
+						return new Response("", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const [retryZeroEmptyDuration] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Stream.runCollect(
+							client.streamEndpointEvents(
+								{ method: "GET", path: "/v1/custom/retry-zero-empty/stream" },
+								{ maxReconnectAttempts: 1, baseReconnectDelayMs: 30 },
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(retryZeroEmptyFetch))),
+				)
+				expect(retryZeroEmptyCalls).toBe(3)
+				// Conn 1 & 2 both close without advancing cursor -> at least 2 * 30ms floor
+				expect(Duration.toMillis(retryZeroEmptyDuration)).toBeGreaterThanOrEqual(45)
 			}),
 		)
 	})

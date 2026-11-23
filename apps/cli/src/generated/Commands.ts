@@ -103,17 +103,19 @@ const agentsCreateCommand = CommandMake(
 		name: FlagString("name").pipe(FlagWithDescription("Human-readable agent name"), FlagOptional),
 		model: FlagString("model").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
-			FlagWithDescription("Model ID string, JSON/YAML object ({id}), or @file"),
+			FlagWithDescription(
+				"Model ID string or model object ({id}) (accepts value, JSON/YAML object, or @file)",
+			),
 			FlagOptional,
 		),
 		system: FlagString("system").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("System prompt text or @file"),
+			FlagWithDescription("System prompt text (supports @file)"),
 			FlagOptional,
 		),
 		description: FlagString("description").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("Agent description text or @file"),
+			FlagWithDescription("Agent description (supports @file)"),
 			FlagOptional,
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
@@ -231,22 +233,28 @@ const agentsUpdateCommand = CommandMake(
 		name: FlagString("name").pipe(FlagWithDescription("Updated agent name"), FlagOptional),
 		model: FlagString("model").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
-			FlagWithDescription("Updated model ID string, JSON/YAML object ({id}), or @file"),
+			FlagWithDescription(
+				"Updated model ID string or model object ({id}) (accepts value, JSON/YAML object, or @file)",
+			),
 			FlagOptional,
 		),
 		system: FlagString("system").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("Updated system prompt text or @file"),
+			FlagWithDescription("Updated system prompt text (supports @file)"),
 			FlagOptional,
 		),
 		description: FlagString("description").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("Updated agent description text or @file"),
+			FlagWithDescription("Updated agent description (supports @file)"),
 			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(agentsUpdateCommandSpec, flags),
-).pipe(CommandWithDescription("Update an agent (creates a new agent version)"))
+).pipe(
+	CommandWithDescription(
+		"Update an agent (creates a new agent version; accepts flags and/or JSON/YAML on stdin)",
+	),
+)
 
 const environmentsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "environments archive",
@@ -326,12 +334,12 @@ const environmentsCreateCommand = CommandMake(
 		),
 		description: FlagString("description").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("Environment description text or @file"),
+			FlagWithDescription("Environment description (supports @file)"),
 			FlagOptional,
 		),
 		config: FlagString("config").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("Environment config object as JSON, YAML, or @file"),
+			FlagWithDescription("Environment configuration object (JSON, YAML, or @file)"),
 			FlagOptional,
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
@@ -472,17 +480,17 @@ const environmentsUpdateCommand = CommandMake(
 		name: FlagString("name").pipe(FlagWithDescription("Updated environment name"), FlagOptional),
 		description: FlagString("description").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("Updated environment description text or @file"),
+			FlagWithDescription("Updated environment description (supports @file)"),
 			FlagOptional,
 		),
 		config: FlagString("config").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("Updated environment config as JSON, YAML, or @file"),
+			FlagWithDescription("Updated environment configuration object (JSON, YAML, or @file)"),
 			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(environmentsUpdateCommandSpec, flags),
-).pipe(CommandWithDescription("Update an environment"))
+).pipe(CommandWithDescription("Update an environment (accepts flags and/or JSON/YAML on stdin)"))
 
 const sessionsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "sessions archive",
@@ -574,12 +582,14 @@ const sessionsCreateCommand = CommandMake(
 	{
 		agent: FlagString("agent").pipe(
 			FlagWithMetavar("VALUE|JSON|@FILE"),
-			FlagWithDescription("Agent ID string, JSON/YAML object ({id, version}), or @file"),
+			FlagWithDescription(
+				"Agent ID string or agent reference object ({id, version}) (accepts value, JSON/YAML object, or @file)",
+			),
 			FlagOptional,
 		),
 		agentId: FlagString("agent-id").pipe(
 			FlagWithMetavar("ID"),
-			FlagWithDescription("Agent ID (alternative to --agent)"),
+			FlagWithDescription("Agent ID (alternative to agent)"),
 			FlagOptional,
 		),
 		agentVersion: FlagInt("agent-version").pipe(
@@ -691,7 +701,9 @@ const sessionsEventsListCommand = CommandMake(
 		),
 		after: FlagInt("after").pipe(
 			FlagWithMetavar("SEQ"),
-			FlagWithDescription("Return events strictly after this sequence number"),
+			FlagWithDescription(
+				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+			),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -762,7 +774,7 @@ const sessionsEventsSendCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(sessionsEventsSendCommandSpec, flags),
 ).pipe(
-	CommandWithDescription("Send user events to a session"),
+	CommandWithDescription("Send user events to a session (accepts flags and/or JSON/YAML on stdin)"),
 	CommandWithExamples([
 		{
 			command:

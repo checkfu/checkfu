@@ -242,13 +242,13 @@ const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 export const CreateAgentBody = Schema.Struct({
 	name: AgentName.annotate({ description: "Human-readable agent name" }),
 	model: ModelInput.annotate({
-		description: "Model ID string, JSON/YAML object ({id}), or @file",
+		description: "Model ID string or model object ({id})",
 	}),
 	system: Schema.optionalKey(
-		Schema.NullOr(AgentSystem).annotate({ description: "System prompt text or @file" }),
+		Schema.NullOr(AgentSystem).annotate({ description: "System prompt text" }),
 	),
 	description: Schema.optionalKey(
-		Schema.NullOr(AgentDescription).annotate({ description: "Agent description text or @file" }),
+		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
 	),
 })
 
@@ -259,15 +259,15 @@ export const UpdateAgentBody = Schema.Struct({
 	name: Schema.optionalKey(AgentName.annotate({ description: "Updated agent name" })),
 	model: Schema.optionalKey(
 		ModelInput.annotate({
-			description: "Updated model ID string, JSON/YAML object ({id}), or @file",
+			description: "Updated model ID string or model object ({id})",
 		}),
 	),
 	system: Schema.optionalKey(
-		Schema.NullOr(AgentSystem).annotate({ description: "Updated system prompt text or @file" }),
+		Schema.NullOr(AgentSystem).annotate({ description: "Updated system prompt text" }),
 	),
 	description: Schema.optionalKey(
 		Schema.NullOr(AgentDescription).annotate({
-			description: "Updated agent description text or @file",
+			description: "Updated agent description",
 		}),
 	),
 })
@@ -276,12 +276,12 @@ export const CreateEnvironmentBody = Schema.Struct({
 	name: EnvironmentName.annotate({ description: "Human-readable environment name" }),
 	description: Schema.optionalKey(
 		Schema.NullOr(EnvironmentDescription).annotate({
-			description: "Environment description text or @file",
+			description: "Environment description",
 		}),
 	),
 	config: Schema.optionalKey(
 		EnvironmentConfig.annotate({
-			description: "Environment config object as JSON, YAML, or @file",
+			description: "Environment configuration object",
 		}),
 	),
 })
@@ -293,12 +293,12 @@ export const UpdateEnvironmentBody = Schema.Struct({
 	name: Schema.optionalKey(EnvironmentName.annotate({ description: "Updated environment name" })),
 	description: Schema.optionalKey(
 		Schema.NullOr(EnvironmentDescription).annotate({
-			description: "Updated environment description text or @file",
+			description: "Updated environment description",
 		}),
 	),
 	config: Schema.optionalKey(
 		EnvironmentConfig.annotate({
-			description: "Updated environment config as JSON, YAML, or @file",
+			description: "Updated environment configuration object",
 		}),
 	),
 })
@@ -321,20 +321,20 @@ const CreateSessionCommonFields = {
 export const CreateSessionBody = Schema.Union([
 	Schema.Struct({
 		agent: AgentReference.annotate({
-			description: "Agent ID string, JSON/YAML object ({id, version}), or @file",
+			description: "Agent ID string or agent reference object ({id, version})",
 		}),
 		agent_id: Schema.optionalKey(
-			ResourceId.annotate({ description: "Agent ID (alternative to --agent)" }),
+			ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
 		),
 		...CreateSessionCommonFields,
 	}),
 	Schema.Struct({
 		agent: Schema.optionalKey(
 			AgentReference.annotate({
-				description: "Agent ID string, JSON/YAML object ({id, version}), or @file",
+				description: "Agent ID string or agent reference object ({id, version})",
 			}),
 		),
-		agent_id: ResourceId.annotate({ description: "Agent ID (alternative to --agent)" }),
+		agent_id: ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
 		...CreateSessionCommonFields,
 	}),
 ])
@@ -620,7 +620,7 @@ const Agents = HttpApiGroup.make("agents")
 				error: BodyErrors,
 			})
 				.annotate(OpenApi.Summary, "Create an agent")
-				.annotate(OpenApi.Description, "Create an agent (accepts flags and/or JSON/YAML on stdin)")
+				.annotate(OpenApi.Description, "Create an agent")
 				.annotate(OpenApi.Override, {
 					"x-forge-group-name": "agents",
 					"x-forge-method-name": "create",
@@ -704,10 +704,7 @@ const Environments = HttpApiGroup.make("environments")
 				error: BodyErrors,
 			})
 				.annotate(OpenApi.Summary, "Create an environment")
-				.annotate(
-					OpenApi.Description,
-					"Create an environment (accepts flags and/or JSON/YAML on stdin)",
-				)
+				.annotate(OpenApi.Description, "Create an environment")
 				.annotate(OpenApi.Override, {
 					"x-forge-group-name": "environments",
 					"x-forge-method-name": "create",
@@ -798,7 +795,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				error: BodyErrors,
 			})
 				.annotate(OpenApi.Summary, "Create a session")
-				.annotate(OpenApi.Description, "Create a session (accepts flags and/or JSON/YAML on stdin)")
+				.annotate(OpenApi.Description, "Create a session")
 				.annotate(OpenApi.Override, {
 					"x-forge-group-name": "sessions",
 					"x-forge-method-name": "create",
@@ -886,7 +883,8 @@ const Sessions = HttpApiGroup.make("sessions")
 			query: {
 				after: Schema.optionalKey(
 					CursorFromString.annotate({
-						description: "Return events strictly after this sequence number",
+						description:
+							"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
 					}),
 				),
 				limit: Schema.optionalKey(

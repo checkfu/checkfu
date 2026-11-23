@@ -848,7 +848,7 @@
 						}
 					}
 				},
-				"description": "Create an agent (accepts flags and/or JSON/YAML on stdin)",
+				"description": "Create an agent",
 				"summary": "Create an agent",
 				"requestBody": {
 					"content": {
@@ -880,7 +880,7 @@
 												"additionalProperties": false
 											}
 										],
-										"description": "Model ID string, JSON/YAML object ({id}), or @file"
+										"description": "Model ID string or model object ({id})"
 									},
 									"system": {
 										"anyOf": [
@@ -892,7 +892,7 @@
 												"type": "null"
 											}
 										],
-										"description": "System prompt text or @file"
+										"description": "System prompt text"
 									},
 									"description": {
 										"anyOf": [
@@ -904,7 +904,7 @@
 												"type": "null"
 											}
 										],
-										"description": "Agent description text or @file"
+										"description": "Agent description"
 									}
 								},
 								"required": ["name", "model"],
@@ -2212,7 +2212,7 @@
 												"additionalProperties": false
 											}
 										],
-										"description": "Updated model ID string, JSON/YAML object ({id}), or @file"
+										"description": "Updated model ID string or model object ({id})"
 									},
 									"system": {
 										"anyOf": [
@@ -2224,7 +2224,7 @@
 												"type": "null"
 											}
 										],
-										"description": "Updated system prompt text or @file"
+										"description": "Updated system prompt text"
 									},
 									"description": {
 										"anyOf": [
@@ -2236,7 +2236,7 @@
 												"type": "null"
 											}
 										],
-										"description": "Updated agent description text or @file"
+										"description": "Updated agent description"
 									}
 								},
 								"required": ["version"],
@@ -3557,7 +3557,7 @@
 						}
 					}
 				},
-				"description": "Create an environment (accepts flags and/or JSON/YAML on stdin)",
+				"description": "Create an environment",
 				"summary": "Create an environment",
 				"requestBody": {
 					"content": {
@@ -3581,7 +3581,7 @@
 												"type": "null"
 											}
 										],
-										"description": "Environment description text or @file"
+										"description": "Environment description"
 									},
 									"config": {
 										"type": "object",
@@ -3637,7 +3637,7 @@
 										},
 										"required": ["type", "networking"],
 										"additionalProperties": false,
-										"description": "Environment config object as JSON, YAML, or @file"
+										"description": "Environment configuration object"
 									}
 								},
 								"required": ["name"],
@@ -4998,7 +4998,7 @@
 												"type": "null"
 											}
 										],
-										"description": "Updated environment description text or @file"
+										"description": "Updated environment description"
 									},
 									"config": {
 										"type": "object",
@@ -5054,7 +5054,7 @@
 										},
 										"required": ["type", "networking"],
 										"additionalProperties": false,
-										"description": "Updated environment config as JSON, YAML, or @file"
+										"description": "Updated environment configuration object"
 									}
 								},
 								"required": ["version"],
@@ -6872,7 +6872,7 @@
 						}
 					}
 				},
-				"description": "Create a session (accepts flags and/or JSON/YAML on stdin)",
+				"description": "Create a session",
 				"summary": "Create a session",
 				"requestBody": {
 					"content": {
@@ -6907,13 +6907,13 @@
 														"additionalProperties": false
 													}
 												],
-												"description": "Agent ID string, JSON/YAML object ({id, version}), or @file"
+												"description": "Agent ID string or agent reference object ({id, version})"
 											},
 											"agent_id": {
 												"type": "string",
 												"minLength": 1,
 												"maxLength": 256,
-												"description": "Agent ID (alternative to --agent)"
+												"description": "Agent ID (alternative to agent)"
 											},
 											"agent_version": {
 												"type": "integer",
@@ -6971,13 +6971,13 @@
 														"additionalProperties": false
 													}
 												],
-												"description": "Agent ID string, JSON/YAML object ({id, version}), or @file"
+												"description": "Agent ID string or agent reference object ({id, version})"
 											},
 											"agent_id": {
 												"type": "string",
 												"minLength": 1,
 												"maxLength": 256,
-												"description": "Agent ID (alternative to --agent)"
+												"description": "Agent ID (alternative to agent)"
 											},
 											"agent_version": {
 												"type": "integer",
@@ -8920,7 +8920,7 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"description": "Return events strictly after this sequence number"
+							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
 						},
 						"required": false
 					},

@@ -647,20 +647,22 @@ export const makeCheckfuClient = (
 								}
 								// Clean close without advancing the cursor (e.g., healthy keepalive rotation,
 								// empty HTTP 200 close, or repeated/unnumbered events): keep listening without
-								// spending error retries, but always apply a minimum delay (and back off on
-								// repeated non-advancing event closes).
+								// spending error retries, but always enforce a positive floor (and back off on
+								// repeated non-advancing event closes) even if the server sent `retry: 0`.
 								loopState.attempt = 0
+								const floorBaseMs = Math.max(baseDelayMs, 1)
 								if (sawEvent) {
 									const streak = loopState.noProgressCloses
 									loopState.noProgressCloses = streak + 1
-									loopState.pendingDelayMs =
-										loopState.retryDelayMs ??
-										Math.min(baseDelayMs * 2 ** Math.min(streak, 4), MAX_SSE_NO_PROGRESS_DELAY_MS)
+									const backoffDelayMs = Math.min(
+										floorBaseMs * 2 ** Math.min(streak, 4),
+										MAX_SSE_NO_PROGRESS_DELAY_MS,
+									)
+									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, backoffDelayMs)
 								} else {
 									loopState.noProgressCloses = 0
-									loopState.pendingDelayMs =
-										loopState.retryDelayMs ??
-										(sawKeepalive ? Math.min(baseDelayMs, 50) : baseDelayMs)
+									const minIdleDelayMs = sawKeepalive ? Math.min(floorBaseMs, 50) : floorBaseMs
+									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, minIdleDelayMs)
 								}
 								return Stream.empty
 							}),

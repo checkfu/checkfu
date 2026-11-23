@@ -231,6 +231,27 @@ const defaultMetavar = (flag: FlagSpec): string | undefined => {
 	return undefined
 }
 
+const formatCliFlagDescription = (base: string, kind: FlagSpec["kind"]): string => {
+	switch (kind) {
+		case "file-text":
+			return `${base} (supports @file)`
+		case "text-or-object":
+			return `${base} (accepts value, JSON/YAML object, or @file)`
+		case "structured":
+			return `${base} (JSON, YAML, or @file)`
+		default:
+			return base
+	}
+}
+
+const formatCliCommandDescription = (base: string, hasBody: boolean): string => {
+	if (!hasBody) return base
+	if (base.endsWith(")")) {
+		return `${base.slice(0, -1)}; accepts flags and/or JSON/YAML on stdin)`
+	}
+	return `${base} (accepts flags and/or JSON/YAML on stdin)`
+}
+
 const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray<FlagSpec> => {
 	const flags: Array<FlagSpec> = []
 	const seenFlagNames = new Set<string>()
@@ -363,7 +384,10 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				location: "body",
 				kind: "file-text",
 				required: false,
-				description: field.description || `Body field ${field.wireName}`,
+				description: formatCliFlagDescription(
+					field.description || `Body field ${field.wireName}`,
+					"file-text",
+				),
 			})
 		} else if (textOrObjectFields.has(field.wireName)) {
 			pushFlag({
@@ -373,7 +397,10 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				location: "body",
 				kind: "text-or-object",
 				required: false,
-				description: field.description || `Body field ${field.wireName}`,
+				description: formatCliFlagDescription(
+					field.description || `Body field ${field.wireName}`,
+					"text-or-object",
+				),
 			})
 		} else if (isIntegerScalar(field.type)) {
 			pushFlag({
@@ -414,7 +441,10 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				location: "body",
 				kind: "structured",
 				required: false,
-				description: field.description || `Body field ${field.wireName}`,
+				description: formatCliFlagDescription(
+					field.description || `Body field ${field.wireName}`,
+					"structured",
+				),
 			})
 		} else {
 			pushFlag({
@@ -620,8 +650,10 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 					out("(flags) => ", invokeGeneratedOperation, "(", descriptorVar, ", flags),")
 				}
 			})
-			const description =
-				method.description || method.summary || `${cliName} ${method.name.kebab()}`
+			const description = formatCliCommandDescription(
+				method.description || method.summary || `${cliName} ${method.name.kebab()}`,
+				method.body !== undefined,
+			)
 			const examples = cliExt.examples ?? []
 			out(").pipe(")
 			out.indent(() => {

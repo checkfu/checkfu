@@ -9,6 +9,13 @@ import { type CliFailure, apiFailure, isApiErrorEnvelope } from "./Errors.ts"
 import { isPlainRecord } from "./Input.ts"
 import { writeStderrLine } from "./TerminalOutput.ts"
 
+const isRoutablePathSegment = (value: string): boolean =>
+	value.length > 0 &&
+	value !== "." &&
+	value !== ".." &&
+	!value.includes("/") &&
+	!value.includes("\\")
+
 const extractAgentId = (payload: unknown): string | undefined => {
 	if (!isPlainRecord(payload)) return undefined
 	const agent = payload["agent"]
@@ -24,13 +31,14 @@ export const diagnoseSessionCreateNotFound = (
 ): Effect.Effect<CliFailure> =>
 	Effect.gen(function* () {
 		const rawAgentId = extractAgentId(payload)
-		if (rawAgentId !== undefined) {
+		if (rawAgentId !== undefined && isRoutablePathSegment(rawAgentId)) {
 			const decodedAgent = Schema.decodeUnknownOption(AgentId)(rawAgentId)
 			if (Option.isSome(decodedAgent)) {
 				const agentCheck = yield* Effect.result(
 					client.api.agents.get({ params: { agent_id: decodedAgent.value } }),
-				)
+				).pipe(Effect.catchDefect(() => Effect.succeed(undefined)))
 				if (
+					agentCheck !== undefined &&
 					agentCheck._tag === "Failure" &&
 					isApiErrorEnvelope(agentCheck.failure) &&
 					agentCheck.failure.error.type === "not_found_error"
@@ -44,13 +52,14 @@ export const diagnoseSessionCreateNotFound = (
 			isPlainRecord(payload) && typeof payload["environment_id"] === "string"
 				? payload["environment_id"]
 				: undefined
-		if (envId !== undefined) {
+		if (envId !== undefined && isRoutablePathSegment(envId)) {
 			const decodedEnv = Schema.decodeUnknownOption(EnvironmentId)(envId)
 			if (Option.isSome(decodedEnv)) {
 				const envCheck = yield* Effect.result(
 					client.api.environments.get({ params: { environment_id: decodedEnv.value } }),
-				)
+				).pipe(Effect.catchDefect(() => Effect.succeed(undefined)))
 				if (
+					envCheck !== undefined &&
 					envCheck._tag === "Failure" &&
 					isApiErrorEnvelope(envCheck.failure) &&
 					envCheck.failure.error.type === "not_found_error"

@@ -94,6 +94,39 @@ describe("Cloudflare Forge pipeline", () => {
 			expect(item.group).not.toContain("beta")
 			expect(item.name).not.toContain("beta")
 		}
+
+		// OpenAPI HTTP descriptions remain wire-format accurate (no CLI @file/YAML syntax),
+		// listEvents cursor description documents both asc and desc order semantics,
+		// and CLI flag help adds @file/YAML guidance from CLI metadata
+		const spec = JSON.parse(openApiJson) as {
+			paths: Record<string, Record<string, Record<string, unknown>>>
+		}
+		const agentsPost = spec.paths["/v1/agents"]?.["post"]
+		expect(agentsPost?.["description"]).toBe("Create an agent")
+		const agentProps = (
+			(agentsPost?.["requestBody"] as Record<string, Record<string, Record<string, unknown>>>)?.[
+				"content"
+			]?.["application/json"]?.["schema"] as
+				| { readonly properties?: Record<string, { readonly description?: string }> }
+				| undefined
+		)?.properties
+		expect(agentProps?.["system"]?.description).toBe("System prompt text")
+		expect(agentProps?.["model"]?.description).not.toContain("YAML")
+		expect(agentProps?.["model"]?.description).not.toContain("@file")
+
+		const listEventsParams = (spec.paths["/v1/sessions/{session_id}/events"]?.["get"]?.[
+			"parameters"
+		] ?? []) as ReadonlyArray<{ name: string; schema?: { description?: string } }>
+		const afterParam = listEventsParams.find((p) => p.name === "after")
+		expect(afterParam?.schema?.description).toContain("selected order")
+		expect(afterParam?.schema?.description).toContain("desc")
+
+		const cliCommands = generateCliFiles(forge).find((f) => f.path === "Commands.ts")?.content ?? ""
+		expect(cliCommands).toContain('FlagWithDescription("System prompt text (supports @file)")')
+		expect(cliCommands).toContain(
+			'FlagWithDescription("Environment configuration object (JSON, YAML, or @file)")',
+		)
+		expect(cliCommands).toContain("accepts flags and/or JSON/YAML on stdin")
 	})
 
 	it("bypasses OpenApi.fromApi caching so nondeterministic OpenAPI generation is detected", () => {

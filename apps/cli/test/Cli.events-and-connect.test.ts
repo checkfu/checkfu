@@ -972,7 +972,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(wsResult.exitCode).toBe(0)
 					expect(receivedInputs).toEqual([indented])
 					expect(wsResult.stdout).toContain(`Got:[${indented}]`)
-					expect(wsResult.stdout).not.toContain("[you]")
+					expect(wsResult.stdout).toContain(`[you] ${indented}`)
 
 					// 2) Connecting to an already-running session and pressing Ctrl-C before SSE replay catches up
 					//    must still send user.interrupt based on liveStatus rather than replay baseline idle status
@@ -1389,6 +1389,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(secondSend.stdout.trim().split("\n")).toEqual([
 						"[you] same text",
 						"Reply-1:same text",
+						"[you] same text",
 						"Reply-2:same text",
 					])
 
@@ -2399,6 +2400,119 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(ttyExitRes.stderr).toContain(
 						`Cannot send input: session ${waiterSessionId} is already archived`,
 					)
+				}),
+			),
+		)
+	})
+
+	it("reports buffered non-newline input on ended sessions and never suppresses another client's matching message", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					// 1) Ended session replay with buffered non-newline piped input (open pipe, no EOF)
+					//    reports unsent input instead of exiting 0
+					const encoder = new TextEncoder()
+					const cli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.succeed({
+								thinking: null,
+								text: `Reply-${args.turn}:${args.input.join("|")}`,
+								input_tokens: 2,
+								output_tokens: 2,
+								stop_reason: { type: "end_turn" as const },
+							}),
+					})
+					const endedSessionId = yield* createReadySession(cli)
+					expect(
+						(yield* cli.run(["sessions", "archive", "--session-id", endedSessionId])).exitCode,
+					).toBe(0)
+
+					for (const buffered of ["hello", "/ex"]) {
+						const [elapsed, bufferedRes] = yield* Effect.timed(
+							cli.run(["sessions", "connect", "--session-id", endedSessionId], {
+								stdin: Stream.concat(Stream.make(encoder.encode(buffered)), Stream.never),
+							}),
+						)
+						expect(bufferedRes.exitCode).toBe(1)
+						expect(Duration.toMillis(elapsed)).toBeLessThan(1_000)
+						expect(bufferedRes.stderr).toContain(
+							`Cannot send input: session ${endedSessionId} is already archived.`,
+						)
+					}
+
+					// Chunked /exit\n and /exit\n followed by trailing partial text in the same chunk exit 0
+					const chunkedExitRes = yield* cli.run(
+						["sessions", "connect", "--session-id", endedSessionId],
+						{
+							stdin: Stream.concat(
+								Stream.make(encoder.encode("/ex")),
+								Stream.make(encoder.encode("it\n")),
+							),
+						},
+					)
+					expect(chunkedExitRes.exitCode).toBe(0)
+
+					const exitThenPartialRes = yield* cli.run(
+						["sessions", "connect", "--session-id", endedSessionId],
+						{
+							stdin: Stream.concat(Stream.make(encoder.encode("/exit\nhello")), Stream.never),
+						},
+					)
+					expect(exitThenPartialRes.exitCode).toBe(0)
+
+					// 2) Shared session: another client sends the same text while local POST is in flight
+					//    and then rejected -> the other client's committed message is NOT hidden
+					const sharedSessionId = yield* createReadySession(cli)
+					const localPostStarted = yield* Deferred.make<void>()
+					const otherMessageRendered = yield* Deferred.make<void>()
+
+					const otherClientFiber = yield* Deferred.await(localPostStarted).pipe(
+						Effect.andThen(
+							cli.run([
+								"sessions:events",
+								"send",
+								"--session-id",
+								sharedSessionId,
+								"--event",
+								JSON.stringify({
+									type: "user.message",
+									content: [{ type: "text", text: "shared hello" }],
+								}),
+							]),
+						),
+						Effect.forkChild,
+					)
+
+					const sharedRes = yield* cli.run(
+						["sessions", "connect", "--session-id", sharedSessionId],
+						{
+							stdin: "shared hello\n",
+							onStdoutChunk: (chunk) =>
+								chunk.includes("[you] shared hello")
+									? Deferred.succeed(otherMessageRendered, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									await Effect.runPromise(Deferred.succeed(localPostStarted, undefined))
+									await Effect.runPromise(Deferred.await(otherMessageRendered))
+									return new Response(
+										JSON.stringify({
+											type: "error",
+											error: { type: "conflict_error", message: "local send rejected" },
+											request_id: "req_shared_reject",
+										}),
+										{ status: 409, headers: { "content-type": "application/json" } },
+									)
+								}
+								return next(request)
+							},
+						},
+					)
+					const otherClientRes = yield* Fiber.join(otherClientFiber)
+					expect(otherClientRes.exitCode).toBe(0)
+					expect(sharedRes.exitCode).toBe(1)
+					expect(sharedRes.stdout).toContain("[you] shared hello")
+					expect(sharedRes.stderr).toContain("409 conflict_error")
 				}),
 			),
 		)
