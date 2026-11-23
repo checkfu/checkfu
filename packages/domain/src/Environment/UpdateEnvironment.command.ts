@@ -25,7 +25,7 @@ export class EnvironmentVersionConflict extends Domain.Rejection(
 		expected_version: PositiveInt,
 		current_version: PositiveInt,
 	},
-	{ httpApiStatus: 409, description: "Environment version does not match expected_version." },
+	{ httpApiStatus: 409, description: "Environment version does not match." },
 ) {}
 
 export class UpdateEnvironment extends Domain.Command("UpdateEnvironment", {

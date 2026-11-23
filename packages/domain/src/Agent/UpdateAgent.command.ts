@@ -31,7 +31,7 @@ export class AgentVersionConflict extends Domain.Rejection(
 		expected_version: PositiveInt,
 		current_version: PositiveInt,
 	},
-	{ httpApiStatus: 409, description: "Agent version does not match expected_version." },
+	{ httpApiStatus: 409, description: "Agent version does not match." },
 ) {}
 
 export class UpdateAgent extends Domain.Command("UpdateAgent", {

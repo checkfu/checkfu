@@ -66,6 +66,21 @@ export class Environment extends Domain.Aggregate("Environment", {
 			].some((ok) => ok),
 	},
 	transitions: {
+		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) =>
+			command._tag !== "UpdateEnvironment" ||
+			[
+				after.name === (command.changes.name === undefined ? before.name : command.changes.name),
+				after.description ===
+					(command.changes.description === undefined
+						? before.description
+						: command.changes.description),
+				after.config !== null &&
+					before.config !== null &&
+					after.config.networking.type ===
+						(command.changes.config === undefined
+							? before.config.networking.type
+							: command.changes.config.networking.type),
+			].every((ok) => ok),
 		CreatedEnvironmentNeverReturnsToUninitialized: ({ before, after }) =>
 			[before.status === "", after.status !== ""].some((ok) => ok),
 		ArchivedNeverReactivates: ({ before, after }) =>

@@ -11,6 +11,8 @@ const STANDING = {
 	"Environment.StatusIsKnown": "proved",
 	"Environment.CreatedExactlyWhenVersioned": "proved",
 	"Environment.ConfiguredExactlyWhenCreated": "proved",
+	"Environment.UpdateKeepsWhatItDoesNotName": "proved",
+	"Environments.EnvironmentViewConfigMatchesEnvironment": "checked",
 	"Environment.CreatedEnvironmentNeverReturnsToUninitialized": "proved",
 	"Environment.ArchivedNeverReactivates": "proved",
 	"Environment.DeletedStaysDeleted": "proved",

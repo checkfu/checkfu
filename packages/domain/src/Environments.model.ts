@@ -29,6 +29,18 @@ export class Environments extends Domain.Model("Environments", {
 					),
 				),
 			].every((ok) => ok),
+		EnvironmentViewConfigMatchesEnvironment: (m) =>
+			m.Environment.every((e) => {
+				const view = m.EnvironmentView.find((v) => v.id === e.id)
+				if (view === undefined) {
+					return true
+				}
+				return [
+					view.state.description === e.state.description,
+					e.state.config !== null &&
+						view.state.config.networking.type === e.state.config.networking.type,
+				].every((ok) => ok)
+			}),
 	},
 	sometimes: {
 		AnEnvironmentIsUpdated: (m) =>
