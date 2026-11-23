@@ -571,6 +571,63 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
+	it("rejects request body fields the published schema does not declare", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch)
+					const agent = { name: "Assistant", model: "gpt-4o-mini" }
+					const cases: ReadonlyArray<readonly [path: string, body: unknown, field: string]> = [
+						["/v1/agents", { ...agent, sytem: "Be brief." }, '["sytem"]'],
+						["/v1/agents", { ...agent, model: { id: "gpt-4o-mini", speed: "fast" } }, '["speed"]'],
+						["/v1/environments", { name: "default", confg: {} }, '["confg"]'],
+						[
+							"/v1/sessions",
+							{ agent: "agent_any", environment_id: session.environment_id, titel: "x" },
+							'["titel"]',
+						],
+						[
+							`/v1/sessions/${session.id}/events`,
+							{ events: [{ type: "user.interrupt", reason: "stop" }] },
+							'["reason"]',
+						],
+					]
+					for (const [path, body, field] of cases) {
+						const res = yield* sendRequest(apiFetch, {
+							method: "POST",
+							path,
+							headers: AUTH_HEADERS,
+							body,
+						})
+						const envelope = (yield* Effect.promise(() => res.json())) as {
+							error: { type: string; message: string }
+						}
+						expect({ path, status: res.status, type: envelope.error.type }).toEqual({
+							path,
+							status: 400,
+							type: "invalid_request_error",
+						})
+						expect(envelope.error.message).toContain(field)
+					}
+
+					const declared = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { ...agent, system: "Be brief." },
+					})
+					expect(declared.status).toBe(201)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("accepts a full-size batch of non-ASCII user messages", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),

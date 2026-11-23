@@ -8,6 +8,7 @@
         "@alchemy.run/cloudflare": "catalog:",
         "@alchemy.run/domain": "catalog:",
         "@checkfu/api": "workspace:*",
+        "@checkfu/mcp": "workspace:*",
         "@distilled.cloud/cloudflare": "catalog:",
         "@effect/platform-bun": "catalog:",
         "alchemy": "catalog:",
@@ -72,6 +73,20 @@
         "vitest": "catalog:",
       },
     },
+    "apps/mcp": {
+      "name": "@checkfu/mcp",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@alchemy.run/domain": "catalog:",
+        "@checkfu/api": "workspace:*",
+        "@checkfu/domain": "workspace:*",
+        "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/domain": {
       "name": "@checkfu/domain",
       "version": "0.0.0",
@@ -113,6 +128,7 @@
       "name": "@checkfu/forge",
       "version": "0.0.0",
       "dependencies": {
+        "@checkfu/mcp": "workspace:*",
         "@checkfu/sdk": "workspace:*",
         "@cloudflare/forge": "catalog:",
         "effect": "catalog:",
@@ -267,6 +283,8 @@
     "@checkfu/domain": ["@checkfu/domain@workspace:packages/domain"],
 
     "@checkfu/forge": ["@checkfu/forge@workspace:tools/forge"],
+
+    "@checkfu/mcp": ["@checkfu/mcp@workspace:apps/mcp"],
 
     "@checkfu/sdk": ["@checkfu/sdk@workspace:packages/sdk"],
 

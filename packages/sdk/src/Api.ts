@@ -635,6 +635,7 @@ const Agents = HttpApiGroup.make("agents")
 				"x-forge-group-name": "agents",
 				"x-forge-method-name": "create",
 				"x-checkfu-endpoint": { group: "agents", endpoint: "create" },
+				"x-checkfu-mcp": { name: "agents_createAgent", destructive: false },
 				"x-checkfu-cli": {
 					fileFields: ["system", "description"],
 					textOrObjectFields: ["model"],
@@ -664,6 +665,7 @@ const Agents = HttpApiGroup.make("agents")
 				"x-forge-group-name": "agents",
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "agents", endpoint: "get" },
+				"x-checkfu-mcp": { name: "agents_getAgent" },
 			}),
 	)
 	.add(
@@ -679,6 +681,7 @@ const Agents = HttpApiGroup.make("agents")
 				"x-forge-group-name": "agents",
 				"x-forge-method-name": "update",
 				"x-checkfu-endpoint": { group: "agents", endpoint: "update" },
+				"x-checkfu-mcp": { name: "agents_updateAgent" },
 				"x-checkfu-cli": {
 					fileFields: ["system", "description"],
 					textOrObjectFields: ["model"],
@@ -698,6 +701,7 @@ const Agents = HttpApiGroup.make("agents")
 				"x-forge-group-name": "agents",
 				"x-forge-method-name": "archive",
 				"x-checkfu-endpoint": { group: "agents", endpoint: "archive" },
+				"x-checkfu-mcp": { name: "agents_archiveAgent" },
 				"x-checkfu-idempotent": true,
 			}),
 	)
@@ -718,6 +722,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "create",
 				"x-checkfu-endpoint": { group: "environments", endpoint: "create" },
+				"x-checkfu-mcp": { name: "environments_createEnvironment", destructive: false },
 				"x-checkfu-cli": {
 					fileFields: ["description"],
 					examples: [
@@ -742,6 +747,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "environments", endpoint: "get" },
+				"x-checkfu-mcp": { name: "environments_getEnvironment" },
 			}),
 	)
 	.add(
@@ -757,6 +763,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "update",
 				"x-checkfu-endpoint": { group: "environments", endpoint: "update" },
+				"x-checkfu-mcp": { name: "environments_updateEnvironment" },
 				"x-checkfu-cli": {
 					fileFields: ["description"],
 				},
@@ -774,6 +781,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "delete",
 				"x-checkfu-endpoint": { group: "environments", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "environments_deleteEnvironment" },
 			}),
 	)
 	.add(
@@ -788,6 +796,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-forge-group-name": "environments",
 				"x-forge-method-name": "archive",
 				"x-checkfu-endpoint": { group: "environments", endpoint: "archive" },
+				"x-checkfu-mcp": { name: "environments_archiveEnvironment" },
 				"x-checkfu-idempotent": true,
 			}),
 	)
@@ -808,6 +817,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-forge-group-name": "sessions",
 				"x-forge-method-name": "create",
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "create" },
+				"x-checkfu-mcp": { name: "sessions_createSession", destructive: false },
 				"x-checkfu-cli": {
 					textOrObjectFields: ["agent"],
 					examples: [
@@ -831,6 +841,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-forge-group-name": "sessions",
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "get" },
+				"x-checkfu-mcp": { name: "sessions_getSession" },
 			}),
 	)
 	.add(
@@ -845,6 +856,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-forge-group-name": "sessions",
 				"x-forge-method-name": "archive",
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "archive" },
+				"x-checkfu-mcp": { name: "sessions_archiveSession" },
 				"x-checkfu-idempotent": true,
 			}),
 	)
@@ -862,6 +874,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "send",
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "sendEvents" },
+				"x-checkfu-mcp": { name: "sessions_sendSessionEvents" },
 				"x-checkfu-cli": {
 					groupDescription: "Send, list, and stream session events",
 					repeatArrayField: {
@@ -904,6 +917,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "list",
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "listEvents" },
+				"x-checkfu-mcp": { name: "sessions_listEvents" },
 				"x-checkfu-cli": {
 					intQueryParams: {
 						after: { min: 0, metavar: "SEQ" },
@@ -933,6 +947,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "stream",
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "streamEvents" },
+				"x-checkfu-mcp": false,
 				"x-checkfu-cli": {
 					intQueryParams: {
 						after: { min: 0, metavar: "SEQ" },
@@ -965,6 +980,9 @@ export const CheckfuApi = HttpApi.make("checkfu")
 		OpenApi.Description,
 		"Managed agents API for managing agents, environments, and sessions.",
 	)
+	// The published schemas forbid unknown body fields, so a misspelled field is refused rather
+	// than dropped.
+	.annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
 	.middleware(RequestValidation)
 
 export type CheckfuHttpApiClient<E = never, R = never> = HttpApiClient.ForApi<

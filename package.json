@@ -54,6 +54,7 @@
 		"@alchemy.run/cloudflare": "catalog:",
 		"@alchemy.run/domain": "catalog:",
 		"@checkfu/api": "workspace:*",
+		"@checkfu/mcp": "workspace:*",
 		"@distilled.cloud/cloudflare": "catalog:",
 		"@effect/platform-bun": "catalog:",
 		"alchemy": "catalog:",

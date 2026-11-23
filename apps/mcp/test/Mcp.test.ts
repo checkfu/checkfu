@@ -1,0 +1,713 @@
+import {
+	MAX_AGENT_BODY_BYTES,
+	MAX_EVENTS_BODY_BYTES,
+	MAX_REQUEST_BODY_BYTES,
+} from "@checkfu/api/Http/HttpHelpers"
+import { ClientEventId } from "@checkfu/api/Http/Api"
+import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/domain/Agent/AgentTypes"
+import { describe, expect, it } from "@effect/vitest"
+import type * as McpClient from "effect/ai/McpClient"
+import * as McpProtocol from "effect/ai/McpProtocol"
+import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import * as Schedule from "effect/Schedule"
+import * as Schema from "effect/Schema"
+import { GENERATED_TOOLS } from "../src/generated/Tools.ts"
+import { importInputSchema, makeToolHandler } from "../src/GeneratedRuntime.ts"
+import { CREDENTIAL_PROBE_PATH, MAX_MCP_BODY_BYTES } from "../src/Server.ts"
+import { MCP_ORIGIN, MCP_URL, TEST_API_KEY, makeTestServer } from "./helpers/McpHarness.ts"
+
+type ToolArguments = NonNullable<Parameters<McpClient.McpClient["callTool"]>[0]["arguments"]>
+
+type Argument =
+	| string
+	| number
+	| boolean
+	| ReadonlyArray<Argument>
+	| { readonly [key: string]: Argument }
+
+const CLIENT_META = {
+	"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+	"io.modelcontextprotocol/clientInfo": { name: "checkfu-mcp-test", version: "0.0.0" },
+	"io.modelcontextprotocol/clientCapabilities": {},
+}
+
+const LIST_TOOLS = JSON.stringify({
+	jsonrpc: "2.0",
+	id: 1,
+	method: "tools/list",
+	params: { _meta: CLIENT_META },
+})
+
+const callToolRequest = (name: string, args: Argument, headers: Record<string, string>) =>
+	new Request(MCP_URL, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			accept: "application/json, text/event-stream",
+			"mcp-protocol-version": "2026-07-28",
+			"mcp-method": "tools/call",
+			"mcp-name": name,
+			...headers,
+		},
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/call",
+			params: { name, arguments: args, _meta: CLIENT_META },
+		}),
+	})
+
+const listToolsRequest = (path: string, headers: Record<string, string> = {}, body = LIST_TOOLS) =>
+	new Request(`${MCP_ORIGIN}${path}`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			accept: "application/json, text/event-stream",
+			"mcp-protocol-version": "2026-07-28",
+			"mcp-method": "tools/list",
+			...headers,
+		},
+		body,
+	})
+
+const isList = (value: Argument): value is ReadonlyArray<Argument> => Array.isArray(value)
+
+// Every copy of `value` that differs by one unknown field added to one of its objects.
+const withUnknownField = (value: Argument): Array<Argument> => {
+	if (isList(value)) {
+		return value.flatMap((item, index) =>
+			withUnknownField(item).map((changed) => value.with(index, changed)),
+		)
+	}
+	if (typeof value !== "object") {
+		return []
+	}
+	return [
+		{ ...value, unknown_field: true },
+		...Object.entries(value).flatMap(([key, child]) =>
+			withUnknownField(child).map((changed) => ({ ...value, [key]: changed })),
+		),
+	]
+}
+
+const Structured = Schema.Record(Schema.String, Schema.Unknown)
+
+const ErrorEnvelope = Schema.fromJsonString(
+	Schema.Struct({
+		type: Schema.Literal("error"),
+		error: Schema.Struct({ type: Schema.String, message: Schema.String }),
+		request_id: Schema.optionalKey(Schema.String),
+	}),
+)
+
+const isCredentialCheck = (input: RequestInfo | URL) =>
+	new URL(typeof input === "string" ? input : "href" in input ? input.href : input.url).pathname ===
+	CREDENTIAL_PROBE_PATH
+
+// A stand-in API that accepts the caller's credential and then answers every operation with `reply`.
+const afterCredentialCheck = (reply: () => Promise<Response>) => ({
+	fetch: ((input) =>
+		isCredentialCheck(input)
+			? Promise.resolve(new Response("{}", { status: 404 }))
+			: reply()) satisfies typeof globalThis.fetch,
+})
+
+const callTool = (client: McpClient.McpClient, name: string, args: ToolArguments) =>
+	Effect.gen(function* () {
+		const tools = yield* client.listTools()
+		const tool = tools.find((candidate) => candidate.name === name)
+		if (tool === undefined) {
+			return yield* Effect.die(new Error(`Unknown tool ${name}`))
+		}
+		return yield* client.callTool({ tool, arguments: args })
+	})
+
+const callOk = (client: McpClient.McpClient, name: string, args: ToolArguments) =>
+	Effect.gen(function* () {
+		const result = yield* callTool(client, name, args)
+		expect(result.isError).toBe(false)
+		return yield* Schema.decodeUnknownEffect(Structured)(result.structuredContent)
+	})
+
+const callError = (client: McpClient.McpClient, name: string, args: ToolArguments) =>
+	Effect.gen(function* () {
+		const result = yield* callTool(client, name, args)
+		expect(result.isError).toBe(true)
+		expect(result.structuredContent).toBeUndefined()
+		const [block] = result.content
+		return yield* Schema.decodeUnknownEffect(ErrorEnvelope)(
+			block?.type === "text" ? block.text : undefined,
+		)
+	})
+
+describe("Checkfu MCP server", () => {
+	it.live("lists one tool per exposed API operation under the established names", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+			expect(client.serverInfo?.name).toBe("checkfu")
+
+			const tools = yield* client.listTools()
+			expect(tools.map((tool) => tool.name)).toEqual([
+				"agents_archiveAgent",
+				"agents_createAgent",
+				"agents_getAgent",
+				"agents_updateAgent",
+				"environments_archiveEnvironment",
+				"environments_createEnvironment",
+				"environments_deleteEnvironment",
+				"environments_getEnvironment",
+				"environments_updateEnvironment",
+				"sessions_archiveSession",
+				"sessions_createSession",
+				"sessions_getSession",
+				"sessions_listEvents",
+				"sessions_sendSessionEvents",
+			])
+			expect(tools.map((tool) => tool.inputSchema)).toEqual(
+				GENERATED_TOOLS.map((tool) => tool.inputSchema),
+			)
+
+			const hints = Object.fromEntries(
+				tools.map((tool) => [
+					tool.name,
+					`${tool.annotations?.readOnlyHint ? "read-only" : "writes"}, ${tool.annotations?.destructiveHint ? "destructive" : "additive"}`,
+				]),
+			)
+			expect(hints).toEqual({
+				agents_archiveAgent: "writes, destructive",
+				agents_createAgent: "writes, additive",
+				agents_getAgent: "read-only, additive",
+				agents_updateAgent: "writes, destructive",
+				environments_archiveEnvironment: "writes, destructive",
+				environments_createEnvironment: "writes, additive",
+				environments_deleteEnvironment: "writes, destructive",
+				environments_getEnvironment: "read-only, additive",
+				environments_updateEnvironment: "writes, destructive",
+				sessions_archiveSession: "writes, destructive",
+				sessions_createSession: "writes, additive",
+				sessions_getSession: "read-only, additive",
+				sessions_listEvents: "read-only, additive",
+				sessions_sendSessionEvents: "writes, destructive",
+			})
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("runs a conversation end to end through tools", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+
+			const agentInput = {
+				body: { name: "Assistant", model: "gpt-6.2-sol" },
+				idempotency_key: "create-agent-1",
+			}
+			const agent = yield* callOk(client, "agents_createAgent", agentInput)
+			const retried = yield* callOk(client, "agents_createAgent", agentInput)
+			expect(retried["id"]).toBe(agent["id"])
+
+			const environment = yield* callOk(client, "environments_createEnvironment", {
+				body: { name: "default" },
+			})
+			const session = yield* callOk(client, "sessions_createSession", {
+				body: { agent: agent["id"], environment_id: environment["id"] },
+			})
+			const path = { session_id: session["id"] }
+			expect(yield* callOk(client, "sessions_getSession", { path })).toMatchObject({
+				id: session["id"],
+				agent: { id: agent["id"], version: 1 },
+			})
+
+			yield* callOk(client, "sessions_sendSessionEvents", {
+				path,
+				body: {
+					events: [{ type: "user.message", content: [{ type: "text", text: "Hello Checkfu!" }] }],
+				},
+			})
+			const events = yield* callOk(client, "sessions_listEvents", {
+				path,
+				query: { limit: "50", order: "asc" },
+			}).pipe(
+				Effect.filterOrFail(
+					(page) => JSON.stringify(page["data"]).includes("Echo: Hello Checkfu!"),
+					() => "agent reply not listed yet",
+				),
+				Effect.retry(Schedule.max([Schedule.spaced("20 millis"), Schedule.recurs(200)])),
+			)
+			expect(events["has_more"]).toBe(false)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("returns API and argument errors as tool errors", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+
+			const missing = yield* callError(client, "agents_getAgent", {
+				path: { agent_id: "agent_missing" },
+			})
+			expect(missing.error.type).toBe("not_found_error")
+			expect(missing.request_id).toMatch(/^req_/)
+
+			const before = server.apiRequests.length
+			for (const agent_id of ["..", "a/b", String.raw`a\b`]) {
+				const refused = yield* callError(client, "agents_getAgent", { path: { agent_id } })
+				expect([agent_id, refused.error.type]).toEqual([agent_id, "invalid_request_error"])
+				expect(refused.error.message).toContain('["path"]["agent_id"]')
+			}
+			const illFormed = yield* callError(client, "agents_getAgent", {
+				path: { agent_id: "agent_\uD800" },
+			})
+			expect(illFormed.error).toEqual({
+				type: "invalid_request_error",
+				message: 'Expected well-formed Unicode\n  at ["path"]["agent_id"]',
+			})
+			const illFormedQuery = yield* callError(client, "sessions_listEvents", {
+				path: { session_id: "sess_1" },
+				query: { after: "\uD800" },
+			})
+			expect(illFormedQuery.error.message).toContain('["query"]["after"]')
+			expect(server.apiRequests.length).toBe(before)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("rejects arguments its published schema rejects instead of dropping them", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+			const body = { name: "Assistant", model: "gpt-6.2-sol" }
+
+			const session = { session_id: "sess_1" }
+			const cases: ReadonlyArray<readonly [string, ToolArguments, string]> = [
+				["agents_createAgent", { body, idempotencyKey: "retry-1" }, '["idempotencyKey"]'],
+				["agents_createAgent", { body, path: { agent_id: "agent_1" } }, '["path"]'],
+				["agents_createAgent", { body, path: {} }, '["path"]'],
+				["agents_createAgent", { body, query: { limit: "5" } }, '["query"]'],
+				["agents_createAgent", { body: { ...body, sytem: "Be brief." } }, '["body"]["sytem"]'],
+				["agents_createAgent", { body: { ...body, name: "" } }, '["body"]["name"]'],
+				["agents_createAgent", {}, '["body"]'],
+				["agents_getAgent", {}, '["path"]'],
+				["agents_getAgent", { path: { agent_id: "" } }, '["path"]["agent_id"]'],
+				["agents_getAgent", { path: { agent_id: "a", other: "b" } }, '["path"]["other"]'],
+				["agents_getAgent", { path: { agent_id: "a" }, body: {} }, '["body"]'],
+				["agents_getAgent", { path: { agent_id: "a" }, query: {} }, '["query"]'],
+				[
+					"agents_archiveAgent",
+					{ path: { agent_id: "a" }, idempotency_key: "k" },
+					'["idempotency_key"]',
+				],
+				["sessions_listEvents", { path: session, query: { limt: "5" } }, '["query"]["limt"]'],
+				["sessions_listEvents", { path: session, query: { limit: 50 } }, '["query"]["limit"]'],
+				["sessions_listEvents", { path: session, query: { limit: "500" } }, '["query"]["limit"]'],
+				["sessions_listEvents", { path: session, query: { order: "up" } }, '["query"]["order"]'],
+			]
+			for (const [name, args, location] of cases) {
+				const refused = yield* callError(client, name, args)
+				expect([name, args, refused.error.type]).toEqual([name, args, "invalid_request_error"])
+				expect(refused.error.message).toContain(location)
+			}
+			expect(server.apiRequests.length).toBe(0)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("refuses an unknown field at every object of every tool's arguments", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+
+			const model = { id: "gpt-6.2-sol" }
+			const config = { type: "cloud", networking: { type: "unrestricted" } }
+			const agent = { path: { agent_id: "agent_1" } }
+			const environment = { path: { environment_id: "env_1" } }
+			const session = { path: { session_id: "sess_1" } }
+			const calls = {
+				agents_archiveAgent: agent,
+				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
+				agents_getAgent: agent,
+				agents_updateAgent: { ...agent, body: { version: 1, model } },
+				environments_archiveEnvironment: environment,
+				environments_createEnvironment: { body: { name: "default", config } },
+				environments_deleteEnvironment: environment,
+				environments_getEnvironment: environment,
+				environments_updateEnvironment: { ...environment, body: { version: 1, config } },
+				sessions_archiveSession: session,
+				sessions_createSession: {
+					body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
+				},
+				sessions_getSession: session,
+				sessions_listEvents: { ...session, query: { limit: "5" } },
+				sessions_sendSessionEvents: {
+					...session,
+					body: {
+						events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
+					},
+				},
+			} satisfies Record<string, Argument>
+			expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
+
+			let refusals = 0
+			for (const [name, valid] of Object.entries(calls)) {
+				for (const changed of withUnknownField(valid)) {
+					const refused = yield* callError(client, name, changed as ToolArguments)
+					expect([name, changed, refused.error.type]).toEqual([
+						name,
+						changed,
+						"invalid_request_error",
+					])
+					expect(refused.error.message).toContain("unknown_field")
+					refusals += 1
+				}
+			}
+			expect(refusals).toBeGreaterThan(40)
+			expect(server.apiRequests.length).toBe(0)
+
+			// The same calls without the unknown field pass the published schema and reach the API.
+			for (const [name, valid] of Object.entries(calls)) {
+				const result = yield* callTool(client, name, valid)
+				const [block] = result.content
+				const refusal = result.isError
+					? yield* Schema.decodeUnknownEffect(ErrorEnvelope)(
+							block?.type === "text" ? block.text : undefined,
+						)
+					: undefined
+				expect([name, refusal === undefined || refusal.request_id !== undefined]).toEqual([
+					name,
+					true,
+				])
+			}
+			expect(server.apiRequests.length).toBe(Object.keys(calls).length)
+		}).pipe(Effect.scoped),
+	)
+
+	it("accepts exactly the retry keys the API accepts that a header carries unchanged", () => {
+		const createAgent = GENERATED_TOOLS.find((tool) => tool.name === "agents_createAgent")
+		const published = Schema.is(importInputSchema(createAgent?.inputSchema ?? {}))
+		const body = { name: "Assistant", model: "gpt-6.2-sol" }
+		const apiAccepts = Schema.is(ClientEventId)
+		// Tab and printable ASCII: what fetch and curl both deliver to a server byte for byte.
+		const headerCarries = (key: string) => /^[\t\u0020-\u007E]*$/u.test(key)
+
+		const keys = [
+			"",
+			"k".repeat(128),
+			"k".repeat(129),
+			"snow\u2603",
+			...Array.from({ length: 256 }, (_, code) => String.fromCodePoint(code)).flatMap(
+				(character) => [character, `${character}k`, `k${character}k`, `k${character}`],
+			),
+		]
+		const disagreements = keys.filter(
+			(key) =>
+				published({ body, idempotency_key: key }) !== (apiAccepts(key) && headerCarries(key)),
+		)
+		expect(disagreements.map((key) => JSON.stringify(key))).toEqual([])
+		expect(published({ body, idempotency_key: "batch 42" })).toBe(true)
+		expect(published({ body, idempotency_key: "batch\t42" })).toBe(true)
+	})
+
+	it.live("delivers a retry key to the API unchanged and refuses the rest before any call", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+			const body = { name: "Assistant", model: "gpt-6.2-sol" }
+
+			for (const idempotency_key of [" padded", "padded ", "line\nbreak", "caf\u00E9", ""]) {
+				const refused = yield* callError(client, "agents_createAgent", { body, idempotency_key })
+				expect(refused.error.type).toBe("invalid_request_error")
+				expect(refused.error.message).toContain('["idempotency_key"]')
+			}
+			expect(server.apiRequests.length).toBe(0)
+
+			for (const idempotency_key of ["k", "retry:1/a~b", "batch 42", "batch\t42", "a  b c"]) {
+				const created = yield* callOk(client, "agents_createAgent", { body, idempotency_key })
+				expect(server.apiRequests.at(-1)?.headers.get("idempotency-key")).toBe(idempotency_key)
+				const retried = yield* callOk(client, "agents_createAgent", { body, idempotency_key })
+				expect([idempotency_key, retried["id"]]).toEqual([idempotency_key, created["id"]])
+			}
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("forwards the caller's credential to the API and holds none of its own", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+
+			const client = yield* server.connect()
+			yield* callOk(client, "environments_createEnvironment", { body: { name: "default" } })
+			expect(server.apiRequests.at(-1)?.headers.get("authorization")).toBe(`Bearer ${TEST_API_KEY}`)
+
+			// A credential the API refuses is refused here too, before the request is handled:
+			// at connection time, and for a tool call.
+			const operations = server.apiRequests.length
+			const stale = { authorization: "Bearer ck_stale_key" }
+			for (const request of [
+				listToolsRequest("/mcp", stale),
+				callToolRequest("environments_createEnvironment", { body: { name: "default" } }, stale),
+			]) {
+				const refused = yield* server.fetch(request)
+				expect(refused.status).toBe(401)
+				expect(refused.headers.get("www-authenticate")).toBe("Bearer")
+				expect(yield* Effect.promise(() => refused.json())).toEqual({
+					type: "error",
+					error: { type: "authentication_error", message: "Invalid or missing API key." },
+				})
+			}
+			expect(server.apiRequests.length).toBe(operations)
+
+			const stranger = yield* Effect.flip(
+				Effect.flatMap(server.connect({ apiKey: "ck_stale_key" }), (client) => client.listTools()),
+			)
+			expect(stranger.reason).toMatchObject({ _tag: "HttpError", status: 401 })
+
+			const accepted = yield* server.fetch(
+				callToolRequest(
+					"environments_createEnvironment",
+					{ body: { name: "default" } },
+					{ "x-api-key": TEST_API_KEY },
+				),
+			)
+			expect(accepted.status).toBe(200)
+			expect(accepted.headers.get("www-authenticate")).toBeNull()
+
+			// If the API cannot be asked, the credential is not taken on trust.
+			const unreachable = yield* server.fetch(listToolsRequest("/mcp", stale), {
+				fetch: () => Promise.reject(new Error("unreachable")),
+			})
+			expect(unreachable.status).toBe(503)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("requires a credential on every route but the health check", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+
+			// Every spelling here is one the router resolves to the MCP endpoint.
+			for (const path of ["/mcp", "/mcp/", "/MCP", "/%6dcp", "//mcp", "/mcp/?x=1"]) {
+				const anonymous = yield* server.fetch(listToolsRequest(path))
+				expect([path, anonymous.status]).toEqual([path, 401])
+				expect(anonymous.headers.get("www-authenticate")).toBe("Bearer")
+
+				expect(anonymous.headers.get("cache-control")).toBe("no-store")
+
+				const admitted = yield* server.fetch(
+					listToolsRequest(path, { authorization: `Bearer ${TEST_API_KEY}` }),
+				)
+				expect([path, admitted.status]).toEqual([path, 200])
+				expect(admitted.headers.get("cache-control")).toBe("no-store")
+			}
+			// A scheme with no token is what "Bearer $UNSET_VARIABLE" sends.
+			for (const authorization of ["Bearer", "Bearer ", "bearer", " "]) {
+				const empty = yield* server.fetch(listToolsRequest("/mcp", { authorization }))
+				expect([authorization, empty.status]).toEqual([authorization, 401])
+			}
+			expect(server.apiRequests.length).toBe(0)
+
+			for (const path of ["/health", "/health?probe=1"]) {
+				const health = yield* server.fetch(new Request(`${MCP_ORIGIN}${path}`))
+				expect([path, health.status]).toEqual([path, 200])
+				expect(health.headers.get("cache-control")).toBeNull()
+			}
+			// A request target is a path, not a URL: a leading "//" is not a host.
+			for (const path of ["//", "//health", "//x/health", "/health/"]) {
+				const anonymous = yield* server.fetch(new Request(`${MCP_ORIGIN}${path}`))
+				expect([path, anonymous.status]).toEqual([path, 401])
+			}
+			const emptySegment = yield* server.fetch(
+				new Request(`${MCP_ORIGIN}//`, { headers: { "x-api-key": TEST_API_KEY } }),
+			)
+			expect(emptySegment.status).toBe(404)
+
+			const unknown = yield* server.fetch(new Request(`${MCP_ORIGIN}/v1/agents`))
+			expect(unknown.status).toBe(401)
+			const unknownWithKey = yield* server.fetch(
+				new Request(`${MCP_ORIGIN}/v1/agents`, { headers: { "x-api-key": TEST_API_KEY } }),
+			)
+			expect(unknownWithKey.status).toBe(404)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("answers an invalid call with its first error, however many it contains", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const invalidBlocks = Array.from({ length: 50_000 }, () => 1)
+			const request = callToolRequest(
+				"sessions_sendSessionEvents",
+				{
+					path: { session_id: "sess_1" },
+					body: { events: [{ type: "user.message", content: invalidBlocks }] },
+				},
+				{ authorization: `Bearer ${TEST_API_KEY}` },
+			)
+			const response = yield* server.fetch(request)
+			const text = yield* Effect.promise(() => response.text())
+			expect(text).toContain("invalid_request_error")
+			expect(text).toContain("content")
+			expect(text.length).toBeLessThan(2000)
+			expect(server.apiRequests.length).toBe(0)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("says a write's outcome is unknown when the API gives no usable reply", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const brokenBody = () =>
+				new ReadableStream<Uint8Array>({
+					start: (controller) => {
+						controller.error(new Error("connection reset"))
+					},
+				})
+			const replies: ReadonlyArray<readonly [string, () => Promise<Response>]> = [
+				["no connection", () => Promise.reject(new Error("unreachable"))],
+				["body lost", () => Promise.resolve(new Response(brokenBody(), { status: 201 }))],
+				["empty body", () => Promise.resolve(new Response("", { status: 201 }))],
+				["not JSON", () => Promise.resolve(new Response("<html>", { status: 201 }))],
+				["not an object", () => Promise.resolve(new Response("[1,2]", { status: 200 }))],
+				["foreign error", () => Promise.resolve(new Response("{}", { status: 502 }))],
+			]
+			const authorization = `Bearer ${TEST_API_KEY}`
+			for (const [label, reply] of replies) {
+				const outcome = (request: Request) =>
+					server.fetch(request, afterCredentialCheck(reply)).pipe(
+						Effect.flatMap((response) => Effect.promise(() => response.text())),
+						Effect.map((text) => [label, text.includes('"isError":true'), text] as const),
+					)
+				const write = yield* outcome(
+					callToolRequest(
+						"environments_createEnvironment",
+						{ body: { name: "default" } },
+						{ authorization },
+					),
+				)
+				expect(write.slice(0, 2)).toEqual([label, true])
+				expect(write[2]).toContain("whether this call took effect is unknown")
+				expect(write[2]).not.toContain("idempotency_key")
+
+				const read = yield* outcome(
+					callToolRequest(
+						"environments_getEnvironment",
+						{ path: { environment_id: "env_1" } },
+						{ authorization },
+					),
+				)
+				expect(read.slice(0, 2)).toEqual([label, true])
+				expect(read[2]).toContain("Retrying is safe")
+			}
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("substitutes every declared path parameter, whatever its name", () =>
+		Effect.gen(function* () {
+			const urls: Array<string> = []
+			const handler = makeToolHandler(
+				HttpClient.make((request, url) => {
+					urls.push(url.pathname)
+					return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
+				}).pipe(HttpClient.mapRequest(HttpClientRequest.prependUrl("http://api.test"))),
+				{
+					name: "things_getPart",
+					title: "Get a part",
+					description: "Get a part",
+					method: "GET",
+					path: "/v1/things/{thing-id}/parts/{part.id}",
+					readOnly: true,
+					destructive: false,
+					inputSchema: {
+						type: "object",
+						properties: {
+							path: {
+								type: "object",
+								properties: { "thing-id": { type: "string" }, "part.id": { type: "string" } },
+								required: ["thing-id", "part.id"],
+								additionalProperties: false,
+							},
+						},
+						required: ["path"],
+						additionalProperties: false,
+					},
+				},
+			)
+			yield* handler({ path: { "thing-id": "t 1", "part.id": "$&" } })
+			expect(urls).toEqual(["/v1/things/t%201/parts/%24%26"])
+		}),
+	)
+
+	it.live("sends each call to the API bound to its own request", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const reached: Array<string> = []
+			const binding = (label: string) => ({
+				fetch: ((input, init) => {
+					reached.push(`${label} ${isCredentialCheck(input) ? "credential check" : "operation"}`)
+					return server.apiFetch(input, init)
+				}) satisfies typeof globalThis.fetch,
+			})
+			for (const label of ["first", "second"]) {
+				const response = yield* server.fetch(
+					callToolRequest(
+						"environments_createEnvironment",
+						{ body: { name: "default" } },
+						{ authorization: `Bearer ${TEST_API_KEY}` },
+					),
+					binding(label),
+				)
+				expect(response.status).toBe(200)
+			}
+			expect(reached).toEqual([
+				"first credential check",
+				"first operation",
+				"second credential check",
+				"second operation",
+			])
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("bounds the request body before parsing it", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const authorization = `Bearer ${TEST_API_KEY}`
+			const oversized = JSON.stringify({ pad: "x".repeat(MAX_MCP_BODY_BYTES) })
+
+			const declared = yield* server.fetch(
+				listToolsRequest(
+					"/mcp",
+					{ authorization, "content-length": String(oversized.length) },
+					oversized,
+				),
+			)
+			expect(declared.status).toBe(413)
+
+			const undeclared = yield* server.fetch(listToolsRequest("/mcp", { authorization }, oversized))
+			expect(undeclared.status).toBe(413)
+			expect(undeclared.headers.get("cache-control")).toBe("no-store")
+
+			const atTheLimit = yield* server.fetch(
+				listToolsRequest("/mcp", { authorization }, LIST_TOOLS.padEnd(MAX_MCP_BODY_BYTES, " ")),
+			)
+			expect(atTheLimit.status).toBe(200)
+			expect(server.apiRequests.length).toBe(0)
+
+			expect(MAX_MCP_BODY_BYTES).toBeGreaterThanOrEqual(
+				Math.max(MAX_AGENT_BODY_BYTES, MAX_EVENTS_BODY_BYTES, MAX_REQUEST_BODY_BYTES) + 64 * 1024,
+			)
+			const client = yield* server.connect()
+			const largest = yield* callOk(client, "agents_createAgent", {
+				body: {
+					name: "Assistant",
+					model: "gpt-6.2-sol",
+					system: "\u{1F600}".repeat(MAX_AGENT_SYSTEM_LENGTH / 2),
+				},
+			})
+			expect(largest["type"]).toBe("agent")
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("serves only the stateless protocol revision", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const legacy = yield* Effect.result(server.connect({ protocol: McpProtocol.v2025_11_25 }))
+			expect(legacy._tag).toBe("Failure")
+		}).pipe(Effect.scoped),
+	)
+})

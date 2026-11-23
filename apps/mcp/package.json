@@ -1,0 +1,25 @@
+{
+	"name": "@checkfu/mcp",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@alchemy.run/domain": "catalog:",
+		"@checkfu/api": "workspace:*",
+		"@checkfu/domain": "workspace:*",
+		"@effect/vitest": "catalog:",
+		"vitest": "catalog:"
+	}
+}
