@@ -11,7 +11,7 @@
 	"scripts": {
 		"typecheck": "effect-tsgo tsc --noEmit",
 		"test": "vitest run --pool=threads --no-allowOnly",
-		"test:bun": "bun --bun run vitest run --pool=threads --no-allowOnly test/PiDurableEngine.test.ts -t redirect",
+		"test:bun": "bun --bun run vitest run --pool=threads --no-allowOnly test/PiModels.redirect.test.ts",
 		"test:workerd": "vitest run --config test/workerd/vitest.config.ts --no-allowOnly"
 	},
 	"dependencies": {

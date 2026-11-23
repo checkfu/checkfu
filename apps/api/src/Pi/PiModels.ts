@@ -44,40 +44,19 @@ const optionalConfigString = (name: string): Config.Config<string | null> =>
 		),
 	)
 
-const EXPLICIT_LOOPBACK_PORT = /^http:\/\/(?:127\.0\.0\.1|\[::1\]):(\d+)(?:\/|$)/i
+const LOOPBACK_BASE_URL = /^http:\/\/(127\.0\.0\.1|\[::1\]):([1-9]\d{0,4})(?:\/[^?#]*)?$/
 
 export const parseLoopbackBaseUrl = (
 	raw: string,
 	envName: string = OPENAI_BASE_URL_ENV,
 ): string => {
-	let parsed: URL
-	try {
-		parsed = new URL(raw)
-	} catch {
-		throw new TypeError(`Invalid ${envName}: must be a valid URL.`)
-	}
-	const portMatch = EXPLICIT_LOOPBACK_PORT.exec(raw)
-	const portNumber = portMatch?.[1] === undefined ? Number.NaN : Number(portMatch[1])
-	const isLoopbackHost = parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]"
-	if (
-		parsed.protocol !== "http:" ||
-		!isLoopbackHost ||
-		!Number.isInteger(portNumber) ||
-		portNumber < 1 ||
-		portNumber > 65_535 ||
-		parsed.username.length > 0 ||
-		parsed.password.length > 0 ||
-		parsed.search.length > 0 ||
-		parsed.hash.length > 0 ||
-		raw.includes("?") ||
-		raw.includes("#")
-	) {
+	const [, host, port] = LOOPBACK_BASE_URL.exec(raw) ?? []
+	if (host === undefined || port === undefined || Number(port) > 65_535) {
 		throw new TypeError(
-			`Refusing non-loopback ${envName}: only http://127.0.0.1:<port> or http://[::1]:<port> URLs are allowed.`,
+			`Refusing ${envName}: only http://127.0.0.1:<port> or http://[::1]:<port> URLs are allowed.`,
 		)
 	}
-	const pathname = parsed.pathname.replace(/\/+$/, "")
-	return `${parsed.protocol}//${parsed.hostname}:${portNumber}${pathname}`
+	return `http://${host}:${port}${new URL(raw).pathname.replace(/\/+$/, "")}`
 }
 
 const resolveOpenAIBaseUrl = (override?: string | null): string =>
@@ -150,93 +129,20 @@ const staticEnvApiKeyAuth = (name: string, envVar: string) => ({
 
 const isObject = (value: unknown): value is object => typeof value === "object" && value !== null
 
-const readNativeUrlHref = (input: unknown): string | null => {
-	const descriptor = Object.getOwnPropertyDescriptor(URL.prototype, "href")
-	if (descriptor?.get === undefined) {
-		return null
-	}
-	try {
-		const href: unknown = descriptor.get.call(input)
-		return typeof href === "string" ? href : null
-	} catch {
-		return null
-	}
-}
-
-const isRedirectStatus = (status: number): boolean => status >= 300 && status < 400
-
-const discardResponseBody = (body: Response["body"]): void => {
-	if (body === null) {
-		return
-	}
-	void body.cancel().catch(() => undefined)
-}
-
 /**
- * Wraps provider `fetch` calls so outbound requests stay pinned to the
- * resolved provider origin and refuse HTTP redirects at the transport.
- * Prevents a redirect from sending transcripts or API keys to another host.
- *
- * Only URL strings and native `URL` instances are accepted. The validated
- * destination is dispatched as an immutable normalized URL string (`parsed.href`)
- * with `{ ...init, redirect: "manual" }`, leaving the underlying `fetch`
- * transport as the sole owner of headers, bodies, routing options (`dispatcher`,
- * `proxy`, `keepalive`), and stream lifetimes. `Request` objects (native or
- * custom) are rejected fail-closed with a `TypeError`.
+ * A provider request is never redirected, so a transcript or an API key cannot
+ * be sent on to another host. workerd rejects `redirect: "error"`, hence "manual".
  */
-export const createNoRedirectProviderFetch = (
-	expectedBaseUrl: string,
-	upstreamFetch?: typeof fetch,
-): typeof fetch => {
-	const expectedOrigin = new URL(expectedBaseUrl).origin
-	const guardedFetch = async (
-		input: Parameters<typeof fetch>[0],
-		init?: Parameters<typeof fetch>[1],
-	): Promise<Response> => {
-		let rawUrl: string
-		if (typeof input === "string") {
-			rawUrl = input
-		} else {
-			const nativeHref = readNativeUrlHref(input)
-			if (nativeHref === null) {
-				throw new TypeError(
-					"Refusing provider request: only URL strings and URL instances are supported.",
-				)
-			}
-			rawUrl = nativeHref
-		}
-		let parsed: URL
-		try {
-			parsed = new URL(rawUrl)
-		} catch {
-			throw new TypeError(`Refusing provider request to invalid URL: ${rawUrl}`)
-		}
-		if (parsed.origin !== expectedOrigin) {
-			throw new TypeError(
-				`Refusing provider request to disallowed origin ${parsed.origin}; expected ${expectedOrigin}.`,
-			)
-		}
-		const baseFetch = upstreamFetch ?? globalThis.fetch
-		// Cloudflare workerd throws a TypeError on `redirect: "error"` before
-		// dispatching the request; use `redirect: "manual"` and reject 3xx
-		// responses below so redirects are never followed.
-		const requestInit: RequestInit =
-			init === undefined ? { redirect: "manual" } : { ...init, redirect: "manual" }
-		const response = await baseFetch(parsed.href, requestInit)
-		if (
-			response.redirected ||
-			response.type === "opaqueredirect" ||
-			isRedirectStatus(response.status)
-		) {
-			discardResponseBody(response.body)
-			throw new TypeError(
-				`Provider request to ${parsed.origin} attempted a redirect, which is not allowed.`,
-			)
+export const createNoRedirectProviderFetch =
+	(upstreamFetch?: typeof fetch): typeof fetch =>
+	async (input, init) => {
+		const response = await (upstreamFetch ?? fetch)(input, { ...init, redirect: "manual" })
+		if (response.status >= 300 && response.status < 400) {
+			await response.body?.cancel()
+			throw new TypeError("Refusing a redirect from the model provider.")
 		}
 		return response
 	}
-	return guardedFetch
-}
 
 export const OPENAI_REFUSAL_ERROR = "The model refused to complete the request."
 
@@ -259,9 +165,9 @@ const refusalTexts = (item: unknown): ReadonlyArray<string> => {
 	return texts
 }
 
-const withProviderFetch = <O extends StreamOptions>(model: Model<Api>, options: O | undefined) => ({
+const withProviderFetch = <O extends StreamOptions>(options: O | undefined) => ({
 	...options,
-	fetch: createNoRedirectProviderFetch(model.baseUrl, options?.fetch),
+	fetch: createNoRedirectProviderFetch(options?.fetch),
 })
 
 /**
@@ -338,14 +244,14 @@ export const createOpenAIProvider = (baseUrl?: string | null): Provider<"openai-
 			stream: (model: Model<"openai-responses">, context, options) =>
 				reportOpenAIRefusals(options, (onProviderStreamEvent) =>
 					openAIResponses.stream(model, context, {
-						...withProviderFetch(model, options),
+						...withProviderFetch(options),
 						onProviderStreamEvent,
 					}),
 				),
 			streamSimple: (model: Model<"openai-responses">, context, options) =>
 				reportOpenAIRefusals(options, (onProviderStreamEvent) =>
 					openAIResponses.streamSimple(model, context, {
-						...withProviderFetch(model, options),
+						...withProviderFetch(options),
 						onProviderStreamEvent,
 					}),
 				),
@@ -392,11 +298,11 @@ export const createAnthropicProvider = (): Provider<"anthropic-messages"> =>
 		api: {
 			stream: (model: Model<"anthropic-messages">, context, options) =>
 				withoutRefusalExplanation(
-					anthropicMessages.stream(model, context, withProviderFetch(model, options)),
+					anthropicMessages.stream(model, context, withProviderFetch(options)),
 				),
 			streamSimple: (model: Model<"anthropic-messages">, context, options) =>
 				withoutRefusalExplanation(
-					anthropicMessages.streamSimple(model, context, withProviderFetch(model, options)),
+					anthropicMessages.streamSimple(model, context, withProviderFetch(options)),
 				),
 		},
 	})
