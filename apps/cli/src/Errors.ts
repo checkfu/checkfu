@@ -75,6 +75,8 @@ const API_ERROR_STATUS_BY_TYPE: Readonly<Record<ApiError["error"]["type"], Error
 export const apiErrorStatus = (error: ApiErrorEnvelope): ErrorStatus =>
 	API_ERROR_STATUS_BY_TYPE[error.error.type]
 
+const PRINTABLE_REQUEST_ID = /^[\w-]{1,128}$/
+
 export const formatApiErrorEnvelope = (
 	error: ApiErrorEnvelope,
 	observedStatus?: number,
@@ -91,7 +93,11 @@ export const formatApiErrorEnvelope = (
 		parts.push(`unconfirmed_index=${error.unconfirmed_index}`)
 	}
 	const detail = parts.length > 0 ? ` (${parts.join(", ")})` : ""
-	return apiFailure(status, error.error.type, `${error.error.message}${detail}`)
+	const requestId =
+		error.request_id !== undefined && PRINTABLE_REQUEST_ID.test(error.request_id)
+			? ` [request_id: ${error.request_id}]`
+			: ""
+	return apiFailure(status, error.error.type, `${error.error.message}${detail}${requestId}`)
 }
 
 export const isTransientHttpStatus = (status: number): boolean =>
