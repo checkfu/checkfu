@@ -1,5 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
-import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { createRegistry } from "@earendil-works/pi-durable"
@@ -16,9 +16,9 @@ import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngin
 import type { PiTurnResult } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AgentVersionLookupTimeout,
-	PiDurableModelProviderLive,
+	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
-} from "../src/Pi/PiDurableModelProvider.ts"
+} from "../src/Pi/PiDurableHarness.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import {
 	DEFAULT_REFUSAL_TEXT,
@@ -357,7 +357,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -546,11 +546,11 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		try {
 			await Effect.runPromise(
 				Effect.gen(function* () {
-					const provider = yield* ModelProvider
+					const provider = yield* Harness
 
 					// Missing/lagging version lookup must fail NON-TERMINALLY so lagging views never kill a valid session
 					const missingVersionErr = yield* Effect.flip(
-						provider.generate({
+						provider.runTurn({
 							session_id: SessionId.make("sess_lagging_agent"),
 							agent_id: "agent_not_projected_yet",
 							agent_version: 1,
@@ -1708,7 +1708,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+				SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),

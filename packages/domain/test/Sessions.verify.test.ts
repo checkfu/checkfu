@@ -4,12 +4,12 @@ import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
+import { Harness } from "../src/Session/Harness.external.ts"
 import { Sessions, SessionsApi, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
 const story = Story.make(Sessions, {
 	layer: SessionsHandlersLive,
-	stub: [ModelProvider],
+	stub: [Harness],
 })
 
 const STANDING = {
@@ -109,7 +109,7 @@ describe("Sessions Z3 formal verification", () => {
 				expect(report.explored.truncated).toBe(false)
 				expect(report.explored.complete).toBe(2)
 				expect(report.explored.repeated).toContain(
-					"ModelProvider.generate, by RunTurn in its step generate-model-reply",
+					"Harness.runTurn, by RunTurn in its step run-harness-turn",
 				)
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)

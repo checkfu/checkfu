@@ -14,7 +14,7 @@ import {
 	seedTokenBudget,
 	trimTailToBudget,
 } from "../src/Pi/PiContextBudget.ts"
-import { conversationName } from "../src/Pi/PiDurableModelProvider.ts"
+import { conversationName } from "../src/Pi/PiDurableHarness.ts"
 import {
 	AUTH_HEADERS,
 	createIdleSession,

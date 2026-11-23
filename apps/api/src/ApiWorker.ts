@@ -11,11 +11,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
-import {
-	HarnessCallFailed,
-	PiDurableModelProviderLive,
-	PiTurnExecutor,
-} from "./Pi/PiDurableModelProvider.ts"
+import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
 import { PiSession } from "./Pi/PiSession.do.ts"
 
 const harnessCall = <A, E, R>(
@@ -49,7 +45,7 @@ const PiSessionExecutorLive = Layer.effect(
 )
 
 const CheckfuLive = Checkfu.layer(
-	SessionsHandlersLive.pipe(Layer.provide(PiDurableModelProviderLive)),
+	SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 ).pipe(Layer.provide(PiSessionExecutorLive), Layer.provide(DomainCloudflare.layerDurableObjects()))
 
 const ApiWorkerLive = Layer.mergeAll(
@@ -66,7 +62,7 @@ export const API_WORKER_PROPS = {
 		// and SSE polling streams interrupt cleanly when clients disconnect.
 		date: "2026-11-17",
 	},
-	// Exceed DEFAULT_MODEL_TIMEOUT_MS (10m) + settle margin so deploys don't evict
+	// Exceed DEFAULT_TURN_TIMEOUT_MS (10m) + settle margin so deploys don't evict
 	// active PiSession/RunTurn Durable Objects mid-turn.
 	codeUpdateStrategy: {
 		mode: "deferred" as const,

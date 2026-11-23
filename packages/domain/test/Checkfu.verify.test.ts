@@ -24,7 +24,7 @@ import { Environment } from "../src/Environment/Environment.aggregate.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { EnvironmentView } from "../src/Environment/EnvironmentView.view.ts"
 import { ArchiveSession } from "../src/Session/ArchiveSession.command.ts"
-import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
+import { Harness } from "../src/Session/Harness.external.ts"
 import { SendUserMessage } from "../src/Session/SendUserMessage.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
@@ -136,10 +136,10 @@ const PROVED = Object.entries(STANDING)
 	.filter(([, standing]) => standing === "proved")
 	.map(([name]) => name)
 
-const ModelProviderStubLayer = ModelProvider.toLayer(
+const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
-		generate: () =>
+		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
 				text: "ok",
@@ -227,9 +227,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const platform = InMemory.make({ manual: true })
 		const observedAggregateIds = new Map<string, Set<string>>()
 		const observedViewKeys = new Map<string, Set<string>>()
-		const layer = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(ModelProviderStubLayer)),
-		).pipe(
+		const layer = Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(HarnessStubLayer))).pipe(
 			Layer.updateService(Domain.Platform, (base) =>
 				Domain.Platform.of({
 					model: (hosted) =>

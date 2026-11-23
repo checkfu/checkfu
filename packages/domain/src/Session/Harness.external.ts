@@ -19,25 +19,25 @@ import {
 	ThinkingText,
 } from "./SessionTypes.ts"
 
-export const DEFAULT_MODEL_TIMEOUT_MS = 600_000
+export const DEFAULT_TURN_TIMEOUT_MS = 600_000
 
 export const ModelStopReason = Schema.Struct({
 	type: Schema.Literals(["end_turn", "budget_reached", "refusal"]),
 })
 export type ModelStopReason = typeof ModelStopReason.Type
 
-export const ModelProviderError = Schema.TaggedStruct("ModelProviderError", {
+export const TurnFailed = Schema.TaggedStruct("TurnFailed", {
 	error_type: ErrorType,
 	message: ErrorMessage,
 	terminal: Schema.Boolean,
 	model_usage: Schema.optionalKey(ModelUsage),
 })
-export type ModelProviderError = typeof ModelProviderError.Type
+export type TurnFailed = typeof TurnFailed.Type
 
-export const ModelRequestInterrupted = Schema.TaggedStruct("ModelRequestInterrupted", {
+export const TurnInterrupted = Schema.TaggedStruct("TurnInterrupted", {
 	model_usage: Schema.optionalKey(ModelUsage),
 })
-export type ModelRequestInterrupted = typeof ModelRequestInterrupted.Type
+export type TurnInterrupted = typeof TurnInterrupted.Type
 
 export const HARNESS_UNAVAILABLE = "harness_unavailable"
 export const HARNESS_UNAVAILABLE_MESSAGE = "The agent runtime could not be reached."
@@ -46,8 +46,8 @@ export const TURN_TIMEOUT_MESSAGE = "Model request timed out."
 export const HarnessUnavailable = Schema.TaggedStruct("HarnessUnavailable", {})
 export type HarnessUnavailable = typeof HarnessUnavailable.Type
 
-export class ModelProvider extends Domain.ExternalSystem("ModelProvider", {
-	generate: {
+export class Harness extends Domain.ExternalSystem("Harness", {
+	runTurn: {
 		args: {
 			session_id: SessionId,
 			agent_id: ResourceId,
@@ -65,7 +65,7 @@ export class ModelProvider extends Domain.ExternalSystem("ModelProvider", {
 			output_tokens: NonNegativeInt,
 			stop_reason: ModelStopReason,
 		},
-		error: [ModelProviderError, ModelRequestInterrupted, HarnessUnavailable],
+		error: [TurnFailed, TurnInterrupted, HarnessUnavailable],
 	},
 	interrupt: {
 		args: {
@@ -84,7 +84,7 @@ const clampText = (value: string, maxLength: number, fallback: string): string =
 	return value.length > maxLength ? value.slice(0, maxLength) : value
 }
 
-export interface ModelProviderReply {
+export interface HarnessReply {
 	readonly thinking: string | null
 	readonly text: string
 	readonly input_tokens: number
@@ -92,16 +92,16 @@ export interface ModelProviderReply {
 	readonly stop_reason: ModelStopReason
 }
 
-const EMPTY_REPLY_ERROR: ModelProviderError = {
-	_tag: "ModelProviderError",
+const EMPTY_REPLY_ERROR: TurnFailed = {
+	_tag: "TurnFailed",
 	error_type: "empty_model_reply",
 	message: "Model provider returned an empty reply.",
 	terminal: false,
 }
 
-export const clampModelReply = (
-	reply: ModelProviderReply,
-): Effect.Effect<ModelProviderReply & { readonly truncated?: true }, ModelProviderError> => {
+export const clampHarnessReply = (
+	reply: HarnessReply,
+): Effect.Effect<HarnessReply & { readonly truncated?: true }, TurnFailed> => {
 	if (reply.text.length === 0) {
 		return Effect.fail({
 			...EMPTY_REPLY_ERROR,
@@ -126,14 +126,14 @@ export const clampModelReply = (
 	})
 }
 
-export const clampModelProviderError = (err: ModelProviderError): ModelProviderError => ({
+export const clampTurnFailure = (err: TurnFailed): TurnFailed => ({
 	...err,
 	error_type: clampText(err.error_type, MAX_ERROR_TYPE_LENGTH, "provider_error"),
 	message: clampText(err.message, MAX_ERROR_MESSAGE_LENGTH, "Model provider failed."),
 })
 
-const INTERNAL_PROVIDER_ERROR: ModelProviderError = {
-	_tag: "ModelProviderError",
+const INTERNAL_PROVIDER_ERROR: TurnFailed = {
+	_tag: "TurnFailed",
 	error_type: "provider_internal_error",
 	message: "Model provider failed unexpectedly.",
 	terminal: false,
@@ -144,10 +144,10 @@ const INTERNAL_PROVIDER_ERROR: ModelProviderError = {
  * metadata are truncated before ExternalSystem schema validation and workflow
  * checkpointing, and empty replies are rejected as provider errors.
  */
-export const boundedModelProvider = <R = never>(
+export const boundedHarness = <R = never>(
 	impl: Effect.Effect<
 		{
-			readonly generate: (args: {
+			readonly runTurn: (args: {
 				readonly session_id: SessionId
 				readonly agent_id: string
 				readonly agent_version: number
@@ -155,10 +155,7 @@ export const boundedModelProvider = <R = never>(
 				readonly turn: number
 				readonly generation: number
 				readonly input: ReadonlyArray<string>
-			}) => Effect.Effect<
-				ModelProviderReply,
-				ModelProviderError | ModelRequestInterrupted | HarnessUnavailable
-			>
+			}) => Effect.Effect<HarnessReply, TurnFailed | TurnInterrupted | HarnessUnavailable>
 			readonly interrupt: (args: {
 				readonly session_id: SessionId
 				readonly turn: number
@@ -169,10 +166,10 @@ export const boundedModelProvider = <R = never>(
 		R
 	>,
 ) =>
-	ModelProvider.toLayer(
+	Harness.toLayer(
 		Effect.map(impl, (adapter) => ({
-			generate: (args) =>
-				Effect.exit(Effect.suspend(() => adapter.generate(args))).pipe(
+			runTurn: (args) =>
+				Effect.exit(Effect.suspend(() => adapter.runTurn(args))).pipe(
 					Effect.flatMap((exit) =>
 						Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
 							? Effect.die("the provider interrupted itself")
@@ -180,14 +177,14 @@ export const boundedModelProvider = <R = never>(
 					),
 					Effect.catchDefect((defect) =>
 						Effect.andThen(
-							Effect.logError("ModelProvider failed unexpectedly", defect),
+							Effect.logError("Harness failed unexpectedly", defect),
 							Effect.fail(INTERNAL_PROVIDER_ERROR),
 						),
 					),
 					Effect.mapError((error) =>
-						error._tag === "ModelProviderError" ? clampModelProviderError(error) : error,
+						error._tag === "TurnFailed" ? clampTurnFailure(error) : error,
 					),
-					Effect.flatMap(clampModelReply),
+					Effect.flatMap(clampHarnessReply),
 				),
 			interrupt: adapter.interrupt,
 		})),

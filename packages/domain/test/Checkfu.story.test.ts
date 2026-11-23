@@ -37,7 +37,7 @@ import {
 	SpanModelRequestEnd,
 } from "../src/Session/CommitModelReply.command.ts"
 import { SessionAlreadyExists, SessionCreated } from "../src/Session/CreateSession.command.ts"
-import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
+import { Harness } from "../src/Session/Harness.external.ts"
 import { SpanModelRequestStart } from "../src/Session/RecordModelRequestStart.command.ts"
 import { RunTurn, turnKey } from "../src/Session/RunTurn.saga.ts"
 import {
@@ -73,13 +73,13 @@ import {
 
 const story = Story.make(Checkfu, {
 	layer: SessionsHandlersLive,
-	stub: [ModelProvider],
+	stub: [Harness],
 })
 
-const ModelProviderStubLayer = ModelProvider.toLayer(
+const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
-		generate: () =>
+		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
 				text: "ok",
@@ -95,7 +95,7 @@ const t0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
 describe("Checkfu unified hosted model stories", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(
-			Layer.build(Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(ModelProviderStubLayer)))),
+			Layer.build(Checkfu.layer(SessionsHandlersLive.pipe(Layer.provide(HarnessStubLayer)))),
 		).pipe(Effect.provide(Domain.InMemory)),
 	)
 
@@ -457,14 +457,14 @@ describe("Checkfu unified hosted model stories", () => {
 					new SessionStatusRunning({ turn: 1, generation: 0 }),
 				),
 				Story.then(sessionV1, new SpanModelRequestStart({ model_request_start_id: reqId })),
-				Story.call(ModelProvider.generate, {
+				Story.call(Harness.runTurn, {
 					session_id: sessionV1.id,
 					agent_id: agent.id,
 					agent_version: 1,
 					environment_id: env.id,
 					turn: 1,
 				}),
-				Story.succeed(ModelProvider.generate, {
+				Story.succeed(Harness.runTurn, {
 					thinking: null,
 					text: "Hello from v1",
 					input_tokens: 10,

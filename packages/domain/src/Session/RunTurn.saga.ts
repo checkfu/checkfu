@@ -4,14 +4,10 @@ import * as Schema from "effect/Schema"
 import { CommitModelReply } from "./CommitModelReply.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
-import {
-	HARNESS_UNAVAILABLE,
-	HARNESS_UNAVAILABLE_MESSAGE,
-	ModelProvider,
-} from "./ModelProvider.external.ts"
+import { HARNESS_UNAVAILABLE, HARNESS_UNAVAILABLE_MESSAGE, Harness } from "./Harness.external.ts"
 import { RecordModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import {
-	GenerateOutcome,
+	TurnOutcome,
 	RUN_TURN_ACTIVITIES,
 	StepOutcome,
 	runTurnActivity,
@@ -20,7 +16,7 @@ import { Session } from "./Session.aggregate.ts"
 import { SessionId } from "./Session.id.ts"
 import { MessageText, NonNegativeInt, PositiveInt, ResourceId } from "./SessionTypes.ts"
 
-export { GenerateOutcome, RUN_TURN_ACTIVITIES, StepOutcome }
+export { TurnOutcome, RUN_TURN_ACTIVITIES, StepOutcome }
 
 export const TurnId = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("TurnId"))
 export type TurnId = typeof TurnId.Type
@@ -50,7 +46,7 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 export const RunTurnLive = RunTurn.toLayer(
 	Effect.gen(function* () {
 		const sessions = yield* Session
-		const provider = yield* ModelProvider
+		const harness = yield* Harness
 
 		return Effect.fn(function* (payload: typeof RunTurn.workflow.payloadSchema.Type) {
 			const requestId = `${payload.key}:req:1`
@@ -86,9 +82,9 @@ export const RunTurnLive = RunTurn.toLayer(
 			}
 
 			const generated = yield* runTurnActivity(
-				"generateModelReply",
-				provider
-					.generate({
+				"runHarnessTurn",
+				harness
+					.runTurn({
 						session_id: payload.session_id,
 						agent_id: payload.agent_id,
 						agent_version: payload.agent_version,
@@ -108,9 +104,9 @@ export const RunTurnLive = RunTurn.toLayer(
 							stop_reason: reply.stop_reason,
 						})),
 						Effect.catchTag(
-							["ModelProviderError", "HarnessUnavailable", "ModelRequestInterrupted"],
-							(err): Effect.Effect<typeof GenerateOutcome.Type> => {
-								if (err._tag === "ModelProviderError") {
+							["TurnFailed", "HarnessUnavailable", "TurnInterrupted"],
+							(err): Effect.Effect<typeof TurnOutcome.Type> => {
+								if (err._tag === "TurnFailed") {
 									return Effect.succeed({
 										ok: false,
 										interrupted: false,

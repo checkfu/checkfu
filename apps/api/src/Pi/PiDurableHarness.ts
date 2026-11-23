@@ -2,14 +2,8 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
-import {
-	DEFAULT_MODEL_TIMEOUT_MS,
-	boundedModelProvider,
-} from "@checkfu/domain/Session/ModelProvider.external"
-import type {
-	HarnessUnavailable,
-	ModelProviderError,
-} from "@checkfu/domain/Session/ModelProvider.external"
+import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
+import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
@@ -125,14 +119,14 @@ const allocatePairBudget = (
 	return [minA + extraA, minB + extraB] as const
 }
 
-const HISTORY_UNAVAILABLE: ModelProviderError = {
-	_tag: "ModelProviderError",
+const HISTORY_UNAVAILABLE: TurnFailed = {
+	_tag: "TurnFailed",
 	error_type: "session_history_unavailable",
 	message: "Could not rebuild the conversation from the session's events.",
 	terminal: false,
 }
 
-export const PiDurableModelProviderLive = boundedModelProvider(
+export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const sessionViews = yield* SessionView
@@ -141,7 +135,7 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 		const baseUrls = yield* providerBaseUrls
 		const catalog = createPiModels(apiKeys, baseUrls)
 
-		const messagesBeforeTurn = Effect.fn("PiDurableModelProvider.messagesBeforeTurn")(function* (
+		const messagesBeforeTurn = Effect.fn("PiDurableHarness.messagesBeforeTurn")(function* (
 			sessionId: string,
 			turn: number,
 			budget: {
@@ -347,11 +341,11 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 		})
 
 		return {
-			generate: (args) =>
+			runTurn: (args) =>
 				Effect.gen(function* () {
 					const { settleMargin } = yield* HarnessLimits
 					const settleTimeout = Duration.sum(
-						Duration.millis(DEFAULT_MODEL_TIMEOUT_MS),
+						Duration.millis(DEFAULT_TURN_TIMEOUT_MS),
 						Duration.fromInputUnsafe(settleMargin),
 					)
 					const conversation = conversationName(args.session_id, args.generation)
@@ -384,8 +378,8 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
 					const lookupKey = agentVersionLookupKey(args.agent_id, args.agent_version)
-					const missingVersion: ModelProviderError = {
-						_tag: "ModelProviderError",
+					const missingVersion: TurnFailed = {
+						_tag: "TurnFailed",
 						error_type: "agent_version_not_found",
 						message: `Agent version ${args.agent_id}@${args.agent_version} was not found.`,
 						terminal: false,
@@ -399,8 +393,8 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 					const resolved = resolveCatalogModel(catalog, version.model.id)
 					if (resolved === null) {
-						return yield* Effect.fail<ModelProviderError>({
-							_tag: "ModelProviderError",
+						return yield* Effect.fail<TurnFailed>({
+							_tag: "TurnFailed",
 							error_type: "unknown_model_error",
 							message: `Unsupported model "${version.model.id}". Only OpenAI and Anthropic models are supported.`,
 							terminal: true,
@@ -409,8 +403,8 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 					const userText = args.input.join("\n")
 					if (userText.length === 0) {
-						return yield* Effect.fail<ModelProviderError>({
-							_tag: "ModelProviderError",
+						return yield* Effect.fail<TurnFailed>({
+							_tag: "TurnFailed",
 							error_type: "invalid_turn_input",
 							message: "Turn contained no user message to send to Pi.",
 							terminal: false,
@@ -418,8 +412,8 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 					}
 
 					if (apiKeys[resolved.provider] === null) {
-						return yield* Effect.fail<ModelProviderError>({
-							_tag: "ModelProviderError",
+						return yield* Effect.fail<TurnFailed>({
+							_tag: "TurnFailed",
 							error_type: "missing_api_key_error",
 							message: `Missing ${PROVIDER_API_KEY_ENV[resolved.provider]} for provider "${resolved.provider}".`,
 							terminal: false,

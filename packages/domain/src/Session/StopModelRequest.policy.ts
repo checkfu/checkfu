@@ -2,11 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import * as Effect from "effect/Effect"
 import { AbandonTurn, TurnAbandoned } from "./AbandonTurn.command.ts"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
-import {
-	HARNESS_UNAVAILABLE,
-	HARNESS_UNAVAILABLE_MESSAGE,
-	ModelProvider,
-} from "./ModelProvider.external.ts"
+import { HARNESS_UNAVAILABLE, HARNESS_UNAVAILABLE_MESSAGE, Harness } from "./Harness.external.ts"
 import { TurnId, turnKey } from "./RunTurn.saga.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { Session } from "./Session.aggregate.ts"
@@ -24,7 +20,7 @@ export class StopModelRequest extends Domain.Policy("StopModelRequest", {
 
 export const StopModelRequestLive = StopModelRequest.toLayer(
 	Effect.gen(function* () {
-		const provider = yield* ModelProvider
+		const harness = yield* Harness
 		const sessions = yield* Session
 		return Effect.fn(function* ({ source, state, event }) {
 			if (state === null || state.turn === 0) {
@@ -32,7 +28,7 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 			}
 			const generation =
 				event._tag === "turn.abandoned" ? event.generation : state.harness_generation
-			const interrupt = provider.interrupt({ session_id: source.id, turn: state.turn, generation })
+			const interrupt = harness.interrupt({ session_id: source.id, turn: state.turn, generation })
 			if (event._tag === "user.interrupt") {
 				yield* interrupt.pipe(
 					Effect.catchTag("HarnessUnavailable", () =>

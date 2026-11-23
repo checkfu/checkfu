@@ -2,7 +2,7 @@ import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Activity } from "effect/workflow"
 import { RequestFailureDisposition } from "./FailModelRequest.command.ts"
-import { ModelStopReason } from "./ModelProvider.external.ts"
+import { ModelStopReason } from "./Harness.external.ts"
 import {
 	ErrorMessage,
 	ErrorType,
@@ -16,7 +16,7 @@ export const StepOutcome = Schema.Struct({
 	status: Schema.Literals(["proceed", "aborted"]),
 })
 
-export const GenerateOutcome = Schema.Union([
+export const TurnOutcome = Schema.Union([
 	Schema.Struct({
 		ok: Schema.Literal(true),
 		thinking: Schema.NullOr(ThinkingText),
@@ -43,7 +43,7 @@ export const GenerateOutcome = Schema.Union([
 
 export const RUN_TURN_ACTIVITIES = {
 	startModelRequest: { name: "start-model-request", success: StepOutcome },
-	generateModelReply: { name: "generate-model-reply", success: GenerateOutcome },
+	runHarnessTurn: { name: "run-harness-turn", success: TurnOutcome },
 	interruptModelRequest: { name: "interrupt-model-request", success: StepOutcome },
 	failModelRequest: { name: "fail-model-request", success: StepOutcome },
 	commitModelReply: { name: "commit-model-reply", success: StepOutcome },
