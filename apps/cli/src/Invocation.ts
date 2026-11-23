@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs"
-import { fileURLToPath } from "node:url"
+import { checkoutRoot } from "./Standalone.ts"
 
 const resolved = (path: string): string | undefined => {
 	try {
@@ -19,7 +19,4 @@ export const invocation = (
 	workingDirectory: string | undefined,
 ) => (checkoutRoot !== undefined && checkoutRoot === workingDirectory ? "bun checkfu" : "checkfu")
 
-export const COMMAND = invocation(
-	resolved(fileURLToPath(new URL("../../../", import.meta.url))),
-	resolved("."),
-)
+export const COMMAND = invocation(resolved(checkoutRoot), resolved("."))

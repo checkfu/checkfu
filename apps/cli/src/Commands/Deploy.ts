@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
@@ -27,6 +26,7 @@ import {
 } from "../SavedConnection.ts"
 import { readIfPresent, removeIfPresent, restrictToOwner, writePrivate } from "../PrivateFile.ts"
 import { COMMAND } from "../Invocation.ts"
+import { checkoutRoot, isStandalone } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 
 export const STACK_NAME = "Checkfu"
@@ -44,16 +44,19 @@ export const providerForKey = (key: string): ModelProvider =>
 
 export interface Checkout {
 	readonly root: string
-	/** The Bun that runs Alchemy. */
+	/** The Bun that runs Alchemy, and what it needs in its environment to act as Bun. */
 	readonly runtime: string
+	readonly runtimeEnv: Readonly<Record<string, string>>
 	/** How long a fresh deployment gets to start answering before the deploy is reported as failed. */
 	readonly readyWithin: Duration.Input
 }
 
 export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
 	defaultValue: () => ({
-		root: fileURLToPath(new URL("../../../../", import.meta.url)),
+		root: checkoutRoot,
+		// The binary runs Alchemy by starting itself as a plain Bun.
 		runtime: process.execPath,
+		runtimeEnv: isStandalone ? { BUN_BE_BUN: "1" } : {},
 		readyWithin: "90 seconds",
 	}),
 })
@@ -200,7 +203,11 @@ interface Target {
 	readonly envFile: Option.Option<string>
 }
 
-const inCheckout = (target: Target) => ({ cwd: target.checkout.root })
+const inCheckout = (target: Target) => ({
+	cwd: target.checkout.root,
+	env: target.checkout.runtimeEnv,
+	extendEnv: true,
+})
 
 /** Runs an Alchemy command attached to the terminal and returns its exit code. */
 const run = (target: Target, args: ReadonlyArray<string>) =>
