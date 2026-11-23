@@ -13,19 +13,11 @@
 		},
 		"@checkfu/api#typecheck": {
 			"dependsOn": ["^typecheck"],
-			"inputs": [
-				"$TURBO_DEFAULT$",
-				"$TURBO_ROOT$/alchemy.run.ts",
-				"$TURBO_ROOT$/scripts/sync-state-store-observability.ts"
-			]
+			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/alchemy.run.ts"]
 		},
 		"@checkfu/api#test": {
 			"dependsOn": ["^typecheck"],
-			"inputs": [
-				"$TURBO_DEFAULT$",
-				"$TURBO_ROOT$/alchemy.run.ts",
-				"$TURBO_ROOT$/scripts/sync-state-store-observability.ts"
-			]
+			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/alchemy.run.ts"]
 		},
 		"@checkfu/cli#test": {
 			"dependsOn": ["^typecheck"],

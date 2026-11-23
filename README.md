@@ -86,6 +86,5 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI commands from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
-- `bun run state:sync-observability` — one-time rollout to apply `alchemy.run.ts` observability settings (disabling invocation logs) to an existing Cloudflare state-store Worker
 - `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy

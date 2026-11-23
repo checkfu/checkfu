@@ -3,5 +3,5 @@
 	"compilerOptions": {
 		"lib": ["ES2024", "DOM"]
 	},
-	"include": ["alchemy.run.ts", "scripts/**/*.ts", "oxlint.config.ts"]
+	"include": ["alchemy.run.ts", "oxlint.config.ts"]
 }
