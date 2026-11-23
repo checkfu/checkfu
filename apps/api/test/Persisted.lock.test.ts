@@ -83,9 +83,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
 						"command-reply:Checkfu/AdmitSession",
-						"state:Checkfu.EventBatch",
-						"event:Checkfu.EventBatch/event_batch.claimed",
-						"command-reply:Checkfu/ClaimEventBatch",
+						"state:Checkfu.IdempotencyClaim",
+						"event:Checkfu.IdempotencyClaim/idempotency_key.claimed",
+						"command-reply:Checkfu/ClaimIdempotencyKey",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
 						"pi-doc:checkfu.seed-state",

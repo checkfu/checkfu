@@ -12,7 +12,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
-import { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
+import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,
@@ -36,7 +36,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 	Effect.gen(function* () {
 		const environments = yield* Environment
 		const environmentViews = yield* EnvironmentView
-		const eventBatches = yield* EventBatch
+		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 
@@ -50,7 +50,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
 						const commandId = yield* claimCreate(
-							eventBatches,
+							idempotencyClaims,
 							digest,
 							"environment",
 							idempotencyKey,

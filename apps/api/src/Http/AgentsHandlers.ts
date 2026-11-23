@@ -20,7 +20,7 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { createPiModels, resolveCatalogModel } from "../Pi/PiModels.ts"
-import { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
+import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import {
 	claimIdempotency,
@@ -59,7 +59,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const updateAgent = yield* UpdateAgentDecision
 		const agentViews = yield* AgentView
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
-		const eventBatches = yield* EventBatch
+		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const isSupportedModel = yield* IsSupportedAgentModel
@@ -150,19 +150,19 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							description,
 						})
 						if (!isSupportedModel(model.id)) {
-							const claim = yield* eventBatches.get(batchId)
+							const claim = yield* idempotencyClaims.get(batchId)
 							if (claim._tag === "Unclaimed") {
 								return yield* unsupportedModel(model)
 							}
 							if (claim.fingerprint !== fingerprint) {
-								yield* claimIdempotency(eventBatches, batchId, fingerprint)
+								yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
 							}
 							const committed = yield* agents.get(id)
 							if (committed.status === "") {
 								return yield* unsupportedModel(model)
 							}
 						} else {
-							yield* claimIdempotency(eventBatches, batchId, fingerprint)
+							yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
 						}
 						sendOptions = { commandId: yield* createCommandId(digest, "agent", idempotencyKey) }
 					} else {

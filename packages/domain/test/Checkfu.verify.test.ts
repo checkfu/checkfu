@@ -36,7 +36,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi } from "../src/Checkfu.model.ts"
-import { EventBatch } from "../src/EventBatch/EventBatch.aggregate.ts"
+import { IdempotencyClaim } from "../src/IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import {
 	AdmitSession,
 	BoundedAgentId,
@@ -58,7 +58,7 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 		"CreateEnvironment",
 		"AdmitSession",
 		"SendUserMessage",
-		"ClaimEventBatch",
+		"ClaimIdempotencyKey",
 	],
 	views: [
 		"AgentView",
@@ -110,9 +110,9 @@ const STANDING = {
 	"Session.TruncatedReplyRetiresGeneration": "proved",
 	"Session.OnlyAbandonmentOrTruncationRetiresGeneration": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
-	"EventBatch.ClaimedBatchNeverReturnsToUnclaimed": "proved",
-	"EventBatch.ClaimedFingerprintNeverChanges": "proved",
-	"EventBatch.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": "proved",
+	"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": "proved",
+	"IdempotencyClaim.ClaimedFingerprintNeverChanges": "proved",
+	"IdempotencyClaim.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
@@ -126,7 +126,7 @@ const STANDING = {
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
 	"Checkfu.TurnInputGenerationMatchesSession": "checked",
-	"Checkfu.AnEventBatchIsClaimed": "reached",
+	"Checkfu.AnIdempotencyKeyIsClaimed": "reached",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -181,7 +181,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"SendUserMessage",
 			"SendUserInterrupt",
 			"ArchiveSession",
-			"ClaimEventBatch",
+			"ClaimIdempotencyKey",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
 		expect(
@@ -219,8 +219,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			(outcome) =>
 				`${outcome.aggregate === undefined ? "" : `${outcome.aggregate}.`}${outcome.command} ${outcome.kind === "records" ? "→" : "✗"} ${outcome.tag}`,
 		)
-		expect(exploredOutcomes).toContain("EventBatch.ClaimEventBatch → event_batch.claimed")
-		expect(exploredOutcomes).toContain("EventBatch.ClaimEventBatch ✗ IdempotencyKeyConflict")
+		expect(exploredOutcomes).toContain(
+			"IdempotencyClaim.ClaimIdempotencyKey → idempotency_key.claimed",
+		)
+		expect(exploredOutcomes).toContain(
+			"IdempotencyClaim.ClaimIdempotencyKey ✗ IdempotencyKeyConflict",
+		)
 	}, 240_000)
 
 	it("preserves all cross-domain Checkfu invariants after post-admission UpdateAgent, ArchiveAgent, ArchiveEnvironment, DeleteEnvironment, and ArchiveSession mutations", async () => {
@@ -398,7 +402,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							AgentVersion: yield* readAggregate(AgentVersion, [vNoopRef.id]),
 							Environment: yield* readAggregate(Environment),
 							Session: yield* readAggregate(Session),
-							EventBatch: yield* readAggregate(EventBatch),
+							IdempotencyClaim: yield* readAggregate(IdempotencyClaim),
 							AgentView: yield* readView(AgentView),
 							AgentVersionView: yield* readView(AgentVersionView),
 							AgentVersionByNumberView: yield* readView(AgentVersionByNumberView),
