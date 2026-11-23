@@ -1,4 +1,5 @@
 import { createServer } from "node:http"
+import { PassThrough } from "node:stream"
 import { AgentId } from "@checkfu/agents/Agent/Agent.id"
 import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
 import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
@@ -9,7 +10,8 @@ import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import { AlchemyContext } from "alchemy/AlchemyContext"
-import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
+import { RuntimeContext } from "alchemy/RuntimeContext"
+import type { BaseRuntimeContext } from "alchemy/RuntimeContext"
 import { Stage } from "alchemy/Stage"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
@@ -20,13 +22,8 @@ import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { createPiHarnessSettings } from "../src/Pi/PiContextBudget.ts"
-import {
-	type PiDurableBackend,
-	type PiTurnRequest,
-	type PiTurnResult,
-	recoverPiDurableTurn,
-	runPiDurableTurn,
-} from "../src/Pi/PiDurableEngine.ts"
+import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import type { PiDurableBackend, PiTurnRequest, PiTurnResult } from "../src/Pi/PiDurableEngine.ts"
 import {
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
@@ -323,8 +320,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					}),
 				)
 				expect(res).toMatchObject({ ok: true })
-				history.push({ role: "user", text })
-				history.push({ role: "assistant", text: `Reply ${text}` })
+				history.push({ role: "user", text }, { role: "assistant", text: `Reply ${text}` })
 			}
 
 			backend.clearScanEntryCalls()
@@ -346,8 +342,8 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		const gpt4Policy = settings.compaction.modelOverrides?.["openai/gpt-4"]
 		expect(gpt4Policy).toBeDefined()
 		expect(gpt4Policy?.backgroundTokens).toBe(0)
-		expect(gpt4Policy?.reserveTokens).toBeLessThan(8_192)
-		expect(gpt4Policy?.keepRecentTokens).toBeLessThan(8_192 - (gpt4Policy?.reserveTokens ?? 0))
+		expect(gpt4Policy?.reserveTokens).toBeLessThan(8192)
+		expect(gpt4Policy?.keepRecentTokens).toBeLessThan(8192 - (gpt4Policy?.reserveTokens ?? 0))
 
 		let compactionCalls = 0
 		const turnMessageCounts: Array<number> = []
@@ -360,7 +356,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 				}
 				turnMessageCounts.push(extractConversationMessageCount(context))
 				const estimatedInput = Math.ceil(JSON.stringify(context.messages).length / 4)
-				return makeAssistantReply(model, null, "r".repeat(6_000), estimatedInput, 1_500)
+				return makeAssistantReply(model, null, "r".repeat(6000), estimatedInput, 1500)
 			}),
 		)
 		try {
@@ -374,7 +370,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 						provider: "openai",
 						modelId: "gpt-4",
 						system: null,
-						text: `turn-${turn}: ${"u".repeat(6_000)}`,
+						text: `turn-${turn}: ${"u".repeat(6000)}`,
 					}),
 				)
 				expect(result).toMatchObject({ ok: true })
@@ -399,7 +395,11 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		const warnLogs: Array<{
 			readonly level: string
 			readonly message: unknown
-			readonly annotations: Readonly<Record<string, unknown>>
+			readonly annotations: {
+				readonly operationId?: unknown
+				readonly provider?: unknown
+				readonly category?: unknown
+			}
 		}> = []
 		const captureLogger = Logger.layer(
 			[
@@ -1076,7 +1076,9 @@ describe("turn engine", () => {
 			res.writeHead(200, { "content-type": "text/plain" })
 			res.end("SHOULD_NOT_BE_REACHED")
 		})
-		await new Promise<void>((resolve) => targetServer.listen(0, "127.0.0.1", () => resolve()))
+		await new Promise<void>((resolve) => {
+			targetServer.listen(0, "127.0.0.1", () => resolve())
+		})
 		const targetPort = (targetServer.address() as { port: number }).port
 
 		let redirectorHits = 0
@@ -1085,7 +1087,9 @@ describe("turn engine", () => {
 			res.writeHead(302, { Location: `http://127.0.0.1:${targetPort}/steal` })
 			res.end()
 		})
-		await new Promise<void>((resolve) => redirectorServer.listen(0, "127.0.0.1", () => resolve()))
+		await new Promise<void>((resolve) => {
+			redirectorServer.listen(0, "127.0.0.1", () => resolve())
+		})
 		const redirectorPort = (redirectorServer.address() as { port: number }).port
 
 		try {
@@ -1096,7 +1100,9 @@ describe("turn engine", () => {
 
 			// 1. Real OpenAI provider stream refuses a 302 redirect at transport; redirect target gets 0 hits.
 			const openaiBase = models.getModel("openai", "gpt-4o-mini")
-			if (openaiBase === undefined) throw new Error("expected gpt-4o-mini")
+			if (openaiBase === undefined) {
+				throw new Error("expected gpt-4o-mini")
+			}
 			const openaiStream = models.streamSimple(
 				{ ...openaiBase, baseUrl: `http://127.0.0.1:${redirectorPort}/v1` },
 				{ messages: [{ role: "user", content: "secret transcript", timestamp: 0 }] },
@@ -1110,7 +1116,9 @@ describe("turn engine", () => {
 			// 2. Real Anthropic provider stream refuses a 302 redirect at transport; redirect target gets 0 hits.
 			const hitsBeforeAnthropic = redirectorHits
 			const anthropicBase = models.getModel("anthropic", "claude-sonnet-4-5")
-			if (anthropicBase === undefined) throw new Error("expected claude-sonnet-4-5")
+			if (anthropicBase === undefined) {
+				throw new Error("expected claude-sonnet-4-5")
+			}
 			const anthropicStream = models.streamSimple(
 				{ ...anthropicBase, baseUrl: `http://127.0.0.1:${redirectorPort}` },
 				{ messages: [{ role: "user", content: "secret transcript", timestamp: 0 }] },
@@ -1148,11 +1156,663 @@ describe("turn engine", () => {
 				/disallowed origin/i,
 			)
 			expect(seenInits).toHaveLength(1)
+
+			// 4. A URL instance carrying an extra `url` property must still be validated and
+			//    dispatched using its real destination, never the unrelated `url` property.
+			const spoofedUrl = Object.assign(new URL("https://evil.example/steal"), {
+				url: "https://api.openai.com/v1/responses",
+			})
+			await expect(guardedFetch(spoofedUrl)).rejects.toThrow(/disallowed origin/i)
+			expect(seenInits).toHaveLength(1)
+
+			// 5. Redirect responses marked `redirected: true` or `type: "opaqueredirect"` must also
+			//    be rejected and have their response body cancelled.
+			let opaqueBodyCancelled = false
+			const opaqueBody = new ReadableStream<Uint8Array>({
+				cancel() {
+					opaqueBodyCancelled = true
+				},
+			})
+			const guardedOpaque = createNoRedirectProviderFetch(
+				"https://api.openai.com/v1",
+				(async () => ({
+					status: 0,
+					redirected: false,
+					type: "opaqueredirect",
+					body: opaqueBody,
+				})) as unknown as typeof fetch,
+			)
+			await expect(guardedOpaque("https://api.openai.com/v1/responses")).rejects.toThrow(
+				/redirect/i,
+			)
+			expect(opaqueBodyCancelled).toBe(true)
+
+			const guardedRedirectedFlag = createNoRedirectProviderFetch(
+				"https://api.openai.com/v1",
+				(async () => ({
+					status: 200,
+					redirected: true,
+					type: "basic",
+					body: null,
+				})) as unknown as typeof fetch,
+			)
+			await expect(guardedRedirectedFlag("https://api.openai.com/v1/responses")).rejects.toThrow(
+				/redirect/i,
+			)
+
+			// 6. Request objects (native, subclassed, or plain request-like objects) are rejected
+			//    fail-closed without calling upstream fetch or consuming the request body.
+			const seenDispatches: Array<{
+				readonly input: Parameters<typeof fetch>[0]
+				readonly init: RequestInit | undefined
+			}> = []
+			const okFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+				seenDispatches.push({ input, init })
+				return new Response("ok", { status: 200 })
+			}) as typeof fetch
+			const guardedOkFetch = createNoRedirectProviderFetch("https://api.openai.com/v1", okFetch)
+
+			const nativePost = new Request("https://api.openai.com/v1/responses", {
+				method: "POST",
+				body: "must-stay-unused",
+			})
+			await expect(guardedOkFetch(nativePost)).rejects.toThrow(
+				/only URL strings and URL instances/i,
+			)
+			expect(nativePost.bodyUsed).toBe(false)
+
+			class SubclassedRequest extends Request {}
+			await expect(
+				guardedOkFetch(new SubclassedRequest("https://api.openai.com/v1/responses")),
+			).rejects.toThrow(/only URL strings and URL instances/i)
+
+			await expect(
+				guardedOkFetch({
+					href: "https://api.openai.com/v1/responses",
+				} as unknown as Parameters<typeof fetch>[0]),
+			).rejects.toThrow(/only URL strings and URL instances/i)
+			expect(seenDispatches).toHaveLength(0)
+
+			// 7. Allowed URL instances are pinned as normalized immutable URL strings before dispatch,
+			//    so post-call URL mutation while awaiting credentials cannot change the destination.
+			const allowedUrl = Object.assign(new URL("https://api.openai.com/v1/responses"), {
+				url: "https://evil.example/override",
+			})
+			await guardedOkFetch(allowedUrl)
+			expect(seenDispatches.map((entry) => entry.input)).toEqual([
+				"https://api.openai.com/v1/responses",
+			])
+
+			let releaseGate!: () => void
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+			const asyncObservedTargets: Array<Parameters<typeof fetch>[0]> = []
+			const guardedAsync = createNoRedirectProviderFetch(
+				"https://api.openai.com/v1",
+				async (input: Parameters<typeof fetch>[0]) => {
+					await gate
+					asyncObservedTargets.push(input)
+					return new Response("ok", { status: 200 })
+				},
+			)
+			const mutableUrl = new URL("https://api.openai.com/v1/responses")
+			const inFlight = guardedAsync(mutableUrl)
+			mutableUrl.hostname = "evil.example"
+			releaseGate()
+			await inFlight
+			expect(asyncObservedTargets).toEqual(["https://api.openai.com/v1/responses"])
+
+			// 8. Init options (including runtime transport fields and getter-backed fields) are
+			//    evaluated once, forwarded intact without mutating caller init, and keep manual redirects.
+			let bodyGetterCalls = 0
+			let headersGetterCalls = 0
+			let proxyGetterCalls = 0
+			const getterBackedInit: RequestInit = { method: "POST", keepalive: false, redirect: "follow" }
+			Object.defineProperty(getterBackedInit, "body", {
+				enumerable: true,
+				configurable: true,
+				get: () => {
+					bodyGetterCalls += 1
+					return JSON.stringify({ input: "from-lazy-getter" })
+				},
+			})
+			Object.defineProperty(getterBackedInit, "headers", {
+				enumerable: true,
+				configurable: true,
+				get: () => {
+					headersGetterCalls += 1
+					return { "x-provider-test": "lazy-getter" }
+				},
+			})
+			Object.defineProperty(getterBackedInit, "proxy", {
+				enumerable: true,
+				configurable: true,
+				get: () => {
+					proxyGetterCalls += 1
+					return "http://127.0.0.1:8081"
+				},
+			})
+			await guardedOkFetch("https://api.openai.com/v1/responses", getterBackedInit)
+			expect(bodyGetterCalls).toBe(1)
+			expect(headersGetterCalls).toBe(1)
+			expect(proxyGetterCalls).toBe(1)
+			expect(getterBackedInit.redirect).toBe("follow")
+			const lastInit = seenDispatches.at(-1)?.init
+			expect(lastInit?.redirect).toBe("manual")
+			expect(lastInit?.keepalive).toBe(false)
+			expect(lastInit !== undefined && "proxy" in lastInit ? lastInit.proxy : undefined).toBe(
+				"http://127.0.0.1:8081",
+			)
+
+			// 8b. Copying `init` must not invoke prototype setters when `init` carries an own
+			//     enumerable `__proto__` key, so inherited transport options cannot be injected.
+			const protoPollutingInit: RequestInit = { method: "POST", redirect: "follow" }
+			Object.defineProperty(protoPollutingInit, "__proto__", {
+				value: {
+					proxy: "http://evil.example:9999",
+					headers: { authorization: "Bearer injected" },
+				},
+				enumerable: true,
+				configurable: true,
+			})
+			await guardedOkFetch("https://api.openai.com/v1/responses", protoPollutingInit)
+			const copiedProtoInit = seenDispatches.at(-1)?.init
+			expect(copiedProtoInit).toBeDefined()
+			expect(Object.getPrototypeOf(copiedProtoInit)).toBe(Object.prototype)
+			expect(copiedProtoInit?.redirect).toBe("manual")
+			expect(copiedProtoInit?.method).toBe("POST")
+			expect(copiedProtoInit?.headers).toBeUndefined()
+			expect(copiedProtoInit !== undefined && "proxy" in copiedProtoInit).toBe(false)
+
+			// 9. When `upstreamFetch` is omitted, `globalThis.fetch` is resolved lazily at call time.
+			const savedGlobalFetch = globalThis.fetch
+			const lateBoundTargets: Array<Parameters<typeof fetch>[0]> = []
+			try {
+				const guardedDefault = createNoRedirectProviderFetch("https://api.openai.com/v1")
+				globalThis.fetch = async (input: Parameters<typeof fetch>[0]) => {
+					lateBoundTargets.push(input)
+					return new Response("ok", { status: 200 })
+				}
+				await guardedDefault("https://api.openai.com/v1/responses")
+			} finally {
+				globalThis.fetch = savedGlobalFetch
+			}
+			expect(lateBoundTargets).toEqual(["https://api.openai.com/v1/responses"])
 		} finally {
 			redirectorServer.close()
 			targetServer.close()
 		}
 	})
+
+	it.skipIf("Bun" in globalThis)(
+		"preserves Node fetch routing, keepalive, headers, and streaming parity in the redirect guard",
+		async () => {
+			const directReceived: Array<{
+				readonly authorization: string | undefined
+				readonly header: string | undefined
+				readonly contentType: string | undefined
+				readonly contentLength: string | undefined
+				readonly transferEncoding: string | undefined
+				readonly body: string
+			}> = []
+			const directServer = createServer((req, res) => {
+				const chunks: Array<Buffer> = []
+				req.on("data", (chunk: Buffer) => {
+					chunks.push(chunk)
+				})
+				req.on("end", () => {
+					const rawHeader = req.headers["x-provider-test"]
+					directReceived.push({
+						authorization: req.headers.authorization,
+						header: typeof rawHeader === "string" ? rawHeader : undefined,
+						contentType: req.headers["content-type"],
+						contentLength: req.headers["content-length"],
+						transferEncoding: req.headers["transfer-encoding"],
+						body: Buffer.concat(chunks).toString("utf8"),
+					})
+					res.writeHead(200, { "content-type": "text/plain" })
+					res.end("from-direct")
+				})
+			})
+			await new Promise<void>((resolve) => {
+				directServer.listen(0, "127.0.0.1", () => resolve())
+			})
+			const directPort = (directServer.address() as { port: number }).port
+			const directBaseUrl = `http://127.0.0.1:${directPort}/v1`
+			const directRequestUrl = `${directBaseUrl}/responses`
+			try {
+				interface NodeDispatchHandler {
+					readonly onConnect: (abort: () => void) => void
+					readonly onHeaders: (
+						statusCode: number,
+						headers: ReadonlyArray<Buffer>,
+						resume: () => void,
+						statusText: string,
+					) => void
+					readonly onData: (chunk: Buffer) => void
+					readonly onComplete: (trailers: ReadonlyArray<Buffer>) => void
+				}
+				const realGuardedFetch = createNoRedirectProviderFetch(directBaseUrl)
+
+				// 1. Custom `dispatcher` in `init` routes through that transport instead of direct origin,
+				//    and still refuses 3xx redirects returned by the dispatcher.
+				let dispatcherHits = 0
+				const customDispatcher = {
+					dispatch(_opts: unknown, handler: NodeDispatchHandler) {
+						dispatcherHits += 1
+						handler.onConnect(() => undefined)
+						handler.onHeaders(
+							200,
+							[Buffer.from("content-type"), Buffer.from("text/plain")],
+							() => undefined,
+							"OK",
+						)
+						handler.onData(Buffer.from("from-configured-transport"))
+						handler.onComplete([])
+						return true
+					},
+				}
+				const transportInit: RequestInit = {
+					method: "POST",
+					headers: { "x-provider-test": "transport-routing" },
+					body: JSON.stringify({ input: "routed" }),
+					keepalive: false,
+					redirect: "follow",
+				}
+				Object.defineProperty(transportInit, "dispatcher", {
+					value: customDispatcher,
+					enumerable: true,
+					configurable: true,
+				})
+				const routedResponse = await realGuardedFetch(directRequestUrl, transportInit)
+				expect(routedResponse.status).toBe(200)
+				expect(await routedResponse.text()).toBe("from-configured-transport")
+				expect(dispatcherHits).toBe(1)
+				expect(directReceived).toHaveLength(0)
+
+				const redirectDispatcher = {
+					dispatch(_opts: unknown, handler: NodeDispatchHandler) {
+						handler.onConnect(() => undefined)
+						handler.onHeaders(
+							302,
+							[Buffer.from("location"), Buffer.from("https://evil.example/steal")],
+							() => undefined,
+							"Found",
+						)
+						handler.onComplete([])
+						return true
+					},
+				}
+				const redirectInit: RequestInit = { redirect: "follow" }
+				Object.defineProperty(redirectInit, "dispatcher", {
+					value: redirectDispatcher,
+					enumerable: true,
+					configurable: true,
+				})
+				await expect(realGuardedFetch(directRequestUrl, redirectInit)).rejects.toThrow(/redirect/i)
+				expect(directReceived).toHaveLength(0)
+
+				// 2. Direct-vs-guarded parity for buffered `keepalive: true` POSTs, empty headers, and FormData.
+				const directKeepaliveRes = await fetch(directRequestUrl, {
+					method: "POST",
+					headers: { "x-provider-test": "keepalive" },
+					body: "hello",
+					keepalive: true,
+				})
+				const directKeepaliveObserved = directReceived.at(-1)
+				const guardedKeepaliveRes = await realGuardedFetch(directRequestUrl, {
+					method: "POST",
+					headers: { "x-provider-test": "keepalive" },
+					body: "hello",
+					keepalive: true,
+				})
+				const guardedKeepaliveObserved = directReceived.at(-1)
+				expect(guardedKeepaliveRes.status).toBe(directKeepaliveRes.status)
+				expect(await guardedKeepaliveRes.text()).toBe(await directKeepaliveRes.text())
+				expect(guardedKeepaliveObserved).toEqual(directKeepaliveObserved)
+				expect(guardedKeepaliveObserved).toMatchObject({
+					header: "keepalive",
+					contentLength: "5",
+					transferEncoding: undefined,
+					body: "hello",
+				})
+
+				const clearedHeadersRes = await realGuardedFetch(directRequestUrl, {
+					method: "POST",
+					headers: {},
+					body: "no-auth",
+				})
+				expect(clearedHeadersRes.status).toBe(200)
+				expect(await clearedHeadersRes.text()).toBe("from-direct")
+				expect(directReceived.at(-1)?.authorization).toBeUndefined()
+
+				const multipartForm = new FormData()
+				multipartForm.set("payload", "multipart-payload")
+				const multipartRes = await realGuardedFetch(new URL(directRequestUrl), {
+					method: "POST",
+					headers: { "x-provider-test": "multipart" },
+					body: multipartForm,
+					redirect: "follow",
+				})
+				expect(multipartRes.status).toBe(200)
+				expect(await multipartRes.text()).toBe("from-direct")
+				const receivedMultipart = directReceived.at(-1)
+				expect(receivedMultipart?.header).toBe("multipart")
+				const boundaryMatch = receivedMultipart?.contentType?.match(
+					/^multipart\/form-data;\s*boundary=(.+)$/i,
+				)
+				expect(boundaryMatch?.[1]).toBeTruthy()
+				expect(receivedMultipart?.body).toContain(`--${boundaryMatch?.[1] ?? ""}`)
+				expect(receivedMultipart?.body).toContain("multipart-payload")
+
+				// 3. Request objects (including subclasses with default Authorization headers or
+				//    inherited/explicit keepalive: true) are rejected fail-closed without contacting
+				//    the server or consuming the request body.
+				const countBeforeRequestReject = directReceived.length
+				const rejectedReq = new Request(directRequestUrl, {
+					method: "POST",
+					body: "must-not-send",
+				})
+				await expect(realGuardedFetch(rejectedReq)).rejects.toThrow(
+					/only URL strings and URL instances/i,
+				)
+				expect(rejectedReq.bodyUsed).toBe(false)
+
+				class CredentialedKeepaliveRequest extends Request {
+					constructor(input: string, init?: RequestInit) {
+						const headers = new Headers(init?.headers)
+						if (!headers.has("authorization")) {
+							headers.set("authorization", "Bearer subclass-default-secret")
+						}
+						super(input, { keepalive: true, ...init, headers })
+					}
+				}
+				const credentialedReq = new CredentialedKeepaliveRequest(directRequestUrl, {
+					method: "POST",
+					body: "subclass-payload",
+				})
+				await expect(
+					realGuardedFetch(credentialedReq, { headers: {}, keepalive: true }),
+				).rejects.toThrow(/only URL strings and URL instances/i)
+				expect(credentialedReq.bodyUsed).toBe(false)
+				expect(directReceived).toHaveLength(countBeforeRequestReject)
+
+				// 4. Node upload streams in `init.body` are forwarded untouched to the transport:
+				//    the guard installs no wrapper or error listener, so destroying an upload stream
+				//    with an error and rejecting delivers the transport rejection to the caller and
+				//    emits the stream `error` event once to a listener attached before emission.
+				const uploadStream = new PassThrough()
+				const uploadError = new Error("upload destroyed before response")
+				const transportError = new Error("transport failed after upload destroy")
+				const observedStreamErrors: Array<Error> = []
+				let listenerCountAtTransport = -1
+				const guardedNodeStreamTransport = createNoRedirectProviderFetch(
+					directBaseUrl,
+					async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+						const forwardedBody = init?.body as unknown as PassThrough
+						expect(forwardedBody).toBe(uploadStream)
+						listenerCountAtTransport = forwardedBody.listenerCount("error")
+						forwardedBody.destroy(uploadError)
+						// Listener attached synchronously between `destroy(error)` and Node's async
+						// `error` event emission must receive the error exactly once.
+						forwardedBody.on("error", (error: Error) => {
+							observedStreamErrors.push(error)
+						})
+						throw transportError
+					},
+				)
+				await expect(
+					guardedNodeStreamTransport(directRequestUrl, {
+						method: "POST",
+						body: uploadStream as unknown as BodyInit,
+					}),
+				).rejects.toThrow("transport failed after upload destroy")
+				await new Promise<void>((resolve) => {
+					setImmediate(resolve)
+				})
+				expect(listenerCountAtTransport).toBe(0)
+				expect(observedStreamErrors).toEqual([uploadError])
+			} finally {
+				directServer.close()
+			}
+		},
+	)
+
+	it.runIf("Bun" in globalThis)(
+		"preserves Bun proxy routing and keepalive: false connection behavior in the redirect guard",
+		async () => {
+			const directReceived: Array<{
+				readonly authorization: string | undefined
+				readonly contentType: string | undefined
+				readonly contentLength: string | undefined
+				readonly transferEncoding: string | undefined
+				readonly body: string
+			}> = []
+			const directServer = createServer((req, res) => {
+				const chunks: Array<Buffer> = []
+				req.on("data", (chunk: Buffer) => {
+					chunks.push(chunk)
+				})
+				req.on("end", () => {
+					directReceived.push({
+						authorization: req.headers.authorization,
+						contentType: req.headers["content-type"],
+						contentLength: req.headers["content-length"],
+						transferEncoding: req.headers["transfer-encoding"],
+						body: Buffer.concat(chunks).toString("utf8"),
+					})
+					res.writeHead(200, { "content-type": "text/plain" })
+					res.end("from-direct")
+				})
+			})
+			let proxyHits = 0
+			const proxyBodies: Array<string> = []
+			let proxyRespondRedirect = false
+			const proxyServer = createServer((req, res) => {
+				proxyHits += 1
+				const chunks: Array<Buffer> = []
+				req.on("data", (chunk: Buffer) => {
+					chunks.push(chunk)
+				})
+				req.on("end", () => {
+					proxyBodies.push(Buffer.concat(chunks).toString("utf8"))
+					if (proxyRespondRedirect) {
+						res.writeHead(302, { location: "https://evil.example/steal" })
+						res.end()
+						return
+					}
+					res.writeHead(200, { "content-type": "text/plain" })
+					res.end("from-configured-proxy")
+				})
+			})
+
+			let noReuseConnections = 0
+			const noReuseServer = createServer((_req, res) => {
+				res.writeHead(200, { "content-type": "text/plain" })
+				res.end("ok")
+			})
+			noReuseServer.on("connection", () => {
+				noReuseConnections += 1
+			})
+
+			let reuseConnections = 0
+			const reuseServer = createServer((_req, res) => {
+				res.writeHead(200, { "content-type": "text/plain" })
+				res.end("ok")
+			})
+			reuseServer.on("connection", () => {
+				reuseConnections += 1
+			})
+
+			await Promise.all([
+				new Promise<void>((resolve) => {
+					directServer.listen(0, "127.0.0.1", () => resolve())
+				}),
+				new Promise<void>((resolve) => {
+					proxyServer.listen(0, "127.0.0.1", () => resolve())
+				}),
+				new Promise<void>((resolve) => {
+					noReuseServer.listen(0, "127.0.0.1", () => resolve())
+				}),
+				new Promise<void>((resolve) => {
+					reuseServer.listen(0, "127.0.0.1", () => resolve())
+				}),
+			])
+
+			const directPort = (directServer.address() as { port: number }).port
+			const proxyPort = (proxyServer.address() as { port: number }).port
+			const noReusePort = (noReuseServer.address() as { port: number }).port
+			const reusePort = (reuseServer.address() as { port: number }).port
+
+			try {
+				const directBaseUrl = `http://127.0.0.1:${directPort}/v1`
+				const guardedProxyFetch = createNoRedirectProviderFetch(directBaseUrl)
+
+				// 1. Proxy routing and redirect refusal through configured Bun proxy.
+				const payload = JSON.stringify({ input: "via-bun-proxy" })
+				const proxyInit: RequestInit = {
+					method: "POST",
+					headers: { "x-provider-test": "bun-proxy" },
+					body: payload,
+					redirect: "follow",
+				}
+				Object.defineProperty(proxyInit, "proxy", {
+					value: `http://127.0.0.1:${proxyPort}`,
+					enumerable: true,
+					configurable: true,
+				})
+				const proxyResponse = await guardedProxyFetch(`${directBaseUrl}/responses`, proxyInit)
+				expect(proxyResponse.status).toBe(200)
+				expect(await proxyResponse.text()).toBe("from-configured-proxy")
+				expect(proxyHits).toBe(1)
+				expect(proxyBodies).toEqual([payload])
+				expect(directReceived).toHaveLength(0)
+
+				proxyRespondRedirect = true
+				const proxyRedirectInit: RequestInit = { redirect: "follow" }
+				Object.defineProperty(proxyRedirectInit, "proxy", {
+					value: `http://127.0.0.1:${proxyPort}`,
+					enumerable: true,
+					configurable: true,
+				})
+				await expect(
+					guardedProxyFetch(`${directBaseUrl}/responses`, proxyRedirectInit),
+				).rejects.toThrow(/redirect/i)
+				expect(proxyHits).toBe(2)
+				expect(directReceived).toHaveLength(0)
+
+				// An own enumerable `__proto__` property on `init` must not become the prototype of
+				// the forwarded options object and inject `proxy` or `headers` into Bun's fetch.
+				const protoProxyInit: RequestInit = { method: "POST", body: "direct-only" }
+				Object.defineProperty(protoProxyInit, "__proto__", {
+					value: {
+						proxy: `http://127.0.0.1:${proxyPort}`,
+						headers: { authorization: "Bearer injected" },
+					},
+					enumerable: true,
+					configurable: true,
+				})
+				const protoRes = await guardedProxyFetch(`${directBaseUrl}/responses`, protoProxyInit)
+				expect(protoRes.status).toBe(200)
+				expect(await protoRes.text()).toBe("from-direct")
+				expect(proxyHits).toBe(2)
+				expect(directReceived).toHaveLength(1)
+				expect(directReceived[0]?.authorization).toBeUndefined()
+				expect(directReceived[0]?.body).toBe("direct-only")
+
+				// 2. Connection reuse: `{ keepalive: false }` opens fresh connections vs default reuse.
+				const noReuseBaseUrl = `http://127.0.0.1:${noReusePort}/v1`
+				const guardedNoReuseFetch = createNoRedirectProviderFetch(noReuseBaseUrl)
+				for (let call = 0; call < 2; call++) {
+					const res = await guardedNoReuseFetch(`${noReuseBaseUrl}/responses`, {
+						keepalive: false,
+						redirect: "follow",
+					})
+					expect(res.status).toBe(200)
+					expect(await res.text()).toBe("ok")
+				}
+				expect(noReuseConnections).toBe(2)
+
+				const reuseBaseUrl = `http://127.0.0.1:${reusePort}/v1`
+				const guardedReuseFetch = createNoRedirectProviderFetch(reuseBaseUrl)
+				for (let call = 0; call < 2; call++) {
+					const res = await guardedReuseFetch(`${reuseBaseUrl}/responses`)
+					expect(res.status).toBe(200)
+					expect(await res.text()).toBe("ok")
+				}
+				expect(reuseConnections).toBe(1)
+
+				// 3. Known-length POST preserves Content-Length, empty POST sends 0 bytes, and streaming
+				//    uploads cancel cleanly on abort.
+				const fixedLengthRes = await guardedProxyFetch(`${directBaseUrl}/responses`, {
+					method: "POST",
+					body: "abcd",
+				})
+				expect(fixedLengthRes.status).toBe(200)
+				expect(await fixedLengthRes.text()).toBe("from-direct")
+				expect(directReceived.at(-1)).toMatchObject({
+					contentLength: "4",
+					transferEncoding: undefined,
+					body: "abcd",
+				})
+
+				const emptyPostRes = await guardedProxyFetch(`${directBaseUrl}/responses`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: "",
+				})
+				expect(emptyPostRes.status).toBe(200)
+				expect(await emptyPostRes.text()).toBe("from-direct")
+				expect(directReceived.at(-1)).toMatchObject({
+					contentType: "application/json",
+					contentLength: "0",
+					transferEncoding: undefined,
+					body: "",
+				})
+
+				const uploadController = new AbortController()
+				let streamCancelled = false
+				const uploadStream = new ReadableStream<Uint8Array>({
+					pull(controller) {
+						controller.enqueue(new TextEncoder().encode("part"))
+						uploadController.abort()
+					},
+					cancel() {
+						streamCancelled = true
+					},
+				})
+				await expect(
+					guardedProxyFetch(`${directBaseUrl}/responses`, {
+						method: "POST",
+						body: uploadStream,
+						signal: uploadController.signal,
+					}),
+				).rejects.toThrow()
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 40)
+				})
+				expect(streamCancelled).toBe(true)
+
+				// 4. Request objects are rejected fail-closed without contacting the server.
+				const countBeforeReject = directReceived.length
+				const rejectedReq = new Request(`${directBaseUrl}/responses`, {
+					method: "POST",
+					body: "must-not-send",
+				})
+				await expect(guardedProxyFetch(rejectedReq)).rejects.toThrow(
+					/only URL strings and URL instances/i,
+				)
+				expect(rejectedReq.bodyUsed).toBe(false)
+				expect(directReceived).toHaveLength(countBeforeReject)
+			} finally {
+				directServer.close()
+				proxyServer.close()
+				noReuseServer.close()
+				reuseServer.close()
+			}
+		},
+	)
 
 	it("synchronizes recoverPiDurableTurn with an in-progress admission before submit", async () => {
 		let markEnteredEnsureRoot!: () => void
@@ -1204,7 +1864,9 @@ describe("turn engine", () => {
 					return outcome
 				},
 			)
-			await new Promise((resolve) => setTimeout(resolve, 15))
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 15)
+			})
 			expect(recoverySettled).toBe(false)
 
 			releaseLockStep()

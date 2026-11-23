@@ -30,6 +30,7 @@ import * as HttpApiSchema from "effect/http-api/HttpApiSchema"
 import * as HttpApiSecurity from "effect/http-api/HttpApiSecurity"
 import type * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientError from "effect/http/HttpClientError"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
 import * as Struct from "effect/Struct"
@@ -40,14 +41,18 @@ export const REQUEST_ID_HEADER = "request-id"
 export const RequestId = NonEmptyString.pipe(Schema.brand("RequestId"))
 export type RequestId = typeof RequestId.Type
 
+const ErrorAccepted = Schema.Array(Schema.Unknown)
+const ErrorIndex = Schema.Finite
+const isErrorIndex = Schema.is(ErrorIndex)
+
 const errorEnvelope = <const T extends string>(status: number, type: T) =>
 	Schema.Struct({
 		type: Schema.Literal("error"),
 		error: Schema.Struct({ type: Schema.Literal(type), message: Schema.String }),
 		request_id: RequestId,
-		accepted: Schema.optionalKey(Schema.Array(Schema.Unknown)),
-		failed_index: Schema.optionalKey(Schema.Finite),
-		unconfirmed_index: Schema.optionalKey(Schema.Finite),
+		accepted: Schema.optionalKey(ErrorAccepted),
+		failed_index: Schema.optionalKey(ErrorIndex),
+		unconfirmed_index: Schema.optionalKey(ErrorIndex),
 	}).pipe(HttpApiSchema.status(status))
 
 export const ERRORS = {
@@ -64,52 +69,144 @@ export const ERRORS = {
 
 export type ErrorStatus = keyof typeof ERRORS
 export type ApiError = (typeof ERRORS)[ErrorStatus]["Type"]
+export type HandlerErrorStatus = 400 | 404 | 409 | 429 | 500 | 503
+export type HandlerError = (typeof ERRORS)[HandlerErrorStatus]["Type"]
 
-const ERROR_TYPES: Readonly<Record<ErrorStatus, ApiError["error"]["type"]>> = {
-	400: "invalid_request_error",
-	401: "authentication_error",
-	404: "not_found_error",
-	409: "conflict_error",
-	413: "payload_too_large",
-	415: "unsupported_media_type",
-	429: "rate_limit_error",
-	500: "internal_error",
-	503: "service_unavailable",
+interface ApiErrorExtra {
+	readonly accepted?: ReadonlyArray<unknown>
+	readonly failed_index?: number
+	readonly unconfirmed_index?: number
 }
+
+const makeError =
+	<const T extends ApiError["error"]["type"]>(type: T) =>
+	(message: string, request_id: RequestId, extra?: ApiErrorExtra) => ({
+		type: "error" as const,
+		error: { type, message },
+		request_id: RequestId.make(request_id),
+		...extra,
+	})
+
+type ErrorFactories = {
+	readonly [S in ErrorStatus]: (
+		message: string,
+		request_id: RequestId,
+		extra?: ApiErrorExtra,
+	) => (typeof ERRORS)[S]["Type"]
+}
+
+const ERROR_FACTORIES = {
+	400: makeError("invalid_request_error"),
+	401: makeError("authentication_error"),
+	404: makeError("not_found_error"),
+	409: makeError("conflict_error"),
+	413: makeError("payload_too_large"),
+	415: makeError("unsupported_media_type"),
+	429: makeError("rate_limit_error"),
+	500: makeError("internal_error"),
+	503: makeError("service_unavailable"),
+} satisfies ErrorFactories
 
 export const apiError = <S extends ErrorStatus>(
 	status: S,
 	message: string,
 	request_id: RequestId,
-	extra?: {
-		readonly accepted?: ReadonlyArray<unknown>
-		readonly failed_index?: number
-		readonly unconfirmed_index?: number
-	},
-): (typeof ERRORS)[S]["Type"] =>
-	({
-		type: "error",
-		error: { type: ERROR_TYPES[status], message },
-		request_id: RequestId.make(request_id),
-		...extra,
-	}) as (typeof ERRORS)[S]["Type"]
+	extra?: ApiErrorExtra,
+): (typeof ERRORS)[S]["Type"] => ERROR_FACTORIES[status](message, request_id, extra)
 
-const STATUS_OF_TYPE: Readonly<Record<ApiError["error"]["type"], ErrorStatus>> = {
+const HANDLER_ERROR_STATUS_BY_TYPE: Readonly<
+	Record<HandlerError["error"]["type"], HandlerErrorStatus>
+> = {
 	invalid_request_error: 400,
-	authentication_error: 401,
 	not_found_error: 404,
 	conflict_error: 409,
-	payload_too_large: 413,
-	unsupported_media_type: 415,
 	rate_limit_error: 429,
 	internal_error: 500,
 	service_unavailable: 503,
 }
 
+const STATUS_OF_TYPE: Readonly<Record<ApiError["error"]["type"], ErrorStatus>> = {
+	...HANDLER_ERROR_STATUS_BY_TYPE,
+	authentication_error: 401,
+	payload_too_large: 413,
+	unsupported_media_type: 415,
+}
+
+export const isApiErrorType = (type: unknown): type is ApiError["error"]["type"] =>
+	typeof type === "string" && Object.hasOwn(STATUS_OF_TYPE, type)
+
 export const statusOf = (error: ApiError): ErrorStatus => STATUS_OF_TYPE[error.error.type]
 
-export type HandlerErrorStatus = 400 | 404 | 409 | 429 | 500 | 503
-export type HandlerError = (typeof ERRORS)[HandlerErrorStatus]["Type"]
+const HandlerErrorInput = Schema.Struct({
+	type: Schema.Literal("error"),
+	error: Schema.Struct({
+		type: Schema.Literals([
+			"invalid_request_error",
+			"not_found_error",
+			"conflict_error",
+			"rate_limit_error",
+			"internal_error",
+			"service_unavailable",
+		]),
+		message: Schema.String,
+	}),
+	accepted: Schema.optional(ErrorAccepted),
+	failed_index: Schema.optional(ErrorIndex),
+	unconfirmed_index: Schema.optional(ErrorIndex),
+})
+
+const decodeHandlerErrorInput = Schema.decodeUnknownOption(HandlerErrorInput)
+
+export const parseHandlerError = (
+	err: unknown,
+	request_id: RequestId,
+): HandlerError | undefined => {
+	const decoded = decodeHandlerErrorInput(err)
+	if (Option.isNone(decoded)) {
+		return undefined
+	}
+	const { error, accepted, failed_index, unconfirmed_index } = decoded.value
+	return apiError(HANDLER_ERROR_STATUS_BY_TYPE[error.type], error.message, request_id, {
+		...(accepted === undefined ? {} : { accepted }),
+		...(failed_index === undefined ? {} : { failed_index }),
+		...(unconfirmed_index === undefined ? {} : { unconfirmed_index }),
+	})
+}
+
+export interface LoggableApiFailure {
+	readonly error_type: ApiError["error"]["type"] | "unknown"
+	readonly accepted_count?: number
+	readonly failed_index?: number
+	readonly unconfirmed_index?: number
+}
+
+export const redactApiErrorEnvelope = (error: unknown): LoggableApiFailure | null => {
+	if (typeof error !== "object" || error === null || !("type" in error) || error.type !== "error") {
+		return null
+	}
+	const nestedError =
+		"error" in error && typeof error.error === "object" && error.error !== null
+			? error.error
+			: undefined
+	const errorType: ApiError["error"]["type"] | "unknown" =
+		nestedError !== undefined && "type" in nestedError && isApiErrorType(nestedError.type)
+			? nestedError.type
+			: "unknown"
+	const acceptedCount =
+		"accepted" in error && Array.isArray(error.accepted) ? error.accepted.length : undefined
+	const failedIndex =
+		"failed_index" in error && isErrorIndex(error.failed_index) ? error.failed_index : undefined
+	const unconfirmedIndex =
+		"unconfirmed_index" in error && isErrorIndex(error.unconfirmed_index)
+			? error.unconfirmed_index
+			: undefined
+	return {
+		error_type: errorType,
+		...(acceptedCount === undefined ? {} : { accepted_count: acceptedCount }),
+		...(failedIndex === undefined ? {} : { failed_index: failedIndex }),
+		...(unconfirmedIndex === undefined ? {} : { unconfirmed_index: unconfirmedIndex }),
+	}
+}
 
 const HandlerErrors = [ERRORS[400], ERRORS[404], ERRORS[409], ERRORS[429], ERRORS[500], ERRORS[503]]
 const BodyErrors = [...HandlerErrors, ERRORS[413], ERRORS[415]]
@@ -347,16 +444,16 @@ export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$
 	Schema.decodeTo(
 		Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
 		{
-			decode: SchemaGetter.transform((value) => Number(value)),
-			encode: SchemaGetter.transform((value) => String(value)),
+			decode: SchemaGetter.transform(Number),
+			encode: SchemaGetter.transform(String),
 		},
 	),
 )
 
 const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u)).pipe(
 	Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
-		decode: SchemaGetter.transform((value) => Number(value)),
-		encode: SchemaGetter.transform((value) => String(value)),
+		decode: SchemaGetter.transform(Number),
+		encode: SchemaGetter.transform(String),
 	}),
 )
 
@@ -391,7 +488,9 @@ const encodeIdempotencyHeaders = SchemaGetter.transformEffect(
 	(value: OptionalIdempotencyHeadersInput | undefined) =>
 		Effect.gen(function* () {
 			const explicit = value?.["idempotency-key"]
-			if (explicit !== undefined) return { "idempotency-key": explicit }
+			if (explicit !== undefined) {
+				return { "idempotency-key": explicit }
+			}
 			const contextual = yield* IdempotencyKey
 			return contextual === undefined ? {} : { "idempotency-key": contextual }
 		}),
@@ -442,7 +541,11 @@ type WithoutClientHeaders<Endpoint> =
 
 const withOptionalIdempotencyHeaders = <Endpoint extends HttpApiEndpoint.Constraint>(
 	endpoint: Endpoint,
-): WithoutClientHeaders<Endpoint> => endpoint as unknown as WithoutClientHeaders<Endpoint>
+): WithoutClientHeaders<Endpoint> =>
+	// Erase only the phantom `~Headers` type parameter so Effect's generated client
+	// does not require `headers` while runtime decoding and OpenAPI retain the schema.
+	// oxlint-disable-next-line quality/no-chained-type-assertions, typescript/no-unsafe-type-assertion
+	endpoint as unknown as WithoutClientHeaders<Endpoint>
 
 const Health = HttpApiGroup.make("health").add(
 	HttpApiEndpoint.get("health", "/health", {
@@ -672,6 +775,8 @@ export const makeCheckfuClient = (options?: {
 		| undefined
 	readonly baseUrl?: URL | string | undefined
 }): Effect.Effect<CheckfuClient, never, HttpClient.HttpClient> =>
+	// Re-expose optional `headers` on create methods backed by `OptionalIdempotencyHeaders` at runtime.
+	// oxlint-disable-next-line quality/no-chained-type-assertions, typescript/no-unsafe-type-assertion
 	HttpApiClient.make(CheckfuApi, options) as unknown as Effect.Effect<
 		CheckfuClient,
 		never,
@@ -687,6 +792,8 @@ export const makeCheckfuClientWith = <E, R>(options: {
 		| undefined
 	readonly baseUrl?: URL | string | undefined
 }): Effect.Effect<CheckfuClient<Exclude<E, HttpClientError.HttpClientError>, R>> =>
+	// Re-expose optional `headers` on create methods backed by `OptionalIdempotencyHeaders` at runtime.
+	// oxlint-disable-next-line quality/no-chained-type-assertions, typescript/no-unsafe-type-assertion
 	HttpApiClient.makeWith(CheckfuApi, options) as unknown as Effect.Effect<
 		CheckfuClient<Exclude<E, HttpClientError.HttpClientError>, R>
 	>

@@ -51,8 +51,12 @@ const hasAncestorSpan = (name: string) =>
 		let current: Option.Option<Tracer.AnySpan> = initial
 		while (Option.isSome(current)) {
 			const span = current.value
-			if (span._tag !== "Span") return false
-			if (span.name === name) return true
+			if (span._tag !== "Span") {
+				return false
+			}
+			if (span.name === name) {
+				return true
+			}
 			current = span.parent
 		}
 		return false
@@ -74,7 +78,9 @@ export const markDeployProgramEvaluated = Effect.gen(function* () {
 
 const isProductionDeployStateInit = (stack: Option.Option<Alchemy.Stack["Service"]>) =>
 	Effect.gen(function* () {
-		if (yield* hasAncestorSpan("cli.deploy")) return true
+		if (yield* hasAncestorSpan("cli.deploy")) {
+			return true
+		}
 		return isDeployBuildForStack(stack) && (yield* hasAncestorSpan("plan.make"))
 	})
 

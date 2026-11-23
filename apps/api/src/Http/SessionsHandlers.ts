@@ -11,7 +11,8 @@ import { SendUserMessage } from "@checkfu/sessions/Session/SendUserMessage.comma
 import { Session } from "@checkfu/sessions/Session/Session.aggregate"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/sessions/Session/SessionTypes"
-import { type SessionSnapshot, SessionView } from "@checkfu/sessions/Session/SessionView.view"
+import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
+import type { SessionSnapshot } from "@checkfu/sessions/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -237,7 +238,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
 				const lookupKey = agentVersionLookupKey(agentId, version)
-				if (Option.isSome(yield* agentVersionsByNumber.get(lookupKey))) return true
+				if (Option.isSome(yield* agentVersionsByNumber.get(lookupKey))) {
+					return true
+				}
 				const found = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
 				return found !== null
 			})
@@ -246,7 +249,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			Effect.gen(function* () {
 				const ref = Session.ref(id)
 				const found = Option.getOrNull(yield* sessionViews.get(ref))
-				if (found !== null) return found
+				if (found !== null) {
+					return found
+				}
 				const committed = yield* sessions.get(id)
 				if (committed._tag === "Uninitialized") {
 					return yield* reject(404, `Session ${id} not found.`)
@@ -325,13 +330,19 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						pinnedVersion,
 						yield* AgentVersionWaitTimeout,
 					).pipe(orPending(id, "session"))
-					if (isPending(pinnedReady)) return pinnedReady
-					if (!pinnedReady) return { id, type: "session", pending: true as const }
+					if (isPending(pinnedReady)) {
+						return pinnedReady
+					}
+					if (!pinnedReady) {
+						return { id, type: "session", pending: true as const }
+					}
 					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
 					const result = yield* sessionViews
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
 						.pipe(orPending(id, "session"))
-					if (isPending(result)) return result
+					if (isPending(result)) {
+						return result
+					}
 					const snapshot = yield* present(result, 500, "Failed to load created session.")
 					return {
 						id,
@@ -379,7 +390,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const result = yield* sessionViews
 						.get(Session.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "session"))
-					if (isPending(result)) return result
+					if (isPending(result)) {
+						return result
+					}
 					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
 				}).pipe(handled),
 			)
@@ -451,11 +464,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					for (const [index, item] of prepared.entries()) {
 						const sendOptions =
 							item.commandId === undefined ? undefined : { commandId: item.commandId }
+						const eventId = item.eventId
 						const claimEventId =
-							item.eventId === undefined
+							eventId === undefined
 								? Effect.void
 								: Effect.gen(function* () {
-										const claimId = yield* sessionEventClaimId(digest, id, item.eventId!)
+										const claimId = yield* sessionEventClaimId(digest, id, eventId)
 										const fingerprint = yield* singleEventFingerprint(digest, item)
 										yield* claimIdempotency(eventBatches, claimId, fingerprint).pipe(
 											Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
@@ -571,7 +585,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						{ cursor: after ?? 0, delayMs: 0, knownHead: initialHead },
 						(state) =>
 							Effect.gen(function* () {
-								if (state.delayMs > 0) yield* Effect.sleep(Duration.millis(state.delayMs))
+								if (state.delayMs > 0) {
+									yield* Effect.sleep(Duration.millis(state.delayMs))
+								}
 								let knownHead = state.knownHead
 								if (state.cursor >= knownHead) {
 									const latest = yield* sessionViews.snapshot(ref)

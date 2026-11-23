@@ -1654,7 +1654,9 @@ describe("Sessions", () => {
 										Effect.succeed({
 											interrupt: () => Effect.void,
 											generate: () => {
-												if (mode === "synchronous throw") throw new Error("secret adapter failure")
+												if (mode === "synchronous throw") {
+													throw new Error("secret adapter failure")
+												}
 												return mode === "defect"
 													? Effect.die(new Error("secret internal sdk failure"))
 													: Effect.interrupt
@@ -2808,11 +2810,11 @@ describe("Sessions", () => {
 		}
 
 		const makeObjectStorage = (data: Map<string, unknown>): DurableObjects.ObjectStorage => {
-			const put = ((keyOrEntries: string | Record<string, unknown>, value?: unknown) =>
+			const put = ((keyOrEntries: unknown, value?: unknown) =>
 				Effect.sync(() => {
 					if (typeof keyOrEntries === "string") {
 						data.set(keyOrEntries, value)
-					} else {
+					} else if (typeof keyOrEntries === "object" && keyOrEntries !== null) {
 						for (const [k, v] of Object.entries(keyOrEntries)) {
 							data.set(k, v)
 						}
@@ -2825,7 +2827,9 @@ describe("Sessions", () => {
 					}
 					let removed = 0
 					for (const k of keyOrKeys) {
-						if (data.delete(k)) removed += 1
+						if (data.delete(k)) {
+							removed += 1
+						}
 					}
 					return removed
 				})) as DurableObjects.ObjectStorage["delete"]
@@ -2842,8 +2846,12 @@ describe("Sessions", () => {
 							.filter(([k]) => (options?.startAfter === undefined ? true : k > options.startAfter))
 							.filter(([k]) => (options?.end === undefined ? true : k < options.end))
 							.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-						if (options?.reverse) entries = entries.reverse()
-						if (options?.limit !== undefined) entries = entries.slice(0, options.limit)
+						if (options?.reverse) {
+							entries = entries.reverse()
+						}
+						if (options?.limit !== undefined) {
+							entries = entries.slice(0, options.limit)
+						}
 						return new Map(entries as ReadonlyArray<[string, T]>)
 					}),
 				transaction: (effect) => effect,
@@ -2914,7 +2922,7 @@ describe("Sessions", () => {
 												}),
 											),
 								},
-							) as DurableObjects.Stub
+							)
 						},
 					}),
 			}
@@ -3084,7 +3092,7 @@ describe("Sessions", () => {
 											callCount += 1
 											if (callCount === 1) {
 												return Effect.succeed({
-													thinking: "t".repeat(MAX_THINKING_TEXT_LENGTH + 2_000),
+													thinking: "t".repeat(MAX_THINKING_TEXT_LENGTH + 2000),
 													text: "Bounded reply",
 													input_tokens: 10,
 													output_tokens: 5,
@@ -3095,7 +3103,7 @@ describe("Sessions", () => {
 												return Effect.fail({
 													_tag: "ModelProviderError" as const,
 													error_type: "e".repeat(MAX_ERROR_TYPE_LENGTH + 100),
-													message: "m".repeat(MAX_ERROR_MESSAGE_LENGTH + 1_000),
+													message: "m".repeat(MAX_ERROR_MESSAGE_LENGTH + 1000),
 													terminal: false,
 												})
 											}
@@ -3136,12 +3144,16 @@ describe("Sessions", () => {
 			let bytes = 0
 			for (let i = 0; i < value.length; i++) {
 				const code = value.charCodeAt(i)
-				if (code < 0x80) bytes += 1
-				else if (code < 0x800) bytes += 2
-				else if (code >= 0xd800 && code <= 0xdbff) {
+				if (code < 0x80) {
+					bytes += 1
+				} else if (code < 0x8_00) {
+					bytes += 2
+				} else if (code >= 0xd8_00 && code <= 0xdb_ff) {
 					bytes += 4
 					i++
-				} else bytes += 3
+				} else {
+					bytes += 3
+				}
 			}
 			return bytes
 		}

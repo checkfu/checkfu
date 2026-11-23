@@ -20,11 +20,11 @@ export const estimateSeedTokens = (text: string): number => {
 		const code = text.charCodeAt(i)
 		if (code <= 0x7f) {
 			bytes += 1
-		} else if (code <= 0x7ff) {
+		} else if (code <= 0x7_ff) {
 			bytes += 2
-		} else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+		} else if (code >= 0xd8_00 && code <= 0xdb_ff && i + 1 < text.length) {
 			const next = text.charCodeAt(i + 1)
-			if (next >= 0xdc00 && next <= 0xdfff) {
+			if (next >= 0xdc_00 && next <= 0xdf_ff) {
 				bytes += 4
 				i += 1
 			} else {
@@ -42,7 +42,9 @@ export const estimateSeedTokens = (text: string): number => {
  * code units and `maxTokens` UTF-8 bytes without splitting a surrogate pair.
  */
 export const trimTailToBudget = (text: string, maxChars: number, maxTokens: number): string => {
-	if (text.length === 0 || maxChars <= 0 || maxTokens <= 0) return ""
+	if (text.length === 0 || maxChars <= 0 || maxTokens <= 0) {
+		return ""
+	}
 	let bytesUsed = 0
 	let charsUsed = 0
 	let start = text.length
@@ -50,43 +52,56 @@ export const trimTailToBudget = (text: string, maxChars: number, maxTokens: numb
 		const code = text.charCodeAt(i)
 		let stepChars = 1
 		let stepBytes = 3
-		if (code >= 0xdc00 && code <= 0xdfff && i > 0) {
+		if (code >= 0xdc_00 && code <= 0xdf_ff && i > 0) {
 			const prev = text.charCodeAt(i - 1)
-			if (prev >= 0xd800 && prev <= 0xdbff) {
+			if (prev >= 0xd8_00 && prev <= 0xdb_ff) {
 				stepChars = 2
 				stepBytes = 4
 			}
 		} else if (code <= 0x7f) {
 			stepBytes = 1
-		} else if (code <= 0x7ff) {
+		} else if (code <= 0x7_ff) {
 			stepBytes = 2
 		}
-		if (charsUsed + stepChars > maxChars || bytesUsed + stepBytes > maxTokens) break
+		if (charsUsed + stepChars > maxChars || bytesUsed + stepBytes > maxTokens) {
+			break
+		}
 		charsUsed += stepChars
 		bytesUsed += stepBytes
 		start = i - (stepChars - 1)
-		if (stepChars === 2) i -= 1
+		if (stepChars === 2) {
+			i -= 1
+		}
 	}
 	return text.slice(start)
+}
+
+export interface CodePointCost {
+	readonly chars: number
+	readonly bytes: number
 }
 
 /**
  * Returns the UTF-16 code-unit length and UTF-8 byte length of the final
  * complete code point in a non-empty string.
  */
-export const trailingCodePointCost = (
-	text: string,
-): { readonly chars: number; readonly bytes: number } => {
-	if (text.length === 0) return { chars: 0, bytes: 0 }
+export const trailingCodePointCost = (text: string): CodePointCost => {
+	if (text.length === 0) {
+		return { chars: 0, bytes: 0 }
+	}
 	const last = text.charCodeAt(text.length - 1)
-	if (last >= 0xdc00 && last <= 0xdfff && text.length >= 2) {
+	if (last >= 0xdc_00 && last <= 0xdf_ff && text.length >= 2) {
 		const prev = text.charCodeAt(text.length - 2)
-		if (prev >= 0xd800 && prev <= 0xdbff) {
+		if (prev >= 0xd8_00 && prev <= 0xdb_ff) {
 			return { chars: 2, bytes: 4 }
 		}
 	}
-	if (last <= 0x7f) return { chars: 1, bytes: 1 }
-	if (last <= 0x7ff) return { chars: 1, bytes: 2 }
+	if (last <= 0x7f) {
+		return { chars: 1, bytes: 1 }
+	}
+	if (last <= 0x7_ff) {
+		return { chars: 1, bytes: 2 }
+	}
 	return { chars: 1, bytes: 3 }
 }
 
@@ -107,7 +122,9 @@ export const seedTokenBudget = ({
 	readonly system: string | null
 	readonly currentInput: string
 }): number => {
-	if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0
+	if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+		return 0
+	}
 	const reserveTokens = compactionReserveTokens(contextWindow)
 	const systemTokens =
 		system !== null && system.length > 0
@@ -120,7 +137,7 @@ export const seedTokenBudget = ({
 export const PI_HARNESS_SETTINGS = {
 	// Blocking compactions finish inside their turn. Background jobs can outlive it.
 	compaction: { backgroundTokens: 0 },
-	retry: { maxRetries: 3, baseDelayMs: 2_000 },
+	retry: { maxRetries: 3, baseDelayMs: 2000 },
 } as const
 
 /**
@@ -131,7 +148,9 @@ export const PI_HARNESS_SETTINGS = {
 export const compactionThresholdsForContextWindow = (
 	contextWindow: number,
 ): { readonly reserveTokens: number; readonly keepRecentTokens: number } | null => {
-	if (!Number.isFinite(contextWindow) || contextWindow <= 0) return null
+	if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+		return null
+	}
 	const reserveTokens = compactionReserveTokens(contextWindow)
 	const available = Math.max(1, contextWindow - reserveTokens)
 	const keepRecentTokens = Math.min(

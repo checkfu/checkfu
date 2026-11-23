@@ -27,7 +27,9 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 		const provider = yield* ModelProvider
 		const sessions = yield* Session
 		return Effect.fn(function* ({ source, state, event }) {
-			if (state === null || state.turn === 0) return
+			if (state === null || state.turn === 0) {
+				return
+			}
 			// TurnInput advances the generation when it projects the abandonment.
 			const generation =
 				event._tag === "turn.abandoned" ? state.harness_generation - 1 : state.harness_generation

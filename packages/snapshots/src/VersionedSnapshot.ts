@@ -19,7 +19,7 @@ export const snapshotVersion = <V extends number, S extends ServiceFreeSchema>(s
 }): SnapshotMigrationStep => ({
 	version: step.version,
 	schema: step.schema,
-	migrate: (state) => step.migrate(state as S["Type"]),
+	migrate: (state) => step.migrate(state),
 })
 
 /**
@@ -44,7 +44,9 @@ export const versionedSnapshot = <Current extends number, S extends ServiceFreeS
 	const sorted = [...(options.previous ?? [])].sort((a, b) => a.version - b.version)
 	for (let i = 0; i < sorted.length; i++) {
 		const step = sorted[i]
-		if (step === undefined) continue
+		if (step === undefined) {
+			continue
+		}
 		if (step.version >= options.current) {
 			throw new Error(
 				`Previous snapshot version ${step.version} must be less than current version ${options.current}`,
@@ -84,7 +86,7 @@ export const versionedSnapshot = <Current extends number, S extends ServiceFreeS
 						readonly state: unknown
 					}
 					if (envelope.schema_version === options.current) {
-						return envelope.state as S["Type"]
+						return envelope.state
 					}
 					let currentState: unknown = envelope.state
 					let started = false
@@ -96,7 +98,7 @@ export const versionedSnapshot = <Current extends number, S extends ServiceFreeS
 							currentState = step.migrate(currentState)
 						}
 					}
-					return currentState as S["Type"]
+					return currentState
 				},
 				encode: (state) => ({
 					schema_version: options.current,

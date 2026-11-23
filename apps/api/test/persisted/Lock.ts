@@ -9,7 +9,8 @@ import * as Path from "effect/Path"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
-import { type PersistedShape, RULES, parseViewShapeId, persistedShapes } from "./Shapes.ts"
+import { RULES, parseViewShapeId, persistedShapes } from "./Shapes.ts"
+import type { PersistedShape } from "./Shapes.ts"
 
 export const Baseline = Schema.Struct({
 	label: Schema.String.check(Schema.isMinLength(1)),
@@ -133,7 +134,9 @@ export const lockProblems = (
 		const fingerprintOf = (shape: PersistedShape) =>
 			Effect.gen(function* () {
 				const cached = fingerprints.get(shape.id)
-				if (cached !== undefined) return cached
+				if (cached !== undefined) {
+					return cached
+				}
 				const computed = yield* schemaFingerprint(shape)
 				fingerprints.set(shape.id, computed)
 				return computed
@@ -148,13 +151,17 @@ export const lockProblems = (
 		}
 		for (const baseline of lock.baselines) {
 			for (const [id, samples] of Object.entries(baseline.shapes)) {
-				if (id in lock.retired) continue
+				if (id in lock.retired) {
+					continue
+				}
 				const shape = current.get(id)
 				if (shape === undefined) {
 					const view = parseViewShapeId(id)
 					const running = view === null ? undefined : currentViews.get(view.name)
 					if (view !== null && running !== undefined) {
-						if (running > view.version) continue
+						if (running > view.version) {
+							continue
+						}
 						problems.push(
 							`${id} shipped in baseline "${baseline.label}" and the view now runs at v${running}. ` +
 								`A view's version only ever increases: rows written at v${view.version} are not rebuilt for an older version.`,
@@ -179,7 +186,9 @@ export const lockProblems = (
 				let unreadable = false
 				for (const sample of samples) {
 					const failure = yield* decodeFailure(shape, sample)
-					if (failure === null) continue
+					if (failure === null) {
+						continue
+					}
 					problems.push(
 						`${id} can no longer read a value written by baseline "${baseline.label}": ${failure}\n` +
 							`  ${RULES[shape.kind]}`,
@@ -283,11 +292,16 @@ export const shipBlockers = (
 ): Effect.Effect<ReadonlyArray<string>, PersistedLockError, Digest.Digest> =>
 	Effect.gen(function* () {
 		const problems = yield* lockProblems(lock, shapes)
-		if (problems.length > 0) return problems
+		if (problems.length > 0) {
+			return problems
+		}
 		const latest = lock.baselines.at(-1)
-		if (latest === undefined) return ["No baseline has been cut yet."]
+		if (latest === undefined) {
+			return ["No baseline has been cut yet."]
+		}
 		const current = yield* cutBaseline(latest.label, latest.cut_at, shapes)
 		return isDeepStrictEqual(latest.schemas, current.schemas) &&
+			// oxlint-disable-next-line unicorn/prefer-structured-clone -- JSON round-trip normalizes undefined fields to match Persisted.lock.json
 			isDeepStrictEqual(latest.shapes, JSON.parse(JSON.stringify(current.shapes)))
 			? []
 			: [`Persisted shapes changed since "${latest.label}".`]
@@ -300,7 +314,9 @@ const lockIsCommitted: Effect.Effect<
 > = Effect.gen(function* () {
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 	const file = yield* lockFilePath.pipe(Effect.orElseSucceed(() => null))
-	if (file === null) return false
+	if (file === null) {
+		return false
+	}
 	const git = (...args: ReadonlyArray<string>) =>
 		spawner
 			.exitCode(

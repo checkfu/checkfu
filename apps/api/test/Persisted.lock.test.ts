@@ -6,7 +6,7 @@ import { NonNegativeInt } from "@checkfu/sessions/Session/SessionTypes"
 import { TurnInputState } from "@checkfu/sessions/Session/TurnInput.view"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
-import type { DocumentId } from "@earendil-works/pi-durable"
+import type { DocumentId, JsonObject } from "@earendil-works/pi-durable"
 import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
@@ -15,7 +15,6 @@ import { createPiModels } from "../src/Pi/PiModels.ts"
 import { CHECKFU_PI_DOCS, SettledUsage, SettledUsageState } from "../src/Pi/PiTurnUsage.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import {
-	type PersistedLock,
 	PersistedServicesLive,
 	cutBaseline,
 	decodeFailure,
@@ -25,8 +24,8 @@ import {
 	schemaFingerprint,
 	shipBlockers,
 } from "./persisted/Lock.ts"
+import type { PersistedLock } from "./persisted/Lock.ts"
 import {
-	type PersistedShape,
 	persistedShapes,
 	piDocPersistedSchema,
 	piDocShapeId,
@@ -34,10 +33,13 @@ import {
 	registryProblems,
 	viewShapeId,
 } from "./persisted/Shapes.ts"
+import type { PersistedShape } from "./persisted/Shapes.ts"
 
 const shapeOfKind = (kind: PersistedShape["kind"]): PersistedShape => {
 	const shape = persistedShapes.find((candidate) => candidate.kind === kind)
-	if (shape === undefined) throw new Error(`no ${kind} shape is registered`)
+	if (shape === undefined) {
+		throw new Error(`no ${kind} shape is registered`)
+	}
 	return shape
 }
 
@@ -51,7 +53,9 @@ const replacing = (id: string, schema: Schema.Top): ReadonlyArray<PersistedShape
 const reviewing = (lock: PersistedLock, id: string, shapes: ReadonlyArray<PersistedShape>) =>
 	Effect.gen(function* () {
 		const shape = shapes.find((candidate) => candidate.id === id)
-		if (shape === undefined) throw new Error(`no shape ${id}`)
+		if (shape === undefined) {
+			throw new Error(`no shape ${id}`)
+		}
 		return {
 			...lock,
 			reviewed: { [id]: { schema: yield* schemaFingerprint(shape), reason: "Checked in a test." } },
@@ -95,10 +99,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 			const unreadable: Array<string> = []
 			for (const shape of persistedShapes) {
 				const samples = yield* sampleEncoded(shape, 4)
-				if (samples.length !== 4) unreadable.push(`${shape.id}: ${samples.length} samples`)
+				if (samples.length !== 4) {
+					unreadable.push(`${shape.id}: ${samples.length} samples`)
+				}
 				for (const sample of samples) {
 					const failure = yield* decodeFailure(shape, sample)
-					if (failure !== null) unreadable.push(`${shape.id}: ${failure}`)
+					if (failure !== null) {
+						unreadable.push(`${shape.id}: ${failure}`)
+					}
 				}
 			}
 			expect(unreadable).toEqual([])
@@ -445,7 +453,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			const reviewedEntries = yield* Effect.forEach([startDeliveryId, stopDeliveryId], (id) =>
 				Effect.gen(function* () {
 					const shape = compatible.find((candidate) => candidate.id === id)
-					if (shape === undefined) throw new Error(`missing ${id}`)
+					if (shape === undefined) {
+						throw new Error(`missing ${id}`)
+					}
 					return [
 						id,
 						{ schema: yield* schemaFingerprint(shape), reason: "Optional field added." },
@@ -465,9 +475,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					? {
 							...shape,
 							id: viewShapeId("Checkfu", "AgentView", 1),
-							schema: Schema.NullOr(
-								Schema.Struct({ rebuilt_v1: Schema.String }),
-							) as unknown as PersistedShape["schema"],
+							schema: Schema.NullOr(Schema.Struct({ rebuilt_v1: Schema.String })),
 						}
 					: shape,
 			)
@@ -497,7 +505,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							...shape,
 							schema: Schema.Struct({
 								outcome: Schema.String,
-							}) as unknown as PersistedShape["schema"],
+							}),
 						}
 					: shape,
 			)
@@ -524,7 +532,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			const added: PersistedShape = {
 				id: "event:Sessions.session.example_added",
 				kind: "event",
-				schema: Schema.Struct({ note: Schema.String }) as unknown as PersistedShape["schema"],
+				schema: Schema.Struct({ note: Schema.String }),
 			}
 			expect(yield* shipBlockers(lock, [...persistedShapes, added])).toEqual([
 				'Persisted shapes changed since "shipped".',
@@ -912,7 +920,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				const v2RoundTripFailures: Array<string> = []
 				for (const sample of generatedV2Samples) {
 					const failure = yield* decodeFailure(transformedRuntimeShape, sample)
-					if (failure !== null) v2RoundTripFailures.push(failure)
+					if (failure !== null) {
+						v2RoundTripFailures.push(failure)
+					}
 				}
 				expect(v2RoundTripFailures).toEqual([])
 
@@ -1136,7 +1146,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 										prompt_tokens: value.input_tokens ?? 0,
 										output_tokens: value.output_tokens ?? 0,
 										undeclared_bad: badExtra,
-									}) as unknown as Record<string, never>,
+									}) as unknown as JsonObject,
 							},
 						},
 						schema: SettledUsageV2,

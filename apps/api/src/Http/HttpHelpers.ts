@@ -1,9 +1,9 @@
 import {
-	type AgentModel,
 	MAX_AGENT_DESCRIPTION_LENGTH,
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/agents/AgentTypes"
+import type { AgentModel } from "@checkfu/agents/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/environments/EnvironmentTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
@@ -21,22 +21,21 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
-import { ClaimEventBatch, type EventBatch, EventBatchId } from "../Checkfu.model.ts"
+import { ClaimEventBatch, EventBatchId } from "../Checkfu.model.ts"
+import type { EventBatch } from "../Checkfu.model.ts"
 import { optionalSecret } from "../Secrets.ts"
 import {
 	AgentBodyLimit,
-	type ApiError,
 	Authentication,
-	type ERRORS,
-	type ErrorStatus,
 	EventBatchBodyLimit,
-	type HandlerError,
-	type HandlerErrorStatus,
 	RequestId,
 	RequestValidation,
 	apiError,
+	parseHandlerError,
+	redactApiErrorEnvelope,
 	statusOf,
 } from "./Api.ts"
+import type { ApiError, ERRORS, ErrorStatus, HandlerError, HandlerErrorStatus } from "./Api.ts"
 
 export const MAX_REQUEST_BODY_BYTES = 160 * 1024
 export const MAX_AGENT_BODY_BYTES =
@@ -48,34 +47,52 @@ export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
 	networking: { type: "unrestricted" },
 }
 
-const ERROR_STATUS_OF_REJECTION: Readonly<Record<number, HandlerErrorStatus>> = {
-	404: 404,
-	409: 409,
-	429: 429,
+const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined => {
+	switch (status) {
+		case 404:
+			return 404
+		case 409:
+			return 409
+		case 429:
+			return 429
+		default:
+			return undefined
+	}
 }
 
-type ApiErrorLike = Omit<HandlerError, "request_id"> & { readonly request_id?: unknown }
+interface RejectionAnnotationInfo {
+	readonly httpApiStatus?: number
+	readonly description?: string
+}
 
-const isApiErrorLike = (err: unknown): err is ApiErrorLike =>
-	typeof err === "object" &&
-	err !== null &&
-	"type" in err &&
-	err.type === "error" &&
-	"error" in err &&
-	typeof err.error === "object" &&
-	err.error !== null &&
-	"type" in err.error &&
-	"message" in err.error
-
-const rejectionAnnotations = (
-	err: unknown,
-): { readonly httpApiStatus?: unknown; readonly description?: unknown } | undefined =>
-	typeof err === "object" && err !== null && "annotations" in err.constructor
-		? (err.constructor.annotations as {
-				readonly httpApiStatus?: unknown
-				readonly description?: unknown
-			})
-		: undefined
+const rejectionAnnotationInfo = (err: unknown): RejectionAnnotationInfo | undefined => {
+	if (typeof err !== "object" || err === null) {
+		return undefined
+	}
+	const ctor: unknown = "constructor" in err ? err.constructor : undefined
+	if ((typeof ctor !== "function" && typeof ctor !== "object") || ctor === null) {
+		return undefined
+	}
+	if (!("annotations" in ctor)) {
+		return undefined
+	}
+	const annotations = ctor.annotations
+	if (typeof annotations !== "object" || annotations === null) {
+		return undefined
+	}
+	const httpApiStatus =
+		"httpApiStatus" in annotations && typeof annotations.httpApiStatus === "number"
+			? annotations.httpApiStatus
+			: undefined
+	const description =
+		"description" in annotations && typeof annotations.description === "string"
+			? annotations.description
+			: undefined
+	return {
+		...(httpApiStatus === undefined ? {} : { httpApiStatus }),
+		...(description === undefined ? {} : { description }),
+	}
+}
 
 export const currentRequestId: Effect.Effect<RequestId> = Effect.flatMap(
 	References.CurrentLogAnnotations,
@@ -86,20 +103,19 @@ export const currentRequestId: Effect.Effect<RequestId> = Effect.flatMap(
 )
 
 export const toApiError = (err: unknown, request_id: RequestId): HandlerError => {
-	if (isApiErrorLike(err)) {
-		return { ...err, request_id: RequestId.make(request_id) } as HandlerError
+	const handlerError = parseHandlerError(err, request_id)
+	if (handlerError !== undefined) {
+		return handlerError
 	}
-	const annotations = rejectionAnnotations(err)
-	const status =
-		typeof annotations?.httpApiStatus === "number"
-			? ERROR_STATUS_OF_REJECTION[annotations.httpApiStatus]
-			: undefined
-	if (status !== undefined) {
-		return apiError(
-			status,
-			typeof annotations?.description === "string" ? annotations.description : "Request rejected.",
-			request_id,
-		)
+	const rejection = rejectionAnnotationInfo(err)
+	if (rejection !== undefined) {
+		const status =
+			rejection.httpApiStatus === undefined
+				? undefined
+				: errorStatusOfRejection(rejection.httpApiStatus)
+		if (status !== undefined) {
+			return apiError(status, rejection.description ?? "Request rejected.", request_id)
+		}
 	}
 	if (Predicate.isTagged(err, "ConsistencyTimeout") || Predicate.isTagged(err, "WaitTimeout")) {
 		return apiError(503, "Timed out waiting for view consistency.", request_id)
@@ -121,26 +137,16 @@ export const present = <A, S extends HandlerErrorStatus>(
 	return value === null ? reject(status, message) : Effect.succeed(value)
 }
 
-const loggableFailure = (err: unknown): unknown => {
-	if (!isApiErrorLike(err)) return err
-	return {
-		error_type: err.error.type,
-		...(err.accepted === undefined ? {} : { accepted_count: err.accepted.length }),
-		...(err.failed_index === undefined ? {} : { failed_index: err.failed_index }),
-		...(err.unconfirmed_index === undefined ? {} : { unconfirmed_index: err.unconfirmed_index }),
-	}
-}
-
 export const handled = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, HandlerError, R> =>
 	effect.pipe(
-		Effect.catch((err) =>
+		Effect.catch((error) =>
 			Effect.flatMap(currentRequestId, (request_id) => {
-				const mapped = toApiError(err, request_id)
+				const mapped = toApiError(error, request_id)
 				return statusOf(mapped) === 500
 					? Effect.andThen(
-							Effect.logError("Unhandled API failure", loggableFailure(err)),
+							Effect.logError("Unhandled API failure", redactApiErrorEnvelope(error) ?? error),
 							Effect.fail(mapped),
 						)
 					: Effect.fail(mapped)
@@ -219,15 +225,17 @@ const utf8Encoder = new TextEncoder()
 export const randomId = (random: SecureRandom.SecureRandom["Service"], prefix: string) =>
 	Effect.map(random.randomBytes(12), (bytes) => `${prefix}_${Hex.encode(bytes)}`)
 
-const canonicalize = (value: unknown): unknown => {
-	if (Array.isArray(value)) return value.map(canonicalize)
+const stringifyCanonicalJson = (value: unknown): string => {
+	if (Array.isArray(value)) {
+		return `[${value.map((entry) => (entry === undefined ? "null" : stringifyCanonicalJson(entry))).join(",")}]`
+	}
 	if (value !== null && typeof value === "object") {
 		const entries = Object.entries(value)
 			.filter(([, entry]) => entry !== undefined)
 			.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-		return Object.fromEntries(entries.map(([key, entry]) => [key, canonicalize(entry)]))
+		return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stringifyCanonicalJson(entry)}`).join(",")}}`
 	}
-	return value
+	return JSON.stringify(value)
 }
 
 export const sha256Json = (
@@ -262,7 +270,7 @@ export const createClaimId = (
 ) => idempotencyClaimId(digest, "cr", ["create", resource, idempotencyKey])
 
 export const createFingerprint = (digest: Digest.Digest["Service"], payload: unknown) =>
-	sha256Json(digest, canonicalize(payload))
+	digest.digestHex(Digest.sha256, utf8Encoder.encode(stringifyCanonicalJson(payload)))
 
 export const createCommandId = (
 	digest: Digest.Digest["Service"],
@@ -369,7 +377,9 @@ export const requestPath = (request: HttpServerRequest.HttpServerRequest): strin
 	const raw = request.url
 	if (!raw.startsWith("/")) {
 		const parsed = HttpServerRequest.toURL(request)
-		if (Option.isSome(parsed)) return parsed.value.pathname
+		if (Option.isSome(parsed)) {
+			return parsed.value.pathname
+		}
 	}
 	const queryIndex = raw.indexOf("?")
 	const hashIndex = raw.indexOf("#")

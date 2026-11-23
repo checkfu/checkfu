@@ -81,7 +81,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 		"continues a truncated reply from exactly the assistant text published to the session",
 		() => {
 			const prefix = "p".repeat(MAX_MESSAGE_TEXT_LENGTH)
-			const history: string[] = []
+			const history: Array<string> = []
 			const { layer } = makePiDurableTestLayer(async (model, context) => {
 				for (const message of context.messages) {
 					if (message.role === "assistant") {
@@ -322,7 +322,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 	it.live("budgets rebuilt history against small-context models like gpt-4", () => {
 		expect(
 			seedTokenBudget({
-				contextWindow: 8_192,
+				contextWindow: 8192,
 				system: "s".repeat(20_000),
 				currentInput: "prompt",
 			}),
@@ -351,7 +351,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 				recoveryBytesSeen.push(totalPromptBytes)
 			}
 			const approxTokens = Math.ceil(totalPromptBytes / 3)
-			return makeAssistantReply(model, null, `reply-${"aBcDeFgH".repeat(400)}`, approxTokens, 1_200)
+			return makeAssistantReply(model, null, `reply-${"aBcDeFgH".repeat(400)}`, approxTokens, 1200)
 		})
 
 		return Effect.gen(function* () {
@@ -399,7 +399,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 				0,
 			)
 			const allowedSeedTokens = seedTokenBudget({
-				contextWindow: 8_192,
+				contextWindow: 8192,
 				system,
 				currentInput,
 			})
@@ -412,8 +412,8 @@ describe("Pi history recovery and small-context budgeting", () => {
 			recovered = false
 			yield* sendAndSettle(apiFetch, session.id, [`turn-8-${"wXyZaBcD".repeat(200)}`], 8)
 			expect(recoveryBytesSeen).toHaveLength(1)
-			expect(recoveryBytesSeen[0]).toBeLessThanOrEqual(8_192 - 2_048)
-			expect(summaryTokensSeen.every((tokens) => tokens < 8_192)).toBe(true)
+			expect(recoveryBytesSeen[0]).toBeLessThanOrEqual(8192 - 2048)
+			expect(summaryTokensSeen.every((tokens) => tokens < 8192)).toBe(true)
 		}).pipe(Effect.scoped, Effect.provide(layer))
 	})
 
@@ -485,7 +485,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 						0,
 					),
 				).toBeLessThanOrEqual(
-					seedTokenBudget({ contextWindow: 8_192, system: null, currentInput: "continue" }),
+					seedTokenBudget({ contextWindow: 8192, system: null, currentInput: "continue" }),
 				)
 
 				// 2. Non-ASCII Japanese transcript on gpt-4 must stay strictly within the 8,192-token
@@ -514,7 +514,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 				)
 				const jpFollowUpBytes = new TextEncoder().encode(jpFollowUp).length
 				// Worst-case 1 token/UTF-8-byte across the rebuilt seed + follow-up stays below gpt-4's window.
-				expect(jpSeedUtf8Bytes + jpFollowUpBytes).toBeLessThan(8_192 - 2_048)
+				expect(jpSeedUtf8Bytes + jpFollowUpBytes).toBeLessThan(8192 - 2048)
 			}).pipe(Effect.scoped, Effect.provide(layer))
 		},
 	)
@@ -605,7 +605,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 				yield* Effect.promise(() => forgetPiState(conversationName(sessFailed.id, 0)))
 
 				// Huge prompt exhausts gpt-4's 8,192-token seed budget -> empty trimmed seed, then fails.
-				yield* sendAndSettle(apiFetch, sessFailed.id, [`fail-huge-${"x".repeat(8_000)}`], 3)
+				yield* sendAndSettle(apiFetch, sessFailed.id, [`fail-huge-${"x".repeat(8000)}`], 3)
 				expect(requests.at(-1)?.seed).toMatchObject({ messages: [], trimmed: true })
 
 				// Short follow-up MUST rebuild Turn 1 & Turn 2 history + keep system prompt.
@@ -646,7 +646,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 						events: [
 							{
 								type: "user.message",
-								content: [{ type: "text", text: `interrupt-huge-${"y".repeat(8_000)}` }],
+								content: [{ type: "text", text: `interrupt-huge-${"y".repeat(8000)}` }],
 							},
 						],
 					},
@@ -682,7 +682,7 @@ describe("Pi history recovery and small-context budgeting", () => {
 				yield* Effect.promise(() => forgetPiState(conversationName(sessPartial.id, 0)))
 
 				// Leave ~450 bytes of seed budget: fits a trimmed tail of Turn 2, drops Turn 1, then fails.
-				const partialPrompt = `fail-partial-${"z".repeat(5_600)}`
+				const partialPrompt = `fail-partial-${"z".repeat(5600)}`
 				yield* sendAndSettle(apiFetch, sessPartial.id, [partialPrompt], 3)
 				const partialSeed = requests.at(-1)?.seed
 				expect(partialSeed?.trimmed).toBe(true)

@@ -26,12 +26,11 @@ import * as References from "effect/References"
 import * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
-import { MAX_AGENT_BODY_BYTES, toApiError } from "../src/Http/HttpHelpers.ts"
+import { MAX_AGENT_BODY_BYTES, handled, toApiError } from "../src/Http/HttpHelpers.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableModelProvider.ts"
 import {
 	AUTH_HEADERS,
-	type RecordedModelCall,
 	TEST_API_KEY,
 	createIdleSession,
 	extractConversationMessageCount,
@@ -43,6 +42,7 @@ import {
 	readSseUntil,
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
+import type { RecordedModelCall } from "./helpers/ApiHarness.ts"
 
 describe("HTTP API routing, auth, validation, and quickstart", () => {
 	it("runs the full multi-turn quickstart flow through real pi-durable: agent -> environment -> session -> SSE -> archive", async () => {
@@ -185,7 +185,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					])
 
 					// 6. Send turn 2 and verify pi-durable preserves full conversation history
-					const lastTurn1Seq = turn1Frames[turn1Frames.length - 1]!.id
+					const lastTurn1Seq = turn1Frames.at(-1)!.id
 					const turn2Stream = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream?after=${lastTurn1Seq}`,
@@ -538,7 +538,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const specRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
 					expect(specRes.status).toBe(200)
 					const spec = (yield* Effect.promise(() => specRes.json())) as {
-						paths: Record<string, Record<string, unknown>>
+						paths: Record<
+							string,
+							Record<
+								string,
+								{ readonly responses?: Record<string, { readonly description?: string }> }
+							>
+						>
 					}
 					expect(Object.keys(spec.paths).toSorted()).toEqual([
 						"/health",
@@ -554,15 +560,11 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/sessions/{session_id}/events",
 						"/v1/sessions/{session_id}/events/stream",
 					])
-					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"] as
-						| { readonly responses: Record<string, unknown> }
-						| undefined
+					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(
 						expect.arrayContaining(["200", "204"]),
 					)
-					const agentsPost = spec.paths["/v1/agents"]?.["post"] as
-						| { readonly responses: Record<string, unknown> }
-						| undefined
+					const agentsPost = spec.paths["/v1/agents"]?.["post"]
 					expect(Object.keys(agentsPost?.responses ?? {})).toEqual(expect.arrayContaining(["415"]))
 
 					const unsupportedRes = yield* sendRequest(apiFetch, {
@@ -587,7 +589,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						headers: AUTH_HEADERS,
 						body: { name: "Agent", model: "gpt-4o-mini" },
 					})
-					const agent = (yield* Effect.promise(() => agentRes.json())) as Record<string, unknown>
+					const agent = (yield* Effect.promise(() => agentRes.json())) as {
+						readonly created_at: string
+						readonly archived_at: string | null
+					}
 					expect(agent.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
 					expect(agent.archived_at).toBeNull()
 					expect("current_version_id" in agent).toBe(false)
@@ -644,7 +649,9 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					}
 					const schemas = spec.components?.schemas ?? {}
 					const resolve = (node: JsonSchemaNode | undefined): JsonSchemaNode | undefined => {
-						if (node?.$ref === undefined) return node
+						if (node?.$ref === undefined) {
+							return node
+						}
 						const name = node.$ref.replace(/^#\/components\/schemas\//, "")
 						return schemas[name]
 					}
@@ -780,6 +787,9 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					type: "error",
 					error: { type: "conflict_error", message: "Conflict." },
 					request_id: "req_stale_other_request",
+					accepted: [{ id: "evt_1" }],
+					failed_index: 1,
+					unconfirmed_index: 2,
 				},
 				requestId,
 			),
@@ -787,7 +797,48 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			type: "error",
 			error: { type: "conflict_error", message: "Conflict." },
 			request_id: requestId,
+			accepted: [{ id: "evt_1" }],
+			failed_index: 1,
+			unconfirmed_index: 2,
 		})
+		const nullProtoEnvelope: unknown = Object.assign(Object.create(null), {
+			type: "error",
+			error: { type: "unsupported_error_type", message: "Nope." },
+		})
+		for (const unsupported of [
+			apiError(401, "Invalid API key.", requestId),
+			{ type: "error", error: null, accepted: [{ id: "evt_1" }] },
+			{ type: "error", error: { type: "unsupported_error_type", message: "Nope." } },
+			{ type: "error", error: { type: "conflict_error", message: 123 } },
+			{
+				type: "error",
+				error: { type: "conflict_error", message: "Bad." },
+				failed_index: Number.NaN,
+			},
+			{
+				type: "error",
+				error: { type: "conflict_error", message: "Bad." },
+				failed_index: Number.POSITIVE_INFINITY,
+			},
+			{
+				type: "error",
+				error: { type: "conflict_error", message: "Bad." },
+				unconfirmed_index: Number.NEGATIVE_INFINITY,
+			},
+			nullProtoEnvelope,
+			{
+				constructor: null,
+				type: "error",
+				error: { type: "unsupported_error_type", message: "Nope." },
+			},
+			Object.create(null),
+		]) {
+			expect(toApiError(unsupported, requestId)).toEqual({
+				type: "error",
+				error: { type: "internal_error", message: "Internal server error." },
+				request_id: requestId,
+			})
+		}
 	})
 
 	it("routes stored resource IDs according to each resource's advertised ID schema", async () => {
@@ -1207,7 +1258,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 											content?: {
 												"application/json"?: {
 													schema?: {
-														properties?: Record<string, unknown>
+														properties?: { readonly request_id?: object }
 														required?: ReadonlyArray<string>
 													}
 												}
@@ -1343,7 +1394,11 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		)
 		const logs: Array<{
 			readonly message: unknown
-			readonly annotations: Readonly<Record<string, unknown>>
+			readonly annotations: {
+				readonly request_id?: unknown
+				readonly service?: unknown
+				readonly caller?: unknown
+			}
 		}> = []
 		const captureLogger = Logger.layer([
 			Logger.make(({ message, fiber }) => {
@@ -1370,7 +1425,9 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							ref: Parameters<typeof realAgentViews.get>[0],
 							options?: Parameters<typeof realAgentViews.get>[1],
 						) => {
-							if (mode === "router-defect") return Effect.die(new Error("router defect"))
+							if (mode === "router-defect") {
+								return Effect.die(new Error("router defect"))
+							}
 							if (mode === "handler-error") {
 								return Effect.fail(new Error("handler error") as unknown as never)
 							}
@@ -1580,6 +1637,102 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			)
 		} finally {
 			await closeAll()
+		}
+	})
+
+	it("redacts malformed or non-handler API error envelopes before logging in handled()", async () => {
+		const requestId = RequestId.make("req_redact_malformed_envelope")
+		const privateBodyText = "PRIVATE_USER_MESSAGE_MUST_NOT_LOG"
+		const privateErrorMessage = "PRIVATE_ERROR_DETAIL_MUST_NOT_LOG"
+		const privateDiscriminator = "PRIVATE_DISCRIMINATOR_MUST_NOT_LOG"
+		const logs: Array<unknown> = []
+		const captureLogger = Logger.layer([
+			Logger.make(({ message }) => {
+				logs.push(message)
+			}),
+		])
+
+		const cases = [
+			{
+				envelope: {
+					type: "error",
+					error: { type: "internal_error", message: 42 },
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+					failed_index: 1,
+				},
+				expectedLogged: { error_type: "internal_error", accepted_count: 1, failed_index: 1 },
+			},
+			{
+				envelope: {
+					type: "error",
+					error: { type: "authentication_error", message: privateErrorMessage },
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+				},
+				expectedLogged: { error_type: "authentication_error", accepted_count: 1 },
+			},
+			{
+				envelope: {
+					type: "error",
+					error: { type: privateDiscriminator, message: privateErrorMessage },
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+				},
+				expectedLogged: { error_type: "unknown", accepted_count: 1 },
+			},
+			{
+				envelope: {
+					type: "error",
+					error: null,
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+				},
+				expectedLogged: { error_type: "unknown", accepted_count: 1 },
+			},
+			{
+				envelope: {
+					type: "error",
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+				},
+				expectedLogged: { error_type: "unknown", accepted_count: 1 },
+			},
+			{
+				envelope: {
+					type: "error",
+					error: privateErrorMessage,
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+				},
+				expectedLogged: { error_type: "unknown", accepted_count: 1 },
+			},
+			{
+				envelope: {
+					type: "error",
+					error: { type: "conflict_error", message: privateErrorMessage },
+					accepted: [{ type: "user.message", content: [{ type: "text", text: privateBodyText }] }],
+					failed_index: Number.NaN,
+					unconfirmed_index: Number.POSITIVE_INFINITY,
+				},
+				expectedLogged: { error_type: "conflict_error", accepted_count: 1 },
+			},
+		]
+
+		for (const testCase of cases) {
+			logs.length = 0
+			const result = await Effect.runPromise(
+				Effect.flip(
+					handled(Effect.fail(testCase.envelope)).pipe(
+						Effect.annotateLogs({ request_id: requestId }),
+						Effect.provide(captureLogger),
+					),
+				),
+			)
+			expect(result).toEqual({
+				type: "error",
+				error: { type: "internal_error", message: "Internal server error." },
+				request_id: requestId,
+			})
+			expect(logs).toEqual([["Unhandled API failure", testCase.expectedLogged]])
+			const serialized = JSON.stringify(logs)
+			expect(serialized).not.toContain(privateBodyText)
+			expect(serialized).not.toContain(privateErrorMessage)
+			expect(serialized).not.toContain(privateDiscriminator)
 		}
 	})
 })

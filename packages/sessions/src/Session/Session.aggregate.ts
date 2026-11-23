@@ -37,13 +37,8 @@ import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
-import {
-	NonEmptyString,
-	NonNegativeInt,
-	PositiveInt,
-	type StopReason,
-	type ModelUsage,
-} from "./SessionTypes.ts"
+import { NonEmptyString, NonNegativeInt, PositiveInt } from "./SessionTypes.ts"
+import type { StopReason, ModelUsage } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
@@ -87,7 +82,7 @@ const abandonTurn = (
 	const errorEvent = new SessionErrorEvent({
 		error: {
 			type: error_type,
-			message: message,
+			message,
 			retry_status: { type: "exhausted" },
 		},
 	})
@@ -112,8 +107,12 @@ const requireActive = (
 	state: SessionState,
 	session_id: SessionId,
 ): ActiveState | SessionNotFound | SessionTerminated => {
-	if (state._tag === "Uninitialized") return new SessionNotFound({ session_id })
-	if (state._tag === "Terminated") return new SessionTerminated({ session_id })
+	if (state._tag === "Uninitialized") {
+		return new SessionNotFound({ session_id })
+	}
+	if (state._tag === "Terminated") {
+		return new SessionTerminated({ session_id })
+	}
 	return state
 }
 
@@ -122,7 +121,9 @@ const requireRunningTurn = (
 	session_id: SessionId,
 	turn: number,
 ): RunningState | SessionNotFound | SessionNotRunning | StaleTurn => {
-	if (state._tag === "Uninitialized") return new SessionNotFound({ session_id })
+	if (state._tag === "Uninitialized") {
+		return new SessionNotFound({ session_id })
+	}
 	if (state._tag !== "Running") {
 		return new SessionNotRunning({
 			session_id,
@@ -243,7 +244,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		SendUserMessage: (state, cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
-			if (active._tag !== "Idle" && active._tag !== "Running") return active
+			if (active._tag !== "Idle" && active._tag !== "Running") {
+				return active
+			}
 			if (active._tag === "Running" && active.pending_user_messages >= 8) {
 				return new PendingMessageQueueFull({ session_id: ctx.id, limit: 8 })
 			}
@@ -253,7 +256,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		SendUserInterrupt: (state, _cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
-			if (active._tag !== "Idle" && active._tag !== "Running") return active
+			if (active._tag !== "Idle" && active._tag !== "Running") {
+				return active
+			}
 			if (active._tag !== "Running") {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
 			}
@@ -262,7 +267,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		RecordModelRequestStart: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") return running
+			if (running._tag !== "Running") {
+				return running
+			}
 			if (
 				running.open_model_request_id !== null ||
 				cmd.request_seq <= running.model_requests_started
@@ -298,7 +305,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		RecordModelRequestEnd: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") return running
+			if (running._tag !== "Running") {
+				return running
+			}
 			if (
 				running.open_model_request_id !== cmd.model_request_start_id ||
 				running.model_requests_started !== cmd.request_seq
@@ -319,7 +328,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		CompleteTurn: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") return running
+			if (running._tag !== "Running") {
+				return running
+			}
 			if (running.open_model_request_id !== null) {
 				return new OpenModelRequests({
 					session_id: ctx.id,
@@ -335,7 +346,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		CommitModelReply: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") return running
+			if (running._tag !== "Running") {
+				return running
+			}
 			if (
 				running.open_model_request_id !== cmd.model_request_start_id ||
 				running.model_requests_started !== cmd.request_seq
@@ -367,7 +380,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		FailModelRequest: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") return running
+			if (running._tag !== "Running") {
+				return running
+			}
 			if (
 				running.open_model_request_id !== cmd.model_request_start_id ||
 				running.model_requests_started !== cmd.request_seq
@@ -377,8 +392,9 @@ export class Session extends Domain.Aggregate("Session", {
 					model_request_start_id: cmd.model_request_start_id,
 				})
 			}
-			if (cmd.disposition === "abandoned")
+			if (cmd.disposition === "abandoned") {
 				return abandonTurn(running, cmd.error_type, cmd.message, cmd.model_usage)
+			}
 			const end = new SpanModelRequestEnd({
 				model_request_start_id: cmd.model_request_start_id,
 				model_usage: cmd.model_usage,
@@ -403,7 +419,9 @@ export class Session extends Domain.Aggregate("Session", {
 
 		InterruptModelRequest: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
-			if (running._tag !== "Running") return running
+			if (running._tag !== "Running") {
+				return running
+			}
 			if (
 				running.open_model_request_id !== cmd.model_request_start_id ||
 				running.model_requests_started !== cmd.request_seq
@@ -426,13 +444,17 @@ export class Session extends Domain.Aggregate("Session", {
 		},
 
 		AbandonTurn: (state, cmd) => {
-			if (state._tag !== "Running" || state.turn !== cmd.turn) return []
+			if (state._tag !== "Running" || state.turn !== cmd.turn) {
+				return []
+			}
 			return abandonTurn(state, cmd.error_type, cmd.message, { input_tokens: 0, output_tokens: 0 })
 		},
 
 		RecordSessionError: (state, cmd, ctx) => {
 			const active = requireActive(state, ctx.id)
-			if (active._tag !== "Idle" && active._tag !== "Running") return active
+			if (active._tag !== "Idle" && active._tag !== "Running") {
+				return active
+			}
 			const errorEvent = new SessionErrorEvent({ error: cmd.error })
 			const terminateWithError = () =>
 				active._tag === "Running" && active.open_model_request_id !== null
@@ -480,7 +502,9 @@ export class Session extends Domain.Aggregate("Session", {
 		},
 
 		ArchiveSession: (state, _cmd, ctx) => {
-			if (state._tag === "Uninitialized") return new SessionNotFound({ session_id: ctx.id })
+			if (state._tag === "Uninitialized") {
+				return new SessionNotFound({ session_id: ctx.id })
+			}
 			if (state._tag === "Terminated") {
 				return state.archived ? [] : [new SessionArchived()]
 			}

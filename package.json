@@ -33,8 +33,9 @@
 		"destroy": "alchemy destroy",
 		"typecheck": "turbo run typecheck && effect-tsgo tsc --noEmit -p tsconfig.stack.json",
 		"test": "turbo run test",
+		"test:bun": "bun --cwd apps/api test:bun",
 		"test:workerd": "bun --cwd apps/api test:workerd",
-		"lint": "effect-tsgo oxlint -c .oxlintrc.jsonc --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives .",
+		"lint": "effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives .",
 		"format": "oxfmt .",
 		"format:check": "oxfmt --check .",
 		"check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
@@ -52,10 +53,12 @@
 		"effect": "catalog:"
 	},
 	"devDependencies": {
+		"@cloudflare/oxlint-config": "0.1.0",
 		"@effect/tsgo": "0.73.2",
 		"oxfmt": "0.79.0",
 		"oxlint": "1.94.0",
 		"oxlint-tsgolint": "7.0.2007",
+		"tsrs": "0.25.0-ts7.1.0-beta",
 		"turbo": "2.11.13",
 		"typescript": "catalog:"
 	},

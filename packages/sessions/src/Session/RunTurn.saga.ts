@@ -52,7 +52,7 @@ export const RunTurnLive = RunTurn.toLayer(
 		const sessions = yield* Session
 		const provider = yield* ModelProvider
 
-		return Effect.fn(function* (payload) {
+		return Effect.fn(function* (payload: typeof RunTurn.workflow.payloadSchema.Type) {
 			const requestId = `${payload.key}:req:1`
 
 			const started = yield* runTurnActivity(

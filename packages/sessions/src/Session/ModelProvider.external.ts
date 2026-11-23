@@ -78,7 +78,9 @@ export class ModelProvider extends Domain.ExternalSystem("ModelProvider", {
 }) {}
 
 const clampText = (value: string, maxLength: number, fallback: string): string => {
-	if (value.length === 0) return fallback
+	if (value.length === 0) {
+		return fallback
+	}
 	return value.length > maxLength ? value.slice(0, maxLength) : value
 }
 

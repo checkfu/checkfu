@@ -1,11 +1,11 @@
 import * as Schema from "effect/Schema"
 
 export const MAX_IDENTIFIER_LENGTH = 256
-export const MAX_TITLE_LENGTH = 1_024
+export const MAX_TITLE_LENGTH = 1024
 export const MAX_MESSAGE_TEXT_LENGTH = 16_384
 export const MAX_THINKING_TEXT_LENGTH = 16_384
 export const MAX_ERROR_TYPE_LENGTH = 128
-export const MAX_ERROR_MESSAGE_LENGTH = 4_096
+export const MAX_ERROR_MESSAGE_LENGTH = 4096
 
 export const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 export const ResourceId = Schema.String.check(

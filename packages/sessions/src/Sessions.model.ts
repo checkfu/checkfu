@@ -17,8 +17,12 @@ export class Sessions extends Domain.Model("Sessions", {
 			[
 				m.Session.every((s) => {
 					const view = m.SessionView.find((v) => v.id === s.id)
-					if (s.state._tag === "Uninitialized") return view === undefined
-					if (view === undefined) return false
+					if (s.state._tag === "Uninitialized") {
+						return view === undefined
+					}
+					if (view === undefined) {
+						return false
+					}
 					if (s.state._tag === "Idle") {
 						return [
 							view.state.id === s.id,
@@ -52,8 +56,12 @@ export class Sessions extends Domain.Model("Sessions", {
 				m.Session.every((s) => {
 					const view = m.TurnInput.find((v) => v.id === s.id)
 					const sessionView = m.SessionView.find((v) => v.id === s.id)
-					if (s.state._tag === "Uninitialized") return view === undefined
-					if (view === undefined || sessionView === undefined) return false
+					if (s.state._tag === "Uninitialized") {
+						return view === undefined
+					}
+					if (view === undefined || sessionView === undefined) {
+						return false
+					}
 					const common = [
 						view.state.agent_id === sessionView.state.agent_id,
 						view.state.agent_version === sessionView.state.agent_version,

@@ -51,7 +51,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		})
 
 		const originalFetch = globalThis.fetch
-		globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+		globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
 			fetchCalls += 1
 			if (typeof init?.body === "string") {
 				sentRequests.push(
@@ -143,7 +143,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const realAnthropicModels = createPiModels({
 			openai: null,
@@ -334,7 +334,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			readonly messages?: ReadonlyArray<{ readonly role: string; readonly content: unknown }>
 		}> = []
 
-		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_url: unknown, init?: RequestInit) => {
 			fetchCalls += 1
 			if (typeof init?.body === "string") {
 				sentRequests.push(JSON.parse(init.body))
@@ -407,7 +407,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 
 		const realModels = createPiModels({
 			openai: null,
@@ -532,7 +532,9 @@ describe("Anthropic Messages refusals and stream errors", () => {
 							status: string
 							turn: number
 						}
-						if (body.status === "idle" && body.turn === 1) break
+						if (body.status === "idle" && body.turn === 1) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 					// Confirm no second model call ran (refusal MUST NOT drain queued messages).
@@ -612,11 +614,11 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		})
 
 		// 1. Sensitive delta followed by overloaded_error before message_stop -> provider error (NOT published refusal).
-		globalThis.fetch = (async () =>
+		globalThis.fetch = async () =>
 			new Response(makeFailingStream("sensitive", true), {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
-			})) as unknown as typeof fetch
+			})
 		const backend1 = await createInMemoryPiDurableBackend(realModels)
 		try {
 			const result = await Effect.runPromise(
@@ -643,11 +645,11 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		}
 
 		// 2. Refusal delta followed by abrupt EOF before message_stop -> provider error (NOT published refusal).
-		globalThis.fetch = (async () =>
+		globalThis.fetch = async () =>
 			new Response(makeFailingStream("refusal", false), {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
-			})) as unknown as typeof fetch
+			})
 		const backend2 = await createInMemoryPiDurableBackend(realModels)
 		try {
 			const result = await Effect.runPromise(
@@ -677,7 +679,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		//    Anthropic SDK throws before onProviderStreamEvent runs) -> provider error, NOT refusal,
 		//    and must not contaminate a subsequent turn's context.
 		const sentAfterPostStopError: Array<unknown> = []
-		globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
 			sentAfterPostStopError.push(body)
 			const isFailingTurn = JSON.stringify(body).includes("trigger post-stop overloaded_error")
@@ -746,7 +748,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				status: 200,
 				headers: { "content-type": "text/event-stream" },
 			})
-		}) as unknown as typeof fetch
+		}
 		const backend3 = await createInMemoryPiDurableBackend(realModels)
 		try {
 			const result1 = await Effect.runPromise(
@@ -802,7 +804,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			"incomplete.content_filter",
 		]) {
 			const sentRequests: Array<unknown> = []
-			globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+			globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 				const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
 				sentRequests.push(body)
 				const isFailingTurn = JSON.stringify(body).includes(`trigger:${unconfirmedStopReason}`)
@@ -867,7 +869,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					status: 200,
 					headers: { "content-type": "text/event-stream" },
 				})
-			}) as unknown as typeof fetch
+			}
 
 			const backend = await createInMemoryPiDurableBackend(realModels)
 			try {
@@ -927,7 +929,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				openai: null,
 				anthropic: Redacted.make("sk-ant-test"),
 			})
-			globalThis.fetch = (async () =>
+			globalThis.fetch = async () =>
 				new Response(
 					[
 						`event: message_start\ndata: ${JSON.stringify({
@@ -955,7 +957,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 						`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
 					].join(""),
 					{ status: 200, headers: { "content-type": "text/event-stream" } },
-				)) as unknown as typeof fetch
+				)
 
 			const normalizedBackends = new Map<
 				string,
@@ -1093,7 +1095,9 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					})),
 				)
 				const claudeModel = wrappedCompactionModels.getModel("anthropic", "claude-sonnet-4-6")
-				if (claudeModel === undefined) throw new Error("expected claude-sonnet-4-6")
+				if (claudeModel === undefined) {
+					throw new Error("expected claude-sonnet-4-6")
+				}
 				const rejectedDirect = await wrappedCompactionModels.completeSimple(claudeModel, {
 					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
 				})
@@ -1127,8 +1131,8 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					model,
 					null,
 					"a".repeat(12_000),
-					normalTurns === 4 ? 190_000 : 6_000,
-					3_000,
+					normalTurns === 4 ? 190_000 : 6000,
+					3000,
 				)
 			})
 			closeables.push(compactionHarness.closeAll)

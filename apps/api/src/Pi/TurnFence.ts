@@ -1,5 +1,5 @@
 export interface SqlExecutor {
-	exec(query: string, ...bindings: ReadonlyArray<unknown>): Iterable<Record<string, unknown>>
+	exec(query: string, ...bindings: ReadonlyArray<unknown>): Iterable<object>
 	transaction(run: () => void): void
 }
 
@@ -12,11 +12,15 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
 const applyMigrations = (sql: SqlExecutor, migrations: ReadonlyArray<Migration>): void => {
 	sql.exec("CREATE TABLE IF NOT EXISTS checkfu_fence_migrations (id INTEGER PRIMARY KEY)")
 	const applied = new Set<unknown>(
-		[...sql.exec("SELECT id FROM checkfu_fence_migrations")].map((row) => row["id"]),
+		[...sql.exec("SELECT id FROM checkfu_fence_migrations")].map((row) =>
+			"id" in row ? row.id : undefined,
+		),
 	)
 	migrations.forEach((statements, index) => {
 		const id = index + 1
-		if (applied.has(id)) return
+		if (applied.has(id)) {
+			return
+		}
 		sql.transaction(() => {
 			for (const statement of statements) {
 				sql.exec(statement)
@@ -37,7 +41,9 @@ export class SqliteTurnFence {
 	}
 
 	#ensureTables(): void {
-		if (this.#initialized) return
+		if (this.#initialized) {
+			return
+		}
 		applyMigrations(this.#sql, this.#migrations)
 		this.#initialized = true
 	}

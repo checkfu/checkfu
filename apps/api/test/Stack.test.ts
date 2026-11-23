@@ -402,7 +402,7 @@ describe("Alchemy stack and worker entry", () => {
 				const patched: Array<workers.PatchScriptSettingRequest> = []
 				const patchSetting = (input: workers.PatchScriptSettingRequest) => {
 					patched.push(input)
-					return Effect.succeed({} as workers.PatchScriptSettingResponse)
+					return Effect.succeed({})
 				}
 
 				// Existing store with previous default (invocationLogs: true) + extra settings to preserve.
@@ -507,7 +507,7 @@ describe("Alchemy stack and worker entry", () => {
 					getSetting: () =>
 						Effect.fail(
 							new workers.WorkerNotFound({
-								code: 10007,
+								code: 10_007,
 								message: "workers.api.error.script_not_found",
 							}),
 						),
@@ -531,7 +531,7 @@ describe("Alchemy stack and worker entry", () => {
 					getSetting: () =>
 						Effect.fail(
 							new workers.WorkerHasNoVersions({
-								code: 10215,
+								code: 10_215,
 								message: "workers.api.error.script_has_no_versions",
 							}),
 						),

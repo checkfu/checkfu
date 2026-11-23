@@ -10,8 +10,12 @@ export class Environments extends Domain.Model("Environments", {
 			[
 				m.Environment.every((e) => {
 					const view = m.EnvironmentView.find((v) => v.id === e.id)
-					if (e.state.status === "" || e.state.status === "deleted") return view === undefined
-					if (view === undefined) return false
+					if (e.state.status === "" || e.state.status === "deleted") {
+						return view === undefined
+					}
+					if (view === undefined) {
+						return false
+					}
 					return [
 						view.state.id === e.id,
 						view.state.version === e.state.version,

@@ -50,7 +50,8 @@ import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
-import { type BaseRuntimeContext, RuntimeContext } from "alchemy/RuntimeContext"
+import { RuntimeContext } from "alchemy/RuntimeContext"
+import type { BaseRuntimeContext } from "alchemy/RuntimeContext"
 import { storageCallbacks } from "alchemy/Workers/StorageCallbacks"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -81,11 +82,8 @@ import {
 	conversationName,
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableModelProvider.ts"
-import {
-	type PiTurnRequest,
-	recoverPiDurableTurn,
-	runPiDurableTurn,
-} from "../src/Pi/PiDurableEngine.ts"
+import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import type { PiTurnRequest } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
@@ -1550,7 +1548,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							),
 				runTurn: (conversation, request) =>
 					Effect.suspend(() => {
-						if (request.seed !== undefined) seededRequests.push(request)
+						if (request.seed !== undefined) {
+							seededRequests.push(request)
+						}
 						return Effect.flatMap(
 							Effect.promise(() => getBackend(conversation)),
 							(backend) => runPiDurableTurn(backend, request),
@@ -2100,48 +2100,41 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					let failNextAgentBeforeCommit = false
 					let dropNextEnvReceipt = false
 
-					const wrappedCreateAgent = new Proxy(realCreateAgent, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof realCreateAgent.send>[0],
-										options?: Parameters<typeof realCreateAgent.send>[1],
-									) => {
-										if (failNextAgentBeforeCommit) {
-											failNextAgentBeforeCommit = false
-											return Effect.die(new Error("failed before commit"))
-										}
-										sentAgentIds.push(command.agent_id)
-										const call = target.send(command, options)
-										if (dropNextAgentReceipt) {
-											dropNextAgentReceipt = false
-											return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
-										}
-										return call
-									}
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+					const wrappedCreateAgent: typeof realCreateAgent = {
+						...realCreateAgent,
+						send: (command, options) => {
+							if (failNextAgentBeforeCommit) {
+								failNextAgentBeforeCommit = false
+								return Effect.die(new Error("failed before commit"))
+							}
+							sentAgentIds.push(command.agent_id)
+							const call = realCreateAgent.send(command, options)
+							if (dropNextAgentReceipt) {
+								dropNextAgentReceipt = false
+								return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
+							}
+							return call
+						},
+					}
 
-					const wrappedEnvironments = new Proxy(realEnvironments, {
-						get: (target, property, receiver) =>
-							property === "send"
-								? (
-										command: Parameters<typeof realEnvironments.send>[0],
-										options?: Parameters<typeof realEnvironments.send>[1],
-									) => {
-										if (command._tag === "CreateEnvironment") {
-											sentEnvironmentIds.push(command.environment_id)
-											const call = target.send(command, options)
-											if (dropNextEnvReceipt) {
-												dropNextEnvReceipt = false
-												return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
-											}
-											return call
-										}
-										return target.send(command, options)
-									}
-								: (Reflect.get(target, property, receiver) as unknown),
-					})
+					const wrappedEnvironments: typeof realEnvironments = {
+						...realEnvironments,
+						send: ((
+							command: Parameters<typeof realEnvironments.send>[0],
+							options?: Parameters<typeof realEnvironments.send>[1],
+						) => {
+							if (command._tag === "CreateEnvironment") {
+								sentEnvironmentIds.push(command.environment_id)
+								const call = realEnvironments.send(command, options)
+								if (dropNextEnvReceipt) {
+									dropNextEnvReceipt = false
+									return call.pipe(Effect.andThen(Effect.die(new Error("receipt lost"))))
+								}
+								return call
+							}
+							return realEnvironments.send(command, options)
+						}) as typeof realEnvironments.send,
+					}
 
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(CreateAgentDecision, wrappedCreateAgent),
@@ -2730,10 +2723,12 @@ describe("Agent and environment field length limits", () => {
 							body: testCase.makeCreateBody(atLimit),
 						})
 						expect(createOk.status).toBe(201)
-						const created = (yield* Effect.promise(() => createOk.json())) as Record<
-							string,
-							unknown
-						>
+						const created = (yield* Effect.promise(() => createOk.json())) as {
+							readonly id: string
+							readonly name?: string
+							readonly description?: string | null
+							readonly system?: string | null
+						}
 						expect(created[testCase.field]).toBe(atLimit)
 
 						const createTooLong = yield* sendRequest(apiFetch, {
@@ -2754,7 +2749,7 @@ describe("Agent and environment field length limits", () => {
 
 						const updatedAtLimit = "🚀".repeat(testCase.limit)
 						const updatedOverLimit = "🚀".repeat(testCase.limit + 1)
-						const resourceId = created.id as string
+						const resourceId = created.id
 
 						const updateTooLong = yield* sendRequest(apiFetch, {
 							method: "POST",
@@ -2779,10 +2774,11 @@ describe("Agent and environment field length limits", () => {
 							body: testCase.makeUpdateBody(updatedAtLimit),
 						})
 						expect(updateOk.status).toBe(200)
-						const updated = (yield* Effect.promise(() => updateOk.json())) as Record<
-							string,
-							unknown
-						>
+						const updated = (yield* Effect.promise(() => updateOk.json())) as {
+							readonly name?: string
+							readonly description?: string | null
+							readonly system?: string | null
+						}
 						expect(updated[testCase.field]).toBe(updatedAtLimit)
 					}).pipe(Effect.scoped, Effect.provide(layer)),
 				)
@@ -2906,16 +2902,16 @@ describe("Agent and environment field length limits", () => {
 						const raw = data.get(key)
 						return raw === undefined ? undefined : (v8.deserialize(raw) as T)
 					}),
-				put: ((keyOrEntries: string | Record<string, unknown>, value?: unknown) =>
+				put: (keyOrEntries: unknown, value?: unknown) =>
 					Effect.sync(() => {
 						if (typeof keyOrEntries === "string") {
 							recordWrite(keyOrEntries, value)
-						} else {
+						} else if (typeof keyOrEntries === "object" && keyOrEntries !== null) {
 							for (const [key, entry] of Object.entries(keyOrEntries)) {
 								recordWrite(key, entry)
 							}
 						}
-					})) as DurableObjects.ObjectStorage["put"],
+					}),
 				delete: ((keyOrKeys: string | ReadonlyArray<string>) =>
 					Effect.sync(() => {
 						if (typeof keyOrKeys === "string") {
@@ -2923,7 +2919,9 @@ describe("Agent and environment field length limits", () => {
 						}
 						let removed = 0
 						for (const key of keyOrKeys) {
-							if (data.delete(key)) removed += 1
+							if (data.delete(key)) {
+								removed += 1
+							}
 						}
 						return removed
 					})) as DurableObjects.ObjectStorage["delete"],
@@ -2942,8 +2940,12 @@ describe("Agent and environment field length limits", () => {
 						if (options?.end !== undefined) {
 							keys = keys.filter((key) => key < options.end!)
 						}
-						if (options?.reverse) keys.reverse()
-						if (options?.limit !== undefined) keys = keys.slice(0, options.limit)
+						if (options?.reverse) {
+							keys.reverse()
+						}
+						if (options?.limit !== undefined) {
+							keys = keys.slice(0, options.limit)
+						}
 						return new Map(keys.map((key) => [key, v8.deserialize(data.get(key)!) as T]))
 					}),
 				transaction: (effect) => effect,
@@ -2954,7 +2956,7 @@ describe("Agent and environment field length limits", () => {
 			claimKey: Effect.succeed({}),
 			declare: (_model, className, impl) =>
 				Effect.sync((): DurableObjects.Namespace => {
-					const instances = new Map<string, Effect.Effect<Record<string, unknown>, never, never>>()
+					const instances = new Map<string, Effect.Effect<object, never, never>>()
 					const getInstance = (objectId: string) => {
 						let existing = instances.get(objectId)
 						if (existing === undefined) {
@@ -3007,17 +3009,21 @@ describe("Agent and environment field length limits", () => {
 					}
 					return {
 						getByName: (objectId) =>
-							new Proxy({} as DurableObjects.Stub, {
-								get:
-									(_target, prop) =>
-									(...args: ReadonlyArray<unknown>) =>
-										Effect.flatMap(getInstance(objectId), (methods) => {
-											const fn = methods[String(prop)] as (
-												...callArgs: ReadonlyArray<unknown>
-											) => Effect.Effect<unknown>
-											return fn(...args)
-										}),
-							}),
+							new Proxy(
+								{},
+								{
+									get:
+										(_target, prop) =>
+										(...args: ReadonlyArray<unknown>) =>
+											Effect.flatMap(getInstance(objectId), (methods) => {
+												const entry = Object.entries(methods).find(([key]) => key === String(prop))
+												const fn = entry?.[1] as (
+													...callArgs: ReadonlyArray<unknown>
+												) => Effect.Effect<unknown>
+												return fn(...args)
+											}),
+								},
+							),
 					}
 				}),
 		}

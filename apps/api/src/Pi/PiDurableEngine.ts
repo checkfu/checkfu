@@ -2,32 +2,34 @@ import type { ModelUsage } from "@checkfu/sessions/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { Api, AssistantMessage, Usage } from "@earendil-works/pi-ai"
 import {
-	type AgentChange,
 	AssistantEntry,
-	type ConversationId,
-	type ConversationInit,
-	type Cursor,
-	type EntryId,
-	type Harness,
 	ROOT_CONVERSATION_ID,
 	ResetEntry,
-	type Storage,
-	type Tx,
 	UserEntry,
+} from "@earendil-works/pi-durable"
+import type {
+	AgentChange,
+	ConversationId,
+	ConversationInit,
+	Cursor,
+	EntryId,
+	Harness,
+	Storage,
+	Tx,
 } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Latch from "effect/Latch"
 import type { SupportedProvider } from "./PiModels.ts"
 import {
-	type PiTurnOutcome,
-	type UnansweredSubmissionInfo,
 	classifyUnansweredCategory,
 	isRefusalAssistantMessage,
 	mapAssistantMessageToOutcome,
 	mapUnansweredToError,
 	normalizeRefusalAssistantMessage,
 } from "./PiRefusals.ts"
-import { type BeginTurnUsageResult, SeedState, clearSeedRebuild } from "./PiTurnUsage.ts"
+import type { PiTurnOutcome, UnansweredSubmissionInfo } from "./PiRefusals.ts"
+import { SeedState, clearSeedRebuild } from "./PiTurnUsage.ts"
+import type { BeginTurnUsageResult } from "./PiTurnUsage.ts"
 
 export interface PiTurnRequest {
 	readonly operationId: string
@@ -117,8 +119,12 @@ export const readAssistantMessageFromStorage = async (
 }
 
 const formatSubmissionDetail = (detail: unknown): string | undefined => {
-	if (typeof detail === "string" && detail.length > 0) return detail
-	if (detail === undefined || detail === null) return undefined
+	if (typeof detail === "string" && detail.length > 0) {
+		return detail
+	}
+	if (detail === undefined || detail === null) {
+		return undefined
+	}
 	if (typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
 		return detail.message
 	}
@@ -132,7 +138,9 @@ const readAssistantEntryForUnansweredSubmission = async (
 	userEntryId: EntryId,
 ): Promise<{ readonly entryId: EntryId; readonly message: AssistantMessage } | undefined> => {
 	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) return undefined
+	if (conversation === undefined) {
+		return undefined
+	}
 	// Scan forward from `userEntryId` and stop at the next turn boundary so
 	// delayed reads in long sessions never scan or retain later turns.
 	let cursor: Cursor | undefined
@@ -145,7 +153,9 @@ const readAssistantEntryForUnansweredSubmission = async (
 			BACKGROUND_CONTEXT,
 		)
 		for (const entry of page.items) {
-			if (entry.id <= userEntryId) continue
+			if (entry.id <= userEntryId) {
+				continue
+			}
 			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
 				return lastAssistant
 			}
@@ -205,9 +215,13 @@ export const restoreRefusalEntryInStorage = async (
 	message: AssistantMessage,
 ): Promise<void> => {
 	const hasText = message.content.some((block) => block.type === "text" && block.text.length > 0)
-	if (message.stopReason === "stop" && hasText) return
+	if (message.stopReason === "stop" && hasText) {
+		return
+	}
 	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) return
+	if (conversation === undefined) {
+		return
+	}
 	const normalized = normalizeRefusalAssistantMessage(message)
 	const submission = await conversation.submit(
 		{
@@ -239,16 +253,24 @@ export const omitTurnEntriesFromStorage = async (
 		operationId,
 		BACKGROUND_CONTEXT,
 	)
-	if (record?.type !== "input") return
+	if (record?.type !== "input") {
+		return
+	}
 	const targets: Array<EntryId> = []
 	if (record.status === "unanswered") {
-		if (record.entry !== undefined) targets.push(record.entry)
+		if (record.entry !== undefined) {
+			targets.push(record.entry)
+		}
 	} else if (record.status === "done") {
 		targets.push(record.entry, record.answer)
 	}
-	if (targets.length === 0) return
+	if (targets.length === 0) {
+		return
+	}
 	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) return
+	if (conversation === undefined) {
+		return
+	}
 	const submission = await conversation.submit(
 		{
 			type: "write",
@@ -281,7 +303,9 @@ export const finalizeSettledTurnFromStorage = async (
 		operationId,
 		BACKGROUND_CONTEXT,
 	)
-	if (record?.type !== "input") return
+	if (record?.type !== "input") {
+		return
+	}
 	if (record.status === "unanswered") {
 		const info = await readUnansweredSubmissionFromStorage(pi, storage, operationId)
 		if (
@@ -366,7 +390,9 @@ export const rebuildRootInStorage = async (
 	seed: PiSeed,
 ): Promise<void> => {
 	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) return
+	if (conversation === undefined) {
+		return
+	}
 	await conversation.configure(agent, BACKGROUND_CONTEXT)
 	await pi.commit(async (tx) => {
 		await tx.appendEntry(ROOT_CONVERSATION_ID, { kind: ResetEntry.kind, head: "self" })
@@ -415,21 +441,31 @@ const admitPiTurn = (
 				while (true) {
 					const admitted = yield* backend.withLock(
 						Effect.promise(async () => {
-							if (await backend.hasSubmission(operationId)) return true
-							if (backend.isCancelled(operationId)) return false
+							if (await backend.hasSubmission(operationId)) {
+								return true
+							}
+							if (backend.isCancelled(operationId)) {
+								return false
+							}
 							const rooted = await backend.ensureRoot(
 								agent,
 								seedInit(request) ?? (request.turn === 1 || request.seed !== undefined),
 							)
-							if (!rooted) return "history_required" as const
-							if (backend.isCancelled(operationId)) return false
+							if (!rooted) {
+								return "history_required" as const
+							}
+							if (backend.isCancelled(operationId)) {
+								return false
+							}
 							while (true) {
 								const turnState = await backend.beginUsage(
 									operationId,
 									finalizedPrevious,
 									request.seed !== undefined,
 								)
-								if (turnState.status === "waiting") return { waitingFor: turnState.operationId }
+								if (turnState.status === "waiting") {
+									return { waitingFor: turnState.operationId }
+								}
 								if (turnState.status === "finalize") {
 									await backend.finalizePrevious(turnState.operationId)
 									finalizedPrevious = turnState.operationId
@@ -439,18 +475,24 @@ const admitPiTurn = (
 									return "history_required" as const
 								}
 								if (turnState.status === "rebuild") {
-									if (request.seed === undefined) return "history_required" as const
+									if (request.seed === undefined) {
+										return "history_required" as const
+									}
 									await backend.rebuildRoot(agent, request, request.seed)
 									continue
 								}
 								break
 							}
-							if (backend.isCancelled(operationId)) return false
+							if (backend.isCancelled(operationId)) {
+								return false
+							}
 							await backend.submit(request.text, operationId)
 							return true
 						}),
 					)
-					if (typeof admitted !== "object") return admitted
+					if (typeof admitted !== "object") {
+						return admitted
+					}
 					yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
 				}
 			}),
@@ -552,7 +594,9 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	// `null` while the original turn proceeds to submit and reply.
 	while (true) {
 		const pending = inFlightAdmissions.get(backend)?.get(operationId)
-		if (pending === undefined || pending.size === 0) break
+		if (pending === undefined || pending.size === 0) {
+			break
+		}
 		yield* Effect.forEach(Array.from(pending), (barrier) => barrier.await, {
 			concurrency: "unbounded",
 			discard: true,
@@ -560,11 +604,15 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	}
 	const probe = yield* backend.withLock(
 		Effect.promise(async () => {
-			if (await backend.hasSubmission(operationId)) return "submitted" as const
+			if (await backend.hasSubmission(operationId)) {
+				return "submitted" as const
+			}
 			return backend.isCancelled(operationId) ? ("cancelled" as const) : ("absent" as const)
 		}),
 	)
-	if (probe === "absent") return null
+	if (probe === "absent") {
+		return null
+	}
 	if (probe === "cancelled") {
 		return { ok: false, error: { _tag: "ModelRequestInterrupted" } }
 	}
@@ -578,8 +626,12 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 ): Effect.fn.Return<PiTurnResult> {
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
-	if (admitted === "history_required") return admitted
-	if (!admitted) return { ok: false, error: { _tag: "ModelRequestInterrupted" } }
+	if (admitted === "history_required") {
+		return admitted
+	}
+	if (!admitted) {
+		return { ok: false, error: { _tag: "ModelRequestInterrupted" } }
+	}
 
 	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))
 	return yield* resolveSettledPiTurn(backend, operationId, settled, request.provider)

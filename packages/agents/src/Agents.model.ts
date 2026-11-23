@@ -16,8 +16,12 @@ export class Agents extends Domain.Model("Agents", {
 			[
 				m.Agent.every((a) => {
 					const view = m.AgentView.find((v) => v.id === a.id)
-					if (a.state.status === "") return view === undefined
-					if (view === undefined) return false
+					if (a.state.status === "") {
+						return view === undefined
+					}
+					if (view === undefined) {
+						return false
+					}
 					return [
 						view.state.id === a.id,
 						view.state.version === a.state.version,
@@ -39,8 +43,12 @@ export class Agents extends Domain.Model("Agents", {
 			[
 				m.AgentVersion.every((av) => {
 					const view = m.AgentVersionView.find((v) => v.id === av.id)
-					if (!av.state.minted) return view === undefined
-					if (view === undefined) return false
+					if (!av.state.minted) {
+						return view === undefined
+					}
+					if (view === undefined) {
+						return false
+					}
 					return [
 						view.state.id === av.id,
 						view.state.agent_id === av.state.agent_id,
@@ -60,10 +68,14 @@ export class Agents extends Domain.Model("Agents", {
 		AgentVersionByNumberMatchesAgentVersion: (m) =>
 			[
 				m.AgentVersion.every((av) => {
-					if (!av.state.minted) return true
+					if (!av.state.minted) {
+						return true
+					}
 					const lookupId = `${av.state.agent_id}@${av.state.version}`
 					const view = m.AgentVersionByNumberView.find((v) => v.id === lookupId)
-					if (view === undefined) return false
+					if (view === undefined) {
+						return false
+					}
 					return [
 						view.state.id === av.id,
 						view.state.agent_id === av.state.agent_id,

@@ -1,6 +1,8 @@
-import { DatabaseSync, type SQLInputValue } from "node:sqlite"
+import { DatabaseSync } from "node:sqlite"
+import type { SQLInputValue } from "node:sqlite"
 import { describe, expect, it } from "@effect/vitest"
-import { MIGRATIONS, type SqlExecutor, SqliteTurnFence } from "../src/Pi/TurnFence.ts"
+import { MIGRATIONS, SqliteTurnFence } from "../src/Pi/TurnFence.ts"
+import type { SqlExecutor } from "../src/Pi/TurnFence.ts"
 
 const executor = (db: DatabaseSync): SqlExecutor => ({
 	exec: (query, ...bindings) => {

@@ -6,10 +6,12 @@ import { Environment } from "@checkfu/environments/Environment/Environment.aggre
 import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
 import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
 import {
-	type HarnessUnavailable,
 	DEFAULT_MODEL_TIMEOUT_MS,
-	type ModelProviderError,
 	boundedModelProvider,
+} from "@checkfu/sessions/Session/ModelProvider.external"
+import type {
+	HarnessUnavailable,
+	ModelProviderError,
 } from "@checkfu/sessions/Session/ModelProvider.external"
 import { Session } from "@checkfu/sessions/Session/Session.aggregate"
 import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
@@ -112,7 +114,9 @@ const allocatePairBudget = (
 	minB: number,
 	needB: number,
 ): readonly [number, number] | null => {
-	if (minA + minB > total) return null
+	if (minA + minB > total) {
+		return null
+	}
 	const extra = total - minA - minB
 	const extraNeedA = Math.max(0, needA - minA)
 	const extraNeedB = Math.max(0, needB - minB)
@@ -140,19 +144,29 @@ const IPV6_LITERAL_INNER = /^[0-9a-fA-F:.]+$/
 const parseAllowedHostEntry = (
 	trimmed: string,
 ): { readonly host: string; readonly port: string | null } | null => {
-	if (trimmed.length === 0 || trimmed.includes("/") || trimmed.includes("://")) return null
+	if (trimmed.length === 0 || trimmed.includes("/") || trimmed.includes("://")) {
+		return null
+	}
 	if (trimmed.startsWith("[")) {
 		const closeBracket = trimmed.indexOf("]")
-		if (closeBracket === -1) return null
+		if (closeBracket === -1) {
+			return null
+		}
 		const inner = trimmed.slice(1, closeBracket)
-		if (!inner.includes(":") || !IPV6_LITERAL_INNER.test(inner)) return null
+		if (!inner.includes(":") || !IPV6_LITERAL_INNER.test(inner)) {
+			return null
+		}
 		const bracketedHost = trimmed.slice(0, closeBracket + 1)
 		const rest = trimmed.slice(closeBracket + 1)
 		let port: string | null = null
 		if (rest.length > 0) {
-			if (!rest.startsWith(":")) return null
+			if (!rest.startsWith(":")) {
+				return null
+			}
 			port = rest.slice(1)
-			if (!/^\d+$/.test(port)) return null
+			if (!/^\d+$/.test(port)) {
+				return null
+			}
 		}
 		try {
 			const parsed = new URL(`http://${bracketedHost}`)
@@ -173,32 +187,48 @@ const parseAllowedHostEntry = (
 			return null
 		}
 	}
-	if (trimmed.includes("[") || trimmed.includes("]")) return null
+	if (trimmed.includes("[") || trimmed.includes("]")) {
+		return null
+	}
 	const colonIndex = trimmed.lastIndexOf(":")
 	let hostPattern = trimmed
 	let port: string | null = null
 	if (colonIndex !== -1) {
 		port = trimmed.slice(colonIndex + 1)
-		if (!/^\d+$/.test(port)) return null
+		if (!/^\d+$/.test(port)) {
+			return null
+		}
 		hostPattern = trimmed.slice(0, colonIndex)
-		if (hostPattern.includes(":")) return null
+		if (hostPattern.includes(":")) {
+			return null
+		}
 	}
 	const host = normalizeHost(hostPattern)
 	return host.length === 0 ? null : { host, port }
 }
 
 const isAllowedHost = (targetUrl: URL, allowedHosts: ReadonlyArray<string>): boolean => {
-	if (targetUrl.protocol !== "https:" && targetUrl.protocol !== "http:") return false
+	if (targetUrl.protocol !== "https:" && targetUrl.protocol !== "http:") {
+		return false
+	}
 	const targetHost = normalizeHost(targetUrl.hostname)
-	if (targetHost.length === 0) return false
+	if (targetHost.length === 0) {
+		return false
+	}
 	const targetPort = targetUrl.port || (targetUrl.protocol === "https:" ? "443" : "80")
 
 	return allowedHosts.some((rawEntry) => {
 		const parsed = parseAllowedHostEntry(rawEntry.trim())
-		if (parsed === null) return false
-		if (parsed.port !== null && parsed.port !== targetPort) return false
+		if (parsed === null) {
+			return false
+		}
+		if (parsed.port !== null && parsed.port !== targetPort) {
+			return false
+		}
 		const rule = parsed.host
-		if (rule === targetHost) return true
+		if (rule === targetHost) {
+			return true
+		}
 		if (rule.startsWith("*.")) {
 			const suffix = rule.slice(1)
 			// Require a concrete base domain (at least two labels after "*."), e.g. "*.openai.com".
@@ -264,7 +294,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 			}
 
 			const { networking } = envSnapshot.config
-			if (networking.type !== "limited") return
+			if (networking.type !== "limited") {
+				return
+			}
 
 			const parsedUrlResult = Url.fromString(providerBaseUrl)
 			if (Result.isFailure(parsedUrlResult)) {
@@ -304,7 +336,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 			if (remainingTokens < minPairTokens) {
 				const current = Option.getOrNull(yield* sessionViews.get(ref))
-				if (current?.turn !== turn) return yield* Effect.fail(HISTORY_UNAVAILABLE)
+				if (current?.turn !== turn) {
+					return yield* Effect.fail(HISTORY_UNAVAILABLE)
+				}
 				return { messages: [] as ReadonlyArray<PiSeedMessage>, trimmed: true }
 			}
 
@@ -315,7 +349,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 			let budgetExhausted = false
 
 			const keepExchange = (userText: string, assistantText: string) => {
-				if (userText.length === 0 || assistantText.length === 0) return
+				if (userText.length === 0 || assistantText.length === 0) {
+					return
+				}
 				if (
 					newestFirst.length + 2 > PI_SEED_MAX_MESSAGES ||
 					roomChars < 2 ||
@@ -444,7 +480,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 							pendingReply = nextReply.length > 0 ? nextReply : null
 							input = []
 							reply = []
-							if (budgetExhausted) break
+							if (budgetExhausted) {
+								break
+							}
 						}
 						boundaries += 1
 					} else if (event._tag === "agent.message" && boundaries > 0) {
@@ -455,9 +493,13 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 						)
 					}
 				}
-				if (budgetExhausted) break
+				if (budgetExhausted) {
+					break
+				}
 				if (page.cursor === null) {
-					if (boundaries === 0) return yield* Effect.fail(HISTORY_UNAVAILABLE)
+					if (boundaries === 0) {
+						return yield* Effect.fail(HISTORY_UNAVAILABLE)
+					}
 					if (pendingReply !== null) {
 						keepExchange(input.join("\n"), pendingReply)
 					}
@@ -467,10 +509,14 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 				after = page.cursor
 			}
 
-			if (boundaries === 0) return yield* Effect.fail(HISTORY_UNAVAILABLE)
+			if (boundaries === 0) {
+				return yield* Effect.fail(HISTORY_UNAVAILABLE)
+			}
 
 			const current = Option.getOrNull(yield* sessionViews.get(ref))
-			if (current?.turn !== turn) return yield* Effect.fail(HISTORY_UNAVAILABLE)
+			if (current?.turn !== turn) {
+				return yield* Effect.fail(HISTORY_UNAVAILABLE)
+			}
 
 			return {
 				messages: newestFirst.toReversed(),
@@ -525,7 +571,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 					const version = yield* agentVersionsByNumber
 						.waitFor(lookupKey, { version: args.agent_version }, { timeout: lookupTimeout })
 						.pipe(Effect.mapError(() => missingVersion))
-					if (version === null) return yield* Effect.fail(missingVersion)
+					if (version === null) {
+						return yield* Effect.fail(missingVersion)
+					}
 
 					const resolved = resolveCatalogModel(catalog, version.model.id)
 					if (resolved === null) {
@@ -582,7 +630,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 									// admitted, revalidate the environment so revocations during backoff
 									// prevent dispatching the transcript under stale permissions.
 									const recoveredAttempt = yield* executor.recoverTurn(conversation, operationId)
-									if (recoveredAttempt !== null) return recoveredAttempt
+									if (recoveredAttempt !== null) {
+										return recoveredAttempt
+									}
 									yield* enforceEnvironmentNetworking(
 										args.environment_id,
 										resolved.model.baseUrl,
@@ -624,7 +674,9 @@ export const PiDurableModelProviderLive = boundedModelProvider(
 
 					const outcome = yield* Effect.gen(function* () {
 						const first = yield* run()
-						if (first !== "history_required") return first
+						if (first !== "history_required") {
+							return first
+						}
 						const { messages, trimmed } = yield* messagesBeforeTurn(args.session_id, args.turn, {
 							contextWindow: resolved.model.contextWindow,
 							system: version.system,

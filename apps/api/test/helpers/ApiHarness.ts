@@ -6,6 +6,7 @@ import { createModels, createProvider } from "@earendil-works/pi-ai/models"
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
+import type { JsonObject } from "@earendil-works/pi-durable"
 import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -20,11 +21,8 @@ import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import { Checkfu } from "../../src/Checkfu.model.ts"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
-import {
-	type PiTurnRequest,
-	recoverPiDurableTurn,
-	runPiDurableTurn,
-} from "../../src/Pi/PiDurableEngine.ts"
+import { recoverPiDurableTurn, runPiDurableTurn } from "../../src/Pi/PiDurableEngine.ts"
+import type { PiTurnRequest } from "../../src/Pi/PiDurableEngine.ts"
 import {
 	HarnessCallFailed,
 	HarnessLimits,
@@ -67,7 +65,9 @@ export const extractLastUserText = (context: TranscriptContext): string => {
 	for (let i = context.messages.length - 1; i >= 0; i--) {
 		const msg = context.messages[i]
 		if (msg?.role === "user") {
-			if (typeof msg.content === "string") return msg.content
+			if (typeof msg.content === "string") {
+				return msg.content
+			}
 			return msg.content.map((part) => (part.type === "text" ? part.text : "")).join("")
 		}
 	}
@@ -107,7 +107,7 @@ export const makeScriptedPiModels = (
 					})
 				}
 			})
-			.catch((err: unknown) => {
+			.catch((error: unknown) => {
 				const errorMsg: AssistantMessage = {
 					role: "assistant",
 					content: [],
@@ -123,7 +123,7 @@ export const makeScriptedPiModels = (
 						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 					},
 					stopReason: "error",
-					errorMessage: err instanceof Error ? err.message : String(err),
+					errorMessage: error instanceof Error ? error.message : String(error),
 					timestamp: 0,
 				}
 				stream.push({ type: "error", reason: "error", error: errorMsg })
@@ -349,24 +349,30 @@ export const makeApiTestHttpClient = (
 		}),
 	)
 
+export type SseEventData = JsonObject & { readonly type: string }
+
+export interface SseFrame {
+	readonly id: string
+	readonly event: string
+	readonly data: SseEventData
+}
+
 export const readSseUntil = async (
 	response: Response,
-	predicate: (event: { readonly type: string } & Record<string, unknown>) => boolean,
-): Promise<
-	Array<{ readonly id: string; readonly event: string; readonly data: Record<string, unknown> }>
-> => {
+	predicate: (event: SseEventData) => boolean,
+): Promise<Array<SseFrame>> => {
 	const reader = response.body?.getReader()
-	if (!reader) throw new Error("Expected SSE response body stream")
+	if (!reader) {
+		throw new Error("Expected SSE response body stream")
+	}
 	const decoder = new TextDecoder()
-	const collected: Array<{
-		readonly id: string
-		readonly event: string
-		readonly data: Record<string, unknown>
-	}> = []
+	const collected: Array<SseFrame> = []
 	let done = false
 	const parser = Sse.makeParser((parsed) => {
-		if (done || parsed._tag !== "Event") return
-		const data = JSON.parse(parsed.data) as { readonly type: string } & Record<string, unknown>
+		if (done || parsed._tag !== "Event") {
+			return
+		}
+		const data = JSON.parse(parsed.data) as SseEventData
 		collected.push({ id: parsed.id ?? "", event: parsed.event, data })
 		if (predicate(data)) {
 			done = true
@@ -377,15 +383,21 @@ export const readSseUntil = async (
 	try {
 		while (!done) {
 			const chunk = await reader.read()
-			if (chunk.done) break
+			if (chunk.done) {
+				break
+			}
 			const error = parser.feed(decoder.decode(chunk.value, { stream: true }))
-			if (error !== undefined) throw error
+			if (error !== undefined) {
+				throw error
+			}
 		}
 		if (done) {
 			await reader.cancel()
 		} else {
 			const tailError = parser.feed(decoder.decode())
-			if (tailError !== undefined) throw tailError
+			if (tailError !== undefined) {
+				throw tailError
+			}
 		}
 	} finally {
 		reader.releaseLock()
@@ -455,8 +467,9 @@ export const createIdleSession = (
 	})
 
 export const providerError = (error: { readonly _tag: string }): ModelProviderError => {
-	if (error._tag !== "ModelProviderError")
+	if (error._tag !== "ModelProviderError") {
 		throw new Error(`expected a provider error, got ${error._tag}`)
+	}
 	return error as ModelProviderError
 }
 

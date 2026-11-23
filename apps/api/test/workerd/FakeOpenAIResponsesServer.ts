@@ -1,5 +1,7 @@
-import { type IncomingMessage, type ServerResponse, createServer } from "node:http"
+import { createServer } from "node:http"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Socket } from "node:net"
+import type { JsonObject } from "@earendil-works/pi-durable"
 
 export interface OpenAIInputMessage {
 	readonly role: string
@@ -10,7 +12,7 @@ export interface RecordedOpenAIRequest {
 	readonly id: number
 	readonly authorization: string | undefined
 	readonly model: string | undefined
-	readonly body: Record<string, unknown>
+	readonly body: JsonObject
 	readonly messages: ReadonlyArray<OpenAIInputMessage>
 	readonly userTexts: ReadonlyArray<string>
 	readonly assistantTexts: ReadonlyArray<string>
@@ -44,19 +46,25 @@ export interface FakeOpenAIResponsesServer {
 	readonly close: () => Promise<void>
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isRecord = (value: unknown): value is JsonObject =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
 const extractInputMessages = (input: unknown): ReadonlyArray<OpenAIInputMessage> => {
-	if (!Array.isArray(input)) return []
+	if (!Array.isArray(input)) {
+		return []
+	}
 	const messages: Array<OpenAIInputMessage> = []
 	for (const item of input) {
-		if (!isRecord(item) || typeof item.role !== "string") continue
+		if (!isRecord(item) || typeof item.role !== "string") {
+			continue
+		}
 		if (typeof item.content === "string") {
 			messages.push({ role: item.role, text: item.content })
 			continue
 		}
-		if (!Array.isArray(item.content)) continue
+		if (!Array.isArray(item.content)) {
+			continue
+		}
 		const parts: Array<string> = []
 		for (const part of item.content) {
 			if (isRecord(part) && typeof part.text === "string") {
@@ -68,7 +76,7 @@ const extractInputMessages = (input: unknown): ReadonlyArray<OpenAIInputMessage>
 	return messages
 }
 
-const sseEvent = (event: string, data: Record<string, unknown>): string =>
+const sseEvent = (event: string, data: JsonObject): string =>
 	`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 const writeTextReplyEvents = (
@@ -203,7 +211,9 @@ export const startFakeOpenAIResponsesServer = async (
 				resolveAborted = resolve
 			})
 			const markAborted = () => {
-				if (res.writableEnded || aborted) return
+				if (res.writableEnded || aborted) {
+					return
+				}
 				aborted = true
 				resolveAborted()
 			}
@@ -233,7 +243,9 @@ export const startFakeOpenAIResponsesServer = async (
 			}
 
 			const action = await handler(record)
-			if (res.destroyed || aborted) return
+			if (res.destroyed || aborted) {
+				return
+			}
 
 			const responseId = `resp_fake_${id}`
 			const messageId = `msg_fake_${id}`
@@ -261,21 +273,25 @@ export const startFakeOpenAIResponsesServer = async (
 					response: { id: responseId, status: "in_progress" },
 				}),
 			)
-			if (action.release === undefined) return
+			if (action.release === undefined) {
+				return
+			}
 
 			const released = await Promise.race([action.release, waitAborted.then(() => undefined)])
-			if (aborted || res.destroyed || res.writableEnded) return
+			if (aborted || res.destroyed || res.writableEnded) {
+				return
+			}
 			if (released === null || released === undefined) {
 				res.end()
 				return
 			}
 			writeTextReplyEvents(res, responseId, messageId, released, 12, 6, true)
-		})().catch((err: unknown) => {
+		})().catch((error: unknown) => {
 			if (!res.headersSent) {
 				res.writeHead(500, { "content-type": "application/json" })
 			}
 			if (!res.writableEnded) {
-				res.end(JSON.stringify({ error: { message: String(err) } }))
+				res.end(JSON.stringify({ error: { message: String(error) } }))
 			}
 		})
 	})
@@ -302,11 +318,15 @@ export const startFakeOpenAIResponsesServer = async (
 		},
 		waitForRequest: (predicate, timeoutMs = 15_000) => {
 			const existing = requests.find(predicate)
-			if (existing !== undefined) return Promise.resolve(existing)
+			if (existing !== undefined) {
+				return Promise.resolve(existing)
+			}
 			return new Promise<RecordedOpenAIRequest>((resolve, reject) => {
 				const timer = setTimeout(() => {
 					const idx = waiters.indexOf(entry)
-					if (idx !== -1) waiters.splice(idx, 1)
+					if (idx !== -1) {
+						waiters.splice(idx, 1)
+					}
 					reject(new Error(`Timed out after ${timeoutMs}ms waiting for fake OpenAI request`))
 				}, timeoutMs)
 				const entry = {
@@ -323,7 +343,11 @@ export const startFakeOpenAIResponsesServer = async (
 			for (const socket of sockets) {
 				socket.destroy()
 			}
-			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await new Promise<void>((resolve) => {
+				server.close(() => {
+					resolve()
+				})
+			})
 		},
 	}
 }
