@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import * as Http from "node:http"
 import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, delimiter, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
@@ -2995,6 +2995,189 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 				expect(JSON.parse(postedEventBodies[0] ?? "{}")).toEqual({
 					events: [{ type: "user.interrupt" }],
 				})
+
+				// Also verify PID-targeted SIGINT (`kill -INT <launcher-pid>`) with a real TTY:
+				// 1) `sessions connect` delivers exactly one interrupt on 1st SIGINT (stays alive)
+				//    and cleanly disconnects with code 130 on 2nd SIGINT.
+				// 2) `sessions:events stream` cleanly terminates with code 130 on 1st SIGINT.
+				postedEventBodies.length = 0
+				const pidSigintConnectScript = `
+import fcntl, json, os, pty, select, signal, subprocess, sys, termios, time
+
+master, slave = pty.openpty()
+def setup_ctty():
+    os.setsid()
+    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+cmd = ["node", "apps/cli/bin/checkfu.mjs", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
+os.close(slave)
+
+out = b""
+stage = 0
+alive_after_first = False
+deadline = time.time() + 4.5
+while time.time() < deadline:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if r:
+        try:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            out += chunk
+        except OSError:
+            break
+    if stage == 0 and b"Connected to sess_pty" in out:
+        time.sleep(0.05)
+        stage = 1
+        os.kill(p.pid, signal.SIGINT)
+    elif stage == 1 and b"Press Ctrl-C again to disconnect." in out:
+        alive_after_first = p.poll() is None
+        stage = 2
+        os.kill(p.pid, signal.SIGINT)
+    if p.poll() is not None:
+        break
+
+if p.poll() is None:
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    p.wait()
+os.close(master)
+print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "output": out.decode("utf-8", errors="replace")}))
+`
+				const pidConnectResult = await new Promise<{
+					readonly rc: number | null
+					readonly aliveAfterFirst: boolean
+					readonly output: string
+				}>((resolve, reject) => {
+					const driver = spawn("python3", ["-c", pidSigintConnectScript, String(port), repoRoot], {
+						env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+						stdio: ["ignore", "pipe", "pipe"],
+					})
+					let stdout = ""
+					let stderr = ""
+					driver.stdout.setEncoding("utf8")
+					driver.stderr.setEncoding("utf8")
+					driver.stdout.on("data", (chunk: string) => {
+						stdout += chunk
+					})
+					driver.stderr.on("data", (chunk: string) => {
+						stderr += chunk
+					})
+					driver.on("error", reject)
+					driver.on("close", (code) => {
+						if (code !== 0) {
+							reject(new Error(`PTY PID-SIGINT connect driver failed (${code}): ${stderr}`))
+							return
+						}
+						try {
+							resolve(
+								JSON.parse(stdout.trim()) as {
+									readonly rc: number | null
+									readonly aliveAfterFirst: boolean
+									readonly output: string
+								},
+							)
+						} catch (err) {
+							reject(new Error(`Invalid PTY PID-SIGINT connect JSON: ${stdout} (${String(err)})`))
+						}
+					})
+				})
+
+				expect(pidConnectResult.aliveAfterFirst).toBe(true)
+				expect(pidConnectResult.rc).toBe(130)
+				expect(pidConnectResult.output).toContain("Interrupt requested.")
+				expect(pidConnectResult.output).toContain("Press Ctrl-C again to disconnect.")
+				expect(postedEventBodies).toHaveLength(1)
+				expect(JSON.parse(postedEventBodies[0] ?? "{}")).toEqual({
+					events: [{ type: "user.interrupt" }],
+				})
+
+				const pidSigintStreamScript = `
+import fcntl, json, os, pty, select, signal, subprocess, sys, termios, time
+
+master, slave = pty.openpty()
+def setup_ctty():
+    os.setsid()
+    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+cmd = ["node", "apps/cli/bin/checkfu.mjs", "sessions:events", "stream", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
+os.close(slave)
+
+out = b""
+sent = False
+deadline = time.time() + 4.5
+while time.time() < deadline:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if r:
+        try:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            out += chunk
+        except OSError:
+            break
+    if not sent and b"session.status_running" in out:
+        sent = True
+        os.kill(p.pid, signal.SIGINT)
+    if p.poll() is not None:
+        break
+
+timed_out = p.poll() is None
+if timed_out:
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    p.wait()
+os.close(master)
+print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decode("utf-8", errors="replace")}))
+`
+				const pidStreamResult = await new Promise<{
+					readonly rc: number | null
+					readonly timedOut: boolean
+					readonly output: string
+				}>((resolve, reject) => {
+					const driver = spawn("python3", ["-c", pidSigintStreamScript, String(port), repoRoot], {
+						env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+						stdio: ["ignore", "pipe", "pipe"],
+					})
+					let stdout = ""
+					let stderr = ""
+					driver.stdout.setEncoding("utf8")
+					driver.stderr.setEncoding("utf8")
+					driver.stdout.on("data", (chunk: string) => {
+						stdout += chunk
+					})
+					driver.stderr.on("data", (chunk: string) => {
+						stderr += chunk
+					})
+					driver.on("error", reject)
+					driver.on("close", (code) => {
+						if (code !== 0) {
+							reject(new Error(`PTY PID-SIGINT stream driver failed (${code}): ${stderr}`))
+							return
+						}
+						try {
+							resolve(
+								JSON.parse(stdout.trim()) as {
+									readonly rc: number | null
+									readonly timedOut: boolean
+									readonly output: string
+								},
+							)
+						} catch (err) {
+							reject(new Error(`Invalid PTY PID-SIGINT stream JSON: ${stdout} (${String(err)})`))
+						}
+					})
+				})
+
+				expect(pidStreamResult.timedOut).toBe(false)
+				expect(pidStreamResult.rc).toBe(130)
+				expect(pidStreamResult.output).toContain("session.status_running")
 			} finally {
 				for (const res of openSseResponses) {
 					res.end()
@@ -3002,6 +3185,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 				await new Promise<void>((resolve) => server.close(() => resolve()))
 			}
 		},
+		15_000,
 	)
 
 	it("reports buffered piped input on live session termination, separates confirmed 429 rejections from unconfirmed delivery, and bounds turn bookkeeping", async () => {
@@ -4076,11 +4260,27 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 				'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
 			)
 			writeFileSync(join(untrustedDir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
+			// Plant untrusted `bun` / `bun.exe` decoys inside cwd; the launcher must resolve Bun
+			// from trusted absolute PATH/install directories and never execute cwd binaries
+			const fakePosixBun = join(untrustedDir, "bun")
+			writeFileSync(fakePosixBun, '#!/bin/sh\necho "FAKE_BUN_EXECUTED" >&2\nexit 98\n')
+			if (process.platform !== "win32") {
+				chmodSync(fakePosixBun, 0o755)
+			}
+			writeFileSync(join(untrustedDir, "bun.exe"), "not-a-trusted-bun-executable")
 			const baseEnv: Record<string, string> = {}
 			for (const [k, v] of Object.entries(process.env)) {
 				if (v !== undefined && !k.startsWith("CHECKFU_")) {
 					baseEnv[k] = v
 				}
+			}
+			const pathEnvKey =
+				process.platform === "win32"
+					? (Object.keys(baseEnv).find((k) => k.toLowerCase() === "path") ?? "PATH")
+					: "PATH"
+			const poisonedPathEnv: Record<string, string> = {
+				...baseEnv,
+				[pathEnvKey]: ["", ".", untrustedDir, baseEnv[pathEnvKey] ?? ""].join(delimiter),
 			}
 
 			const runSubprocess = (
@@ -4127,18 +4327,20 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					? runSubprocess(nodeExecutable, [binPath, ...cliArgs], env, cwd)
 					: runSubprocess(binPath, cliArgs, env, cwd)
 
-			// 1a) Supported launcher (`apps/cli/bin/checkfu.mjs`) pins --no-env-file and --config=...
-			//     before Bun starts, ignoring both cwd .env* and cwd bunfig.toml preloads
+			// 1a) Supported launcher (`apps/cli/bin/checkfu.mjs`) resolves Bun from trusted absolute
+			//     directories (ignoring cwd decoys and relative/cwd PATH entries) and pins --no-env-file
+			//     and --config=... before Bun starts, ignoring cwd .env* and bunfig.toml preloads
 			const launcherResult = await invokeLauncher(
 				["sessions", "retrieve", "--session-id", "sess_env"],
 				{
-					...baseEnv,
+					...poisonedPathEnv,
 					CHECKFU_API_KEY: "ck_exported_secret",
 					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
 				},
 			)
 			expect(launcherResult.status).toBe(0)
 			expect(launcherResult.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(launcherResult.stderr).not.toContain("FAKE_BUN_EXECUTED")
 			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 

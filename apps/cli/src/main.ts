@@ -59,18 +59,13 @@ const MainLive = Layer.mergeAll(
 
 const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	let exitSignalCode: number | undefined
+	let launcherOwnsSigint = typeof process.send === "function" && process.connected
 
 	const releaseStdin = () => {
 		process.stdin.pause()
 		if (typeof process.stdin.unref === "function") {
 			process.stdin.unref()
 		}
-	}
-
-	const cleanup = () => {
-		process.removeListener("SIGINT", onSigint)
-		process.removeListener("SIGTERM", onSigterm)
-		releaseStdin()
 	}
 
 	const onSigint = () => {
@@ -81,9 +76,43 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 		fiber.interruptUnsafe(fiber.id)
 	}
 
+	const onOsSigint = () => {
+		if (launcherOwnsSigint) {
+			return
+		}
+		onSigint()
+	}
+
+	const onLauncherMessage = (message: unknown) => {
+		if (
+			typeof message === "object" &&
+			message !== null &&
+			"type" in message &&
+			message.type === "checkfu:sigint"
+		) {
+			onSigint()
+		}
+	}
+
+	const onLauncherDisconnect = () => {
+		launcherOwnsSigint = false
+	}
+
 	const onSigterm = () => {
 		exitSignalCode = 143
 		fiber.interruptUnsafe(fiber.id)
+	}
+
+	const cleanup = () => {
+		process.removeListener("SIGINT", onOsSigint)
+		process.removeListener("SIGTERM", onSigterm)
+		process.removeListener("message", onLauncherMessage)
+		process.removeListener("disconnect", onLauncherDisconnect)
+		if (launcherOwnsSigint && process.connected) {
+			process.disconnect?.()
+		}
+		launcherOwnsSigint = false
+		releaseStdin()
 	}
 
 	fiber.addObserver((exit) => {
@@ -108,8 +137,17 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 		})
 	})
 
-	process.on("SIGINT", onSigint)
+	process.on("SIGINT", onOsSigint)
 	process.on("SIGTERM", onSigterm)
+	if (launcherOwnsSigint) {
+		process.on("message", onLauncherMessage)
+		process.on("disconnect", onLauncherDisconnect)
+		try {
+			process.send?.({ type: "checkfu:sigint-ready" })
+		} catch {
+			launcherOwnsSigint = false
+		}
+	}
 })
 
 runMain(runCli().pipe(Effect.provide(MainLive)), {

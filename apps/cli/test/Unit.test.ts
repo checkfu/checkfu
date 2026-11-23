@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
+import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
 import {
 	DEFAULT_API_URL,
 	makeCheckfuClient,
@@ -1866,5 +1867,136 @@ describe("Transform and formatOutput", () => {
 			expect(ttyYaml).not.toContain(forbidden)
 		}
 		expect(YAML.parse(`${ttyYaml}\n`)).toEqual(tricky)
+	})
+})
+
+describe("resolveBunExecutable", () => {
+	it("resolves trusted absolute Bun paths on Windows while excluding cwd, relative, and drive-relative entries", () => {
+		const winExecutables = new Set([
+			"c:\\untrusted\\repo\\bun.exe",
+			"c:\\untrusted\\repo\\sub\\bun.exe",
+			"c:\\untrusted\\repo\\node_modules\\.bin\\bun.exe",
+			"c:\\bin\\bun.exe",
+			"c:\\program files\\bun\\bin\\bun.exe",
+		])
+		const isWinExec = (candidate: string) => winExecutables.has(candidate.toLowerCase())
+
+		// Excludes bare cwd, relative, empty, drive-relative (\bin, C:bin), and explicit cwd entries
+		// (any casing / trailing slash / ..) before selecting quoted absolute PATH entry
+		const resolved = resolveBunExecutable({
+			platform: "win32",
+			cwd: "C:\\untrusted\\repo",
+			homedir: "C:\\Users\\alice",
+			env: {
+				Path: [
+					"",
+					".",
+					".\\",
+					"./sub",
+					"node_modules\\.bin",
+					"\\bin",
+					"C:sub",
+					"C:\\untrusted\\repo",
+					"c:\\UNTRUSTED\\REPO\\",
+					"C:\\untrusted\\repo\\..\\repo",
+					'"C:\\Program Files\\Bun\\bin"',
+				].join(";"),
+			},
+			isExecutableFile: isWinExec,
+			realpath: (target) => target,
+		})
+		expect(resolved).toBe("C:\\Program Files\\Bun\\bin\\bun.exe")
+
+		// Running from %USERPROFILE% still resolves %USERPROFILE%\.bun\bin\bun.exe while skipping %USERPROFILE%\bun.exe
+		const homeExecutables = new Set([
+			"c:\\users\\alice\\bun.exe",
+			"c:\\users\\alice\\.bun\\bin\\bun.exe",
+		])
+		expect(
+			resolveBunExecutable({
+				platform: "win32",
+				cwd: "C:\\Users\\alice",
+				homedir: "C:\\Users\\alice",
+				env: { Path: "C:\\Users\\alice;." },
+				isExecutableFile: (candidate) => homeExecutables.has(candidate.toLowerCase()),
+				realpath: (target) => target,
+			}),
+		).toBe("C:\\Users\\alice\\.bun\\bin\\bun.exe")
+
+		// Falls back to trusted absolute BUN_INSTALL\bin, while ignoring relative or cwd-rooted BUN_INSTALL
+		const installExecutables = new Set([
+			"c:\\untrusted\\repo\\bun.exe",
+			"c:\\untrusted\\repo\\bin\\bun.exe",
+			"c:\\tools\\bun\\bin\\bun.exe",
+		])
+		expect(
+			resolveBunExecutable({
+				platform: "win32",
+				cwd: "C:\\untrusted\\repo",
+				homedir: "C:\\Users\\alice",
+				env: {
+					PATH: ".;C:\\untrusted\\repo",
+					BUN_INSTALL: "C:\\untrusted\\repo",
+				},
+				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
+				realpath: (target) => target,
+			}),
+		).toBeNull()
+		expect(
+			resolveBunExecutable({
+				platform: "win32",
+				cwd: "C:\\untrusted\\repo",
+				homedir: "C:\\Users\\alice",
+				env: {
+					PATH: ".;C:\\untrusted\\repo",
+					BUN_INSTALL: "C:\\tools\\bun",
+				},
+				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
+				realpath: (target) => target,
+			}),
+		).toBe("C:\\tools\\bun\\bin\\bun.exe")
+	})
+
+	it("resolves trusted absolute Bun paths on POSIX while excluding empty/relative PATH entries and cwd symlinks", () => {
+		const posixExecutables = new Set([
+			"/private/var/folders/untrusted/bun",
+			"/var/folders/untrusted/bun",
+			"/tmp/symlink-bin/bun",
+			"/opt/bun/bin/bun",
+		])
+		const posixRealpaths: Record<string, string> = {
+			"/var/folders/untrusted": "/private/var/folders/untrusted",
+			"/private/var/folders/untrusted": "/private/var/folders/untrusted",
+			"/tmp/symlink-bin": "/tmp/symlink-bin",
+			"/tmp/symlink-bin/bun": "/private/var/folders/untrusted/bun",
+			"/opt/bun/bin": "/opt/bun/bin",
+			"/opt/bun/bin/bun": "/opt/bun/bin/bun",
+		}
+		const resolved = resolveBunExecutable({
+			platform: "darwin",
+			cwd: "/var/folders/untrusted",
+			homedir: "/Users/alice",
+			env: {
+				PATH: ":/private/var/folders/untrusted:.:./bin:/tmp/symlink-bin:/opt/bun/bin:",
+			},
+			isExecutableFile: (candidate) => posixExecutables.has(candidate),
+			realpath: (target) => posixRealpaths[target] ?? target,
+		})
+		expect(resolved).toBe("/opt/bun/bin/bun")
+
+		// Fails closed with null when only cwd/relative candidates exist
+		expect(
+			resolveBunExecutable({
+				platform: "linux",
+				cwd: "/tmp/untrusted",
+				homedir: "/home/alice",
+				env: {
+					PATH: ".:./bin:/tmp/untrusted",
+					BUN_INSTALL: "./relative-bun",
+				},
+				isExecutableFile: (candidate) => candidate === "/tmp/untrusted/bun",
+				realpath: (target) => target,
+			}),
+		).toBeNull()
 	})
 })
