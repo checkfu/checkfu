@@ -18,7 +18,7 @@ import {
 } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
-import { createCheckfuRegistry, rejectRefusalCompactions } from "./PiRefusals.ts"
+import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
@@ -165,7 +165,7 @@ export const PiSessionLive = PiSession.make(
 						return Harness.open(
 							storage,
 							{
-								models: rejectRefusalCompactions(models),
+								models,
 								registry: createCheckfuRegistry(),
 								onWake,
 								settings: PI_HARNESS_SETTINGS,

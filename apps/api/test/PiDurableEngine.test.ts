@@ -48,7 +48,6 @@ import {
 import {
 	DEFAULT_REFUSAL_TEXT,
 	PROVIDER_FAILURE_MESSAGE,
-	classifyUnansweredCategory,
 	isProviderRefusalStopReason,
 	isRefusalAssistantMessage,
 	mapAssistantMessageToOutcome,
@@ -360,7 +359,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		expect("modelOverrides" in PI_HARNESS_SETTINGS.compaction).toBe(false)
 	})
 
-	it("logs a bounded error category without echoing raw provider error bodies", async () => {
+	it("logs Pi's reason for an unanswered turn without echoing raw provider error bodies", async () => {
 		const secretBody = "SECRET_ECHOED_PAYLOAD_98765"
 		const backend = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(async (model) => ({
@@ -375,7 +374,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			readonly annotations: {
 				readonly operationId?: unknown
 				readonly provider?: unknown
-				readonly category?: unknown
+				readonly reason?: unknown
 			}
 		}> = []
 		const captureLogger = Logger.layer(
@@ -411,57 +410,11 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 			expect(warnLogs).toContainEqual({
 				level: "Warn",
 				message: ["pi turn unanswered"],
-				annotations: { operationId: "turn:1", provider: "openai", category: "invalid_request" },
+				annotations: { operationId: "turn:1", provider: "openai", reason: "model_error" },
 			})
 		} finally {
 			await backend.close()
 		}
-	})
-
-	it("classifies provider errors by status or error code instead of incidental numbers", () => {
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail: "429 Rate limit exceeded: Requested 401 tokens",
-			}),
-		).toBe("rate_limit")
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail: "Rate limit exceeded: Requested 401 tokens",
-			}),
-		).toBe("rate_limit")
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail: "Requested 401 tokens exceeds limit of 400",
-			}),
-		).toBe("model_error")
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail:
-					'400 {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens 500 > 401"}}',
-			}),
-		).toBe("invalid_request")
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail: '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
-			}),
-		).toBe("provider_5xx")
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail: "Error Code rate_limit_exceeded: Requested 401 tokens",
-			}),
-		).toBe("rate_limit")
-		expect(
-			classifyUnansweredCategory("model_error", {
-				reason: "model_error",
-				detail: "401 Incorrect API key provided",
-			}),
-		).toBe("auth_error")
 	})
 })
 

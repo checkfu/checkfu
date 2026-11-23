@@ -16,7 +16,6 @@ import * as Latch from "effect/Latch"
 import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import type { SupportedProvider } from "./PiCatalog.ts"
 import {
-	classifyUnansweredCategory,
 	isRefusalAssistantMessage,
 	mapAssistantMessageToOutcome,
 	mapUnansweredToError,
@@ -470,7 +469,7 @@ const resolveSettledPiTurn = (
 					Effect.annotateLogs({
 						operationId,
 						provider: submissionInfo?.assistantMessage?.provider ?? providerForLog,
-						category: classifyUnansweredCategory(settled.reason, submissionInfo),
+						reason: settled.reason ?? "unknown",
 					}),
 				)
 				return {

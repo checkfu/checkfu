@@ -17,7 +17,7 @@ import {
 	restoreRefusalEntryInStorage,
 } from "../../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
-import { createCheckfuRegistry, rejectRefusalCompactions } from "../../src/Pi/PiRefusals.ts"
+import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
 import { CHECKFU_PI_DOCS, beginTurnUsage, settleTurnUsage } from "../../src/Pi/PiTurnUsage.ts"
 
 export interface InMemoryEntryScanCall {
@@ -198,7 +198,7 @@ export const createInMemoryPiDurableBackend = async (
 	const pi = await PiHarnessRuntime.open(
 		storage,
 		{
-			models: rejectRefusalCompactions(models),
+			models,
 			registry,
 			settings: {
 				...PI_HARNESS_SETTINGS,

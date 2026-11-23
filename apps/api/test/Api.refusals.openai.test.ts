@@ -19,11 +19,7 @@ import {
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableHarness.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
-import {
-	DEFAULT_REFUSAL_TEXT,
-	PROVIDER_FAILURE_MESSAGE,
-	rejectRefusalCompactions,
-} from "../src/Pi/PiRefusals.ts"
+import { DEFAULT_REFUSAL_TEXT, PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
@@ -1554,34 +1550,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			])
 			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
 
-			for (const stopReason of ["stop", "error"] as const) {
-				warnCalls.length = 0
-				const wrappedCompactionModels = rejectRefusalCompactions(
-					makeScriptedPiModels(async (model) => ({
-						...makeAssistantReply(model, null, "", 20, 4),
-						content: [],
-						stopReason,
-						rawStopReason: "refusal",
-						errorMessage: secretDetail,
-					})),
-				)
-				const gptModel = wrappedCompactionModels.getModel("openai", "gpt-4o-mini")
-				if (gptModel === undefined) {
-					throw new Error("expected gpt-4o-mini")
-				}
-				const rejectedDirect = await wrappedCompactionModels.completeSimple(gptModel, {
-					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
-				})
-				expect(rejectedDirect.stopReason).toBe("error")
-				expect(rejectedDirect.errorMessage).toBe(DEFAULT_REFUSAL_TEXT)
-				expect(JSON.stringify(rejectedDirect)).not.toContain(secretDetail)
-				expect(warnCalls).toContainEqual([
-					"pi refusal fallback",
-					{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "refusal" },
-				])
-				expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
-			}
-
 			warnCalls.length = 0
 			let compactionCalls = 0
 			let normalTurns = 0
@@ -1655,10 +1623,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					expect(JSON.stringify(listed.data)).not.toContain(secretDetail)
 				}).pipe(Effect.scoped, Effect.provide(compactionHarness.layer)),
 			)
-			expect(warnCalls).toContainEqual([
-				"pi refusal fallback",
-				{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "refusal" },
-			])
 			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
 
 			warnCalls.length = 0
