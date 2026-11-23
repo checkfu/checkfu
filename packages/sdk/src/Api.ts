@@ -23,16 +23,13 @@ import {
 	AutomationId,
 	AutomationName,
 	AutomationRunError,
+	AutomationSchedule,
 	AutomationSnapshot,
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
-	HOURLY_CRON_EXPRESSION,
-	MAX_CRON_EXPRESSION_LENGTH,
-	MAX_TIMEZONE_LENGTH,
-	NAMED_TIME_ZONE,
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
@@ -396,26 +393,6 @@ export const CreateSessionBody = Schema.Union([
 ])
 export type CreateSessionBody = typeof CreateSessionBody.Type
 
-export const AutomationScheduleBody = Schema.Struct({
-	type: Schema.Literal("cron"),
-	expression: Schema.String.check(
-		Schema.isMaxLength(MAX_CRON_EXPRESSION_LENGTH),
-		Schema.isPattern(HOURLY_CRON_EXPRESSION, {
-			message:
-				"Expected a five-field cron expression whose minute field is a single number from 0 to 59; an automation fires at most once per clock hour",
-		}),
-	).annotate({
-		description:
-			"Five-field cron expression whose minute field is a single number, so it fires at most once per clock hour in its time zone",
-	}),
-	timezone: Schema.String.check(
-		Schema.isMaxLength(MAX_TIMEZONE_LENGTH),
-		Schema.isPattern(NAMED_TIME_ZONE, {
-			message: "Expected an IANA time zone name such as America/New_York or UTC",
-		}),
-	).annotate({ description: "IANA time zone name the expression is read in" }),
-})
-
 const AutomationInitialEvent = Schema.Struct({
 	type: Schema.Literal("user.message"),
 	content: Schema.Array(
@@ -438,7 +415,10 @@ export const CreateAutomationBody = Schema.Struct({
 	initial_events: AutomationInitialEvents.annotate({
 		description: "The one user message each run's session starts with",
 	}),
-	schedule: AutomationScheduleBody.annotate({ description: "When the automation fires" }),
+	schedule: AutomationSchedule.annotate({
+		description:
+			"When the automation fires: a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York",
+	}),
 })
 export type CreateAutomationBody = typeof CreateAutomationBody.Type
 

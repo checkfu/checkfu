@@ -286,9 +286,6 @@ export const AutomationName = Schema.String.check(
 	Schema.isMaxCodePoints(MAX_AUTOMATION_NAME_LENGTH),
 )
 
-export const HOURLY_CRON_EXPRESSION = /^(?:[0-9]|[1-5][0-9])(?: \S+){4}$/u
-export const NAMED_TIME_ZONE = /^[A-Za-z][A-Za-z0-9_+\-/]*$/u
-
 export const CronExpression = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_CRON_EXPRESSION_LENGTH),

@@ -1,60 +1,37 @@
+import * as Arr from "effect/Array"
 import * as Cron from "effect/Cron"
 import * as DateTime from "effect/DateTime"
+import * as Iterable from "effect/Iterable"
 import * as Option from "effect/Option"
-import * as Result from "effect/Result"
 
-import { HOURLY_CRON_EXPRESSION, NAMED_TIME_ZONE } from "./AutomationTypes.ts"
-
-export const parseSchedule = (expression: string, timezone: string): Cron.Cron | null => {
-	if (!HOURLY_CRON_EXPRESSION.test(expression) || !NAMED_TIME_ZONE.test(timezone)) {
-		return null
-	}
-	const zone = DateTime.zoneMakeNamed(timezone)
-	if (Option.isNone(zone)) {
-		return null
-	}
-	try {
-		const parsed = Cron.parse(expression, zone.value)
-		return Result.isSuccess(parsed) ? parsed.success : null
-	} catch {
-		return null
-	}
-}
+export const parseSchedule = (expression: string, timezone: string): Option.Option<Cron.Cron> =>
+	DateTime.zoneFromString(timezone).pipe(
+		Option.filter((zone) => zone._tag === "Named"),
+		Option.flatMap((zone) => Option.getSuccess(Cron.parse(expression, zone))),
+		Option.filter((cron) => cron.minutes.size === 1 && cron.seconds.size === 1),
+	)
 
 export const isUsableSchedule = (expression: string, timezone: string): boolean =>
-	parseSchedule(expression, timezone) !== null
+	Option.isSome(parseSchedule(expression, timezone))
 
-export const nextOccurrence = (
-	expression: string,
-	timezone: string,
-	after: number,
-): number | null => {
-	const cron = parseSchedule(expression, timezone)
-	if (cron === null) {
-		return null
-	}
-	try {
-		return Cron.next(cron, after).getTime()
-	} catch {
-		return null
-	}
-}
+const firings = Option.liftThrowable(
+	(cron: Cron.Cron, after: number, count: number): ReadonlyArray<number> =>
+		Arr.fromIterable(Iterable.take(Cron.sequence(cron, after), count)).map((at) => at.getTime()),
+)
 
 export const upcomingOccurrences = (
 	expression: string,
 	timezone: string,
 	after: number,
 	count: number,
-): ReadonlyArray<number> => {
-	const upcoming: Array<number> = []
-	let from = after
-	while (upcoming.length < count) {
-		const next = nextOccurrence(expression, timezone, from)
-		if (next === null) {
-			break
-		}
-		upcoming.push(next)
-		from = next
-	}
-	return upcoming
-}
+): ReadonlyArray<number> =>
+	parseSchedule(expression, timezone).pipe(
+		Option.flatMap((cron) => firings(cron, after, count)),
+		Option.getOrElse((): ReadonlyArray<number> => []),
+	)
+
+export const nextOccurrence = (
+	expression: string,
+	timezone: string,
+	after: number,
+): number | null => upcomingOccurrences(expression, timezone, after, 1)[0] ?? null

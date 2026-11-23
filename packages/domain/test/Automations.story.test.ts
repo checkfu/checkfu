@@ -14,7 +14,11 @@ import { AutomationArchivedError } from "../src/Automation/AutomationArchived.re
 import { AutomationNotFound } from "../src/Automation/AutomationNotFound.rejection.ts"
 import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
 import { SCHEDULE_EXHAUSTED } from "../src/Automation/AutomationTypes.ts"
-import { upcomingOccurrences } from "../src/Automation/Schedule.ts"
+import {
+	isUsableSchedule,
+	nextOccurrence,
+	upcomingOccurrences,
+} from "../src/Automation/Schedule.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
 import {
 	AutomationAlreadyExists,
@@ -282,7 +286,7 @@ describe("Automations", () => {
 			{ type: "cron" as const, expression: "0 0 31 2 *", timezone: "UTC" },
 			{ type: "cron" as const, expression: "0 9 * * *", timezone: "+02:00" },
 			{ type: "cron" as const, expression: "0 9 * * *", timezone: "Mars/Olympus" },
-			{ type: "cron" as const, expression: "0 0 9 * * *", timezone: "UTC" },
+			{ type: "cron" as const, expression: "*/30 0 9 * * *", timezone: "UTC" },
 		]
 		return Effect.forEach(
 			unusable,
@@ -391,6 +395,31 @@ describe("Automations", () => {
 			Story.then(automation),
 		),
 	)
+
+	it("accepts a schedule that names one minute in a named time zone, and nothing else", () => {
+		const usable = [
+			["0 9 * * 1-5", "America/New_York"],
+			["45 * * * *", "UTC"],
+			["0 0 9 * * *", "UTC"],
+			["0 9 * * *", "EST"],
+		] as const
+		const unusable = [
+			["* * * * *", "UTC"],
+			["*/30 * * * *", "UTC"],
+			["0,30 9 * * *", "UTC"],
+			["*/30 0 9 * * *", "UTC"],
+			["0 24 * * *", "UTC"],
+			["0 9 * *", "UTC"],
+			["@daily", "UTC"],
+			["0 9 * * *", "+02:00"],
+			["0 9 * * *", "+99:99"],
+			["0 9 * * *", "Mars/Olympus"],
+			["0 9 * * *", ""],
+		] as const
+		expect(usable.filter(([expression, zone]) => !isUsableSchedule(expression, zone))).toEqual([])
+		expect(unusable.filter(([expression, zone]) => isUsableSchedule(expression, zone))).toEqual([])
+		expect(nextOccurrence("0 0 31 2 *", "UTC", ms("2026-01-01T00:00:00.000Z"))).toBeNull()
+	})
 
 	it("limits a schedule to one firing per clock hour, which a half-hour clock change can halve", () => {
 		const around = (timezone: string, from: string) =>

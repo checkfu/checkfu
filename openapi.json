@@ -9126,20 +9126,18 @@
 											},
 											"expression": {
 												"type": "string",
-												"maxLength": 256,
-												"pattern": "^(?:[0-9]|[1-5][0-9])(?: \\S+){4}$",
-												"description": "Five-field cron expression whose minute field is a single number, so it fires at most once per clock hour in its time zone"
+												"minLength": 1,
+												"maxLength": 256
 											},
 											"timezone": {
 												"type": "string",
-												"maxLength": 64,
-												"pattern": "^[A-Za-z][A-Za-z0-9_+\\-/]*$",
-												"description": "IANA time zone name the expression is read in"
+												"minLength": 1,
+												"maxLength": 64
 											}
 										},
 										"required": ["type", "expression", "timezone"],
 										"additionalProperties": false,
-										"description": "When the automation fires"
+										"description": "When the automation fires: a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York"
 									}
 								},
 								"required": ["name", "agent", "environment_id", "initial_events", "schedule"],

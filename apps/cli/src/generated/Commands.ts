@@ -366,7 +366,9 @@ const automationsCreateCommand = CommandMake(
 		),
 		schedule: FlagString("schedule").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
-			FlagWithDescription("When the automation fires (JSON, YAML, or @file)"),
+			FlagWithDescription(
+				"When the automation fires: a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York (JSON, YAML, or @file)",
+			),
 			FlagOptional,
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(

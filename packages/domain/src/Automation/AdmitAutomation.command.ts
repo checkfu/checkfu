@@ -37,7 +37,7 @@ export class AutomationScheduleUnusable extends Domain.Rejection(
 	{
 		httpApiStatus: 400,
 		description:
-			"The schedule must be a five-field cron expression whose minute field is a single number, read in an IANA time zone name.",
+			"The schedule must be a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York.",
 	},
 ) {}
 

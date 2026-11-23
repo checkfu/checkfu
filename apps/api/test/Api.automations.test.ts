@@ -420,7 +420,7 @@ describe("Automations API", () => {
 					["every minute", schedule("* * * * *"), 400],
 					["every half hour", schedule("*/30 * * * *"), 400],
 					["twice an hour", schedule("0,30 * * * *"), 400],
-					["seconds field", schedule("0 0 9 * * *"), 400],
+					["two firings in one minute", schedule("*/30 0 9 * * *"), 400],
 					["four fields", schedule("0 9 * *"), 400],
 					["macro", schedule("@daily"), 400],
 					["hour out of range", schedule("0 24 * * *"), 400],

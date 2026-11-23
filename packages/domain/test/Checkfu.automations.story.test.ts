@@ -389,7 +389,7 @@ describe("Checkfu automations", () => {
 			const unusable = [
 				{ type: "cron" as const, expression: "* * * * *", timezone: "UTC" },
 				{ type: "cron" as const, expression: "*/30 * * * *", timezone: "UTC" },
-				{ type: "cron" as const, expression: "0 0 9 * * *", timezone: "UTC" },
+				{ type: "cron" as const, expression: "*/30 0 9 * * *", timezone: "UTC" },
 				{ type: "cron" as const, expression: "0 24 * * *", timezone: "UTC" },
 				{ type: "cron" as const, expression: "0 9 * * *", timezone: "+02:00" },
 				{ type: "cron" as const, expression: "0 9 * * *", timezone: "Mars/Olympus" },
