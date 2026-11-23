@@ -33,22 +33,25 @@ const PROVED = Object.entries(STANDING)
 	.map(([name]) => name)
 
 describe("Agents Z3 formal verification", () => {
-	it("proves every Agent invariant, transition, decision, and relation in Z3", async () => {
-		const report = await Effect.runPromise(
-			Verify.model(Agents, {
-				apis: [AgentsApi],
-				story,
-				walks: { count: 50 },
-				lock: "./Agents.verify.lock.json",
-				require: { proved: PROVED },
+	it.live(
+		"proves every Agent invariant, transition, decision, and relation in Z3",
+		() =>
+			Effect.gen(function* () {
+				const report = yield* Verify.model(Agents, {
+					apis: [AgentsApi],
+					story,
+					walks: { count: 50 },
+					lock: "./Agents.verify.lock.json",
+					require: { proved: PROVED },
+				})
+				expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
+					STANDING,
+				)
+				expect(report.undone).toEqual([])
+				expect(report.explored.aside).toEqual([])
+				expect(report.explored.disagreements).toEqual([])
+				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		)
-		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
-			STANDING,
-		)
-		expect(report.undone).toEqual([])
-		expect(report.explored.aside).toEqual([])
-		expect(report.explored.disagreements).toEqual([])
-		expect(report.explored.agreement.compared).toBeGreaterThan(0)
-	}, 120_000)
+		120_000,
+	)
 })

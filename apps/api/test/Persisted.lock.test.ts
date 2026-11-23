@@ -7,9 +7,8 @@ import { TurnInputState } from "@checkfu/sessions/Session/TurnInput.view"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { DocumentId } from "@earendil-works/pi-durable"
-import { describe, expect, it } from "@effect/vitest"
+import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import type * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { createPiModels } from "../src/Pi/PiModels.ts"
@@ -49,9 +48,6 @@ const replacing = (id: string, schema: Schema.Top): ReadonlyArray<PersistedShape
 	)
 }
 
-const runLock = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof PersistedServicesLive>>) =>
-	Effect.runPromise(Effect.provide(effect, PersistedServicesLive))
-
 const reviewing = (lock: PersistedLock, id: string, shapes: ReadonlyArray<PersistedShape>) =>
 	Effect.gen(function* () {
 		const shape = shapes.find((candidate) => candidate.id === id)
@@ -72,94 +68,91 @@ const lockWith = (
 	baselines: [{ label: "test-baseline", cut_at: "2026-01-01T00:00:00.000Z", schemas: {}, shapes }],
 })
 
-describe("persisted shapes", () => {
-	it("finds every event, state, view, saga, and Pi document shape the hosted models declare", () => {
-		expect(registryProblems()).toEqual([])
-		expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(5)
-		expect(persistedShapes.map((shape) => shape.id)).toEqual(
-			expect.arrayContaining([
-				"saga-input:Checkfu.RunTurn",
-				"command-reply:Checkfu/AdmitSession",
-				"state:Checkfu.EventBatch",
-				"event:Checkfu.EventBatch/event_batch.claimed",
-				"command-reply:Checkfu/ClaimEventBatch",
-				"pi-doc:checkfu.active-usage",
-				"pi-doc:checkfu.settled-usage",
-				"pi-doc:checkfu.seed-state",
-			]),
-		)
-	})
+it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes", (it) => {
+	it.effect(
+		"finds every event, state, view, saga, and Pi document shape the hosted models declare",
+		() =>
+			Effect.sync(() => {
+				expect(registryProblems()).toEqual([])
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(5)
+				expect(persistedShapes.map((shape) => shape.id)).toEqual(
+					expect.arrayContaining([
+						"saga-input:Checkfu.RunTurn",
+						"command-reply:Checkfu/AdmitSession",
+						"state:Checkfu.EventBatch",
+						"event:Checkfu.EventBatch/event_batch.claimed",
+						"command-reply:Checkfu/ClaimEventBatch",
+						"pi-doc:checkfu.active-usage",
+						"pi-doc:checkfu.settled-usage",
+						"pi-doc:checkfu.seed-state",
+					]),
+				)
+			}),
+	)
 
-	it("writes every shape in a JSON form the same code reads back", () =>
-		runLock(
-			Effect.gen(function* () {
-				const unreadable: Array<string> = []
-				for (const shape of persistedShapes) {
-					const samples = yield* sampleEncoded(shape, 4)
-					if (samples.length !== 4) unreadable.push(`${shape.id}: ${samples.length} samples`)
-					for (const sample of samples) {
-						const failure = yield* decodeFailure(shape, sample)
-						if (failure !== null) unreadable.push(`${shape.id}: ${failure}`)
-					}
+	it.effect("writes every shape in a JSON form the same code reads back", () =>
+		Effect.gen(function* () {
+			const unreadable: Array<string> = []
+			for (const shape of persistedShapes) {
+				const samples = yield* sampleEncoded(shape, 4)
+				if (samples.length !== 4) unreadable.push(`${shape.id}: ${samples.length} samples`)
+				for (const sample of samples) {
+					const failure = yield* decodeFailure(shape, sample)
+					if (failure !== null) unreadable.push(`${shape.id}: ${failure}`)
 				}
-				expect(unreadable).toEqual([])
-			}),
-		))
+			}
+			expect(unreadable).toEqual([])
+		}),
+	)
 
-	it("still reads everything written by every shipped baseline", () =>
-		runLock(
-			Effect.gen(function* () {
-				const lock = yield* readLockFile
-				expect(yield* lockProblems(lock)).toEqual([])
-			}),
-		))
+	it.effect("still reads everything written by every shipped baseline", () =>
+		Effect.gen(function* () {
+			const lock = yield* readLockFile
+			expect(yield* lockProblems(lock)).toEqual([])
+		}),
+	)
 })
 
-describe("persisted shape lock", () => {
-	it("accepts a baseline cut from the current code", () =>
-		runLock(
-			Effect.gen(function* () {
-				const baseline = yield* cutBaseline("now", "2026-01-01T00:00:00.000Z")
-				expect(Object.keys(baseline.shapes).length).toBe(persistedShapes.length)
-				expect(
-					yield* lockProblems({ version: 1, retired: {}, reviewed: {}, baselines: [baseline] }),
-				).toEqual([])
-			}),
-		))
+it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape lock", (it) => {
+	it.effect("accepts a baseline cut from the current code", () =>
+		Effect.gen(function* () {
+			const baseline = yield* cutBaseline("now", "2026-01-01T00:00:00.000Z")
+			expect(Object.keys(baseline.shapes).length).toBe(persistedShapes.length)
+			expect(
+				yield* lockProblems({ version: 1, retired: {}, reviewed: {}, baselines: [baseline] }),
+			).toEqual([])
+		}),
+	)
 
-	it("reports a shipped value the current schema can no longer read, with the rule", () =>
-		runLock(
-			Effect.gen(function* () {
-				const event = shapeOfKind("event")
-				const problems = yield* lockProblems(lockWith({ [event.id]: [{ not: "this event" }] }))
-				expect(problems.length).toBe(1)
-				expect(problems[0]).toContain(event.id)
-				expect(problems[0]).toContain('baseline "test-baseline"')
-				expect(problems[0]).toContain("Events are permanent")
-			}),
-		))
+	it.effect("reports a shipped value the current schema can no longer read, with the rule", () =>
+		Effect.gen(function* () {
+			const event = shapeOfKind("event")
+			const problems = yield* lockProblems(lockWith({ [event.id]: [{ not: "this event" }] }))
+			expect(problems.length).toBe(1)
+			expect(problems[0]).toContain(event.id)
+			expect(problems[0]).toContain('baseline "test-baseline"')
+			expect(problems[0]).toContain("Events are permanent")
+		}),
+	)
 
-	it("reports a shipped shape nothing reads any more, unless it is retired", () =>
-		runLock(
-			Effect.gen(function* () {
-				const gone = "event:Sessions.Session/removed.event"
-				const dropped = yield* lockProblems(lockWith({ [gone]: [{}] }))
-				expect(dropped.length).toBe(1)
-				expect(dropped[0]).toContain(gone)
-				expect(dropped[0]).toContain('"retired"')
+	it.effect("reports a shipped shape nothing reads any more, unless it is retired", () =>
+		Effect.gen(function* () {
+			const gone = "event:Sessions.Session/removed.event"
+			const dropped = yield* lockProblems(lockWith({ [gone]: [{}] }))
+			expect(dropped.length).toBe(1)
+			expect(dropped[0]).toContain(gone)
+			expect(dropped[0]).toContain('"retired"')
 
-				const retired = yield* lockProblems(
-					lockWith(
-						{ [gone]: [{}] },
-						{ [gone]: "Replaced by removed.event_v2; no stream holds it." },
-					),
-				)
-				expect(retired).toEqual([])
-			}),
-		))
+			const retired = yield* lockProblems(
+				lockWith({ [gone]: [{}] }, { [gone]: "Replaced by removed.event_v2; no stream holds it." }),
+			)
+			expect(retired).toEqual([])
+		}),
+	)
 
-	it("fails a saga input that gains a required field or breaks __cause, and passes an optional one", () =>
-		runLock(
+	it.effect(
+		"fails a saga input that gains a required field or breaks __cause, and passes an optional one",
+		() =>
 			Effect.gen(function* () {
 				const id = "saga-input:Checkfu.RunTurn"
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -222,41 +215,41 @@ describe("persisted shape lock", () => {
 				expect(unreviewed[0]).toContain("has not been reviewed")
 				expect(yield* lockProblems(yield* reviewing(lock, id, optional), optional)).toEqual([])
 			}),
-		))
+	)
 
-	it("blocks a release that cannot deliver an already-armed turn deadline", () =>
-		runLock(
-			Effect.gen(function* () {
-				const id = "scheduled-command:Checkfu.Session/AbandonTurn"
-				// The Durable Object stores this JSON as the alarm job's command.
-				const lock = lockWith({
-					[id]: [
-						{
-							_tag: "AbandonTurn",
-							session_id: "session_deadline",
-							turn: 3,
-							error_type: "model_request_timeout",
-							message: "Model request timed out.",
-						},
-					],
-				})
-				expect(yield* lockProblems(lock)).toEqual([])
-				const missing = yield* shipBlockers(
-					lock,
-					persistedShapes.filter((shape) => shape.id !== id),
-				)
-				expect(missing).toEqual([expect.stringContaining(`${id} shipped`)])
-				const changed = replacing(
-					id,
-					Schema.Struct({ ...AbandonTurn.fields, generation: Schema.Int }),
-				)
-				const narrowed = yield* shipBlockers(lock, changed)
-				expect(narrowed).toEqual([expect.stringContaining(`${id} can no longer read`)])
-			}),
-		))
+	it.effect("blocks a release that cannot deliver an already-armed turn deadline", () =>
+		Effect.gen(function* () {
+			const id = "scheduled-command:Checkfu.Session/AbandonTurn"
+			// The Durable Object stores this JSON as the alarm job's command.
+			const lock = lockWith({
+				[id]: [
+					{
+						_tag: "AbandonTurn",
+						session_id: "session_deadline",
+						turn: 3,
+						error_type: "model_request_timeout",
+						message: "Model request timed out.",
+					},
+				],
+			})
+			expect(yield* lockProblems(lock)).toEqual([])
+			const missing = yield* shipBlockers(
+				lock,
+				persistedShapes.filter((shape) => shape.id !== id),
+			)
+			expect(missing).toEqual([expect.stringContaining(`${id} shipped`)])
+			const changed = replacing(
+				id,
+				Schema.Struct({ ...AbandonTurn.fields, generation: Schema.Int }),
+			)
+			const narrowed = yield* shipBlockers(lock, changed)
+			expect(narrowed).toEqual([expect.stringContaining(`${id} can no longer read`)])
+		}),
+	)
 
-	it("blocks unreadable receipt replies from aggregates and decisions, including previously empty replies", () =>
-		runLock(
+	it.effect(
+		"blocks unreadable receipt replies from aggregates and decisions, including previously empty replies",
+		() =>
 			Effect.gen(function* () {
 				const sessionReply = "command-reply:Checkfu/SendUserMessage"
 				const agentReply = "command-reply:Checkfu/CreateAgent"
@@ -281,353 +274,351 @@ describe("persisted shape lock", () => {
 				)
 				expect(added).toEqual([expect.stringContaining(`${emptyReply} can no longer read`)])
 			}),
-		))
+	)
 
-	it("rehearses adding a field to a shipped event", () =>
-		runLock(
-			Effect.gen(function* () {
-				const id = "event:Checkfu.Session/user.message"
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
+	it.effect("rehearses adding a field to a shipped event", () =>
+		Effect.gen(function* () {
+			const id = "event:Checkfu.Session/user.message"
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
 
-				const required = yield* lockProblems(
-					lock,
-					replacing(id, Schema.Struct({ ...UserMessage.fields, added_later: Schema.Finite })),
-				)
-				expect(required.length).toBe(1)
-				expect(required[0]).toContain(id)
-				expect(required[0]).toContain("Events are permanent")
+			const required = yield* lockProblems(
+				lock,
+				replacing(id, Schema.Struct({ ...UserMessage.fields, added_later: Schema.Finite })),
+			)
+			expect(required.length).toBe(1)
+			expect(required[0]).toContain(id)
+			expect(required[0]).toContain("Events are permanent")
 
-				const defaulted = replacing(
-					id,
+			const defaulted = replacing(
+				id,
+				Schema.Struct({
+					...UserMessage.fields,
+					added_later: Schema.Finite.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+				}),
+			)
+			const unreviewed = yield* lockProblems(lock, defaulted)
+			expect(unreviewed.length).toBe(1)
+			expect(unreviewed[0]).toContain("has not been reviewed")
+			expect(yield* lockProblems(yield* reviewing(lock, id, defaulted), defaulted)).toEqual([])
+		}),
+	)
+
+	it.effect("rehearses changing a shipped aggregate state with a migration step", () =>
+		Effect.gen(function* () {
+			const id = "state:Checkfu.Agent"
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
+			const AgentStateV2 = Schema.Struct({ ...AgentState.fields, tier: Schema.String })
+
+			const migrated = replacing(
+				id,
+				versionedSnapshot({
+					current: 2,
+					schema: AgentStateV2,
+					previous: [
+						snapshotVersion({
+							version: 1,
+							schema: AgentState,
+							migrate: (state) => ({ ...state, tier: "standard" }),
+						}),
+					],
+				}),
+			)
+			expect(yield* lockProblems(yield* reviewing(lock, id, migrated), migrated)).toEqual([])
+
+			const inPlace = yield* lockProblems(
+				lock,
+				replacing(id, versionedSnapshot({ current: 2, schema: AgentStateV2 })),
+			)
+			expect(inPlace.length).toBe(1)
+			expect(inPlace[0]).toContain(id)
+			expect(inPlace[0]).toContain("Aggregate state is permanent")
+		}),
+	)
+
+	it.effect("reports a retired shape that is active again", () =>
+		Effect.gen(function* () {
+			const event = shapeOfKind("event")
+			const problems = yield* lockProblems({
+				version: 1,
+				retired: { [event.id]: "Replaced; no stream holds it." },
+				reviewed: {},
+				baselines: [],
+			})
+			expect(problems.length).toBe(1)
+			expect(problems[0]).toContain(event.id)
+			expect(problems[0]).toContain("a retired shape is active again")
+		}),
+	)
+
+	it.effect("lets a view change shape only when its version increased", () =>
+		Effect.gen(function* () {
+			const id = "view:Checkfu.TurnInput@v1"
+			expect(persistedShapes.map((shape) => shape.id)).toContain(id)
+			const earlier = viewShapeId("Checkfu", "TurnInput", 0)
+			const later = viewShapeId("Checkfu", "TurnInput", 2)
+
+			expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
+
+			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v2" }] }))
+			expect(downgraded.length).toBe(1)
+			expect(downgraded[0]).toContain("only ever increases")
+
+			const stale = yield* lockProblems(lockWith({ [id]: [{ shape: "changed in place" }] }))
+			expect(stale.length).toBe(1)
+			expect(stale[0]).toContain("Bump the view's `version`")
+
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const widened = replacing(
+				id,
+				Schema.NullOr(
 					Schema.Struct({
-						...UserMessage.fields,
-						added_later: Schema.Finite.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
+						...TurnInputState.fields,
+						derived: Schema.optionalKey(Schema.String),
 					}),
-				)
-				const unreviewed = yield* lockProblems(lock, defaulted)
-				expect(unreviewed.length).toBe(1)
-				expect(unreviewed[0]).toContain("has not been reviewed")
-				expect(yield* lockProblems(yield* reviewing(lock, id, defaulted), defaulted)).toEqual([])
-			}),
-		))
-
-	it("rehearses changing a shipped aggregate state with a migration step", () =>
-		runLock(
-			Effect.gen(function* () {
-				const id = "state:Checkfu.Agent"
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
-				const AgentStateV2 = Schema.Struct({ ...AgentState.fields, tier: Schema.String })
-
-				const migrated = replacing(
-					id,
-					versionedSnapshot({
-						current: 2,
-						schema: AgentStateV2,
-						previous: [
-							snapshotVersion({
-								version: 1,
-								schema: AgentState,
-								migrate: (state) => ({ ...state, tier: "standard" }),
-							}),
-						],
-					}),
-				)
-				expect(yield* lockProblems(yield* reviewing(lock, id, migrated), migrated)).toEqual([])
-
-				const inPlace = yield* lockProblems(
-					lock,
-					replacing(id, versionedSnapshot({ current: 2, schema: AgentStateV2 })),
-				)
-				expect(inPlace.length).toBe(1)
-				expect(inPlace[0]).toContain(id)
-				expect(inPlace[0]).toContain("Aggregate state is permanent")
-			}),
-		))
-
-	it("reports a retired shape that is active again", () =>
-		runLock(
-			Effect.gen(function* () {
-				const event = shapeOfKind("event")
-				const problems = yield* lockProblems({
-					version: 1,
-					retired: { [event.id]: "Replaced; no stream holds it." },
-					reviewed: {},
-					baselines: [],
-				})
-				expect(problems.length).toBe(1)
-				expect(problems[0]).toContain(event.id)
-				expect(problems[0]).toContain("a retired shape is active again")
-			}),
-		))
-
-	it("lets a view change shape only when its version increased", () =>
-		runLock(
-			Effect.gen(function* () {
-				const id = "view:Checkfu.TurnInput@v1"
-				expect(persistedShapes.map((shape) => shape.id)).toContain(id)
-				const earlier = viewShapeId("Checkfu", "TurnInput", 0)
-				const later = viewShapeId("Checkfu", "TurnInput", 2)
-
-				expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
-
-				const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v2" }] }))
-				expect(downgraded.length).toBe(1)
-				expect(downgraded[0]).toContain("only ever increases")
-
-				const stale = yield* lockProblems(lockWith({ [id]: [{ shape: "changed in place" }] }))
-				expect(stale.length).toBe(1)
-				expect(stale[0]).toContain("Bump the view's `version`")
-
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const widened = replacing(
-					id,
-					Schema.NullOr(
-						Schema.Struct({
-							...TurnInputState.fields,
-							derived: Schema.optionalKey(Schema.String),
-						}),
-					),
-				)
-				const sameVersion = yield* lockProblems(
-					{ version: 1, retired: {}, reviewed: {}, baselines: [shipped] },
-					widened,
-				)
-				expect(sameVersion.length).toBe(1)
-				expect(sameVersion[0]).toContain("without a new version")
-			}),
-		))
-
-	it("blocks a view version bump whose new state breaks queued policy deliveries", () =>
-		runLock(
-			Effect.gen(function* () {
-				const viewId = "view:Checkfu.TurnInput@v1"
-				const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
-				const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
-				expect(persistedShapes.map((shape) => shape.id)).toEqual(
-					expect.arrayContaining([viewId, startDeliveryId, stopDeliveryId]),
-				)
-
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
-
-				const upgradedTurnInput = (nextState: Schema.Top): ReadonlyArray<PersistedShape> =>
-					persistedShapes.map((shape) => {
-						if (shape.id === viewId) {
-							return {
-								...shape,
-								id: viewShapeId("Checkfu", "TurnInput", 2),
-								schema: nextState as unknown as PersistedShape["schema"],
-							}
-						}
-						if (shape.id === startDeliveryId || shape.id === stopDeliveryId) {
-							return { ...shape, schema: nextState as unknown as PersistedShape["schema"] }
-						}
-						return shape
-					})
-
-				// Even with TurnInput bumped to v2, adding a required field breaks queued deliveries.
-				const breaking = upgradedTurnInput(
-					Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
-				)
-				const breakingProblems = yield* lockProblems(lock, breaking)
-				expect(breakingProblems.length).toBe(2)
-				expect(breakingProblems).toEqual(
-					expect.arrayContaining([
-						expect.stringContaining(startDeliveryId),
-						expect.stringContaining(stopDeliveryId),
-					]),
-				)
-				expect(breakingProblems.every((p) => p.includes("Queued policy deliveries"))).toBe(true)
-
-				// A backward-compatible optional field passes once both policy deliveries are reviewed.
-				const compatible = upgradedTurnInput(
-					Schema.NullOr(
-						Schema.Struct({
-							...TurnInputState.fields,
-							optional_later: Schema.optionalKey(Schema.String),
-						}),
-					),
-				)
-				const unreviewed = yield* lockProblems(lock, compatible)
-				expect(unreviewed.length).toBe(2)
-				expect(unreviewed.every((p) => p.includes("has not been reviewed"))).toBe(true)
-
-				const reviewedEntries = yield* Effect.forEach([startDeliveryId, stopDeliveryId], (id) =>
-					Effect.gen(function* () {
-						const shape = compatible.find((candidate) => candidate.id === id)
-						if (shape === undefined) throw new Error(`missing ${id}`)
-						return [
-							id,
-							{ schema: yield* schemaFingerprint(shape), reason: "Optional field added." },
-						] as const
-					}),
-				)
-				const reviewedLock: PersistedLock = {
-					...lock,
-					reviewed: Object.fromEntries(reviewedEntries),
-				}
-				expect(yield* lockProblems(reviewedLock, compatible)).toEqual([])
-
-				// A view with no policy consumers can still break shape freely on a version bump.
-				const agentViewId = viewShapeId("Checkfu", "AgentView", 0)
-				const upgradedAgentView = persistedShapes.map((shape) =>
-					shape.id === agentViewId
-						? {
-								...shape,
-								id: viewShapeId("Checkfu", "AgentView", 1),
-								schema: Schema.NullOr(
-									Schema.Struct({ rebuilt_v1: Schema.String }),
-								) as unknown as PersistedShape["schema"],
-							}
-						: shape,
-				)
-				expect(yield* lockProblems(lock, upgradedAgentView)).toEqual([])
-			}),
-		))
-
-	it("derives the activity lock from the steps RunTurn executes", () => {
-		const steps = persistedShapes
-			.filter((shape) => shape.kind === "saga-step")
-			.map((shape) => shape.id)
-		const declared = Object.values(RUN_TURN_ACTIVITIES).map(
-			(activity) => `saga-step:Checkfu.RunTurn/${activity.name}`,
-		)
-		expect(steps.toSorted()).toEqual(declared.toSorted())
-	})
-
-	it("locks a saga's completed result", () =>
-		runLock(
-			Effect.gen(function* () {
-				const id = "saga-result:Checkfu.RunTurn"
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const changed = persistedShapes.map((shape) =>
-					shape.id === id
-						? {
-								...shape,
-								schema: Schema.Struct({
-									outcome: Schema.String,
-								}) as unknown as PersistedShape["schema"],
-							}
-						: shape,
-				)
-				const problems = yield* lockProblems(
-					{ version: 1, retired: {}, reviewed: {}, baselines: [shipped] },
-					changed,
-				)
-				expect(problems.length).toBe(1)
-				expect(problems[0]).toContain(id)
-				expect(problems[0]).toContain("A completed run keeps its result")
-			}),
-		))
-
-	it("blocks a production deploy until a baseline covers the current shapes", () =>
-		runLock(
-			Effect.gen(function* () {
-				expect(
-					yield* shipBlockers({ version: 1, retired: {}, reviewed: {}, baselines: [] }),
-				).toEqual(["No baseline has been cut yet."])
-
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
-				expect(yield* shipBlockers(lock)).toEqual([])
-
-				const added: PersistedShape = {
-					id: "event:Sessions.session.example_added",
-					kind: "event",
-					schema: Schema.Struct({ note: Schema.String }) as unknown as PersistedShape["schema"],
-				}
-				expect(yield* shipBlockers(lock, [...persistedShapes, added])).toEqual([
-					'Persisted shapes changed since "shipped".',
-				])
-			}),
-		))
-
-	it("treats a schema change as a change even when every sample is identical", () =>
-		runLock(
-			Effect.gen(function* () {
-				const shape = shapeOfKind("event")
-				const narrowed = (schema: Schema.Top): PersistedShape => ({
-					...shape,
-					schema: schema as unknown as PersistedShape["schema"],
-				})
-				expect(
-					yield* schemaFingerprint(
-						narrowed(Schema.Struct({ status: Schema.Literals(["a", "b"]) })),
-					),
-				).not.toBe(
-					yield* schemaFingerprint(narrowed(Schema.Struct({ status: Schema.Literals(["a"]) }))),
-				)
-
-				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
-				const sameSamples: PersistedLock = {
-					version: 1,
-					retired: {},
-					reviewed: {},
-					baselines: [
-						{ ...shipped, schemas: { ...shipped.schemas, [shape.id]: "an older schema" } },
-					],
-				}
-				const blockers = yield* shipBlockers(sameSamples)
-				expect(blockers.length).toBe(1)
-				expect(blockers[0]).toContain(shape.id)
-				expect(blockers[0]).toContain("has not been reviewed")
-			}),
-		))
-
-	it("locks every Checkfu Pi document in CHECKFU_PI_DOCS independent of import order and rejects unregistered persisted docs at runtime", async () => {
-		const registered = persistedShapes
-			.filter((shape) => shape.kind === "pi-doc")
-			.map((shape) => shape.id)
-		const declaredBeforeWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
-			piDocShapeId(spec.token.definition.kind),
-		)
-		expect(Object.isFrozen(CHECKFU_PI_DOCS)).toBe(true)
-		expect(registered.toSorted()).toEqual(declaredBeforeWorkerImport.toSorted())
-		expect(new Set(declaredBeforeWorkerImport).size).toBe(declaredBeforeWorkerImport.length)
-
-		// Importing the deploy entry point (ApiWorker -> PiSession -> PiDurableEngine) MUST
-		// enumerate the exact same Pi document IDs as the standalone persisted:cut / persisted:check
-		// entry point (Shapes.ts -> PiDocRegistry.ts).
-		await import("../src/ApiWorker.ts")
-		const declaredAfterWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
-			piDocShapeId(spec.token.definition.kind),
-		)
-		expect(declaredAfterWorkerImport).toEqual(declaredBeforeWorkerImport)
-		expect(registered.toSorted()).toEqual(declaredAfterWorkerImport.toSorted())
-
-		// Runtime guard: persisting any non-pi.* document kind not in CHECKFU_PI_DOCS fails at storage commit.
-		const backend = await createInMemoryPiDurableBackend(
-			createPiModels({ openai: Redacted.make("sk-test"), anthropic: null }),
-		)
-		try {
-			await expect(
-				backend.storage.commit(
-					[
-						[
-							{
-								type: "document.create",
-								record: {
-									id: 9999 as DocumentId,
-									kind: "checkfu.unregistered-secret-doc",
-									scope: { kind: "session" },
-								},
-								content: { kind: "base", version: 1, value: { ok: true } },
-							},
-						],
-					],
-					() => undefined,
-					BACKGROUND_CONTEXT,
 				),
-			).rejects.toThrow(/Unregistered Pi durable document/)
-		} finally {
-			await backend.close()
-		}
-	})
+			)
+			const sameVersion = yield* lockProblems(
+				{ version: 1, retired: {}, reviewed: {}, baselines: [shipped] },
+				widened,
+			)
+			expect(sameVersion.length).toBe(1)
+			expect(sameVersion[0]).toContain("without a new version")
+		}),
+	)
 
-	it("blocks incompatible changes to Checkfu-owned Pi documents unless versioned with a working migration", () =>
-		runLock(
+	it.effect("blocks a view version bump whose new state breaks queued policy deliveries", () =>
+		Effect.gen(function* () {
+			const viewId = "view:Checkfu.TurnInput@v1"
+			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
+			const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
+			expect(persistedShapes.map((shape) => shape.id)).toEqual(
+				expect.arrayContaining([viewId, startDeliveryId, stopDeliveryId]),
+			)
+
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
+
+			const upgradedTurnInput = (nextState: Schema.Top): ReadonlyArray<PersistedShape> =>
+				persistedShapes.map((shape) => {
+					if (shape.id === viewId) {
+						return {
+							...shape,
+							id: viewShapeId("Checkfu", "TurnInput", 2),
+							schema: nextState as unknown as PersistedShape["schema"],
+						}
+					}
+					if (shape.id === startDeliveryId || shape.id === stopDeliveryId) {
+						return { ...shape, schema: nextState as unknown as PersistedShape["schema"] }
+					}
+					return shape
+				})
+
+			// Even with TurnInput bumped to v2, adding a required field breaks queued deliveries.
+			const breaking = upgradedTurnInput(
+				Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
+			)
+			const breakingProblems = yield* lockProblems(lock, breaking)
+			expect(breakingProblems.length).toBe(2)
+			expect(breakingProblems).toEqual(
+				expect.arrayContaining([
+					expect.stringContaining(startDeliveryId),
+					expect.stringContaining(stopDeliveryId),
+				]),
+			)
+			expect(breakingProblems.every((p) => p.includes("Queued policy deliveries"))).toBe(true)
+
+			// A backward-compatible optional field passes once both policy deliveries are reviewed.
+			const compatible = upgradedTurnInput(
+				Schema.NullOr(
+					Schema.Struct({
+						...TurnInputState.fields,
+						optional_later: Schema.optionalKey(Schema.String),
+					}),
+				),
+			)
+			const unreviewed = yield* lockProblems(lock, compatible)
+			expect(unreviewed.length).toBe(2)
+			expect(unreviewed.every((p) => p.includes("has not been reviewed"))).toBe(true)
+
+			const reviewedEntries = yield* Effect.forEach([startDeliveryId, stopDeliveryId], (id) =>
+				Effect.gen(function* () {
+					const shape = compatible.find((candidate) => candidate.id === id)
+					if (shape === undefined) throw new Error(`missing ${id}`)
+					return [
+						id,
+						{ schema: yield* schemaFingerprint(shape), reason: "Optional field added." },
+					] as const
+				}),
+			)
+			const reviewedLock: PersistedLock = {
+				...lock,
+				reviewed: Object.fromEntries(reviewedEntries),
+			}
+			expect(yield* lockProblems(reviewedLock, compatible)).toEqual([])
+
+			// A view with no policy consumers can still break shape freely on a version bump.
+			const agentViewId = viewShapeId("Checkfu", "AgentView", 0)
+			const upgradedAgentView = persistedShapes.map((shape) =>
+				shape.id === agentViewId
+					? {
+							...shape,
+							id: viewShapeId("Checkfu", "AgentView", 1),
+							schema: Schema.NullOr(
+								Schema.Struct({ rebuilt_v1: Schema.String }),
+							) as unknown as PersistedShape["schema"],
+						}
+					: shape,
+			)
+			expect(yield* lockProblems(lock, upgradedAgentView)).toEqual([])
+		}),
+	)
+
+	it.effect("derives the activity lock from the steps RunTurn executes", () =>
+		Effect.sync(() => {
+			const steps = persistedShapes
+				.filter((shape) => shape.kind === "saga-step")
+				.map((shape) => shape.id)
+			const declared = Object.values(RUN_TURN_ACTIVITIES).map(
+				(activity) => `saga-step:Checkfu.RunTurn/${activity.name}`,
+			)
+			expect(steps.toSorted()).toEqual(declared.toSorted())
+		}),
+	)
+
+	it.effect("locks a saga's completed result", () =>
+		Effect.gen(function* () {
+			const id = "saga-result:Checkfu.RunTurn"
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const changed = persistedShapes.map((shape) =>
+				shape.id === id
+					? {
+							...shape,
+							schema: Schema.Struct({
+								outcome: Schema.String,
+							}) as unknown as PersistedShape["schema"],
+						}
+					: shape,
+			)
+			const problems = yield* lockProblems(
+				{ version: 1, retired: {}, reviewed: {}, baselines: [shipped] },
+				changed,
+			)
+			expect(problems.length).toBe(1)
+			expect(problems[0]).toContain(id)
+			expect(problems[0]).toContain("A completed run keeps its result")
+		}),
+	)
+
+	it.effect("blocks a production deploy until a baseline covers the current shapes", () =>
+		Effect.gen(function* () {
+			expect(yield* shipBlockers({ version: 1, retired: {}, reviewed: {}, baselines: [] })).toEqual(
+				["No baseline has been cut yet."],
+			)
+
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const lock: PersistedLock = { version: 1, retired: {}, reviewed: {}, baselines: [shipped] }
+			expect(yield* shipBlockers(lock)).toEqual([])
+
+			const added: PersistedShape = {
+				id: "event:Sessions.session.example_added",
+				kind: "event",
+				schema: Schema.Struct({ note: Schema.String }) as unknown as PersistedShape["schema"],
+			}
+			expect(yield* shipBlockers(lock, [...persistedShapes, added])).toEqual([
+				'Persisted shapes changed since "shipped".',
+			])
+		}),
+	)
+
+	it.effect("treats a schema change as a change even when every sample is identical", () =>
+		Effect.gen(function* () {
+			const shape = shapeOfKind("event")
+			const narrowed = (schema: Schema.Top): PersistedShape => ({
+				...shape,
+				schema: schema as unknown as PersistedShape["schema"],
+			})
+			expect(
+				yield* schemaFingerprint(narrowed(Schema.Struct({ status: Schema.Literals(["a", "b"]) }))),
+			).not.toBe(
+				yield* schemaFingerprint(narrowed(Schema.Struct({ status: Schema.Literals(["a"]) }))),
+			)
+
+			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
+			const sameSamples: PersistedLock = {
+				version: 1,
+				retired: {},
+				reviewed: {},
+				baselines: [{ ...shipped, schemas: { ...shipped.schemas, [shape.id]: "an older schema" } }],
+			}
+			const blockers = yield* shipBlockers(sameSamples)
+			expect(blockers.length).toBe(1)
+			expect(blockers[0]).toContain(shape.id)
+			expect(blockers[0]).toContain("has not been reviewed")
+		}),
+	)
+
+	it.effect(
+		"locks every Checkfu Pi document in CHECKFU_PI_DOCS independent of import order and rejects unregistered persisted docs at runtime",
+		() =>
+			Effect.gen(function* () {
+				const registered = persistedShapes
+					.filter((shape) => shape.kind === "pi-doc")
+					.map((shape) => shape.id)
+				const declaredBeforeWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
+					piDocShapeId(spec.token.definition.kind),
+				)
+				expect(Object.isFrozen(CHECKFU_PI_DOCS)).toBe(true)
+				expect(registered.toSorted()).toEqual(declaredBeforeWorkerImport.toSorted())
+				expect(new Set(declaredBeforeWorkerImport).size).toBe(declaredBeforeWorkerImport.length)
+
+				// Importing the deploy entry point (ApiWorker -> PiSession -> PiDurableEngine) MUST
+				// enumerate the exact same Pi document IDs as the standalone persisted:cut / persisted:check
+				// entry point (Shapes.ts -> PiDocRegistry.ts).
+				yield* Effect.promise(() => import("../src/ApiWorker.ts"))
+				const declaredAfterWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
+					piDocShapeId(spec.token.definition.kind),
+				)
+				expect(declaredAfterWorkerImport).toEqual(declaredBeforeWorkerImport)
+				expect(registered.toSorted()).toEqual(declaredAfterWorkerImport.toSorted())
+
+				// Runtime guard: persisting any non-pi.* document kind not in CHECKFU_PI_DOCS fails at storage commit.
+				const backend = yield* Effect.acquireRelease(
+					Effect.promise(() =>
+						createInMemoryPiDurableBackend(
+							createPiModels({ openai: Redacted.make("sk-test"), anthropic: null }),
+						),
+					),
+					(b) => Effect.promise(() => b.close()),
+				)
+				yield* Effect.promise(() =>
+					expect(
+						backend.storage.commit(
+							[
+								[
+									{
+										type: "document.create",
+										record: {
+											id: 9999 as DocumentId,
+											kind: "checkfu.unregistered-secret-doc",
+											scope: { kind: "session" },
+										},
+										content: { kind: "base", version: 1, value: { ok: true } },
+									},
+								],
+							],
+							() => undefined,
+							BACKGROUND_CONTEXT,
+						),
+					).rejects.toThrow(/Unregistered Pi durable document/),
+				)
+			}),
+	)
+
+	it.effect(
+		"blocks incompatible changes to Checkfu-owned Pi documents unless versioned with a working migration",
+		() =>
 			Effect.gen(function* () {
 				const id = piDocShapeId(SettledUsage.definition.kind)
 				const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -1234,5 +1225,5 @@ describe("persisted shape lock", () => {
 					yield* lockProblems(yield* reviewing(convLock, convId, validConvV2), validConvV2),
 				).toEqual([])
 			}),
-		))
+	)
 })
