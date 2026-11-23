@@ -176,6 +176,15 @@ export default defineConfig({
 			},
 		},
 		{
+			// GeneratedRuntime dynamically decodes erased HttpApiEndpoint Schema.Top contracts
+			// and dispatches Forge-generated operations onto the typed HttpApiClient by name.
+			files: ["apps/cli/src/GeneratedRuntime.ts"],
+			rules: {
+				"quality/no-chained-type-assertions": "off",
+				"typescript/no-unsafe-type-assertion": "off",
+			},
+		},
+		{
 			files: ["apps/api/src/Pi/PiDocRegistry.ts"],
 			rules: {
 				"no-restricted-imports": "off",

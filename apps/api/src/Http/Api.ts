@@ -28,6 +28,7 @@ import * as HttpApiGroup from "effect/http-api/HttpApiGroup"
 import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware"
 import * as HttpApiSchema from "effect/http-api/HttpApiSchema"
 import * as HttpApiSecurity from "effect/http-api/HttpApiSecurity"
+import * as OpenApi from "effect/http-api/OpenApi"
 import type * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
@@ -239,31 +240,67 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
-	name: AgentName,
-	model: ModelInput,
-	system: Schema.optionalKey(Schema.NullOr(AgentSystem)),
-	description: Schema.optionalKey(Schema.NullOr(AgentDescription)),
+	name: AgentName.annotate({ description: "Human-readable agent name" }),
+	model: ModelInput.annotate({
+		description: "Model ID string or model object ({id})",
+	}),
+	system: Schema.optionalKey(
+		Schema.NullOr(AgentSystem).annotate({ description: "System prompt text" }),
+	),
+	description: Schema.optionalKey(
+		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
+	),
 })
 
 export const UpdateAgentBody = Schema.Struct({
-	version: PositiveInt,
-	name: Schema.optionalKey(AgentName),
-	model: Schema.optionalKey(ModelInput),
-	system: Schema.optionalKey(Schema.NullOr(AgentSystem)),
-	description: Schema.optionalKey(Schema.NullOr(AgentDescription)),
+	version: PositiveInt.annotate({
+		description: "Current agent version for optimistic concurrency",
+	}),
+	name: Schema.optionalKey(AgentName.annotate({ description: "Updated agent name" })),
+	model: Schema.optionalKey(
+		ModelInput.annotate({
+			description: "Updated model ID string or model object ({id})",
+		}),
+	),
+	system: Schema.optionalKey(
+		Schema.NullOr(AgentSystem).annotate({ description: "Updated system prompt text" }),
+	),
+	description: Schema.optionalKey(
+		Schema.NullOr(AgentDescription).annotate({
+			description: "Updated agent description",
+		}),
+	),
 })
 
 export const CreateEnvironmentBody = Schema.Struct({
-	name: EnvironmentName,
-	description: Schema.optionalKey(Schema.NullOr(EnvironmentDescription)),
-	config: Schema.optionalKey(EnvironmentConfig),
+	name: EnvironmentName.annotate({ description: "Human-readable environment name" }),
+	description: Schema.optionalKey(
+		Schema.NullOr(EnvironmentDescription).annotate({
+			description: "Environment description",
+		}),
+	),
+	config: Schema.optionalKey(
+		EnvironmentConfig.annotate({
+			description: "Environment configuration object",
+		}),
+	),
 })
 
 export const UpdateEnvironmentBody = Schema.Struct({
-	version: PositiveInt,
-	name: Schema.optionalKey(EnvironmentName),
-	description: Schema.optionalKey(Schema.NullOr(EnvironmentDescription)),
-	config: Schema.optionalKey(EnvironmentConfig),
+	version: PositiveInt.annotate({
+		description: "Current environment version for optimistic concurrency",
+	}),
+	name: Schema.optionalKey(EnvironmentName.annotate({ description: "Updated environment name" })),
+	description: Schema.optionalKey(
+		Schema.NullOr(EnvironmentDescription).annotate({
+			description: "Updated environment description",
+		}),
+	),
+	config: Schema.optionalKey(
+		EnvironmentConfig.annotate({
+			description: "Updated environment configuration object",
+		}),
+	),
 })
 
 const AgentReference = Schema.Union([
@@ -272,20 +309,32 @@ const AgentReference = Schema.Union([
 ])
 
 const CreateSessionCommonFields = {
-	agent_version: Schema.optionalKey(PositiveInt),
-	environment_id: ResourceId,
-	title: Schema.optionalKey(Schema.NullOr(SessionTitle)),
+	agent_version: Schema.optionalKey(
+		PositiveInt.annotate({ description: "Optional pinned agent version" }),
+	),
+	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
+	title: Schema.optionalKey(
+		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
+	),
 }
 
 export const CreateSessionBody = Schema.Union([
 	Schema.Struct({
-		agent: AgentReference,
-		agent_id: Schema.optionalKey(ResourceId),
+		agent: AgentReference.annotate({
+			description: "Agent ID string or agent reference object ({id, version})",
+		}),
+		agent_id: Schema.optionalKey(
+			ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
+		),
 		...CreateSessionCommonFields,
 	}),
 	Schema.Struct({
-		agent: Schema.optionalKey(AgentReference),
-		agent_id: ResourceId,
+		agent: Schema.optionalKey(
+			AgentReference.annotate({
+				description: "Agent ID string or agent reference object ({id, version})",
+			}),
+		),
+		agent_id: ResourceId.annotate({ description: "Agent ID (alternative to agent)" }),
 		...CreateSessionCommonFields,
 	}),
 ])
@@ -450,16 +499,35 @@ export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$
 	),
 )
 
-const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u)).pipe(
-	Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
-		decode: SchemaGetter.transform(Number),
-		encode: SchemaGetter.transform(String),
-	}),
-)
+const EventListAfterFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u))
+	.annotate({
+		description:
+			"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+	})
+	.pipe(
+		Schema.decodeTo(
+			Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
+			{
+				decode: SchemaGetter.transform(Number),
+				encode: SchemaGetter.transform(String),
+			},
+		),
+	)
 
-const agentParams = { agent_id: AgentId }
-const environmentParams = { environment_id: EnvironmentId }
-const sessionParams = { session_id: SessionId }
+const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u))
+	.annotate({ description: "Maximum number of events to return (1-100)" })
+	.pipe(
+		Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
+			decode: SchemaGetter.transform(Number),
+			encode: SchemaGetter.transform(String),
+		}),
+	)
+
+const agentParams = { agent_id: AgentId.annotate({ description: "Agent ID" }) }
+const environmentParams = {
+	environment_id: EnvironmentId.annotate({ description: "Environment ID" }),
+}
+const sessionParams = { session_id: SessionId.annotate({ description: "Session ID" }) }
 
 export const IdempotencyKey = Context.Reference<string | undefined>("@checkfu/api/IdempotencyKey", {
 	defaultValue: () => undefined,
@@ -475,7 +543,11 @@ export const withIdempotencyKey: {
 )
 
 const IdempotencyHeaders = Schema.Struct({
-	"idempotency-key": Schema.optionalKey(ClientEventId),
+	"idempotency-key": Schema.optionalKey(
+		ClientEventId.annotate({
+			description: "Optional Idempotency-Key header for safe retries",
+		}),
+	),
 })
 
 const IdempotencyHeadersInput = Schema.Struct({
@@ -550,7 +622,9 @@ const withOptionalIdempotencyHeaders = <Endpoint extends HttpApiEndpoint.Constra
 const Health = HttpApiGroup.make("health").add(
 	HttpApiEndpoint.get("health", "/health", {
 		success: Schema.Struct({ status: Schema.Literal("ok") }),
-	}),
+	})
+		.annotate(OpenApi.Summary, "Health check")
+		.annotate(OpenApi.Override, { "x-forge-skip": true }),
 )
 
 const Agents = HttpApiGroup.make("agents")
@@ -561,7 +635,29 @@ const Agents = HttpApiGroup.make("agents")
 				payload: CreateAgentBody,
 				success: [AgentResource.pipe(HttpApiSchema.status(201)), Pending],
 				error: BodyErrors,
-			}).middleware(AgentBodyLimit),
+			})
+				.annotate(OpenApi.Summary, "Create an agent")
+				.annotate(OpenApi.Description, "Create an agent")
+				.annotate(OpenApi.Override, {
+					"x-forge-group-name": "agents",
+					"x-forge-method-name": "create",
+					"x-checkfu-endpoint": { group: "agents", endpoint: "create" },
+					"x-checkfu-cli": {
+						fileFields: ["system", "description"],
+						textOrObjectFields: ["model"],
+						examples: [
+							{
+								command: 'checkfu agents create --name "Assistant" --model gpt-6.2-sol',
+								description: "Create an agent with flags",
+							},
+							{
+								command: "checkfu agents create < agent.yaml",
+								description: "Create an agent from YAML on stdin",
+							},
+						],
+					},
+				})
+				.middleware(AgentBodyLimit),
 		),
 	)
 	.add(
@@ -569,7 +665,14 @@ const Agents = HttpApiGroup.make("agents")
 			params: agentParams,
 			success: AgentResource,
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Retrieve an agent")
+			.annotate(OpenApi.Description, "Retrieve an agent by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "get" },
+			}),
 	)
 	.add(
 		HttpApiEndpoint.post("update", "/v1/agents/:agent_id", {
@@ -577,15 +680,35 @@ const Agents = HttpApiGroup.make("agents")
 			payload: UpdateAgentBody,
 			success: [AgentResource, Pending],
 			error: BodyErrors,
-		}).middleware(AgentBodyLimit),
+		})
+			.annotate(OpenApi.Summary, "Update an agent")
+			.annotate(OpenApi.Description, "Update an agent (creates a new agent version)")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "update" },
+				"x-checkfu-cli": {
+					fileFields: ["system", "description"],
+					textOrObjectFields: ["model"],
+				},
+			})
+			.middleware(AgentBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/agents/:agent_id/archive", {
 			params: agentParams,
 			success: [AgentResource, Pending],
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Archive an agent")
+			.annotate(OpenApi.Description, "Archive an agent")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "archive" },
+			}),
 	)
+	.annotate(OpenApi.Description, "Manage agents")
 	.middleware(Authentication)
 
 const Environments = HttpApiGroup.make("environments")
@@ -596,7 +719,24 @@ const Environments = HttpApiGroup.make("environments")
 				payload: CreateEnvironmentBody,
 				success: [EnvironmentSnapshot.pipe(HttpApiSchema.status(201)), Pending],
 				error: BodyErrors,
-			}),
+			})
+				.annotate(OpenApi.Summary, "Create an environment")
+				.annotate(OpenApi.Description, "Create an environment")
+				.annotate(OpenApi.Override, {
+					"x-forge-group-name": "environments",
+					"x-forge-method-name": "create",
+					"x-checkfu-endpoint": { group: "environments", endpoint: "create" },
+					"x-checkfu-cli": {
+						fileFields: ["description"],
+						examples: [
+							{
+								command:
+									'checkfu environments create --name "default" --config \'{"type":"cloud","networking":{"type":"unrestricted"}}\'',
+								description: "Create a cloud environment",
+							},
+						],
+					},
+				}),
 		),
 	)
 	.add(
@@ -604,7 +744,14 @@ const Environments = HttpApiGroup.make("environments")
 			params: environmentParams,
 			success: EnvironmentSnapshot,
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Retrieve an environment")
+			.annotate(OpenApi.Description, "Retrieve an environment by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "environments",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "environments", endpoint: "get" },
+			}),
 	)
 	.add(
 		HttpApiEndpoint.post("update", "/v1/environments/:environment_id", {
@@ -612,22 +759,47 @@ const Environments = HttpApiGroup.make("environments")
 			payload: UpdateEnvironmentBody,
 			success: [EnvironmentSnapshot, Pending],
 			error: BodyErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Update an environment")
+			.annotate(OpenApi.Description, "Update an environment")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "environments",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "environments", endpoint: "update" },
+				"x-checkfu-cli": {
+					fileFields: ["description"],
+				},
+			}),
 	)
 	.add(
 		HttpApiEndpoint.delete("delete", "/v1/environments/:environment_id", {
 			params: environmentParams,
 			success: Schema.Struct({ id: Schema.String, type: Schema.Literal("environment_deleted") }),
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Delete an environment")
+			.annotate(OpenApi.Description, "Delete an environment")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "environments",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "environments", endpoint: "delete" },
+			}),
 	)
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/environments/:environment_id/archive", {
 			params: environmentParams,
 			success: [EnvironmentSnapshot, Pending],
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Archive an environment")
+			.annotate(OpenApi.Description, "Archive an environment")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "environments",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "environments", endpoint: "archive" },
+			}),
 	)
+	.annotate(OpenApi.Description, "Manage environments")
 	.middleware(Authentication)
 
 const Sessions = HttpApiGroup.make("sessions")
@@ -638,7 +810,23 @@ const Sessions = HttpApiGroup.make("sessions")
 				payload: CreateSessionBody,
 				success: [SessionResource.pipe(HttpApiSchema.status(201)), Pending],
 				error: BodyErrors,
-			}),
+			})
+				.annotate(OpenApi.Summary, "Create a session")
+				.annotate(OpenApi.Description, "Create a session")
+				.annotate(OpenApi.Override, {
+					"x-forge-group-name": "sessions",
+					"x-forge-method-name": "create",
+					"x-checkfu-endpoint": { group: "sessions", endpoint: "create" },
+					"x-checkfu-cli": {
+						textOrObjectFields: ["agent"],
+						examples: [
+							{
+								command: "checkfu sessions create --agent agent_123 --environment-id env_456",
+								description: "Create a session with flags",
+							},
+						],
+					},
+				}),
 		),
 	)
 	.add(
@@ -646,14 +834,28 @@ const Sessions = HttpApiGroup.make("sessions")
 			params: sessionParams,
 			success: SessionResource,
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Retrieve a session")
+			.annotate(OpenApi.Description, "Retrieve a session by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "get" },
+			}),
 	)
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/sessions/:session_id/archive", {
 			params: sessionParams,
 			success: [SessionResource, Pending],
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Archive a session")
+			.annotate(OpenApi.Description, "Archive a session")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "archive" },
+			}),
 	)
 	.add(
 		HttpApiEndpoint.post("sendEvents", "/v1/sessions/:session_id/events", {
@@ -662,15 +864,45 @@ const Sessions = HttpApiGroup.make("sessions")
 			payload: SendSessionEventsBody,
 			success: Schema.Struct({ data: Schema.Array(Schema.Unknown) }),
 			error: BodyErrors,
-		}).middleware(EventBatchBodyLimit),
+		})
+			.annotate(OpenApi.Summary, "Send session events")
+			.annotate(OpenApi.Description, "Send user events to a session")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.events",
+				"x-forge-method-name": "send",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "sendEvents" },
+				"x-checkfu-cli": {
+					groupDescription: "Send, list, and stream session events",
+					repeatArrayField: {
+						field: "events",
+						flag: "event",
+						description: "Event payload as JSON, YAML, or @file (repeatable, up to 8)",
+					},
+					examples: [
+						{
+							command:
+								'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.message","content":[{"type":"text","text":"Hello!"}]}\'',
+							description: "Send a user message event",
+						},
+						{
+							command:
+								'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.interrupt"}\'',
+							description: "Interrupt an active session turn",
+						},
+					],
+				},
+			})
+			.middleware(EventBatchBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("listEvents", "/v1/sessions/:session_id/events", {
 			params: sessionParams,
 			query: {
-				after: Schema.optionalKey(CursorFromString),
+				after: Schema.optionalKey(EventListAfterFromString),
 				limit: Schema.optionalKey(EventListLimitFromString),
-				order: Schema.optionalKey(Schema.Literals(["asc", "desc"])),
+				order: Schema.optionalKey(
+					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
+				),
 			},
 			success: Schema.Struct({
 				data: Schema.Array(SessionEvent),
@@ -678,18 +910,61 @@ const Sessions = HttpApiGroup.make("sessions")
 				next_cursor: Schema.NullOr(Schema.Finite),
 			}),
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "List session events")
+			.annotate(OpenApi.Description, "List historical events for a session")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.events",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "listEvents" },
+				"x-checkfu-cli": {
+					intQueryParams: {
+						after: { min: 0, metavar: "SEQ" },
+						limit: { min: 1, max: 100, metavar: "N" },
+					},
+				},
+			}),
 	)
 	.add(
 		HttpApiEndpoint.get("streamEvents", "/v1/sessions/:session_id/events/stream", {
 			params: sessionParams,
 			// Keep `after` as a raw string here so `streamEvents` can give a non-empty
 			// `Last-Event-ID` header precedence before decoding the selected cursor.
-			query: { after: Schema.optionalKey(Schema.String) },
+			query: {
+				after: Schema.optionalKey(
+					Schema.String.annotate({
+						description: "Resume stream strictly after this sequence number",
+					}),
+				),
+			},
 			success: [HttpApiSchema.StreamSse({ data: SessionEvent }), HttpApiSchema.NoContent],
 			error: HandlerErrors,
-		}),
+		})
+			.annotate(OpenApi.Summary, "Stream session events")
+			.annotate(OpenApi.Description, "Stream live session events over Server-Sent Events")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions.events",
+				"x-forge-method-name": "stream",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "streamEvents" },
+				"x-checkfu-cli": {
+					intQueryParams: {
+						after: { min: 0, metavar: "SEQ" },
+					},
+					examples: [
+						{
+							command: "checkfu sessions:events stream --session-id sess_123",
+							description: "Stream all events as JSONL",
+						},
+						{
+							command:
+								"checkfu sessions:events stream --session-id sess_123 --after 5 --transform content.0.text -r",
+							description: "Resume after sequence 5 and extract message text",
+						},
+					],
+				},
+			}),
 	)
+	.annotate(OpenApi.Description, "Manage sessions")
 	.middleware(Authentication)
 
 export const CheckfuApi = HttpApi.make("checkfu")
@@ -697,6 +972,12 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Agents)
 	.add(Environments)
 	.add(Sessions)
+	.annotate(OpenApi.Title, "Checkfu API")
+	.annotate(OpenApi.Version, "0.0.1")
+	.annotate(
+		OpenApi.Description,
+		"Managed agents API for managing agents, environments, and sessions.",
+	)
 	.middleware(RequestValidation)
 
 type OptionalIdempotencyCreateMethod<Endpoint extends HttpApiEndpoint.ConstraintRequest, E, R> = <

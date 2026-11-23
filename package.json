@@ -5,11 +5,13 @@
 	"workspaces": {
 		"packages": [
 			"apps/*",
-			"packages/*"
+			"packages/*",
+			"tools/*"
 		],
 		"catalog": {
 			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d49aab2e8f5ab9abbec4b4bcbd8d4d7b428c14143eb0e20a07eba6b5194ade5d.tgz",
 			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/300073173839ac69f7f76fd46021bdc13ce7386471bda71ff2b930b6f319f117.tgz",
+			"@cloudflare/forge": "0.2.0",
 			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
 			"@earendil-works/chord": "1.6.0",
 			"@earendil-works/pi-ai": "1.6.0",
@@ -18,15 +20,19 @@
 			"@effect/platform-bun": "4.1.5",
 			"@effect/platform-node": "4.1.5",
 			"@effect/vitest": "4.1.5",
+			"@types/node": "26.6.6",
 			"agents": "0.34.0",
 			"alchemy": "https://pkg.alchemy.run/alchemy/-/3882966d5d3b5229ec2df019a1d53902e85bd720a17326cf3e24c6bba3cb78bc.tgz",
 			"effect": "4.1.5",
 			"typescript": "7.0.2",
-			"vitest": "5.1.1"
+			"vitest": "5.1.1",
+			"yaml": "2.9.1"
 		}
 	},
 	"type": "module",
 	"scripts": {
+		"generate": "bun tools/forge/src/Generate.ts",
+		"generate:check": "bun tools/forge/src/Generate.ts --check",
 		"dev": "alchemy dev",
 		"deploy": "alchemy deploy",
 		"deploy:production": "bun run persisted:check && alchemy deploy --stage production",
@@ -38,7 +44,7 @@
 		"lint": "effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives .",
 		"format": "oxfmt .",
 		"format:check": "oxfmt --check .",
-		"check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
+		"check": "bun run generate:check && bun run format:check && bun run lint && bun run typecheck && bun run test",
 		"persisted:check": "bun apps/api/test/persisted/check.ts",
 		"persisted:cut": "bun apps/api/test/persisted/cut.ts",
 		"state:sync-observability": "bun scripts/sync-state-store-observability.ts"
@@ -53,6 +59,7 @@
 		"effect": "catalog:"
 	},
 	"devDependencies": {
+		"@cloudflare/forge": "catalog:",
 		"@cloudflare/oxlint-config": "0.1.0",
 		"@effect/tsgo": "0.73.2",
 		"oxfmt": "0.79.0",

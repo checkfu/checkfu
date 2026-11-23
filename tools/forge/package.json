@@ -1,0 +1,22 @@
+{
+	"name": "@checkfu/forge",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"@checkfu/api": "workspace:*",
+		"@cloudflare/forge": "catalog:",
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@effect/vitest": "catalog:",
+		"@types/node": "catalog:",
+		"vitest": "catalog:"
+	}
+}
