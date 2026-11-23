@@ -210,7 +210,7 @@ describe("checkfu deploy", () => {
 				spawn: fakeAlchemy(calls),
 			})
 			expect(refused.errorMessage).toContain("export a persistent CHECKFU_API_KEY")
-			expect(calls).toEqual([])
+			expect(calls.map((call) => call[0])).toEqual(["query"])
 			expect(noTerminal[ENV_FILE]).toBeUndefined()
 		}),
 	)
@@ -256,7 +256,7 @@ describe("checkfu deploy", () => {
 				expect(result.exitCode).toBe(1)
 				expect(result.errorMessage).toContain(message)
 				expect(result.errorMessage).not.toContain("shell-key")
-				expect(calls).toEqual([])
+				expect(calls.filter((call) => call[0] !== "query")).toEqual([])
 			}
 		}),
 	)
@@ -388,9 +388,11 @@ describe("checkfu deploy", () => {
 			expect(result.exitCode).toBe(1)
 			expect(result.errorMessage).toContain(`act on account ${OTHER_ACCOUNT}`)
 			expect(result.errorMessage).toContain("Nothing was changed")
-			expect(calls).toEqual([ASK_ACCOUNT])
+			expect(calls).toEqual([["query", "account", "default", ""]])
 			expect(files[RECORD_FILE]).toBe(record("live"))
 			expect(files[CONFIG_FILE]).toBe(saved)
+			// Refused before any secret was written, so "nothing was changed" is true.
+			expect(files[ENV_FILE]).toBeUndefined()
 
 			const explicit: Array<ReadonlyArray<string>> = []
 			const onPurpose = yield* cli.run(["deploy", "--yes", "--stage", "live"], {
@@ -401,6 +403,32 @@ describe("checkfu deploy", () => {
 			expect(onPurpose.errorMessage).toBeUndefined()
 			expect(explicit[1]?.[0]).toBe("deploy")
 			expect(files[RECORD_FILE]).toBe(record("live", "default", OTHER_ACCOUNT, elsewhere.url))
+		}),
+	)
+
+	it.live("names the stage in the command it suggests for trying again", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const named = yield* cli.run(["deploy", "--yes", "--stage", "staging"], {
+				env: deployEnv,
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([], { output: "error" }),
+			})
+			expect(named.errorMessage).toContain("Run `bun checkfu deploy --stage staging` again")
+
+			const declined = yield* cli.run(["deploy", "--stage", "staging"], {
+				env: deployEnv,
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([], { deployExitCode: 1 }),
+			})
+			expect(declined.errorMessage).toContain("Run `bun checkfu deploy --stage staging` again")
+
+			const bare = yield* cli.run(["deploy", "--yes"], {
+				env: deployEnv,
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([], { output: "missing" }),
+			})
+			expect(bare.errorMessage).toContain("Run `bun checkfu deploy` again")
 		}),
 	)
 
@@ -882,7 +910,7 @@ describe("checkfu chat", () => {
 			expect(result.stderr).toContain("This agent will not be reused next time")
 			expect(creates.slice(0, 3)).toEqual(["/v1/agents", "/v1/environments", "/v1/sessions"])
 			expect(result.stderr).toMatch(
-				new RegExp(`checkfu --base-url ${DEPLOYED_URL} sessions connect sess_`),
+				new RegExp(`bun checkfu --base-url ${DEPLOYED_URL} sessions connect sess_`),
 			)
 
 			const unreadable = yield* cli.run(["chat"], {
@@ -892,7 +920,9 @@ describe("checkfu chat", () => {
 			})
 			expect(unreadable.errorMessage).toBeUndefined()
 			expect(unreadable.stderr).toContain("Starting without remembered chat defaults")
-			expect(unreadable.stderr).toMatch(/Resume later with: checkfu sessions connect sess_/)
+			expect(unreadable.stderr).toContain(
+				`Resume later with: bun checkfu --base-url ${DEPLOYED_URL} sessions connect sess_`,
+			)
 		}),
 	)
 

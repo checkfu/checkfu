@@ -14,6 +14,7 @@ import {
 	removeSavedConnection,
 	writeSavedConnection,
 } from "../SavedConnection.ts"
+import { COMMAND } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 
 const apiKeyFromEnvOrPrompt = Effect.gen(function* () {
@@ -45,7 +46,7 @@ export const loginCommand = Command.make("login", {}, () =>
 		const explicit = yield* explicitBaseUrl(root.baseUrl)
 		if (Option.isNone(explicit)) {
 			return yield* usageError(
-				"Pass the deployment URL: checkfu --base-url https://<your-worker>.workers.dev login",
+				`Pass the deployment URL: ${COMMAND} --base-url https://<your-worker>.workers.dev login`,
 			)
 		}
 		const url = yield* normalizeApiUrl(explicit.value)

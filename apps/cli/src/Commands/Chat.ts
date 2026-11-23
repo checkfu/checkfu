@@ -8,9 +8,10 @@ import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { configError, formatClientError, isApiErrorEnvelope, usageError } from "../Errors.ts"
-import { RootCommand, getClient } from "../RootCommand.ts"
+import { getClient } from "../RootCommand.ts"
 import type { ChatDefaults } from "../SavedConnection.ts"
 import { readChatDefaults, readSavedConnection, writeChatDefaults } from "../SavedConnection.ts"
+import { COMMAND } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 import { MODEL_PROVIDERS } from "./Deploy.ts"
 import { connectToSession } from "./SessionsConnect.ts"
@@ -142,11 +143,10 @@ export const chatCommand = Command.make(
 				.create({ payload: { agent: agentId, environment_id: environmentId } })
 				.pipe(Effect.retry(whilePending), Effect.mapError(formatClientError))
 			const sessionId = yield* decodeId(SessionId, "session", session.id)
-			const target = Option.isSome((yield* RootCommand).baseUrl)
-				? ` --base-url ${shellQuote(client.baseUrl)}`
-				: ""
+			// Spelled out in full so it still reaches this deployment whatever is exported or
+			// saved by the time it is pasted.
 			yield* writeStderrLine(
-				`Resume later with: checkfu${target} sessions connect ${shellQuote(sessionId)}`,
+				`Resume later with: ${COMMAND} --base-url ${shellQuote(client.baseUrl)} sessions connect ${shellQuote(sessionId)}`,
 			)
 			return yield* connectToSession(client, sessionId)
 		}),

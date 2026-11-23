@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema"
 import { configError } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import { readIfPresent, removeIfPresent, writePrivate } from "./PrivateFile.ts"
+import { COMMAND } from "./Standalone.ts"
 
 export const SavedConnection = Schema.Struct({
 	url: Schema.String,
@@ -78,7 +79,7 @@ const store = <A>(fileName: string, schema: Schema.Codec<A, unknown>) => {
 				onSuccess: Option.some,
 				onFailure: () =>
 					configError(
-						`${location.value} is not valid. Fix or delete it, then run \`checkfu login\`.`,
+						`${location.value} is not valid. Fix or delete it, then run \`${COMMAND} login\`.`,
 					),
 			}),
 		)

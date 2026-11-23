@@ -27,7 +27,7 @@ import {
 	writeSavedConnection,
 } from "../SavedConnection.ts"
 import { readIfPresent, removeIfPresent, writePrivate } from "../PrivateFile.ts"
-import { isStandalone } from "../Standalone.ts"
+import { COMMAND, isStandalone } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
 
 export const STACK_NAME = "Checkfu"
@@ -303,24 +303,27 @@ const generateApiKey = Effect.map(
 	(bytes) => `ck_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`,
 )
 
-const promptForProviderKey = Effect.gen(function* () {
-	const stdio = yield* Stdio.Stdio
-	if (!(yield* stdio.stdinIsTerminal)) {
-		return yield* configError(
-			`No model provider key found. Export ${MODEL_PROVIDERS.map((provider) => provider.env).join(" or ")} and run \`checkfu deploy\` again.`,
-		)
-	}
-	const key = yield* Prompt.run(
-		Prompt.Hidden({
-			message: "Paste an Anthropic or OpenAI API key (your agents call the model with it)",
-			validate: (value) =>
-				value.trim().length === 0 ? Effect.fail("An API key is required.") : Effect.succeed(value),
-		}),
-	).pipe(Effect.mapError(() => new CliFailure({ message: "Deploy cancelled.", exitCode: 130 })))
-	return Redacted.value(key).trim()
-})
+const promptForProviderKey = (retry: string) =>
+	Effect.gen(function* () {
+		const stdio = yield* Stdio.Stdio
+		if (!(yield* stdio.stdinIsTerminal)) {
+			return yield* configError(
+				`No model provider key found. Export ${MODEL_PROVIDERS.map((provider) => provider.env).join(" or ")} and run \`${retry}\` again.`,
+			)
+		}
+		const key = yield* Prompt.run(
+			Prompt.Hidden({
+				message: "Paste an Anthropic or OpenAI API key (your agents call the model with it)",
+				validate: (value) =>
+					value.trim().length === 0
+						? Effect.fail("An API key is required.")
+						: Effect.succeed(value),
+			}),
+		).pipe(Effect.mapError(() => new CliFailure({ message: "Deploy cancelled.", exitCode: 130 })))
+		return Redacted.value(key).trim()
+	})
 
-const prepareEnvFile = (envFile: string) =>
+const prepareEnvFile = (envFile: string, retry: string) =>
 	Effect.gen(function* () {
 		const original = Option.getOrElse(yield* readIfPresent(envFile), () => "")
 		let contents = original
@@ -362,7 +365,7 @@ const prepareEnvFile = (envFile: string) =>
 			}
 		}
 		if (provider === undefined) {
-			const key = yield* promptForProviderKey
+			const key = yield* promptForProviderKey(retry)
 			provider = providerForKey(key)
 			contents = yield* setDotEnvValue(contents, provider.env, key)
 		}
@@ -395,12 +398,12 @@ const OutputAnswer = Schema.Union([
  * it out changes nothing in any account. At a terminal, a profile with no Cloudflare
  * connection gets Alchemy's browser sign-in first.
  */
-const requireAccount = (target: Target, options: { readonly offerSignIn: boolean }) =>
+const requireAccount = (target: Target, signIn: Option.Option<{ readonly retry: string }>) =>
 	Effect.gen(function* () {
 		let answer = yield* ask(target, AccountAnswer, ["account"])
 		if (
 			answer.status === "not-configured" &&
-			options.offerSignIn &&
+			Option.isSome(signIn) &&
 			(yield* (yield* Stdio.Stdio).stdinIsTerminal)
 		) {
 			yield* writeStderrLine(
@@ -416,7 +419,7 @@ const requireAccount = (target: Target, options: { readonly offerSignIn: boolean
 			answer = yield* ask(target, AccountAnswer, ["account"])
 			if (exitCode !== 0 || answer.status === "not-configured") {
 				return yield* new CliFailure({
-					message: "Cloudflare sign-in did not finish. Run `bun checkfu deploy` again to retry.",
+					message: `Cloudflare sign-in did not finish. Run \`${signIn.value.retry}\` again to retry.`,
 					exitCode: exitCode === 0 ? 1 : exitCode,
 				})
 			}
@@ -426,7 +429,7 @@ const requireAccount = (target: Target, options: { readonly offerSignIn: boolean
 				return answer.account_id
 			case "not-configured":
 				return yield* configError(
-					`${answer.message} Sign in by running \`bun checkfu deploy\` in a terminal, or export CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.`,
+					`${answer.message} Sign in by running \`${COMMAND} deploy\` in a terminal, or export CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.`,
 				)
 			case "error":
 				return yield* configError(
@@ -440,14 +443,12 @@ const requireAccount = (target: Target, options: { readonly offerSignIn: boolean
  * the account it was deployed to. Otherwise changed credentials would silently point
  * the command at another account's deployment of the same name.
  */
-const requireRecordedAccount = (target: Target, record: DeploymentRecord, accountId: string) =>
-	record.account_id === accountId
-		? Effect.void
-		: usageError(
-				`This checkout deployed "${record.stage}" to Cloudflare account ${record.account_id}, but the credentials in use (profile "${target.profile}") act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials, or pass --stage to act on this account on purpose.`,
-			)
+const differentAccount = (record: DeploymentRecord, accountId: string) =>
+	usageError(
+		`This checkout deployed "${record.stage}" to Cloudflare account ${record.account_id}, but the credentials in use act on account ${accountId}. Nothing was changed. Check ALCHEMY_PROFILE and your Cloudflare credentials, or pass --stage to act on this account on purpose.`,
+	)
 
-const readDeployedUrl = (target: Target, stage: string) =>
+const readDeployedUrl = (target: Target, stage: string, retry: string) =>
 	Effect.gen(function* () {
 		const answer = yield* ask(target, OutputAnswer, ["output", `${STACK_NAME}/${stage}/output`])
 		switch (answer.status) {
@@ -455,16 +456,16 @@ const readDeployedUrl = (target: Target, stage: string) =>
 				return yield* normalizeApiUrl(answer.value.api)
 			case "missing":
 				return yield* configError(
-					`Alchemy deployed "${stage}" but recorded no API URL for it. Run \`bun checkfu deploy\` again.`,
+					`Alchemy deployed "${stage}" but recorded no API URL for it. Run \`${retry}\` again.`,
 				)
 			case "error":
 				return yield* configError(
-					`"${stage}" is deployed, but its URL could not be read: ${answer.message.replace(/\.+$/, "")}. Run \`bun checkfu deploy\` again to finish connecting.`,
+					`"${stage}" is deployed, but its URL could not be read: ${answer.message.replace(/\.+$/, "")}. Run \`${retry}\` again to finish connecting.`,
 				)
 		}
 	})
 
-const waitUntilLive = (url: string, within: Duration.Input) =>
+const waitUntilLive = (url: string, within: Duration.Input, retry: string) =>
 	Effect.gen(function* () {
 		const http = yield* HttpClient.HttpClient
 		yield* http.execute(HttpClientRequest.get(`${url}/health`)).pipe(
@@ -481,7 +482,7 @@ const waitUntilLive = (url: string, within: Duration.Input) =>
 				orElse: () =>
 					Effect.fail(
 						networkFailure(
-							`${url} did not start answering within ${Duration.format(Duration.fromInputUnsafe(within))}. It is deployed; run \`bun checkfu deploy\` again to re-check.`,
+							`${url} did not start answering within ${Duration.format(Duration.fromInputUnsafe(within))}. It is deployed; run \`${retry}\` again to re-check.`,
 						),
 					),
 			}),
@@ -498,12 +499,25 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			Option.match(record, { onNone: () => DEFAULT_STAGE, onSome: (known) => known.stage }),
 		)
 
-		const { apiKey, provider } = yield* prepareEnvFile(envFile)
-		const target = yield* resolveTarget(checkout, envFile, record)
-		const accountId = yield* requireAccount(target, { offerSignIn: true })
-		if (Option.isNone(input.stage) && Option.isSome(record)) {
-			yield* requireRecordedAccount(target, record.value, accountId)
+		// What to type to run this same deploy again; a bare retry could pick another stage.
+		const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
+
+		// The account is settled before any secret is written, so a refusal leaves the
+		// checkout exactly as it was.
+		const accountId = yield* requireAccount(
+			yield* resolveTarget(checkout, envFile, record),
+			Option.some({ retry }),
+		)
+		if (
+			Option.isNone(input.stage) &&
+			Option.isSome(record) &&
+			record.value.account_id !== accountId
+		) {
+			return yield* differentAccount(record.value, accountId)
 		}
+		const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
+		// Resolved again because preparing the secrets may have created the env file.
+		const target = yield* resolveTarget(checkout, envFile, record)
 
 		const exitCode = yield* run(target, [
 			"deploy",
@@ -513,18 +527,18 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		])
 		if (exitCode !== 0) {
 			return yield* new CliFailure({
-				message: "Deploy did not finish. Run `bun checkfu deploy` again when you are ready.",
+				message: `Deploy did not finish. Run \`${retry}\` again when you are ready.`,
 				exitCode,
 			})
 		}
 
-		const url = yield* readDeployedUrl(target, stage)
+		const url = yield* readDeployedUrl(target, stage, retry)
 		yield* writePrivate(
 			yield* deploymentRecordPath(checkout),
 			`${yield* Schema.encodeEffect(DeploymentRecord)({ stage, profile: target.profile, account_id: accountId, url }).pipe(Effect.orDie)}\n`,
 		)
 		yield* writeStderrLine(`Waiting for ${url} to come up…`)
-		yield* waitUntilLive(url, checkout.readyWithin)
+		yield* waitUntilLive(url, checkout.readyWithin, retry)
 		yield* verifyApiKey(url, apiKey)
 		const file = yield* writeSavedConnection({
 			url,
@@ -543,7 +557,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				"",
 				"Talk to your first agent:",
 				"",
-				"  bun checkfu chat",
+				`  ${COMMAND} chat`,
 				"",
 			].join("\n"),
 		)
@@ -564,9 +578,13 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 			)
 		}
 		const target = yield* resolveTarget(checkout, path.join(checkout.root, ".env"), record)
-		const accountId = yield* requireAccount(target, { offerSignIn: false })
-		if (Option.isNone(input.stage) && Option.isSome(record)) {
-			yield* requireRecordedAccount(target, record.value, accountId)
+		const accountId = yield* requireAccount(target, Option.none())
+		if (
+			Option.isNone(input.stage) &&
+			Option.isSome(record) &&
+			record.value.account_id !== accountId
+		) {
+			return yield* differentAccount(record.value, accountId)
 		}
 
 		const exitCode = yield* run(target, [

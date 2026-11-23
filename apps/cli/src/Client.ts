@@ -29,6 +29,7 @@ import {
 } from "./Errors.ts"
 import type { CliFailure } from "./Errors.ts"
 import type { SavedConnection } from "./SavedConnection.ts"
+import { COMMAND } from "./Standalone.ts"
 
 export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5
@@ -178,8 +179,7 @@ export const resolveBaseUrl = <R = never>(
 		return Option.isSome(saved) ? yield* normalizeApiUrl(saved.value.url) : DEFAULT_API_URL
 	})
 
-const MISSING_API_KEY =
-	"Missing CHECKFU_API_KEY. Run `checkfu deploy` or `checkfu login` to save one, or export CHECKFU_API_KEY."
+const MISSING_API_KEY = `Missing CHECKFU_API_KEY. Run \`${COMMAND} deploy\` or \`${COMMAND} login\` to save one, or export CHECKFU_API_KEY.`
 
 export const resolveApiKey = <R = never>(
 	baseUrl: string,
@@ -204,7 +204,7 @@ export const resolveApiKey = <R = never>(
 		const savedUrl = yield* normalizeApiUrl(saved.value.url)
 		if (savedUrl !== baseUrl) {
 			return yield* configError(
-				`The saved API key belongs to ${savedUrl} and is not sent to ${baseUrl}. Export CHECKFU_API_KEY for this URL, or run \`checkfu login\`.`,
+				`The saved API key belongs to ${savedUrl} and is not sent to ${baseUrl}. Export CHECKFU_API_KEY for this URL, or run \`${COMMAND} login\`.`,
 			)
 		}
 		return Redacted.make(saved.value.api_key)

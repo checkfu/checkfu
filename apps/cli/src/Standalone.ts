@@ -8,3 +8,6 @@ declare const CHECKFU_STANDALONE: boolean | undefined
 export const isStandalone: boolean =
 	// oxlint-disable-next-line unicorn/no-typeof-undefined -- the identifier exists only once the build defines it; comparing it directly would throw everywhere else
 	typeof CHECKFU_STANDALONE !== "undefined" && CHECKFU_STANDALONE
+
+/** How to invoke this CLI, for commands printed for the user to copy and run. */
+export const COMMAND = isStandalone ? "checkfu" : "bun checkfu"

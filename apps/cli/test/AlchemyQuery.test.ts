@@ -30,8 +30,10 @@ const askAccount = (home: string, extra: ProcessEnv): typeof Answer.Type => {
 			env[key] = value
 		}
 	}
+	// Run from the empty home, not the checkout, so a developer's own `.env` (which
+	// Alchemy reads from the working directory) cannot supply credentials.
 	const result = spawnSync(resolveBunExecutable() ?? "bun", [script, "account", "default", ""], {
-		cwd: repoRoot,
+		cwd: home,
 		env: { ...env, ALCHEMY_HOME: home, ...extra },
 		encoding: "utf8",
 		timeout: 60_000,
