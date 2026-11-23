@@ -3,6 +3,7 @@ node_modules/
 .turbo/
 .alchemy/
 .checkfu/
+apps/cli/dist/
 .env
 .env.*
 !.env.example
