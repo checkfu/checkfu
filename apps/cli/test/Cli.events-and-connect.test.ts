@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -494,16 +495,46 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(badJsonRequests).toBe(1)
 					expect(badJson.stderr).toContain("Invalid SSE event JSON payload")
 
-					// 3) >6 consecutive healthy idle keepalive rotations stay connected and deliver all events
+					// 3) >6 consecutive healthy long-lived idle keepalive rotations stay connected and deliver all events promptly
 					let rotationRequests = 0
+					let virtualRotationNanos = 1_000_000_000n
+					const rotationSleepsMs: Array<number> = []
+					const rotationClock: Clock.Clock = {
+						currentTimeMillisUnsafe: () => Number(virtualRotationNanos / 1_000_000n),
+						currentTimeMillis: Effect.sync(() => Number(virtualRotationNanos / 1_000_000n)),
+						currentTimeNanosUnsafe: () => virtualRotationNanos,
+						currentTimeNanos: Effect.sync(() => virtualRotationNanos),
+						monotonicTimeNanosUnsafe: () => virtualRotationNanos,
+						monotonicTimeNanos: Effect.sync(() => virtualRotationNanos),
+						sleep: (duration) =>
+							Effect.sync(() => {
+								const ms = Duration.toMillis(duration)
+								rotationSleepsMs.push(ms)
+								virtualRotationNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+							}),
+					}
+					const rotationEncoder = new TextEncoder()
 					const rotated = yield* cli.run(
 						["sessions:events", "stream", "--session-id", sessionId, "--format", "yaml"],
 						{
+							clock: rotationClock,
 							interceptFetch: async (next, request) => {
 								if (!request.url.includes("/events/stream")) return next(request)
 								rotationRequests++
 								if (rotationRequests <= 8) {
-									return new Response(": keepalive\n\n", {
+									let step = 0
+									const idleBody = new ReadableStream<Uint8Array>({
+										pull(controller) {
+											if (step === 0) {
+												step = 1
+												controller.enqueue(rotationEncoder.encode(": keepalive\n\n"))
+											} else {
+												virtualRotationNanos += 10_000_000_000n
+												controller.close()
+											}
+										},
+									})
+									return new Response(idleBody, {
 										status: 200,
 										headers: { "content-type": "text/event-stream; charset=utf-8" },
 									})
@@ -514,12 +545,139 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(rotated.exitCode).toBe(0)
 					expect(rotationRequests).toBe(9)
+					expect(rotationSleepsMs).toEqual([50, 50, 50, 50, 50, 50, 50, 50])
 					const yamlDocs = YAML.parseAllDocuments(rotated.stdout)
 					expect(yamlDocs.length).toBe(expectedSeqs.length)
 					for (const doc of yamlDocs) {
 						expect(doc.errors).toEqual([])
 					}
 					expect(yamlDocs.map((doc) => (doc.toJS() as { seq: number }).seq)).toEqual(expectedSeqs)
+
+					// 4) sessions:events stream deduplicates replayed sequences on reconnect (both without
+					//    and with --after) so JSONL output emits each event exactly once
+					let replayStreamRequests = 0
+					let savedPrefixFrames = ""
+					const deduped = yield* cli.run(
+						["sessions:events", "stream", "--session-id", sessionId, "--transform", "seq", "-r"],
+						{
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								replayStreamRequests += 1
+								const conn = replayStreamRequests
+								const real = await next(request)
+								if (real.body === null) return real
+								const reader = real.body.getReader()
+								const decoder = new TextDecoder()
+								const encoder = new TextEncoder()
+								if (conn === 1) {
+									let buffer = ""
+									let framesSent = 0
+									const dropAfterTwo = new ReadableStream<Uint8Array>({
+										async pull(controller) {
+											while (framesSent < 2) {
+												const chunk = await reader.read()
+												if (chunk.done) {
+													controller.close()
+													return
+												}
+												buffer += decoder.decode(chunk.value, { stream: true })
+												let idx = buffer.indexOf("\n\n")
+												while (idx !== -1 && framesSent < 2) {
+													const frame = buffer.slice(0, idx + 2)
+													buffer = buffer.slice(idx + 2)
+													savedPrefixFrames += frame
+													controller.enqueue(encoder.encode(frame))
+													framesSent += 1
+													idx = buffer.indexOf("\n\n")
+												}
+											}
+											await reader.cancel()
+											controller.error(new TypeError("simulated stream disconnect"))
+										},
+									})
+									return new Response(dropAfterTwo, { status: 200, headers: real.headers })
+								}
+								let replayed = false
+								const withDuplicatePrefix = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										if (!replayed) {
+											replayed = true
+											controller.enqueue(encoder.encode(savedPrefixFrames))
+											return
+										}
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										controller.enqueue(chunk.value)
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(withDuplicatePrefix, { status: 200, headers: real.headers })
+							},
+						},
+					)
+					expect(deduped.exitCode).toBe(0)
+					expect(replayStreamRequests).toBe(2)
+					expect(
+						deduped.stdout
+							.trim()
+							.split("\n")
+							.map((line) => Number(line)),
+					).toEqual(expectedSeqs)
+
+					const dedupedAfter = yield* cli.run(
+						[
+							"sessions:events",
+							"stream",
+							"--session-id",
+							sessionId,
+							"--after",
+							"2",
+							"--transform",
+							"seq",
+							"-r",
+						],
+						{
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								const real = await next(request)
+								if (real.body === null) return real
+								const reader = real.body.getReader()
+								const encoder = new TextEncoder()
+								let replayed = false
+								const withStalePrefix = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										if (!replayed) {
+											replayed = true
+											controller.enqueue(encoder.encode(savedPrefixFrames))
+											return
+										}
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										controller.enqueue(chunk.value)
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(withStalePrefix, { status: 200, headers: real.headers })
+							},
+						},
+					)
+					expect(dedupedAfter.exitCode).toBe(0)
+					expect(
+						dedupedAfter.stdout
+							.trim()
+							.split("\n")
+							.map((line) => Number(line)),
+					).toEqual(expectedSeqs.filter((seq) => seq > 2))
 				}),
 			),
 		)
@@ -2556,10 +2714,14 @@ describe("CLI sessions:events and sessions connect", () => {
 		const cliPkg = JSON.parse(
 			readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 		) as { readonly bin?: Record<string, string> }
+		const bunLock = readFileSync(new URL("../../../bun.lock", import.meta.url), "utf8")
 		expect(readme).toContain("bun --no-env-file apps/cli/src/main.ts --help")
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
 		expect(cliPkg.bin?.["checkfu"]).toBe("./bin/checkfu")
+		expect(bunLock).toMatch(
+			/"apps\/cli":\s*\{[\s\S]*?"bin":\s*\{\s*"checkfu":\s*"\.\/bin\/checkfu",?\s*\}/,
+		)
 	})
 
 	it.runIf(ptySupported)(

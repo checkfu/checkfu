@@ -388,6 +388,13 @@ export const invokeGeneratedStream = (
 		const resolvedPath = yield* resolveEndpointPath(endpoint.path, parts.params, spec.cliLabel)
 		const afterRaw = parts.query["after"]
 		const isSessionStream = spec.apiGroup === "sessions" && spec.apiEndpoint === "streamEvents"
+		let lastEmittedSeq: number | undefined
+		if (isSessionStream && afterRaw !== undefined) {
+			const parsedAfter = Number(afterRaw)
+			if (Number.isInteger(parsedAfter) && parsedAfter >= 0) {
+				lastEmittedSeq = parsedAfter
+			}
+		}
 
 		const client = yield* getClient
 		yield* client
@@ -399,10 +406,32 @@ export const invokeGeneratedStream = (
 				...(afterRaw !== undefined ? { initialCursor: afterRaw, cursorQueryParam: "after" } : {}),
 				...(isSessionStream
 					? {
+							monotonicNumericCursor: true,
 							isTerminalEvent: (data: Record<string, unknown>) =>
 								data["type"] === "session.archived",
 						}
 					: {}),
 			})
-			.pipe(Stream.runForEach((event) => renderOutput(event.data, { streaming: true })))
+			.pipe(
+				Stream.runForEach((event) =>
+					Effect.gen(function* () {
+						if (isSessionStream) {
+							const rawSeq = event.data["seq"]
+							const eventSeq =
+								typeof rawSeq === "number" && Number.isInteger(rawSeq) && rawSeq >= 0
+									? rawSeq
+									: undefined
+							if (eventSeq !== undefined) {
+								if (lastEmittedSeq !== undefined && eventSeq <= lastEmittedSeq) {
+									return
+								}
+								yield* renderOutput(event.data, { streaming: true })
+								lastEmittedSeq = eventSeq
+								return
+							}
+						}
+						yield* renderOutput(event.data, { streaming: true })
+					}),
+				),
+			)
 	})

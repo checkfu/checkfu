@@ -10,6 +10,7 @@ import {
 } from "@checkfu/sessions/Session/ModelProvider.external"
 import type { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
@@ -67,6 +68,7 @@ export interface CliRunOptions {
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
 	readonly terminalReads?: ReadonlyArray<Effect.Effect<string, Terminal.QuitError>>
 	readonly sigintController?: SigintController
+	readonly clock?: Clock.Clock
 	readonly onStdoutChunk?: (chunk: string) => Effect.Effect<void>
 	readonly interceptFetch?: (
 		next: (request: Request) => Promise<Response>,
@@ -238,7 +240,14 @@ export const makeTestServer = (handler?: ModelHandler) =>
 					ConfigProvider.layer(ConfigProvider.fromUnknown(envMap)),
 				)
 
-				const outcome = yield* Effect.result(runCli(args).pipe(Effect.provide(cliLayer)))
+				const runEffect =
+					options?.clock !== undefined
+						? runCli(args).pipe(
+								Effect.provide(cliLayer),
+								Effect.provideService(Clock.Clock, options.clock),
+							)
+						: runCli(args).pipe(Effect.provide(cliLayer))
+				const outcome = yield* Effect.result(runEffect)
 				return {
 					exitCode: outcome._tag === "Success" ? 0 : outcome.failure.exitCode,
 					stdout: stdoutChunks.join(""),

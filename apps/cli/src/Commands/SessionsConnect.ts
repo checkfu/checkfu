@@ -34,6 +34,21 @@ import {
 	writeStderrLine,
 	writeStdoutLine,
 } from "../TerminalOutput.ts"
+import {
+	type ConnectState,
+	applyMessageReceipt,
+	applySessionEvent,
+	beginMessageSend,
+	cancelMessageSend,
+	createInitialConnectState,
+	evaluateHaltedQueueSnapshot,
+	evaluatePipedSettlement,
+	extractSubmittedMessageReceipt,
+	hasInterruptReceipt,
+	markSessionEnded,
+	resolveFinalPipedError,
+	shouldInterruptOnCtrlC,
+} from "./SessionsConnectState.ts"
 
 const extractContentText = (data: Record<string, unknown>): string => {
 	const content = data["content"]
@@ -52,83 +67,6 @@ const extractContentText = (data: Record<string, unknown>): string => {
 	return parts.join("\n")
 }
 
-interface TurnFailure {
-	readonly turn: number
-	readonly message: string
-}
-
-interface TurnErrorSnapshot {
-	readonly turn: number
-	readonly message: string
-	readonly retryStatus: string | undefined
-}
-
-interface ConnectState {
-	readonly trackPipedTurns: boolean
-	readonly status: "idle" | "running" | "terminated"
-	readonly liveStatus: "idle" | "running" | "terminated"
-	readonly liveTurn: number
-	readonly liveStateVersion: number
-	readonly lastProcessedSeq: number
-	readonly observedTurn: number
-	readonly settledTurn: number
-	readonly latestSettledStopReason: string | undefined
-	readonly targetTurn: number
-	readonly unsettledSubmittedTurns: ReadonlySet<number>
-	readonly unsettledQueuedTurns: ReadonlySet<number>
-	readonly firstSubmittedTurnFailure: TurnFailure | undefined
-	readonly pendingTurnErrors: ReadonlyMap<number, string>
-	readonly sendInFlight: boolean
-	readonly latestTurnError: TurnErrorSnapshot | undefined
-	readonly ended: boolean
-}
-
-const recordFirstFailure = (
-	current: TurnFailure | undefined,
-	turn: number,
-	message: string,
-): TurnFailure => (current === undefined || turn < current.turn ? { turn, message } : current)
-
-const pruneSettledTurns = (
-	turns: ReadonlySet<number>,
-	settledTurn: number,
-): ReadonlySet<number> => {
-	if (turns.size === 0) return turns
-	let hasSettled = false
-	for (const turn of turns) {
-		if (turn <= settledTurn) {
-			hasSettled = true
-			break
-		}
-	}
-	if (!hasSettled) return turns
-	const next = new Set<number>()
-	for (const turn of turns) {
-		if (turn > settledTurn) next.add(turn)
-	}
-	return next
-}
-
-const pruneSettledErrors = (
-	errors: ReadonlyMap<number, string>,
-	settledTurn: number,
-): ReadonlyMap<number, string> => {
-	if (errors.size === 0) return errors
-	let hasSettled = false
-	for (const turn of errors.keys()) {
-		if (turn <= settledTurn) {
-			hasSettled = true
-			break
-		}
-	}
-	if (!hasSettled) return errors
-	const next = new Map<number, string>()
-	for (const [turn, message] of errors) {
-		if (turn > settledTurn) next.set(turn, message)
-	}
-	return next
-}
-
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
 const MAX_CONNECT_SEND_RETRIES = 2
@@ -138,30 +76,6 @@ const QUEUED_TURN_PROJECTION_RETRY_BASE_MS = 50
 
 const isAmbiguousResponseStatus = (status: number): boolean =>
 	(status >= 200 && status < 300) || isTransientHttpStatus(status)
-
-interface SubmittedMessageReceipt {
-	readonly turn: number
-	readonly queued: boolean | undefined
-}
-
-const extractSubmittedMessageReceipt = (
-	data: ReadonlyArray<unknown>,
-): SubmittedMessageReceipt | undefined => {
-	const first = data[0]
-	if (typeof first !== "object" || first === null) return undefined
-	const record = first as Record<string, unknown>
-	if (record["type"] !== "user.message") return undefined
-	const turn = record["turn"]
-	if (typeof turn !== "number" || !Number.isInteger(turn) || turn < 1) return undefined
-	const queued = typeof record["queued"] === "boolean" ? record["queued"] : undefined
-	return { turn, queued }
-}
-
-const hasInterruptReceipt = (data: ReadonlyArray<unknown>): boolean => {
-	const first = data[0]
-	if (typeof first !== "object" || first === null) return false
-	return (first as Record<string, unknown>)["type"] === "user.interrupt"
-}
 
 const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
 	if (HttpClientError.isHttpClientError(err)) {
@@ -405,12 +319,6 @@ const inspectEndedPipedStdin = (
 		return yield* Effect.raceFirst(readLines, Deferred.await(earlyInput))
 	})
 
-const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
-	stopReason !== undefined &&
-	stopReason !== "end_turn" &&
-	stopReason !== "interrupted" &&
-	stopReason !== "retries_exhausted"
-
 const renderConnectEvent = (
 	client: CheckfuClient,
 	sessionId: SessionId,
@@ -425,18 +333,42 @@ const renderConnectEvent = (
 		const data = event.data
 		const rawSeq = data["seq"]
 		const eventSeq = typeof rawSeq === "number" && Number.isInteger(rawSeq) ? rawSeq : undefined
+		const eventType = typeof data["type"] === "string" ? data["type"] : event.event
+
+		let formattedError: string | undefined
+		let errorRetryStatus: string | undefined
+		if (eventType === "session.error") {
+			const errObj =
+				typeof data["error"] === "object" && data["error"] !== null
+					? (data["error"] as Record<string, unknown>)
+					: undefined
+			const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
+			const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
+			const retryStatusObj =
+				typeof errObj?.["retry_status"] === "object" && errObj["retry_status"] !== null
+					? (errObj["retry_status"] as Record<string, unknown>)
+					: undefined
+			errorRetryStatus =
+				typeof retryStatusObj?.["type"] === "string" ? retryStatusObj["type"] : undefined
+			formattedError = `${errType}: ${errMsg}`
+		}
+
+		let stopReason: string | undefined
+		if (eventType === "session.status_idle") {
+			const rawStopReason =
+				typeof data["stop_reason"] === "object" && data["stop_reason"] !== null
+					? (data["stop_reason"] as Record<string, unknown>)["type"]
+					: undefined
+			stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined
+		}
+
+		// Check duplicate before emitting output so replayed frames never render twice.
 		if (eventSeq !== undefined) {
-			const isDuplicate = yield* Ref.modify(stateRef, (state) =>
-				eventSeq <= state.lastProcessedSeq
-					? ([true, state] as const)
-					: ([false, { ...state, lastProcessedSeq: eventSeq }] as const),
-			)
-			if (isDuplicate) {
+			const current = yield* Ref.get(stateRef)
+			if (eventSeq <= current.lastProcessedSeq) {
 				return
 			}
 		}
-
-		const eventType = typeof data["type"] === "string" ? data["type"] : event.event
 
 		if (rawStructuredMode) {
 			yield* renderOutput(data, { streaming: true })
@@ -448,21 +380,6 @@ const renderConnectEvent = (
 				if (!rawStructuredMode && text.length > 0) {
 					yield* writeStdoutLine(`[user] ${escapeTerminalControlCharacters(text)}`)
 				}
-				break
-			}
-			case "session.status_running": {
-				yield* Ref.update(stateRef, (state) => {
-					const nextObserved = state.observedTurn + 1
-					const reachedLive = nextObserved > state.liveTurn
-					return {
-						...state,
-						status: "running" as const,
-						observedTurn: nextObserved,
-						liveStatus: reachedLive ? ("running" as const) : state.liveStatus,
-						liveTurn: reachedLive ? nextObserved : state.liveTurn,
-						liveStateVersion: reachedLive ? state.liveStateVersion + 1 : state.liveStateVersion,
-					}
-				})
 				break
 			}
 			case "agent.thinking": {
@@ -486,186 +403,67 @@ const renderConnectEvent = (
 				break
 			}
 			case "session.error": {
-				const errObj =
-					typeof data["error"] === "object" && data["error"] !== null
-						? (data["error"] as Record<string, unknown>)
-						: undefined
-				const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
-				const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
-				const retryStatusObj =
-					typeof errObj?.["retry_status"] === "object" && errObj["retry_status"] !== null
-						? (errObj["retry_status"] as Record<string, unknown>)
-						: undefined
-				const retryStatus =
-					typeof retryStatusObj?.["type"] === "string" ? retryStatusObj["type"] : undefined
-				const formattedError = `${errType}: ${errMsg}`
-				yield* Ref.update(stateRef, (state) =>
-					state.trackPipedTurns
-						? {
-								...state,
-								latestTurnError: {
-									turn: state.observedTurn,
-									message: formattedError,
-									retryStatus,
-								},
-							}
-						: state,
-				)
-				if (!rawStructuredMode) {
+				if (!rawStructuredMode && formattedError !== undefined) {
 					yield* writeStderrLine(`[error] ${formattedError}`)
 				}
 				break
 			}
 			case "session.status_idle": {
-				const rawStopReason =
-					typeof data["stop_reason"] === "object" && data["stop_reason"] !== null
-						? (data["stop_reason"] as Record<string, unknown>)["type"]
-						: undefined
-				const stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined
 				if (!rawStructuredMode && stopReason !== undefined && stopReason !== "end_turn") {
 					yield* writeStderrLine(`[status: idle (${stopReason})]`)
-				}
-				const next = yield* Ref.updateAndGet(stateRef, (state) => {
-					const turn = state.observedTurn
-					const nextSettledTurn = Math.max(state.settledTurn, turn)
-					const latestSettledStopReason =
-						turn >= state.settledTurn ? stopReason : state.latestSettledStopReason
-					const reachedLiveIdle =
-						turn > state.liveTurn || (turn === state.liveTurn && state.liveStatus === "running")
-					if (!state.trackPipedTurns) {
-						return {
-							...state,
-							status: "idle" as const,
-							liveStatus: turn >= state.liveTurn ? ("idle" as const) : state.liveStatus,
-							liveTurn: Math.max(state.liveTurn, turn),
-							liveStateVersion: reachedLiveIdle
-								? state.liveStateVersion + 1
-								: state.liveStateVersion,
-							settledTurn: nextSettledTurn,
-							latestSettledStopReason,
-						}
-					}
-					let firstSubmittedTurnFailure = state.firstSubmittedTurnFailure
-					let pendingTurnErrors = state.pendingTurnErrors
-					if (stopReason === "retries_exhausted") {
-						const turnError =
-							(state.latestTurnError?.turn === turn ? state.latestTurnError.message : undefined) ??
-							"Model retries exhausted."
-						if (state.unsettledSubmittedTurns.has(turn)) {
-							firstSubmittedTurnFailure = recordFirstFailure(
-								firstSubmittedTurnFailure,
-								turn,
-								turnError,
-							)
-						} else if (state.sendInFlight) {
-							const nextPending = new Map(pendingTurnErrors)
-							nextPending.set(turn, turnError)
-							pendingTurnErrors = nextPending
-						}
-					}
-					if (!state.sendInFlight) {
-						pendingTurnErrors = pruneSettledErrors(pendingTurnErrors, nextSettledTurn)
-					}
-					return {
-						...state,
-						status: "idle" as const,
-						liveStatus: turn >= state.liveTurn ? ("idle" as const) : state.liveStatus,
-						liveTurn: Math.max(state.liveTurn, turn),
-						liveStateVersion: reachedLiveIdle ? state.liveStateVersion + 1 : state.liveStateVersion,
-						settledTurn: nextSettledTurn,
-						latestSettledStopReason,
-						unsettledSubmittedTurns: pruneSettledTurns(
-							state.unsettledSubmittedTurns,
-							nextSettledTurn,
-						),
-						unsettledQueuedTurns: pruneSettledTurns(state.unsettledQueuedTurns, nextSettledTurn),
-						firstSubmittedTurnFailure,
-						pendingTurnErrors,
-						latestTurnError:
-							state.latestTurnError?.turn === turn ? undefined : state.latestTurnError,
-					}
-				})
-				if (
-					next.trackPipedTurns &&
-					((next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
-						(next.unsettledQueuedTurns.has(next.targetTurn) &&
-							next.settledTurn === next.targetTurn - 1 &&
-							isQueueHaltingStopReason(stopReason)))
-				) {
-					const settleDeferred = yield* Ref.get(settleDeferredRef)
-					yield* Deferred.succeed(settleDeferred, undefined)
 				}
 				break
 			}
 			case "session.status_terminated":
 			case "session.archived": {
-				yield* Ref.update(stateRef, (state) => {
-					if (!state.trackPipedTurns) {
-						return {
-							...state,
-							status: "terminated" as const,
-							liveStatus: "terminated" as const,
-							liveStateVersion: state.liveStateVersion + 1,
-						}
-					}
-					let firstSubmittedTurnFailure = state.firstSubmittedTurnFailure
-					let pendingTurnErrors = state.pendingTurnErrors
-					if (
-						eventType === "session.status_terminated" &&
-						state.observedTurn > state.settledTurn &&
-						state.latestTurnError?.turn === state.observedTurn &&
-						state.latestTurnError.retryStatus === "terminal"
-					) {
-						const turn = state.observedTurn
-						const turnError = state.latestTurnError.message
-						if (state.unsettledSubmittedTurns.has(turn)) {
-							firstSubmittedTurnFailure = recordFirstFailure(
-								firstSubmittedTurnFailure,
-								turn,
-								turnError,
-							)
-						} else if (state.sendInFlight) {
-							const nextPending = new Map(pendingTurnErrors)
-							nextPending.set(turn, turnError)
-							pendingTurnErrors = nextPending
-						}
-					}
-					return {
-						...state,
-						status: "terminated" as const,
-						liveStatus: "terminated" as const,
-						liveStateVersion: state.liveStateVersion + 1,
-						firstSubmittedTurnFailure,
-						pendingTurnErrors,
-					}
-				})
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(
 						eventType === "session.archived" ? "[session archived]" : "[session terminated]",
 					)
 				}
-
-				let isLiveArchive = false
-				if (eventType === "session.status_terminated") {
-					if (expectArchivedEvent) {
-						isLiveArchive = true
-					} else {
-						const latest = yield* fetchSessionStatusWithRetry(client, sessionId)
-						isLiveArchive = latest.archived_at !== null
-					}
-				}
-				const shouldStopNow = eventType === "session.archived" || !isLiveArchive
-
-				if (shouldStopNow) {
-					yield* Ref.update(stateRef, (state) => ({ ...state, ended: true }))
-					const settleDeferred = yield* Ref.get(settleDeferredRef)
-					yield* Deferred.succeed(settleDeferred, undefined)
-					yield* Deferred.succeed(stopConnectDeferred, undefined)
-				}
 				break
 			}
 			default:
 				break
+		}
+
+		const transition = yield* Ref.modify(stateRef, (state) => {
+			const res = applySessionEvent(state, {
+				seq: eventSeq,
+				type: eventType,
+				...(stopReason !== undefined ? { stopReason } : {}),
+				...(formattedError !== undefined
+					? { error: { message: formattedError, retryStatus: errorRetryStatus } }
+					: {}),
+			})
+			return [res, res.state] as const
+		})
+		if (transition.duplicate) {
+			return
+		}
+		if (transition.shouldWakeWaiter) {
+			const settleDeferred = yield* Ref.get(settleDeferredRef)
+			yield* Deferred.succeed(settleDeferred, undefined)
+		}
+
+		if (eventType === "session.status_terminated" || eventType === "session.archived") {
+			let isLiveArchive = false
+			if (eventType === "session.status_terminated") {
+				if (expectArchivedEvent) {
+					isLiveArchive = true
+				} else {
+					const latest = yield* fetchSessionStatusWithRetry(client, sessionId)
+					isLiveArchive = latest.archived_at !== null
+				}
+			}
+			const shouldStopNow = eventType === "session.archived" || !isLiveArchive
+
+			if (shouldStopNow) {
+				yield* Ref.update(stateRef, markSessionEnded)
+				const settleDeferred = yield* Ref.get(settleDeferredRef)
+				yield* Deferred.succeed(settleDeferred, undefined)
+				yield* Deferred.succeed(stopConnectDeferred, undefined)
+			}
 		}
 	})
 
@@ -727,23 +525,8 @@ const dispatchUserLine = (
 		}
 
 		const key = yield* client.generateIdempotencyKey
-		const sendSnapshot = yield* Ref.modify(stateRef, (state) => [
-			{
-				liveStatus: state.liveStatus,
-				liveTurn: state.liveTurn,
-				liveStateVersion: state.liveStateVersion,
-			},
-			state.trackPipedTurns ? { ...state, sendInFlight: true } : state,
-		])
-		const clearSendInFlight = Ref.update(stateRef, (state) =>
-			state.trackPipedTurns
-				? {
-						...state,
-						sendInFlight: false,
-						pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
-					}
-				: state,
-		)
+		const sendSnapshot = yield* Ref.modify(stateRef, beginMessageSend)
+		const clearSendInFlight = Ref.update(stateRef, cancelMessageSend)
 		const res = yield* Effect.result(
 			sendConnectEventsWithRetry(
 				client.api.sessions.sendEvents({
@@ -785,72 +568,7 @@ const dispatchUserLine = (
 				`Message response did not confirm a valid turn (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
 			)
 		}
-		const { turn, queued } = receipt
-		yield* Ref.update(stateRef, (state) => {
-			const initiatedFromIdle =
-				queued !== undefined
-					? !queued
-					: sendSnapshot.liveStatus === "idle" && turn === sendSnapshot.liveTurn + 1
-			const startedNow =
-				state.liveStatus !== "terminated" &&
-				(queued === false
-					? state.liveTurn < turn
-					: initiatedFromIdle &&
-						state.liveStateVersion === sendSnapshot.liveStateVersion &&
-						state.liveStatus === "idle")
-			const predecessorRunning =
-				!startedNow &&
-				state.liveStatus !== "terminated" &&
-				!initiatedFromIdle &&
-				turn >= 2 &&
-				state.liveTurn < turn - 1
-			const nextLiveStatus =
-				startedNow || predecessorRunning ? ("running" as const) : state.liveStatus
-			const nextLiveTurn = startedNow ? turn : predecessorRunning ? turn - 1 : state.liveTurn
-			if (!state.trackPipedTurns) {
-				return startedNow || predecessorRunning
-					? {
-							...state,
-							liveStatus: nextLiveStatus,
-							liveTurn: nextLiveTurn,
-						}
-					: state
-			}
-			const preRecordedError = state.pendingTurnErrors.get(turn)
-			const firstSubmittedTurnFailure =
-				preRecordedError !== undefined
-					? recordFirstFailure(state.firstSubmittedTurnFailure, turn, preRecordedError)
-					: state.firstSubmittedTurnFailure
-			let unsettledSubmittedTurns = state.unsettledSubmittedTurns
-			if (turn > state.settledTurn && !unsettledSubmittedTurns.has(turn)) {
-				const nextSubmitted = new Set(unsettledSubmittedTurns)
-				nextSubmitted.add(turn)
-				unsettledSubmittedTurns = nextSubmitted
-			}
-			let unsettledQueuedTurns = state.unsettledQueuedTurns
-			if (!initiatedFromIdle && turn > state.settledTurn) {
-				if (!unsettledQueuedTurns.has(turn)) {
-					const nextQueued = new Set(unsettledQueuedTurns)
-					nextQueued.add(turn)
-					unsettledQueuedTurns = nextQueued
-				}
-			} else if (initiatedFromIdle && unsettledQueuedTurns.has(turn)) {
-				const nextQueued = new Set(unsettledQueuedTurns)
-				nextQueued.delete(turn)
-				unsettledQueuedTurns = nextQueued
-			}
-			return {
-				...state,
-				targetTurn: Math.max(state.targetTurn, turn),
-				unsettledSubmittedTurns,
-				unsettledQueuedTurns,
-				firstSubmittedTurnFailure,
-				pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
-				sendInFlight: false,
-				liveStatus: nextLiveStatus,
-				liveTurn: nextLiveTurn,
-			}
-		})
+		yield* Ref.update(stateRef, (state) => applyMessageReceipt(state, sendSnapshot, receipt))
 		return "continue" as const
 	})
 
@@ -1186,25 +904,18 @@ export const sessionsConnectCommand = Command.make(
 				`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
 			)
 
-			const stateRef = yield* Ref.make<ConnectState>({
-				trackPipedTurns: !isInteractiveTty,
-				status: baseline.status,
-				liveStatus: session.status,
-				liveTurn: session.turn,
-				liveStateVersion: 0,
-				lastProcessedSeq: after ?? 0,
-				observedTurn: baseline.observedTurn,
-				settledTurn: baseline.settledTurn,
-				latestSettledStopReason: undefined,
-				targetTurn: 0,
-				unsettledSubmittedTurns: new Set<number>(),
-				unsettledQueuedTurns: new Set<number>(),
-				firstSubmittedTurnFailure: undefined,
-				pendingTurnErrors: new Map<number, string>(),
-				sendInFlight: false,
-				latestTurnError: undefined,
-				ended: initiallyEnded,
-			})
+			const stateRef = yield* Ref.make<ConnectState>(
+				createInitialConnectState({
+					trackPipedTurns: !isInteractiveTty,
+					status: baseline.status,
+					liveStatus: session.status,
+					liveTurn: session.turn,
+					lastProcessedSeq: after ?? 0,
+					observedTurn: baseline.observedTurn,
+					settledTurn: baseline.settledTurn,
+					ended: initiallyEnded,
+				}),
+			)
 
 			const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())
 			const streamFailedRef = yield* Ref.make<CliFailure | null>(null)
@@ -1376,7 +1087,7 @@ export const sessionsConnectCommand = Command.make(
 
 					yield* withSigintHandler(() => {
 						const current = Ref.getUnsafe(stateRef)
-						if (current.liveStatus === "running" && !interruptRequestedOnce) {
+						if (shouldInterruptOnCtrlC(current, interruptRequestedOnce)) {
 							interruptRequestedOnce = true
 							Queue.offerUnsafe(interruptQueue, undefined)
 							return true
@@ -1457,20 +1168,11 @@ export const sessionsConnectCommand = Command.make(
 						const failed = yield* Ref.get(streamFailedRef)
 						if (failed !== null) break
 						const state = yield* Ref.get(stateRef)
-						if (state.ended) {
+						const settlementAction = evaluatePipedSettlement(state)
+						if (settlementAction === "ended" || settlementAction === "settled") {
 							break
 						}
-						if (state.targetTurn > 0 && state.settledTurn >= state.targetTurn) {
-							break
-						}
-						const lastStopReason = state.latestSettledStopReason
-						if (
-							state.status === "idle" &&
-							state.unsettledQueuedTurns.has(state.targetTurn) &&
-							state.settledTurn === state.targetTurn - 1 &&
-							state.observedTurn < state.targetTurn &&
-							isQueueHaltingStopReason(lastStopReason)
-						) {
+						if (settlementAction === "check_halted_queue") {
 							let haltedQueuedTurn = false
 							for (let checkAttempt = 0; ; checkAttempt++) {
 								const latestRes = yield* Effect.result(
@@ -1481,36 +1183,18 @@ export const sessionsConnectCommand = Command.make(
 									haltedQueuedTurn = true
 									break
 								}
-								const snap = latestRes.success
-								if (snap.turn >= state.targetTurn) {
-									break
-								}
-								if (snap.status !== "running") {
-									yield* Ref.set(
-										incompleteTurnRef,
-										networkFailure(
-											`Queued turn ${state.targetTurn} did not start because turn ${state.settledTurn} stopped with ${lastStopReason}.`,
-										),
-									)
-									haltedQueuedTurn = true
-									break
-								}
 								const refreshed = yield* Ref.get(stateRef)
-								if (
-									refreshed.ended ||
-									refreshed.observedTurn >= state.targetTurn ||
-									refreshed.settledTurn >= state.targetTurn ||
-									!refreshed.unsettledQueuedTurns.has(state.targetTurn)
-								) {
+								const decision = evaluateHaltedQueueSnapshot(
+									state,
+									refreshed,
+									latestRes.success,
+									checkAttempt >= MAX_QUEUED_TURN_PROJECTION_RETRIES,
+								)
+								if (decision.action === "continue_waiting") {
 									break
 								}
-								if (checkAttempt >= MAX_QUEUED_TURN_PROJECTION_RETRIES) {
-									yield* Ref.set(
-										incompleteTurnRef,
-										networkFailure(
-											`Queued turn ${state.targetTurn} did not start because turn ${state.settledTurn} stopped with ${lastStopReason}.`,
-										),
-									)
+								if (decision.action === "fail") {
+									yield* Ref.set(incompleteTurnRef, networkFailure(decision.message))
 									haltedQueuedTurn = true
 									break
 								}
@@ -1572,32 +1256,9 @@ export const sessionsConnectCommand = Command.make(
 					}
 
 					const finalState = yield* Ref.get(stateRef)
-					let lowestUnsettled: number | undefined
-					for (const turn of finalState.unsettledSubmittedTurns) {
-						if (lowestUnsettled === undefined || turn < lowestUnsettled) {
-							lowestUnsettled = turn
-						}
-					}
-					if (
-						finalState.firstSubmittedTurnFailure !== undefined &&
-						(lowestUnsettled === undefined ||
-							finalState.firstSubmittedTurnFailure.turn <= lowestUnsettled)
-					) {
-						yield* Ref.set(
-							failedTurnRef,
-							networkFailure(
-								`Turn ${finalState.firstSubmittedTurnFailure.turn} failed: ${finalState.firstSubmittedTurnFailure.message}`,
-							),
-						)
-					} else if (lowestUnsettled !== undefined) {
-						yield* Ref.set(
-							failedTurnRef,
-							networkFailure(
-								finalState.ended
-									? `Session terminated before turn ${lowestUnsettled} completed.`
-									: `Turn ${lowestUnsettled} did not complete.`,
-							),
-						)
+					const finalError = resolveFinalPipedError(finalState)
+					if (finalError !== undefined) {
+						yield* Ref.set(failedTurnRef, networkFailure(finalError))
 					}
 				}
 			})

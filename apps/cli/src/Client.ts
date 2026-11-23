@@ -2,6 +2,7 @@ import {
 	type CheckfuClient as ApiCheckfuClient,
 	makeCheckfuClientWith,
 } from "@checkfu/api/Http/Api"
+import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -33,6 +34,7 @@ export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5
 const DEFAULT_SSE_RECONNECT_DELAY_MS = 250
 const DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS = 2_000
+const DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS = 5_000
 const MAX_SSE_ERROR_BODY_BYTES = 16 * 1024
 const MAX_SSE_NO_PROGRESS_DELAY_MS = 5_000
 
@@ -193,6 +195,7 @@ export interface StreamSseOptions {
 	readonly maxReconnectAttempts?: number | undefined
 	readonly baseReconnectDelayMs?: number | undefined
 	readonly errorBodyTimeoutMs?: number | undefined
+	readonly healthyIdleDurationMs?: number | undefined
 }
 
 export interface StreamSessionEventsOptions extends StreamSseOptions {
@@ -206,6 +209,7 @@ export interface EndpointSseRequest {
 	readonly headers?: Readonly<Record<string, string>> | undefined
 	readonly initialCursor?: string | undefined
 	readonly cursorQueryParam?: string | undefined
+	readonly monotonicNumericCursor?: boolean | undefined
 	readonly isTerminalEvent?: ((data: Record<string, unknown>) => boolean) | undefined
 }
 
@@ -223,14 +227,14 @@ export interface CheckfuClient {
 	readonly generateIdempotencyKey: Effect.Effect<string>
 }
 
+const parseNonNegativeIntString = (value: string | undefined): number | undefined =>
+	value !== undefined && /^\d{1,15}$/.test(value) ? Number(value) : undefined
+
 const parseSeq = (id: string | undefined, data: Record<string, unknown>): number | undefined => {
 	if (typeof data["seq"] === "number" && Number.isInteger(data["seq"]) && data["seq"] >= 0) {
 		return data["seq"]
 	}
-	if (id !== undefined && /^\d{1,15}$/.test(id)) {
-		return Number(id)
-	}
-	return undefined
+	return parseNonNegativeIntString(id)
 }
 
 class StreamBodyReadError extends Data.TaggedError("StreamBodyReadError")<{
@@ -317,6 +321,12 @@ export const makeCheckfuClient = (
 			const maxReconnects = options?.maxReconnectAttempts ?? DEFAULT_MAX_SSE_RECONNECTS
 			const baseDelayMs = options?.baseReconnectDelayMs ?? DEFAULT_SSE_RECONNECT_DELAY_MS
 			const errorBodyTimeoutMs = options?.errorBodyTimeoutMs ?? DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS
+			const rawHealthyIdleMs =
+				options?.healthyIdleDurationMs ?? DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS
+			const healthyIdleDurationMs = Number.isFinite(rawHealthyIdleMs)
+				? Math.max(0, Math.trunc(rawHealthyIdleMs))
+				: DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS
+			const healthyIdleDurationNanos = BigInt(healthyIdleDurationMs) * 1_000_000n
 
 			interface LoopState {
 				cursor: string | undefined
@@ -438,6 +448,7 @@ export const makeCheckfuClient = (
 							)
 						}
 
+						const connectedAtNanos = yield* Clock.monotonicTimeNanos
 						const initialCursor = loopState.cursor
 						const hasCursorProgress = (): boolean => loopState.cursor !== initialCursor
 						let sawEvent = false
@@ -565,21 +576,35 @@ export const makeCheckfuClient = (
 								Stream.rechunk(1),
 								Stream.mapEffect((item) =>
 									Effect.gen(function* () {
+										const updateCursor = (nextId: string | undefined, nextSeq?: number): void => {
+											if (requestSpec.monotonicNumericCursor === true) {
+												const candidateNum =
+													nextSeq !== undefined ? nextSeq : parseNonNegativeIntString(nextId)
+												if (candidateNum !== undefined) {
+													const currentNum = parseNonNegativeIntString(loopState.cursor)
+													if (currentNum === undefined || candidateNum > currentNum) {
+														loopState.cursor = String(candidateNum)
+													}
+												}
+												return
+											}
+											if (nextId === "") {
+												loopState.cursor = undefined
+											} else if (nextId !== undefined) {
+												loopState.cursor = nextId
+											} else if (nextSeq !== undefined) {
+												loopState.cursor = String(nextSeq)
+											}
+										}
 										if (item._tag === "CursorUpdate") {
-											loopState.cursor = item.id === "" ? undefined : item.id
+											updateCursor(item.id)
 											sawKeepalive = true
 											return Option.none<SessionStreamEvent>()
 										}
 										const sseEvent = item.event
 										const data = yield* parseSseData(sseEvent.data)
 										const seq = parseSeq(sseEvent.id, data)
-										if (sseEvent.id === "") {
-											loopState.cursor = undefined
-										} else if (sseEvent.id !== undefined) {
-											loopState.cursor = sseEvent.id
-										} else if (seq !== undefined) {
-											loopState.cursor = String(seq)
-										}
+										updateCursor(sseEvent.id, seq)
 										sawEvent = true
 										if (requestSpec.isTerminalEvent?.(data) === true) {
 											terminalReached = true
@@ -617,7 +642,7 @@ export const makeCheckfuClient = (
 							)
 
 						const finalizeConnection = Stream.unwrap(
-							Effect.sync(() => {
+							Effect.gen(function* () {
 								if (terminalReached || handledError || loopState.done) {
 									if (terminalReached) {
 										loopState.done = true
@@ -646,24 +671,30 @@ export const makeCheckfuClient = (
 									loopState.pendingDelayMs = loopState.retryDelayMs ?? 0
 									return Stream.empty
 								}
-								// Clean close without advancing the cursor (e.g., healthy keepalive rotation,
-								// empty HTTP 200 close, or repeated/unnumbered events): keep listening without
-								// spending error retries, but always enforce a positive floor (and back off on
-								// repeated non-advancing event closes) even if the server sent `retry: 0`.
+								// Clean close without advancing the cursor:
+								// - Normal long-lived idle connections (stayed open >= healthyIdleDurationMs
+								//   without replaying non-advancing events) reset the no-progress streak and
+								//   reconnect promptly.
+								// - Consecutive short heartbeat-only/empty closes or repeated non-advancing
+								//   event closes apply capped exponential backoff even if the server sent
+								//   `retry: 0`.
 								loopState.attempt = 0
 								const floorBaseMs = Math.max(baseDelayMs, 1)
-								if (sawEvent) {
-									const streak = loopState.noProgressCloses
-									loopState.noProgressCloses = streak + 1
-									const backoffDelayMs = Math.min(
-										floorBaseMs * 2 ** Math.min(streak, 4),
-										MAX_SSE_NO_PROGRESS_DELAY_MS,
-									)
-									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, backoffDelayMs)
-								} else {
+								const closedAtNanos = yield* Clock.monotonicTimeNanos
+								const isHealthyLongIdle =
+									!sawEvent && closedAtNanos - connectedAtNanos >= healthyIdleDurationNanos
+								if (isHealthyLongIdle) {
 									loopState.noProgressCloses = 0
 									const minIdleDelayMs = sawKeepalive ? Math.min(floorBaseMs, 50) : floorBaseMs
 									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, minIdleDelayMs)
+								} else {
+									const streak = loopState.noProgressCloses
+									loopState.noProgressCloses = streak + 1
+									const backoffDelayMs = Math.min(
+										floorBaseMs * 2 ** Math.min(streak, 16),
+										MAX_SSE_NO_PROGRESS_DELAY_MS,
+									)
+									loopState.pendingDelayMs = Math.max(loopState.retryDelayMs ?? 0, backoffDelayMs)
 								}
 								return Stream.empty
 							}),
@@ -720,6 +751,7 @@ export const makeCheckfuClient = (
 								cursorQueryParam: "after",
 							}
 						: {}),
+					monotonicNumericCursor: true,
 					isTerminalEvent: (data) => data["type"] === "session.archived",
 				},
 				options,

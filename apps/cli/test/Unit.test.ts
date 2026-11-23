@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
@@ -1059,6 +1060,229 @@ describe("normalizeApiUrl", () => {
 				expect(gateway403Err.message).toContain(
 					"API error (403 authentication_error): gateway denied",
 				)
+
+				// 18) Consecutive short heartbeat-only and empty SSE closes apply capped exponential
+				//     backoff (even under `retry: 0`), while normal long-lived idle connections reset
+				//     the streak and preserve prompt 50ms reconnection.
+				let virtualNowNanos = 1_000_000_000n
+				const recordedSleepsMs: Array<number> = []
+				const recordingClock: Clock.Clock = {
+					currentTimeMillisUnsafe: () => Number(virtualNowNanos / 1_000_000n),
+					currentTimeMillis: Effect.sync(() => Number(virtualNowNanos / 1_000_000n)),
+					currentTimeNanosUnsafe: () => virtualNowNanos,
+					currentTimeNanos: Effect.sync(() => virtualNowNanos),
+					monotonicTimeNanosUnsafe: () => virtualNowNanos,
+					monotonicTimeNanos: Effect.sync(() => virtualNowNanos),
+					sleep: (duration) =>
+						Effect.sync(() => {
+							const ms = Duration.toMillis(duration)
+							recordedSleepsMs.push(ms)
+							virtualNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+						}),
+				}
+				let idleBackoffCalls = 0
+				const idleBackoffFetch = (async () => {
+					idleBackoffCalls += 1
+					if (idleBackoffCalls === 1) {
+						return new Response("retry: 0\n\n: keepalive\n\n", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (idleBackoffCalls <= 7) {
+						return new Response(": keepalive\n\n", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (idleBackoffCalls <= 11) {
+						// Normal long-lived idle keepalive connection (10s open before clean close)
+						let step = 0
+						const longIdleBody = new ReadableStream<Uint8Array>({
+							pull(controller) {
+								if (step === 0) {
+									step = 1
+									controller.enqueue(encoder.encode(": keepalive\n\n"))
+								} else {
+									virtualNowNanos += 10_000_000_000n
+									controller.close()
+								}
+							},
+						})
+						return new Response(longIdleBody, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					if (idleBackoffCalls <= 14) {
+						// Short empty HTTP 200 closes back off again from base delay
+						return new Response("", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(
+						'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+
+				const idleBackoffEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(client.streamSessionEvents("sess_idle_backoff"))
+				}).pipe(
+					Effect.provide(makeLayer(idleBackoffFetch)),
+					Effect.provideService(Clock.Clock, recordingClock),
+				)
+				expect(idleBackoffCalls).toBe(15)
+				expect(Array.from(idleBackoffEvents).map((e) => e.seq)).toEqual([1])
+				expect(recordedSleepsMs).toEqual([
+					// 7 short keepalive closes (even after retry: 0): exponential backoff capped at 5000ms
+					250, 500, 1000, 2000, 4000, 5000, 5000,
+					// 4 long-lived (10s) idle keepalive closes: streak resets, prompt 50ms reconnects
+					50, 50, 50, 50,
+					// 3 short empty closes: exponential backoff starts fresh from 250ms
+					250, 500, 1000,
+				])
+
+				// Real-clock sanity check: short keepalive closes back off using live monotonic time
+				let shortLiveKeepaliveCalls = 0
+				const shortLiveKeepaliveFetch = (async () => {
+					shortLiveKeepaliveCalls += 1
+					if (shortLiveKeepaliveCalls <= 3) {
+						return new Response("retry: 0\n\n: keepalive\n\n", {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const [shortLiveDuration] = yield* Effect.timed(
+					Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Stream.runCollect(
+							client.streamEndpointEvents(
+								{ method: "GET", path: "/v1/custom/short-keepalive/stream" },
+								{
+									maxReconnectAttempts: 1,
+									baseReconnectDelayMs: 25,
+									healthyIdleDurationMs: 500,
+								},
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(shortLiveKeepaliveFetch))),
+				)
+				expect(shortLiveKeepaliveCalls).toBe(4)
+				// 3 short keepalives: 25 + 50 + 100 = 175ms
+				expect(Duration.toMillis(shortLiveDuration)).toBeGreaterThanOrEqual(140)
+
+				// 19) Generic SSE streams with opaque non-numeric IDs emit every frame across reconnects
+				let opaqueCalls = 0
+				const opaqueFetch = (async () => {
+					opaqueCalls += 1
+					if (opaqueCalls === 1) {
+						return new Response(
+							'id: tok_alpha\nevent: custom.msg\ndata: {"seq":5,"msg":"first"}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					if (opaqueCalls === 2) {
+						return new Response(
+							'id: tok_beta\nevent: custom.msg\ndata: {"seq":5,"msg":"second-same-seq-opaque-id"}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const opaqueEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamEndpointEvents(
+							{ method: "GET", path: "/v1/custom/opaque/stream" },
+							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(opaqueFetch)))
+				expect(opaqueCalls).toBe(3)
+				expect(Array.from(opaqueEvents).map((e) => ({ id: e.id, msg: e.data["msg"] }))).toEqual([
+					{ id: "tok_alpha", msg: "first" },
+					{ id: "tok_beta", msg: "second-same-seq-opaque-id" },
+				])
+
+				// 20) Monotonic numeric session streams never regress Last-Event-ID on partial older replay
+				//     and treat older-only replays as no-progress (applying backoff)
+				let replayCursorNanos = 1_000_000_000n
+				const replayCursorSleeps: Array<number> = []
+				const replayCursorClock: Clock.Clock = {
+					currentTimeMillisUnsafe: () => Number(replayCursorNanos / 1_000_000n),
+					currentTimeMillis: Effect.sync(() => Number(replayCursorNanos / 1_000_000n)),
+					currentTimeNanosUnsafe: () => replayCursorNanos,
+					currentTimeNanos: Effect.sync(() => replayCursorNanos),
+					monotonicTimeNanosUnsafe: () => replayCursorNanos,
+					monotonicTimeNanos: Effect.sync(() => replayCursorNanos),
+					sleep: (duration) =>
+						Effect.sync(() => {
+							const ms = Duration.toMillis(duration)
+							replayCursorSleeps.push(ms)
+							replayCursorNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
+						}),
+				}
+				const replayCursorLastIds: Array<string | null> = []
+				let replayCursorCalls = 0
+				const replayCursorFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = input instanceof Request ? input : new Request(input, init)
+					replayCursorLastIds.push(req.headers.get("last-event-id"))
+					replayCursorCalls += 1
+					if (replayCursorCalls === 1) {
+						return new Response(
+							'id: 5\nevent: user.message\ndata: {"seq":5,"type":"user.message"}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					if (replayCursorCalls === 2) {
+						// Proxy partially replays an older frame (seq 2) and disconnects
+						return new Response(
+							'id: 2\nevent: user.message\ndata: {"seq":2,"type":"user.message"}\n\n',
+							{
+								status: 200,
+								headers: { "content-type": "text/event-stream; charset=utf-8" },
+							},
+						)
+					}
+					return new Response(
+						'id: 6\nevent: session.archived\ndata: {"seq":6,"type":"session.archived"}\n\n',
+						{
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						},
+					)
+				}) as unknown as typeof globalThis.fetch
+
+				const replayCursorEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(client.streamSessionEvents("sess_monotonic_cursor"))
+				}).pipe(
+					Effect.provide(makeLayer(replayCursorFetch)),
+					Effect.provideService(Clock.Clock, replayCursorClock),
+				)
+				expect(replayCursorCalls).toBe(3)
+				// Cursor stays at "5" after replaying older seq 2 (never regresses to "2")
+				expect(replayCursorLastIds).toEqual([null, "5", "5"])
+				// Conn 1 advanced (0ms); conn 2 replayed older seq 2 (no progress -> 250ms backoff)
+				expect(replayCursorSleeps).toEqual([250])
+				expect(Array.from(replayCursorEvents).map((e) => e.seq)).toEqual([5, 2, 6])
 			}),
 		)
 	})
