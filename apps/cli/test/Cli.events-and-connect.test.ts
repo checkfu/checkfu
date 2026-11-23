@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { basename, delimiter, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import * as Clock from "effect/Clock"
+import type * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -82,7 +82,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					for (let i = 0; i < 200; i++) {
 						const s = yield* cli.run(["sessions", "retrieve", "--session-id", sessionId])
 						const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
-						if (parsed.status === "idle" && parsed.turn === 1) break
+						if (parsed.status === "idle" && parsed.turn === 1) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 
@@ -120,7 +122,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					for (let i = 0; i < 200; i++) {
 						const s = yield* cli.run(["sessions", "retrieve", "--session-id", sessionId])
 						const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
-						if (parsed.status === "idle" && parsed.turn === 2) break
+						if (parsed.status === "idle" && parsed.turn === 2) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 
@@ -200,7 +204,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					for (let i = 0; i < 200; i++) {
 						const s = yield* cli.run(["sessions", "retrieve", "--session-id", sessionId])
 						const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
-						if (parsed.status === "idle" && parsed.turn === 1) break
+						if (parsed.status === "idle" && parsed.turn === 1) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 					yield* cli.run(["sessions", "archive", "--session-id", sessionId])
@@ -272,10 +278,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(seenLastEventIds[0]).toBeNull()
 					expect(seenLastEventIds[1]).toBeTruthy()
 
-					const seqs = streamed.stdout
-						.trim()
-						.split("\n")
-						.map((line) => Number(line))
+					const seqs = streamed.stdout.trim().split("\n").map(Number)
 					// Verify exact 1:1 match with zero duplicates and zero gaps across reconnect
 					expect(seqs.length).toBeGreaterThanOrEqual(5)
 					expect(seqs).toEqual(expectedSeqs)
@@ -292,7 +295,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						generate: (args) =>
 							Effect.succeed({
 								thinking: "pondering",
-								text: `Reply(${args.turn}): ${args.input.join("+")}\x1b]52;c;evil\x07\u202e`,
+								text: `Reply(${args.turn}): ${args.input.join("+")}\u001b]52;c;evil\u0007\u202e`,
 								input_tokens: 8,
 								output_tokens: 4,
 								stop_reason: { type: "end_turn" as const },
@@ -309,10 +312,10 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(result.stdout).toContain("Reply(1): first prompt")
 					expect(result.stdout).toContain("second prompt")
 					// ANSI OSC52 and bidi control characters must be escaped on stdout
-					expect(result.stdout).not.toContain("\x1b")
-					expect(result.stdout).not.toContain("\x07")
+					expect(result.stdout).not.toContain("\u001b")
+					expect(result.stdout).not.toContain("\u0007")
 					expect(result.stdout).not.toContain("\u202e")
-					expect(result.stdout).toContain("\\x1b]52;c;evil\\x07\\u202e")
+					expect(result.stdout).toContain(String.raw`\x1b]52;c;evil\x07\u202e`)
 				}),
 			),
 		)
@@ -405,7 +408,9 @@ describe("CLI sessions:events and sessions connect", () => {
 					for (let i = 0; i < 200; i++) {
 						const s = yield* cli.run(["sessions", "retrieve", "--session-id", sessionId])
 						const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
-						if (parsed.status === "idle" && parsed.turn === 1) break
+						if (parsed.status === "idle" && parsed.turn === 1) {
+							break
+						}
 						yield* Effect.sleep("5 millis")
 					}
 					yield* cli.run(["sessions", "archive", "--session-id", sessionId])
@@ -430,7 +435,9 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions:events", "stream", "--session-id", sessionId, "--transform", "seq", "-r"],
 						{
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								bodyErrorRequests++
 								bodyErrorLastIds.push(request.headers.get("last-event-id"))
 								const real = await next(request)
@@ -472,18 +479,15 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(bodyErrorRequests).toBe(2)
 					expect(bodyErrorLastIds[0]).toBeNull()
 					expect(bodyErrorLastIds[1]).toBeTruthy()
-					expect(
-						recovered.stdout
-							.trim()
-							.split("\n")
-							.map((line) => Number(line)),
-					).toEqual(expectedSeqs)
+					expect(recovered.stdout.trim().split("\n").map(Number)).toEqual(expectedSeqs)
 
 					// 2) Malformed SSE JSON payload fails immediately without retrying
 					let badJsonRequests = 0
 					const badJson = yield* cli.run(["sessions:events", "stream", "--session-id", sessionId], {
 						interceptFetch: async (next, request) => {
-							if (!request.url.includes("/events/stream")) return next(request)
+							if (!request.url.includes("/events/stream")) {
+								return next(request)
+							}
 							badJsonRequests++
 							return new Response("id: 1\nevent: user.message\ndata: {not-json\n\n", {
 								status: 200,
@@ -519,7 +523,9 @@ describe("CLI sessions:events and sessions connect", () => {
 						{
 							clock: rotationClock,
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								rotationRequests++
 								if (rotationRequests <= 8) {
 									let step = 0
@@ -561,11 +567,15 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions:events", "stream", "--session-id", sessionId, "--transform", "seq", "-r"],
 						{
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								replayStreamRequests += 1
 								const conn = replayStreamRequests
 								const real = await next(request)
-								if (real.body === null) return real
+								if (real.body === null) {
+									return real
+								}
 								const reader = real.body.getReader()
 								const decoder = new TextDecoder()
 								const encoder = new TextEncoder()
@@ -622,12 +632,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(deduped.exitCode).toBe(0)
 					expect(replayStreamRequests).toBe(2)
-					expect(
-						deduped.stdout
-							.trim()
-							.split("\n")
-							.map((line) => Number(line)),
-					).toEqual(expectedSeqs)
+					expect(deduped.stdout.trim().split("\n").map(Number)).toEqual(expectedSeqs)
 
 					const dedupedAfter = yield* cli.run(
 						[
@@ -643,9 +648,13 @@ describe("CLI sessions:events and sessions connect", () => {
 						],
 						{
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								const real = await next(request)
-								if (real.body === null) return real
+								if (real.body === null) {
+									return real
+								}
 								const reader = real.body.getReader()
 								const encoder = new TextEncoder()
 								let replayed = false
@@ -672,12 +681,9 @@ describe("CLI sessions:events and sessions connect", () => {
 						},
 					)
 					expect(dedupedAfter.exitCode).toBe(0)
-					expect(
-						dedupedAfter.stdout
-							.trim()
-							.split("\n")
-							.map((line) => Number(line)),
-					).toEqual(expectedSeqs.filter((seq) => seq > 2))
+					expect(dedupedAfter.stdout.trim().split("\n").map(Number)).toEqual(
+						expectedSeqs.filter((seq) => seq > 2),
+					)
 				}),
 			),
 		)
@@ -782,7 +788,9 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions:events", "stream", "--session-id", baseSessionId],
 						{
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								htmlRequests++
 								return new Response("<html><body>proxy error</body></html>", {
 									status: 200,
@@ -1334,10 +1342,14 @@ describe("CLI sessions:events and sessions connect", () => {
 						{
 							stdin: Stream.never,
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								await runPromise(Deferred.succeed(streamConnected, undefined))
 								const real = await next(request)
-								if (real.status !== 200 || real.body === null) return real
+								if (real.status !== 200 || real.body === null) {
+									return real
+								}
 								const reader = real.body.getReader()
 								const decoder = new TextDecoder()
 								const encoder = new TextEncoder()
@@ -1350,7 +1362,9 @@ describe("CLI sessions:events and sessions connect", () => {
 												const frame = buf.slice(0, boundary + 2)
 												buf = buf.slice(boundary + 2)
 												if (frame.includes("session.archived")) {
-													await new Promise((resolve) => setTimeout(resolve, 40))
+													await new Promise((resolve) => {
+														setTimeout(resolve, 40)
+													})
 												}
 												controller.enqueue(encoder.encode(frame))
 												return
@@ -1872,13 +1886,19 @@ describe("CLI sessions:events and sessions connect", () => {
 										// SSE has delivered session.status_idle(refusal)
 										await runPromise(Deferred.succeed(releaseDelayedTurn1, undefined))
 										await runPromise(Deferred.await(delayedIdleDelivered))
-										await new Promise((resolve) => setTimeout(resolve, 30))
+										await new Promise((resolve) => {
+											setTimeout(resolve, 30)
+										})
 									}
 									return res
 								}
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								const res = await next(request)
-								if (res.status !== 200 || res.body === null) return res
+								if (res.status !== 200 || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								let idleSignaled = false
@@ -2135,7 +2155,9 @@ describe("CLI sessions:events and sessions connect", () => {
 			)
 		})
 
-		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve)
+		})
 		try {
 			const addr = server.address()
 			const port = typeof addr === "object" && addr !== null ? addr.port : 0
@@ -2258,7 +2280,11 @@ describe("CLI sessions:events and sessions connect", () => {
 			for (const res of openSseResponses) {
 				res.end()
 			}
-			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await new Promise<void>((resolve) => {
+				server.close(() => {
+					resolve()
+				})
+			})
 		}
 	})
 
@@ -2455,9 +2481,13 @@ describe("CLI sessions:events and sessions connect", () => {
 						{
 							stdin: openAfterTurnStdin,
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								const res = await next(request)
-								if (res.status !== 200 || res.body === null) return res
+								if (res.status !== 200 || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								const encoder = new TextEncoder()
@@ -2465,8 +2495,8 @@ describe("CLI sessions:events and sessions connect", () => {
 								let idleSignaled = false
 								const shiftSeqs = (raw: string): string =>
 									raw
-										.replace(/^id: (\d+)$/gm, (_m, n: string) => `id: ${Number(n) + 1}`)
-										.replace(/"seq":(\d+)/g, (_m, n: string) => `"seq":${Number(n) + 1}`)
+										.replaceAll(/^id: (\d+)$/gm, (_m, n: string) => `id: ${Number(n) + 1}`)
+										.replaceAll(/"seq":(\d+)/g, (_m, n: string) => `"seq":${Number(n) + 1}`)
 								const observed = new ReadableStream<Uint8Array>({
 									async pull(controller) {
 										const chunk = await reader.read()
@@ -2581,7 +2611,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(waiterRes.exitCode).toBe(0)
 					expect(postCount).toBe(2)
 					expect(idleRenderCount).toBe(2)
-					expect(Duration.toMillis(waiterDuration)).toBeLessThan(2_000)
+					expect(Duration.toMillis(waiterDuration)).toBeLessThan(2000)
 					expect(waiterRes.stdout).toContain("Reply-1:first")
 					expect(waiterRes.stdout).toContain("Reply-2:second")
 
@@ -2641,7 +2671,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							}),
 						)
 						expect(pipedExitRes.exitCode).toBe(0)
-						expect(Duration.toMillis(elapsed)).toBeLessThan(1_000)
+						expect(Duration.toMillis(elapsed)).toBeLessThan(1000)
 						expect(stalled.getPostAttempts()).toBe(0)
 					}
 
@@ -2654,7 +2684,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						}),
 					)
 					expect(ttyExitRes.exitCode).toBe(0)
-					expect(Duration.toMillis(ttyElapsed)).toBeLessThan(1_000)
+					expect(Duration.toMillis(ttyElapsed)).toBeLessThan(1000)
 					expect(ttyStalled.getPostAttempts()).toBe(0)
 					expect(ttyExitRes.stderr).toContain(
 						`Cannot send input: session ${waiterSessionId} is already archived`,
@@ -2693,7 +2723,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						}),
 					)
 					expect(helloRes.exitCode).toBe(1)
-					expect(Duration.toMillis(helloElapsed)).toBeLessThan(1_000)
+					expect(Duration.toMillis(helloElapsed)).toBeLessThan(1000)
 					expect(helloRes.stderr).toContain(
 						`Cannot send input: session ${endedSessionId} is already archived.`,
 					)
@@ -2716,7 +2746,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						}),
 					)
 					expect(divergedPrefixRes.exitCode).toBe(1)
-					expect(Duration.toMillis(divergedElapsed)).toBeLessThan(1_000)
+					expect(Duration.toMillis(divergedElapsed)).toBeLessThan(1000)
 					expect(divergedPrefixRes.stderr).toContain(
 						`Cannot send input: session ${endedSessionId} is already archived.`,
 					)
@@ -2800,10 +2830,12 @@ describe("CLI sessions:events and sessions connect", () => {
 	})
 
 	const hasPosixPythonPty = (): boolean => {
-		if (process.platform === "win32") return false
+		if (process.platform === "win32") {
+			return false
+		}
 		const probe = spawnSync("python3", ["-c", "import fcntl, pty, termios"], {
 			stdio: "ignore",
-			timeout: 3_000,
+			timeout: 3000,
 		})
 		return probe.status === 0
 	}
@@ -2897,7 +2929,9 @@ describe("CLI sessions:events and sessions connect", () => {
 				)
 			})
 
-			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve)
+			})
 			try {
 				const addr = server.address()
 				const port = typeof addr === "object" && addr !== null ? addr.port : 0
@@ -2941,10 +2975,13 @@ while time.time() < deadline:
 
 if p.poll() is None:
     try:
-        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    p.wait()
+        p.wait(timeout=max(0.1, deadline - time.time()))
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
 os.close(master)
 print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "output": out.decode("utf-8", errors="replace")}))
 `
@@ -2981,8 +3018,8 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 									readonly output: string
 								},
 							)
-						} catch (err) {
-							reject(new Error(`Invalid PTY driver JSON: ${stdout} (${String(err)})`))
+						} catch (error) {
+							reject(new Error(`Invalid PTY driver JSON: ${stdout} (${String(error)})`))
 						}
 					})
 				})
@@ -3040,10 +3077,13 @@ while time.time() < deadline:
 
 if p.poll() is None:
     try:
-        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    p.wait()
+        p.wait(timeout=max(0.1, deadline - time.time()))
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
 os.close(master)
 print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "output": out.decode("utf-8", errors="replace")}))
 `
@@ -3080,8 +3120,8 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 									readonly output: string
 								},
 							)
-						} catch (err) {
-							reject(new Error(`Invalid PTY PID-SIGINT connect JSON: ${stdout} (${String(err)})`))
+						} catch (error) {
+							reject(new Error(`Invalid PTY PID-SIGINT connect JSON: ${stdout} (${String(error)})`))
 						}
 					})
 				})
@@ -3126,13 +3166,17 @@ while time.time() < deadline:
     if p.poll() is not None:
         break
 
-timed_out = p.poll() is None
-if timed_out:
+timed_out = False
+if p.poll() is None:
     try:
-        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    p.wait()
+        p.wait(timeout=max(0.1, deadline - time.time()))
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
 os.close(master)
 print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decode("utf-8", errors="replace")}))
 `
@@ -3169,8 +3213,8 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									readonly output: string
 								},
 							)
-						} catch (err) {
-							reject(new Error(`Invalid PTY PID-SIGINT stream JSON: ${stdout} (${String(err)})`))
+						} catch (error) {
+							reject(new Error(`Invalid PTY PID-SIGINT stream JSON: ${stdout} (${String(error)})`))
 						}
 					})
 				})
@@ -3182,7 +3226,11 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				for (const res of openSseResponses) {
 					res.end()
 				}
-				await new Promise<void>((resolve) => server.close(() => resolve()))
+				await new Promise<void>((resolve) => {
+					server.close(() => {
+						resolve()
+					})
+				})
 			}
 		},
 		15_000,
@@ -3422,7 +3470,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									: Effect.void,
 							interceptFetch: async (next, request) => {
 								const res = await next(request)
-								if (!request.url.includes("/events/stream") || res.body === null) return res
+								if (!request.url.includes("/events/stream") || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								let signaledTurn2 = false
@@ -3600,17 +3650,21 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						{
 							stdin: "trigger retrying then archive\n",
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								const res = await next(request)
-								if (res.status !== 200 || res.body === null) return res
+								if (res.status !== 200 || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								const encoder = new TextEncoder()
 								let injected = false
 								const shiftSeqs = (raw: string): string =>
 									raw
-										.replace(/^id: (\d+)$/gm, (_m, n: string) => `id: ${Number(n) + 1}`)
-										.replace(/"seq":(\d+)/g, (_m, n: string) => `"seq":${Number(n) + 1}`)
+										.replaceAll(/^id: (\d+)$/gm, (_m, n: string) => `id: ${Number(n) + 1}`)
+										.replaceAll(/"seq":(\d+)/g, (_m, n: string) => `"seq":${Number(n) + 1}`)
 								const observed = new ReadableStream<Uint8Array>({
 									async pull(controller) {
 										const chunk = await reader.read()
@@ -3624,8 +3678,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										} else if (text.includes("session.status_running")) {
 											injected = true
 											const seqMatches = [...text.matchAll(/"seq":(\d+)/g)]
-											const lastSeq =
-												seqMatches.length > 0 ? Number(seqMatches[seqMatches.length - 1]?.[1]) : 2
+											const lastSeq = seqMatches.length > 0 ? Number(seqMatches.at(-1)?.[1]) : 2
 											const errSeq = lastSeq + 1
 											const retryErr = `id: ${errSeq}\nevent: session.error\ndata: ${JSON.stringify(
 												{
@@ -3761,7 +3814,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									const res = await next(request)
 									if (getSessionCount > 1) {
 										// Simulate a lagging SessionView projection still showing turn 1 idle
-										const body = (await res.json()) as Record<string, unknown>
+										const body = (await res.json()) as { status?: string; turn?: number }
 										return new Response(JSON.stringify({ ...body, status: "idle", turn: 1 }), {
 											status: 200,
 											headers: { "content-type": "application/json" },
@@ -3769,9 +3822,13 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									}
 									return res
 								}
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								const res = await next(request)
-								if (res.status !== 200 || res.body === null) return res
+								if (res.status !== 200 || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								let heldFirstIdle = false
@@ -3928,7 +3985,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						),
 					)
 					expect(busyResumeRes.exitCode).toBe(0)
-					expect(Duration.toMillis(busyDuration)).toBeLessThan(1_500)
+					expect(Duration.toMillis(busyDuration)).toBeLessThan(1500)
 					expect(suffixPagesServed).toBeGreaterThanOrEqual(1)
 					expect(suffixPagesServed).toBeLessThanOrEqual(10)
 					expect(prefixPagesServed).toBeGreaterThanOrEqual(1)
@@ -4022,7 +4079,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									clearGets += 1
 									const res = await next(request)
 									if (clearGets > 1) {
-										const body = (await res.json()) as Record<string, unknown>
+										const body = (await res.json()) as { status?: string; turn?: number }
 										return new Response(JSON.stringify({ ...body, status: "idle", turn: 1 }), {
 											status: 200,
 											headers: { "content-type": "application/json" },
@@ -4030,9 +4087,13 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									}
 									return res
 								}
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								const res = await next(request)
-								if (res.status !== 200 || res.body === null) return res
+								if (res.status !== 200 || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								let sawFirstIdle = false
@@ -4049,7 +4110,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 											heldAfterFirstIdle = true
 											// Hold turn 2 SSE events until POST #3 receipt has returned and EOF settled
 											await runPromise(Deferred.await(post3Returned))
-											await new Promise((resolve) => setTimeout(resolve, 40))
+											await new Promise((resolve) => {
+												setTimeout(resolve, 40)
+											})
 										}
 										controller.enqueue(chunk.value)
 										if (!sawFirstIdle && text.includes("session.status_idle")) {
@@ -4242,8 +4305,12 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			)
 		})
 		await Promise.all([
-			new Promise<void>((resolve) => evilServer.listen(0, "127.0.0.1", resolve)),
-			new Promise<void>((resolve) => legitServer.listen(0, "127.0.0.1", resolve)),
+			new Promise<void>((resolve) => {
+				evilServer.listen(0, "127.0.0.1", resolve)
+			}),
+			new Promise<void>((resolve) => {
+				legitServer.listen(0, "127.0.0.1", resolve)
+			}),
 		])
 		const untrustedDir = mkdtempSync(join(tmpdir(), "checkfu-untrusted-cwd-"))
 		const cleanDir = mkdtempSync(join(tmpdir(), "checkfu-clean-cwd-"))
@@ -4278,10 +4345,10 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				process.platform === "win32"
 					? (Object.keys(baseEnv).find((k) => k.toLowerCase() === "path") ?? "PATH")
 					: "PATH"
-			const poisonedPathEnv: Record<string, string> = {
+			const poisonedPathEnv = {
 				...baseEnv,
 				[pathEnvKey]: ["", ".", untrustedDir, baseEnv[pathEnvKey] ?? ""].join(delimiter),
-			}
+			} satisfies Record<string, string>
 
 			const runSubprocess = (
 				cmd: string,
@@ -4411,8 +4478,16 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			rmSync(untrustedDir, { recursive: true, force: true })
 			rmSync(cleanDir, { recursive: true, force: true })
 			await Promise.all([
-				new Promise<void>((resolve) => evilServer.close(() => resolve())),
-				new Promise<void>((resolve) => legitServer.close(() => resolve())),
+				new Promise<void>((resolve) => {
+					evilServer.close(() => {
+						resolve()
+					})
+				}),
+				new Promise<void>((resolve) => {
+					legitServer.close(() => {
+						resolve()
+					})
+				}),
 			])
 		}
 
@@ -4446,11 +4521,15 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						{
 							stdin: "first\nsecond\n",
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								streamConnections += 1
 								const conn = streamConnections
 								const res = await next(request)
-								if (res.status !== 200 || res.body === null) return res
+								if (res.status !== 200 || res.body === null) {
+									return res
+								}
 								const reader = res.body.getReader()
 								const decoder = new TextDecoder()
 								const encoder = new TextEncoder()
@@ -4459,7 +4538,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									let errored = false
 									const dropping = new ReadableStream<Uint8Array>({
 										async pull(controller) {
-											if (errored) return
+											if (errored) {
+												return
+											}
 											const chunk = await reader.read()
 											if (chunk.done) {
 												controller.close()
@@ -4558,7 +4639,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									// Return lagging "running" at turn 1 for the first two post-refusal rechecks,
 									// then let the third recheck see the real idle snapshot
 									if (lagGets === 2 || lagGets === 3) {
-										const body = (await res.json()) as Record<string, unknown>
+										const body = (await res.json()) as { status?: string; turn?: number }
 										return new Response(JSON.stringify({ ...body, status: "running", turn: 1 }), {
 											status: 200,
 											headers: { "content-type": "application/json" },
@@ -4571,7 +4652,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						}),
 					)
 					expect(lagGets).toBe(4)
-					expect(Duration.toMillis(lagDuration)).toBeLessThan(2_000)
+					expect(Duration.toMillis(lagDuration)).toBeLessThan(2000)
 					expect(lagRes.exitCode).toBe(1)
 					expect(lagRes.stderr).toContain(
 						"Queued turn 2 did not start because turn 1 stopped with refusal.",
@@ -4633,7 +4714,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										raceSessionId,
 									])
 									const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
-									if (parsed.status === "idle" && parsed.turn === 2) break
+									if (parsed.status === "idle" && parsed.turn === 2) {
+										break
+									}
 									yield* Effect.sleep("5 millis")
 								}
 							}),
@@ -4676,13 +4759,17 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										// archives the session so SSE finishes streamEndedDeferred while GET is in flight
 										await runPromise(Deferred.succeed(lookupInFlight, undefined))
 										await runPromise(Deferred.await(archivedRendered))
-										await new Promise((resolve) => setTimeout(resolve, 25))
+										await new Promise((resolve) => {
+											setTimeout(resolve, 25)
+										})
 									}
 									return next(request)
 								}
 								if (request.url.includes("/events/stream")) {
 									const res = await next(request)
-									if (res.status !== 200 || res.body === null) return res
+									if (res.status !== 200 || res.body === null) {
+										return res
+									}
 									const reader = res.body.getReader()
 									const decoder = new TextDecoder()
 									let sawArchived = false
@@ -4727,7 +4814,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						{
 							stdin: "hello\n",
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								return new Response('id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n', {
 									status: 200,
 									headers: { "content-type": "text/event-stream; charset=utf-8" },
@@ -4742,7 +4831,9 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						["sessions:events", "stream", "--session-id", malformedSessionId],
 						{
 							interceptFetch: async (next, request) => {
-								if (!request.url.includes("/events/stream")) return next(request)
+								if (!request.url.includes("/events/stream")) {
+									return next(request)
+								}
 								return new Response('id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n', {
 									status: 200,
 									headers: { "content-type": "text/event-stream; charset=utf-8" },

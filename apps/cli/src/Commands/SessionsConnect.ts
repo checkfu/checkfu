@@ -1,4 +1,3 @@
-import { statusOf } from "@checkfu/api/Http/Api"
 import { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
 import * as Argument from "effect/cli/Argument"
@@ -19,6 +18,7 @@ import * as Terminal from "effect/Terminal"
 import type { CheckfuClient, SessionStreamEvent } from "../Client.ts"
 import {
 	CliFailure,
+	apiErrorStatus,
 	formatClientError,
 	isApiErrorEnvelope,
 	isTransientHttpError,
@@ -35,7 +35,6 @@ import {
 	writeStdoutLine,
 } from "../TerminalOutput.ts"
 import {
-	type ConnectState,
 	applyMessageReceipt,
 	applySessionEvent,
 	beginMessageSend,
@@ -50,19 +49,21 @@ import {
 	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "./SessionsConnectState.ts"
+import type { ConnectState } from "./SessionsConnectState.ts"
 
-const extractContentText = (data: Record<string, unknown>): string => {
+const isJsonObject = Schema.is(Schema.JsonObject)
+const isJsonArray = (value: Schema.Json | undefined): value is ReadonlyArray<Schema.Json> =>
+	Array.isArray(value)
+
+const extractContentText = (data: Schema.JsonObject): string => {
 	const content = data["content"]
-	if (!Array.isArray(content)) return ""
+	if (!isJsonArray(content)) {
+		return ""
+	}
 	const parts: Array<string> = []
 	for (const block of content) {
-		if (
-			typeof block === "object" &&
-			block !== null &&
-			(block as Record<string, unknown>)["type"] === "text" &&
-			typeof (block as Record<string, unknown>)["text"] === "string"
-		) {
-			parts.push((block as Record<string, unknown>)["text"] as string)
+		if (isJsonObject(block) && block["type"] === "text" && typeof block["text"] === "string") {
+			parts.push(block["text"])
 		}
 	}
 	return parts.join("\n")
@@ -80,7 +81,9 @@ const isAmbiguousResponseStatus = (status: number): boolean =>
 
 const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): boolean => {
 	if (HttpClientError.isHttpClientError(err)) {
-		if (isTransientHttpError(err)) return true
+		if (isTransientHttpError(err)) {
+			return true
+		}
 		const reason = err.reason
 		if (reason._tag === "DecodeError" || reason._tag === "EmptyBodyError") {
 			return isAmbiguousResponseStatus(reason.response.status)
@@ -88,7 +91,7 @@ const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): b
 		return false
 	}
 	if (isApiErrorEnvelope(err)) {
-		const status = statusOf(err)
+		const status = apiErrorStatus(err)
 		return status === 429 || status >= 500
 	}
 	return false
@@ -96,7 +99,9 @@ const isRetryableLookupError = (err: Parameters<typeof formatClientError>[0]): b
 
 const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): boolean => {
 	if (HttpClientError.isHttpClientError(err)) {
-		if (isTransientHttpError(err)) return true
+		if (isTransientHttpError(err)) {
+			return true
+		}
 		const reason = err.reason
 		if (reason._tag === "DecodeError" || reason._tag === "EmptyBodyError") {
 			return isAmbiguousResponseStatus(reason.response.status)
@@ -104,18 +109,20 @@ const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): b
 		return false
 	}
 	if (isApiErrorEnvelope(err)) {
-		const status = statusOf(err)
+		const status = apiErrorStatus(err)
 		return err.unconfirmed_index !== undefined || status >= 500
 	}
 	return Schema.isSchemaError(err)
 }
 
 const isRetryableSendError = (err: Parameters<typeof formatClientError>[0]): boolean =>
-	isUnconfirmedSendError(err) || (isApiErrorEnvelope(err) && statusOf(err) === 429)
+	isUnconfirmedSendError(err) || (isApiErrorEnvelope(err) && apiErrorStatus(err) === 429)
 
 const isConfirmedPerMessageRejection = (err: Parameters<typeof formatClientError>[0]): boolean => {
-	if (!isApiErrorEnvelope(err) || err.unconfirmed_index !== undefined) return false
-	const status = statusOf(err)
+	if (!isApiErrorEnvelope(err) || err.unconfirmed_index !== undefined) {
+		return false
+	}
+	const status = apiErrorStatus(err)
 	return status === 400 || status === 409 || status === 413 || status === 429
 }
 
@@ -125,7 +132,9 @@ const formatUnconfirmedSendError = (
 	hadUnconfirmedAttempt: boolean,
 ): CliFailure => {
 	const formatted = formatClientError(err)
-	if (!hadUnconfirmedAttempt && !isUnconfirmedSendError(err)) return formatted
+	if (!hadUnconfirmedAttempt && !isUnconfirmedSendError(err)) {
+		return formatted
+	}
 	return new CliFailure({
 		message: `${formatted.message} (delivery unconfirmed; retry safely with Idempotency-Key: ${idempotencyKey})`,
 		exitCode: formatted.exitCode,
@@ -187,6 +196,9 @@ interface BoundedLineHooks {
 	readonly onTrailingFlushed?: (line: string) => Effect.Effect<void>
 }
 
+const lineTooLongError = (maxLineChars: number) =>
+	usageError(`Input line exceeds maximum message length of ${maxLineChars} characters.`)
+
 const splitBoundedLines = (
 	stdin: Stdio.Stdio["stdin"],
 	maxLineChars: number,
@@ -195,8 +207,6 @@ const splitBoundedLines = (
 	Stream.suspend(() => {
 		let pending = ""
 		let discardLeadingLf = false
-		const lineTooLongError = () =>
-			usageError(`Input line exceeds maximum message length of ${maxLineChars} characters.`)
 
 		const processChunk = (chunk: string): Stream.Stream<string, CliFailure> =>
 			Stream.unwrap(
@@ -216,7 +226,9 @@ const splitBoundedLines = (
 						let lineEnd = pos
 						while (lineEnd < len) {
 							const code = chunk.charCodeAt(lineEnd)
-							if (code === 13 || code === 10) break
+							if (code === 13 || code === 10) {
+								break
+							}
 							lineEnd += 1
 						}
 						const segLen = lineEnd - pos
@@ -239,7 +251,7 @@ const splitBoundedLines = (
 					const emitted =
 						lines.length > 0 ? Stream.fromIterable(lines).pipe(Stream.rechunk(1)) : Stream.empty
 					if (overflowed) {
-						return Stream.concat(emitted, Stream.fail(lineTooLongError()))
+						return Stream.concat(emitted, Stream.fail(lineTooLongError(maxLineChars)))
 					}
 					if (hooks?.onPendingAfterLines !== undefined) {
 						const snapshot = pending
@@ -260,7 +272,9 @@ const splitBoundedLines = (
 
 		const flushTrailing = Stream.unwrap(
 			Effect.gen(function* () {
-				if (pending.length === 0) return Stream.empty
+				if (pending.length === 0) {
+					return Stream.empty
+				}
 				const last = pending
 				pending = ""
 				if (hooks?.onTrailingFlushed !== undefined) {
@@ -303,7 +317,9 @@ const inspectEndedPipedStdin = (stdio: Stdio.Stdio): Effect.Effect<EndedStdinSig
 				Stream.runForEach((line) =>
 					Effect.sync(() => {
 						const trimmed = line.trim()
-						if (trimmed.length === 0) return
+						if (trimmed.length === 0) {
+							return
+						}
 						if (isExitCommand(trimmed)) {
 							signal = { _tag: "exit" }
 						} else {
@@ -336,16 +352,12 @@ const renderConnectEvent = (
 		let formattedError: string | undefined
 		let errorRetryStatus: string | undefined
 		if (eventType === "session.error") {
-			const errObj =
-				typeof data["error"] === "object" && data["error"] !== null
-					? (data["error"] as Record<string, unknown>)
-					: undefined
+			const errObj = isJsonObject(data["error"]) ? data["error"] : undefined
 			const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
 			const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
-			const retryStatusObj =
-				typeof errObj?.["retry_status"] === "object" && errObj["retry_status"] !== null
-					? (errObj["retry_status"] as Record<string, unknown>)
-					: undefined
+			const retryStatusObj = isJsonObject(errObj?.["retry_status"])
+				? errObj["retry_status"]
+				: undefined
 			errorRetryStatus =
 				typeof retryStatusObj?.["type"] === "string" ? retryStatusObj["type"] : undefined
 			formattedError = `${errType}: ${errMsg}`
@@ -353,10 +365,9 @@ const renderConnectEvent = (
 
 		let stopReason: string | undefined
 		if (eventType === "session.status_idle") {
-			const rawStopReason =
-				typeof data["stop_reason"] === "object" && data["stop_reason"] !== null
-					? (data["stop_reason"] as Record<string, unknown>)["type"]
-					: undefined
+			const rawStopReason = isJsonObject(data["stop_reason"])
+				? data["stop_reason"]["type"]
+				: undefined
 			stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined
 		}
 
@@ -478,8 +489,12 @@ const dispatchUserLine = (
 ): Effect.Effect<"continue" | "exit", CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const trimmed = line.trim()
-		if (trimmed.length === 0) return "continue" as const
-		if (trimmed === "/exit" || trimmed === "/quit") return "exit" as const
+		if (trimmed.length === 0) {
+			return "continue" as const
+		}
+		if (trimmed === "/exit" || trimmed === "/quit") {
+			return "exit" as const
+		}
 
 		if (trimmed === "/interrupt") {
 			const key = yield* client.generateIdempotencyKey
@@ -944,9 +959,9 @@ export const sessionsConnectCommand = Command.make(
 							rawStructuredMode,
 						),
 					),
-					Effect.catch((err) =>
+					Effect.catch((error) =>
 						Effect.gen(function* () {
-							yield* Ref.set(streamFailedRef, err)
+							yield* Ref.set(streamFailedRef, error)
 							yield* Deferred.succeed(streamFailedDeferred, undefined)
 							const settleDeferred = yield* Ref.get(settleDeferredRef)
 							yield* Deferred.succeed(settleDeferred, undefined)
@@ -980,7 +995,9 @@ export const sessionsConnectCommand = Command.make(
 								),
 								replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
 							)
-							if (nextEvent._tag === "replay_done") break
+							if (nextEvent._tag === "replay_done") {
+								break
+							}
 							if (nextEvent.outcome._tag === "Failure") {
 								yield* replayDone
 								break
@@ -1062,14 +1079,18 @@ export const sessionsConnectCommand = Command.make(
 					const ttyLoop = Effect.gen(function* () {
 						while (true) {
 							const state = yield* Ref.get(stateRef)
-							if (state.ended) break
+							if (state.ended) {
+								break
+							}
 							const nextEvent = yield* Effect.race(
 								Effect.result(terminal.readLine).pipe(
 									Effect.map((outcome) => ({ _tag: "line" as const, outcome })),
 								),
 								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
 							)
-							if (nextEvent._tag === "ended") break
+							if (nextEvent._tag === "ended") {
+								break
+							}
 							if (nextEvent.outcome._tag === "Failure") {
 								break
 							}
@@ -1081,7 +1102,9 @@ export const sessionsConnectCommand = Command.make(
 								}).pipe(Effect.map((action) => ({ _tag: "action" as const, action }))),
 								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
 							)
-							if (dispatchOutcome._tag === "ended" || dispatchOutcome.action === "exit") break
+							if (dispatchOutcome._tag === "ended" || dispatchOutcome.action === "exit") {
+								break
+							}
 						}
 					})
 
@@ -1115,9 +1138,13 @@ export const sessionsConnectCommand = Command.make(
 					Stream.runForEach((line) =>
 						Effect.gen(function* () {
 							queuedLines.shift()
-							if (explicitExit) return
+							if (explicitExit) {
+								return
+							}
 							const trimmed = line.trim()
-							if (trimmed.length === 0) return
+							if (trimmed.length === 0) {
+								return
+							}
 							if (isExitCommand(trimmed)) {
 								explicitExit = true
 								return
@@ -1166,7 +1193,9 @@ export const sessionsConnectCommand = Command.make(
 						yield* Ref.set(settleDeferredRef, waiter)
 
 						const failed = yield* Ref.get(streamFailedRef)
-						if (failed !== null) break
+						if (failed !== null) {
+							break
+						}
 						let currentState = yield* Ref.get(stateRef)
 						const settlementAction = evaluatePipedSettlement(currentState)
 						if (settlementAction === "ended" || settlementAction === "settled") {
@@ -1218,7 +1247,9 @@ export const sessionsConnectCommand = Command.make(
 								break
 							}
 							const failedAfterLookup = yield* Ref.get(streamFailedRef)
-							if (failedAfterLookup !== null) break
+							if (failedAfterLookup !== null) {
+								break
+							}
 							currentState = yield* Ref.get(stateRef)
 							const afterLookupAction = evaluatePipedSettlement(currentState)
 							if (afterLookupAction === "ended" || afterLookupAction === "settled") {

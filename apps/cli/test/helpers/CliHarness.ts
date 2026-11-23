@@ -1,12 +1,12 @@
 import * as Domain from "@alchemy.run/domain"
 import { Checkfu } from "@checkfu/api/Checkfu.model"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
-import {
-	type ModelProviderError,
-	type ModelProviderReply,
-	type ModelRequestInterrupted,
-	type HarnessUnavailable,
-	boundedModelProvider,
+import { boundedModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
+import type {
+	ModelProviderError,
+	ModelProviderReply,
+	ModelRequestInterrupted,
+	HarnessUnavailable,
 } from "@checkfu/sessions/Session/ModelProvider.external"
 import type { SessionId } from "@checkfu/sessions/Session/Session.id"
 import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
@@ -28,13 +28,21 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import * as Terminal from "effect/Terminal"
 import { runCli } from "../../src/Cli.ts"
-import {
-	type SigintController,
-	SigintCoordinator,
-	makeSigintController,
-} from "../../src/Signals.ts"
+import { SigintCoordinator, makeSigintController } from "../../src/Signals.ts"
+import type { SigintController } from "../../src/Signals.ts"
 
 export const TEST_API_KEY = "ck_cli_test_secret"
+
+const notFoundError = (method: string, filePath: string) =>
+	PlatformError.systemError({
+		_tag: "NotFound",
+		module: "FileSystem",
+		method,
+		pathOrDescriptor: filePath,
+	})
+
+const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
+	typeof input === "string" || "href" in input ? new Request(input, init) : input
 
 export interface ModelTurnInput {
 	readonly session_id: SessionId
@@ -159,13 +167,6 @@ export const makeTestServer = (handler?: ModelHandler) =>
 							: options.stdin
 
 				const files = options?.files ?? {}
-				const notFoundError = (method: string, filePath: string) =>
-					PlatformError.systemError({
-						_tag: "NotFound",
-						module: "FileSystem",
-						method,
-						pathOrDescriptor: filePath,
-					})
 				const fileSystemLayer = FileSystem.layerNoop({
 					readFileString: (filePath) => {
 						const entry = files[filePath]
@@ -203,7 +204,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				)
 
 				const customFetch = ((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-					const request = input instanceof Request ? input : new Request(input, init)
+					const request = toWebRequest(input, init)
 					return options?.interceptFetch
 						? options.interceptFetch(dispatchWeb, request)
 						: dispatchWeb(request)

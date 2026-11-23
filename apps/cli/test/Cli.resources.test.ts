@@ -85,15 +85,15 @@ describe("CLI help, errors, and resource commands", () => {
 
 					// TTY invalid invocation must not display literal escaped ANSI codes around ERROR,
 					// while still escaping untrusted control characters from the argument itself
-					const ttyInvalid = yield* cli.run(["agents", "bad\x1b]52;c;evil\x07cmd"], {
+					const ttyInvalid = yield* cli.run(["agents", "bad\u001b]52;c;evil\u0007cmd"], {
 						stderrIsTerminal: true,
 					})
 					expect(ttyInvalid.exitCode).toBe(1)
 					expect(ttyInvalid.stdout).toBe("")
 					expect(ttyInvalid.stderr).toContain("ERROR")
-					expect(ttyInvalid.stderr).not.toContain("\\x1b[1m")
-					expect(ttyInvalid.stderr).not.toContain("\x1b")
-					expect(ttyInvalid.stderr).not.toContain("\x07")
+					expect(ttyInvalid.stderr).not.toContain(String.raw`\x1b[1m`)
+					expect(ttyInvalid.stderr).not.toContain("\u001b")
+					expect(ttyInvalid.stderr).not.toContain("\u0007")
 
 					// Explicitly blank --base-url must fail rather than falling back to CHECKFU_API_URL
 					const blankUrl = yield* cli.run([
@@ -511,14 +511,14 @@ describe("CLI help, errors, and resource commands", () => {
 					process.on("warning", onWarning)
 					try {
 						const warnedYaml = yield* cli.run(["agents", "create"], {
-							stdin: "name: !custom_tag Safe\x1b]52;c;evil\x07Name\nmodel: gpt-6.2-sol\n",
+							stdin: "name: !custom_tag Safe\u001b]52;c;evil\u0007Name\nmodel: gpt-6.2-sol\n",
 						})
 						expect(warnedYaml.exitCode).toBe(0)
 						expect(leakedWarnings).toEqual([])
 						expect(warnedYaml.stderr).toContain("Warning (stdin):")
 						expect(warnedYaml.stderr).toContain("Unresolved tag")
-						expect(warnedYaml.stderr).not.toContain("\x1b")
-						expect(warnedYaml.stderr).not.toContain("\x07")
+						expect(warnedYaml.stderr).not.toContain("\u001b")
+						expect(warnedYaml.stderr).not.toContain("\u0007")
 					} finally {
 						process.off("warning", onWarning)
 					}

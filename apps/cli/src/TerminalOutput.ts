@@ -4,13 +4,13 @@ import * as Stream from "effect/Stream"
 import { CliFailure } from "./Errors.ts"
 
 const isBidiOrSeparatorCodePoint = (code: number): boolean =>
-	code === 0x061c ||
-	code === 0x200e ||
-	code === 0x200f ||
-	code === 0x2028 ||
-	code === 0x2029 ||
-	(code >= 0x202a && code <= 0x202e) ||
-	(code >= 0x2066 && code <= 0x2069)
+	code === 0x06_1c ||
+	code === 0x20_0e ||
+	code === 0x20_0f ||
+	code === 0x20_28 ||
+	code === 0x20_29 ||
+	(code >= 0x20_2a && code <= 0x20_2e) ||
+	(code >= 0x20_66 && code <= 0x20_69)
 
 const isUnsafeHumanCodePoint = (code: number): boolean =>
 	(code <= 0x1f && code !== 0x09 && code !== 0x0a) ||

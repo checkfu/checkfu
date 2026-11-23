@@ -24,6 +24,15 @@ import {
 } from "../src/TerminalOutput.ts"
 import { evaluateTransform, formatOutput } from "../src/Transform.ts"
 
+const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
+	typeof input === "string" || "href" in input ? new Request(input, init) : input
+
+const getRequestHeaders = (input: RequestInfo | URL, init?: RequestInit): Headers =>
+	new Headers(typeof input === "string" || "href" in input ? init?.headers : input.headers)
+
+const getRequestUrl = (input: RequestInfo | URL): string =>
+	typeof input === "string" ? input : "href" in input ? input.href : input.url
+
 describe("normalizeApiUrl", () => {
 	it("accepts https URLs and loopback http URLs and strips trailing / and /v1", async () => {
 		await Effect.runPromise(
@@ -174,9 +183,9 @@ describe("normalizeApiUrl", () => {
 				let retryDropRequests = 0
 				const retryDropLastIds: Array<string | null> = []
 				const encoder = new TextEncoder()
-				const retryDropFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+				const retryDropFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 					retryDropRequests++
-					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					const headers = getRequestHeaders(input, init)
 					retryDropLastIds.push(headers.get("last-event-id"))
 					if (retryDropRequests === 1) {
 						let pullCount = 0
@@ -201,7 +210,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 
 				const [retryDropDuration, retryDropEvents] = yield* Effect.timed(
 					Effect.gen(function* () {
@@ -357,9 +366,9 @@ describe("normalizeApiUrl", () => {
 				// 5) HTTP 408 on SSE open/reconnect is retried and resumes from cursor
 				let timeout408Requests = 0
 				const timeout408LastIds: Array<string | null> = []
-				const timeout408Fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+				const timeout408Fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 					timeout408Requests++
-					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+					const headers = getRequestHeaders(input, init)
 					timeout408LastIds.push(headers.get("last-event-id"))
 					if (timeout408Requests === 1) {
 						let step = 0
@@ -385,7 +394,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 
 				const timeout408Events = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -496,9 +505,9 @@ describe("normalizeApiUrl", () => {
 					readonly trace: string | null
 					readonly lastEventId: string | null
 				}> = []
-				const customSseFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const url = input instanceof Request ? input.url : String(input)
-					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+				const customSseFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const url = getRequestUrl(input)
+					const headers = getRequestHeaders(input, init)
 					seenCustomRequests.push({
 						url,
 						trace: headers.get("x-trace"),
@@ -517,7 +526,7 @@ describe("normalizeApiUrl", () => {
 						})
 					}
 					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
+				}
 				const customEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
@@ -599,8 +608,8 @@ describe("normalizeApiUrl", () => {
 
 				// 9) Explicitly empty SSE id: clears the reconnect cursor instead of keeping prior id or JSON seq
 				const resetLastIds: Array<string | null> = []
-				const resetIdFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+				const resetIdFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const headers = getRequestHeaders(input, init)
 					resetLastIds.push(headers.get("last-event-id"))
 					if (resetLastIds.length === 1) {
 						return new Response(
@@ -612,7 +621,7 @@ describe("normalizeApiUrl", () => {
 						)
 					}
 					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
+				}
 				const resetEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
@@ -633,8 +642,8 @@ describe("normalizeApiUrl", () => {
 
 				// 10) ID-only SSE frames advance and clear the reconnect cursor without emitting data events
 				const idOnlyLastIds: Array<string | null> = []
-				const idOnlyFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+				const idOnlyFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const headers = getRequestHeaders(input, init)
 					idOnlyLastIds.push(headers.get("last-event-id"))
 					if (idOnlyLastIds.length === 1) {
 						return new Response('id: cur_1\nevent: custom.ping\ndata: {"seq":1}\n\nid: cur_2\n\n', {
@@ -649,7 +658,7 @@ describe("normalizeApiUrl", () => {
 						})
 					}
 					return new Response(null, { status: 204 })
-				}) as unknown as typeof globalThis.fetch
+				}
 				const idOnlyEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
@@ -963,7 +972,7 @@ describe("normalizeApiUrl", () => {
 						)
 					}).pipe(Effect.provide(makeLayer(stalled400Fetch))),
 				)
-				expect(Duration.toMillis(stalled400Duration)).toBeLessThan(1_000)
+				expect(Duration.toMillis(stalled400Duration)).toBeLessThan(1000)
 				expect(stalled400Err.message).toContain("HTTP 400")
 				expect(stalled400Err.message).toContain("partial diagnostic")
 				expect(stalled400Canceled).toBe(true)
@@ -1230,8 +1239,8 @@ describe("normalizeApiUrl", () => {
 				}
 				const replayCursorLastIds: Array<string | null> = []
 				let replayCursorCalls = 0
-				const replayCursorFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const req = input instanceof Request ? input : new Request(input, init)
+				const replayCursorFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
 					replayCursorLastIds.push(req.headers.get("last-event-id"))
 					replayCursorCalls += 1
 					if (replayCursorCalls === 1) {
@@ -1251,7 +1260,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 
 				const replayCursorEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -1299,8 +1308,8 @@ describe("normalizeApiUrl", () => {
 
 				// Data-less `id: 9\n\n` frames on a session stream must not advance Last-Event-ID past seq 1
 				const idOnlySessionLastIds: Array<string | null> = []
-				const idOnlySessionFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const req = input instanceof Request ? input : new Request(input, init)
+				const idOnlySessionFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
 					idOnlySessionLastIds.push(req.headers.get("last-event-id"))
 					if (idOnlySessionLastIds.length === 1) {
 						return new Response(`${sseSessionFrame(1, "user.message")}id: 9\n\n`, {
@@ -1312,7 +1321,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 				const idOnlySessionEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
 					return yield* Stream.runCollect(
@@ -1369,8 +1378,8 @@ describe("normalizeApiUrl", () => {
 				}
 				let longResetCalls = 0
 				const longResetLastIds: Array<string | null> = []
-				const longResetFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const req = input instanceof Request ? input : new Request(input, init)
+				const longResetFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
 					longResetLastIds.push(req.headers.get("last-event-id"))
 					longResetCalls += 1
 					if (longResetCalls === 1) {
@@ -1407,7 +1416,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 
 				const longResetEvents = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -1440,8 +1449,8 @@ describe("normalizeApiUrl", () => {
 							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
 						}),
 				}
-				const immediateResetFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const req = input instanceof Request ? input : new Request(input, init)
+				const immediateResetFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
 					immediateResetLastIds.push(req.headers.get("last-event-id"))
 					immediateResetCalls += 1
 					let step = 0
@@ -1459,7 +1468,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 
 				const immediateResetErr = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -1495,8 +1504,8 @@ describe("normalizeApiUrl", () => {
 							resetNowNanos += BigInt(Math.max(0, Math.trunc(ms))) * 1_000_000n
 						}),
 				}
-				const stalledResetFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-					const req = input instanceof Request ? input : new Request(input, init)
+				const stalledResetFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
 					stalledResetLastIds.push(req.headers.get("last-event-id"))
 					stalledResetCalls += 1
 					if (stalledResetCalls > 10) {
@@ -1525,7 +1534,7 @@ describe("normalizeApiUrl", () => {
 						status: 200,
 						headers: { "content-type": "text/event-stream; charset=utf-8" },
 					})
-				}) as unknown as typeof globalThis.fetch
+				}
 
 				const stalledResetErr = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -1584,12 +1593,12 @@ describe("normalizeApiUrl", () => {
 
 describe("TerminalOutput", () => {
 	it("escapes ANSI sequences, control chars, C1, line separators, and bidi overrides", () => {
-		const dangerous = "hello\x1b]52;c;evil\x07\r\nworld\x7f\u009b31m\u202e\u2028ok\t!"
+		const dangerous = "hello\u001b]52;c;evil\u0007\r\nworld\u007f\u009b31m\u202e\u2028ok\t!"
 		const safe = escapeTerminalControlCharacters(dangerous)
-		expect(safe).not.toContain("\x1b")
-		expect(safe).not.toContain("\x07")
+		expect(safe).not.toContain("\u001b")
+		expect(safe).not.toContain("\u0007")
 		expect(safe).not.toContain("\r")
-		expect(safe).not.toContain("\x7f")
+		expect(safe).not.toContain("\u007f")
 		expect(safe).not.toContain("\u009b")
 		expect(safe).not.toContain("\u202e")
 		expect(safe).not.toContain("\u2028")
@@ -1598,9 +1607,9 @@ describe("TerminalOutput", () => {
 	})
 
 	it("keeps JSON round-trip identical while escaping unsafe terminal code points", () => {
-		const payload = { text: "hi\x1b[31m\u009b\u202e\u2028there" }
+		const payload = { text: "hi\u001b[31m\u009b\u202e\u2028there" }
 		const json = stringifyTerminalSafeJson(payload)
-		expect(json).not.toContain("\x1b")
+		expect(json).not.toContain("\u001b")
 		expect(json).not.toContain("\u009b")
 		expect(json).not.toContain("\u202e")
 		expect(json).not.toContain("\u2028")
@@ -1629,7 +1638,7 @@ describe("Transform and formatOutput", () => {
 		expect(evaluateTransform(sample, "data.#.type")).toEqual(["user.message", "agent.message"])
 		expect(evaluateTransform(sample, '{"#":id}."#"')).toBe("agt_123")
 		expect(evaluateTransform(sample, "{\"#\":id}.'#'")).toBe("agt_123")
-		expect(evaluateTransform(sample, '{"#":id}.\\#')).toBe("agt_123")
+		expect(evaluateTransform(sample, String.raw`{"#":id}.\#`)).toBe("agt_123")
 		expect(evaluateTransform(sample, '{"#":data}."#".#')).toBe(2)
 		expect(evaluateTransform(sample, '{"@this":id}."@this"')).toBe("agt_123")
 		expect(
@@ -1789,7 +1798,7 @@ describe("Transform and formatOutput", () => {
 		for (const doc of docs) {
 			expect(doc.errors).toEqual([])
 		}
-		expect(docs.map((doc) => doc.toJS())).toEqual(events)
+		expect(docs.map((doc) => doc.toJS() as (typeof events)[number])).toEqual(events)
 	})
 
 	it("honors the selected output format for non-string values with --raw-output and round-trips terminal-safe YAML", () => {
@@ -1813,7 +1822,9 @@ describe("Transform and formatOutput", () => {
 		expect(yamlRawStream).toContain("---\n")
 		const parsedStreamDocs = YAML.parseAllDocuments(yamlRawStream)
 		expect(parsedStreamDocs).toHaveLength(2)
-		expect(parsedStreamDocs.map((doc) => doc.toJS())).toEqual(streamedEvents)
+		expect(parsedStreamDocs.map((doc) => doc.toJS() as (typeof streamedEvents)[number])).toEqual(
+			streamedEvents,
+		)
 
 		// --format yaml -r on a string still outputs the raw unquoted string
 		expect(
@@ -1841,7 +1852,7 @@ describe("Transform and formatOutput", () => {
 		// Terminal-safe YAML uses YAML double-quoted escapes so values & keys remain both safe and lossless
 		const tricky = {
 			name: "evil\u202ename",
-			controls: "hi\x1b[31m\x07\u009b\u2028\u2029\u2066there",
+			controls: "hi\u001b[31m\u0007\u009b\u2028\u2029\u2066there",
 			backslashAdjacent: "foo\\\u202ebar",
 			crlf: "a\r\nb",
 			["key\u202ename"]: "val\u200f",
@@ -1855,8 +1866,8 @@ describe("Transform and formatOutput", () => {
 		expect(hasUnsafeTerminalCodePoint(ttyYaml)).toBe(false)
 		for (const forbidden of [
 			"\u202e",
-			"\x1b",
-			"\x07",
+			"\u001b",
+			"\u0007",
 			"\u009b",
 			"\u2028",
 			"\u2029",
@@ -1873,11 +1884,11 @@ describe("Transform and formatOutput", () => {
 describe("resolveBunExecutable", () => {
 	it("resolves trusted absolute Bun paths on Windows while excluding cwd, relative, and drive-relative entries", () => {
 		const winExecutables = new Set([
-			"c:\\untrusted\\repo\\bun.exe",
-			"c:\\untrusted\\repo\\sub\\bun.exe",
-			"c:\\untrusted\\repo\\node_modules\\.bin\\bun.exe",
-			"c:\\bin\\bun.exe",
-			"c:\\program files\\bun\\bin\\bun.exe",
+			String.raw`c:\untrusted\repo\bun.exe`,
+			String.raw`c:\untrusted\repo\sub\bun.exe`,
+			String.raw`c:\untrusted\repo\node_modules\.bin\bun.exe`,
+			String.raw`c:\bin\bun.exe`,
+			String.raw`c:\program files\bun\bin\bun.exe`,
 		])
 		const isWinExec = (candidate: string) => winExecutables.has(candidate.toLowerCase())
 
@@ -1885,58 +1896,58 @@ describe("resolveBunExecutable", () => {
 		// (any casing / trailing slash / ..) before selecting quoted absolute PATH entry
 		const resolved = resolveBunExecutable({
 			platform: "win32",
-			cwd: "C:\\untrusted\\repo",
-			homedir: "C:\\Users\\alice",
+			cwd: String.raw`C:\untrusted\repo`,
+			homedir: String.raw`C:\Users\alice`,
 			env: {
 				Path: [
 					"",
 					".",
 					".\\",
 					"./sub",
-					"node_modules\\.bin",
-					"\\bin",
+					String.raw`node_modules\.bin`,
+					String.raw`\bin`,
 					"C:sub",
-					"C:\\untrusted\\repo",
+					String.raw`C:\untrusted\repo`,
 					"c:\\UNTRUSTED\\REPO\\",
-					"C:\\untrusted\\repo\\..\\repo",
-					'"C:\\Program Files\\Bun\\bin"',
+					String.raw`C:\untrusted\repo\..\repo`,
+					String.raw`"C:\Program Files\Bun\bin"`,
 				].join(";"),
 			},
 			isExecutableFile: isWinExec,
 			realpath: (target) => target,
 		})
-		expect(resolved).toBe("C:\\Program Files\\Bun\\bin\\bun.exe")
+		expect(resolved).toBe(String.raw`C:\Program Files\Bun\bin\bun.exe`)
 
 		// Running from %USERPROFILE% still resolves %USERPROFILE%\.bun\bin\bun.exe while skipping %USERPROFILE%\bun.exe
 		const homeExecutables = new Set([
-			"c:\\users\\alice\\bun.exe",
-			"c:\\users\\alice\\.bun\\bin\\bun.exe",
+			String.raw`c:\users\alice\bun.exe`,
+			String.raw`c:\users\alice\.bun\bin\bun.exe`,
 		])
 		expect(
 			resolveBunExecutable({
 				platform: "win32",
-				cwd: "C:\\Users\\alice",
-				homedir: "C:\\Users\\alice",
-				env: { Path: "C:\\Users\\alice;." },
+				cwd: String.raw`C:\Users\alice`,
+				homedir: String.raw`C:\Users\alice`,
+				env: { Path: String.raw`C:\Users\alice;.` },
 				isExecutableFile: (candidate) => homeExecutables.has(candidate.toLowerCase()),
 				realpath: (target) => target,
 			}),
-		).toBe("C:\\Users\\alice\\.bun\\bin\\bun.exe")
+		).toBe(String.raw`C:\Users\alice\.bun\bin\bun.exe`)
 
 		// Falls back to trusted absolute BUN_INSTALL\bin, while ignoring relative or cwd-rooted BUN_INSTALL
 		const installExecutables = new Set([
-			"c:\\untrusted\\repo\\bun.exe",
-			"c:\\untrusted\\repo\\bin\\bun.exe",
-			"c:\\tools\\bun\\bin\\bun.exe",
+			String.raw`c:\untrusted\repo\bun.exe`,
+			String.raw`c:\untrusted\repo\bin\bun.exe`,
+			String.raw`c:\tools\bun\bin\bun.exe`,
 		])
 		expect(
 			resolveBunExecutable({
 				platform: "win32",
-				cwd: "C:\\untrusted\\repo",
-				homedir: "C:\\Users\\alice",
+				cwd: String.raw`C:\untrusted\repo`,
+				homedir: String.raw`C:\Users\alice`,
 				env: {
-					PATH: ".;C:\\untrusted\\repo",
-					BUN_INSTALL: "C:\\untrusted\\repo",
+					PATH: String.raw`.;C:\untrusted\repo`,
+					BUN_INSTALL: String.raw`C:\untrusted\repo`,
 				},
 				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
 				realpath: (target) => target,
@@ -1945,16 +1956,16 @@ describe("resolveBunExecutable", () => {
 		expect(
 			resolveBunExecutable({
 				platform: "win32",
-				cwd: "C:\\untrusted\\repo",
-				homedir: "C:\\Users\\alice",
+				cwd: String.raw`C:\untrusted\repo`,
+				homedir: String.raw`C:\Users\alice`,
 				env: {
-					PATH: ".;C:\\untrusted\\repo",
-					BUN_INSTALL: "C:\\tools\\bun",
+					PATH: String.raw`.;C:\untrusted\repo`,
+					BUN_INSTALL: String.raw`C:\tools\bun`,
 				},
 				isExecutableFile: (candidate) => installExecutables.has(candidate.toLowerCase()),
 				realpath: (target) => target,
 			}),
-		).toBe("C:\\tools\\bun\\bin\\bun.exe")
+		).toBe(String.raw`C:\tools\bun\bin\bun.exe`)
 	})
 
 	it("resolves trusted absolute Bun paths on POSIX while excluding empty/relative PATH entries and cwd symlinks", () => {
@@ -1964,14 +1975,14 @@ describe("resolveBunExecutable", () => {
 			"/tmp/symlink-bin/bun",
 			"/opt/bun/bin/bun",
 		])
-		const posixRealpaths: Record<string, string> = {
-			"/var/folders/untrusted": "/private/var/folders/untrusted",
-			"/private/var/folders/untrusted": "/private/var/folders/untrusted",
-			"/tmp/symlink-bin": "/tmp/symlink-bin",
-			"/tmp/symlink-bin/bun": "/private/var/folders/untrusted/bun",
-			"/opt/bun/bin": "/opt/bun/bin",
-			"/opt/bun/bin/bun": "/opt/bun/bin/bun",
-		}
+		const posixRealpaths = new Map<string, string>([
+			["/var/folders/untrusted", "/private/var/folders/untrusted"],
+			["/private/var/folders/untrusted", "/private/var/folders/untrusted"],
+			["/tmp/symlink-bin", "/tmp/symlink-bin"],
+			["/tmp/symlink-bin/bun", "/private/var/folders/untrusted/bun"],
+			["/opt/bun/bin", "/opt/bun/bin"],
+			["/opt/bun/bin/bun", "/opt/bun/bin/bun"],
+		])
 		const resolved = resolveBunExecutable({
 			platform: "darwin",
 			cwd: "/var/folders/untrusted",
@@ -1980,7 +1991,7 @@ describe("resolveBunExecutable", () => {
 				PATH: ":/private/var/folders/untrusted:.:./bin:/tmp/symlink-bin:/opt/bun/bin:",
 			},
 			isExecutableFile: (candidate) => posixExecutables.has(candidate),
-			realpath: (target) => posixRealpaths[target] ?? target,
+			realpath: (target) => posixRealpaths.get(target) ?? target,
 		})
 		expect(resolved).toBe("/opt/bun/bin/bun")
 

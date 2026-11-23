@@ -137,7 +137,9 @@ const pruneSettledTurns = (
 	turns: ReadonlySet<number>,
 	settledTurn: number,
 ): ReadonlySet<number> => {
-	if (turns.size === 0) return turns
+	if (turns.size === 0) {
+		return turns
+	}
 	let hasSettled = false
 	for (const turn of turns) {
 		if (turn <= settledTurn) {
@@ -145,10 +147,14 @@ const pruneSettledTurns = (
 			break
 		}
 	}
-	if (!hasSettled) return turns
+	if (!hasSettled) {
+		return turns
+	}
 	const next = new Set<number>()
 	for (const turn of turns) {
-		if (turn > settledTurn) next.add(turn)
+		if (turn > settledTurn) {
+			next.add(turn)
+		}
 	}
 	return next
 }
@@ -157,7 +163,9 @@ const pruneSettledErrors = (
 	errors: ReadonlyMap<number, string>,
 	settledTurn: number,
 ): ReadonlyMap<number, string> => {
-	if (errors.size === 0) return errors
+	if (errors.size === 0) {
+		return errors
+	}
 	let hasSettled = false
 	for (const turn of errors.keys()) {
 		if (turn <= settledTurn) {
@@ -165,10 +173,14 @@ const pruneSettledErrors = (
 			break
 		}
 	}
-	if (!hasSettled) return errors
+	if (!hasSettled) {
+		return errors
+	}
 	const next = new Map<number, string>()
 	for (const [turn, message] of errors) {
-		if (turn > settledTurn) next.set(turn, message)
+		if (turn > settledTurn) {
+			next.set(turn, message)
+		}
 	}
 	return next
 }
@@ -177,19 +189,28 @@ export const extractSubmittedMessageReceipt = (
 	data: ReadonlyArray<unknown>,
 ): SubmittedMessageReceipt | undefined => {
 	const first = data[0]
-	if (typeof first !== "object" || first === null) return undefined
-	const record = first as Record<string, unknown>
-	if (record["type"] !== "user.message") return undefined
-	const turn = record["turn"]
-	if (typeof turn !== "number" || !Number.isInteger(turn) || turn < 1) return undefined
-	const queued = typeof record["queued"] === "boolean" ? record["queued"] : undefined
+	if (typeof first !== "object" || first === null) {
+		return undefined
+	}
+	if (!("type" in first) || first.type !== "user.message") {
+		return undefined
+	}
+	const turn = "turn" in first ? first.turn : undefined
+	if (typeof turn !== "number" || !Number.isInteger(turn) || turn < 1) {
+		return undefined
+	}
+	const queued = "queued" in first && typeof first.queued === "boolean" ? first.queued : undefined
 	return { turn, queued }
 }
 
 export const hasInterruptReceipt = (data: ReadonlyArray<unknown>): boolean => {
 	const first = data[0]
-	if (typeof first !== "object" || first === null) return false
-	return (first as Record<string, unknown>)["type"] === "user.interrupt"
+	return (
+		typeof first === "object" &&
+		first !== null &&
+		"type" in first &&
+		first.type === "user.interrupt"
+	)
 }
 
 export const isQueueHaltingStopReason = (stopReason: string | undefined): boolean =>
@@ -471,8 +492,12 @@ export const shouldInterruptOnCtrlC = (
 ): boolean => state.liveStatus === "running" && !interruptRequestedOnce
 
 export const evaluatePipedSettlement = (state: ConnectState): PipedSettlementAction => {
-	if (state.ended) return "ended"
-	if (state.targetTurn > 0 && state.settledTurn >= state.targetTurn) return "settled"
+	if (state.ended) {
+		return "ended"
+	}
+	if (state.targetTurn > 0 && state.settledTurn >= state.targetTurn) {
+		return "settled"
+	}
 	if (
 		state.status === "idle" &&
 		state.unsettledQueuedTurns.has(state.targetTurn) &&

@@ -1,6 +1,5 @@
 import { realpathSync } from "node:fs"
-import { dirname, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { resolve } from "node:path"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Cause from "effect/Cause"
@@ -9,7 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
-import { CliFailure } from "./Errors.ts"
+import { isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
@@ -21,18 +20,20 @@ const resolvePhysicalPath = (path: string): string | undefined => {
 	}
 }
 
-const trustedBunfigPath = resolvePhysicalPath(
-	resolve(dirname(fileURLToPath(import.meta.url)), "../bunfig.toml"),
-)
+const trustedBunfigPath = resolvePhysicalPath(resolve(import.meta.dirname, "../bunfig.toml"))
 
 const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean => {
 	if (!execArgv.includes("--no-env-file") || trustedBunfigPath === undefined) {
 		return false
 	}
 	return execArgv.some((arg) => {
-		if (!arg.startsWith("--config=")) return false
+		if (!arg.startsWith("--config=")) {
+			return false
+		}
 		const rawPath = arg.slice("--config=".length)
-		if (rawPath.length === 0) return false
+		if (rawPath.length === 0) {
+			return false
+		}
 		return resolvePhysicalPath(rawPath) === trustedBunfigPath
 	})
 }
@@ -57,16 +58,16 @@ const MainLive = Layer.mergeAll(
 	Layer.succeed(SigintCoordinator, sigintController),
 )
 
+const releaseStdin = () => {
+	process.stdin.pause()
+	if (typeof process.stdin.unref === "function") {
+		process.stdin.unref()
+	}
+}
+
 const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	let exitSignalCode: number | undefined
 	let launcherOwnsSigint = typeof process.send === "function" && process.connected
-
-	const releaseStdin = () => {
-		process.stdin.pause()
-		if (typeof process.stdin.unref === "function") {
-			process.stdin.unref()
-		}
-	}
 
 	const onSigint = () => {
 		if (sigintController.handleSigint()) {
@@ -121,9 +122,7 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 			const hasDefect = Cause.hasDies(exit.cause)
 			const hasUnreportedFailure =
 				Cause.hasFails(exit.cause) &&
-				!exit.cause.reasons.some(
-					(reason) => reason._tag === "Fail" && reason.error instanceof CliFailure,
-				)
+				!exit.cause.reasons.some((reason) => reason._tag === "Fail" && isCliFailure(reason.error))
 			if (hasDefect || hasUnreportedFailure) {
 				process.stderr.write(`${escapeTerminalControlCharacters(Cause.pretty(exit.cause))}\n`)
 			}

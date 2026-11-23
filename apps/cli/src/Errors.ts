@@ -1,7 +1,8 @@
-import { type ApiError, statusOf } from "@checkfu/api/Http/Api"
+import type { ApiError, ErrorStatus } from "@checkfu/api/Http/Api"
 import * as Data from "effect/Data"
 import * as Sse from "effect/encoding/Sse"
 import * as HttpClientError from "effect/http/HttpClientError"
+import * as Predicate from "effect/Predicate"
 import * as Runtime from "effect/Runtime"
 import * as Schema from "effect/Schema"
 
@@ -15,6 +16,13 @@ export class CliFailure extends Data.TaggedError("CliFailure")<{
 	}
 }
 
+export const isCliFailure = (value: unknown): value is CliFailure =>
+	Predicate.isTagged(value, "CliFailure") &&
+	"message" in value &&
+	typeof value.message === "string" &&
+	"exitCode" in value &&
+	typeof value.exitCode === "number"
+
 export const usageError = (message: string): CliFailure => new CliFailure({ message, exitCode: 1 })
 
 export const configError = (message: string): CliFailure => new CliFailure({ message, exitCode: 1 })
@@ -25,44 +33,53 @@ export const networkFailure = (message: string): CliFailure =>
 export const apiFailure = (status: number, type: string, message: string): CliFailure =>
 	new CliFailure({ message: `API error (${status} ${type}): ${message}`, exitCode: 1 })
 
-export const isApiErrorEnvelope = (value: unknown): value is ApiError => {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false
-	const record = value as Record<string, unknown>
-	if (record["type"] !== "error") return false
-	const inner = record["error"]
-	if (typeof inner !== "object" || inner === null || Array.isArray(inner)) return false
-	const innerRecord = inner as Record<string, unknown>
-	if (typeof innerRecord["type"] !== "string" || typeof innerRecord["message"] !== "string") {
-		return false
-	}
-	if (typeof statusOf(record as unknown as ApiError) !== "number") {
-		return false
-	}
-	if (record["request_id"] !== undefined && typeof record["request_id"] !== "string") {
-		return false
-	}
-	if (record["accepted"] !== undefined && !Array.isArray(record["accepted"])) {
-		return false
-	}
-	if (
-		record["failed_index"] !== undefined &&
-		(typeof record["failed_index"] !== "number" || !Number.isFinite(record["failed_index"]))
-	) {
-		return false
-	}
-	if (
-		record["unconfirmed_index"] !== undefined &&
-		(typeof record["unconfirmed_index"] !== "number" ||
-			!Number.isFinite(record["unconfirmed_index"]))
-	) {
-		return false
-	}
-	return true
+const ApiErrorEnvelopeSchema = Schema.Struct({
+	type: Schema.Literal("error"),
+	error: Schema.Struct({
+		type: Schema.Literals([
+			"invalid_request_error",
+			"authentication_error",
+			"not_found_error",
+			"conflict_error",
+			"payload_too_large",
+			"unsupported_media_type",
+			"rate_limit_error",
+			"internal_error",
+			"service_unavailable",
+		]),
+		message: Schema.String,
+	}),
+	request_id: Schema.optional(Schema.String),
+	accepted: Schema.optional(Schema.Array(Schema.Unknown)),
+	failed_index: Schema.optional(Schema.Finite),
+	unconfirmed_index: Schema.optional(Schema.Finite),
+})
+
+export type ApiErrorEnvelope = typeof ApiErrorEnvelopeSchema.Type
+
+export const isApiErrorEnvelope: (value: unknown) => value is ApiErrorEnvelope =
+	Schema.is(ApiErrorEnvelopeSchema)
+
+const API_ERROR_STATUS_BY_TYPE: Readonly<Record<ApiError["error"]["type"], ErrorStatus>> = {
+	invalid_request_error: 400,
+	authentication_error: 401,
+	not_found_error: 404,
+	conflict_error: 409,
+	payload_too_large: 413,
+	unsupported_media_type: 415,
+	rate_limit_error: 429,
+	internal_error: 500,
+	service_unavailable: 503,
 }
 
-export const formatApiErrorEnvelope = (error: ApiError, observedStatus?: number): CliFailure => {
-	const knownStatus = statusOf(error)
-	const status = observedStatus ?? (typeof knownStatus === "number" ? knownStatus : 500)
+export const apiErrorStatus = (error: ApiErrorEnvelope): ErrorStatus =>
+	API_ERROR_STATUS_BY_TYPE[error.error.type]
+
+export const formatApiErrorEnvelope = (
+	error: ApiErrorEnvelope,
+	observedStatus?: number,
+): CliFailure => {
+	const status = observedStatus ?? apiErrorStatus(error)
 	const parts: Array<string> = []
 	if (Array.isArray(error.accepted) && error.accepted.length > 0) {
 		parts.push(`${error.accepted.length} event(s) accepted`)
@@ -82,7 +99,9 @@ export const isTransientHttpStatus = (status: number): boolean =>
 
 export const isTransientHttpError = (error: HttpClientError.HttpClientError): boolean => {
 	const reason = error.reason
-	if (reason._tag === "TransportError") return true
+	if (reason._tag === "TransportError") {
+		return true
+	}
 	if (
 		reason._tag === "StatusCodeError" ||
 		reason._tag === "DecodeError" ||
@@ -102,8 +121,9 @@ export const formatClientError = (
 		| Sse.Retry
 		| CliFailure,
 ): CliFailure => {
-	if (error instanceof CliFailure) return error
-	if (isApiErrorEnvelope(error)) return formatApiErrorEnvelope(error)
+	if ("_tag" in error && error._tag === "CliFailure") {
+		return error
+	}
 	if (HttpClientError.isHttpClientError(error)) {
 		const reason = error.reason
 		if (reason._tag === "StatusCodeError") {
@@ -117,11 +137,11 @@ export const formatClientError = (
 	if (Schema.isSchemaError(error)) {
 		return networkFailure(`Response validation failed: ${error.message}`)
 	}
-	if (error instanceof Sse.SseError) {
+	if ("_tag" in error && error._tag === "SseError") {
 		return networkFailure(`Event stream decode failed: ${error.message}`)
 	}
 	if (Sse.Retry.is(error)) {
 		return networkFailure("Event stream requested retry.")
 	}
-	return networkFailure(String(error))
+	return formatApiErrorEnvelope(error)
 }

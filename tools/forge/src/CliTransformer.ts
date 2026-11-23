@@ -63,6 +63,8 @@ interface FlagSpec {
 const isJsonRecord = (value: Json | undefined): value is Readonly<Record<string, Json>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
+const isJsonArray = (value: Json | undefined): value is ReadonlyArray<Json> => Array.isArray(value)
+
 const readEndpointRef = (method: Method): EndpointRef => {
 	const ext = method.extension("x-checkfu-endpoint")
 	if (
@@ -80,10 +82,14 @@ const readEndpointRef = (method: Method): EndpointRef => {
 
 const readCliExtension = (method: Method): CliExtension => {
 	const raw = method.extension("x-checkfu-cli")
-	if (!isJsonRecord(raw)) return {}
+	if (!isJsonRecord(raw)) {
+		return {}
+	}
 	const stringList = (key: string): ReadonlyArray<string> | undefined => {
 		const val = raw[key]
-		if (!Array.isArray(val)) return undefined
+		if (!Array.isArray(val)) {
+			return undefined
+		}
 		return val.filter((item): item is string => typeof item === "string")
 	}
 	const repeatRaw = raw["repeatArrayField"]
@@ -106,7 +112,9 @@ const readCliExtension = (method: Method): CliExtension => {
 	if (isJsonRecord(intQueryRaw)) {
 		intQueryParams = {}
 		for (const [key, entry] of Object.entries(intQueryRaw)) {
-			if (!isJsonRecord(entry)) continue
+			if (!isJsonRecord(entry)) {
+				continue
+			}
 			intQueryParams[key] = {
 				...(typeof entry["min"] === "number" ? { min: entry["min"] } : {}),
 				...(typeof entry["max"] === "number" ? { max: entry["max"] } : {}),
@@ -117,10 +125,12 @@ const readCliExtension = (method: Method): CliExtension => {
 
 	const examplesRaw = raw["examples"]
 	let examples: Array<ExampleSpec> | undefined
-	if (Array.isArray(examplesRaw)) {
+	if (isJsonArray(examplesRaw)) {
 		examples = []
 		for (const item of examplesRaw) {
-			if (!isJsonRecord(item) || typeof item["command"] !== "string") continue
+			if (!isJsonRecord(item) || typeof item["command"] !== "string") {
+				continue
+			}
 			examples.push({
 				command: item["command"],
 				...(typeof item["description"] === "string" ? { description: item["description"] } : {}),
@@ -156,7 +166,9 @@ const unwrapNullableType = (ty: Type): Type => {
 }
 
 const collectFieldsFromType = (ty: Type | undefined, out: Map<string, Field>): void => {
-	if (ty === undefined) return
+	if (ty === undefined) {
+		return
+	}
 	switch (ty.kind) {
 		case "object": {
 			for (const field of ty.fields) {
@@ -205,15 +217,23 @@ const extractStringLiterals = (ty: Type): ReadonlyArray<string> | undefined => {
 
 const extractArrayMaxItems = (ty: Type): number | undefined => {
 	const unwrapped = unwrapNullableType(ty)
-	if (unwrapped.kind === "array") return unwrapped.maxItems
-	if (unwrapped.kind === "model") return extractArrayMaxItems(unwrapped.model.type)
+	if (unwrapped.kind === "array") {
+		return unwrapped.maxItems
+	}
+	if (unwrapped.kind === "model") {
+		return extractArrayMaxItems(unwrapped.model.type)
+	}
 	return undefined
 }
 
 const isObjectOrComplexUnion = (ty: Type): boolean => {
 	const unwrapped = unwrapNullableType(ty)
-	if (unwrapped.kind === "object" || unwrapped.kind === "array") return true
-	if (unwrapped.kind === "model") return isObjectOrComplexUnion(unwrapped.model.type)
+	if (unwrapped.kind === "object" || unwrapped.kind === "array") {
+		return true
+	}
+	if (unwrapped.kind === "model") {
+		return isObjectOrComplexUnion(unwrapped.model.type)
+	}
 	if (unwrapped.kind === "union") {
 		return unwrapped.members.some((m) => isObjectOrComplexUnion(m))
 	}
@@ -234,19 +254,37 @@ const RESERVED_GLOBAL_FLAG_NAMES = new Set([
 
 const resolveCliFlagName = (field: Field): string => {
 	const raw = field.name.kebab()
-	if (raw === "version") return "current-version"
-	if (RESERVED_GLOBAL_FLAG_NAMES.has(raw)) return `param-${raw}`
+	if (raw === "version") {
+		return "current-version"
+	}
+	if (RESERVED_GLOBAL_FLAG_NAMES.has(raw)) {
+		return `param-${raw}`
+	}
 	return raw
 }
 
 const defaultMetavar = (flag: FlagSpec): string | undefined => {
-	if (flag.metavar !== undefined) return flag.metavar
-	if (flag.location === "path" || flag.flagName.endsWith("-id")) return "ID"
-	if (flag.kind === "int") return "INT"
-	if (flag.kind === "file-text") return "TEXT|@FILE"
-	if (flag.kind === "text-or-object") return "VALUE|JSON|@FILE"
-	if (flag.kind === "structured" || flag.kind === "repeat-structured") return "JSON|YAML|@FILE"
-	if (flag.location === "header") return "KEY"
+	if (flag.metavar !== undefined) {
+		return flag.metavar
+	}
+	if (flag.location === "path" || flag.flagName.endsWith("-id")) {
+		return "ID"
+	}
+	if (flag.kind === "int") {
+		return "INT"
+	}
+	if (flag.kind === "file-text") {
+		return "TEXT|@FILE"
+	}
+	if (flag.kind === "text-or-object") {
+		return "VALUE|JSON|@FILE"
+	}
+	if (flag.kind === "structured" || flag.kind === "repeat-structured") {
+		return "JSON|YAML|@FILE"
+	}
+	if (flag.location === "header") {
+		return "KEY"
+	}
 	return undefined
 }
 
@@ -264,7 +302,9 @@ const formatCliFlagDescription = (base: string, kind: FlagSpec["kind"]): string 
 }
 
 const formatCliCommandDescription = (base: string, hasBody: boolean): string => {
-	if (!hasBody) return base
+	if (!hasBody) {
+		return base
+	}
 	if (base.endsWith(")")) {
 		return `${base.slice(0, -1)}; accepts flags and/or JSON/YAML on stdin)`
 	}
@@ -308,7 +348,9 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	}
 
 	const pushFlag = (spec: FlagSpec) => {
-		if (seenFlagNames.has(spec.flagName)) return
+		if (seenFlagNames.has(spec.flagName)) {
+			return
+		}
 		seenFlagNames.add(spec.flagName)
 		flags.push(spec)
 	}
@@ -509,9 +551,41 @@ const groupExtrasTypeParam = (group: Group): string =>
 const methodVarName = (group: Group, method: Method): string =>
 	`${group.path.map((part, idx) => (idx === 0 ? part.camel() : part.pascal())).join("")}${method.name.pascal()}Command`
 
+const splitInlineTypeImports = (content: string): string =>
+	content.replaceAll(
+		/^import\s*\{([^}]+)\}\s*from\s*("[^"]+")/gm,
+		(fullMatch, specifiers: string, source: string) => {
+			const parts = specifiers
+				.split(",")
+				.map((part) => part.trim())
+				.filter((part) => part.length > 0)
+			const typeSpecs: Array<string> = []
+			const valueSpecs: Array<string> = []
+			for (const part of parts) {
+				if (part.startsWith("type ")) {
+					typeSpecs.push(part.slice("type ".length).trim())
+				} else {
+					valueSpecs.push(part)
+				}
+			}
+			if (typeSpecs.length === 0) {
+				return fullMatch
+			}
+			const lines: Array<string> = []
+			if (valueSpecs.length > 0) {
+				lines.push(`import { ${valueSpecs.join(", ")} } from ${source}`)
+			}
+			lines.push(`import type { ${typeSpecs.join(", ")} } from ${source}`)
+			return lines.join("\n")
+		},
+	)
+
 const cleanGeneratedHeader = (content: string): string => {
 	const header = "// Code generated by @cloudflare/forge. DO NOT EDIT.\n\n"
-	return content.startsWith(PREAMBLE) ? `${header}${content.slice(PREAMBLE.length)}` : content
+	const withHeader = content.startsWith(PREAMBLE)
+		? `${header}${content.slice(PREAMBLE.length)}`
+		: content
+	return splitInlineTypeImports(withHeader)
 }
 
 export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => {

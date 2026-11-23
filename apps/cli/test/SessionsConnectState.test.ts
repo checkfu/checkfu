@@ -1,10 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
-	type ConnectSessionEvent,
-	type ConnectState,
-	type SendSnapshot,
-	type SessionSnapshotSummary,
-	type SubmittedMessageReceipt,
 	applyMessageReceipt,
 	applySessionEvent,
 	beginMessageSend,
@@ -19,6 +14,13 @@ import {
 	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "../src/Commands/SessionsConnectState.ts"
+import type {
+	ConnectSessionEvent,
+	ConnectState,
+	SendSnapshot,
+	SessionSnapshotSummary,
+	SubmittedMessageReceipt,
+} from "../src/Commands/SessionsConnectState.ts"
 
 type Step =
 	| { readonly _tag: "begin_send"; readonly label: string }
@@ -27,14 +29,13 @@ type Step =
 	| { readonly _tag: "event"; readonly event: ConnectSessionEvent }
 	| { readonly _tag: "mark_ended" }
 
-const runSequence = (
-	initial: ConnectState,
-	steps: ReadonlyArray<Step>,
-): {
+interface SequenceRunResult {
 	readonly state: ConnectState
 	readonly duplicates: ReadonlyArray<number | undefined>
 	readonly wokeAtEvents: ReadonlyArray<number | undefined>
-} => {
+}
+
+const runSequence = (initial: ConnectState, steps: ReadonlyArray<Step>): SequenceRunResult => {
 	let state = initial
 	const snapshots = new Map<string, SendSnapshot>()
 	const duplicates: Array<number | undefined> = []
@@ -62,8 +63,12 @@ const runSequence = (
 			case "event": {
 				const res = applySessionEvent(state, step.event)
 				state = res.state
-				if (res.duplicate) duplicates.push(step.event.seq)
-				if (res.shouldWakeWaiter) wokeAtEvents.push(step.event.seq)
+				if (res.duplicate) {
+					duplicates.push(step.event.seq)
+				}
+				if (res.shouldWakeWaiter) {
+					wokeAtEvents.push(step.event.seq)
+				}
 				break
 			}
 			case "mark_ended": {

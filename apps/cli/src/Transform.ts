@@ -11,7 +11,24 @@ import {
 export const OUTPUT_FORMATS = ["auto", "json", "jsonl", "yaml", "pretty", "raw"] as const
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number]
 
-const setOwnProperty = (target: Record<string, unknown>, key: string, value: unknown): void => {
+export type NormalizedPrimitive = string | number | boolean | null | undefined
+export type NormalizedArray = ReadonlyArray<NormalizedValue>
+export interface NormalizedObject {
+	readonly [key: string]: NormalizedValue
+}
+export type NormalizedValue = NormalizedPrimitive | NormalizedArray | NormalizedObject
+type MutableNormalizedObject = Record<string, NormalizedValue>
+
+const isNormalizedArray = (value: NormalizedValue): value is NormalizedArray => Array.isArray(value)
+
+const isNormalizedObject = (value: NormalizedValue): value is NormalizedObject =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const setOwnProperty = (
+	target: MutableNormalizedObject,
+	key: string,
+	value: NormalizedValue,
+): void => {
 	Object.defineProperty(target, key, {
 		value,
 		enumerable: true,
@@ -20,11 +37,15 @@ const setOwnProperty = (target: Record<string, unknown>, key: string, value: unk
 	})
 }
 
-export const normalizeJsonValue = (value: unknown): unknown => {
-	if (DateTime.isDateTime(value)) return DateTime.formatIso(value)
-	if (Array.isArray(value)) return value.map((item) => normalizeJsonValue(item))
+export const normalizeJsonValue = (value: unknown): NormalizedValue => {
+	if (DateTime.isDateTime(value)) {
+		return DateTime.formatIso(value)
+	}
+	if (Array.isArray(value)) {
+		return value.map((item) => normalizeJsonValue(item))
+	}
 	if (typeof value === "object" && value !== null) {
-		const out: Record<string, unknown> = {}
+		const out: MutableNormalizedObject = {}
 		for (const [key, entry] of Object.entries(value)) {
 			if (entry !== undefined) {
 				setOwnProperty(out, key, normalizeJsonValue(entry))
@@ -32,7 +53,16 @@ export const normalizeJsonValue = (value: unknown): unknown => {
 		}
 		return out
 	}
-	return value
+	if (
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean" ||
+		value === null ||
+		value === undefined
+	) {
+		return value
+	}
+	return String(value)
 }
 
 const splitTopLevel = (input: string, delimiter: string): Array<string> => {
@@ -57,7 +87,9 @@ const splitTopLevel = (input: string, delimiter: string): Array<string> => {
 		}
 		if (inQuote !== null) {
 			current += ch
-			if (ch === inQuote) inQuote = null
+			if (ch === inQuote) {
+				inQuote = null
+			}
 			continue
 		}
 		if (ch === '"' || ch === "'") {
@@ -71,7 +103,9 @@ const splitTopLevel = (input: string, delimiter: string): Array<string> => {
 			continue
 		}
 		if (ch === "}") {
-			if (braceDepth > 0) braceDepth--
+			if (braceDepth > 0) {
+				braceDepth--
+			}
 			current += ch
 			continue
 		}
@@ -81,7 +115,9 @@ const splitTopLevel = (input: string, delimiter: string): Array<string> => {
 			continue
 		}
 		if (ch === "]") {
-			if (bracketDepth > 0) bracketDepth--
+			if (bracketDepth > 0) {
+				bracketDepth--
+			}
 			current += ch
 			continue
 		}
@@ -111,11 +147,14 @@ const parseSegment = (segment: string): ParsedSegment => {
 			(trimmed.startsWith("'") && trimmed.endsWith("'")))
 	) {
 		return {
-			value: trimmed.slice(1, -1).replaceAll('\\"', '"').replaceAll("\\'", "'"),
+			value: trimmed
+				.slice(1, -1)
+				.replaceAll(String.raw`\"`, '"')
+				.replaceAll(String.raw`\'`, "'"),
 			literal: true,
 		}
 	}
-	const unescaped = trimmed.replaceAll("\\.", ".").replaceAll("\\#", "#")
+	const unescaped = trimmed.replaceAll(String.raw`\.`, ".").replaceAll(String.raw`\#`, "#")
 	return {
 		value: unescaped,
 		literal: unescaped !== trimmed,
@@ -124,11 +163,13 @@ const parseSegment = (segment: string): ParsedSegment => {
 
 const unescapeSegment = (segment: string): string => parseSegment(segment).value
 
-const evaluateObjectLiteral = (value: unknown, body: string): Record<string, unknown> => {
-	const result: Record<string, unknown> = {}
+const evaluateObjectLiteral = (value: unknown, body: string): NormalizedObject => {
+	const result: MutableNormalizedObject = {}
 	for (const rawEntry of splitTopLevel(body, ",")) {
 		const entry = rawEntry.trim()
-		if (entry.length === 0) continue
+		if (entry.length === 0) {
+			continue
+		}
 		const colonIndex = findTopLevelColon(entry)
 		if (colonIndex === -1) {
 			const segments = splitTopLevel(entry, ".")
@@ -160,31 +201,43 @@ const findTopLevelColon = (input: string): number => {
 			continue
 		}
 		if (inQuote !== null) {
-			if (ch === inQuote) inQuote = null
+			if (ch === inQuote) {
+				inQuote = null
+			}
 			continue
 		}
 		if (ch === '"' || ch === "'") {
 			inQuote = ch
 			continue
 		}
-		if (ch === "{") braceDepth++
-		else if (ch === "}" && braceDepth > 0) braceDepth--
-		else if (ch === "[") bracketDepth++
-		else if (ch === "]" && bracketDepth > 0) bracketDepth--
-		else if (ch === ":" && braceDepth === 0 && bracketDepth === 0) return i
+		if (ch === "{") {
+			braceDepth++
+		} else if (ch === "}" && braceDepth > 0) {
+			braceDepth--
+		} else if (ch === "[") {
+			bracketDepth++
+		} else if (ch === "]" && bracketDepth > 0) {
+			bracketDepth--
+		} else if (ch === ":" && braceDepth === 0 && bracketDepth === 0) {
+			return i
+		}
 	}
 	return -1
 }
 
-const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unknown => {
-	let current: unknown = value
+const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): NormalizedValue => {
+	let current: NormalizedValue = normalizeJsonValue(value)
 	for (let i = 0; i < segments.length; i++) {
-		if (current === null || current === undefined) return undefined
+		if (current === null || current === undefined) {
+			return undefined
+		}
 		const rawSegment = segments[i] ?? ""
 		const rawTrimmed = rawSegment.trim()
 		const rest = segments.slice(i + 1)
 
-		if (rawTrimmed === "@this" || rawTrimmed.length === 0) continue
+		if (rawTrimmed === "@this" || rawTrimmed.length === 0) {
+			continue
+		}
 
 		if (rawTrimmed.startsWith("{") && rawTrimmed.endsWith("}")) {
 			current = evaluateObjectLiteral(current, rawTrimmed.slice(1, -1))
@@ -200,19 +253,25 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 
 		const parsed = parseSegment(rawTrimmed)
 		if (!parsed.literal && parsed.value === "#") {
-			if (!Array.isArray(current)) return undefined
-			if (rest.length === 0) return current.length
-			const projected: Array<unknown> = []
+			if (!isNormalizedArray(current)) {
+				return undefined
+			}
+			if (rest.length === 0) {
+				return current.length
+			}
+			const projected: Array<NormalizedValue> = []
 			for (const element of current) {
 				const mapped = evaluateSegments(element, rest)
-				if (mapped !== undefined) projected.push(mapped)
+				if (mapped !== undefined) {
+					projected.push(mapped)
+				}
 			}
 			return projected
 		}
 
 		const segment = parsed.value
 
-		if (Array.isArray(current)) {
+		if (isNormalizedArray(current)) {
 			if (/^-?\d+$/.test(segment)) {
 				const rawIndex = Number(segment)
 				const idx = rawIndex < 0 ? current.length + rawIndex : rawIndex
@@ -222,10 +281,8 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 			return undefined
 		}
 
-		if (typeof current === "object") {
-			current = Object.hasOwn(current, segment)
-				? (current as Record<string, unknown>)[segment]
-				: undefined
+		if (isNormalizedObject(current)) {
+			current = Object.hasOwn(current, segment) ? current[segment] : undefined
 			continue
 		}
 
@@ -234,9 +291,11 @@ const evaluateSegments = (value: unknown, segments: ReadonlyArray<string>): unkn
 	return current
 }
 
-export const evaluateTransform = (value: unknown, expression: string): unknown => {
+export const evaluateTransform = (value: unknown, expression: string): NormalizedValue => {
 	const trimmed = expression.trim()
-	if (trimmed.length === 0) return value
+	if (trimmed.length === 0) {
+		return normalizeJsonValue(value)
+	}
 	const segments = splitTopLevel(trimmed, ".")
 	return evaluateSegments(value, segments)
 }
@@ -272,8 +331,12 @@ export const formatOutput = (value: unknown, options: FormatOptions): string => 
 		if (typeof transformed === "string") {
 			return options.isTerminal ? escapeTerminalControlCharacters(transformed) : transformed
 		}
-		if (transformed === undefined) return ""
-		if (transformed === null) return "null"
+		if (transformed === undefined) {
+			return ""
+		}
+		if (transformed === null) {
+			return "null"
+		}
 		if (typeof transformed === "number" || typeof transformed === "boolean") {
 			return String(transformed)
 		}

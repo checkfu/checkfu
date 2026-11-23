@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parse } from "@cloudflare/forge"
+import type { Json } from "@cloudflare/forge"
 import { describe, expect, it } from "@effect/vitest"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
@@ -99,12 +100,12 @@ describe("Cloudflare Forge pipeline", () => {
 		// listEvents cursor description documents both asc and desc order semantics,
 		// and CLI flag help adds @file/YAML guidance from CLI metadata
 		const spec = JSON.parse(openApiJson) as {
-			paths: Record<string, Record<string, Record<string, unknown>>>
+			paths: Record<string, Record<string, Record<string, Json>>>
 		}
 		const agentsPost = spec.paths["/v1/agents"]?.["post"]
 		expect(agentsPost?.["description"]).toBe("Create an agent")
 		const agentProps = (
-			(agentsPost?.["requestBody"] as Record<string, Record<string, Record<string, unknown>>>)?.[
+			(agentsPost?.["requestBody"] as Record<string, Record<string, Record<string, Json>>>)?.[
 				"content"
 			]?.["application/json"]?.["schema"] as
 				| { readonly properties?: Record<string, { readonly description?: string }> }
@@ -151,7 +152,7 @@ describe("Cloudflare Forge pipeline", () => {
 
 	it("automatically emits a CLI command when a new endpoint is added to the OpenAPI spec", () => {
 		const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
-			paths: Record<string, Record<string, unknown>>
+			paths: Record<string, Record<string, Json>>
 		}
 		spec.paths["/v1/agents"] = {
 			...spec.paths["/v1/agents"],

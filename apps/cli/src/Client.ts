@@ -1,8 +1,5 @@
-import {
-	type CheckfuClient as ApiCheckfuClient,
-	SessionEvent,
-	makeCheckfuClientWith,
-} from "@checkfu/api/Http/Api"
+import { SessionEvent, makeCheckfuClientWith } from "@checkfu/api/Http/Api"
+import type { CheckfuClient as ApiCheckfuClient } from "@checkfu/api/Http/Api"
 import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -21,7 +18,6 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
-	type CliFailure,
 	configError,
 	formatApiErrorEnvelope,
 	formatClientError,
@@ -31,14 +27,15 @@ import {
 	networkFailure,
 	usageError,
 } from "./Errors.ts"
+import type { CliFailure } from "./Errors.ts"
 
 export const DEFAULT_API_URL = "http://localhost:1337"
 const DEFAULT_MAX_SSE_RECONNECTS = 5
 const DEFAULT_SSE_RECONNECT_DELAY_MS = 250
-const DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS = 2_000
-const DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS = 5_000
+const DEFAULT_SSE_ERROR_BODY_TIMEOUT_MS = 2000
+const DEFAULT_SSE_HEALTHY_IDLE_DURATION_MS = 5000
 const MAX_SSE_ERROR_BODY_BYTES = 16 * 1024
-const MAX_SSE_NO_PROGRESS_DELAY_MS = 5_000
+const MAX_SSE_NO_PROGRESS_DELAY_MS = 5000
 
 const isRedirectStatus = (status: number): boolean =>
 	status === 301 || status === 302 || status === 303 || status === 307 || status === 308
@@ -93,7 +90,9 @@ const readBoundedResponseText = (
 		if (truncated || timedOut) {
 			yield* cancelResponseBody(response)
 		}
-		if (totalBytes === 0) return ""
+		if (totalBytes === 0) {
+			return ""
+		}
 		const merged = new Uint8Array(totalBytes)
 		let offset = 0
 		for (const chunk of chunks) {
@@ -190,7 +189,7 @@ export interface SessionStreamEvent {
 	readonly id: string | undefined
 	readonly event: string
 	readonly seq: number | undefined
-	readonly data: Record<string, unknown>
+	readonly data: Schema.JsonObject
 }
 
 export interface StreamSseOptions {
@@ -213,15 +212,15 @@ export interface EndpointSseRequest {
 	readonly cursorQueryParam?: string | undefined
 	readonly monotonicNumericCursor?: boolean | undefined
 	readonly validateEventData?:
-		| ((data: Record<string, unknown>) => Effect.Effect<void, CliFailure>)
+		| ((data: Schema.JsonObject) => Effect.Effect<void, CliFailure>)
 		| undefined
-	readonly isTerminalEvent?: ((data: Record<string, unknown>) => boolean) | undefined
+	readonly isTerminalEvent?: ((data: Schema.JsonObject) => boolean) | undefined
 }
 
 const decodeSessionEvent = Schema.decodeUnknownEffect(Schema.toCodecJson(SessionEvent))
 
 export const validateSessionEventData = (
-	data: Record<string, unknown>,
+	data: Schema.JsonObject,
 ): Effect.Effect<void, CliFailure> =>
 	decodeSessionEvent(data).pipe(
 		Effect.asVoid,
@@ -245,7 +244,7 @@ export interface CheckfuClient {
 const parseNonNegativeIntString = (value: string | undefined): number | undefined =>
 	value !== undefined && /^\d{1,15}$/.test(value) ? Number(value) : undefined
 
-const parseSeq = (id: string | undefined, data: Record<string, unknown>): number | undefined => {
+const parseSeq = (id: string | undefined, data: Schema.JsonObject): number | undefined => {
 	if (typeof data["seq"] === "number" && Number.isInteger(data["seq"]) && data["seq"] >= 0) {
 		return data["seq"]
 	}
@@ -256,20 +255,12 @@ class StreamBodyReadError extends Data.TaggedError("StreamBodyReadError")<{
 	readonly error: HttpClientError.HttpClientError
 }> {}
 
-const parseSseData = (raw: string): Effect.Effect<Record<string, unknown>, CliFailure> =>
-	Effect.try({
-		try: () => {
-			const parsed: unknown = JSON.parse(raw)
-			if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-				throw new Error("Expected JSON object in SSE data payload.")
-			}
-			return parsed as Record<string, unknown>
-		},
-		catch: (err) =>
-			networkFailure(
-				`Invalid SSE event JSON payload: ${err instanceof Error ? err.message : String(err)}`,
-			),
-	})
+const decodeSseJsonObject = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.JsonObject))
+
+const parseSseData = (raw: string): Effect.Effect<Schema.JsonObject, CliFailure> =>
+	decodeSseJsonObject(raw).pipe(
+		Effect.mapError((err) => networkFailure(`Invalid SSE event JSON payload: ${err.message}`)),
+	)
 
 export const makeCheckfuClient = (
 	baseUrlFlag: Option.Option<string>,
@@ -503,7 +494,9 @@ export const makeCheckfuClient = (
 						})
 
 						const feedChunkOrdered = (rawChunk: string): Sse.SseError | undefined => {
-							if (rawChunk.length === 0) return undefined
+							if (rawChunk.length === 0) {
+								return undefined
+							}
 							let chunk = rawChunk
 							if (isFirstChunk && chunk.startsWith("\uFEFF")) {
 								chunk = chunk.slice(1)
@@ -523,7 +516,9 @@ export const makeCheckfuClient = (
 								let lineEnd = position
 								while (lineEnd < length) {
 									const code = chunk.charCodeAt(lineEnd)
-									if (code === 13 || code === 10) break
+									if (code === 13 || code === 10) {
+										break
+									}
 									lineEnd += 1
 								}
 								if (lineEnd === length) {
@@ -655,8 +650,8 @@ export const makeCheckfuClient = (
 								Stream.flatMap((maybeEvent) =>
 									Option.isSome(maybeEvent) ? Stream.make(maybeEvent.value) : Stream.empty,
 								),
-								Stream.catch((err) => {
-									if (err instanceof StreamBodyReadError) {
+								Stream.catch((error) => {
+									if (error instanceof StreamBodyReadError) {
 										return Stream.unwrap(
 											Effect.gen(function* () {
 												const health = assessConnectionHealth(yield* Clock.monotonicTimeNanos)
@@ -673,12 +668,12 @@ export const makeCheckfuClient = (
 													return Stream.empty
 												}
 												loopState.done = true
-												return Stream.fail(formatClientError(err.error))
+												return Stream.fail(formatClientError(error.error))
 											}),
 										)
 									}
 									loopState.done = true
-									return Stream.fail(formatClientError(err))
+									return Stream.fail(formatClientError(error))
 								}),
 							)
 

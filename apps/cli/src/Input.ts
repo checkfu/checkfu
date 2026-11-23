@@ -5,12 +5,18 @@ import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
-import { type CliFailure, usageError } from "./Errors.ts"
+import { usageError } from "./Errors.ts"
+import type { CliFailure } from "./Errors.ts"
 import { writeStderrLine } from "./TerminalOutput.ts"
+import { normalizeJsonValue } from "./Transform.ts"
+import type { NormalizedValue } from "./Transform.ts"
 
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024
 
-export const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+export type StructuredValue = NormalizedValue
+export type StructuredRecord = Record<string, StructuredValue>
+
+export const isPlainRecord = (value: unknown): value is StructuredRecord =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
 const readBoundedBytes = <E extends { readonly message: string }>(
@@ -48,7 +54,9 @@ export const resolveTextOrFile = (
 	raw: string,
 ): Effect.Effect<string, CliFailure, FileSystem.FileSystem> =>
 	Effect.gen(function* () {
-		if (raw.startsWith("@@")) return raw.slice(1)
+		if (raw.startsWith("@@")) {
+			return raw.slice(1)
+		}
 		if (raw.startsWith("@") && raw.length > 1) {
 			const filePath = raw.slice(1)
 			const fs = yield* FileSystem.FileSystem
@@ -64,7 +72,7 @@ export const resolveTextOrFile = (
 	})
 
 export interface ParsedStructuredInput {
-	readonly value: unknown
+	readonly value: StructuredValue
 	readonly warnings: ReadonlyArray<string>
 }
 
@@ -73,7 +81,10 @@ export const parseJsonOrYamlDocument = (
 	label: string,
 ): Effect.Effect<ParsedStructuredInput, CliFailure> =>
 	Effect.try({
-		try: () => ({ value: JSON.parse(raw) as unknown, warnings: [] as ReadonlyArray<string> }),
+		try: () => ({
+			value: normalizeJsonValue(JSON.parse(raw)),
+			warnings: [] as ReadonlyArray<string>,
+		}),
 		catch: () => undefined,
 	}).pipe(
 		Effect.catch(() =>
@@ -81,10 +92,10 @@ export const parseJsonOrYamlDocument = (
 				try: () => {
 					const doc = YAML.parseDocument(raw, { logLevel: "silent" })
 					if (doc.errors.length > 0) {
-						throw doc.errors[0]
+						throw new Error(doc.errors[0]?.message ?? "Invalid YAML document.")
 					}
 					return {
-						value: doc.toJS() as unknown,
+						value: normalizeJsonValue(doc.toJS()),
 						warnings: doc.warnings.map((warning) => warning.message),
 					}
 				},
@@ -107,7 +118,7 @@ export const emitYamlWarnings = (
 export const parseJsonOrYaml = (
 	raw: string,
 	label: string,
-): Effect.Effect<unknown, CliFailure, Stdio.Stdio> =>
+): Effect.Effect<StructuredValue, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const parsed = yield* parseJsonOrYamlDocument(raw, label)
 		yield* emitYamlWarnings(label, parsed.warnings)
@@ -117,11 +128,11 @@ export const parseJsonOrYaml = (
 export const resolveStructuredInput = (
 	raw: string,
 	label: string,
-): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
+): Effect.Effect<StructuredValue, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	resolveTextOrFile(raw).pipe(Effect.flatMap((text) => parseJsonOrYaml(text, label)))
 
 export const readPipedStdin: Effect.Effect<
-	Option.Option<unknown>,
+	Option.Option<StructuredValue>,
 	CliFailure,
 	Stdio.Stdio
 > = Effect.gen(function* () {
@@ -135,19 +146,25 @@ export const readPipedStdin: Effect.Effect<
 		"Failed to read stdin",
 		"stdin payload",
 	)
-	if (bytes.byteLength === 0) return Option.none()
+	if (bytes.byteLength === 0) {
+		return Option.none()
+	}
 	const text = new TextDecoder().decode(bytes)
-	if (text.trim().length === 0) return Option.none()
+	if (text.trim().length === 0) {
+		return Option.none()
+	}
 	const parsed = yield* parseJsonOrYaml(text, "stdin")
 	return Option.some(parsed)
 })
 
 export const readPipedStdinRecord = (
 	label: string,
-): Effect.Effect<Record<string, unknown>, CliFailure, Stdio.Stdio> =>
+): Effect.Effect<StructuredRecord, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const input = yield* readPipedStdin
-		if (Option.isNone(input)) return {}
+		if (Option.isNone(input)) {
+			return {}
+		}
 		if (!isPlainRecord(input.value)) {
 			return yield* usageError(`Expected a JSON or YAML object on stdin for ${label}.`)
 		}

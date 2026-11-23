@@ -13,7 +13,9 @@ export const makeSigintController = (): SigintController => {
 			handlers.push(handler)
 			return () => {
 				const idx = handlers.lastIndexOf(handler)
-				if (idx !== -1) handlers.splice(idx, 1)
+				if (idx !== -1) {
+					handlers.splice(idx, 1)
+				}
 			}
 		},
 		handleSigint: () => {

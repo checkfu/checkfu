@@ -1,4 +1,5 @@
-import { type ApiError, CheckfuApi } from "@checkfu/api/Http/Api"
+import { CheckfuApi } from "@checkfu/api/Http/Api"
+import type { ApiError } from "@checkfu/api/Http/Api"
 import type * as Command from "effect/cli/Command"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
@@ -10,7 +11,8 @@ import * as Schema from "effect/Schema"
 import type * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { validateSessionEventData } from "./Client.ts"
-import { type CliFailure, formatClientError, isApiErrorEnvelope, usageError } from "./Errors.ts"
+import { formatClientError, isApiErrorEnvelope, usageError } from "./Errors.ts"
+import type { CliFailure } from "./Errors.ts"
 import { diagnoseSessionCreateNotFound, ensureIdempotencyKeyHeader } from "./Hooks.ts"
 import {
 	emitYamlWarnings,
@@ -21,6 +23,7 @@ import {
 	resolveStructuredInput,
 	resolveTextOrFile,
 } from "./Input.ts"
+import type { StructuredRecord, StructuredValue } from "./Input.ts"
 import { getClient, renderOutput } from "./RootCommand.ts"
 
 export interface GeneratedFlagDescriptor {
@@ -50,31 +53,25 @@ export interface GeneratedOperationDescriptor {
 	readonly flags: ReadonlyArray<GeneratedFlagDescriptor>
 }
 
-interface RuntimeEndpoint {
-	readonly method: string
-	readonly path: string
-	readonly params: Schema.Top | undefined
-	readonly query: Schema.Top | undefined
-	readonly headers: Schema.Top | undefined
-	readonly payload: ReadonlyMap<
-		string,
-		{ readonly schemas: readonly [Schema.Top, ...Array<Schema.Top>] }
-	>
-}
+type CheckfuApiGroup = (typeof CheckfuApi.groups)[keyof typeof CheckfuApi.groups]
+type EndpointValues<G> = G extends { readonly endpoints: infer E } ? E[keyof E] : never
+type CheckfuApiEndpoint = EndpointValues<CheckfuApiGroup>
 
 const lookupEndpoint = (
 	groupName: string,
 	endpointName: string,
-): Effect.Effect<RuntimeEndpoint, CliFailure> => {
-	const groups = CheckfuApi.groups as unknown as Record<
-		string,
-		{ readonly endpoints: Record<string, RuntimeEndpoint> } | undefined
-	>
-	const endpoint = groups[groupName]?.endpoints[endpointName]
-	if (endpoint === undefined) {
-		return Effect.fail(usageError(`Unknown CheckfuApi endpoint ${groupName}.${endpointName}.`))
+): Effect.Effect<CheckfuApiEndpoint, CliFailure> => {
+	for (const [name, group] of Object.entries(CheckfuApi.groups)) {
+		if (name !== groupName) {
+			continue
+		}
+		const endpoints: Readonly<Record<string, CheckfuApiEndpoint>> = group.endpoints
+		const endpoint = endpoints[endpointName]
+		if (endpoint !== undefined) {
+			return Effect.succeed(endpoint)
+		}
 	}
-	return Effect.succeed(endpoint)
+	return Effect.fail(usageError(`Unknown CheckfuApi endpoint ${groupName}.${endpointName}.`))
 }
 
 const validatePathSegment = (value: string, label: string): Effect.Effect<string, CliFailure> => {
@@ -106,7 +103,7 @@ const decodeWithTop = (
 const parseTextOrObjectFlag = (
 	raw: string,
 	flagName: string,
-): Effect.Effect<unknown, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
+): Effect.Effect<StructuredValue, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const isFile = raw.startsWith("@") && !raw.startsWith("@@") && raw.length > 1
 		const text = yield* resolveTextOrFile(raw)
@@ -132,27 +129,35 @@ const parseTextOrObjectFlag = (
 		return isFile ? trimmed : text
 	})
 
-const unwrapFlagValue = (raw: unknown): Option.Option<unknown> =>
-	Option.isOption(raw) ? raw : Option.some(raw)
+type RawFlagValue =
+	| string
+	| number
+	| boolean
+	| ReadonlyArray<string>
+	| Option.Option<string | number | boolean>
+type RawFlagsRecord = Readonly<Record<string, RawFlagValue>>
+
+interface RequestParts {
+	readonly params: Record<string, string>
+	readonly query: Record<string, string>
+	readonly headers: Record<string, string>
+	readonly body: StructuredRecord | undefined
+}
+
+const unwrapFlagValue = (
+	raw: RawFlagValue | undefined,
+): Option.Option<string | number | boolean | ReadonlyArray<string>> =>
+	raw === undefined ? Option.none() : Option.isOption(raw) ? raw : Option.some(raw)
 
 const collectRequestParts = (
 	spec: GeneratedOperationDescriptor,
-	rawFlags: Readonly<Record<string, unknown>>,
-): Effect.Effect<
-	{
-		readonly params: Record<string, unknown>
-		readonly query: Record<string, string>
-		readonly headers: Record<string, string>
-		readonly body: Record<string, unknown> | undefined
-	},
-	CliFailure,
-	FileSystem.FileSystem | Stdio.Stdio
-> =>
+	rawFlags: RawFlagsRecord,
+): Effect.Effect<RequestParts, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	Effect.gen(function* () {
-		const params: Record<string, unknown> = {}
+		const params: Record<string, string> = {}
 		const query: Record<string, string> = {}
 		const headers: Record<string, string> = {}
-		let body: Record<string, unknown> | undefined
+		let body: StructuredRecord | undefined
 
 		const repeatFlag = spec.flags.find((fl) => fl.kind === "repeat-structured")
 		if (spec.hasBody) {
@@ -166,7 +171,7 @@ const collectRequestParts = (
 					)
 				}
 				if (items.length > 0) {
-					const parsed: Array<unknown> = []
+					const parsed: Array<StructuredValue> = []
 					for (const [index, entry] of items.entries()) {
 						parsed.push(
 							yield* resolveStructuredInput(String(entry), `--${repeatFlag.flagName}[${index}]`),
@@ -197,9 +202,13 @@ const collectRequestParts = (
 		}
 
 		for (const fl of spec.flags) {
-			if (fl.kind === "repeat-structured") continue
+			if (fl.kind === "repeat-structured") {
+				continue
+			}
 			const maybeVal = unwrapFlagValue(rawFlags[fl.propName])
-			if (Option.isNone(maybeVal)) continue
+			if (Option.isNone(maybeVal)) {
+				continue
+			}
 			const value = maybeVal.value
 
 			if (fl.kind === "int" && typeof value === "number") {
@@ -241,13 +250,20 @@ const collectRequestParts = (
 		return { params, query, headers, body }
 	})
 
+interface RuntimeClientRequest {
+	params?: unknown
+	query?: unknown
+	headers?: unknown
+	payload?: unknown
+}
+
 type UntypedClientMethod = (
-	req: Record<string, unknown>,
+	req: RuntimeClientRequest,
 ) => Effect.Effect<unknown, ApiError | HttpClientError.HttpClientError | Schema.SchemaError>
 
 export const invokeGeneratedOperation = (
 	spec: GeneratedOperationDescriptor,
-	rawFlags: Readonly<Record<string, unknown>>,
+	rawFlags: RawFlagsRecord,
 ): Effect.Effect<
 	void,
 	CliFailure,
@@ -261,27 +277,27 @@ export const invokeGeneratedOperation = (
 		const endpoint = yield* lookupEndpoint(spec.apiGroup, spec.apiEndpoint)
 		const parts = yield* collectRequestParts(spec, rawFlags)
 
-		const request: Record<string, unknown> = {}
+		const request: RuntimeClientRequest = {}
 		if (endpoint.params !== undefined) {
-			request["params"] = yield* decodeWithTop(
+			request.params = yield* decodeWithTop(
 				endpoint.params,
 				parts.params,
 				`${spec.cliLabel} params`,
 			)
 		}
 		if (endpoint.query !== undefined) {
-			request["query"] = yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
+			request.query = yield* decodeWithTop(endpoint.query, parts.query, `${spec.cliLabel} query`)
 		}
 		if (spec.hasBody) {
 			const jsonEntry = endpoint.payload.get("application/json")
 			if (jsonEntry !== undefined) {
 				const schema =
 					jsonEntry.schemas.length === 1 ? jsonEntry.schemas[0] : Schema.Union(jsonEntry.schemas)
-				request["payload"] = yield* decodeWithTop(schema, parts.body, `${spec.cliLabel} payload`, {
+				request.payload = yield* decodeWithTop(schema, parts.body, `${spec.cliLabel} payload`, {
 					onExcessProperty: "error",
 				})
 			} else {
-				request["payload"] = parts.body
+				request.payload = parts.body
 			}
 		}
 
@@ -292,7 +308,7 @@ export const invokeGeneratedOperation = (
 				spec.apiGroup === "sessions" && spec.apiEndpoint === "sendEvents"
 					? yield* ensureIdempotencyKeyHeader(client, parts.headers)
 					: parts.headers
-			request["headers"] = yield* decodeWithTop(
+			request.headers = yield* decodeWithTop(
 				endpoint.headers,
 				effectiveHeaders,
 				`${spec.cliLabel} headers`,
@@ -309,19 +325,19 @@ export const invokeGeneratedOperation = (
 		}
 
 		const result = yield* method(request).pipe(
-			Effect.catch((err) => {
+			Effect.catch((error) => {
 				if (
 					spec.apiGroup === "sessions" &&
 					spec.apiEndpoint === "create" &&
-					isApiErrorEnvelope(err) &&
-					err.error.type === "not_found_error"
+					isApiErrorEnvelope(error) &&
+					error.error.type === "not_found_error"
 				) {
 					return Effect.flatMap(
-						diagnoseSessionCreateNotFound(client, request["payload"], err.error.message),
+						diagnoseSessionCreateNotFound(client, request.payload, error.error.message),
 						Effect.fail,
 					)
 				}
-				return Effect.fail(formatClientError(err))
+				return Effect.fail(formatClientError(error))
 			}),
 		)
 
@@ -330,29 +346,28 @@ export const invokeGeneratedOperation = (
 
 const resolveEndpointPath = (
 	template: string,
-	params: Readonly<Record<string, unknown>>,
+	params: Readonly<Record<string, string>>,
 	label: string,
 ): Effect.Effect<string, CliFailure> =>
 	Effect.gen(function* () {
 		let invalidReason: string | undefined
-		const resolved = template.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
+		const resolved = template.replaceAll(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
 			const value = params[name]
-			if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+			if (value === undefined) {
 				invalidReason = `Missing required path parameter "${name}" for ${label}.`
 				return ""
 			}
-			const str = String(value)
 			if (
-				str.length === 0 ||
-				str === "." ||
-				str === ".." ||
-				str.includes("/") ||
-				str.includes("\\")
+				value.length === 0 ||
+				value === "." ||
+				value === ".." ||
+				value.includes("/") ||
+				value.includes("\\")
 			) {
 				invalidReason = `Invalid path parameter "${name}" for ${label}: must be a single non-empty path segment (not "." or "..").`
 				return ""
 			}
-			return encodeURIComponent(str)
+			return encodeURIComponent(value)
 		})
 		if (invalidReason !== undefined) {
 			return yield* usageError(invalidReason)
@@ -362,7 +377,7 @@ const resolveEndpointPath = (
 
 export const invokeGeneratedStream = (
 	spec: GeneratedOperationDescriptor,
-	rawFlags: Readonly<Record<string, unknown>>,
+	rawFlags: RawFlagsRecord,
 ): Effect.Effect<
 	void,
 	CliFailure,
@@ -409,8 +424,7 @@ export const invokeGeneratedStream = (
 					? {
 							monotonicNumericCursor: true,
 							validateEventData: validateSessionEventData,
-							isTerminalEvent: (data: Record<string, unknown>) =>
-								data["type"] === "session.archived",
+							isTerminalEvent: (data: Schema.JsonObject) => data["type"] === "session.archived",
 						}
 					: {}),
 			})

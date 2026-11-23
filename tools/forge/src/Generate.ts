@@ -1,12 +1,11 @@
 import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
 import { parse } from "@cloudflare/forge"
 import { generateCliFiles } from "./CliTransformer.ts"
 import { exportDeterministicOpenApiJson, renderOpenApiModule } from "./OpenApiExport.ts"
 
-const THIS_DIR = dirname(fileURLToPath(import.meta.url))
+const THIS_DIR = import.meta.dirname
 export const REPO_ROOT = resolve(THIS_DIR, "../../..")
 
 export interface EmittedArtifact {
@@ -65,10 +64,15 @@ const formatArtifacts = (
 	}
 }
 
+export interface GenerateResult {
+	readonly ok: boolean
+	readonly drifted: ReadonlyArray<string>
+}
+
 export const runGenerate = (options?: {
 	readonly check?: boolean
 	readonly repoRoot?: string
-}): { readonly ok: boolean; readonly drifted: ReadonlyArray<string> } => {
+}): GenerateResult => {
 	const repoRoot = options?.repoRoot ?? REPO_ROOT
 	const check = options?.check ?? false
 	const formatted = formatArtifacts(generateAllArtifacts(), repoRoot)
@@ -113,8 +117,7 @@ export const runGenerate = (options?: {
 	return { ok: true, drifted: [] }
 }
 
-const isMain =
-	process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === import.meta.filename
 
 if (isMain) {
 	const check = process.argv.includes("--check")
