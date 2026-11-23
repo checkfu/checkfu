@@ -12,6 +12,7 @@
 		"./*": "./src/*.ts"
 	},
 	"scripts": {
+		"build": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --define CHECKFU_STANDALONE=true src/main.ts --outfile dist/checkfu",
 		"typecheck": "effect-tsgo tsc --noEmit",
 		"test": "vitest run --pool=threads --no-allowOnly"
 	},
@@ -19,11 +20,13 @@
 		"@checkfu/api": "workspace:*",
 		"@checkfu/domain": "workspace:*",
 		"@effect/platform-bun": "catalog:",
+		"alchemy": "catalog:",
 		"effect": "catalog:",
 		"yaml": "catalog:"
 	},
 	"devDependencies": {
 		"@alchemy.run/domain": "catalog:",
+		"@effect/platform-node": "catalog:",
 		"@effect/vitest": "catalog:",
 		"vitest": "catalog:"
 	}

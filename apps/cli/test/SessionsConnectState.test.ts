@@ -116,6 +116,9 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		expect(
 			extractSubmittedMessageReceipt([{ type: "user.message", turn: 2, queued: false }]),
 		).toEqual({ turn: 2, queued: false })
+		expect(
+			extractSubmittedMessageReceipt([{ type: "user.message", turn: 2, queued: "yes" }]),
+		).toBeUndefined()
 		expect(extractSubmittedMessageReceipt([{ turn: 7 }])).toBeUndefined()
 		expect(extractSubmittedMessageReceipt([{ type: "user.message", turn: 0 }])).toBeUndefined()
 		expect(extractSubmittedMessageReceipt([{ type: "user.interrupt", turn: 1 }])).toBeUndefined()

@@ -11,6 +11,7 @@ import * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
@@ -173,22 +174,14 @@ const sendConnectEventsWithRetry = <A>(
 	})
 
 const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId) =>
-	Effect.gen(function* () {
-		for (let attempt = 0; ; attempt++) {
-			const res = yield* Effect.result(
-				client.api.sessions.get({ params: { session_id: sessionId } }),
-			)
-			if (res._tag === "Success") {
-				return res.success
-			}
-			const err = res.failure
-			if (isRetryableLookupError(err) && attempt < MAX_SESSION_STATUS_LOOKUP_RETRIES) {
-				yield* Effect.sleep(Duration.millis(SESSION_STATUS_LOOKUP_RETRY_BASE_MS * 2 ** attempt))
-				continue
-			}
-			return yield* formatClientError(err)
-		}
-	})
+	client.api.sessions.get({ params: { session_id: sessionId } }).pipe(
+		Effect.retry({
+			while: isRetryableLookupError,
+			schedule: Schedule.exponential(Duration.millis(SESSION_STATUS_LOOKUP_RETRY_BASE_MS)),
+			times: MAX_SESSION_STATUS_LOOKUP_RETRIES,
+		}),
+		Effect.mapError(formatClientError),
+	)
 
 interface BoundedLineHooks {
 	readonly onChunkParsed?: (lines: ReadonlyArray<string>, pending: string) => void
@@ -841,6 +834,568 @@ const resolveCursorBaseline = (
 	})
 }
 
+export const connectToSession = (client: CheckfuClient, sessionId: SessionId, after?: number) =>
+	Effect.gen(function* () {
+		const root = yield* RootCommand
+		const stdio = yield* Stdio.Stdio
+		const terminal = yield* Terminal.Terminal
+
+		const initialSession = yield* fetchSessionStatusWithRetry(client, sessionId)
+
+		const rawStructuredMode =
+			root.format !== "auto" || Option.isSome(root.transform) || root.rawOutput
+
+		let headSeq = 0
+		if (after !== undefined && after > 0) {
+			const latestPage = yield* client.api.sessions
+				.listEvents({
+					params: { session_id: sessionId },
+					query: { limit: 1, order: "desc" },
+				})
+				.pipe(Effect.mapError(formatClientError))
+			const latestEntry = latestPage.data[0]
+			if (latestEntry !== undefined && typeof latestEntry["seq"] === "number") {
+				headSeq = latestEntry["seq"]
+			}
+		}
+
+		const baseline = yield* resolveCursorBaseline(client, sessionId, initialSession, after, headSeq)
+		const session = baseline.latestSession
+		const initiallyEnded = session.status === "terminated" || session.archived_at !== null
+		const isInteractiveTty = yield* stdio.stdinIsTerminal
+
+		yield* writeStderrLine(
+			`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
+		)
+
+		const stateRef = yield* Ref.make<ConnectState>(
+			createInitialConnectState({
+				trackPipedTurns: !isInteractiveTty,
+				status: baseline.status,
+				liveStatus: session.status,
+				liveTurn: session.turn,
+				lastProcessedSeq: after ?? 0,
+				observedTurn: baseline.observedTurn,
+				settledTurn: baseline.settledTurn,
+				ended: initiallyEnded,
+			}),
+		)
+
+		const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())
+		const streamFailedRef = yield* Ref.make<CliFailure | null>(null)
+		const streamFailedDeferred = yield* Deferred.make<void>()
+		const incompleteTurnRef = yield* Ref.make<CliFailure | null>(null)
+		const failedTurnRef = yield* Ref.make<CliFailure | null>(null)
+		const streamEndedDeferred = yield* Deferred.make<void>()
+		const stopConnectDeferred = yield* Deferred.make<void>()
+		const expectArchivedEvent = session.archived_at !== null
+
+		const stdinCheckFiber =
+			initiallyEnded && !isInteractiveTty
+				? yield* Effect.result(inspectEndedPipedStdin(stdio)).pipe(Effect.forkChild)
+				: undefined
+
+		const streamFiber = yield* client
+			.streamSessionEvents(sessionId, after === undefined ? undefined : { after })
+			.pipe(
+				Stream.runForEach((event) =>
+					renderConnectEvent(
+						client,
+						sessionId,
+						event,
+						stateRef,
+						settleDeferredRef,
+						stopConnectDeferred,
+						expectArchivedEvent,
+						rawStructuredMode,
+					),
+				),
+				Effect.catch((error) =>
+					Effect.gen(function* () {
+						yield* Ref.set(streamFailedRef, error)
+						yield* Deferred.succeed(streamFailedDeferred, undefined)
+						const settleDeferred = yield* Ref.get(settleDeferredRef)
+						yield* Deferred.succeed(settleDeferred, undefined)
+					}),
+				),
+				Effect.ensuring(
+					Effect.all([
+						Deferred.succeed(streamEndedDeferred, undefined),
+						Deferred.succeed(stopConnectDeferred, undefined),
+					]),
+				),
+				Effect.forkChild,
+			)
+
+		const runInputLoop = Effect.gen(function* () {
+			const initialState = yield* Ref.get(stateRef)
+			if (initialState.ended) {
+				const replayDone =
+					session.archived_at !== null
+						? Deferred.await(streamEndedDeferred)
+						: baseline.status !== "terminated"
+							? Deferred.await(stopConnectDeferred)
+							: Effect.void
+
+				if (stdinCheckFiber === undefined) {
+					const endedStatusLabel = session.archived_at !== null ? "archived" : "terminated"
+					while (true) {
+						const nextEvent = yield* Effect.race(
+							Effect.result(terminal.readLine).pipe(
+								Effect.map((outcome) => ({ _tag: "line" as const, outcome })),
+							),
+							replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
+						)
+						if (nextEvent._tag === "replay_done") {
+							break
+						}
+						if (nextEvent.outcome._tag === "Failure") {
+							yield* replayDone
+							break
+						}
+						const trimmed = nextEvent.outcome.success.trim()
+						if (trimmed === "/exit" || trimmed === "/quit") {
+							break
+						}
+						if (trimmed.length > 0) {
+							yield* writeStderrLine(
+								`Cannot send input: session ${session.id} is already ${endedStatusLabel}. Type /exit to disconnect.`,
+							)
+						}
+					}
+					return
+				}
+
+				const unsentInputError = networkFailure(
+					`Cannot send input: session ${session.id} is already ${session.archived_at !== null ? "archived" : "terminated"}.`,
+				)
+				const handleStdinOutcome = (
+					outcome:
+						| { readonly _tag: "Success"; readonly success: EndedStdinSignal }
+						| { readonly _tag: "Failure"; readonly failure: CliFailure },
+				): Effect.Effect<"eof" | "exit", CliFailure> => {
+					if (outcome._tag === "Failure") {
+						return Effect.fail(outcome.failure)
+					}
+					if (outcome.success._tag === "input") {
+						return Effect.fail(unsentInputError)
+					}
+					return Effect.succeed(outcome.success._tag)
+				}
+
+				yield* Effect.gen(function* () {
+					const first = yield* Effect.race(
+						Fiber.join(stdinCheckFiber).pipe(
+							Effect.map((outcome) => ({ _tag: "stdin" as const, outcome })),
+						),
+						replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
+					)
+					if (first._tag === "stdin") {
+						const kind = yield* handleStdinOutcome(first.outcome)
+						if (kind === "eof") {
+							yield* replayDone
+						}
+					} else {
+						const streamErr = yield* Ref.get(streamFailedRef)
+						if (streamErr !== null) {
+							return
+						}
+						const afterReplay = yield* Effect.race(
+							Fiber.join(stdinCheckFiber).pipe(
+								Effect.map((outcome) => ({ _tag: "stdin" as const, outcome })),
+							),
+							Deferred.await(streamFailedDeferred).pipe(
+								Effect.as({ _tag: "stream_failed" as const }),
+							),
+						)
+						if (afterReplay._tag === "stdin") {
+							yield* handleStdinOutcome(afterReplay.outcome)
+						}
+					}
+				}).pipe(Effect.ensuring(Fiber.interrupt(stdinCheckFiber)))
+				return
+			}
+
+			if (isInteractiveTty) {
+				let interruptedLiveTurn: number | undefined
+				const interruptQueue = yield* Queue.unbounded<void>()
+
+				const interruptWorker = yield* Effect.forever(
+					Queue.take(interruptQueue).pipe(
+						Effect.andThen(dispatchUserLine(client, sessionId, "/interrupt", stateRef)),
+						Effect.andThen(writeStderrLine("Press Ctrl-C again to disconnect.")),
+					),
+				).pipe(Effect.forkChild)
+
+				const ttyLoop = Effect.gen(function* () {
+					while (true) {
+						const state = yield* Ref.get(stateRef)
+						if (state.ended) {
+							break
+						}
+						const nextEvent = yield* Effect.race(
+							Effect.result(terminal.readLine).pipe(
+								Effect.map((outcome) => ({ _tag: "line" as const, outcome })),
+							),
+							Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
+						)
+						if (nextEvent._tag === "ended") {
+							break
+						}
+						if (nextEvent.outcome._tag === "Failure") {
+							break
+						}
+						const dispatchOutcome = yield* Effect.raceFirst(
+							dispatchUserLine(client, sessionId, nextEvent.outcome.success, stateRef, {
+								reportRecoverableSendErrors: true,
+								onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
+							}).pipe(Effect.map((action) => ({ _tag: "action" as const, action }))),
+							Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
+						)
+						if (dispatchOutcome._tag === "ended" || dispatchOutcome.action === "exit") {
+							break
+						}
+					}
+				})
+
+				yield* withSigintHandler(() => {
+					const current = Ref.getUnsafe(stateRef)
+					if (shouldInterruptOnCtrlC(current, interruptedLiveTurn)) {
+						interruptedLiveTurn = current.liveTurn
+						Queue.offerUnsafe(interruptQueue, undefined)
+						return true
+					}
+					return false
+				}, ttyLoop).pipe(Effect.ensuring(Fiber.interrupt(interruptWorker)))
+				return
+			}
+
+			type PipedStdinItem =
+				| { readonly _tag: "line"; readonly line: string }
+				| { readonly _tag: "eof" }
+				| { readonly _tag: "error"; readonly failure: CliFailure }
+
+			let explicitExit = false
+			let stdinReachedEof = false
+			let pendingPartial = ""
+			let postStopPending: Deferred.Deferred<void> | undefined
+			const stdinQueue = yield* Queue.bounded<PipedStdinItem>(64)
+
+			const stdinReaderFiber = yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
+				onChunkParsed: (_lines, pending) => {
+					pendingPartial = pending
+				},
+				onPendingAfterLines: (pending) => {
+					pendingPartial = pending
+					if (postStopPending !== undefined && pending.trim().length > 0) {
+						return Deferred.succeed(postStopPending, undefined).pipe(Effect.asVoid)
+					}
+					return Effect.void
+				},
+				onTrailingFlushed: () =>
+					Effect.sync(() => {
+						pendingPartial = ""
+					}),
+			}).pipe(
+				Stream.runForEach((line) => Queue.offer(stdinQueue, { _tag: "line", line })),
+				Effect.andThen(
+					Effect.sync(() => {
+						stdinReachedEof = true
+					}),
+				),
+				Effect.andThen(Queue.offer(stdinQueue, { _tag: "eof" })),
+				Effect.catch((error) => Queue.offer(stdinQueue, { _tag: "error", failure: error })),
+				Effect.forkChild,
+			)
+
+			const dispatchLoop = Effect.gen(function* () {
+				while (true) {
+					const item = yield* Queue.take(stdinQueue)
+					if (item._tag === "eof") {
+						return "stdin_eof" as const
+					}
+					if (item._tag === "error") {
+						return yield* item.failure
+					}
+					if (explicitExit) {
+						return "explicit_exit" as const
+					}
+					const trimmed = item.line.trim()
+					if (trimmed.length === 0) {
+						continue
+					}
+					if (isExitCommand(trimmed)) {
+						explicitExit = true
+						return "explicit_exit" as const
+					}
+					const state = yield* Ref.get(stateRef)
+					if (state.ended) {
+						return yield* networkFailure(
+							`Cannot send input: session ${session.id} has already ended.`,
+						)
+					}
+					const action = yield* dispatchUserLine(client, sessionId, item.line, stateRef, {
+						failOnInterruptError: true,
+						onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
+					})
+					if (action === "exit") {
+						explicitExit = true
+						return "explicit_exit" as const
+					}
+				}
+			})
+
+			const failUnreadBufferedInput = Effect.gen(function* () {
+				const currentState = yield* Ref.get(stateRef)
+				return yield* networkFailure(
+					currentState.ended
+						? `Cannot send input: session ${session.id} ended before buffered input was submitted.`
+						: "Event stream ended before buffered input was submitted.",
+				)
+			})
+
+			const inspectPipedItemAfterStop = (
+				item: PipedStdinItem,
+			): Effect.Effect<"continue" | "done", CliFailure> => {
+				if (item._tag === "error") {
+					return Effect.fail(item.failure)
+				}
+				if (item._tag === "eof") {
+					stdinReachedEof = true
+					return Effect.succeed("done" as const)
+				}
+				const trimmed = item.line.trim()
+				if (trimmed.length === 0) {
+					return Effect.succeed("continue" as const)
+				}
+				if (isExitCommand(trimmed)) {
+					explicitExit = true
+					return Effect.succeed("done" as const)
+				}
+				return failUnreadBufferedInput
+			}
+
+			yield* Effect.gen(function* () {
+				const inputRaceOutcome = yield* Effect.raceFirst(
+					dispatchLoop,
+					Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
+				)
+				if (inputRaceOutcome !== "stopped" || explicitExit) {
+					return
+				}
+				const streamErr = yield* Ref.get(streamFailedRef)
+				const existingIncomplete = yield* Ref.get(incompleteTurnRef)
+				if (streamErr !== null || existingIncomplete !== null) {
+					return
+				}
+
+				// First inspect anything already pulled by the concurrent stdin reader.
+				const bufferedItems = yield* Queue.clear(stdinQueue)
+				for (const item of bufferedItems) {
+					if ((yield* inspectPipedItemAfterStop(item)) === "done") {
+						return
+					}
+				}
+				const trimmedPending = pendingPartial.trim()
+				if (trimmedPending.length > 0 && !isExitCommand(trimmedPending)) {
+					return yield* failUnreadBufferedInput
+				}
+				if (stdinReachedEof) {
+					return
+				}
+
+				// The dispatch loop was cancelled before stdin reached EOF; briefly probe the
+				// still-attached stdin reader so unread input waiting in the next pipe chunk
+				// is detected rather than silently dropped with exit code 0.
+				const pendingSignal = yield* Deferred.make<void>()
+				postStopPending = pendingSignal
+				if (pendingPartial.trim().length > 0) {
+					yield* Deferred.succeed(pendingSignal, undefined)
+				}
+				const probeDeadline = yield* Deferred.make<void>()
+				const probeTimer = yield* Effect.sleep(Duration.millis(50)).pipe(
+					Effect.andThen(Deferred.succeed(probeDeadline, undefined)),
+					Effect.forkChild,
+				)
+				yield* Effect.gen(function* () {
+					while (!stdinReachedEof) {
+						const probed = yield* Effect.race(
+							Queue.take(stdinQueue).pipe(Effect.map((item) => ({ _tag: "item" as const, item }))),
+							Effect.race(
+								Deferred.await(pendingSignal).pipe(Effect.as({ _tag: "pending" as const })),
+								Deferred.await(probeDeadline).pipe(Effect.as({ _tag: "idle" as const })),
+							),
+						)
+						if (probed._tag === "item") {
+							if ((yield* inspectPipedItemAfterStop(probed.item)) === "done") {
+								return
+							}
+							continue
+						}
+						const pendingNow = pendingPartial.trim()
+						if (probed._tag === "pending") {
+							if (pendingNow.length > 0 && !isExitCommandPrefix(pendingNow)) {
+								return yield* failUnreadBufferedInput
+							}
+							// Wait for either the line/EOF to arrive or the probe window to finish
+							const afterPrefix = yield* Effect.race(
+								Queue.take(stdinQueue).pipe(
+									Effect.map((item) => ({ _tag: "item" as const, item })),
+								),
+								Deferred.await(probeDeadline).pipe(Effect.as({ _tag: "idle" as const })),
+							)
+							if (afterPrefix._tag === "item") {
+								if ((yield* inspectPipedItemAfterStop(afterPrefix.item)) === "done") {
+									return
+								}
+								continue
+							}
+						}
+						const finalPending = pendingPartial.trim()
+						if (finalPending.length > 0 && !isExitCommand(finalPending)) {
+							return yield* failUnreadBufferedInput
+						}
+						return
+					}
+				}).pipe(Effect.ensuring(Fiber.interrupt(probeTimer)))
+			}).pipe(Effect.ensuring(Fiber.interrupt(stdinReaderFiber)))
+
+			if (!explicitExit) {
+				while (true) {
+					const waiter = yield* Deferred.make<void>()
+					yield* Ref.set(settleDeferredRef, waiter)
+
+					const failed = yield* Ref.get(streamFailedRef)
+					if (failed !== null) {
+						break
+					}
+					let currentState = yield* Ref.get(stateRef)
+					const settlementAction = evaluatePipedSettlement(currentState)
+					if (settlementAction === "ended" || settlementAction === "settled") {
+						break
+					}
+					if (settlementAction === "check_halted_queue") {
+						let haltedQueuedTurn = false
+						for (let checkAttempt = 0; ; checkAttempt++) {
+							const lookupFiber = yield* Effect.result(
+								fetchSessionStatusWithRetry(client, sessionId),
+							).pipe(Effect.forkChild)
+							const lookupRace = yield* Effect.race(
+								Fiber.join(lookupFiber).pipe(
+									Effect.map((result) => ({ _tag: "lookup" as const, result })),
+								),
+								Effect.race(
+									Deferred.await(waiter).pipe(Effect.as({ _tag: "event" as const })),
+									Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "event" as const })),
+								),
+							).pipe(Effect.ensuring(Fiber.interrupt(lookupFiber)))
+							if (lookupRace._tag === "event") {
+								break
+							}
+							const latestRes = lookupRace.result
+							const refreshed = yield* Ref.get(stateRef)
+							if (latestRes._tag === "Failure") {
+								if (evaluatePipedSettlement(refreshed) !== "check_halted_queue") {
+									break
+								}
+								yield* Ref.set(incompleteTurnRef, latestRes.failure)
+								haltedQueuedTurn = true
+								break
+							}
+							const decision = evaluateHaltedQueueSnapshot(
+								currentState,
+								refreshed,
+								latestRes.success,
+								checkAttempt >= MAX_QUEUED_TURN_PROJECTION_RETRIES,
+							)
+							if (decision.action === "continue_waiting") {
+								break
+							}
+							if (decision.action === "fail") {
+								yield* Ref.set(incompleteTurnRef, networkFailure(decision.message))
+								haltedQueuedTurn = true
+								break
+							}
+							const delayMs = QUEUED_TURN_PROJECTION_RETRY_BASE_MS * 2 ** checkAttempt
+							const waitRace = yield* Effect.race(
+								Effect.sleep(Duration.millis(delayMs)).pipe(Effect.as("retry" as const)),
+								Effect.race(
+									Deferred.await(waiter).pipe(Effect.as("event" as const)),
+									Deferred.await(stopConnectDeferred).pipe(Effect.as("event" as const)),
+								),
+							)
+							if (waitRace === "event") {
+								break
+							}
+						}
+						if (haltedQueuedTurn) {
+							break
+						}
+						const failedAfterLookup = yield* Ref.get(streamFailedRef)
+						if (failedAfterLookup !== null) {
+							break
+						}
+						currentState = yield* Ref.get(stateRef)
+						const afterLookupAction = evaluatePipedSettlement(currentState)
+						if (afterLookupAction === "ended" || afterLookupAction === "settled") {
+							break
+						}
+					}
+					if (yield* Deferred.isDone(streamEndedDeferred)) {
+						const failedAtEnd = yield* Ref.get(streamFailedRef)
+						if (failedAtEnd === null) {
+							const stateAtEnd = yield* Ref.get(stateRef)
+							const streamEndedError = resolveStreamEndedError(stateAtEnd)
+							if (streamEndedError !== undefined) {
+								yield* Ref.set(incompleteTurnRef, networkFailure(streamEndedError))
+							}
+						}
+						break
+					}
+					if (currentState.targetTurn === 0) {
+						break
+					}
+					const outcome = yield* Effect.race(
+						Deferred.await(waiter).pipe(Effect.as("settled" as const)),
+						Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
+					)
+					if (outcome === "stopped") {
+						const failedAfter = yield* Ref.get(streamFailedRef)
+						if (failedAfter === null) {
+							const afterStream = yield* Ref.get(stateRef)
+							const streamEndedError = resolveStreamEndedError(afterStream)
+							if (streamEndedError !== undefined) {
+								yield* Ref.set(incompleteTurnRef, networkFailure(streamEndedError))
+							}
+						}
+						break
+					}
+				}
+
+				const finalState = yield* Ref.get(stateRef)
+				const finalError = resolveFinalPipedError(finalState)
+				if (finalError !== undefined) {
+					yield* Ref.set(failedTurnRef, networkFailure(finalError))
+				}
+			}
+		})
+
+		yield* runInputLoop.pipe(Effect.ensuring(Fiber.interrupt(streamFiber)))
+
+		const streamError = yield* Ref.get(streamFailedRef)
+		if (streamError !== null) {
+			return yield* streamError
+		}
+		const incompleteError = yield* Ref.get(incompleteTurnRef)
+		if (incompleteError !== null) {
+			return yield* incompleteError
+		}
+		const failedTurnError = yield* Ref.get(failedTurnRef)
+		if (failedTurnError !== null) {
+			return yield* failedTurnError
+		}
+	})
+
 export const sessionsConnectCommand = Command.make(
 	"connect",
 	{
@@ -894,574 +1449,11 @@ export const sessionsConnectCommand = Command.make(
 			}
 
 			const sessionId = yield* decodePayload(SessionId, rawSessionId, "--session-id")
-			const root = yield* RootCommand
-			const stdio = yield* Stdio.Stdio
-			const terminal = yield* Terminal.Terminal
-			const client = yield* getClient
-
-			const initialSession = yield* fetchSessionStatusWithRetry(client, sessionId)
-
-			const rawStructuredMode =
-				root.format !== "auto" || Option.isSome(root.transform) || root.rawOutput
-
-			const after = Option.getOrUndefined(input.after)
-			let headSeq = 0
-			if (after !== undefined && after > 0) {
-				const latestPage = yield* client.api.sessions
-					.listEvents({
-						params: { session_id: sessionId },
-						query: { limit: 1, order: "desc" },
-					})
-					.pipe(Effect.mapError(formatClientError))
-				const latestEntry = latestPage.data[0]
-				if (latestEntry !== undefined && typeof latestEntry["seq"] === "number") {
-					headSeq = latestEntry["seq"]
-				}
-			}
-
-			const baseline = yield* resolveCursorBaseline(
-				client,
+			return yield* connectToSession(
+				yield* getClient,
 				sessionId,
-				initialSession,
-				after,
-				headSeq,
+				Option.getOrUndefined(input.after),
 			)
-			const session = baseline.latestSession
-			const initiallyEnded = session.status === "terminated" || session.archived_at !== null
-			const isInteractiveTty = yield* stdio.stdinIsTerminal
-
-			yield* writeStderrLine(
-				`Connected to ${session.id} (agent ${session.agent.id}@v${session.agent.version}, status: ${session.status}). Type a message, /interrupt, or /exit.`,
-			)
-
-			const stateRef = yield* Ref.make<ConnectState>(
-				createInitialConnectState({
-					trackPipedTurns: !isInteractiveTty,
-					status: baseline.status,
-					liveStatus: session.status,
-					liveTurn: session.turn,
-					lastProcessedSeq: after ?? 0,
-					observedTurn: baseline.observedTurn,
-					settledTurn: baseline.settledTurn,
-					ended: initiallyEnded,
-				}),
-			)
-
-			const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())
-			const streamFailedRef = yield* Ref.make<CliFailure | null>(null)
-			const streamFailedDeferred = yield* Deferred.make<void>()
-			const incompleteTurnRef = yield* Ref.make<CliFailure | null>(null)
-			const failedTurnRef = yield* Ref.make<CliFailure | null>(null)
-			const streamEndedDeferred = yield* Deferred.make<void>()
-			const stopConnectDeferred = yield* Deferred.make<void>()
-			const expectArchivedEvent = session.archived_at !== null
-
-			const stdinCheckFiber =
-				initiallyEnded && !isInteractiveTty
-					? yield* Effect.result(inspectEndedPipedStdin(stdio)).pipe(Effect.forkChild)
-					: undefined
-
-			const streamFiber = yield* client
-				.streamSessionEvents(sessionId, after === undefined ? undefined : { after })
-				.pipe(
-					Stream.runForEach((event) =>
-						renderConnectEvent(
-							client,
-							sessionId,
-							event,
-							stateRef,
-							settleDeferredRef,
-							stopConnectDeferred,
-							expectArchivedEvent,
-							rawStructuredMode,
-						),
-					),
-					Effect.catch((error) =>
-						Effect.gen(function* () {
-							yield* Ref.set(streamFailedRef, error)
-							yield* Deferred.succeed(streamFailedDeferred, undefined)
-							const settleDeferred = yield* Ref.get(settleDeferredRef)
-							yield* Deferred.succeed(settleDeferred, undefined)
-						}),
-					),
-					Effect.ensuring(
-						Effect.all([
-							Deferred.succeed(streamEndedDeferred, undefined),
-							Deferred.succeed(stopConnectDeferred, undefined),
-						]),
-					),
-					Effect.forkChild,
-				)
-
-			const runInputLoop = Effect.gen(function* () {
-				const initialState = yield* Ref.get(stateRef)
-				if (initialState.ended) {
-					const replayDone =
-						session.archived_at !== null
-							? Deferred.await(streamEndedDeferred)
-							: baseline.status !== "terminated"
-								? Deferred.await(stopConnectDeferred)
-								: Effect.void
-
-					if (stdinCheckFiber === undefined) {
-						const endedStatusLabel = session.archived_at !== null ? "archived" : "terminated"
-						while (true) {
-							const nextEvent = yield* Effect.race(
-								Effect.result(terminal.readLine).pipe(
-									Effect.map((outcome) => ({ _tag: "line" as const, outcome })),
-								),
-								replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
-							)
-							if (nextEvent._tag === "replay_done") {
-								break
-							}
-							if (nextEvent.outcome._tag === "Failure") {
-								yield* replayDone
-								break
-							}
-							const trimmed = nextEvent.outcome.success.trim()
-							if (trimmed === "/exit" || trimmed === "/quit") {
-								break
-							}
-							if (trimmed.length > 0) {
-								yield* writeStderrLine(
-									`Cannot send input: session ${session.id} is already ${endedStatusLabel}. Type /exit to disconnect.`,
-								)
-							}
-						}
-						return
-					}
-
-					const unsentInputError = networkFailure(
-						`Cannot send input: session ${session.id} is already ${session.archived_at !== null ? "archived" : "terminated"}.`,
-					)
-					const handleStdinOutcome = (
-						outcome:
-							| { readonly _tag: "Success"; readonly success: EndedStdinSignal }
-							| { readonly _tag: "Failure"; readonly failure: CliFailure },
-					): Effect.Effect<"eof" | "exit", CliFailure> => {
-						if (outcome._tag === "Failure") {
-							return Effect.fail(outcome.failure)
-						}
-						if (outcome.success._tag === "input") {
-							return Effect.fail(unsentInputError)
-						}
-						return Effect.succeed(outcome.success._tag)
-					}
-
-					yield* Effect.gen(function* () {
-						const first = yield* Effect.race(
-							Fiber.join(stdinCheckFiber).pipe(
-								Effect.map((outcome) => ({ _tag: "stdin" as const, outcome })),
-							),
-							replayDone.pipe(Effect.as({ _tag: "replay_done" as const })),
-						)
-						if (first._tag === "stdin") {
-							const kind = yield* handleStdinOutcome(first.outcome)
-							if (kind === "eof") {
-								yield* replayDone
-							}
-						} else {
-							const streamErr = yield* Ref.get(streamFailedRef)
-							if (streamErr !== null) {
-								return
-							}
-							const afterReplay = yield* Effect.race(
-								Fiber.join(stdinCheckFiber).pipe(
-									Effect.map((outcome) => ({ _tag: "stdin" as const, outcome })),
-								),
-								Deferred.await(streamFailedDeferred).pipe(
-									Effect.as({ _tag: "stream_failed" as const }),
-								),
-							)
-							if (afterReplay._tag === "stdin") {
-								yield* handleStdinOutcome(afterReplay.outcome)
-							}
-						}
-					}).pipe(Effect.ensuring(Fiber.interrupt(stdinCheckFiber)))
-					return
-				}
-
-				if (isInteractiveTty) {
-					let interruptedLiveTurn: number | undefined
-					const interruptQueue = yield* Queue.unbounded<void>()
-
-					const interruptWorker = yield* Effect.forever(
-						Queue.take(interruptQueue).pipe(
-							Effect.andThen(dispatchUserLine(client, sessionId, "/interrupt", stateRef)),
-							Effect.andThen(writeStderrLine("Press Ctrl-C again to disconnect.")),
-						),
-					).pipe(Effect.forkChild)
-
-					const ttyLoop = Effect.gen(function* () {
-						while (true) {
-							const state = yield* Ref.get(stateRef)
-							if (state.ended) {
-								break
-							}
-							const nextEvent = yield* Effect.race(
-								Effect.result(terminal.readLine).pipe(
-									Effect.map((outcome) => ({ _tag: "line" as const, outcome })),
-								),
-								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
-							)
-							if (nextEvent._tag === "ended") {
-								break
-							}
-							if (nextEvent.outcome._tag === "Failure") {
-								break
-							}
-							const dispatchOutcome = yield* Effect.raceFirst(
-								dispatchUserLine(client, sessionId, nextEvent.outcome.success, stateRef, {
-									reportRecoverableSendErrors: true,
-									onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
-								}).pipe(Effect.map((action) => ({ _tag: "action" as const, action }))),
-								Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "ended" as const })),
-							)
-							if (dispatchOutcome._tag === "ended" || dispatchOutcome.action === "exit") {
-								break
-							}
-						}
-					})
-
-					yield* withSigintHandler(() => {
-						const current = Ref.getUnsafe(stateRef)
-						if (shouldInterruptOnCtrlC(current, interruptedLiveTurn)) {
-							interruptedLiveTurn = current.liveTurn
-							Queue.offerUnsafe(interruptQueue, undefined)
-							return true
-						}
-						return false
-					}, ttyLoop).pipe(Effect.ensuring(Fiber.interrupt(interruptWorker)))
-					return
-				}
-
-				type PipedStdinItem =
-					| { readonly _tag: "line"; readonly line: string }
-					| { readonly _tag: "eof" }
-					| { readonly _tag: "error"; readonly failure: CliFailure }
-
-				let explicitExit = false
-				let stdinReachedEof = false
-				let pendingPartial = ""
-				let postStopPending: Deferred.Deferred<void> | undefined
-				const stdinQueue = yield* Queue.bounded<PipedStdinItem>(64)
-
-				const stdinReaderFiber = yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
-					onChunkParsed: (_lines, pending) => {
-						pendingPartial = pending
-					},
-					onPendingAfterLines: (pending) => {
-						pendingPartial = pending
-						if (postStopPending !== undefined && pending.trim().length > 0) {
-							return Deferred.succeed(postStopPending, undefined).pipe(Effect.asVoid)
-						}
-						return Effect.void
-					},
-					onTrailingFlushed: () =>
-						Effect.sync(() => {
-							pendingPartial = ""
-						}),
-				}).pipe(
-					Stream.runForEach((line) => Queue.offer(stdinQueue, { _tag: "line", line })),
-					Effect.andThen(
-						Effect.sync(() => {
-							stdinReachedEof = true
-						}),
-					),
-					Effect.andThen(Queue.offer(stdinQueue, { _tag: "eof" })),
-					Effect.catch((error) => Queue.offer(stdinQueue, { _tag: "error", failure: error })),
-					Effect.forkChild,
-				)
-
-				const dispatchLoop = Effect.gen(function* () {
-					while (true) {
-						const item = yield* Queue.take(stdinQueue)
-						if (item._tag === "eof") {
-							return "stdin_eof" as const
-						}
-						if (item._tag === "error") {
-							return yield* item.failure
-						}
-						if (explicitExit) {
-							return "explicit_exit" as const
-						}
-						const trimmed = item.line.trim()
-						if (trimmed.length === 0) {
-							continue
-						}
-						if (isExitCommand(trimmed)) {
-							explicitExit = true
-							return "explicit_exit" as const
-						}
-						const state = yield* Ref.get(stateRef)
-						if (state.ended) {
-							return yield* networkFailure(
-								`Cannot send input: session ${session.id} has already ended.`,
-							)
-						}
-						const action = yield* dispatchUserLine(client, sessionId, item.line, stateRef, {
-							failOnInterruptError: true,
-							onInterruptedSend: (failure) => Ref.set(incompleteTurnRef, failure),
-						})
-						if (action === "exit") {
-							explicitExit = true
-							return "explicit_exit" as const
-						}
-					}
-				})
-
-				const failUnreadBufferedInput = Effect.gen(function* () {
-					const currentState = yield* Ref.get(stateRef)
-					return yield* networkFailure(
-						currentState.ended
-							? `Cannot send input: session ${session.id} ended before buffered input was submitted.`
-							: "Event stream ended before buffered input was submitted.",
-					)
-				})
-
-				const inspectPipedItemAfterStop = (
-					item: PipedStdinItem,
-				): Effect.Effect<"continue" | "done", CliFailure> => {
-					if (item._tag === "error") {
-						return Effect.fail(item.failure)
-					}
-					if (item._tag === "eof") {
-						stdinReachedEof = true
-						return Effect.succeed("done" as const)
-					}
-					const trimmed = item.line.trim()
-					if (trimmed.length === 0) {
-						return Effect.succeed("continue" as const)
-					}
-					if (isExitCommand(trimmed)) {
-						explicitExit = true
-						return Effect.succeed("done" as const)
-					}
-					return failUnreadBufferedInput
-				}
-
-				yield* Effect.gen(function* () {
-					const inputRaceOutcome = yield* Effect.raceFirst(
-						dispatchLoop,
-						Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
-					)
-					if (inputRaceOutcome !== "stopped" || explicitExit) {
-						return
-					}
-					const streamErr = yield* Ref.get(streamFailedRef)
-					const existingIncomplete = yield* Ref.get(incompleteTurnRef)
-					if (streamErr !== null || existingIncomplete !== null) {
-						return
-					}
-
-					// First inspect anything already pulled by the concurrent stdin reader.
-					const bufferedItems = yield* Queue.clear(stdinQueue)
-					for (const item of bufferedItems) {
-						if ((yield* inspectPipedItemAfterStop(item)) === "done") {
-							return
-						}
-					}
-					const trimmedPending = pendingPartial.trim()
-					if (trimmedPending.length > 0 && !isExitCommand(trimmedPending)) {
-						return yield* failUnreadBufferedInput
-					}
-					if (stdinReachedEof) {
-						return
-					}
-
-					// The dispatch loop was cancelled before stdin reached EOF; briefly probe the
-					// still-attached stdin reader so unread input waiting in the next pipe chunk
-					// is detected rather than silently dropped with exit code 0.
-					const pendingSignal = yield* Deferred.make<void>()
-					postStopPending = pendingSignal
-					if (pendingPartial.trim().length > 0) {
-						yield* Deferred.succeed(pendingSignal, undefined)
-					}
-					const probeDeadline = yield* Deferred.make<void>()
-					const probeTimer = yield* Effect.sleep(Duration.millis(50)).pipe(
-						Effect.andThen(Deferred.succeed(probeDeadline, undefined)),
-						Effect.forkChild,
-					)
-					yield* Effect.gen(function* () {
-						while (!stdinReachedEof) {
-							const probed = yield* Effect.race(
-								Queue.take(stdinQueue).pipe(
-									Effect.map((item) => ({ _tag: "item" as const, item })),
-								),
-								Effect.race(
-									Deferred.await(pendingSignal).pipe(Effect.as({ _tag: "pending" as const })),
-									Deferred.await(probeDeadline).pipe(Effect.as({ _tag: "idle" as const })),
-								),
-							)
-							if (probed._tag === "item") {
-								if ((yield* inspectPipedItemAfterStop(probed.item)) === "done") {
-									return
-								}
-								continue
-							}
-							const pendingNow = pendingPartial.trim()
-							if (probed._tag === "pending") {
-								if (pendingNow.length > 0 && !isExitCommandPrefix(pendingNow)) {
-									return yield* failUnreadBufferedInput
-								}
-								// Wait for either the line/EOF to arrive or the probe window to finish
-								const afterPrefix = yield* Effect.race(
-									Queue.take(stdinQueue).pipe(
-										Effect.map((item) => ({ _tag: "item" as const, item })),
-									),
-									Deferred.await(probeDeadline).pipe(Effect.as({ _tag: "idle" as const })),
-								)
-								if (afterPrefix._tag === "item") {
-									if ((yield* inspectPipedItemAfterStop(afterPrefix.item)) === "done") {
-										return
-									}
-									continue
-								}
-							}
-							const finalPending = pendingPartial.trim()
-							if (finalPending.length > 0 && !isExitCommand(finalPending)) {
-								return yield* failUnreadBufferedInput
-							}
-							return
-						}
-					}).pipe(Effect.ensuring(Fiber.interrupt(probeTimer)))
-				}).pipe(Effect.ensuring(Fiber.interrupt(stdinReaderFiber)))
-
-				if (!explicitExit) {
-					while (true) {
-						const waiter = yield* Deferred.make<void>()
-						yield* Ref.set(settleDeferredRef, waiter)
-
-						const failed = yield* Ref.get(streamFailedRef)
-						if (failed !== null) {
-							break
-						}
-						let currentState = yield* Ref.get(stateRef)
-						const settlementAction = evaluatePipedSettlement(currentState)
-						if (settlementAction === "ended" || settlementAction === "settled") {
-							break
-						}
-						if (settlementAction === "check_halted_queue") {
-							let haltedQueuedTurn = false
-							for (let checkAttempt = 0; ; checkAttempt++) {
-								const lookupFiber = yield* Effect.result(
-									fetchSessionStatusWithRetry(client, sessionId),
-								).pipe(Effect.forkChild)
-								const lookupRace = yield* Effect.race(
-									Fiber.join(lookupFiber).pipe(
-										Effect.map((result) => ({ _tag: "lookup" as const, result })),
-									),
-									Effect.race(
-										Deferred.await(waiter).pipe(Effect.as({ _tag: "event" as const })),
-										Deferred.await(stopConnectDeferred).pipe(Effect.as({ _tag: "event" as const })),
-									),
-								).pipe(Effect.ensuring(Fiber.interrupt(lookupFiber)))
-								if (lookupRace._tag === "event") {
-									break
-								}
-								const latestRes = lookupRace.result
-								const refreshed = yield* Ref.get(stateRef)
-								if (latestRes._tag === "Failure") {
-									if (evaluatePipedSettlement(refreshed) !== "check_halted_queue") {
-										break
-									}
-									yield* Ref.set(incompleteTurnRef, latestRes.failure)
-									haltedQueuedTurn = true
-									break
-								}
-								const decision = evaluateHaltedQueueSnapshot(
-									currentState,
-									refreshed,
-									latestRes.success,
-									checkAttempt >= MAX_QUEUED_TURN_PROJECTION_RETRIES,
-								)
-								if (decision.action === "continue_waiting") {
-									break
-								}
-								if (decision.action === "fail") {
-									yield* Ref.set(incompleteTurnRef, networkFailure(decision.message))
-									haltedQueuedTurn = true
-									break
-								}
-								const delayMs = QUEUED_TURN_PROJECTION_RETRY_BASE_MS * 2 ** checkAttempt
-								const waitRace = yield* Effect.race(
-									Effect.sleep(Duration.millis(delayMs)).pipe(Effect.as("retry" as const)),
-									Effect.race(
-										Deferred.await(waiter).pipe(Effect.as("event" as const)),
-										Deferred.await(stopConnectDeferred).pipe(Effect.as("event" as const)),
-									),
-								)
-								if (waitRace === "event") {
-									break
-								}
-							}
-							if (haltedQueuedTurn) {
-								break
-							}
-							const failedAfterLookup = yield* Ref.get(streamFailedRef)
-							if (failedAfterLookup !== null) {
-								break
-							}
-							currentState = yield* Ref.get(stateRef)
-							const afterLookupAction = evaluatePipedSettlement(currentState)
-							if (afterLookupAction === "ended" || afterLookupAction === "settled") {
-								break
-							}
-						}
-						if (yield* Deferred.isDone(streamEndedDeferred)) {
-							const failedAtEnd = yield* Ref.get(streamFailedRef)
-							if (failedAtEnd === null) {
-								const stateAtEnd = yield* Ref.get(stateRef)
-								const streamEndedError = resolveStreamEndedError(stateAtEnd)
-								if (streamEndedError !== undefined) {
-									yield* Ref.set(incompleteTurnRef, networkFailure(streamEndedError))
-								}
-							}
-							break
-						}
-						if (currentState.targetTurn === 0) {
-							break
-						}
-						const outcome = yield* Effect.race(
-							Deferred.await(waiter).pipe(Effect.as("settled" as const)),
-							Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
-						)
-						if (outcome === "stopped") {
-							const failedAfter = yield* Ref.get(streamFailedRef)
-							if (failedAfter === null) {
-								const afterStream = yield* Ref.get(stateRef)
-								const streamEndedError = resolveStreamEndedError(afterStream)
-								if (streamEndedError !== undefined) {
-									yield* Ref.set(incompleteTurnRef, networkFailure(streamEndedError))
-								}
-							}
-							break
-						}
-					}
-
-					const finalState = yield* Ref.get(stateRef)
-					const finalError = resolveFinalPipedError(finalState)
-					if (finalError !== undefined) {
-						yield* Ref.set(failedTurnRef, networkFailure(finalError))
-					}
-				}
-			})
-
-			yield* runInputLoop.pipe(Effect.ensuring(Fiber.interrupt(streamFiber)))
-
-			const streamError = yield* Ref.get(streamFailedRef)
-			if (streamError !== null) {
-				return yield* streamError
-			}
-			const incompleteError = yield* Ref.get(incompleteTurnRef)
-			if (incompleteError !== null) {
-				return yield* incompleteError
-			}
-			const failedTurnError = yield* Ref.get(failedTurnRef)
-			if (failedTurnError !== null) {
-				return yield* failedTurnError
-			}
 		}),
 ).pipe(
 	Command.withDescription("Connect interactively to a session to stream events and send messages"),

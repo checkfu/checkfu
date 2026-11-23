@@ -3,77 +3,31 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { CliFailure } from "./Errors.ts"
 
-const isBidiOrSeparatorCodePoint = (code: number): boolean =>
-	code === 0x06_1c ||
-	code === 0x20_0e ||
-	code === 0x20_0f ||
-	code === 0x20_28 ||
-	code === 0x20_29 ||
-	(code >= 0x20_2a && code <= 0x20_2e) ||
-	(code >= 0x20_66 && code <= 0x20_69)
+// C0/C1 control characters (except tab and newline) and the bidirectional and line
+// separator characters that can reorder or hide what a terminal shows.
+const UNSAFE_FOR_HUMANS = /(?![\t\n])[\p{Cc}\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu
+// JSON.stringify already escapes C0 controls, so only the rest can reach the terminal.
+const UNSAFE_IN_JSON = /[\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g
 
-const isUnsafeHumanCodePoint = (code: number): boolean =>
-	(code <= 0x1f && code !== 0x09 && code !== 0x0a) ||
-	(code >= 0x7f && code <= 0x9f) ||
-	isBidiOrSeparatorCodePoint(code)
+const unicodeEscape = (character: string): string =>
+	`\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
 
-const isUnsafeJsonTerminalCodePoint = (code: number): boolean =>
-	(code >= 0x7f && code <= 0x9f) || isBidiOrSeparatorCodePoint(code)
-
-const formatHexEscape = (code: number): string =>
-	code <= 0xff
-		? `\\x${code.toString(16).padStart(2, "0")}`
-		: `\\u${code.toString(16).padStart(4, "0")}`
-
-export const hasUnsafeTerminalCodePoint = (value: string): boolean => {
-	for (let i = 0; i < value.length; i++) {
-		if (isUnsafeHumanCodePoint(value.charCodeAt(i))) {
-			return true
-		}
-	}
-	return false
+const hexEscape = (character: string): string => {
+	const code = character.charCodeAt(0)
+	return code <= 0xff ? `\\x${code.toString(16).padStart(2, "0")}` : unicodeEscape(character)
 }
 
-export const escapeQuotedTerminalCodePoints = (value: string): string => {
-	let out = ""
-	for (let i = 0; i < value.length; i++) {
-		const code = value.charCodeAt(i)
-		if (isUnsafeHumanCodePoint(code)) {
-			out += `\\u${code.toString(16).padStart(4, "0")}`
-		} else {
-			out += value[i] ?? ""
-		}
-	}
-	return out
-}
+export const hasUnsafeTerminalCodePoint = (value: string): boolean =>
+	value.search(UNSAFE_FOR_HUMANS) !== -1
 
-export const escapeTerminalControlCharacters = (value: string): string => {
-	const normalized = value.replaceAll("\r\n", "\n")
-	let out = ""
-	for (let i = 0; i < normalized.length; i++) {
-		const code = normalized.charCodeAt(i)
-		if (isUnsafeHumanCodePoint(code)) {
-			out += formatHexEscape(code)
-		} else {
-			out += normalized[i] ?? ""
-		}
-	}
-	return out
-}
+export const escapeQuotedTerminalCodePoints = (value: string): string =>
+	value.replaceAll(UNSAFE_FOR_HUMANS, unicodeEscape)
 
-export const stringifyTerminalSafeJson = (value: unknown, space?: number): string => {
-	const json = JSON.stringify(value, null, space) ?? "null"
-	let out = ""
-	for (let i = 0; i < json.length; i++) {
-		const code = json.charCodeAt(i)
-		if (isUnsafeJsonTerminalCodePoint(code)) {
-			out += `\\u${code.toString(16).padStart(4, "0")}`
-		} else {
-			out += json[i] ?? ""
-		}
-	}
-	return out
-}
+export const escapeTerminalControlCharacters = (value: string): string =>
+	value.replaceAll("\r\n", "\n").replaceAll(UNSAFE_FOR_HUMANS, hexEscape)
+
+export const stringifyTerminalSafeJson = (value: unknown, space?: number): string =>
+	(JSON.stringify(value, null, space) ?? "null").replaceAll(UNSAFE_IN_JSON, unicodeEscape)
 
 export const writeStdout = (text: string): Effect.Effect<void, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {

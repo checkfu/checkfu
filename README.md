@@ -2,9 +2,37 @@
 
 Managed agents on Cloudflare, built on Pi Durable, Alchemy, and Effect.
 
+## Deploy your own
+
+You need [Bun](https://bun.sh) 1.4+, Node.js, a Cloudflare account, and an Anthropic or OpenAI API key. The Workers Paid plan is the safe choice: the free plan allows 10 ms of CPU per request, which an agent turn can exceed.
+
+```sh
+git clone https://github.com/checkfu/checkfu && cd checkfu
+bun install
+bun checkfu deploy
+```
+
+`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys one Worker with its Durable Objects to your account. It generates the API key for you and keeps the secrets in the checkout's `.env`. Once Alchemy has deployed, it records what this checkout now manages (stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go.
+
+Then talk to an agent:
+
+```sh
+bun checkfu chat
+```
+
+`chat` creates an assistant agent, an environment, and a session, and connects you to it. Everything it does is plain API: `bun checkfu agents create --help`, `bun checkfu sessions create --help`, or `GET <your-url>/openapi.json`.
+
+After that:
+
+- **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. Like `destroy`, it stops if the Cloudflare account in use does not hold the deployment this checkout recorded.
+- **Call the API from your own code** — the URL and key are in `~/.config/checkfu/config.json`; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`.
+- **Use it from another machine** — `bun checkfu --base-url https://<your-worker>.workers.dev login`.
+- **Deploy from CI** — export `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, a model provider key, and a persistent `CHECKFU_API_KEY` (the one from your first deploy, or `openssl rand -hex 32`), then run `bun checkfu deploy --yes`. Without a terminal the deploy refuses to invent an API key, because a fresh runner would rotate it on every run.
+- **Remove it** — `bun checkfu destroy` deletes the Worker and all of its data. It only acts on the deployment this checkout recorded: if the Cloudflare account in use does not hold that exact deployment, or the checkout has no record, it stops and asks for an explicit `--stage` rather than guessing.
+
 ## Run locally
 
-Initialize `.env` (if not present), then set `CHECKFU_API_KEY` plus `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`:
+Initialize `.env` (if not present), then set `CHECKFU_API_KEY` plus `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (a `.env` written by `bun checkfu deploy` already has them):
 
 ```sh
 [ -f .env ] || cp .env.example .env
@@ -14,7 +42,7 @@ bun run dev
 
 `bun run dev` prints the local Worker URL (for example `http://localhost:1337`). `GET /health` and `GET /openapi.json` are public; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`.
 
-## Quickstart
+## Quickstart with curl
 
 In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `.env` and `CHECKFU_MODEL` to match your provider key (`gpt-6.2-sol` for `OPENAI_API_KEY` or `claude-sonnet-5-5` for `ANTHROPIC_API_KEY`). This creates an agent, environment, and session, sends a message, and streams events from the start (`Ctrl-C` to exit):
 
@@ -52,11 +80,12 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 ## Commands
 
-- `node apps/cli/bin/checkfu.mjs --help` — run the Checkfu CLI from a **trusted Checkfu source checkout** (`agents`, `environments`, `sessions`, `sessions:events`).
+- `bun checkfu --help` (short for `node apps/cli/bin/checkfu.mjs --help`) — run the Checkfu CLI from a **trusted Checkfu source checkout** (`deploy`, `chat`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
   - **Untrusted checkouts with `CHECKFU_API_KEY` exported:** invoke an independently installed Checkfu launcher using **absolute paths for both Node and `checkfu.mjs`** (e.g., `/usr/bin/node /opt/checkfu/apps/cli/bin/checkfu.mjs --help` on POSIX or `C:\Program Files\nodejs\node.exe C:\Users\<user>\checkfu\apps\cli\bin\checkfu.mjs --help` on Windows). Never run a relative `apps/cli/bin/checkfu.mjs` inside an untrusted checkout.
   - **`PATH`-based `checkfu` bin (`#!/usr/bin/env node`):** requires both `checkfu` and `node` on `PATH` to resolve to trusted installations before the launcher starts (do not rely on the `PATH`-based bin when `PATH` may contain `.`, empty entries, or project-local directories). Once started, the launcher resolves Bun only from explicitly trusted installation roots (or `BUN_INSTALL` / `CHECKFU_BUN_PATH` outside the enclosing checkout) and pins `--no-env-file --config=<install>/bunfig.toml`.
+- `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI commands from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages
 - `bun run state:sync-observability` — one-time rollout to apply `alchemy.run.ts` observability settings (disabling invocation logs) to an existing Cloudflare state-store Worker
-- `bun run deploy` — deploy to your default Cloudflare stage
+- `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy

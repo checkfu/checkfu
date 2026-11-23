@@ -33,6 +33,8 @@
 	"scripts": {
 		"generate": "bun tools/forge/src/Generate.ts",
 		"generate:check": "bun tools/forge/src/Generate.ts --check",
+		"checkfu": "node apps/cli/bin/checkfu.mjs",
+		"checkfu:build": "bun run --cwd apps/cli build",
 		"dev": "alchemy dev",
 		"deploy": "alchemy deploy",
 		"deploy:production": "bun run persisted:check && alchemy deploy --stage production",
