@@ -93,13 +93,18 @@ const check = Command.make("check", {}, () => checkShippedBaseline).pipe(
 
 const persisted = Command.make("persisted").pipe(Command.withSubcommands([cut, check]))
 
-BunRuntime.runMain(
-	Command.run(persisted, { version: "0.0.0" }).pipe(
+export const runPersisted = (args?: ReadonlyArray<string>) =>
+	(args === undefined
+		? Command.run(persisted, { version: "0.0.0" })
+		: Command.runWith(persisted, { version: "0.0.0" })(args)
+	).pipe(
 		Effect.catchTag("PersistedLockError", (error) =>
 			Console.error(error.message).pipe(
 				Effect.andThen(Effect.fail({ [Runtime.errorReported]: false })),
 			),
 		),
-		Effect.provide(PersistedServicesLive),
-	),
-)
+	)
+
+if (import.meta.main) {
+	BunRuntime.runMain(runPersisted().pipe(Effect.provide(PersistedServicesLive)))
+}
