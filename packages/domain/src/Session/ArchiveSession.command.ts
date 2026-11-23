@@ -1,5 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
-import { SpanModelRequestEnd } from "./RecordModelRequestEnd.command.ts"
+import { SpanModelRequestEnd } from "./CommitModelReply.command.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 

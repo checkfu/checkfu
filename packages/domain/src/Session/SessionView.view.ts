@@ -1,12 +1,14 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
+import { SessionErrorEvent } from "./AbandonTurn.command.ts"
 import { SessionArchived, SessionStatusTerminated } from "./ArchiveSession.command.ts"
-import { SessionStatusIdle } from "./CompleteTurn.command.ts"
-import { AgentMessage } from "./RecordAgentMessage.command.ts"
-import { AgentThinking } from "./RecordAgentThinking.command.ts"
-import { SpanModelRequestEnd } from "./RecordModelRequestEnd.command.ts"
+import {
+	AgentMessage,
+	AgentThinking,
+	SessionStatusIdle,
+	SpanModelRequestEnd,
+} from "./CommitModelReply.command.ts"
 import { SpanModelRequestStart } from "./RecordModelRequestStart.command.ts"
-import { SessionErrorEvent } from "./RecordSessionError.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"

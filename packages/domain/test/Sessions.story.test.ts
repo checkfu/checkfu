@@ -1,4 +1,8 @@
-import { AbandonTurn, TurnAbandoned } from "../src/Session/AbandonTurn.command.ts"
+import {
+	AbandonTurn,
+	SessionErrorEvent,
+	TurnAbandoned,
+} from "../src/Session/AbandonTurn.command.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import * as InMemory from "@alchemy.run/domain/InMemory"
@@ -19,7 +23,13 @@ import {
 	SessionArchived,
 	SessionStatusTerminated,
 } from "../src/Session/ArchiveSession.command.ts"
-import { CompleteTurn, SessionStatusIdle } from "../src/Session/CompleteTurn.command.ts"
+import {
+	AgentMessage,
+	AgentThinking,
+	CommitModelReply,
+	SessionStatusIdle,
+	SpanModelRequestEnd,
+} from "../src/Session/CommitModelReply.command.ts"
 import {
 	CreateSession,
 	SessionAlreadyExists,
@@ -30,22 +40,14 @@ import {
 	boundedModelProvider,
 	clampModelReply,
 } from "../src/Session/ModelProvider.external.ts"
+import { FailModelRequest } from "../src/Session/FailModelRequest.command.ts"
 import { InterruptModelRequest } from "../src/Session/InterruptModelRequest.command.ts"
-import { OpenModelRequests } from "../src/Session/OpenModelRequests.rejection.ts"
-import { AgentMessage, RecordAgentMessage } from "../src/Session/RecordAgentMessage.command.ts"
-import { AgentThinking, RecordAgentThinking } from "../src/Session/RecordAgentThinking.command.ts"
-import {
-	RecordModelRequestEnd,
-	SpanModelRequestEnd,
-	UnknownModelRequest,
-} from "../src/Session/RecordModelRequestEnd.command.ts"
 import {
 	DuplicateModelRequest,
 	OutOfOrderModelRequest,
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "../src/Session/RecordModelRequestStart.command.ts"
-import { RecordSessionError, SessionErrorEvent } from "../src/Session/RecordSessionError.command.ts"
 import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
 import { SendUserInterrupt, UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import {
@@ -74,6 +76,7 @@ import { StaleTurn } from "../src/Session/StaleTurn.rejection.ts"
 import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModelRequest.policy.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
+import { UnknownModelRequest } from "../src/Session/UnknownModelRequest.rejection.ts"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import { Sessions, SessionsHandlersLive } from "../src/Sessions.model.ts"
 
@@ -180,37 +183,28 @@ describe("Sessions", () => {
 			),
 			Story.then(session, new SpanModelRequestStart({ model_request_start_id: "evt_001" })),
 			Story.when(
-				new RecordAgentThinking({ session_id: session.id, turn: 1, thinking: "Thinking..." }),
-			),
-			Story.then(session, new AgentThinking({ thinking: "Thinking..." })),
-			Story.when(new RecordAgentMessage({ session_id: session.id, turn: 1, text: "Hello!" })),
-			Story.then(session, new AgentMessage({ content: [{ type: "text", text: "Hello!" }] })),
-			Story.when(
-				new RecordModelRequestEnd({
+				new CommitModelReply({
 					session_id: session.id,
 					turn: 1,
 					request_seq: 1,
 					model_request_start_id: "evt_001",
+					thinking: "Thinking...",
+					text: "Hello!",
 					model_usage: { input_tokens: 12, output_tokens: 5 },
-					is_error: false,
+					stop_reason: { type: "end_turn" },
 				}),
 			),
 			Story.then(
 				session,
+				new AgentThinking({ thinking: "Thinking..." }),
+				new AgentMessage({ content: [{ type: "text", text: "Hello!" }] }),
 				new SpanModelRequestEnd({
 					model_request_start_id: "evt_001",
 					model_usage: { input_tokens: 12, output_tokens: 5 },
 					is_error: false,
 				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
 			),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.then(session, new SessionStatusIdle({ stop_reason: { type: "end_turn" } })),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
 	})
@@ -259,90 +253,63 @@ describe("Sessions", () => {
 			),
 			Story.rejected(stale),
 			Story.when(
-				new RecordAgentThinking({ session_id: session.id, turn: 1, thinking: "Stale thinking" }),
+				new CommitModelReply({
+					session_id: session.id,
+					turn: 1,
+					request_seq: 1,
+					model_request_start_id: "evt_req",
+					thinking: "Stale thinking",
+					text: "Stale message",
+					model_usage: usage,
+					stop_reason: { type: "end_turn" },
+				}),
 			),
 			Story.rejected(stale),
 			Story.when(
-				new RecordAgentMessage({ session_id: session.id, turn: 1, text: "Stale message" }),
-			),
-			Story.rejected(stale),
-			Story.when(
-				new RecordModelRequestEnd({
+				new FailModelRequest({
 					session_id: session.id,
 					turn: 1,
 					request_seq: 1,
 					model_request_start_id: "evt_req",
 					model_usage: usage,
-					is_error: false,
+					error_type: "model_request_failed_error",
+					message: "Stale exhausted error",
+					disposition: "exhausted",
 				}),
 			),
 			Story.rejected(stale),
 			Story.when(
-				new RecordSessionError({
+				new InterruptModelRequest({
 					session_id: session.id,
 					turn: 1,
-					error: {
-						type: "model_request_failed_error",
-						message: "Stale exhausted error",
-						retry_status: { type: "exhausted" },
-					},
+					request_seq: 1,
+					model_request_start_id: "evt_req",
+					model_usage: usage,
 				}),
 			),
 			Story.rejected(stale),
 			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.rejected(stale),
-			Story.when(
-				new CompleteTurn({
+				new CommitModelReply({
 					session_id: session.id,
 					turn: 2,
+					request_seq: 1,
+					model_request_start_id: "evt_req",
+					thinking: null,
+					text: "Still running turn 2",
+					model_usage: usage,
 					stop_reason: { type: "end_turn" },
 				}),
-			),
-			Story.rejected(
-				new OpenModelRequests({
-					session_id: session.id,
-					open_model_request_id: "evt_req",
-				}),
-			),
-			Story.when(
-				new RecordAgentMessage({ session_id: session.id, turn: 2, text: "Still running turn 2" }),
 			),
 			Story.then(
 				session,
 				new AgentMessage({ content: [{ type: "text", text: "Still running turn 2" }] }),
-			),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: session.id,
-					turn: 2,
-					request_seq: 1,
-					model_request_start_id: "evt_req",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
-			Story.then(
-				session,
 				new SpanModelRequestEnd({
 					model_request_start_id: "evt_req",
 					model_usage: usage,
 					is_error: false,
 				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
 			),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 2,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.then(session, new SessionStatusIdle({ stop_reason: { type: "end_turn" } })),
 			Story.state(session, { _tag: "Idle", turn: 2 }),
 		)
 	})
@@ -350,6 +317,17 @@ describe("Sessions", () => {
 	it.effect("enforces sequential model-request accounting before completing a turn", () => {
 		const session = Session.ref("sess_model_req")
 		const usage = { input_tokens: 10, output_tokens: 4 }
+		const commit = (request_seq: number, model_request_start_id: string) =>
+			new CommitModelReply({
+				session_id: session.id,
+				turn: 1,
+				request_seq,
+				model_request_start_id,
+				thinking: null,
+				text: "Done",
+				model_usage: usage,
+				stop_reason: { type: "end_turn" },
+			})
 		return story(
 			Story.given(
 				session,
@@ -357,16 +335,7 @@ describe("Sessions", () => {
 				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
 				new SessionStatusRunning(),
 			),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: session.id,
-					turn: 1,
-					request_seq: 1,
-					model_request_start_id: "evt_unknown",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
+			Story.when(commit(1, "evt_unknown")),
 			Story.rejected(
 				new UnknownModelRequest({
 					session_id: session.id,
@@ -413,47 +382,7 @@ describe("Sessions", () => {
 					model_requests_started: 1,
 				}),
 			),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.rejected(
-				new OpenModelRequests({
-					session_id: session.id,
-					open_model_request_id: "evt_1",
-				}),
-			),
-			Story.when(
-				new RecordSessionError({
-					session_id: session.id,
-					turn: 1,
-					error: {
-						type: "model_request_failed_error",
-						message: "429 rate limit",
-						retry_status: { type: "exhausted" },
-					},
-				}),
-			),
-			Story.rejected(
-				new OpenModelRequests({
-					session_id: session.id,
-					open_model_request_id: "evt_1",
-				}),
-			),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: session.id,
-					turn: 1,
-					request_seq: 1,
-					model_request_start_id: "evt_1",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
-			Story.then(
+			Story.given(
 				session,
 				new SpanModelRequestEnd({
 					model_request_start_id: "evt_1",
@@ -461,16 +390,14 @@ describe("Sessions", () => {
 					is_error: false,
 				}),
 			),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: session.id,
-					turn: 1,
-					request_seq: 1,
-					model_request_start_id: "evt_1",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
+			Story.state(session, {
+				_tag: "Running",
+				turn: 1,
+				open_model_request_id: null,
+				model_requests_started: 1,
+				pending_user_messages: 0,
+			}),
+			Story.when(commit(1, "evt_1")),
 			Story.rejected(
 				new UnknownModelRequest({
 					session_id: session.id,
@@ -502,68 +429,32 @@ describe("Sessions", () => {
 				}),
 			),
 			Story.then(session, new SpanModelRequestStart({ model_request_start_id: "evt_1" })),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: session.id,
-					turn: 1,
-					request_seq: 1,
-					model_request_start_id: "evt_1",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
+			Story.when(commit(1, "evt_1")),
 			Story.rejected(
 				new UnknownModelRequest({
 					session_id: session.id,
 					model_request_start_id: "evt_1",
 				}),
 			),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.rejected(
-				new OpenModelRequests({
-					session_id: session.id,
-					open_model_request_id: "evt_1",
-				}),
-			),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: session.id,
-					turn: 1,
-					request_seq: 2,
-					model_request_start_id: "evt_1",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
+			Story.state(session, {
+				_tag: "Running",
+				turn: 1,
+				open_model_request_id: "evt_1",
+				model_requests_started: 2,
+				pending_user_messages: 0,
+			}),
+			Story.when(commit(2, "evt_1")),
 			Story.then(
 				session,
+				new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
 				new SpanModelRequestEnd({
 					model_request_start_id: "evt_1",
 					model_usage: usage,
 					is_error: false,
 				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
 			),
-			Story.state(session, {
-				_tag: "Running",
-				turn: 1,
-				open_model_request_id: null,
-				model_requests_started: 2,
-				pending_user_messages: 0,
-			}),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.then(session, new SessionStatusIdle({ stop_reason: { type: "end_turn" } })),
+			Story.state(session, { _tag: "Idle", turn: 1 }),
 		)
 	})
 
@@ -648,13 +539,9 @@ describe("Sessions", () => {
 		},
 	)
 
-	it.effect("distinguishes retrying, exhausted, and terminal session.error transitions", () => {
+	it.effect("distinguishes exhausted and terminal session.error transitions", () => {
 		const session = Session.ref("sess_004")
-		const retryingError = {
-			type: "model_request_failed_error",
-			message: "429 rate limit",
-			retry_status: { type: "retrying" as const },
-		}
+		const usage = { input_tokens: 0, output_tokens: 0 }
 		const exhaustedError = {
 			type: "model_request_failed_error",
 			message: "429 rate limit",
@@ -665,34 +552,37 @@ describe("Sessions", () => {
 			message: "401 unauthorized",
 			retry_status: { type: "terminal" as const },
 		}
+		const failExhausted = new FailModelRequest({
+			session_id: session.id,
+			turn: 1,
+			request_seq: 1,
+			model_request_start_id: "req_1",
+			model_usage: usage,
+			error_type: exhaustedError.type,
+			message: exhaustedError.message,
+			disposition: "exhausted",
+		})
 		return story(
 			Story.given(
 				session,
 				createdEvent,
 				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
 				new SessionStatusRunning(),
+				new SpanModelRequestStart({ model_request_start_id: "req_1" }),
 			),
-			Story.when(new RecordSessionError({ session_id: session.id, turn: 1, error: retryingError })),
-			Story.then(session, new SessionErrorEvent({ error: retryingError })),
-			Story.state(session, {
-				_tag: "Running",
-				turn: 1,
-				open_model_request_id: null,
-				model_requests_started: 0,
-				pending_user_messages: 0,
-			}),
-			Story.when(
-				new RecordSessionError({ session_id: session.id, turn: 1, error: exhaustedError }),
-			),
+			Story.when(failExhausted),
 			Story.then(
 				session,
+				new SpanModelRequestEnd({
+					model_request_start_id: "req_1",
+					model_usage: usage,
+					is_error: true,
+				}),
 				new SessionErrorEvent({ error: exhaustedError }),
 				new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
 			),
 			Story.state(session, { _tag: "Idle", turn: 1 }),
-			Story.when(
-				new RecordSessionError({ session_id: session.id, turn: 1, error: exhaustedError }),
-			),
+			Story.when(failExhausted),
 			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Retry" })),
 			Story.then(
@@ -701,9 +591,34 @@ describe("Sessions", () => {
 				new SessionStatusRunning(),
 			),
 			Story.replied({ turn: 2 }),
-			Story.when(new RecordSessionError({ session_id: session.id, turn: 2, error: terminalError })),
+			Story.when(
+				new RecordModelRequestStart({
+					session_id: session.id,
+					turn: 2,
+					request_seq: 1,
+					model_request_start_id: "req_2",
+				}),
+			),
+			Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_2" })),
+			Story.when(
+				new FailModelRequest({
+					session_id: session.id,
+					turn: 2,
+					request_seq: 1,
+					model_request_start_id: "req_2",
+					model_usage: usage,
+					error_type: terminalError.type,
+					message: terminalError.message,
+					disposition: "terminal",
+				}),
+			),
 			Story.then(
 				session,
+				new SpanModelRequestEnd({
+					model_request_start_id: "req_2",
+					model_usage: usage,
+					is_error: true,
+				}),
 				new SessionErrorEvent({ error: terminalError }),
 				new SessionStatusTerminated(),
 			),
@@ -718,70 +633,19 @@ describe("Sessions", () => {
 		)
 	})
 
-	it.effect("closes an open model request span before terminating via RecordSessionError", () => {
-		const turnScoped = Session.ref("sess_terminal_open_span_turn")
-		const unscoped = Session.ref("sess_terminal_open_span_unscoped")
-		const terminalError = {
-			type: "provider_error",
-			message: "401 unauthorized",
-			retry_status: { type: "terminal" as const },
-		}
-		return story(
-			Story.given(
-				turnScoped,
-				createdEvent,
-				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-				new SessionStatusRunning(),
-				new SpanModelRequestStart({ model_request_start_id: "mreq_open_1" }),
-			),
-			Story.when(
-				new RecordSessionError({
-					session_id: turnScoped.id,
-					turn: 1,
-					error: terminalError,
-				}),
-			),
-			Story.then(
-				turnScoped,
-				new SpanModelRequestEnd({
-					model_request_start_id: "mreq_open_1",
-					model_usage: { input_tokens: 0, output_tokens: 0 },
-					is_error: true,
-				}),
-				new SessionErrorEvent({ error: terminalError }),
-				new SessionStatusTerminated(),
-			),
-			Story.state(turnScoped, { _tag: "Terminated", archived: false }),
-			Story.given(
-				unscoped,
-				createdEvent,
-				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
-				new SessionStatusRunning(),
-				new SpanModelRequestStart({ model_request_start_id: "mreq_open_2" }),
-			),
-			Story.when(
-				new RecordSessionError({
-					session_id: unscoped.id,
-					turn: null,
-					error: terminalError,
-				}),
-			),
-			Story.then(
-				unscoped,
-				new SpanModelRequestEnd({
-					model_request_start_id: "mreq_open_2",
-					model_usage: { input_tokens: 0, output_tokens: 0 },
-					is_error: true,
-				}),
-				new SessionErrorEvent({ error: terminalError }),
-				new SessionStatusTerminated(),
-			),
-			Story.state(unscoped, { _tag: "Terminated", archived: false }),
-		)
-	})
-
 	it.effect("rejects turn-recording commands when idle and archives running sessions", () => {
 		const session = Session.ref("sess_005")
+		const commit = (model_request_start_id: string, text: string) =>
+			new CommitModelReply({
+				session_id: session.id,
+				turn: 1,
+				request_seq: 1,
+				model_request_start_id,
+				thinking: null,
+				text,
+				model_usage: { input_tokens: 1, output_tokens: 1 },
+				stop_reason: { type: "end_turn" },
+			})
 		return story(
 			Story.given(session, createdEvent),
 			Story.when(
@@ -793,13 +657,7 @@ describe("Sessions", () => {
 				}),
 			),
 			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
+			Story.when(commit("evt_0", "Early")),
 			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "Work" })),
 			Story.then(
@@ -829,7 +687,7 @@ describe("Sessions", () => {
 				new SessionArchived(),
 			),
 			Story.state(session, { _tag: "Terminated", archived: true }),
-			Story.when(new RecordAgentMessage({ session_id: session.id, turn: 1, text: "Late" })),
+			Story.when(commit("evt_open", "Late")),
 			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "terminated" })),
 		)
 	})
@@ -859,18 +717,6 @@ describe("Sessions", () => {
 			Story.then(session),
 			Story.when(new SendUserMessage({ session_id: session.id, text: "After" })),
 			Story.rejected(new SessionTerminated({ session_id: session.id })),
-			Story.when(
-				new RecordSessionError({
-					session_id: session.id,
-					turn: null,
-					error: {
-						type: "unknown_error",
-						message: "boom",
-						retry_status: { type: "terminal" },
-					},
-				}),
-			),
-			Story.rejected(new SessionTerminated({ session_id: session.id })),
 		)
 	})
 
@@ -878,6 +724,17 @@ describe("Sessions", () => {
 		const sessionA = Session.ref("s")
 		const sessionB = Session.ref("s:1:x")
 		const usage = { input_tokens: 4, output_tokens: 2 }
+		const commit = (session_id: typeof sessionA.id, model_request_start_id: string) =>
+			new CommitModelReply({
+				session_id,
+				turn: 1,
+				request_seq: 1,
+				model_request_start_id,
+				thinking: null,
+				text: "Done",
+				model_usage: usage,
+				stop_reason: { type: "end_turn" },
+			})
 		return story(
 			Story.given(
 				sessionA,
@@ -901,58 +758,28 @@ describe("Sessions", () => {
 				}),
 			),
 			Story.then(sessionB, new SpanModelRequestStart({ model_request_start_id: "y" })),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: sessionB.id,
-					turn: 1,
-					request_seq: 1,
-					model_request_start_id: "y",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
+			Story.when(commit(sessionB.id, "y")),
 			Story.then(
 				sessionB,
+				new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
 				new SpanModelRequestEnd({
 					model_request_start_id: "y",
 					model_usage: usage,
 					is_error: false,
 				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
 			),
-			Story.when(
-				new RecordModelRequestEnd({
-					session_id: sessionA.id,
-					turn: 1,
-					request_seq: 1,
-					model_request_start_id: "x:1:y",
-					model_usage: usage,
-					is_error: false,
-				}),
-			),
+			Story.when(commit(sessionA.id, "x:1:y")),
 			Story.then(
 				sessionA,
+				new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
 				new SpanModelRequestEnd({
 					model_request_start_id: "x:1:y",
 					model_usage: usage,
 					is_error: false,
 				}),
+				new SessionStatusIdle({ stop_reason: { type: "end_turn" } }),
 			),
-			Story.when(
-				new CompleteTurn({
-					session_id: sessionA.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.then(sessionA, new SessionStatusIdle({ stop_reason: { type: "end_turn" } })),
-			Story.when(
-				new CompleteTurn({
-					session_id: sessionB.id,
-					turn: 1,
-					stop_reason: { type: "end_turn" },
-				}),
-			),
-			Story.then(sessionB, new SessionStatusIdle({ stop_reason: { type: "end_turn" } })),
 		)
 	})
 
@@ -1761,8 +1588,7 @@ describe("Sessions", () => {
 				request,
 			),
 			Story.call(ModelProvider.generate, { turn: 1, generation: 0 }),
-			Story.when(new RecordSessionError({ session_id: session.id, turn: 1, error: diagnostic })),
-			Story.then(session, new SessionErrorEvent({ error: diagnostic })),
+			Story.given(session, new SessionErrorEvent({ error: diagnostic })),
 			Story.view(TurnInput, session, {
 				agent_id: "agent_001",
 				agent_version: 1,
@@ -2057,7 +1883,24 @@ describe("Sessions", () => {
 				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Quick" }))
 				yield* memory.control.drain
 				yield* sessions.send(
-					new CompleteTurn({ session_id: session.id, turn: 1, stop_reason: { type: "end_turn" } }),
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+					}),
+				)
+				yield* sessions.send(
+					new CommitModelReply({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+						thinking: null,
+						text: "Done",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						stop_reason: { type: "end_turn" },
+					}),
 				)
 				yield* memory.control.drain
 				const completed = yield* sessions.get(session)
@@ -2343,7 +2186,7 @@ describe("Sessions", () => {
 					}),
 				)
 				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Hello" }))
-				yield* sessions.send(
+				const foreign = yield* sessions.send(
 					new RecordModelRequestStart({
 						session_id: session.id,
 						turn: 1,
@@ -2351,15 +2194,16 @@ describe("Sessions", () => {
 						model_request_start_id: "foreign_req_1",
 					}),
 				)
-				yield* sessions.send(
-					new RecordModelRequestEnd({
-						session_id: session.id,
-						turn: 1,
-						request_seq: 1,
-						model_request_start_id: "foreign_req_1",
-						model_usage: { input_tokens: 1, output_tokens: 1 },
-						is_error: false,
-					}),
+				yield* sessions.import(
+					session,
+					[
+						new SpanModelRequestEnd({
+							model_request_start_id: "foreign_req_1",
+							model_usage: { input_tokens: 1, output_tokens: 1 },
+							is_error: false,
+						}),
+					],
+					{ commandId: "foreign_req_1:end", expectedVersion: foreign.version },
 				)
 				yield* sessions.send(
 					new RecordModelRequestStart({
@@ -2520,17 +2364,7 @@ describe("Sessions", () => {
 					environment_id: "env_001",
 					turn: 1,
 				}),
-				Story.when(
-					new RecordModelRequestEnd({
-						session_id: session.id,
-						turn: 1,
-						request_seq: 1,
-						model_request_start_id: req1,
-						model_usage: { input_tokens: 1, output_tokens: 1 },
-						is_error: false,
-					}),
-				),
-				Story.then(
+				Story.given(
 					session,
 					new SpanModelRequestEnd({
 						model_request_start_id: req1,
@@ -2631,38 +2465,6 @@ describe("Sessions", () => {
 			)
 		},
 	)
-
-	it.effect("drains queued messages when CompleteTurn settles with retries_exhausted", () => {
-		const session = Session.ref("sess_complete_exhausted_drain")
-		return story(
-			Story.given(
-				session,
-				createdEvent,
-				new UserMessage({ content: [{ type: "text", text: "First" }] }),
-				new SessionStatusRunning(),
-				new UserMessage({ content: [{ type: "text", text: "Queued" }] }),
-			),
-			Story.when(
-				new CompleteTurn({
-					session_id: session.id,
-					turn: 1,
-					stop_reason: { type: "retries_exhausted" },
-				}),
-			),
-			Story.then(
-				session,
-				new SessionStatusIdle({ stop_reason: { type: "retries_exhausted" } }),
-				new SessionStatusRunning(),
-			),
-			Story.state(session, {
-				_tag: "Running",
-				turn: 2,
-				open_model_request_id: null,
-				model_requests_started: 0,
-				pending_user_messages: 0,
-			}),
-		)
-	})
 
 	it("encodes and decodes SessionState snapshots at explicit schema_version 1 and rejects unknown versions", () => {
 		const encode = Schema.encodeSync(SessionStateSnapshot)

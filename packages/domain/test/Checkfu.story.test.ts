@@ -31,11 +31,13 @@ import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { EnvironmentArchivedError } from "../src/Environment/EnvironmentArchived.rejection.ts"
 import { EnvironmentNotFound } from "../src/Environment/EnvironmentNotFound.rejection.ts"
 import { EnvironmentView } from "../src/Environment/EnvironmentView.view.ts"
-import { SessionStatusIdle } from "../src/Session/CompleteTurn.command.ts"
+import {
+	AgentMessage,
+	SessionStatusIdle,
+	SpanModelRequestEnd,
+} from "../src/Session/CommitModelReply.command.ts"
 import { SessionAlreadyExists, SessionCreated } from "../src/Session/CreateSession.command.ts"
 import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
-import { AgentMessage } from "../src/Session/RecordAgentMessage.command.ts"
-import { SpanModelRequestEnd } from "../src/Session/RecordModelRequestEnd.command.ts"
 import { SpanModelRequestStart } from "../src/Session/RecordModelRequestStart.command.ts"
 import { RunTurn, turnKey } from "../src/Session/RunTurn.saga.ts"
 import {
