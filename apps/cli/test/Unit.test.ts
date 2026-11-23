@@ -343,7 +343,8 @@ describe("normalizeApiUrl", () => {
 							error: { type: "invalid_request_error", message: "Cursor invalid" },
 							request_id: "req_1",
 						}),
-						expectContains: "API error (400 invalid_request_error): Cursor invalid",
+						expectContains:
+							"API error (400 invalid_request_error): Cursor invalid [request_id: req_1]",
 					},
 				]
 				for (const testCase of sseErrorCases) {
