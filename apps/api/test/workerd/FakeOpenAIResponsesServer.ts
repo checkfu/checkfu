@@ -17,6 +17,8 @@ export interface RecordedOpenAIRequest {
 	readonly userTexts: ReadonlyArray<string>
 	readonly assistantTexts: ReadonlyArray<string>
 	readonly lastUserText: string
+	readonly toolNames: ReadonlyArray<string>
+	readonly toolOutputs: ReadonlyArray<string>
 	readonly aborted: () => boolean
 	readonly waitAborted: Promise<void>
 }
@@ -27,6 +29,11 @@ export type FakeOpenAIAction =
 			readonly text: string
 			readonly inputTokens?: number
 			readonly outputTokens?: number
+	  }
+	| {
+			readonly kind: "tool_call"
+			readonly name: string
+			readonly arguments: JsonObject
 	  }
 	| {
 			readonly kind: "hold"
@@ -74,6 +81,25 @@ const extractInputMessages = (input: unknown): ReadonlyArray<OpenAIInputMessage>
 		messages.push({ role: item.role, text: parts.join("") })
 	}
 	return messages
+}
+
+const extractToolNames = (tools: unknown): ReadonlyArray<string> =>
+	Array.isArray(tools)
+		? tools.flatMap((tool) => (isRecord(tool) && typeof tool.name === "string" ? [tool.name] : []))
+		: []
+
+const extractToolOutputsAfterLastUser = (input: unknown): ReadonlyArray<string> => {
+	if (!Array.isArray(input)) {
+		return []
+	}
+	const lastUser = input.findLastIndex((item) => isRecord(item) && item.role === "user")
+	return input
+		.slice(lastUser + 1)
+		.flatMap((item) =>
+			isRecord(item) && item.type === "function_call_output"
+				? [typeof item.output === "string" ? item.output : JSON.stringify(item.output)]
+				: [],
+		)
 }
 
 const sseEvent = (event: string, data: JsonObject): string =>
@@ -169,6 +195,76 @@ const writeTextReplyEvents = (
 	res.end()
 }
 
+const writeToolCallEvents = (
+	res: ServerResponse,
+	responseId: string,
+	callId: string,
+	name: string,
+	args: JsonObject,
+): void => {
+	const item = {
+		id: `fc_${callId}`,
+		type: "function_call",
+		call_id: callId,
+		name,
+		arguments: JSON.stringify(args),
+		status: "completed",
+	}
+	res.write(
+		sseEvent("response.created", {
+			type: "response.created",
+			response: { id: responseId, status: "in_progress" },
+		}),
+	)
+	res.write(
+		sseEvent("response.output_item.added", {
+			type: "response.output_item.added",
+			output_index: 0,
+			item: { ...item, arguments: "", status: "in_progress" },
+		}),
+	)
+	res.write(
+		sseEvent("response.function_call_arguments.delta", {
+			type: "response.function_call_arguments.delta",
+			item_id: item.id,
+			output_index: 0,
+			delta: item.arguments,
+		}),
+	)
+	res.write(
+		sseEvent("response.function_call_arguments.done", {
+			type: "response.function_call_arguments.done",
+			item_id: item.id,
+			output_index: 0,
+			arguments: item.arguments,
+		}),
+	)
+	res.write(
+		sseEvent("response.output_item.done", {
+			type: "response.output_item.done",
+			output_index: 0,
+			item,
+		}),
+	)
+	res.write(
+		sseEvent("response.completed", {
+			type: "response.completed",
+			response: {
+				id: responseId,
+				status: "completed",
+				output: [item],
+				usage: {
+					input_tokens: 12,
+					output_tokens: 6,
+					total_tokens: 18,
+					input_tokens_details: { cached_tokens: 0 },
+				},
+			},
+		}),
+	)
+	res.end()
+}
+
 const readBody = (req: IncomingMessage): Promise<string> =>
 	new Promise((resolve, reject) => {
 		const chunks: Array<Buffer> = []
@@ -229,6 +325,8 @@ export const startFakeOpenAIResponsesServer = async (
 				userTexts,
 				assistantTexts,
 				lastUserText: userTexts.at(-1) ?? "",
+				toolNames: extractToolNames(body.tools),
+				toolOutputs: extractToolOutputsAfterLastUser(body.input),
 				aborted: () => aborted,
 				waitAborted,
 			}
@@ -264,6 +362,11 @@ export const startFakeOpenAIResponsesServer = async (
 					action.outputTokens ?? 6,
 					false,
 				)
+				return
+			}
+
+			if (action.kind === "tool_call") {
+				writeToolCallEvents(res, responseId, `call_fake_${id}`, action.name, action.arguments)
 				return
 			}
 

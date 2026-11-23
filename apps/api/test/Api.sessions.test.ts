@@ -131,7 +131,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		}
 	})
 
-	it("ends an interrupted turn only when the harness stops, and stops the harness when a session is archived", async () => {
+	it("ends an interrupted turn only when the harness stops, and stops the harness and discards the workspace when a session is archived", async () => {
 		let aborted = 0
 		const starts: Array<() => void> = []
 		const started = [0, 1].map(
@@ -141,20 +141,22 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				}),
 		)
 		let calls = 0
-		const { layer, closeAll } = makePiDurableTestLayer(async (model, _context, signal) => {
-			starts[calls++]?.()
-			await new Promise<void>((resolve) => {
-				signal?.addEventListener(
-					"abort",
-					() => {
-						aborted += 1
-						resolve()
-					},
-					{ once: true },
-				)
-			})
-			return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" as const }
-		})
+		const { layer, closeAll, discardedWorkspaces } = makePiDurableTestLayer(
+			async (model, _context, signal) => {
+				starts[calls++]?.()
+				await new Promise<void>((resolve) => {
+					signal?.addEventListener(
+						"abort",
+						() => {
+							aborted += 1
+							resolve()
+						},
+						{ once: true },
+					)
+				})
+				return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" as const }
+			},
+		)
 		try {
 			await Effect.runPromise(
 				Effect.gen(function* () {
@@ -218,10 +220,15 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					yield* post(archived.id, "/events", message)
 					yield* Effect.promise(() => started[1]!)
 					expect((yield* post(archived.id, "/archive")).status).toBe(200)
-					for (let attempt = 0; attempt < 400 && aborted < 2; attempt++) {
+					for (
+						let attempt = 0;
+						attempt < 400 && (aborted < 2 || discardedWorkspaces.length === 0);
+						attempt++
+					) {
 						yield* Effect.sleep("5 millis")
 					}
 					expect(aborted).toBe(2)
+					expect(discardedWorkspaces).toEqual([archived.id])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

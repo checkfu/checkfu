@@ -104,6 +104,10 @@ For a deployment, use the `MCP` URL that `bun checkfu deploy` prints and the key
 
 The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpWorker`) next to the API and reaches it over a service binding.
 
+## Session workspace
+
+Every session has a durable workspace: a filesystem that lasts for the whole session and survives restarts. The agent works in it with `read`, `ls`, `find`, `grep`, `write`, `edit` and `delete` tools, starting from `/workspace`. The workspace is discarded when the session terminates.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

@@ -35,6 +35,7 @@ export const makeTestServer = Effect.gen(function* () {
 					stop_reason: { type: "end_turn" as const },
 				}),
 			interrupt: () => Effect.void,
+			discardWorkspace: () => Effect.void,
 		}),
 	)
 	const ApiLayer = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive))).pipe(

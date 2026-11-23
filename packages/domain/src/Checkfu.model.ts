@@ -28,6 +28,7 @@ import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
+import { DiscardWorkspace } from "./Session/DiscardWorkspace.policy.ts"
 import { RunTurn } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
@@ -61,7 +62,14 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AutomationRunView,
 		AutomationDirectory,
 	],
-	policies: [StartTurn, StopModelRequest, ArmAutomation, StartAutomationRun, FreeAutomationSlot],
+	policies: [
+		StartTurn,
+		StopModelRequest,
+		ArmAutomation,
+		StartAutomationRun,
+		FreeAutomationSlot,
+		DiscardWorkspace,
+	],
 	sagas: [RunTurn],
 	invariants: {
 		EverySessionReferencesExistingAgentVersion: (m) =>

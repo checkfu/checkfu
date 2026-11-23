@@ -31,6 +31,10 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
+			discardWorkspace: (sessionId) =>
+				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
+					Effect.withSpan("PiHarness.discardWorkspace"),
+				),
 		}
 	}),
 )
