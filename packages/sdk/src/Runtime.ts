@@ -12,6 +12,7 @@ import * as Stream from "effect/Stream"
 import { CheckfuApi, ClientEventId } from "./Api.ts"
 import type { CheckfuHttpApiClient, PendingResource } from "./Api.ts"
 import {
+	APIConnectionError,
 	APIConnectionTimeoutError,
 	BadRequestError,
 	CheckfuConfigError,
@@ -25,6 +26,8 @@ import type { ApiSseError, StreamSseOptions } from "./Sse.ts"
 import {
 	CurrentRequestTransportMeta,
 	computeRetryDelayMs,
+	lookupHeader,
+	mergeHeaderMaps,
 	parseRetryAfterMs,
 	shouldRetryError,
 	validatePathSegment,
@@ -220,6 +223,7 @@ export interface WaitForPendingOptions<T> {
 export interface EffectSdkRuntime {
 	readonly baseUrl: string
 	readonly raw: CheckfuHttpApiClient
+	readonly defaultHeaders: HeaderMap | undefined
 	readonly maxRetries: number
 	readonly timeout: Duration.Duration | null
 	readonly autoIdempotencyKey: boolean
@@ -329,16 +333,39 @@ const decodeClientIdempotencyKey = (key: string): Effect.Effect<ClientEventId, B
 
 export const resolveCallIdempotencyKey = (
 	runtime: EffectSdkRuntime,
-	explicitKey: string | undefined,
+	options: AnyRequestOptions | undefined,
 	supportsIdempotency: boolean,
 ): Effect.Effect<ClientEventId | undefined, BadRequestError> => {
-	if (explicitKey !== undefined) {
-		return decodeClientIdempotencyKey(explicitKey)
+	if (!supportsIdempotency) {
+		return options?.idempotencyKey !== undefined
+			? decodeClientIdempotencyKey(options.idempotencyKey)
+			: Effect.undefined
 	}
-	if (!supportsIdempotency || !runtime.autoIdempotencyKey) {
+	const perCallHeader = lookupHeader(options?.headers, "idempotency-key")
+	if (perCallHeader !== undefined) {
+		return perCallHeader === null ? Effect.undefined : decodeClientIdempotencyKey(perCallHeader)
+	}
+	if (options?.idempotencyKey !== undefined) {
+		return decodeClientIdempotencyKey(options.idempotencyKey)
+	}
+	const defaultHeader = lookupHeader(runtime.defaultHeaders, "idempotency-key")
+	if (defaultHeader !== undefined) {
+		return defaultHeader === null ? Effect.undefined : decodeClientIdempotencyKey(defaultHeader)
+	}
+	if (!runtime.autoIdempotencyKey) {
 		return Effect.undefined
 	}
 	return Effect.flatMap(runtime.generateIdempotencyKey, decodeClientIdempotencyKey)
+}
+
+export const withResolvedIdempotencyKey = (
+	options: AnyRequestOptions | undefined,
+	key: ClientEventId | undefined,
+): AnyRequestOptions => {
+	const headers = mergeHeaderMaps(options?.headers, {
+		"idempotency-key": key ?? null,
+	})
+	return options === undefined ? { headers } : { ...options, headers }
 }
 
 export const executeWithRetries = <A, E>(
@@ -511,11 +538,10 @@ export const executePaginatedStreamEffect = <
 type RawSseMethod = (request: {
 	readonly params?: unknown
 	readonly query?: unknown
-	readonly responseMode: "decoded-and-response"
-}) => Effect.Effect<
-	readonly [Stream.Stream<unknown, ApiSseError> | void, HttpClientResponse.HttpClientResponse],
-	ApiSseError
->
+	readonly responseMode: "response-only"
+}) => Effect.Effect<HttpClientResponse.HttpClientResponse, ApiSseError>
+
+const decodeGenericSseJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 const lookupRawSseMethod = (
 	raw: CheckfuHttpApiClient,
@@ -572,19 +598,25 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 			}
 			return streamApiSse<EndpointSseEvent<G, E>>({
 				open: () =>
-					// Boundary cast: `method` decodes `EndpointSseEvent<G, E>` streams for `CheckfuApi[G][E]`.
-					// oxlint-disable-next-line typescript/no-unsafe-type-assertion
 					method({
 						...(decodedParams === undefined ? {} : { params: decodedParams }),
 						...(rawQuery === undefined ? {} : { query: rawQuery }),
-						responseMode: "decoded-and-response",
-					}) as Effect.Effect<
-						readonly [
-							Stream.Stream<EndpointSseEvent<G, E>, ApiSseError> | void,
-							HttpClientResponse.HttpClientResponse,
-						],
-						ApiSseError
-					>,
+						responseMode: "response-only",
+					}),
+				decodeEvent: (rawData) =>
+					decodeGenericSseJson(rawData).pipe(
+						Effect.mapBoth({
+							onSuccess: (parsed) =>
+								// Boundary cast: parsed JSON payload for generic `CheckfuApi[G][E]` SSE event.
+								// oxlint-disable-next-line typescript/no-unsafe-type-assertion
+								parsed as EndpointSseEvent<G, E>,
+							onFailure: (err) =>
+								new APIConnectionError({
+									message: `Invalid SSE event payload: ${err.message}`,
+									cause: err,
+								}),
+						}),
+					),
 				options,
 			})
 		}),
@@ -628,38 +660,42 @@ export const pollPending = <T>(
 			})
 		}
 
-		const startedNanos = yield* Clock.monotonicTimeNanos
-		const deadlineNanos = startedNanos + BigInt(Math.trunc(timeoutMs)) * 1_000_000n
-		let delayMs = initialDelayMs
-
-		for (;;) {
-			const outcome = yield* Effect.result(fetchResource(pending.id, options?.requestOptions))
-			if (outcome._tag === "Success") {
-				if (options?.until === undefined || options.until(outcome.success)) {
-					return outcome.success
+		const pollLoop = Effect.gen(function* () {
+			let delayMs = initialDelayMs
+			for (;;) {
+				const outcome = yield* Effect.result(fetchResource(pending.id, options?.requestOptions))
+				if (outcome._tag === "Success") {
+					if (options?.until === undefined || options.until(outcome.success)) {
+						return outcome.success
+					}
+				} else {
+					const err = outcome.failure
+					const retryablePending =
+						err._tag === "ServiceUnavailableError" ||
+						err._tag === "NotFoundError" ||
+						err._tag === "RateLimitError" ||
+						err._tag === "APIConnectionError" ||
+						err._tag === "APIConnectionTimeoutError"
+					if (!retryablePending) {
+						return yield* err
+					}
 				}
-			} else {
-				const err = outcome.failure
-				const retryablePending =
-					err._tag === "ServiceUnavailableError" ||
-					err._tag === "NotFoundError" ||
-					err._tag === "RateLimitError" ||
-					err._tag === "APIConnectionError" ||
-					err._tag === "APIConnectionTimeoutError"
-				if (!retryablePending) {
-					return yield* err
-				}
+				yield* Effect.sleep(Duration.millis(delayMs))
+				delayMs = Math.min(delayMs * 2, maxDelayMs)
 			}
+		})
 
-			const nowNanos = yield* Clock.monotonicTimeNanos
-			if (nowNanos >= deadlineNanos) {
-				return yield* new APIConnectionTimeoutError({
-					message: `Timed out waiting for pending ${pending.type} "${pending.id}" after ${Duration.format(timeoutDuration)}.`,
-				})
-			}
-			const remainingMs = Number((deadlineNanos - nowNanos) / 1_000_000n)
-			const sleepMs = Math.min(delayMs, Math.max(1, remainingMs))
-			yield* Effect.sleep(Duration.millis(sleepMs))
-			delayMs = Math.min(delayMs * 2, maxDelayMs)
-		}
+		return yield* pollLoop.pipe(
+			Effect.timeoutOption(timeoutDuration),
+			Effect.flatMap((maybeResult) =>
+				Effect.fromOption(maybeResult).pipe(
+					Effect.mapError(
+						() =>
+							new APIConnectionTimeoutError({
+								message: `Timed out waiting for pending ${pending.type} "${pending.id}" after ${Duration.format(timeoutDuration)}.`,
+							}),
+					),
+				),
+			),
+		)
 	}).pipe(Effect.withSpan("checkfu.waitForPending"))

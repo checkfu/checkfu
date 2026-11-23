@@ -123,6 +123,7 @@ const generateResourcesFile = (
 	const executeWithRetries = runtimeMod.ident("executeWithRetries")
 	const resolveCallIdempotencyKey = runtimeMod.ident("resolveCallIdempotencyKey")
 	const unwrapResponse = runtimeMod.ident("unwrapResponse")
+	const withResolvedIdempotencyKey = runtimeMod.ident("withResolvedIdempotencyKey")
 
 	const APIPromise = promiseRuntimeMod.ident("APIPromise").ty()
 	const CursorPage = promiseRuntimeMod.ident("CursorPage").ty()
@@ -363,7 +364,9 @@ const generateResourcesFile = (
 					JSON.stringify(`checkfu.${op.operationId}`),
 					", ",
 					safetyExpr,
-					", options, () =>",
+					", ",
+					op.supportsIdempotencyKey ? [withResolvedIdempotencyKey, "(options, key)"] : "options",
+					", () =>",
 				)
 				out.indent(() => {
 					out("this.#runtime.raw.", op.apiGroup, ".", op.apiEndpoint, "({")
@@ -421,7 +424,7 @@ const generateResourcesFile = (
 					EffectFlatMap,
 					"(",
 					resolveCallIdempotencyKey,
-					"(this.#runtime, options?.idempotencyKey, true), (key) =>",
+					"(this.#runtime, options, true), (key) =>",
 				)
 				out.indent(() => emitInvoke())
 				out(")")

@@ -1,6 +1,7 @@
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
@@ -9,6 +10,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Stream from "effect/Stream"
 import { CheckfuConfigError, isAPIError } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./Schemas.ts"
@@ -50,6 +52,55 @@ export const cancelResponseBody = (
 	}
 	return Effect.void
 }
+
+export const readBoundedResponseText = (
+	response: HttpClientResponse.HttpClientResponse,
+	maxBytes: number,
+	timeoutMs: number,
+): Effect.Effect<string> =>
+	Effect.gen(function* () {
+		const chunks: Array<Uint8Array> = []
+		let totalBytes = 0
+		let truncated = false
+		const readBody = response.stream.pipe(
+			Stream.takeUntil((chunk) => {
+				if (totalBytes + chunk.byteLength > maxBytes) {
+					const remaining = maxBytes - totalBytes
+					if (remaining > 0) {
+						chunks.push(chunk.subarray(0, remaining))
+						totalBytes += remaining
+					}
+					truncated = true
+					return true
+				}
+				chunks.push(chunk)
+				totalBytes += chunk.byteLength
+				return false
+			}),
+			Stream.runDrain,
+			Effect.ignore,
+			Effect.catchDefect(() => Effect.void),
+		)
+		const outcome = yield* Effect.race(
+			readBody.pipe(Effect.as("done" as const)),
+			Effect.sleep(Duration.millis(timeoutMs)).pipe(Effect.as("timeout" as const)),
+		)
+		const timedOut = outcome === "timeout"
+		if (truncated || timedOut) {
+			yield* cancelResponseBody(response)
+		}
+		if (totalBytes === 0) {
+			return ""
+		}
+		const merged = new Uint8Array(totalBytes)
+		let offset = 0
+		for (const chunk of chunks) {
+			merged.set(chunk, offset)
+			offset += chunk.byteLength
+		}
+		const decoded = new TextDecoder().decode(merged)
+		return truncated || timedOut ? `${decoded}…` : decoded
+	})
 
 export interface NormalizeApiUrlOptions {
 	readonly allowInsecureHttp?: boolean | undefined
@@ -184,6 +235,22 @@ export const resolveApiKey = (
 			return Effect.succeed(Redacted.make(Redacted.value(maybeKey.value).trim()))
 		}),
 	)
+}
+
+export const lookupHeader = (
+	headers: HeaderMap | undefined,
+	lowerName: string,
+): string | null | undefined => {
+	if (headers === undefined) {
+		return undefined
+	}
+	let found: string | null | undefined
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === lowerName && value !== undefined) {
+			found = value
+		}
+	}
+	return found
 }
 
 export const mergeHeaderMaps = (
@@ -344,6 +411,12 @@ export const shouldRetryError = (error: CheckfuSdkError, safety: RetrySafety): b
 		return false
 	}
 	if (isAPIError(error)) {
+		const hasPartialOrUnconfirmed =
+			(error.accepted !== undefined && error.accepted.length > 0) ||
+			error.unconfirmedIndex !== undefined
+		if (safety !== "idempotent" && hasPartialOrUnconfirmed) {
+			return false
+		}
 		const shouldRetryHeader = error.headers?.["x-should-retry"]?.trim().toLowerCase()
 		if (shouldRetryHeader === "false") {
 			return false

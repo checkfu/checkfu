@@ -208,6 +208,7 @@ const buildCheckfuClient = (params: {
 		const runtime: EffectSdkRuntime = {
 			baseUrl: params.baseUrl,
 			raw,
+			defaultHeaders: params.defaultHeaders,
 			maxRetries: params.maxRetries,
 			timeout: params.timeout,
 			autoIdempotencyKey: params.autoIdempotencyKey,
@@ -220,12 +221,9 @@ const buildCheckfuClient = (params: {
 		): Effect.Effect<CheckfuClientService, CheckfuConfigError> =>
 			Effect.gen(function* () {
 				const nextAllowInsecure = overrides.allowInsecureHttp ?? params.allowInsecureHttp
-				const nextBaseUrl =
-					overrides.baseUrl === undefined
-						? params.baseUrl
-						: yield* normalizeApiUrl(overrides.baseUrl, {
-								allowInsecureHttp: nextAllowInsecure,
-							})
+				const nextBaseUrl = yield* normalizeApiUrl(overrides.baseUrl ?? params.baseUrl, {
+					allowInsecureHttp: nextAllowInsecure,
+				})
 				const nextApiKey =
 					overrides.apiKey === undefined ? params.apiKey : yield* normalizeApiKey(overrides.apiKey)
 				const nextMaxRetries = yield* normalizeMaxRetries(overrides.maxRetries, params.maxRetries)

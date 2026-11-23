@@ -139,17 +139,33 @@ export const toEffectRequestOptions = (
 	}
 }
 
-const toWebResponse = <A>(res: WithResponse<A>, jsonData: unknown): Response => {
+const toWebResponse = async <A>(
+	runtime: PromiseSdkRuntime,
+	res: WithResponse<A>,
+	jsonData: unknown,
+): Promise<Response> => {
 	const web = HttpClientResponse.toWeb(res.response)
-	if (Option.isSome(web)) {
+	if (Option.isSome(web) && !web.value.bodyUsed) {
 		return web.value
 	}
-	const headers = new Headers()
-	for (const [key, value] of Object.entries(res.headers)) {
-		headers.set(key, value)
+	const headers = Option.isSome(web) ? new Headers(web.value.headers) : toHeaders(res.headers)
+	const statusText = Option.isSome(web) ? web.value.statusText : ""
+	if (res.status === 204 || res.status === 205 || res.status === 304) {
+		return new Response(null, { status: res.status, statusText, headers })
+	}
+	headers.delete("content-encoding")
+	headers.delete("content-length")
+	const rawBytes = await runtime.runPromise(Effect.option(res.response.arrayBuffer))
+	if (Option.isSome(rawBytes)) {
+		return new Response(rawBytes.value.slice(0), {
+			status: res.status,
+			statusText,
+			headers,
+		})
 	}
 	return new Response(JSON.stringify(jsonData), {
 		status: res.status,
+		statusText,
 		headers,
 	})
 }
@@ -346,15 +362,23 @@ export class EventStream<T> implements AsyncIterable<T> {
 		const source = this[Symbol.asyncIterator]()
 		const leftQueue: Array<Promise<IteratorResult<T, undefined>>> = []
 		const rightQueue: Array<Promise<IteratorResult<T, undefined>>> = []
-		let closedBranches = 0
+		let leftClosed = false
+		let rightClosed = false
 
 		const pullIntoBoth = (): void => {
 			const step = source.next()
-			leftQueue.push(step)
-			rightQueue.push(step)
+			if (!leftClosed) {
+				leftQueue.push(step)
+			}
+			if (!rightClosed) {
+				rightQueue.push(step)
+			}
 		}
 
-		const makeBranch = (queue: Array<Promise<IteratorResult<T, undefined>>>): EventStream<T> => {
+		const makeBranch = (
+			queue: Array<Promise<IteratorResult<T, undefined>>>,
+			isLeft: boolean,
+		): EventStream<T> => {
 			let branchClosed = false
 			const nextBranch = (): Promise<IteratorResult<T, undefined>> => {
 				if (branchClosed) {
@@ -371,15 +395,21 @@ export class EventStream<T> implements AsyncIterable<T> {
 					return
 				}
 				branchClosed = true
-				closedBranches += 1
-				if (closedBranches >= 2) {
+				if (isLeft) {
+					leftClosed = true
+					leftQueue.length = 0
+				} else {
+					rightClosed = true
+					rightQueue.length = 0
+				}
+				if (leftClosed && rightClosed) {
 					await source.return?.()
 				}
 			}
 			return new EventStream(this.controller, nextBranch, closeBranch)
 		}
 
-		return [makeBranch(leftQueue), makeBranch(rightQueue)] as const
+		return [makeBranch(leftQueue, true), makeBranch(rightQueue, false)] as const
 	}
 
 	/**
@@ -488,7 +518,7 @@ export const executeUnaryPromise = <A>(
 		const data = toIsoJson(raw.data)
 		return {
 			data,
-			response: toWebResponse(raw, data),
+			response: await toWebResponse(runtime, raw, data),
 			status: raw.status,
 			headers: toHeaders(raw.headers),
 			request_id: raw.requestId ?? null,
@@ -540,7 +570,7 @@ export const executePaginatedPromise = <Item, Cursor extends string | number = n
 			)
 			return {
 				data: page,
-				response: toWebResponse(raw, body),
+				response: await toWebResponse(runtime, raw, body),
 				status: raw.status,
 				headers: toHeaders(raw.headers),
 				request_id: raw.requestId ?? null,
@@ -576,6 +606,15 @@ export const executeSseStreamPromise = <Event>(
 		let closedByConsumer = false
 		let interrupted = false
 
+		const cleanup = (): void => {
+			externalSignal?.removeEventListener("abort", onExternalAbort)
+		}
+
+		if (controller.signal.aborted) {
+			cleanup()
+			throw new APIUserAbortError({ message: "Request was aborted." })
+		}
+
 		const fiber = runtime.runFork((effectRuntime) => {
 			const { signal: _ignoredSignal, ...effectStreamOpts } = streamOptions ?? {}
 			return buildStream(effectRuntime, {
@@ -604,20 +643,26 @@ export const executeSseStreamPromise = <Event>(
 			)
 		})
 
-		const cleanup = (): void => {
-			externalSignal?.removeEventListener("abort", onExternalAbort)
-		}
-
 		const abortStream = (): void => {
 			if (interrupted) {
 				return
 			}
 			interrupted = true
 			cleanup()
-			runtime.runFork(() => Fiber.interrupt(fiber))
+			const abortErr = new APIUserAbortError({ message: "Event stream was aborted." })
+			runtime.runFork(() =>
+				Deferred.fail(opened, abortErr).pipe(
+					Effect.andThen(Queue.fail(queue, abortErr)),
+					Effect.andThen(Fiber.interrupt(fiber)),
+					Effect.ignore,
+				),
+			)
 		}
 
 		controller.signal.addEventListener("abort", abortStream, { once: true })
+		if (controller.signal.aborted) {
+			abortStream()
+		}
 
 		const openExit = await runtime.runPromiseExit(Deferred.await(opened))
 		if (Exit.isFailure(openExit)) {

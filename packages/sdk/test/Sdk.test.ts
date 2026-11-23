@@ -1058,4 +1058,422 @@ describe("@checkfu/sdk", () => {
 			expect(checkTypes[0]).toBe("agent")
 		})
 	})
+
+	describe("safety & lifecycle regression coverage", () => {
+		it.live(
+			"bases mutation retry safety on the effective Idempotency-Key header sent on the wire",
+			() =>
+				Effect.gen(function* () {
+					// 1) headers: { "Idempotency-Key": null } strips the key AND prevents connection-error retries
+					let strippedCalls = 0
+					const strippedKeys: Array<string | null> = []
+					const strippedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						strippedCalls += 1
+						strippedKeys.push(req.headers.get("idempotency-key"))
+						throw new TypeError("socket closed after commit")
+					}) as typeof globalThis.fetch
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const err = yield* Effect.flip(
+							client.agents.create(
+								{ name: "NoRetry", model: "gpt-6.2-sol" },
+								{ headers: { "Idempotency-Key": null } },
+							),
+						)
+						expect(err._tag).toBe("APIConnectionError")
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								fetch: strippedFetch,
+							}),
+						),
+					)
+					expect(strippedCalls).toBe(1)
+					expect(strippedKeys).toEqual([null])
+
+					// 2) Explicit idempotencyKey overrides defaultHeaders: { "Idempotency-Key": null } and retries safely
+					let overrideCalls = 0
+					const overrideKeys: Array<string | null> = []
+					const overrideFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						overrideCalls += 1
+						overrideKeys.push(req.headers.get("idempotency-key"))
+						if (overrideCalls === 1) {
+							throw new TypeError("transient drop")
+						}
+						return jsonResponse(sampleAgent(), 201)
+					}) as typeof globalThis.fetch
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const created = yield* client.agents.create(
+							{ name: "ExplicitKey", model: "gpt-6.2-sol" },
+							{ idempotencyKey: "k_explicit_1" },
+						)
+						expect(created.type).toBe("agent")
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								defaultHeaders: { "Idempotency-Key": null },
+								fetch: overrideFetch,
+							}),
+						),
+					)
+					expect(overrideCalls).toBe(2)
+					expect(overrideKeys).toEqual(["k_explicit_1", "k_explicit_1"])
+
+					// 3) Per-call headers: { "Idempotency-Key": "k_hdr" } with autoIdempotencyKey: false enables retries
+					let headerKeyCalls = 0
+					const headerKeys: Array<string | null> = []
+					const headerKeyFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						headerKeyCalls += 1
+						headerKeys.push(req.headers.get("idempotency-key"))
+						if (headerKeyCalls === 1) {
+							throw new TypeError("transient drop")
+						}
+						return jsonResponse(sampleAgent(), 201)
+					}) as typeof globalThis.fetch
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const created = yield* client.agents.create(
+							{ name: "HeaderKey", model: "gpt-6.2-sol" },
+							{ headers: { "Idempotency-Key": "k_hdr_1" } },
+						)
+						expect(created.type).toBe("agent")
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+								fetch: headerKeyFetch,
+							}),
+						),
+					)
+					expect(headerKeyCalls).toBe(2)
+					expect(headerKeys).toEqual(["k_hdr_1", "k_hdr_1"])
+				}),
+		)
+
+		it.live(
+			"does not retry partially accepted or unconfirmed batches without idempotency (even on 429/503)",
+			() =>
+				Effect.gen(function* () {
+					// 1) 429 with accepted receipts must not replay the batch
+					let acceptedCalls = 0
+					const acceptedFetch = (async () => {
+						acceptedCalls += 1
+						return jsonResponse(
+							{
+								type: "error",
+								error: { type: "rate_limit_error", message: "throttled mid-batch" },
+								request_id: "req_partial_429",
+								accepted: [
+									{
+										type: "user.message",
+										turn: 1,
+										queued: false,
+										content: [{ type: "text", text: "first" }],
+									},
+								],
+								failed_index: 1,
+							},
+							429,
+							{ "x-should-retry": "true", "retry-after-ms": "1" },
+						)
+					}) as typeof globalThis.fetch
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const err = yield* Effect.flip(
+							client.sessions.events.send("sess_1", {
+								events: [
+									{ type: "user.message", content: [{ type: "text", text: "first" }] },
+									{ type: "user.message", content: [{ type: "text", text: "second" }] },
+								],
+							}),
+						)
+						expect(err._tag).toBe("RateLimitError")
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+								fetch: acceptedFetch,
+							}),
+						),
+					)
+					expect(acceptedCalls).toBe(1)
+
+					// 2) 503 with unconfirmed_index: 0 must not replay the batch without idempotency
+					let unconfirmedCalls = 0
+					const unconfirmedFetch = (async () => {
+						unconfirmedCalls += 1
+						return jsonResponse(
+							{
+								type: "error",
+								error: { type: "service_unavailable", message: "outcome unknown" },
+								request_id: "req_unconfirmed_503",
+								unconfirmed_index: 0,
+							},
+							503,
+							{ "retry-after-ms": "1" },
+						)
+					}) as typeof globalThis.fetch
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const err = yield* Effect.flip(
+							client.sessions.events.send("sess_1", {
+								events: [{ type: "user.message", content: [{ type: "text", text: "first" }] }],
+							}),
+						)
+						expect(err._tag).toBe("ServiceUnavailableError")
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+								fetch: unconfirmedFetch,
+							}),
+						),
+					)
+					expect(unconfirmedCalls).toBe(1)
+
+					// 3) Clean pre-commit 429 (no accepted receipts, no unconfirmed_index) still retries
+					let preCommitCalls = 0
+					const preCommitFetch = (async () => {
+						preCommitCalls += 1
+						if (preCommitCalls === 1) {
+							return jsonResponse(
+								{
+									type: "error",
+									error: { type: "rate_limit_error", message: "try again" },
+									request_id: "req_clean_429",
+									failed_index: 0,
+								},
+								429,
+								{ "retry-after-ms": "1" },
+							)
+						}
+						return jsonResponse({ data: [{ type: "user.interrupt" }] }, 200)
+					}) as typeof globalThis.fetch
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const res = yield* client.sessions.events.send("sess_1", {
+							events: [{ type: "user.interrupt" }],
+						})
+						expect(res.data).toHaveLength(1)
+					}).pipe(
+						Effect.provide(
+							CheckfuClient.layerFetch({
+								apiKey: "ck_test_key",
+								baseUrl: "http://localhost:1337",
+								maxRetries: 2,
+								autoIdempotencyKey: false,
+								fetch: preCommitFetch,
+							}),
+						),
+					)
+					expect(preCommitCalls).toBe(2)
+				}),
+		)
+
+		it.live("enforces waitForPending timeout across slow in-flight requests", () =>
+			Effect.gen(function* () {
+				let fetchCalls = 0
+				let abortedInFlight = false
+				const slowFetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+					fetchCalls += 1
+					return await new Promise<Response>((_resolve, reject) => {
+						const onAbort = () => {
+							abortedInFlight = true
+							reject(new DOMException("Aborted", "AbortError"))
+						}
+						if (init?.signal?.aborted) {
+							onAbort()
+							return
+						}
+						init?.signal?.addEventListener("abort", onAbort, { once: true })
+					})
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const err = yield* Effect.flip(
+						client.waitForPending(
+							{ id: "agent_slow", type: "agent", pending: true },
+							{
+								timeout: "40 millis",
+								initialDelay: "10 millis",
+								requestOptions: { timeout: null, maxRetries: 0 },
+							},
+						),
+					)
+					expect(err._tag).toBe("APIConnectionTimeoutError")
+				}).pipe(
+					Effect.provide(
+						CheckfuClient.layerFetch({
+							apiKey: "ck_test_key",
+							baseUrl: "http://localhost:1337",
+							timeout: null,
+							maxRetries: 0,
+							fetch: slowFetch,
+						}),
+					),
+				)
+				expect(fetchCalls).toBe(1)
+				expect(abortedInFlight).toBe(true)
+			}),
+		)
+
+		it.live("revalidates inherited baseUrl when disabling allowInsecureHttp via withOptions", () =>
+			Effect.gen(function* () {
+				const err = yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					return yield* Effect.flip(client.withOptions({ allowInsecureHttp: false }))
+				}).pipe(
+					Effect.provide(
+						CheckfuClient.layerFetch({
+							apiKey: "ck_test_key",
+							baseUrl: "http://api.example.com",
+							allowInsecureHttp: true,
+							fetch: async () => jsonResponse(sampleAgent()),
+						}),
+					),
+				)
+				expect(err._tag).toBe("CheckfuConfigError")
+				expect(err.message).toContain("insecure HTTP")
+			}),
+		)
+
+		it("returns readable Response bodies from asResponse() and withResponse() in a single fetch", async () => {
+			let fetches = 0
+			const mockFetch = (async () => {
+				fetches += 1
+				return jsonResponse(sampleAgent({ name: "ReadableBody" }), 201, {
+					"request-id": "req_readable_1",
+				})
+			}) as typeof globalThis.fetch
+
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: mockFetch,
+			})
+			try {
+				const asRes = await client.agents
+					.create({ name: "ReadableBody", model: "gpt-6.2-sol" })
+					.asResponse()
+				expect(asRes.bodyUsed).toBe(false)
+				expect(asRes.status).toBe(201)
+				const rawText = await asRes.text()
+				expect(JSON.parse(rawText)).toMatchObject({ name: "ReadableBody" })
+				expect(fetches).toBe(1)
+
+				const withRes = await client.agents
+					.create({ name: "ReadableBody", model: "gpt-6.2-sol" })
+					.withResponse()
+				expect(withRes.response.bodyUsed).toBe(false)
+				expect(await withRes.response.json()).toMatchObject({ name: "ReadableBody" })
+				expect(fetches).toBe(2)
+			} finally {
+				await client.close()
+			}
+		})
+
+		it("handles immediate aborts during Promise stream initialization without hanging or fetching", async () => {
+			let fetches = 0
+			const mockFetch = (async () => {
+				fetches += 1
+				return await new Promise<Response>(() => {})
+			}) as typeof globalThis.fetch
+
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: mockFetch,
+			})
+			try {
+				const controller = new AbortController()
+				const pendingStream = client.sessions.events.stream("sess_abort_init", undefined, {
+					signal: controller.signal,
+				})
+				// Abort immediately on the same tick while Queue/Deferred allocation is still awaiting
+				controller.abort()
+				await expect(pendingStream).rejects.toThrow(APIUserAbortError)
+				expect(fetches).toBe(0)
+			} finally {
+				await client.close()
+			}
+		})
+
+		it("stops buffering closed tee() branches while the surviving branch drains", async () => {
+			const encoder = new TextEncoder()
+			let bodyCanceled = false
+			const mockFetch = (async () => {
+				const payload = [
+					sseFrame(sampleUserMessageEvent(1)),
+					sseFrame(sampleUserMessageEvent(2)),
+					sseFrame(sampleUserMessageEvent(3)),
+					sseFrame(sampleArchivedEvent(4)),
+				].join("")
+				const body = new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(encoder.encode(payload))
+						controller.close()
+					},
+					cancel() {
+						bodyCanceled = true
+					},
+				})
+				return new Response(body, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				})
+			}) as typeof globalThis.fetch
+
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: mockFetch,
+			})
+			try {
+				const live = await client.sessions.events.stream("sess_tee_close")
+				const [left, right] = live.tee()
+				const leftSeen: Array<number> = []
+				for await (const ev of left) {
+					leftSeen.push(ev.seq)
+					if (ev.seq === 1) {
+						break
+					}
+				}
+				expect(leftSeen).toEqual([1])
+				const rightSeen: Array<number> = []
+				for await (const ev of right) {
+					rightSeen.push(ev.seq)
+				}
+				expect(rightSeen).toEqual([1, 2, 3, 4])
+				expect(bodyCanceled).toBe(false)
+			} finally {
+				await client.close()
+			}
+		})
+	})
 })

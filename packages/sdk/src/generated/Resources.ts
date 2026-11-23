@@ -27,6 +27,7 @@ import {
 	executeWithRetries,
 	resolveCallIdempotencyKey,
 	unwrapResponse,
+	withResolvedIdempotencyKey,
 } from "../Runtime.js"
 import type {
 	AnyRequestOptions,
@@ -198,21 +199,19 @@ export class EffectAgentsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(
-				resolveCallIdempotencyKey(this.#runtime, options?.idempotencyKey, true),
-				(key) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.agents.create",
-						key !== undefined ? "idempotent" : "pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.agents.create({
-								headers: key === undefined ? {} : { "idempotency-key": key },
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
-					),
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+				executeWithRetries(
+					this.#runtime,
+					"checkfu.agents.create",
+					key !== undefined ? "idempotent" : "pre-commit-only",
+					withResolvedIdempotencyKey(options, key),
+					() =>
+						this.#runtime.raw.agents.create({
+							headers: key === undefined ? {} : { "idempotency-key": key },
+							payload: params,
+							responseMode: "decoded-and-response",
+						}),
+				),
 			),
 			options,
 		)
@@ -343,21 +342,19 @@ export class EffectEnvironmentsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(
-				resolveCallIdempotencyKey(this.#runtime, options?.idempotencyKey, true),
-				(key) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.environments.create",
-						key !== undefined ? "idempotent" : "pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.environments.create({
-								headers: key === undefined ? {} : { "idempotency-key": key },
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
-					),
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+				executeWithRetries(
+					this.#runtime,
+					"checkfu.environments.create",
+					key !== undefined ? "idempotent" : "pre-commit-only",
+					withResolvedIdempotencyKey(options, key),
+					() =>
+						this.#runtime.raw.environments.create({
+							headers: key === undefined ? {} : { "idempotency-key": key },
+							payload: params,
+							responseMode: "decoded-and-response",
+						}),
+				),
 			),
 			options,
 		)
@@ -596,22 +593,20 @@ export class EffectSessionsEventsResource {
 			EffectFlatMap(
 				decodeEndpointParams("sessions", "sendEvents", { session_id: sessionId }),
 				(pathParams) =>
-					EffectFlatMap(
-						resolveCallIdempotencyKey(this.#runtime, options?.idempotencyKey, true),
-						(key) =>
-							executeWithRetries(
-								this.#runtime,
-								"checkfu.sessions.events.send",
-								key !== undefined ? "idempotent" : "pre-commit-only",
-								options,
-								() =>
-									this.#runtime.raw.sessions.sendEvents({
-										params: pathParams,
-										headers: key === undefined ? {} : { "idempotency-key": key },
-										payload: params,
-										responseMode: "decoded-and-response",
-									}),
-							),
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.sessions.events.send",
+							key !== undefined ? "idempotent" : "pre-commit-only",
+							withResolvedIdempotencyKey(options, key),
+							() =>
+								this.#runtime.raw.sessions.sendEvents({
+									params: pathParams,
+									headers: key === undefined ? {} : { "idempotency-key": key },
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -692,21 +687,19 @@ export class EffectSessionsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(
-				resolveCallIdempotencyKey(this.#runtime, options?.idempotencyKey, true),
-				(key) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.sessions.create",
-						key !== undefined ? "idempotent" : "pre-commit-only",
-						options,
-						() =>
-							this.#runtime.raw.sessions.create({
-								headers: key === undefined ? {} : { "idempotency-key": key },
-								payload: params,
-								responseMode: "decoded-and-response",
-							}),
-					),
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+				executeWithRetries(
+					this.#runtime,
+					"checkfu.sessions.create",
+					key !== undefined ? "idempotent" : "pre-commit-only",
+					withResolvedIdempotencyKey(options, key),
+					() =>
+						this.#runtime.raw.sessions.create({
+							headers: key === undefined ? {} : { "idempotency-key": key },
+							payload: params,
+							responseMode: "decoded-and-response",
+						}),
+				),
 			),
 			options,
 		)

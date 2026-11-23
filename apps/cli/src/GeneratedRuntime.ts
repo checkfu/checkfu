@@ -1,5 +1,6 @@
 import { CheckfuApi } from "@checkfu/sdk/Api"
 import type { ApiError } from "@checkfu/sdk/Api"
+import { APIConnectionError } from "@checkfu/sdk/Errors"
 import type { ApiSseError } from "@checkfu/sdk/Sse"
 import { validatePathSegment as sdkValidatePathSegment } from "@checkfu/sdk/Transport"
 import type * as Command from "effect/cli/Command"
@@ -342,11 +343,10 @@ type UntypedStreamMethod = (request: {
 	readonly params?: unknown
 	readonly query?: unknown
 	readonly headers?: unknown
-	readonly responseMode: "decoded-and-response"
-}) => Effect.Effect<
-	readonly [Stream.Stream<unknown, ApiSseError> | void, HttpClientResponse.HttpClientResponse],
-	ApiSseError
->
+	readonly responseMode: "response-only"
+}) => Effect.Effect<HttpClientResponse.HttpClientResponse, ApiSseError>
+
+const decodeGenericStreamJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 export const invokeGeneratedStream = (
 	spec: GeneratedOperationDescriptor,
@@ -407,8 +407,18 @@ export const invokeGeneratedStream = (
 						...(decodedParams === undefined ? {} : { params: decodedParams }),
 						...(decodedQuery === undefined ? {} : { query: decodedQuery }),
 						...(decodedHeaders === undefined ? {} : { headers: decodedHeaders }),
-						responseMode: "decoded-and-response",
+						responseMode: "response-only",
 					}),
+				decodeEvent: (rawData) =>
+					decodeGenericStreamJson(rawData).pipe(
+						Effect.mapError(
+							(err) =>
+								new APIConnectionError({
+									message: `Invalid SSE event payload: ${err.message}`,
+									cause: err,
+								}),
+						),
+					),
 				...(Object.keys(parts.headers).length > 0 ? { options: { headers: parts.headers } } : {}),
 			})
 			.pipe(Stream.runForEach((event) => renderOutput(event, { streaming: true })))
