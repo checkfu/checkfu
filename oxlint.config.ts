@@ -151,12 +151,10 @@ export default defineConfig({
 			},
 		},
 		{
-			// PiDurableEngine and PiRefusals emit structured console.warn logs outside Effect
-			// for Cloudflare Worker logs, and their tests intercept console.warn to verify redaction.
+			// PiRefusals emits structured console.warn logs outside Effect for Cloudflare
+			// Worker logs, and the refusal tests intercept console.warn to verify redaction.
 			files: [
-				"apps/api/src/Pi/PiDurableEngine.ts",
 				"apps/api/src/Pi/PiRefusals.ts",
-				"apps/api/test/PiDurableEngine.test.ts",
 				"apps/api/test/Api.refusals.anthropic.test.ts",
 				"apps/api/test/Api.refusals.openai.test.ts",
 			],
