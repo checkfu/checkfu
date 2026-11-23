@@ -187,6 +187,46 @@ export class Session extends Domain.Aggregate("Session", {
 			after._tag !== "Running" ||
 			after.turn !== before.turn ||
 			after.model_requests_started >= before.model_requests_started,
+		ModelRequestsStartedGrowsByAtMostOneWithinTurn: ({ before, after }) =>
+			before._tag !== "Running" ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.model_requests_started <= before.model_requests_started + 1,
+		PendingUserMessagesGrowsByAtMostOneWithinTurn: ({ before, after }) =>
+			before._tag !== "Running" ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.pending_user_messages <= before.pending_user_messages + 1,
+		OnlySendUserMessageAddsPendingMessages: ({ before, after, command }) =>
+			before._tag !== "Running" ||
+			after._tag !== "Running" ||
+			after.turn !== before.turn ||
+			after.pending_user_messages <= before.pending_user_messages ||
+			command._tag === "SendUserMessage",
+		OnlyArchiveSessionSetsArchivedFlag: ({ before, after, command }) =>
+			after._tag !== "Terminated" ||
+			!after.archived ||
+			(before._tag === "Terminated" && before.archived) ||
+			command._tag === "ArchiveSession",
+		OpenModelRequestClosedBeforeLeavingRunning: ({ before, after, events }) => {
+			if (
+				before._tag !== "Running" ||
+				before.open_model_request_id === null ||
+				(after._tag === "Running" && after.turn === before.turn)
+			) {
+				return true
+			}
+			const endIndex = events.findIndex(
+				(event) =>
+					event._tag === "span.model_request_end" &&
+					event.model_request_start_id === before.open_model_request_id,
+			)
+			const leaveIndex = events.findIndex(
+				(event) =>
+					event._tag === "session.status_idle" || event._tag === "session.status_terminated",
+			)
+			return endIndex >= 0 && (leaveIndex < 0 || endIndex < leaveIndex)
+		},
 	},
 	decide: {
 		CreateSession: (state, cmd, ctx) =>
@@ -394,6 +434,18 @@ export class Session extends Domain.Aggregate("Session", {
 			const active = requireActive(state, ctx.id)
 			if (active._tag !== "Idle" && active._tag !== "Running") return active
 			const errorEvent = new SessionErrorEvent({ error: cmd.error })
+			const terminateWithError = () =>
+				active._tag === "Running" && active.open_model_request_id !== null
+					? [
+							new SpanModelRequestEnd({
+								model_request_start_id: active.open_model_request_id,
+								model_usage: { input_tokens: 0, output_tokens: 0 },
+								is_error: true,
+							}),
+							errorEvent,
+							new SessionStatusTerminated(),
+						]
+					: [errorEvent, new SessionStatusTerminated()]
 			if (cmd.turn !== null) {
 				if (active._tag !== "Running") {
 					return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
@@ -406,7 +458,7 @@ export class Session extends Domain.Aggregate("Session", {
 					})
 				}
 				if (cmd.error.retry_status.type === "terminal") {
-					return [errorEvent, new SessionStatusTerminated()]
+					return terminateWithError()
 				}
 				if (cmd.error.retry_status.type === "exhausted") {
 					if (active.open_model_request_id !== null) {
@@ -424,9 +476,7 @@ export class Session extends Domain.Aggregate("Session", {
 				}
 				return [errorEvent]
 			}
-			return cmd.error.retry_status.type === "terminal"
-				? [errorEvent, new SessionStatusTerminated()]
-				: [errorEvent]
+			return cmd.error.retry_status.type === "terminal" ? terminateWithError() : [errorEvent]
 		},
 
 		ArchiveSession: (state, _cmd, ctx) => {

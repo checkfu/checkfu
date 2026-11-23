@@ -24,8 +24,14 @@ const STANDING = {
 	"Session.TurnNeverDecreases": "proved",
 	"Session.TurnAdvancesByAtMostOne": "proved",
 	"Session.ModelRequestsStartedNeverDecreasesWithinTurn": "proved",
+	"Session.ModelRequestsStartedGrowsByAtMostOneWithinTurn": "proved",
+	"Session.PendingUserMessagesGrowsByAtMostOneWithinTurn": "proved",
+	"Session.OnlySendUserMessageAddsPendingMessages": "proved",
+	"Session.OnlyArchiveSessionSetsArchivedFlag": "proved",
+	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
 	"Sessions.ASessionCompletesATurn": "reached",
 	"Sessions.ASessionTerminates": "reached",
+	"Sessions.ASessionIsArchived": "reached",
 	"Sessions.EveryTurnSettles": "checked",
 } as const
 
@@ -36,6 +42,7 @@ const PROVED = Object.entries(STANDING)
 const REQUIRED_REPLAY_RULES = [
 	"Sessions.ASessionCompletesATurn",
 	"Sessions.ASessionTerminates",
+	"Sessions.ASessionIsArchived",
 ] as const
 
 const REQUIRED_REPLAY_OUTCOMES = [
@@ -75,7 +82,7 @@ describe("Sessions Z3 formal verification", () => {
 				depth: 2,
 				budget: 20_000,
 				faults: { redeliver: true, reorder: true, rerun: true },
-				walks: { count: 10 },
+				walks: { count: 25 },
 				lock: "./Sessions.verify.lock.json",
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),
@@ -83,6 +90,7 @@ describe("Sessions Z3 formal verification", () => {
 		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
 			STANDING,
 		)
+		expect(report.undone).toEqual([])
 		expect(report.explored.truncated).toBe(false)
 		expect(report.explored.complete).toBe(2)
 		expect(report.explored.repeated).toContain(
@@ -109,6 +117,7 @@ describe("Sessions Z3 formal verification", () => {
 		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
 			STANDING,
 		)
+		expect(report.undone).toEqual([])
 		expect(report.explored.truncated).toBe(false)
 		expect(report.explored.complete).toBe(2)
 		expect(report.unrun).toBe(0)

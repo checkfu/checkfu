@@ -57,6 +57,30 @@
 			"Session.ArchivedSessionStaysArchived": {
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Terminated\" ||\n\t\t\t!before.archived ||\n\t\t\t(after._tag === \"Terminated\" && after.archived)"
+			},
+			"Session.ModelRequestsStartedGrowsByAtMostOneWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.model_requests_started <= before.model_requests_started + 1"
+			},
+			"Session.PendingUserMessagesGrowsByAtMostOneWithinTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.pending_user_messages <= before.pending_user_messages + 1"
+			},
+			"Session.OnlySendUserMessageAddsPendingMessages": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.pending_user_messages <= before.pending_user_messages ||\n\t\t\tcommand._tag === \"SendUserMessage\""
+			},
+			"Session.OnlyArchiveSessionSetsArchivedFlag": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tafter._tag !== \"Terminated\" ||\n\t\t\t!after.archived ||\n\t\t\t(before._tag === \"Terminated\" && before.archived) ||\n\t\t\tcommand._tag === \"ArchiveSession\""
+			},
+			"Session.OpenModelRequestClosedBeforeLeavingRunning": {
+				"kind": "transition",
+				"source": "({ before, after, events }) => {\n\t\t\tif (\n\t\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t\tbefore.open_model_request_id === null ||\n\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn)\n\t\t\t) {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tconst endIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"span.model_request_end\" &&\n\t\t\t\t\tevent.model_request_start_id === before.open_model_request_id,\n\t\t\t)\n\t\t\tconst leaveIndex = events.findIndex(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.status_idle\" || event._tag === \"session.status_terminated\",\n\t\t\t)\n\t\t\treturn endIndex >= 0 && (leaveIndex < 0 || endIndex < leaveIndex)\n\t\t}"
+			},
+			"Sessions.ASessionIsArchived": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Session.some((s) => s.state._tag === \"Terminated\" && s.state.archived)"
 			}
 		}
 	}
