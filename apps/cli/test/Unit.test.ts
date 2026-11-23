@@ -106,12 +106,35 @@ describe("normalizeApiUrl", () => {
 	it("handles SSE retry directives without disconnecting, preserves split CRLF keepalives, and rotates iteratively", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
+				const sseSessionFrame = (
+					seq: number,
+					type: "user.message" | "session.archived",
+					eol = "\n",
+				): string => {
+					const payload =
+						type === "user.message"
+							? {
+									id: `evt_${seq}`,
+									seq,
+									type,
+									created_at: "2026-11-22T00:00:00.000Z",
+									content: [{ type: "text", text: `msg ${seq}` }],
+								}
+							: {
+									id: `evt_${seq}`,
+									seq,
+									type,
+									created_at: "2026-11-22T00:00:00.000Z",
+								}
+					return `id: ${seq}${eol}event: ${type}${eol}data: ${JSON.stringify(payload)}${eol}${eol}`
+				}
+
 				// 1) Server advertises retry: at start of connection and delivers events on the same response
 				let retryRequests = 0
 				const retryFetch = (async () => {
 					retryRequests++
 					return new Response(
-						'retry: 25\n\nid: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\nid: 2\nevent: session.archived\ndata: {"seq":2,"type":"session.archived"}\n\n',
+						`retry: 25\n\n${sseSessionFrame(1, "user.message")}${sseSessionFrame(2, "session.archived")}`,
 						{
 							status: 200,
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
@@ -156,9 +179,7 @@ describe("normalizeApiUrl", () => {
 								if (pullCount === 0) {
 									pullCount = 1
 									controller.enqueue(
-										encoder.encode(
-											'retry: 10\n\nid: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
-										),
+										encoder.encode(`retry: 10\n\n${sseSessionFrame(1, "user.message")}`),
 									)
 								} else {
 									controller.error(new Error("simulated disconnect"))
@@ -170,13 +191,10 @@ describe("normalizeApiUrl", () => {
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
 						})
 					}
-					return new Response(
-						'id: 2\nevent: session.archived\ndata: {"seq":2,"type":"session.archived"}\n\n',
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(sseSessionFrame(2, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 
 				const [retryDropDuration, retryDropEvents] = yield* Effect.timed(
@@ -217,9 +235,7 @@ describe("normalizeApiUrl", () => {
 					const body = new ReadableStream<Uint8Array>({
 						start(controller) {
 							controller.enqueue(
-								encoder.encode(
-									'id: 1\r\nevent: session.archived\r\ndata: {"seq":1,"type":"session.archived"}\r\n\r',
-								),
+								encoder.encode(sseSessionFrame(1, "session.archived", "\r\n").slice(0, -1)),
 							)
 							controller.enqueue(encoder.encode("\n"))
 							controller.close()
@@ -249,13 +265,10 @@ describe("normalizeApiUrl", () => {
 				const rotFetch = (async () => {
 					rotSeq++
 					const type = rotSeq === 50 ? "session.archived" : "user.message"
-					return new Response(
-						`id: ${rotSeq}\nevent: ${type}\ndata: {"seq":${rotSeq},"type":"${type}"}\n\n`,
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(sseSessionFrame(rotSeq, type), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 
 				const rotEvents = yield* Effect.gen(function* () {
@@ -348,11 +361,7 @@ describe("normalizeApiUrl", () => {
 							pull(controller) {
 								if (step === 0) {
 									step = 1
-									controller.enqueue(
-										encoder.encode(
-											'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
-										),
-									)
+									controller.enqueue(encoder.encode(sseSessionFrame(1, "user.message")))
 								} else {
 									controller.error(new Error("drop after event 1"))
 								}
@@ -366,13 +375,10 @@ describe("normalizeApiUrl", () => {
 					if (timeout408Requests === 2) {
 						return new Response("Request Timeout", { status: 408 })
 					}
-					return new Response(
-						'id: 2\nevent: session.archived\ndata: {"seq":2,"type":"session.archived"}\n\n',
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(sseSessionFrame(2, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 
 				const timeout408Events = yield* Effect.gen(function* () {
@@ -397,11 +403,7 @@ describe("normalizeApiUrl", () => {
 						pull(controller) {
 							if (step === 0) {
 								step = 1
-								controller.enqueue(
-									encoder.encode(
-										'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
-									),
-								)
+								controller.enqueue(encoder.encode(sseSessionFrame(1, "user.message")))
 							} else {
 								controller.error(new Error("mid-stream failure"))
 							}
@@ -428,13 +430,10 @@ describe("normalizeApiUrl", () => {
 				let zeroRetryFrameCalls = 0
 				const zeroRetryFrameFetch = (async () => {
 					zeroRetryFrameCalls++
-					return new Response(
-						'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\nid: 2\ndata: {"partial',
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(`${sseSessionFrame(1, "user.message")}id: 2\ndata: {"partial`, {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 				const zeroFrameErr = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -459,11 +458,7 @@ describe("normalizeApiUrl", () => {
 							pull(controller) {
 								if (step === 0) {
 									step = 1
-									controller.enqueue(
-										encoder.encode(
-											'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message"}\n\n',
-										),
-									)
+									controller.enqueue(encoder.encode(sseSessionFrame(1, "user.message")))
 								} else {
 									controller.error(new Error("drop after event"))
 								}
@@ -566,7 +561,7 @@ describe("normalizeApiUrl", () => {
 								sent = true
 								controller.enqueue(
 									encoder.encode(
-										'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\nid: 2\nevent: bogus\ndata: NOT_JSON\n\n',
+										`${sseSessionFrame(1, "session.archived")}id: 2\nevent: bogus\ndata: NOT_JSON\n\n`,
 									),
 								)
 								return
@@ -686,13 +681,10 @@ describe("normalizeApiUrl", () => {
 						})
 						return new Response(stalledBody, { status: 503 })
 					}
-					return new Response(
-						'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\n',
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(sseSessionFrame(1, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 				const stalled503Events = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -889,13 +881,10 @@ describe("normalizeApiUrl", () => {
 						})
 						return new Response(body, { status: 503 })
 					}
-					return new Response(
-						'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\n',
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(sseSessionFrame(1, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 				const cancelReject503Events = yield* Effect.gen(function* () {
 					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
@@ -1121,13 +1110,10 @@ describe("normalizeApiUrl", () => {
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
 						})
 					}
-					return new Response(
-						'id: 1\nevent: session.archived\ndata: {"seq":1,"type":"session.archived"}\n\n',
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+					return new Response(sseSessionFrame(1, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 
 				const idleBackoffEvents = yield* Effect.gen(function* () {
@@ -1243,31 +1229,22 @@ describe("normalizeApiUrl", () => {
 					replayCursorLastIds.push(req.headers.get("last-event-id"))
 					replayCursorCalls += 1
 					if (replayCursorCalls === 1) {
-						return new Response(
-							'id: 5\nevent: user.message\ndata: {"seq":5,"type":"user.message"}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
+						return new Response(sseSessionFrame(5, "user.message"), {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
 					}
 					if (replayCursorCalls === 2) {
 						// Proxy partially replays an older frame (seq 2) and disconnects
-						return new Response(
-							'id: 2\nevent: user.message\ndata: {"seq":2,"type":"user.message"}\n\n',
-							{
-								status: 200,
-								headers: { "content-type": "text/event-stream; charset=utf-8" },
-							},
-						)
-					}
-					return new Response(
-						'id: 6\nevent: session.archived\ndata: {"seq":6,"type":"session.archived"}\n\n',
-						{
+						return new Response(sseSessionFrame(2, "user.message"), {
 							status: 200,
 							headers: { "content-type": "text/event-stream; charset=utf-8" },
-						},
-					)
+						})
+					}
+					return new Response(sseSessionFrame(6, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
 				}) as unknown as typeof globalThis.fetch
 
 				const replayCursorEvents = yield* Effect.gen(function* () {
@@ -1283,6 +1260,87 @@ describe("normalizeApiUrl", () => {
 				// Conn 1 advanced (0ms); conn 2 replayed older seq 2 (no progress -> 250ms backoff)
 				expect(replayCursorSleeps).toEqual([250])
 				expect(Array.from(replayCursorEvents).map((e) => e.seq)).toEqual([5, 2, 6])
+
+				// 21) Session streams validate frames against SessionEvent before advancing the cursor
+				//     and ignore data-less id-only cursor updates, while generic SSE endpoints stay schema-free
+				for (const malformedBody of [
+					'id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n',
+					'id: 2\nevent: session.status_idle\ndata: {"id":"e2","seq":2,"type":"session.status_idle","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+					'id: 2\nevent: custom.unknown\ndata: {"id":"e2","seq":2,"type":"custom.unknown","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+				]) {
+					let malformedCalls = 0
+					const malformedFetch = (async () => {
+						malformedCalls += 1
+						return new Response(`${sseSessionFrame(1, "user.message")}${malformedBody}`, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}) as unknown as typeof globalThis.fetch
+					const malformedErr = yield* Effect.gen(function* () {
+						const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+						return yield* Effect.flip(
+							Stream.runDrain(
+								client.streamSessionEvents("sess_malformed_event", {
+									maxReconnectAttempts: 2,
+									baseReconnectDelayMs: 1,
+								}),
+							),
+						)
+					}).pipe(Effect.provide(makeLayer(malformedFetch)))
+					expect(malformedCalls).toBe(1)
+					expect(malformedErr.message).toContain("Invalid SSE session event payload")
+				}
+
+				// Data-less `id: 9\n\n` frames on a session stream must not advance Last-Event-ID past seq 1
+				const idOnlySessionLastIds: Array<string | null> = []
+				const idOnlySessionFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = input instanceof Request ? input : new Request(input, init)
+					idOnlySessionLastIds.push(req.headers.get("last-event-id"))
+					if (idOnlySessionLastIds.length === 1) {
+						return new Response(`${sseSessionFrame(1, "user.message")}id: 9\n\n`, {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(sseSessionFrame(2, "session.archived"), {
+						status: 200,
+						headers: { "content-type": "text/event-stream; charset=utf-8" },
+					})
+				}) as unknown as typeof globalThis.fetch
+				const idOnlySessionEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamSessionEvents("sess_id_only_ignored", {
+							maxReconnectAttempts: 1,
+							baseReconnectDelayMs: 1,
+						}),
+					)
+				}).pipe(Effect.provide(makeLayer(idOnlySessionFetch)))
+				expect(idOnlySessionLastIds).toEqual([null, "1"])
+				expect(Array.from(idOnlySessionEvents).map((e) => e.seq)).toEqual([1, 2])
+
+				// Generic SSE endpoint remains independent of SessionEvent (accepts arbitrary JSON `{ seq: 2 }`)
+				let genericSchemaFreeCalls = 0
+				const genericSchemaFreeFetch = (async () => {
+					genericSchemaFreeCalls += 1
+					if (genericSchemaFreeCalls === 1) {
+						return new Response('id: 2\nevent: custom.ping\ndata: {"seq":2}\n\n', {
+							status: 200,
+							headers: { "content-type": "text/event-stream; charset=utf-8" },
+						})
+					}
+					return new Response(null, { status: 204 })
+				}) as unknown as typeof globalThis.fetch
+				const genericSchemaFreeEvents = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Stream.runCollect(
+						client.streamEndpointEvents(
+							{ method: "GET", path: "/v1/custom/arbitrary-json/stream" },
+							{ maxReconnectAttempts: 1, baseReconnectDelayMs: 1 },
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(genericSchemaFreeFetch)))
+				expect(Array.from(genericSchemaFreeEvents).map((e) => e.data)).toEqual([{ seq: 2 }])
 			}),
 		)
 	})

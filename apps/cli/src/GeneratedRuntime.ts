@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
+import { validateSessionEventData } from "./Client.ts"
 import { type CliFailure, formatClientError, isApiErrorEnvelope, usageError } from "./Errors.ts"
 import { diagnoseSessionCreateNotFound, ensureIdempotencyKeyHeader } from "./Hooks.ts"
 import {
@@ -407,6 +408,7 @@ export const invokeGeneratedStream = (
 				...(isSessionStream
 					? {
 							monotonicNumericCursor: true,
+							validateEventData: validateSessionEventData,
 							isTerminalEvent: (data: Record<string, unknown>) =>
 								data["type"] === "session.archived",
 						}

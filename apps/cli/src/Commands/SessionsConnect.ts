@@ -47,6 +47,7 @@ import {
 	hasInterruptReceipt,
 	markSessionEnded,
 	resolveFinalPipedError,
+	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "./SessionsConnectState.ts"
 
@@ -1166,8 +1167,8 @@ export const sessionsConnectCommand = Command.make(
 
 						const failed = yield* Ref.get(streamFailedRef)
 						if (failed !== null) break
-						const state = yield* Ref.get(stateRef)
-						const settlementAction = evaluatePipedSettlement(state)
+						let currentState = yield* Ref.get(stateRef)
+						const settlementAction = evaluatePipedSettlement(currentState)
 						if (settlementAction === "ended" || settlementAction === "settled") {
 							break
 						}
@@ -1177,14 +1178,18 @@ export const sessionsConnectCommand = Command.make(
 								const latestRes = yield* Effect.result(
 									fetchSessionStatusWithRetry(client, sessionId),
 								)
+								const refreshed = yield* Ref.get(stateRef)
 								if (latestRes._tag === "Failure") {
+									const refreshedAction = evaluatePipedSettlement(refreshed)
+									if (refreshedAction === "ended" || refreshedAction === "settled") {
+										break
+									}
 									yield* Ref.set(incompleteTurnRef, latestRes.failure)
 									haltedQueuedTurn = true
 									break
 								}
-								const refreshed = yield* Ref.get(stateRef)
 								const decision = evaluateHaltedQueueSnapshot(
-									state,
+									currentState,
 									refreshed,
 									latestRes.success,
 									checkAttempt >= MAX_QUEUED_TURN_PROJECTION_RETRIES,
@@ -1212,22 +1217,26 @@ export const sessionsConnectCommand = Command.make(
 							if (haltedQueuedTurn) {
 								break
 							}
+							const failedAfterLookup = yield* Ref.get(streamFailedRef)
+							if (failedAfterLookup !== null) break
+							currentState = yield* Ref.get(stateRef)
+							const afterLookupAction = evaluatePipedSettlement(currentState)
+							if (afterLookupAction === "ended" || afterLookupAction === "settled") {
+								break
+							}
 						}
 						if (yield* Deferred.isDone(streamEndedDeferred)) {
-							if (state.targetTurn > 0) {
-								yield* Ref.set(
-									incompleteTurnRef,
-									networkFailure(`Event stream ended before turn ${state.targetTurn} completed.`),
-								)
-							} else {
-								yield* Ref.set(
-									incompleteTurnRef,
-									networkFailure("Event stream ended unexpectedly."),
-								)
+							const failedAtEnd = yield* Ref.get(streamFailedRef)
+							if (failedAtEnd === null) {
+								const stateAtEnd = yield* Ref.get(stateRef)
+								const streamEndedError = resolveStreamEndedError(stateAtEnd)
+								if (streamEndedError !== undefined) {
+									yield* Ref.set(incompleteTurnRef, networkFailure(streamEndedError))
+								}
 							}
 							break
 						}
-						if (state.targetTurn === 0) {
+						if (currentState.targetTurn === 0) {
 							break
 						}
 						const outcome = yield* Effect.race(
@@ -1235,20 +1244,13 @@ export const sessionsConnectCommand = Command.make(
 							Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
 						)
 						if (outcome === "stopped") {
-							const afterStream = yield* Ref.get(stateRef)
 							const failedAfter = yield* Ref.get(streamFailedRef)
-							if (
-								failedAfter === null &&
-								!afterStream.ended &&
-								afterStream.targetTurn > 0 &&
-								afterStream.settledTurn < afterStream.targetTurn
-							) {
-								yield* Ref.set(
-									incompleteTurnRef,
-									networkFailure(
-										`Event stream ended before turn ${afterStream.targetTurn} completed.`,
-									),
-								)
+							if (failedAfter === null) {
+								const afterStream = yield* Ref.get(stateRef)
+								const streamEndedError = resolveStreamEndedError(afterStream)
+								if (streamEndedError !== undefined) {
+									yield* Ref.set(incompleteTurnRef, networkFailure(streamEndedError))
+								}
 							}
 							break
 						}

@@ -1,5 +1,6 @@
 import {
 	type CheckfuClient as ApiCheckfuClient,
+	SessionEvent,
 	makeCheckfuClientWith,
 } from "@checkfu/api/Http/Api"
 import * as Clock from "effect/Clock"
@@ -17,6 +18,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
 	type CliFailure,
@@ -210,8 +212,21 @@ export interface EndpointSseRequest {
 	readonly initialCursor?: string | undefined
 	readonly cursorQueryParam?: string | undefined
 	readonly monotonicNumericCursor?: boolean | undefined
+	readonly validateEventData?:
+		| ((data: Record<string, unknown>) => Effect.Effect<void, CliFailure>)
+		| undefined
 	readonly isTerminalEvent?: ((data: Record<string, unknown>) => boolean) | undefined
 }
+
+const decodeSessionEvent = Schema.decodeUnknownEffect(Schema.toCodecJson(SessionEvent))
+
+export const validateSessionEventData = (
+	data: Record<string, unknown>,
+): Effect.Effect<void, CliFailure> =>
+	decodeSessionEvent(data).pipe(
+		Effect.asVoid,
+		Effect.mapError((err) => networkFailure(`Invalid SSE session event payload: ${err.message}`)),
+	)
 
 export interface CheckfuClient {
 	readonly baseUrl: string
@@ -597,12 +612,17 @@ export const makeCheckfuClient = (
 											}
 										}
 										if (item._tag === "CursorUpdate") {
-											updateCursor(item.id)
+											if (requestSpec.validateEventData === undefined) {
+												updateCursor(item.id)
+											}
 											sawKeepalive = true
 											return Option.none<SessionStreamEvent>()
 										}
 										const sseEvent = item.event
 										const data = yield* parseSseData(sseEvent.data)
+										if (requestSpec.validateEventData !== undefined) {
+											yield* requestSpec.validateEventData(data)
+										}
 										const seq = parseSeq(sseEvent.id, data)
 										updateCursor(sseEvent.id, seq)
 										sawEvent = true
@@ -752,6 +772,7 @@ export const makeCheckfuClient = (
 							}
 						: {}),
 					monotonicNumericCursor: true,
+					validateEventData: validateSessionEventData,
 					isTerminalEvent: (data) => data["type"] === "session.archived",
 				},
 				options,

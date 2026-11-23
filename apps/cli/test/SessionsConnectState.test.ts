@@ -16,6 +16,7 @@ import {
 	hasInterruptReceipt,
 	markSessionEnded,
 	resolveFinalPipedError,
+	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "../src/Commands/SessionsConnectState.ts"
 
@@ -447,5 +448,35 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		expect(cancelled.sendInFlight).toBe(false)
 		expect(cancelled.pendingTurnErrors.size).toBe(0)
 		expect(resolveFinalPipedError(cancelled)).toBeUndefined()
+	})
+
+	it("evaluates stream-ended errors from fresh settlement state instead of stale snapshots", () => {
+		// Turn 2 queued after turn 1 refusal, then another client runs turn 2 and archives session
+		const { state: completedAndArchived } = runSequence(pipedIdleInitial(), [
+			{ _tag: "begin_send", label: "m1" },
+			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
+			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
+			{ _tag: "begin_send", label: "m2" },
+			{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
+			{ _tag: "event", event: { seq: 2, type: "session.status_idle", stopReason: "refusal" } },
+			{ _tag: "event", event: { seq: 3, type: "session.status_running" } },
+			{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
+			{ _tag: "event", event: { seq: 5, type: "session.archived" } },
+			{ _tag: "mark_ended" },
+		])
+		expect(resolveStreamEndedError(completedAndArchived)).toBeUndefined()
+		expect(resolveFinalPipedError(completedAndArchived)).toBeUndefined()
+
+		// Stream ends unexpectedly (e.g. HTTP 204) before target turn 1 settles
+		const { state: endedBeforeSettling } = runSequence(pipedIdleInitial(), [
+			{ _tag: "begin_send", label: "m1" },
+			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
+		])
+		expect(resolveStreamEndedError(endedBeforeSettling)).toBe(
+			"Event stream ended before turn 1 completed.",
+		)
+
+		// Stream ends unexpectedly with no target turn
+		expect(resolveStreamEndedError(pipedIdleInitial())).toBe("Event stream ended unexpectedly.")
 	})
 })

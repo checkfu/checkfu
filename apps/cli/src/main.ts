@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs"
-import { join } from "node:path"
+import { realpathSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Cause from "effect/Cause"
@@ -12,40 +13,37 @@ import { CliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
-const hasImplicitCwdDotenv = (): boolean => {
-	const cwd = process.cwd()
-	const nodeEnv = process.env["NODE_ENV"]
-	const candidates = [
-		".env",
-		".env.local",
-		".env.development",
-		".env.development.local",
-		".env.production",
-		".env.production.local",
-		".env.test",
-		".env.test.local",
-		...(nodeEnv !== undefined && nodeEnv.length > 0
-			? [`.env.${nodeEnv}`, `.env.${nodeEnv}.local`]
-			: []),
-	]
-	return candidates.some((name) => existsSync(join(cwd, name)))
+const resolvePhysicalPath = (path: string): string | undefined => {
+	try {
+		return realpathSync(path)
+	} catch {
+		return undefined
+	}
 }
 
-const hasExplicitBunConfig = (execArgv: ReadonlyArray<string>): boolean =>
-	execArgv.some((arg) => arg.startsWith("--config=") && arg.length > "--config=".length)
+const trustedBunfigPath = resolvePhysicalPath(
+	resolve(dirname(fileURLToPath(import.meta.url)), "../bunfig.toml"),
+)
 
-const hasImplicitCwdBunfig = (): boolean => existsSync(join(process.cwd(), "bunfig.toml"))
-
-if (!process.execArgv.includes("--no-env-file") && hasImplicitCwdDotenv()) {
-	process.stderr.write(
-		"Error: Refusing to run with implicit Bun .env autoloading while .env file(s) exist in the working directory. Run with: bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts ...\n",
-	)
-	process.exit(1)
+const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean => {
+	if (!execArgv.includes("--no-env-file") || trustedBunfigPath === undefined) {
+		return false
+	}
+	return execArgv.some((arg) => {
+		if (!arg.startsWith("--config=")) return false
+		const rawPath = arg.slice("--config=".length)
+		if (rawPath.length === 0) return false
+		return resolvePhysicalPath(rawPath) === trustedBunfigPath
+	})
 }
 
-if (!hasExplicitBunConfig(process.execArgv) && hasImplicitCwdBunfig()) {
+// `apps/cli/bin/checkfu` enforces `--no-env-file --config=<cli>/bunfig.toml`
+// *before* Bun starts so untrusted working-directory `.env*` and `bunfig.toml`
+// preloads can never execute. Refuse unsupported direct invocations consistently
+// rather than allowing `bun apps/cli/src/main.ts` to run in clean directories.
+if (!launchedWithPinnedCliConfig(process.execArgv)) {
 	process.stderr.write(
-		"Error: Refusing to run with implicit working-directory bunfig.toml loading. Run with: bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts ...\n",
+		"Error: Launch the Checkfu CLI via apps/cli/bin/checkfu (or the installed `checkfu` binary) so Bun starts with --no-env-file and the pinned CLI config.\n",
 	)
 	process.exit(1)
 }

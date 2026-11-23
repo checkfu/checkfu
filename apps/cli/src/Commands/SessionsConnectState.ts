@@ -513,6 +513,16 @@ export const evaluateHaltedQueueSnapshot = (
 	return { action: "retry_snapshot" }
 }
 
+export const resolveStreamEndedError = (state: ConnectState): string | undefined => {
+	const action = evaluatePipedSettlement(state)
+	if (action === "ended" || action === "settled") {
+		return undefined
+	}
+	return state.targetTurn > 0
+		? `Event stream ended before turn ${state.targetTurn} completed.`
+		: "Event stream ended unexpectedly."
+}
+
 export const resolveFinalPipedError = (state: ConnectState): string | undefined => {
 	let lowestUnsettled: number | undefined
 	for (const turn of state.unsettledSubmittedTurns) {

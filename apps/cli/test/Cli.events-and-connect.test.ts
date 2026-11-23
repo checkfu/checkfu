@@ -2054,10 +2054,15 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 
-		// 3) Real Bun subprocess running src/main.ts exits cleanly with code 0 on /exit\n even
-		//    while the parent keeps stdin open, and reports path-segment errors on stderr
+		// 3) Real subprocess via apps/cli/bin/checkfu exits cleanly with code 0 on /exit\n even
+		//    while the parent keeps stdin open, and reports path-segment & redirect errors on stderr
 		const mainPath = fileURLToPath(new URL("../src/main.ts", import.meta.url))
 		const bunfigPath = fileURLToPath(new URL("../bunfig.toml", import.meta.url))
+		const launcherPath = fileURLToPath(new URL("../bin/checkfu", import.meta.url))
+		const launcherCommand = (cliArgs: ReadonlyArray<string>): readonly [string, Array<string>] =>
+			process.platform === "win32"
+				? ["bun", ["--no-env-file", `--config=${bunfigPath}`, mainPath, ...cliArgs]]
+				: [launcherPath, [...cliArgs]]
 		const openSseResponses: Array<Http.ServerResponse> = []
 		let redirectTargetGetHits = 0
 		const server = Http.createServer((req, res) => {
@@ -2135,24 +2140,18 @@ describe("CLI sessions:events and sessions connect", () => {
 			const port = typeof addr === "object" && addr !== null ? addr.port : 0
 
 			const exitCode = await new Promise<number | null>((resolve, reject) => {
-				const child = spawn(
-					"bun",
-					[
-						"--no-env-file",
-						`--config=${bunfigPath}`,
-						mainPath,
-						"sessions",
-						"connect",
-						"--session-id",
-						"sess_subproc",
-						"--base-url",
-						`http://127.0.0.1:${port}`,
-					],
-					{
-						env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
-						stdio: ["pipe", "pipe", "pipe"],
-					},
-				)
+				const [cmd, cmdArgs] = launcherCommand([
+					"sessions",
+					"connect",
+					"--session-id",
+					"sess_subproc",
+					"--base-url",
+					`http://127.0.0.1:${port}`,
+				])
+				const child = spawn(cmd, cmdArgs, {
+					env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+					stdio: ["pipe", "pipe", "pipe"],
+				})
 				let stderr = ""
 				let sentExit = false
 				const timer = setTimeout(() => {
@@ -2186,24 +2185,18 @@ describe("CLI sessions:events and sessions connect", () => {
 				readonly stdout: string
 				readonly stderr: string
 			}>((resolve, reject) => {
-				const child = spawn(
-					"bun",
-					[
-						"--no-env-file",
-						`--config=${bunfigPath}`,
-						mainPath,
-						"agents",
-						"retrieve",
-						"--agent-id",
-						"..",
-						"--base-url",
-						`http://127.0.0.1:${port}`,
-					],
-					{
-						env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
-						stdio: ["ignore", "pipe", "pipe"],
-					},
-				)
+				const [cmd, cmdArgs] = launcherCommand([
+					"agents",
+					"retrieve",
+					"--agent-id",
+					"..",
+					"--base-url",
+					`http://127.0.0.1:${port}`,
+				])
+				const child = spawn(cmd, cmdArgs, {
+					env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+					stdio: ["ignore", "pipe", "pipe"],
+				})
 				let stdout = ""
 				let stderr = ""
 				child.stdout.setEncoding("utf8")
@@ -2221,34 +2214,28 @@ describe("CLI sessions:events and sessions connect", () => {
 			expect(badDotSubproc.stdout).toBe("")
 			expect(badDotSubproc.stderr).toContain("Invalid --agent-id")
 
-			// Real Bun subprocess must NOT follow a 302 redirect from POST update into GET retrieve
+			// Real launcher subprocess must NOT follow a 302 redirect from POST update into GET retrieve
 			const redirectSubproc = await new Promise<{
 				readonly code: number | null
 				readonly stdout: string
 				readonly stderr: string
 			}>((resolve, reject) => {
-				const child = spawn(
-					"bun",
-					[
-						"--no-env-file",
-						`--config=${bunfigPath}`,
-						mainPath,
-						"agents",
-						"update",
-						"--agent-id",
-						"agent_redirect",
-						"--current-version",
-						"1",
-						"--name",
-						"ShouldNotChange",
-						"--base-url",
-						`http://127.0.0.1:${port}`,
-					],
-					{
-						env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
-						stdio: ["ignore", "pipe", "pipe"],
-					},
-				)
+				const [cmd, cmdArgs] = launcherCommand([
+					"agents",
+					"update",
+					"--agent-id",
+					"agent_redirect",
+					"--current-version",
+					"1",
+					"--name",
+					"ShouldNotChange",
+					"--base-url",
+					`http://127.0.0.1:${port}`,
+				])
+				const child = spawn(cmd, cmdArgs, {
+					env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+					stdio: ["ignore", "pipe", "pipe"],
+				})
 				let stdout = ""
 				let stderr = ""
 				child.stdout.setEncoding("utf8")
@@ -2475,6 +2462,10 @@ describe("CLI sessions:events and sessions connect", () => {
 								const encoder = new TextEncoder()
 								let injectedRetryErr = false
 								let idleSignaled = false
+								const shiftSeqs = (raw: string): string =>
+									raw
+										.replace(/^id: (\d+)$/gm, (_m, n: string) => `id: ${Number(n) + 1}`)
+										.replace(/"seq":(\d+)/g, (_m, n: string) => `"seq":${Number(n) + 1}`)
 								const observed = new ReadableStream<Uint8Array>({
 									async pull(controller) {
 										const chunk = await reader.read()
@@ -2483,22 +2474,30 @@ describe("CLI sessions:events and sessions connect", () => {
 											return
 										}
 										let text = decoder.decode(chunk.value, { stream: true })
-										if (!injectedRetryErr && text.includes("session.status_idle")) {
+										if (injectedRetryErr) {
+											text = shiftSeqs(text)
+										} else if (text.includes("session.status_idle")) {
 											injectedRetryErr = true
-											const retryErrFrame = `event: session.error\ndata: ${JSON.stringify({
-												type: "session.error",
-												error: {
-													type: "upstream_overloaded",
-													message: "transient overload",
-													retry_status: { type: "retrying" },
-												},
-											})}\n\n`
 											const idleIdx = text.indexOf("event: session.status_idle")
 											const frameStart = idleIdx >= 0 ? text.lastIndexOf("\n\n", idleIdx) : -1
-											text =
-												frameStart >= 0
-													? `${text.slice(0, frameStart + 2)}${retryErrFrame}${text.slice(frameStart + 2)}`
-													: `${retryErrFrame}${text}`
+											const prefix = frameStart >= 0 ? text.slice(0, frameStart + 2) : ""
+											const suffix = frameStart >= 0 ? text.slice(frameStart + 2) : text
+											const idleSeqMatch = /"seq":(\d+)/.exec(suffix)
+											const errSeq = idleSeqMatch !== null ? Number(idleSeqMatch[1]) : 99
+											const retryErrFrame = `id: ${errSeq}\nevent: session.error\ndata: ${JSON.stringify(
+												{
+													id: "evt_inject_transient",
+													seq: errSeq,
+													type: "session.error",
+													created_at: "2026-11-22T00:00:00.000Z",
+													error: {
+														type: "upstream_overloaded",
+														message: "transient overload",
+														retry_status: { type: "retrying" },
+													},
+												},
+											)}\n\n`
+											text = `${prefix}${retryErrFrame}${shiftSeqs(suffix)}`
 										}
 										controller.enqueue(encoder.encode(text))
 										if (!idleSignaled && text.includes("session.status_idle")) {
@@ -2614,7 +2613,7 @@ describe("CLI sessions:events and sessions connect", () => {
 											sent = true
 											controller.enqueue(
 												encoder.encode(
-													'id: 1\nevent: user.message\ndata: {"seq":1,"type":"user.message","content":[{"type":"text","text":"archived history"}]}\n\n',
+													'id: 1\nevent: user.message\ndata: {"id":"evt_1","seq":1,"type":"user.message","created_at":"2026-11-22T00:00:00.000Z","content":[{"type":"text","text":"archived history"}]}\n\n',
 												),
 											)
 											return
@@ -2810,7 +2809,7 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("documents the direct --no-env-file CLI launcher instead of bun run cli", () => {
+	it("documents the apps/cli/bin/checkfu launcher instead of direct bun main.ts or bun run cli", () => {
 		const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8")
 		const rootPkg = JSON.parse(
 			readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
@@ -2821,9 +2820,8 @@ describe("CLI sessions:events and sessions connect", () => {
 		const bunLock = readFileSync(new URL("../../../bun.lock", import.meta.url), "utf8")
 		const binScript = readFileSync(new URL("../bin/checkfu", import.meta.url), "utf8")
 		const cliBunfig = readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")
-		expect(readme).toContain(
-			"bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts --help",
-		)
+		expect(readme).toContain("./apps/cli/bin/checkfu --help")
+		expect(readme).not.toContain("apps/cli/src/main.ts")
 		expect(readme).not.toContain("bun run cli")
 		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
 		expect(cliPkg.bin?.["checkfu"]).toBe("./bin/checkfu")
@@ -2909,7 +2907,7 @@ def setup_ctty():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-cmd = ["bun", "--no-env-file", "--config=apps/cli/bunfig.toml", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+cmd = ["./apps/cli/bin/checkfu", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
 p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
 os.close(slave)
 
@@ -3422,6 +3420,10 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 								const decoder = new TextDecoder()
 								const encoder = new TextEncoder()
 								let injected = false
+								const shiftSeqs = (raw: string): string =>
+									raw
+										.replace(/^id: (\d+)$/gm, (_m, n: string) => `id: ${Number(n) + 1}`)
+										.replace(/"seq":(\d+)/g, (_m, n: string) => `"seq":${Number(n) + 1}`)
 								const observed = new ReadableStream<Uint8Array>({
 									async pull(controller) {
 										const chunk = await reader.read()
@@ -3430,16 +3432,27 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 											return
 										}
 										let text = decoder.decode(chunk.value, { stream: true })
-										if (!injected && text.includes("session.status_running")) {
+										if (injected) {
+											text = shiftSeqs(text)
+										} else if (text.includes("session.status_running")) {
 											injected = true
-											const retryErr = `event: session.error\ndata: ${JSON.stringify({
-												type: "session.error",
-												error: {
-													type: "upstream_overloaded",
-													message: "temporary retryable error",
-													retry_status: { type: "retrying" },
+											const seqMatches = [...text.matchAll(/"seq":(\d+)/g)]
+											const lastSeq =
+												seqMatches.length > 0 ? Number(seqMatches[seqMatches.length - 1]?.[1]) : 2
+											const errSeq = lastSeq + 1
+											const retryErr = `id: ${errSeq}\nevent: session.error\ndata: ${JSON.stringify(
+												{
+													id: "evt_inject_retrying",
+													seq: errSeq,
+													type: "session.error",
+													created_at: "2026-11-22T00:00:00.000Z",
+													error: {
+														type: "upstream_overloaded",
+														message: "temporary retryable error",
+														retry_status: { type: "retrying" },
+													},
 												},
-											})}\n\n`
+											)}\n\n`
 											text = `${text}${retryErr}`
 											await runPromise(Deferred.succeed(retryErrDelivered, undefined))
 										}
@@ -4046,7 +4059,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 			new Promise<void>((resolve) => legitServer.listen(0, "127.0.0.1", resolve)),
 		])
 		const untrustedDir = mkdtempSync(join(tmpdir(), "checkfu-untrusted-cwd-"))
-		const bunfigOnlyDir = mkdtempSync(join(tmpdir(), "checkfu-bunfig-only-cwd-"))
+		const cleanDir = mkdtempSync(join(tmpdir(), "checkfu-clean-cwd-"))
 		try {
 			const evilPort = (evilServer.address() as { port: number }).port
 			const legitPort = (legitServer.address() as { port: number }).port
@@ -4057,7 +4070,6 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 				'process.stderr.write("PRELOAD_EXECUTED\\n"); process.exit(99);\n',
 			)
 			writeFileSync(join(untrustedDir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
-			writeFileSync(join(bunfigOnlyDir, "bunfig.toml"), "# untrusted cwd bunfig\n")
 			const baseEnv: Record<string, string> = {}
 			for (const [k, v] of Object.entries(process.env)) {
 				if (v !== undefined && !k.startsWith("CHECKFU_")) {
@@ -4095,95 +4107,72 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					child.on("close", (status) => resolve({ status, stdout, stderr }))
 				})
 
-			// 1a) Documented direct invocation ignores cwd .env files AND cwd bunfig.toml preloads
-			const noEnvDoc = await runSubprocess(
-				"bun",
-				[
-					"--no-env-file",
-					`--config=${bunfigPath}`,
-					mainPath,
-					"sessions",
-					"retrieve",
-					"--session-id",
-					"sess_env",
-				],
-				{
-					...baseEnv,
-					CHECKFU_API_KEY: "ck_exported_secret",
-					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
-				},
-			)
-			expect(noEnvDoc.status).toBe(0)
-			expect(noEnvDoc.stderr).not.toContain("PRELOAD_EXECUTED")
-			expect(legitHits).toBe(1)
-			expect(evilHits).toBe(0)
-
-			// 1b) Without an exported URL, documented launcher must NOT fall back to cwd .env's CHECKFU_API_URL
-			const noEnvDefault = await runSubprocess(
-				"bun",
-				[
-					"--no-env-file",
-					`--config=${bunfigPath}`,
-					mainPath,
-					"sessions",
-					"retrieve",
-					"--session-id",
-					"sess_env",
-				],
-				{
-					...baseEnv,
-					CHECKFU_API_KEY: "ck_exported_secret",
-				},
-			)
-			expect(noEnvDefault.stderr).not.toContain("PRELOAD_EXECUTED")
-			expect(evilHits).toBe(0)
-			expect(noEnvDefault.stdout).not.toContain('"sess_env"')
-
-			// 1c) Bare `bun --config=... apps/cli/src/main.ts` without `--no-env-file` fails closed when cwd has .env
-			const bareLaunch = await runSubprocess(
-				"bun",
-				[`--config=${bunfigPath}`, mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
-				{
-					...baseEnv,
-					CHECKFU_API_KEY: "ck_exported_secret",
-				},
-			)
-			expect(bareLaunch.status).toBe(1)
-			expect(bareLaunch.stderr).toContain("--no-env-file")
-			expect(evilHits).toBe(0)
-
-			// 1d) Direct invocation without `--config=...` fails closed when cwd has bunfig.toml
-			const unpinnedBunfigLaunch = await runSubprocess(
-				"bun",
-				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
-				{
-					...baseEnv,
-					CHECKFU_API_KEY: "ck_exported_secret",
-					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
-				},
-				bunfigOnlyDir,
-			)
-			expect(unpinnedBunfigLaunch.status).toBe(1)
-			expect(unpinnedBunfigLaunch.stderr).toContain("--config=")
-			expect(legitHits).toBe(1)
-
-			// 1e) POSIX bin launcher (`apps/cli/bin/checkfu`) pins --no-env-file and --config=...
-			//     and ignores both cwd .env and cwd bunfig.toml preloads
-			const binResult =
+			const invokeLauncher = (
+				cliArgs: ReadonlyArray<string>,
+				env: Record<string, string>,
+				cwd = untrustedDir,
+			) =>
 				process.platform === "win32"
-					? { status: 0, stdout: "", stderr: "" }
-					: await runSubprocess(binPath, ["sessions", "retrieve", "--session-id", "sess_env"], {
-							...baseEnv,
-							CHECKFU_API_KEY: "ck_exported_secret",
-							CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
-						})
-			expect(binResult.status).toBe(0)
-			expect(binResult.stderr).not.toContain("PRELOAD_EXECUTED")
-			expect(legitHits).toBe(process.platform === "win32" ? 1 : 2)
+					? runSubprocess(
+							"bun",
+							["--no-env-file", `--config=${bunfigPath}`, mainPath, ...cliArgs],
+							env,
+							cwd,
+						)
+					: runSubprocess(binPath, cliArgs, env, cwd)
+
+			// 1a) Supported launcher (`apps/cli/bin/checkfu`) pins --no-env-file and --config=...
+			//     before Bun starts, ignoring both cwd .env* and cwd bunfig.toml preloads
+			const launcherResult = await invokeLauncher(
+				["sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_API_KEY: "ck_exported_secret",
+					CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+				},
+			)
+			expect(launcherResult.status).toBe(0)
+			expect(launcherResult.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(legitHits).toBe(1)
+			expect(evilHits).toBe(0)
+
+			// 1b) Without an exported URL, launcher must NOT fall back to cwd .env's CHECKFU_API_URL
+			const launcherDefault = await invokeLauncher(
+				["sessions", "retrieve", "--session-id", "sess_env"],
+				{
+					...baseEnv,
+					CHECKFU_API_KEY: "ck_exported_secret",
+				},
+			)
+			expect(launcherDefault.stderr).not.toContain("PRELOAD_EXECUTED")
+			expect(evilHits).toBe(0)
+			expect(launcherDefault.stdout).not.toContain('"sess_env"')
+
+			// 1c) Direct `bun apps/cli/src/main.ts` invocations without the pinned launcher flags
+			//     are refused unconditionally even in a clean directory (direct entry is unsupported)
+			for (const unsupportedArgs of [
+				[mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				["--no-env-file", mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+				[`--config=${bunfigPath}`, mainPath, "sessions", "retrieve", "--session-id", "sess_env"],
+			]) {
+				const direct = await runSubprocess(
+					"bun",
+					unsupportedArgs,
+					{
+						...baseEnv,
+						CHECKFU_API_KEY: "ck_exported_secret",
+						CHECKFU_API_URL: `http://127.0.0.1:${legitPort}`,
+					},
+					cleanDir,
+				)
+				expect(direct.status).toBe(1)
+				expect(direct.stderr).toContain("apps/cli/bin/checkfu")
+			}
+			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 		} finally {
 			rmSync(untrustedDir, { recursive: true, force: true })
-			rmSync(bunfigOnlyDir, { recursive: true, force: true })
+			rmSync(cleanDir, { recursive: true, force: true })
 			await Promise.all([
 				new Promise<void>((resolve) => evilServer.close(() => resolve())),
 				new Promise<void>((resolve) => legitServer.close(() => resolve())),
@@ -4350,6 +4339,182 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					expect(lagRes.stderr).toContain(
 						"Queued turn 2 did not start because turn 1 stopped with refusal.",
 					)
+
+					// 4) While the halted-queue status GET is in flight, another client starts turn 2,
+					//    SSE delivers turn 2's completion, and the session is archived (finishing
+					//    streamEndedDeferred before the GET resolves) -> connect rechecks stateRef
+					//    and exits 0 with turn 2's reply instead of reporting an incomplete turn
+					const raceTurn1Running = yield* Deferred.make<void>()
+					const releaseRaceTurn1 = yield* Deferred.make<void>()
+					const lookupInFlight = yield* Deferred.make<void>()
+					const archivedRendered = yield* Deferred.make<void>()
+					const raceCli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.gen(function* () {
+								if (args.turn === 1) {
+									yield* Deferred.succeed(raceTurn1Running, undefined)
+									yield* Deferred.await(releaseRaceTurn1)
+									return {
+										thinking: null,
+										text: "Refused turn 1",
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "refusal" as const },
+									}
+								}
+								return {
+									thinking: null,
+									text: `CompletedTurn2:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+					const raceSessionId = yield* createReadySession(raceCli)
+					const otherClientDone = yield* Deferred.await(lookupInFlight).pipe(
+						Effect.andThen(
+							raceCli.run([
+								"sessions:events",
+								"send",
+								"--session-id",
+								raceSessionId,
+								"--event",
+								JSON.stringify({
+									type: "user.message",
+									content: [{ type: "text", text: "trigger turn 2" }],
+								}),
+							]),
+						),
+						Effect.andThen(
+							Effect.gen(function* () {
+								for (let i = 0; i < 200; i++) {
+									const s = yield* raceCli.run([
+										"sessions",
+										"retrieve",
+										"--session-id",
+										raceSessionId,
+									])
+									const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
+									if (parsed.status === "idle" && parsed.turn === 2) break
+									yield* Effect.sleep("5 millis")
+								}
+							}),
+						),
+						Effect.andThen(raceCli.run(["sessions", "archive", "--session-id", raceSessionId])),
+						Effect.forkChild,
+					)
+					let racePosts = 0
+					let raceGets = 0
+					const raceStdin = Stream.concat(
+						Stream.make(encoder.encode("race turn 1\n")),
+						Stream.fromEffect(
+							Deferred.await(raceTurn1Running).pipe(
+								Effect.as(encoder.encode("race queued turn 2\n")),
+							),
+						),
+					)
+					const raceRes = yield* raceCli.run(
+						["sessions", "connect", "--session-id", raceSessionId],
+						{
+							stdin: raceStdin,
+							onStdoutChunk: (chunk) =>
+								chunk.includes("CompletedTurn2:") ? Effect.void : Effect.void,
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									racePosts += 1
+									const res = await next(request)
+									if (racePosts === 2) {
+										await runPromise(Deferred.succeed(releaseRaceTurn1, undefined))
+									}
+									return res
+								}
+								if (
+									request.method === "GET" &&
+									request.url.endsWith(`/sessions/${raceSessionId}`)
+								) {
+									raceGets += 1
+									if (raceGets === 2) {
+										// Pause the halted-queue GET until another client completes turn 2 AND
+										// archives the session so SSE finishes streamEndedDeferred while GET is in flight
+										await runPromise(Deferred.succeed(lookupInFlight, undefined))
+										await runPromise(Deferred.await(archivedRendered))
+										await new Promise((resolve) => setTimeout(resolve, 25))
+									}
+									return next(request)
+								}
+								if (request.url.includes("/events/stream")) {
+									const res = await next(request)
+									if (res.status !== 200 || res.body === null) return res
+									const reader = res.body.getReader()
+									const decoder = new TextDecoder()
+									let sawArchived = false
+									const observed = new ReadableStream<Uint8Array>({
+										async pull(controller) {
+											const chunk = await reader.read()
+											if (chunk.done) {
+												if (sawArchived) {
+													await runPromise(Deferred.succeed(archivedRendered, undefined))
+												}
+												controller.close()
+												return
+											}
+											const text = decoder.decode(chunk.value, { stream: true })
+											if (text.includes("session.archived")) {
+												sawArchived = true
+											}
+											controller.enqueue(chunk.value)
+										},
+										cancel(reason) {
+											return reader.cancel(reason)
+										},
+									})
+									return new Response(observed, { status: 200, headers: res.headers })
+								}
+								return next(request)
+							},
+						},
+					)
+					yield* Fiber.await(otherClientDone)
+					// 3 GETs: startup lookup, paused halted-queue lookup, and session.status_terminated archive check
+					expect(raceGets).toBe(3)
+					expect(raceRes.exitCode).toBe(0)
+					expect(raceRes.stdout).toContain("CompletedTurn2:")
+
+					// 5) Malformed / incomplete session SSE events (e.g. only `seq`) fail immediately
+					//    in both `sessions connect` and `sessions:events stream` before advancing cursor
+					const malformedCli = yield* makeTestServer()
+					const malformedSessionId = yield* createReadySession(malformedCli)
+					const malformedConnect = yield* malformedCli.run(
+						["sessions", "connect", "--session-id", malformedSessionId],
+						{
+							stdin: "hello\n",
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								return new Response('id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n', {
+									status: 200,
+									headers: { "content-type": "text/event-stream; charset=utf-8" },
+								})
+							},
+						},
+					)
+					expect(malformedConnect.exitCode).toBe(1)
+					expect(malformedConnect.stderr).toContain("Invalid SSE session event payload")
+
+					const malformedStream = yield* malformedCli.run(
+						["sessions:events", "stream", "--session-id", malformedSessionId],
+						{
+							interceptFetch: async (next, request) => {
+								if (!request.url.includes("/events/stream")) return next(request)
+								return new Response('id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n', {
+									status: 200,
+									headers: { "content-type": "text/event-stream; charset=utf-8" },
+								})
+							},
+						},
+					)
+					expect(malformedStream.exitCode).toBe(1)
+					expect(malformedStream.stderr).toContain("Invalid SSE session event payload")
 				}),
 			),
 		)
