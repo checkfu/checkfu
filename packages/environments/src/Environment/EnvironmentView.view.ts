@@ -49,7 +49,7 @@ export class EnvironmentView extends Domain.View("EnvironmentView", {
 						updated_at: ctx.at,
 					},
 		"environment.archived": (state, _e, ctx) =>
-			state === null || state.archived_at !== null
+			state === null || state.archived_at
 				? state
 				: {
 						...state,

@@ -11,6 +11,82 @@ export class Agents extends Domain.Model("Agents", {
 	aggregates: [Agent, AgentVersion],
 	decisions: [CreateAgentDecision, UpdateAgentDecision],
 	views: [AgentView, AgentVersionView, AgentVersionByNumberView],
+	invariants: {
+		AgentViewMatchesAgent: (m) =>
+			[
+				m.Agent.every((a) => {
+					const view = m.AgentView.find((v) => v.id === a.id)
+					if (a.state.status === "") return view === undefined
+					if (view === undefined) return false
+					return [
+						view.state.id === a.id,
+						view.state.version === a.state.version,
+						view.state.current_version_id === a.state.current_version_id,
+						view.state.name === a.state.name,
+						view.state.model.id === a.state.model_id,
+						(view.state.system !== null) === a.state.has_system,
+						(view.state.system ?? "") === a.state.system,
+						(view.state.description !== null) === a.state.has_description,
+						(view.state.description ?? "") === a.state.description,
+						!!view.state.archived_at === (a.state.status === "archived"),
+					].every((ok) => ok)
+				}),
+				m.AgentView.every((v) =>
+					m.Agent.some((a) => [a.id === v.id, a.state.status !== ""].every((ok) => ok)),
+				),
+			].every((ok) => ok),
+		AgentVersionViewMatchesAgentVersion: (m) =>
+			[
+				m.AgentVersion.every((av) => {
+					const view = m.AgentVersionView.find((v) => v.id === av.id)
+					if (!av.state.minted) return view === undefined
+					if (view === undefined) return false
+					return [
+						view.state.id === av.id,
+						view.state.agent_id === av.state.agent_id,
+						view.state.version === av.state.version,
+						view.state.name === av.state.name,
+						view.state.model.id === av.state.model_id,
+						(view.state.system !== null) === av.state.has_system,
+						(view.state.system ?? "") === av.state.system,
+						(view.state.description !== null) === av.state.has_description,
+						(view.state.description ?? "") === av.state.description,
+					].every((ok) => ok)
+				}),
+				m.AgentVersionView.every((v) =>
+					m.AgentVersion.some((av) => [av.id === v.id, av.state.minted].every((ok) => ok)),
+				),
+			].every((ok) => ok),
+		AgentVersionByNumberMatchesAgentVersion: (m) =>
+			[
+				m.AgentVersion.every((av) => {
+					if (!av.state.minted) return true
+					const lookupId = `${av.state.agent_id}@${av.state.version}`
+					const view = m.AgentVersionByNumberView.find((v) => v.id === lookupId)
+					if (view === undefined) return false
+					return [
+						view.state.id === av.id,
+						view.state.agent_id === av.state.agent_id,
+						view.state.version === av.state.version,
+						view.state.name === av.state.name,
+						view.state.model.id === av.state.model_id,
+						(view.state.system !== null) === av.state.has_system,
+						(view.state.system ?? "") === av.state.system,
+						(view.state.description !== null) === av.state.has_description,
+						(view.state.description ?? "") === av.state.description,
+					].every((ok) => ok)
+				}),
+				m.AgentVersionByNumberView.every((v) =>
+					m.AgentVersion.some((av) =>
+						[
+							av.state.minted,
+							av.id === v.state.id,
+							v.id === `${av.state.agent_id}@${av.state.version}`,
+						].every((ok) => ok),
+					),
+				),
+			].every((ok) => ok),
+	},
 	relations: {
 		AMintedVersionBelongsToItsAgent: Domain.Relation({
 			over: { version: AgentVersion, agent: Agent },

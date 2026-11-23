@@ -21,6 +21,9 @@ const STANDING = {
 	"Agents.AMintedVersionBelongsToItsAgent": "proved",
 	"Agents.AnAgentsHeadIsItsLatestVersion": "proved",
 	"Agents.VersionNumbersAreDistinct": "proved",
+	"Agents.AgentViewMatchesAgent": "checked",
+	"Agents.AgentVersionViewMatchesAgentVersion": "checked",
+	"Agents.AgentVersionByNumberMatchesAgentVersion": "checked",
 	"Agents.AnAgentIsUpdated": "reached",
 	"Agents.AnAgentIsArchived": "reached",
 } as const
@@ -35,7 +38,7 @@ describe("Agents Z3 formal verification", () => {
 			Verify.model(Agents, {
 				apis: [AgentsApi],
 				story,
-				walks: { count: 20 },
+				walks: { count: 50 },
 				lock: "./Agents.verify.lock.json",
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),
@@ -43,6 +46,8 @@ describe("Agents Z3 formal verification", () => {
 		expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
 			STANDING,
 		)
+		expect(report.undone).toEqual([])
+		expect(report.explored.aside).toEqual([])
 		expect(report.explored.disagreements).toEqual([])
 		expect(report.explored.agreement.compared).toBeGreaterThan(0)
 	}, 120_000)

@@ -29,6 +29,8 @@ const STANDING = {
 	"Session.OnlySendUserMessageAddsPendingMessages": "proved",
 	"Session.OnlyArchiveSessionSetsArchivedFlag": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
+	"Sessions.SessionViewMatchesSession": "checked",
+	"Sessions.TurnInputMatchesSession": "checked",
 	"Sessions.ASessionCompletesATurn": "reached",
 	"Sessions.ASessionTerminates": "reached",
 	"Sessions.ASessionIsArchived": "reached",
@@ -91,6 +93,7 @@ describe("Sessions Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
+		expect(report.explored.aside).toEqual([])
 		expect(report.explored.truncated).toBe(false)
 		expect(report.explored.complete).toBe(2)
 		expect(report.explored.repeated).toContain(
@@ -98,7 +101,7 @@ describe("Sessions Z3 formal verification", () => {
 		)
 		expect(report.explored.disagreements).toEqual([])
 		expect(report.explored.agreement.compared).toBeGreaterThan(0)
-	}, 180_000)
+	}, 240_000)
 
 	it("replays representative depth-2 witnesses against the real in-memory model", async () => {
 		const report = await Effect.runPromise(
@@ -118,6 +121,7 @@ describe("Sessions Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
+		expect(report.explored.aside).toEqual([])
 		expect(report.explored.truncated).toBe(false)
 		expect(report.explored.complete).toBe(2)
 		expect(report.unrun).toBe(0)

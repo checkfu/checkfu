@@ -53,7 +53,7 @@ export class AgentView extends Domain.View("AgentView", {
 						updated_at: ctx.at,
 					},
 		"agent.archived": (state, _e, ctx) =>
-			state === null || state.archived_at !== null
+			state === null || state.archived_at
 				? state
 				: {
 						...state,
