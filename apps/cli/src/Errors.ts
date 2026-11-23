@@ -60,9 +60,9 @@ export const isApiErrorEnvelope = (value: unknown): value is ApiError => {
 	return true
 }
 
-export const formatApiErrorEnvelope = (error: ApiError, fallbackStatus?: number): CliFailure => {
+export const formatApiErrorEnvelope = (error: ApiError, observedStatus?: number): CliFailure => {
 	const knownStatus = statusOf(error)
-	const status = typeof knownStatus === "number" ? knownStatus : (fallbackStatus ?? 500)
+	const status = observedStatus ?? (typeof knownStatus === "number" ? knownStatus : 500)
 	const parts: Array<string> = []
 	if (Array.isArray(error.accepted) && error.accepted.length > 0) {
 		parts.push(`${error.accepted.length} event(s) accepted`)

@@ -1554,9 +1554,14 @@ describe("CLI sessions:events and sessions connect", () => {
 						.map((line) => (JSON.parse(line) as { type: string }).type)
 					expect(openStdinTypes).toContain("session.archived")
 
-					// 7) Message receipts with empty data or missing numeric turn fail as unconfirmed
-					//    delivery with the generated Idempotency-Key instead of silently exiting 0
-					for (const badBody of [{ data: [] }, { data: [{ type: "user.message" }] }]) {
+					// 7) Message receipts with empty data, missing type, mismatched type, or missing numeric turn
+					//    fail as unconfirmed delivery with the generated Idempotency-Key
+					for (const badBody of [
+						{ data: [] },
+						{ data: [{ type: "user.message" }] },
+						{ data: [{ turn: 7 }] },
+						{ data: [{ type: "user.interrupt", turn: 7 }] },
+					]) {
 						let capturedKey = ""
 						const badReceiptRes = yield* decodeRetryCli.run(
 							["sessions", "connect", "--session-id", decodeRetrySessionId],

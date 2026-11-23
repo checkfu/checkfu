@@ -140,7 +140,7 @@ const extractSubmittedTurn = (data: ReadonlyArray<unknown>): number | undefined 
 	const first = data[0]
 	if (typeof first !== "object" || first === null) return undefined
 	const record = first as Record<string, unknown>
-	if (record["type"] !== undefined && record["type"] !== "user.message") return undefined
+	if (record["type"] !== "user.message") return undefined
 	const turn = record["turn"]
 	return typeof turn === "number" && Number.isInteger(turn) && turn >= 1 ? turn : undefined
 }

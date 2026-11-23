@@ -1033,6 +1033,32 @@ describe("normalizeApiUrl", () => {
 				expect(retryZeroEmptyCalls).toBe(3)
 				// Conn 1 & 2 both close without advancing cursor -> at least 2 * 30ms floor
 				expect(Duration.toMillis(retryZeroEmptyDuration)).toBeGreaterThanOrEqual(45)
+
+				// 17) SSE API error envelopes preserve the observed HTTP status (e.g. 403 gateway
+				//     response with an authentication_error body reports 403, not inferred 401)
+				const gateway403Fetch = (async () =>
+					new Response(
+						JSON.stringify({
+							type: "error",
+							error: { type: "authentication_error", message: "gateway denied" },
+							request_id: "req_gw_403",
+						}),
+						{ status: 403, headers: { "content-type": "application/json" } },
+					)) as unknown as typeof globalThis.fetch
+				const gateway403Err = yield* Effect.gen(function* () {
+					const client = yield* makeCheckfuClient(Option.some("http://localhost:1337"))
+					return yield* Effect.flip(
+						Stream.runDrain(
+							client.streamSessionEvents("sess_gw_403", {
+								maxReconnectAttempts: 0,
+								baseReconnectDelayMs: 1,
+							}),
+						),
+					)
+				}).pipe(Effect.provide(makeLayer(gateway403Fetch)))
+				expect(gateway403Err.message).toContain(
+					"API error (403 authentication_error): gateway denied",
+				)
 			}),
 		)
 	})
