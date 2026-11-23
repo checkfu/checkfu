@@ -6,7 +6,7 @@ import {
 	EnvironmentName,
 	NonEmptyString,
 	PositiveInt,
-} from "../EnvironmentTypes.ts"
+} from "./EnvironmentTypes.ts"
 import { EnvironmentId } from "./Environment.id.ts"
 import { EnvironmentArchivedError } from "./EnvironmentArchived.rejection.ts"
 import { EnvironmentNotFound } from "./EnvironmentNotFound.rejection.ts"

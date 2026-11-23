@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
-import { AgentModel, NonEmptyString, NonNegativeInt, PositiveInt } from "../AgentTypes.ts"
+import { AgentModel, NonEmptyString, NonNegativeInt, PositiveInt } from "./AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
 

@@ -1,20 +1,20 @@
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
-} from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
-import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
+} from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
 import {
 	DEFAULT_MODEL_TIMEOUT_MS,
 	boundedModelProvider,
-} from "@checkfu/sessions/Session/ModelProvider.external"
+} from "@checkfu/domain/Session/ModelProvider.external"
 import type {
 	HarnessUnavailable,
 	ModelProviderError,
-} from "@checkfu/sessions/Session/ModelProvider.external"
-import { Session } from "@checkfu/sessions/Session/Session.aggregate"
-import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
+} from "@checkfu/domain/Session/ModelProvider.external"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"

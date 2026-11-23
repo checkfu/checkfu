@@ -7,7 +7,7 @@ import {
 	AgentSystem,
 	NonEmptyString,
 	PositiveInt,
-} from "../AgentTypes.ts"
+} from "./AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentArchivedError } from "./AgentArchived.rejection.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"

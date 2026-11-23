@@ -1,4 +1,4 @@
-import { ModelUsage, NonNegativeInt } from "@checkfu/sessions/Session/SessionTypes"
+import { ModelUsage, NonNegativeInt } from "@checkfu/domain/Session/SessionTypes"
 import type { ServiceFreeSchema } from "@checkfu/snapshots/VersionedSnapshot"
 import type { JsonValue } from "@earendil-works/chord/json"
 import { defineDoc, defineDocFamily } from "@earendil-works/pi-durable"

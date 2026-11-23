@@ -7,7 +7,7 @@ import {
 	AgentSystem,
 	NonEmptyString,
 	PositiveInt,
-} from "../AgentTypes.ts"
+} from "./AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionMinted } from "./AgentVersion.aggregate.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"

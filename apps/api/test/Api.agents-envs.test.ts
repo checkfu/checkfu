@@ -1,54 +1,54 @@
 import * as v8 from "node:v8"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
-import { Agent, AgentStateSnapshot } from "@checkfu/agents/Agent/Agent.aggregate"
-import { AgentId } from "@checkfu/agents/Agent/Agent.id"
+import { Agent, AgentStateSnapshot } from "@checkfu/domain/Agent/Agent.aggregate"
+import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import {
 	AgentVersion,
 	AgentVersionMinted,
 	AgentVersionStateSnapshot,
-} from "@checkfu/agents/Agent/AgentVersion.aggregate"
-import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
+} from "@checkfu/domain/Agent/AgentVersion.aggregate"
+import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
-} from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
-import { AgentVersionView } from "@checkfu/agents/Agent/AgentVersionView.view"
-import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
-import { AgentCreated, CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
-import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
-import { AgentUpdated, UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
-import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
-import { Agents } from "@checkfu/agents/Agents.model"
+} from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { AgentVersionView } from "@checkfu/domain/Agent/AgentVersionView.view"
+import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
+import { AgentCreated, CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
+import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
+import { AgentUpdated, UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
+import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
+import { Agents } from "@checkfu/domain/Agents.model"
 import {
 	MAX_AGENT_DESCRIPTION_LENGTH,
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
-} from "@checkfu/agents/AgentTypes"
+} from "@checkfu/domain/Agent/AgentTypes"
 import {
 	CreateEnvironment,
 	EnvironmentCreated,
-} from "@checkfu/environments/Environment/CreateEnvironment.command"
-import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
+} from "@checkfu/domain/Environment/CreateEnvironment.command"
+import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"
 import {
 	Environment,
 	EnvironmentStateSnapshot,
-} from "@checkfu/environments/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
+} from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { EnvironmentView } from "@checkfu/domain/Environment/EnvironmentView.view"
 import {
 	EnvironmentUpdated,
 	UpdateEnvironment,
-} from "@checkfu/environments/Environment/UpdateEnvironment.command"
-import { Environments } from "@checkfu/environments/Environments.model"
+} from "@checkfu/domain/Environment/UpdateEnvironment.command"
+import { Environments } from "@checkfu/domain/Environments.model"
 import {
 	MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
 	MAX_ENVIRONMENT_NAME_LENGTH,
-} from "@checkfu/environments/EnvironmentTypes"
-import { ModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
-import { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
-import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+} from "@checkfu/domain/Environment/EnvironmentTypes"
+import { ModelProvider } from "@checkfu/domain/Session/ModelProvider.external"
+import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
+import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import type { BaseRuntimeContext } from "alchemy/RuntimeContext"
@@ -65,7 +65,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import { Checkfu } from "../src/Checkfu.model.ts"
+import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CheckfuApi, withIdempotencyKey } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,

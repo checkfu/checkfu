@@ -1,74 +1,73 @@
 import * as Domain from "@alchemy.run/domain"
 import { Story } from "@alchemy.run/domain/Story"
-import { Agent } from "@checkfu/agents/Agent/Agent.aggregate"
-import { AgentId } from "@checkfu/agents/Agent/Agent.id"
-import { AgentArchivedError } from "@checkfu/agents/Agent/AgentArchived.rejection"
-import { AgentNotFound } from "@checkfu/agents/Agent/AgentNotFound.rejection"
-import { AgentVersion, AgentVersionMinted } from "@checkfu/agents/Agent/AgentVersion.aggregate"
-import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
+import { Agent } from "../src/Agent/Agent.aggregate.ts"
+import { AgentId } from "../src/Agent/Agent.id.ts"
+import { AgentArchivedError } from "../src/Agent/AgentArchived.rejection.ts"
+import { AgentNotFound } from "../src/Agent/AgentNotFound.rejection.ts"
+import { AgentVersion, AgentVersionMinted } from "../src/Agent/AgentVersion.aggregate.ts"
+import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
-} from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
-import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
-import { AgentArchived, ArchiveAgent } from "@checkfu/agents/Agent/ArchiveAgent.command"
-import { AgentCreated, CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
-import { AgentUpdated, UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
+} from "../src/Agent/AgentVersionByNumberView.view.ts"
+import { AgentView } from "../src/Agent/AgentView.view.ts"
+import { AgentArchived, ArchiveAgent } from "../src/Agent/ArchiveAgent.command.ts"
+import { AgentCreated, CreateAgent } from "../src/Agent/CreateAgent.command.ts"
+import { AgentUpdated, UpdateAgent } from "../src/Agent/UpdateAgent.command.ts"
 import {
 	ArchiveEnvironment,
 	EnvironmentArchived,
-} from "@checkfu/environments/Environment/ArchiveEnvironment.command"
+} from "../src/Environment/ArchiveEnvironment.command.ts"
 import {
 	CreateEnvironment,
 	EnvironmentCreated,
-} from "@checkfu/environments/Environment/CreateEnvironment.command"
+} from "../src/Environment/CreateEnvironment.command.ts"
 import {
 	DeleteEnvironment,
 	EnvironmentDeleted,
-} from "@checkfu/environments/Environment/DeleteEnvironment.command"
-import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
-import { EnvironmentArchivedError } from "@checkfu/environments/Environment/EnvironmentArchived.rejection"
-import { EnvironmentNotFound } from "@checkfu/environments/Environment/EnvironmentNotFound.rejection"
-import { EnvironmentView } from "@checkfu/environments/Environment/EnvironmentView.view"
-import { SessionStatusIdle } from "@checkfu/sessions/Session/CompleteTurn.command"
-import {
-	SessionAlreadyExists,
-	SessionCreated,
-} from "@checkfu/sessions/Session/CreateSession.command"
-import { ModelProvider } from "@checkfu/sessions/Session/ModelProvider.external"
-import { AgentMessage } from "@checkfu/sessions/Session/RecordAgentMessage.command"
-import { SpanModelRequestEnd } from "@checkfu/sessions/Session/RecordModelRequestEnd.command"
-import { SpanModelRequestStart } from "@checkfu/sessions/Session/RecordModelRequestStart.command"
-import { RunTurn, turnKey } from "@checkfu/sessions/Session/RunTurn.saga"
+} from "../src/Environment/DeleteEnvironment.command.ts"
+import { Environment } from "../src/Environment/Environment.aggregate.ts"
+import { EnvironmentId } from "../src/Environment/Environment.id.ts"
+import { EnvironmentArchivedError } from "../src/Environment/EnvironmentArchived.rejection.ts"
+import { EnvironmentNotFound } from "../src/Environment/EnvironmentNotFound.rejection.ts"
+import { EnvironmentView } from "../src/Environment/EnvironmentView.view.ts"
+import { SessionStatusIdle } from "../src/Session/CompleteTurn.command.ts"
+import { SessionAlreadyExists, SessionCreated } from "../src/Session/CreateSession.command.ts"
+import { ModelProvider } from "../src/Session/ModelProvider.external.ts"
+import { AgentMessage } from "../src/Session/RecordAgentMessage.command.ts"
+import { SpanModelRequestEnd } from "../src/Session/RecordModelRequestEnd.command.ts"
+import { SpanModelRequestStart } from "../src/Session/RecordModelRequestStart.command.ts"
+import { RunTurn, turnKey } from "../src/Session/RunTurn.saga.ts"
 import {
 	SendUserMessage,
 	SessionStatusRunning,
 	UserMessage,
-} from "@checkfu/sessions/Session/SendUserMessage.command"
-import { Session } from "@checkfu/sessions/Session/Session.aggregate"
-import { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
-import { TurnInput } from "@checkfu/sessions/Session/TurnInput.view"
-import { SessionsHandlersLive } from "@checkfu/sessions/Sessions.model"
+} from "../src/Session/SendUserMessage.command.ts"
+import { Session } from "../src/Session/Session.aggregate.ts"
+import { SessionId } from "../src/Session/Session.id.ts"
+import { SessionView } from "../src/Session/SessionView.view.ts"
+import { TurnInput } from "../src/Session/TurnInput.view.ts"
+import { SessionsHandlersLive } from "../src/Sessions.model.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Arbitrary from "effect/Arbitrary"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { Checkfu } from "../src/Checkfu.model.ts"
+import {
+	BatchFingerprint,
+	ClaimEventBatch,
+	EventBatchClaimed,
+	IdempotencyKeyConflict,
+} from "../src/EventBatch/ClaimEventBatch.command.ts"
+import { EventBatch } from "../src/EventBatch/EventBatch.aggregate.ts"
+import { EventBatchId } from "../src/EventBatch/EventBatch.id.ts"
 import {
 	AdmitSession,
 	AgentVersionNotFound,
-	BatchFingerprint,
 	BoundedAgentId,
 	BoundedEnvironmentId,
-	Checkfu,
-	ClaimEventBatch,
-	EventBatch,
-	EventBatchClaimed,
-	EventBatchId,
-	IdempotencyKeyConflict,
-} from "../src/Checkfu.model.ts"
+} from "../src/Session/AdmitSession.command.ts"
 
 const story = Story.make(Checkfu, {
 	layer: SessionsHandlersLive,

@@ -2,8 +2,8 @@ import type {
 	ModelProviderError,
 	ModelProviderReply,
 	ModelRequestInterrupted,
-} from "@checkfu/sessions/Session/ModelProvider.external"
-import type { ModelUsage } from "@checkfu/sessions/Session/SessionTypes"
+} from "@checkfu/domain/Session/ModelProvider.external"
+import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import type { AnyModel, Api, AssistantMessage } from "@earendil-works/pi-ai"
 import type { Models } from "@earendil-works/pi-ai/models"
 import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"

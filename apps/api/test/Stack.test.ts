@@ -1,5 +1,5 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
+import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
 import { Credentials } from "@distilled.cloud/cloudflare/Credentials"
 import * as workers from "@distilled.cloud/cloudflare/workers"
 import { describe, expect, it } from "@effect/vitest"

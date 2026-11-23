@@ -1,38 +1,35 @@
 import * as Domain from "@alchemy.run/domain"
-import { Agent } from "@checkfu/agents/Agent/Agent.aggregate"
-import { AgentId } from "@checkfu/agents/Agent/Agent.id"
-import { AgentVersionId } from "@checkfu/agents/Agent/AgentVersion.id"
-import { AgentVersionByNumberView } from "@checkfu/agents/Agent/AgentVersionByNumberView.view"
-import { AgentView } from "@checkfu/agents/Agent/AgentView.view"
-import { ArchiveAgent } from "@checkfu/agents/Agent/ArchiveAgent.command"
-import { CreateAgent } from "@checkfu/agents/Agent/CreateAgent.command"
-import { CreateAgentDecision } from "@checkfu/agents/Agent/CreateAgent.decision"
-import { UpdateAgent } from "@checkfu/agents/Agent/UpdateAgent.command"
-import { UpdateAgentDecision } from "@checkfu/agents/Agent/UpdateAgent.decision"
-import { DeleteEnvironment } from "@checkfu/environments/Environment/DeleteEnvironment.command"
-import { Environment } from "@checkfu/environments/Environment/Environment.aggregate"
-import { EnvironmentId } from "@checkfu/environments/Environment/Environment.id"
+import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
+import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
+import { AgentVersionByNumberView } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
+import { ArchiveAgent } from "@checkfu/domain/Agent/ArchiveAgent.command"
+import { CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
+import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
+import { UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
+import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
+import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import {
 	SessionArchived,
 	SessionStatusTerminated,
-} from "@checkfu/sessions/Session/ArchiveSession.command"
-import { SessionStatusIdle } from "@checkfu/sessions/Session/CompleteTurn.command"
-import { AgentMessage } from "@checkfu/sessions/Session/RecordAgentMessage.command"
-import { AgentThinking } from "@checkfu/sessions/Session/RecordAgentThinking.command"
-import { SpanModelRequestEnd } from "@checkfu/sessions/Session/RecordModelRequestEnd.command"
-import { SpanModelRequestStart } from "@checkfu/sessions/Session/RecordModelRequestStart.command"
+} from "@checkfu/domain/Session/ArchiveSession.command"
+import { SessionStatusIdle } from "@checkfu/domain/Session/CompleteTurn.command"
+import { AgentMessage } from "@checkfu/domain/Session/RecordAgentMessage.command"
+import { AgentThinking } from "@checkfu/domain/Session/RecordAgentThinking.command"
+import { SpanModelRequestEnd } from "@checkfu/domain/Session/RecordModelRequestEnd.command"
+import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
 import {
 	RecordSessionError,
 	SessionErrorEvent,
-} from "@checkfu/sessions/Session/RecordSessionError.command"
-import { UserInterrupt } from "@checkfu/sessions/Session/SendUserInterrupt.command"
-import {
-	SessionStatusRunning,
-	UserMessage,
-} from "@checkfu/sessions/Session/SendUserMessage.command"
-import { Session } from "@checkfu/sessions/Session/Session.aggregate"
-import { SessionId } from "@checkfu/sessions/Session/Session.id"
-import { SessionView } from "@checkfu/sessions/Session/SessionView.view"
+} from "@checkfu/domain/Session/RecordSessionError.command"
+import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
+import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { describe, expect, it } from "@effect/vitest"
 import * as Arbitrary from "effect/Arbitrary"
 import * as DateTime from "effect/DateTime"
@@ -41,7 +38,8 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { AdmitSession, AdmitSessionDecision } from "../src/Checkfu.model.ts"
+import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
+import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { SessionEvent, withIdempotencyKey } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
@@ -2047,7 +2045,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					)
 					const environments = yield* Environment
 					const { CreateEnvironment } = yield* Effect.promise(
-						() => import("@checkfu/environments/Environment/CreateEnvironment.command"),
+						() => import("@checkfu/domain/Environment/CreateEnvironment.command"),
 					)
 					yield* environments.send(
 						new CreateEnvironment({

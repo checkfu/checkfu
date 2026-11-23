@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { EnvironmentConfig, NonEmptyString, PositiveInt } from "../EnvironmentTypes.ts"
+import { EnvironmentConfig, NonEmptyString, PositiveInt } from "./EnvironmentTypes.ts"
 import { Environment } from "./Environment.aggregate.ts"
 import { EnvironmentId } from "./Environment.id.ts"
 

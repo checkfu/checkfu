@@ -2,10 +2,10 @@ import {
 	MAX_AGENT_DESCRIPTION_LENGTH,
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
-} from "@checkfu/agents/AgentTypes"
-import type { AgentModel } from "@checkfu/agents/AgentTypes"
-import type { EnvironmentConfig } from "@checkfu/environments/EnvironmentTypes"
-import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/sessions/Session/SessionTypes"
+} from "@checkfu/domain/Agent/AgentTypes"
+import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
+import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
+import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
 import * as Mac from "effect/crypto/Mac"
@@ -21,8 +21,9 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
-import { ClaimEventBatch, EventBatchId } from "../Checkfu.model.ts"
-import type { EventBatch } from "../Checkfu.model.ts"
+import { ClaimEventBatch } from "@checkfu/domain/EventBatch/ClaimEventBatch.command"
+import { EventBatchId } from "@checkfu/domain/EventBatch/EventBatch.id"
+import type { EventBatch } from "@checkfu/domain/EventBatch/EventBatch.aggregate"
 import { optionalSecret } from "../Secrets.ts"
 import {
 	AgentBodyLimit,

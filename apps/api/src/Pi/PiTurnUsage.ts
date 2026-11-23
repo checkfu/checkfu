@@ -1,4 +1,4 @@
-import type { ModelUsage } from "@checkfu/sessions/Session/SessionTypes"
+import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { ROOT_CONVERSATION_ID, UsageDoc } from "@earendil-works/pi-durable"
 import type { Harness, Tx } from "@earendil-works/pi-durable"
