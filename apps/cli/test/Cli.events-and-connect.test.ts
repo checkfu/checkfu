@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { readFileSync } from "node:fs"
 import * as Http from "node:http"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
@@ -2513,6 +2514,448 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sharedRes.exitCode).toBe(1)
 					expect(sharedRes.stdout).toContain("[you] shared hello")
 					expect(sharedRes.stderr).toContain("409 conflict_error")
+				}),
+			),
+		)
+	})
+
+	it("preserves Ctrl-C interrupt through the documented CLI launcher in a real PTY", async () => {
+		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
+		const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8")
+		const rootPkg = JSON.parse(
+			readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+		) as { readonly scripts?: Record<string, string> }
+		expect(readme).toContain("bun apps/cli/src/main.ts --help")
+		expect(readme).not.toContain("bun run cli")
+		expect(rootPkg.scripts?.["cli"]).toBeUndefined()
+
+		const openSseResponses: Array<Http.ServerResponse> = []
+		const postedEventBodies: Array<string> = []
+		const server = Http.createServer((req, res) => {
+			const url = new URL(req.url ?? "/", "http://127.0.0.1")
+			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_pty") {
+				res.writeHead(200, { "content-type": "application/json" })
+				res.end(
+					JSON.stringify({
+						id: "sess_pty",
+						type: "session",
+						status: "running",
+						turn: 1,
+						usage: { input_tokens: 0, output_tokens: 0 },
+						agent: { id: "agt_pty", version: 1 },
+						environment_id: "env_pty",
+						title: null,
+						created_at: "2026-11-22T00:00:00.000Z",
+						updated_at: "2026-11-22T00:00:00.000Z",
+						archived_at: null,
+					}),
+				)
+				return
+			}
+			if (req.method === "GET" && url.pathname === "/v1/sessions/sess_pty/events/stream") {
+				res.writeHead(200, {
+					"content-type": "text/event-stream; charset=utf-8",
+					"cache-control": "no-cache",
+				})
+				res.write(
+					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+				)
+				openSseResponses.push(res)
+				return
+			}
+			if (req.method === "POST" && url.pathname === "/v1/sessions/sess_pty/events") {
+				let body = ""
+				req.setEncoding("utf8")
+				req.on("data", (chunk: string) => {
+					body += chunk
+				})
+				req.on("end", () => {
+					postedEventBodies.push(body)
+					res.writeHead(200, { "content-type": "application/json" })
+					res.end(JSON.stringify({ data: [{ type: "user.interrupt" }] }))
+				})
+				return
+			}
+			res.writeHead(404, { "content-type": "application/json" })
+			res.end(
+				JSON.stringify({
+					type: "error",
+					error: { type: "not_found_error", message: "not found" },
+					request_id: "req_pty",
+				}),
+			)
+		})
+
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+		try {
+			const addr = server.address()
+			const port = typeof addr === "object" && addr !== null ? addr.port : 0
+
+			const ptyScript = `
+import fcntl, json, os, pty, select, signal, subprocess, sys, termios, time
+
+master, slave = pty.openpty()
+def setup_ctty():
+    os.setsid()
+    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+cmd = ["bun", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
+os.close(slave)
+
+out = b""
+stage = 0
+alive_after_first = False
+deadline = time.time() + 4.5
+while time.time() < deadline:
+    r, _, _ = select.select([master], [], [], 0.05)
+    if r:
+        try:
+            chunk = os.read(master, 4096)
+            if not chunk:
+                break
+            out += chunk
+        except OSError:
+            break
+    if stage == 0 and b"Connected to sess_pty" in out:
+        time.sleep(0.05)
+        stage = 1
+        os.write(master, b"\\x03")
+    elif stage == 1 and b"Press Ctrl-C again to disconnect." in out:
+        alive_after_first = p.poll() is None
+        stage = 2
+        os.write(master, b"\\x03")
+    if p.poll() is not None:
+        break
+
+if p.poll() is None:
+    try:
+        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    p.wait()
+os.close(master)
+print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "output": out.decode("utf-8", errors="replace")}))
+`
+			const ptyResult = await new Promise<{
+				readonly rc: number | null
+				readonly aliveAfterFirst: boolean
+				readonly output: string
+			}>((resolve, reject) => {
+				const driver = spawn("python3", ["-c", ptyScript, String(port), repoRoot], {
+					env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+					stdio: ["ignore", "pipe", "pipe"],
+				})
+				let stdout = ""
+				let stderr = ""
+				driver.stdout.setEncoding("utf8")
+				driver.stderr.setEncoding("utf8")
+				driver.stdout.on("data", (chunk: string) => {
+					stdout += chunk
+				})
+				driver.stderr.on("data", (chunk: string) => {
+					stderr += chunk
+				})
+				driver.on("error", reject)
+				driver.on("close", (code) => {
+					if (code !== 0) {
+						reject(new Error(`PTY driver failed (${code}): ${stderr}`))
+						return
+					}
+					try {
+						resolve(
+							JSON.parse(stdout.trim()) as {
+								readonly rc: number | null
+								readonly aliveAfterFirst: boolean
+								readonly output: string
+							},
+						)
+					} catch (err) {
+						reject(new Error(`Invalid PTY driver JSON: ${stdout} (${String(err)})`))
+					}
+				})
+			})
+
+			expect(ptyResult.aliveAfterFirst).toBe(true)
+			expect(ptyResult.rc).toBe(130)
+			expect(ptyResult.output).toContain("Interrupt requested.")
+			expect(ptyResult.output).toContain("Press Ctrl-C again to disconnect.")
+			expect(postedEventBodies).toHaveLength(1)
+			expect(JSON.parse(postedEventBodies[0] ?? "{}")).toEqual({
+				events: [{ type: "user.interrupt" }],
+			})
+		} finally {
+			for (const res of openSseResponses) {
+				res.end()
+			}
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+		}
+	})
+
+	it("reports buffered piped input on live session termination, separates confirmed 429 rejections from unconfirmed delivery, and bounds turn bookkeeping", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const encoder = new TextEncoder()
+					let turnCount = 0
+					const cli = yield* makeTestServer({
+						generate: (args) =>
+							Effect.sync(() => {
+								turnCount += 1
+								return {
+									thinking: null,
+									text: `Reply-${args.turn}:${args.input.join("|")}`,
+									input_tokens: 2,
+									output_tokens: 2,
+									stop_reason: { type: "end_turn" as const },
+								}
+							}),
+					})
+
+					// 1) Live session archived while non-newline piped input is buffered fails instead of exiting 0
+					const liveBufferedSessionId = yield* createReadySession(cli)
+					const streamReady = yield* Deferred.make<void>()
+					const archiver1 = yield* Deferred.await(streamReady).pipe(
+						Effect.andThen(Effect.sleep("40 millis")),
+						Effect.andThen(cli.run(["sessions", "archive", "--session-id", liveBufferedSessionId])),
+						Effect.forkChild,
+					)
+					const liveBufferedRes = yield* cli.run(
+						["sessions", "connect", "--session-id", liveBufferedSessionId],
+						{
+							stdin: Stream.concat(
+								Stream.make(encoder.encode("buffered before archive")),
+								Stream.never,
+							),
+							interceptFetch: async (next, request) => {
+								if (request.url.includes("/events/stream")) {
+									await Effect.runPromise(Deferred.succeed(streamReady, undefined))
+								}
+								return next(request)
+							},
+						},
+					)
+					yield* Fiber.await(archiver1)
+					expect(liveBufferedRes.exitCode).toBe(1)
+					expect(liveBufferedRes.stderr).toContain("ended before buffered input was submitted")
+
+					// 1b) Live session archived after first line sent, while second line is buffered without newline
+					const liveSecondSessionId = yield* createReadySession(cli)
+					const firstReplyRendered = yield* Deferred.make<void>()
+					const archiver2 = yield* Deferred.await(firstReplyRendered).pipe(
+						Effect.andThen(Effect.sleep("30 millis")),
+						Effect.andThen(cli.run(["sessions", "archive", "--session-id", liveSecondSessionId])),
+						Effect.forkChild,
+					)
+					const liveSecondRes = yield* cli.run(
+						["sessions", "connect", "--session-id", liveSecondSessionId],
+						{
+							stdin: Stream.concat(
+								Stream.make(encoder.encode("first line\nsecond buffered")),
+								Stream.never,
+							),
+							onStdoutChunk: (chunk) =>
+								chunk.includes("Reply-1:first line")
+									? Deferred.succeed(firstReplyRendered, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+						},
+					)
+					yield* Fiber.await(archiver2)
+					expect(liveSecondRes.exitCode).toBe(1)
+					expect(liveSecondRes.stderr).toContain("ended before buffered input was submitted")
+
+					// 2a) Confirmed 429 queue-full rejection (no unconfirmed_index) retries but does NOT claim
+					//     delivery is unconfirmed when all attempts are definitively rejected
+					const queueFullSessionId = yield* createReadySession(cli)
+					let confirmed429Calls = 0
+					const confirmed429Res = yield* cli.run(
+						["sessions", "connect", "--session-id", queueFullSessionId],
+						{
+							stdin: "queued message\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									confirmed429Calls += 1
+									return new Response(
+										JSON.stringify({
+											type: "error",
+											error: {
+												type: "rate_limit_error",
+												message:
+													"Too many queued user messages are already waiting for the active turn.",
+											},
+											request_id: `req_429_${confirmed429Calls}`,
+										}),
+										{ status: 429, headers: { "content-type": "application/json" } },
+									)
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(confirmed429Calls).toBe(3)
+					expect(confirmed429Res.exitCode).toBe(1)
+					expect(confirmed429Res.stderr).toContain("429 rate_limit_error")
+					expect(confirmed429Res.stderr).not.toContain("delivery unconfirmed")
+					expect(confirmed429Res.stderr).not.toContain("Idempotency-Key:")
+
+					// 2b) Unconfirmed transport error followed by confirmed 429 still preserves delivery uncertainty
+					const mixedKeys: Array<string | null> = []
+					const mixed429Res = yield* cli.run(
+						["sessions", "connect", "--session-id", queueFullSessionId],
+						{
+							stdin: "ambiguous then 429\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									mixedKeys.push(request.headers.get("idempotency-key"))
+									if (mixedKeys.length === 1) {
+										throw new TypeError("socket dropped after send")
+									}
+									return new Response(
+										JSON.stringify({
+											type: "error",
+											error: {
+												type: "rate_limit_error",
+												message:
+													"Too many queued user messages are already waiting for the active turn.",
+											},
+											request_id: `req_mixed_${mixedKeys.length}`,
+										}),
+										{ status: 429, headers: { "content-type": "application/json" } },
+									)
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(mixedKeys).toHaveLength(3)
+					expect(new Set(mixedKeys).size).toBe(1)
+					expect(mixed429Res.exitCode).toBe(1)
+					expect(mixed429Res.stderr).toContain("delivery unconfirmed")
+					expect(mixed429Res.stderr).toContain(`Idempotency-Key: ${mixedKeys[0]}`)
+
+					// 2c) 429 WITH unconfirmed_index still reports uncertain delivery and Idempotency-Key
+					const unconfirmed429Keys: Array<string | null> = []
+					const unconfirmed429Res = yield* cli.run(
+						["sessions", "connect", "--session-id", queueFullSessionId],
+						{
+							stdin: "unconfirmed 429\n",
+							interceptFetch: async (next, request) => {
+								if (request.method === "POST" && request.url.endsWith("/events")) {
+									unconfirmed429Keys.push(request.headers.get("idempotency-key"))
+									return new Response(
+										JSON.stringify({
+											type: "error",
+											error: { type: "rate_limit_error", message: "ambiguous rate limit" },
+											request_id: `req_u429_${unconfirmed429Keys.length}`,
+											unconfirmed_index: 0,
+										}),
+										{ status: 429, headers: { "content-type": "application/json" } },
+									)
+								}
+								return next(request)
+							},
+						},
+					)
+					expect(unconfirmed429Keys).toHaveLength(3)
+					expect(unconfirmed429Res.exitCode).toBe(1)
+					expect(unconfirmed429Res.stderr).toContain("delivery unconfirmed")
+					expect(unconfirmed429Res.stderr).toContain(`Idempotency-Key: ${unconfirmed429Keys[0]}`)
+
+					// 3) Multi-turn TTY session runs without piped-turn bookkeeping overhead, and multi-turn
+					//    piped session retains first submitted turn failure even after later turns settle
+					const multiTtySessionId = yield* createReadySession(cli)
+					const multiTtyRes = yield* cli.run(
+						["sessions", "connect", "--session-id", multiTtySessionId],
+						{
+							stdinIsTerminal: true,
+							terminalReads: [
+								Effect.succeed("tty turn 1"),
+								Effect.sleep("20 millis").pipe(Effect.as("tty turn 2")),
+								Effect.sleep("20 millis").pipe(Effect.as("/exit")),
+							],
+						},
+					)
+					expect(multiTtyRes.exitCode).toBe(0)
+					expect(turnCount).toBeGreaterThanOrEqual(2)
+
+					const multiFailCli = yield* makeTestServer({
+						generate: (args) =>
+							args.turn === 2
+								? Effect.fail({
+										_tag: "ModelProviderError" as const,
+										error_type: "upstream_error" as const,
+										message: "turn 2 provider boom",
+										terminal: false,
+									})
+								: Effect.succeed({
+										thinking: null,
+										text: `Ok-${args.turn}`,
+										input_tokens: 2,
+										output_tokens: 2,
+										stop_reason: { type: "end_turn" as const },
+									}),
+					})
+					const multiFailSessionId = yield* createReadySession(multiFailCli)
+					const turn1Done = yield* Deferred.make<void>()
+					const turn2Done = yield* Deferred.make<void>()
+					const stagedMultiFailStdin = Stream.concat(
+						Stream.make(encoder.encode("m1\n")),
+						Stream.concat(
+							Stream.fromEffect(
+								Deferred.await(turn1Done).pipe(
+									Effect.andThen(Effect.sleep("20 millis")),
+									Effect.as(encoder.encode("m2\n")),
+								),
+							),
+							Stream.fromEffect(
+								Deferred.await(turn2Done).pipe(
+									Effect.andThen(Effect.sleep("20 millis")),
+									Effect.as(encoder.encode("m3\n")),
+								),
+							),
+						),
+					)
+					const multiFailRes = yield* multiFailCli.run(
+						["sessions", "connect", "--session-id", multiFailSessionId],
+						{
+							stdin: stagedMultiFailStdin,
+							onStdoutChunk: (chunk) =>
+								chunk.includes("Ok-1")
+									? Deferred.succeed(turn1Done, undefined).pipe(Effect.asVoid)
+									: Effect.void,
+							interceptFetch: async (next, request) => {
+								const res = await next(request)
+								if (!request.url.includes("/events/stream") || res.body === null) return res
+								const reader = res.body.getReader()
+								const decoder = new TextDecoder()
+								let signaledTurn2 = false
+								const observed = new ReadableStream<Uint8Array>({
+									async pull(controller) {
+										const chunk = await reader.read()
+										if (chunk.done) {
+											controller.close()
+											return
+										}
+										const text = decoder.decode(chunk.value, { stream: true })
+										controller.enqueue(chunk.value)
+										if (!signaledTurn2 && text.includes("retries_exhausted")) {
+											signaledTurn2 = true
+											await Effect.runPromise(Deferred.succeed(turn2Done, undefined))
+										}
+									},
+									cancel(reason) {
+										return reader.cancel(reason)
+									},
+								})
+								return new Response(observed, { status: res.status, headers: res.headers })
+							},
+						},
+					)
+					expect(multiFailRes.exitCode).toBe(1)
+					expect(multiFailRes.stderr).toContain("Turn 2 failed:")
+					expect(multiFailRes.stderr).toContain("turn 2 provider boom")
+					expect(multiFailRes.stdout).toContain("Ok-1")
+					expect(multiFailRes.stdout).toContain("Ok-3")
 				}),
 			),
 		)

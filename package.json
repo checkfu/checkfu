@@ -31,7 +31,6 @@
 	},
 	"type": "module",
 	"scripts": {
-		"cli": "bun apps/cli/src/main.ts",
 		"generate": "bun tools/forge/src/Generate.ts",
 		"generate:check": "bun tools/forge/src/Generate.ts --check",
 		"dev": "alchemy dev",

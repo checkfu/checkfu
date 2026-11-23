@@ -52,7 +52,13 @@ const extractContentText = (data: Record<string, unknown>): string => {
 	return parts.join("\n")
 }
 
+interface TurnFailure {
+	readonly turn: number
+	readonly message: string
+}
+
 interface ConnectState {
+	readonly trackPipedTurns: boolean
 	readonly status: "idle" | "running" | "terminated"
 	readonly liveStatus: "idle" | "running" | "terminated"
 	readonly liveTurn: number
@@ -61,11 +67,59 @@ interface ConnectState {
 	readonly settledTurn: number
 	readonly latestSettledStopReason: string | undefined
 	readonly targetTurn: number
-	readonly submittedTurns: ReadonlySet<number>
-	readonly queuedTurns: ReadonlySet<number>
-	readonly latestTurnError: { readonly turn: number; readonly message: string } | undefined
-	readonly failedTurnErrors: ReadonlyMap<number, string>
+	readonly unsettledSubmittedTurns: ReadonlySet<number>
+	readonly unsettledQueuedTurns: ReadonlySet<number>
+	readonly firstSubmittedTurnFailure: TurnFailure | undefined
+	readonly pendingTurnErrors: ReadonlyMap<number, string>
+	readonly sendInFlight: boolean
+	readonly latestTurnError: TurnFailure | undefined
 	readonly ended: boolean
+}
+
+const recordFirstFailure = (
+	current: TurnFailure | undefined,
+	turn: number,
+	message: string,
+): TurnFailure => (current === undefined || turn < current.turn ? { turn, message } : current)
+
+const pruneSettledTurns = (
+	turns: ReadonlySet<number>,
+	settledTurn: number,
+): ReadonlySet<number> => {
+	if (turns.size === 0) return turns
+	let hasSettled = false
+	for (const turn of turns) {
+		if (turn <= settledTurn) {
+			hasSettled = true
+			break
+		}
+	}
+	if (!hasSettled) return turns
+	const next = new Set<number>()
+	for (const turn of turns) {
+		if (turn > settledTurn) next.add(turn)
+	}
+	return next
+}
+
+const pruneSettledErrors = (
+	errors: ReadonlyMap<number, string>,
+	settledTurn: number,
+): ReadonlyMap<number, string> => {
+	if (errors.size === 0) return errors
+	let hasSettled = false
+	for (const turn of errors.keys()) {
+		if (turn <= settledTurn) {
+			hasSettled = true
+			break
+		}
+	}
+	if (!hasSettled) return errors
+	const next = new Map<number, string>()
+	for (const [turn, message] of errors) {
+		if (turn > settledTurn) next.set(turn, message)
+	}
+	return next
 }
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
@@ -112,10 +166,13 @@ const isUnconfirmedSendError = (err: Parameters<typeof formatClientError>[0]): b
 	}
 	if (isApiErrorEnvelope(err)) {
 		const status = statusOf(err)
-		return err.unconfirmed_index !== undefined || status === 429 || status >= 500
+		return err.unconfirmed_index !== undefined || status >= 500
 	}
 	return Schema.isSchemaError(err)
 }
+
+const isRetryableSendError = (err: Parameters<typeof formatClientError>[0]): boolean =>
+	isUnconfirmedSendError(err) || (isApiErrorEnvelope(err) && statusOf(err) === 429)
 
 const formatUnconfirmedSendError = (
 	err: Parameters<typeof formatClientError>[0],
@@ -144,10 +201,10 @@ const sendConnectEventsWithRetry = <A>(
 			const err = res.failure
 			if (isUnconfirmedSendError(err)) {
 				hadUnconfirmedAttempt = true
-				if (attempt < MAX_CONNECT_SEND_RETRIES) {
-					yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
-					continue
-				}
+			}
+			if (isRetryableSendError(err) && attempt < MAX_CONNECT_SEND_RETRIES) {
+				yield* Effect.sleep(Duration.millis(CONNECT_SEND_RETRY_BASE_MS * 2 ** attempt))
+				continue
 			}
 			return yield* formatUnconfirmedSendError(err, idempotencyKey, hadUnconfirmedAttempt)
 		}
@@ -171,10 +228,16 @@ const fetchSessionStatusWithRetry = (client: CheckfuClient, sessionId: SessionId
 		}
 	})
 
+interface BoundedLineHooks {
+	readonly onChunkParsed?: (lines: ReadonlyArray<string>, pending: string) => void
+	readonly onPendingAfterLines?: (pending: string) => Effect.Effect<void>
+	readonly onTrailingFlushed?: (line: string) => Effect.Effect<void>
+}
+
 const splitBoundedLines = (
 	stdin: Stdio.Stdio["stdin"],
 	maxLineChars: number,
-	onPendingChange?: (pending: string) => Effect.Effect<void>,
+	hooks?: BoundedLineHooks,
 ): Stream.Stream<string, CliFailure> =>
 	Stream.suspend(() => {
 		let pending = ""
@@ -219,16 +282,17 @@ const splitBoundedLines = (
 						pending = ""
 						pos = lineEnd + 1
 					}
+					hooks?.onChunkParsed?.(lines, pending)
 					const emitted =
 						lines.length > 0 ? Stream.fromIterable(lines).pipe(Stream.rechunk(1)) : Stream.empty
 					if (overflowed) {
 						return Stream.concat(emitted, Stream.fail(lineTooLongError()))
 					}
-					if (onPendingChange !== undefined) {
+					if (hooks?.onPendingAfterLines !== undefined) {
 						const snapshot = pending
 						return Stream.concat(
 							emitted,
-							Stream.unwrap(onPendingChange(snapshot).pipe(Effect.as(Stream.empty))),
+							Stream.unwrap(hooks.onPendingAfterLines(snapshot).pipe(Effect.as(Stream.empty))),
 						)
 					}
 					return emitted
@@ -246,8 +310,8 @@ const splitBoundedLines = (
 				if (pending.length === 0) return Stream.empty
 				const last = pending
 				pending = ""
-				if (onPendingChange !== undefined) {
-					yield* onPendingChange("")
+				if (hooks?.onTrailingFlushed !== undefined) {
+					yield* hooks.onTrailingFlushed(last)
 				}
 				return Stream.make(last)
 			}),
@@ -274,15 +338,17 @@ const inspectEndedPipedStdin = (
 		const earlyInput = yield* Deferred.make<EndedStdinSignal>()
 		const readLines = Effect.gen(function* () {
 			let signal: EndedStdinSignal = { _tag: "eof" }
-			yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, (pending) =>
-				Effect.gen(function* () {
-					yield* Ref.set(bufferedLineRef, pending)
-					const trimmed = pending.trim()
-					if (trimmed.length > 0 && !isExitCommandPrefix(trimmed)) {
-						yield* Deferred.succeed(earlyInput, { _tag: "input", line: trimmed })
-					}
-				}),
-			).pipe(
+			yield* splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
+				onPendingAfterLines: (pending) =>
+					Effect.gen(function* () {
+						yield* Ref.set(bufferedLineRef, pending)
+						const trimmed = pending.trim()
+						if (trimmed.length > 0 && !isExitCommandPrefix(trimmed)) {
+							yield* Deferred.succeed(earlyInput, { _tag: "input", line: trimmed })
+						}
+					}),
+				onTrailingFlushed: () => Ref.set(bufferedLineRef, ""),
+			}).pipe(
 				Stream.takeUntil((line) => line.trim().length > 0),
 				Stream.runForEach((line) =>
 					Effect.sync(() => {
@@ -376,10 +442,11 @@ const renderConnectEvent = (
 				const errType = typeof errObj?.["type"] === "string" ? errObj["type"] : "session_error"
 				const errMsg = typeof errObj?.["message"] === "string" ? errObj["message"] : "Unknown error"
 				const formattedError = `${errType}: ${errMsg}`
-				yield* Ref.update(stateRef, (state) => ({
-					...state,
-					latestTurnError: { turn: state.observedTurn, message: formattedError },
-				}))
+				yield* Ref.update(stateRef, (state) =>
+					state.trackPipedTurns
+						? { ...state, latestTurnError: { turn: state.observedTurn, message: formattedError } }
+						: state,
+				)
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(`[error] ${formattedError}`)
 				}
@@ -396,36 +463,70 @@ const renderConnectEvent = (
 				}
 				const next = yield* Ref.updateAndGet(stateRef, (state) => {
 					const turn = state.observedTurn
+					const nextSettledTurn = Math.max(state.settledTurn, turn)
 					const latestSettledStopReason =
 						turn >= state.settledTurn ? stopReason : state.latestSettledStopReason
-					let failedTurnErrors = state.failedTurnErrors
-					if (stopReason === "retries_exhausted") {
-						const turnError =
-							state.latestTurnError?.turn === turn ? state.latestTurnError.message : undefined
-						const nextFailed = new Map(state.failedTurnErrors)
-						nextFailed.set(turn, turnError ?? "Model retries exhausted.")
-						failedTurnErrors = nextFailed
-					}
 					const reachedLiveIdle =
 						turn > state.liveTurn || (turn === state.liveTurn && state.liveStatus === "running")
+					if (!state.trackPipedTurns) {
+						return {
+							...state,
+							status: "idle" as const,
+							liveStatus: turn >= state.liveTurn ? ("idle" as const) : state.liveStatus,
+							liveTurn: Math.max(state.liveTurn, turn),
+							liveStateVersion: reachedLiveIdle
+								? state.liveStateVersion + 1
+								: state.liveStateVersion,
+							settledTurn: nextSettledTurn,
+							latestSettledStopReason,
+						}
+					}
+					let firstSubmittedTurnFailure = state.firstSubmittedTurnFailure
+					let pendingTurnErrors = state.pendingTurnErrors
+					if (stopReason === "retries_exhausted") {
+						const turnError =
+							(state.latestTurnError?.turn === turn ? state.latestTurnError.message : undefined) ??
+							"Model retries exhausted."
+						if (state.unsettledSubmittedTurns.has(turn)) {
+							firstSubmittedTurnFailure = recordFirstFailure(
+								firstSubmittedTurnFailure,
+								turn,
+								turnError,
+							)
+						} else if (state.sendInFlight) {
+							const nextPending = new Map(pendingTurnErrors)
+							nextPending.set(turn, turnError)
+							pendingTurnErrors = nextPending
+						}
+					}
+					if (!state.sendInFlight) {
+						pendingTurnErrors = pruneSettledErrors(pendingTurnErrors, nextSettledTurn)
+					}
 					return {
 						...state,
 						status: "idle" as const,
 						liveStatus: turn >= state.liveTurn ? ("idle" as const) : state.liveStatus,
 						liveTurn: Math.max(state.liveTurn, turn),
 						liveStateVersion: reachedLiveIdle ? state.liveStateVersion + 1 : state.liveStateVersion,
-						settledTurn: Math.max(state.settledTurn, turn),
+						settledTurn: nextSettledTurn,
 						latestSettledStopReason,
+						unsettledSubmittedTurns: pruneSettledTurns(
+							state.unsettledSubmittedTurns,
+							nextSettledTurn,
+						),
+						unsettledQueuedTurns: pruneSettledTurns(state.unsettledQueuedTurns, nextSettledTurn),
+						firstSubmittedTurnFailure,
+						pendingTurnErrors,
 						latestTurnError:
 							state.latestTurnError?.turn === turn ? undefined : state.latestTurnError,
-						failedTurnErrors,
 					}
 				})
 				if (
-					(next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
-					(next.queuedTurns.has(next.targetTurn) &&
-						next.settledTurn === next.targetTurn - 1 &&
-						isQueueHaltingStopReason(stopReason))
+					next.trackPipedTurns &&
+					((next.targetTurn > 0 && next.settledTurn >= next.targetTurn) ||
+						(next.unsettledQueuedTurns.has(next.targetTurn) &&
+							next.settledTurn === next.targetTurn - 1 &&
+							isQueueHaltingStopReason(stopReason)))
 				) {
 					const settleDeferred = yield* Ref.get(settleDeferredRef)
 					yield* Deferred.succeed(settleDeferred, undefined)
@@ -435,22 +536,42 @@ const renderConnectEvent = (
 			case "session.status_terminated":
 			case "session.archived": {
 				yield* Ref.update(stateRef, (state) => {
-					let failedTurnErrors = state.failedTurnErrors
+					if (!state.trackPipedTurns) {
+						return {
+							...state,
+							status: "terminated" as const,
+							liveStatus: "terminated" as const,
+							liveStateVersion: state.liveStateVersion + 1,
+						}
+					}
+					let firstSubmittedTurnFailure = state.firstSubmittedTurnFailure
+					let pendingTurnErrors = state.pendingTurnErrors
 					if (
 						eventType === "session.status_terminated" &&
 						state.observedTurn > state.settledTurn &&
 						state.latestTurnError?.turn === state.observedTurn
 					) {
-						const nextFailed = new Map(state.failedTurnErrors)
-						nextFailed.set(state.observedTurn, state.latestTurnError.message)
-						failedTurnErrors = nextFailed
+						const turn = state.observedTurn
+						const turnError = state.latestTurnError.message
+						if (state.unsettledSubmittedTurns.has(turn)) {
+							firstSubmittedTurnFailure = recordFirstFailure(
+								firstSubmittedTurnFailure,
+								turn,
+								turnError,
+							)
+						} else if (state.sendInFlight) {
+							const nextPending = new Map(pendingTurnErrors)
+							nextPending.set(turn, turnError)
+							pendingTurnErrors = nextPending
+						}
 					}
 					return {
 						...state,
 						status: "terminated" as const,
 						liveStatus: "terminated" as const,
 						liveStateVersion: state.liveStateVersion + 1,
-						failedTurnErrors,
+						firstSubmittedTurnFailure,
+						pendingTurnErrors,
 					}
 				})
 				if (!rawStructuredMode) {
@@ -532,12 +653,23 @@ const dispatchUserLine = (
 		}
 
 		const key = yield* client.generateIdempotencyKey()
-		const currentState = yield* Ref.get(stateRef)
-		const sendSnapshot = {
-			liveStatus: currentState.liveStatus,
-			liveTurn: currentState.liveTurn,
-			liveStateVersion: currentState.liveStateVersion,
-		}
+		const sendSnapshot = yield* Ref.modify(stateRef, (state) => [
+			{
+				liveStatus: state.liveStatus,
+				liveTurn: state.liveTurn,
+				liveStateVersion: state.liveStateVersion,
+			},
+			state.trackPipedTurns ? { ...state, sendInFlight: true } : state,
+		])
+		const clearSendInFlight = Ref.update(stateRef, (state) =>
+			state.trackPipedTurns
+				? {
+						...state,
+						sendInFlight: false,
+						pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
+					}
+				: state,
+		)
 		const res = yield* Effect.result(
 			sendConnectEventsWithRetry(
 				client.api.sessions.sendEvents({
@@ -552,6 +684,7 @@ const dispatchUserLine = (
 				Effect.onInterrupt(() => {
 					const msg = `Interrupted while sending message (delivery unconfirmed; retry safely with Idempotency-Key: ${key}).`
 					return Effect.all([
+						clearSendInFlight,
 						writeStderrLine(msg).pipe(Effect.ignore),
 						options?.onInterruptedSend !== undefined
 							? options.onInterruptedSend(networkFailure(msg))
@@ -561,32 +694,57 @@ const dispatchUserLine = (
 			),
 		)
 		if (res._tag === "Failure") {
+			yield* clearSendInFlight
 			return yield* res.failure
 		}
 		const turn = extractSubmittedTurn(res.success.data)
 		if (turn === undefined) {
+			yield* clearSendInFlight
 			return yield* networkFailure(
 				`Message response did not confirm a valid turn (delivery unconfirmed; retry safely with Idempotency-Key: ${key})`,
 			)
 		}
 		yield* Ref.update(stateRef, (state) => {
-			const nextSubmitted = new Set(state.submittedTurns)
-			nextSubmitted.add(turn)
 			const initiatedFromIdle =
 				sendSnapshot.liveStatus === "idle" && turn === sendSnapshot.liveTurn + 1
-			const nextQueued = new Set(state.queuedTurns)
-			if (!initiatedFromIdle) {
-				nextQueued.add(turn)
-			}
 			const startedFromIdle =
 				initiatedFromIdle &&
 				state.liveStateVersion === sendSnapshot.liveStateVersion &&
 				state.liveStatus === "idle"
+			if (!state.trackPipedTurns) {
+				return startedFromIdle
+					? {
+							...state,
+							liveStatus: "running" as const,
+							liveTurn: turn,
+						}
+					: state
+			}
+			const preRecordedError = state.pendingTurnErrors.get(turn)
+			const firstSubmittedTurnFailure =
+				preRecordedError !== undefined
+					? recordFirstFailure(state.firstSubmittedTurnFailure, turn, preRecordedError)
+					: state.firstSubmittedTurnFailure
+			let unsettledSubmittedTurns = state.unsettledSubmittedTurns
+			if (turn > state.settledTurn && !unsettledSubmittedTurns.has(turn)) {
+				const nextSubmitted = new Set(unsettledSubmittedTurns)
+				nextSubmitted.add(turn)
+				unsettledSubmittedTurns = nextSubmitted
+			}
+			let unsettledQueuedTurns = state.unsettledQueuedTurns
+			if (!initiatedFromIdle && turn > state.settledTurn && !unsettledQueuedTurns.has(turn)) {
+				const nextQueued = new Set(unsettledQueuedTurns)
+				nextQueued.add(turn)
+				unsettledQueuedTurns = nextQueued
+			}
 			return {
 				...state,
 				targetTurn: Math.max(state.targetTurn, turn),
-				submittedTurns: nextSubmitted,
-				queuedTurns: nextQueued,
+				unsettledSubmittedTurns,
+				unsettledQueuedTurns,
+				firstSubmittedTurnFailure,
+				pendingTurnErrors: pruneSettledErrors(state.pendingTurnErrors, state.settledTurn),
+				sendInFlight: false,
 				liveStatus: startedFromIdle ? ("running" as const) : state.liveStatus,
 				liveTurn: startedFromIdle ? turn : state.liveTurn,
 			}
@@ -882,6 +1040,7 @@ export const sessionsConnectCommand = Command.make(
 			)
 
 			const stateRef = yield* Ref.make<ConnectState>({
+				trackPipedTurns: !isInteractiveTty,
 				status: baseline.status,
 				liveStatus: session.status,
 				liveTurn: session.turn,
@@ -890,10 +1049,12 @@ export const sessionsConnectCommand = Command.make(
 				settledTurn: baseline.settledTurn,
 				latestSettledStopReason: undefined,
 				targetTurn: 0,
-				submittedTurns: new Set<number>(),
-				queuedTurns: new Set<number>(),
+				unsettledSubmittedTurns: new Set<number>(),
+				unsettledQueuedTurns: new Set<number>(),
+				firstSubmittedTurnFailure: undefined,
+				pendingTurnErrors: new Map<number, string>(),
+				sendInFlight: false,
 				latestTurnError: undefined,
-				failedTurnErrors: new Map<number, string>(),
 				ended: initiallyEnded,
 			})
 
@@ -1077,17 +1238,27 @@ export const sessionsConnectCommand = Command.make(
 				}
 
 				let explicitExit = false
-				const pipedInputEffect = splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH).pipe(
-					Stream.takeUntil((line) => {
-						const trimmed = line.trim()
-						return trimmed === "/exit" || trimmed === "/quit"
-					}),
+				const queuedLines: Array<string> = []
+				let pendingPartial = ""
+				const pipedInputEffect = splitBoundedLines(stdio.stdin, MAX_MESSAGE_TEXT_LENGTH, {
+					onChunkParsed: (lines, pending) => {
+						queuedLines.push(...lines)
+						pendingPartial = pending
+					},
+					onTrailingFlushed: (last) =>
+						Effect.sync(() => {
+							queuedLines.push(last)
+							pendingPartial = ""
+						}),
+				}).pipe(
+					Stream.takeUntil((line) => isExitCommand(line.trim())),
 					Stream.runForEach((line) =>
 						Effect.gen(function* () {
+							queuedLines.shift()
 							if (explicitExit) return
 							const trimmed = line.trim()
 							if (trimmed.length === 0) return
-							if (trimmed === "/exit" || trimmed === "/quit") {
+							if (isExitCommand(trimmed)) {
 								explicitExit = true
 								return
 							}
@@ -1107,7 +1278,27 @@ export const sessionsConnectCommand = Command.make(
 						}),
 					),
 				)
-				yield* Effect.raceFirst(pipedInputEffect, Deferred.await(stopConnectDeferred))
+				const inputRaceOutcome = yield* Effect.raceFirst(
+					pipedInputEffect.pipe(Effect.as("stdin_done" as const)),
+					Deferred.await(stopConnectDeferred).pipe(Effect.as("stopped" as const)),
+				)
+				if (inputRaceOutcome === "stopped" && !explicitExit) {
+					const streamErr = yield* Ref.get(streamFailedRef)
+					const existingIncomplete = yield* Ref.get(incompleteTurnRef)
+					if (streamErr === null && existingIncomplete === null) {
+						const firstUnprocessed = [...queuedLines, pendingPartial]
+							.map((entry) => entry.trim())
+							.find((entry) => entry.length > 0)
+						if (firstUnprocessed !== undefined && !isExitCommand(firstUnprocessed)) {
+							const currentState = yield* Ref.get(stateRef)
+							return yield* networkFailure(
+								currentState.ended
+									? `Cannot send input: session ${session.id} ended before buffered input was submitted.`
+									: "Event stream ended before buffered input was submitted.",
+							)
+						}
+					}
+				}
 
 				if (!explicitExit) {
 					while (true) {
@@ -1126,7 +1317,7 @@ export const sessionsConnectCommand = Command.make(
 						const lastStopReason = state.latestSettledStopReason
 						if (
 							state.status === "idle" &&
-							state.queuedTurns.has(state.targetTurn) &&
+							state.unsettledQueuedTurns.has(state.targetTurn) &&
 							state.settledTurn === state.targetTurn - 1 &&
 							state.observedTurn < state.targetTurn &&
 							isQueueHaltingStopReason(lastStopReason)
@@ -1191,24 +1382,32 @@ export const sessionsConnectCommand = Command.make(
 					}
 
 					const finalState = yield* Ref.get(stateRef)
-					const submitted = [...finalState.submittedTurns].sort((a, b) => a - b)
-					for (const turn of submitted) {
-						const turnFailure = finalState.failedTurnErrors.get(turn)
-						if (turnFailure !== undefined) {
-							yield* Ref.set(failedTurnRef, networkFailure(`Turn ${turn} failed: ${turnFailure}`))
-							break
+					let lowestUnsettled: number | undefined
+					for (const turn of finalState.unsettledSubmittedTurns) {
+						if (lowestUnsettled === undefined || turn < lowestUnsettled) {
+							lowestUnsettled = turn
 						}
-						if (finalState.settledTurn < turn) {
-							yield* Ref.set(
-								failedTurnRef,
-								networkFailure(
-									finalState.ended
-										? `Session terminated before turn ${turn} completed.`
-										: `Turn ${turn} did not complete.`,
-								),
-							)
-							break
-						}
+					}
+					if (
+						finalState.firstSubmittedTurnFailure !== undefined &&
+						(lowestUnsettled === undefined ||
+							finalState.firstSubmittedTurnFailure.turn <= lowestUnsettled)
+					) {
+						yield* Ref.set(
+							failedTurnRef,
+							networkFailure(
+								`Turn ${finalState.firstSubmittedTurnFailure.turn} failed: ${finalState.firstSubmittedTurnFailure.message}`,
+							),
+						)
+					} else if (lowestUnsettled !== undefined) {
+						yield* Ref.set(
+							failedTurnRef,
+							networkFailure(
+								finalState.ended
+									? `Session terminated before turn ${lowestUnsettled} completed.`
+									: `Turn ${lowestUnsettled} did not complete.`,
+							),
+						)
 					}
 				}
 			})
