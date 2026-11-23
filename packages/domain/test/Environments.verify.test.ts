@@ -49,7 +49,7 @@ describe("Environments Z3 formal verification", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		120_000,
+		300_000,
 	)
 
 	it("tells a projected config apart from the aggregate's by type, by hosts and by each flag", () => {

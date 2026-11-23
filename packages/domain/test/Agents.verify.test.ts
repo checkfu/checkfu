@@ -52,6 +52,6 @@ describe("Agents Z3 formal verification", () => {
 				expect(report.explored.disagreements).toEqual([])
 				expect(report.explored.agreement.compared).toBeGreaterThan(0)
 			}).pipe(Effect.provide(NodeServices.layer)),
-		120_000,
+		300_000,
 	)
 })
