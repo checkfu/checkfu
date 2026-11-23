@@ -5,7 +5,9 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { JURISDICTION_ENV, LOCATION_HINT_ENV, placedStub, placement } from "../src/Placement.ts"
 
-const parse = (env: Record<string, string>) => placement.parse(ConfigProvider.fromEnv({ env }))
+// The Worker runtime reads its bindings the same way, so an empty binding arrives as "".
+const parse = (env: Record<string, string>) =>
+	placement.parse(ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true }))
 
 const recordingNamespace = () => {
 	const calls: Array<string> = []

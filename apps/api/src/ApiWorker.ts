@@ -1,5 +1,4 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import * as Alchemy from "alchemy"
 import * as Cause from "effect/Cause"
@@ -13,7 +12,7 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
 import { PiSession } from "./Pi/PiSession.do.ts"
-import { placedStub, placement } from "./Placement.ts"
+import { PlacedDurableObjects, placedStub, placement } from "./Placement.ts"
 
 const harnessCall = <A, E, R>(
 	call: Effect.Effect<A, E, R>,
@@ -48,10 +47,7 @@ const PiSessionExecutorLive = Layer.effect(
 
 const CheckfuLive = Checkfu.layer(
 	SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
-).pipe(
-	Layer.provide(PiSessionExecutorLive),
-	Layer.provide(Layer.unwrap(Effect.map(placement, DomainCloudflare.layerDurableObjects))),
-)
+).pipe(Layer.provide(PiSessionExecutorLive), Layer.provide(PlacedDurableObjects))
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,

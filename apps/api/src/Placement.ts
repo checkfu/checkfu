@@ -1,5 +1,8 @@
 import type * as Cloudflare from "@alchemy.run/cloudflare"
+import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
 import * as Config from "effect/Config"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
@@ -49,6 +52,10 @@ export const placement: Config.Config<Placement> = Config.all({
 			onSome: (set) => ({ locationHint: set }),
 		}),
 	})),
+)
+
+export const PlacedDurableObjects = Layer.unwrap(
+	Effect.map(placement, DomainCloudflare.layerDurableObjects),
 )
 
 export const placedStub =

@@ -68,6 +68,16 @@ export default defineConfig({
 				message:
 					"Declare Checkfu Pi document families in apps/api/src/Pi/PiDocRegistry.ts so every persisted Pi document family is covered by Persisted.lock.json.",
 			},
+			{
+				property: "layerDurableObjects",
+				message:
+					"Host the model on PlacedDurableObjects from apps/api/src/Placement.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to its Durable Objects.",
+			},
+			{
+				property: "getByName",
+				message:
+					"Address a Durable Object with placedStub from apps/api/src/Placement.ts so CHECKFU_JURISDICTION and CHECKFU_LOCATION_HINT apply to it.",
+			},
 		],
 		"no-sequences": "error",
 		"promise/no-new-statics": "error",
@@ -189,6 +199,12 @@ export default defineConfig({
 			rules: {
 				"unicorn/numeric-separators-style": "off",
 				"unicorn/prefer-string-raw": "off",
+			},
+		},
+		{
+			files: ["apps/api/src/Placement.ts"],
+			rules: {
+				"no-restricted-properties": "off",
 			},
 		},
 		{
