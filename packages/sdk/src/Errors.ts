@@ -39,167 +39,71 @@ export interface ApiStatusErrorFields<Status extends number = number> {
 	readonly unconfirmedIndex?: number | undefined
 }
 
-export class BadRequestError extends Data.TaggedError("BadRequestError")<
-	ApiStatusErrorFields<400>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
+/**
+ * The shared shape of the errors for a non-2xx response: `requestID` and `error` read the
+ * response's request id and body, and `retryable` says whether the status may succeed later.
+ */
+const ApiStatusError = <const Tag extends string, Status extends number>(
+	tag: Tag,
+	retryable: (status: Status) => boolean,
+) =>
+	class extends Data.TaggedError(tag)<ApiStatusErrorFields<Status>> {
+		get requestID(): string | undefined {
+			return this.requestId
+		}
+		get error(): ApiErrorBody {
+			return this.body
+		}
+		get retryable(): boolean {
+			return retryable(this.status)
+		}
 	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
 
-export class AuthenticationError extends Data.TaggedError("AuthenticationError")<
-	ApiStatusErrorFields<401>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
+const always = () => true
+const never = () => false
 
-export class PermissionDeniedError extends Data.TaggedError("PermissionDeniedError")<
-	ApiStatusErrorFields<403>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
-
-export class NotFoundError extends Data.TaggedError("NotFoundError")<ApiStatusErrorFields<404>> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
-
-export class ConflictError extends Data.TaggedError("ConflictError")<ApiStatusErrorFields<409>> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
-
-export class PayloadTooLargeError extends Data.TaggedError("PayloadTooLargeError")<
-	ApiStatusErrorFields<413>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
-
-export class UnsupportedMediaTypeError extends Data.TaggedError("UnsupportedMediaTypeError")<
-	ApiStatusErrorFields<415>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
-
-export class UnprocessableEntityError extends Data.TaggedError("UnprocessableEntityError")<
-	ApiStatusErrorFields<422>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return false
-	}
-}
-
-export class RateLimitError extends Data.TaggedError("RateLimitError")<ApiStatusErrorFields<429>> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return true
-	}
-}
-
-export class InternalServerError extends Data.TaggedError("InternalServerError")<
-	ApiStatusErrorFields<number>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return true
-	}
-}
-
-export class ServiceUnavailableError extends Data.TaggedError("ServiceUnavailableError")<
-	ApiStatusErrorFields<503>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return true
-	}
-}
-
-export class UnexpectedStatusError extends Data.TaggedError("UnexpectedStatusError")<
-	ApiStatusErrorFields<number>
-> {
-	get requestID(): string | undefined {
-		return this.requestId
-	}
-	get error(): ApiErrorBody {
-		return this.body
-	}
-	get retryable(): boolean {
-		return this.status === 408
-	}
-}
+export class BadRequestError extends ApiStatusError<"BadRequestError", 400>(
+	"BadRequestError",
+	never,
+) {}
+export class AuthenticationError extends ApiStatusError<"AuthenticationError", 401>(
+	"AuthenticationError",
+	never,
+) {}
+export class PermissionDeniedError extends ApiStatusError<"PermissionDeniedError", 403>(
+	"PermissionDeniedError",
+	never,
+) {}
+export class NotFoundError extends ApiStatusError<"NotFoundError", 404>("NotFoundError", never) {}
+export class ConflictError extends ApiStatusError<"ConflictError", 409>("ConflictError", never) {}
+export class PayloadTooLargeError extends ApiStatusError<"PayloadTooLargeError", 413>(
+	"PayloadTooLargeError",
+	never,
+) {}
+export class UnsupportedMediaTypeError extends ApiStatusError<"UnsupportedMediaTypeError", 415>(
+	"UnsupportedMediaTypeError",
+	never,
+) {}
+export class UnprocessableEntityError extends ApiStatusError<"UnprocessableEntityError", 422>(
+	"UnprocessableEntityError",
+	never,
+) {}
+export class RateLimitError extends ApiStatusError<"RateLimitError", 429>(
+	"RateLimitError",
+	always,
+) {}
+export class InternalServerError extends ApiStatusError<"InternalServerError", number>(
+	"InternalServerError",
+	always,
+) {}
+export class ServiceUnavailableError extends ApiStatusError<"ServiceUnavailableError", 503>(
+	"ServiceUnavailableError",
+	always,
+) {}
+export class UnexpectedStatusError extends ApiStatusError<"UnexpectedStatusError", number>(
+	"UnexpectedStatusError",
+	(status) => status === 408,
+) {}
 
 export class APIConnectionError extends Data.TaggedError("APIConnectionError")<{
 	readonly message: string
