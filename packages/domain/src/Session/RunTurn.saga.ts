@@ -35,7 +35,8 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		agent_id: ResourceId,
 		agent_version: PositiveInt,
 		environment_id: ResourceId,
-		resources: SessionResources,
+		// A turn queued before resources existed carries none.
+		resources: SessionResources.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
 		last_reply_turn: Schema.optionalKey(NonNegativeInt),

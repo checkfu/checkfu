@@ -54,7 +54,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			agent_id: ResourceId,
 			agent_version: PositiveInt,
 			environment_id: ResourceId,
-			resources: SessionResources,
+			resources: SessionResources.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
 			// The last turn whose reply the session published; the model must not keep a later one's.

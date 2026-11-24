@@ -224,6 +224,7 @@ describe("Session resources", () => {
 						[repository({ checkout: { type: "commit", sha: "abc123" } })],
 						[repository({ authorization_token: "" })],
 						[repository({}), repository({})],
+						[repository({}), repository({ mount_path: "/workspace/second-copy" })],
 						[
 							repository({ mount_path: "/workspace/code" }),
 							repository({ url: "https://github.com/acme/web", mount_path: "/workspace/code/web" }),

@@ -367,9 +367,14 @@ const haveDisjointMounts = (resources: ReadonlyArray<SessionMount>): boolean =>
 const haveDistinctIds = (resources: ReadonlyArray<SessionMount>): boolean =>
 	new Set(resources.map((resource) => resource.id)).size === resources.length
 
+// A repository's token is found by its URL, and GitHub reads owner and name without case.
+const mountEachRepositoryOnce = (resources: ReadonlyArray<SessionMount>): boolean =>
+	new Set(resources.map((resource) => resource.url.toLowerCase())).size === resources.length
+
 export const SessionMounts = Schema.Array(SessionMount).check(
 	Schema.isMaxLength(MAX_SESSION_REPOSITORIES),
 	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),
+	Schema.makeFilter(mountEachRepositoryOnce, { expected: "each repository mounted once" }),
 	Schema.makeFilter(haveDisjointMounts, {
 		expected: "mount paths that are neither equal nor inside one another",
 	}),

@@ -408,7 +408,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						Effect.catchTag("SchemaError", () =>
 							reject(
 								400,
-								"Resource mount paths must be distinct and must not contain one another.",
+								"Resources must mount at distinct paths that do not contain one another, and mount each repository once.",
 							),
 						),
 					)
