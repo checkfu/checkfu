@@ -228,7 +228,9 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(
 						yield* untilListed(cli.run(["agents", "list", "--include-archived", "true"]), agentId),
 					).toContain(agentId)
-					expect(listedIds(yield* cli.run(["agents", "list"]))).not.toContain(agentId)
+					const defaultList = yield* cli.run(["agents", "list"])
+					expect(defaultList.exitCode).toBe(0)
+					expect(listedIds(defaultList)).not.toContain(agentId)
 
 					// Create from YAML stdin with flag override
 					const fromYaml = yield* cli.run(["agents", "create", "--name", "OverrideName"], {
