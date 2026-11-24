@@ -6,6 +6,8 @@ import { checkfu } from "../api.ts"
 
 type Status = "idle" | "running" | "terminated"
 
+const QUIET_RECONNECT_MS = 5000
+
 const EVENT_TYPES: Record<SessionEventType, true> = {
 	"user.message": true,
 	"user.interrupt": true,
@@ -39,26 +41,43 @@ export function useSessionEvents(sessionId: string, initialStatus: Status) {
 	const [error, setError] = React.useState<string>()
 	React.useEffect(() => {
 		const source = new EventSource(checkfu.sessions.streamUrl(sessionId))
-		let archived = false
+		let slowReconnect: ReturnType<typeof setTimeout> | undefined
+		const settle = () => {
+			clearTimeout(slowReconnect)
+			slowReconnect = undefined
+		}
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
 			const event = JSON.parse(message.data) as JsonSessionEvent
-			archived ||= event.type === "session.archived"
 			setEvents((seen) => (seen.some((known) => known.seq === event.seq) ? seen : [...seen, event]))
 			setStatus((current) => statusAfter(current, event))
+			if (event.type === "session.archived") {
+				settle()
+				source.close()
+			}
 		}
 		for (const type of Object.keys(EVENT_TYPES)) {
 			source.addEventListener(type, receive)
 		}
-		source.addEventListener("open", () => setError(undefined))
+		source.addEventListener("open", () => {
+			settle()
+			setError(undefined)
+		})
 		source.addEventListener("error", () => {
-			if (source.readyState === EventSource.CONNECTING) {
-				setError("Live updates were interrupted. Reconnecting…")
-			} else if (!archived) {
+			if (source.readyState === EventSource.CLOSED) {
+				settle()
 				setError("Live updates stopped. Reload the page to try again.")
+			} else if (slowReconnect === undefined) {
+				slowReconnect = setTimeout(
+					() => setError("Live updates were interrupted. Reconnecting…"),
+					QUIET_RECONNECT_MS,
+				)
 			}
 		})
-		return () => source.close()
+		return () => {
+			settle()
+			source.close()
+		}
 	}, [sessionId])
 	return { events, status, error }
 }

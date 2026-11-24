@@ -56,13 +56,23 @@ const call = async <T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 const isPending = <T>(value: T | Pending): value is Pending =>
 	typeof value === "object" && value !== null && "pending" in value && value.pending === true
 
-const settled = async <T>(collection: string, result: T | Pending): Promise<T> => {
+const settled = async <T>(
+	collection: string,
+	result: T | Pending,
+	done: (resource: T) => boolean = () => true,
+): Promise<T> => {
 	if (!isPending(result)) {
 		return result
 	}
 	for (let attempt = 0; ; attempt++) {
 		try {
-			return await call<T>("GET", `${collection}/${encodeURIComponent(result.id)}`)
+			const resource = await call<T>("GET", `${collection}/${encodeURIComponent(result.id)}`)
+			if (done(resource) || attempt >= 40) {
+				return resource
+			}
+			await new Promise((resolve) => {
+				setTimeout(resolve, 250)
+			})
 		} catch (error) {
 			if (attempt >= 40 || !(error instanceof ApiError) || ![404, 503].includes(error.status)) {
 				throw error
@@ -74,7 +84,17 @@ const settled = async <T>(collection: string, result: T | Pending): Promise<T> =
 	}
 }
 
-const resource = <T, Create, Update = never>(collection: string) => ({
+const versionOf = (value: unknown): number =>
+	typeof value === "object" &&
+	value !== null &&
+	"version" in value &&
+	typeof value.version === "number"
+		? value.version
+		: 0
+
+const resource = <T, Create, Update extends { readonly version: number } = never>(
+	collection: string,
+) => ({
 	list: () => call<Page<T>>("GET", `${collection}?limit=100&order=desc`),
 	retrieve: (id: string) => call<T>("GET", `${collection}/${encodeURIComponent(id)}`),
 	create: async (body: Create) =>
@@ -83,6 +103,7 @@ const resource = <T, Create, Update = never>(collection: string) => ({
 		settled(
 			collection,
 			await call<T | Pending>("POST", `${collection}/${encodeURIComponent(id)}`, body),
+			(saved) => versionOf(saved) > body.version,
 		),
 	archive: (id: string) => call<unknown>("POST", `${collection}/${encodeURIComponent(id)}/archive`),
 })
