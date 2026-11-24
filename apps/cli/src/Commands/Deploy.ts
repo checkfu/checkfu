@@ -7,6 +7,7 @@ import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -507,10 +508,10 @@ const deployedJurisdiction = (envFile: string) =>
 export const jurisdictionBunWouldLoad = (checkout: Checkout) =>
 	Effect.gen(function* () {
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const value = yield* spawner.string(
+		const answer = yield* spawner.string(
 			ChildProcess.make(
 				checkout.runtime,
-				["-e", `process.stdout.write(process.env.${JURISDICTION_ENV} ?? "")`],
+				["-e", `process.stdout.write(JSON.stringify(process.env.${JURISDICTION_ENV} ?? null))`],
 				{
 					cwd: checkout.root,
 					env: checkout.runtimeEnv,
@@ -520,8 +521,17 @@ export const jurisdictionBunWouldLoad = (checkout: Checkout) =>
 				},
 			),
 		)
-		return value.trim()
-	}).pipe(Effect.mapError((error) => configError(`Could not start Bun in the checkout: ${error}`)))
+		// Anything but that one JSON value, such as no output from a Bun that exited early, means
+		// the check did not complete, which is not the same as no jurisdiction.
+		const value = yield* Schema.decodeEffect(RecordedJurisdiction)(answer.trim())
+		return (value ?? "").trim()
+	}).pipe(
+		Effect.mapError((error) =>
+			configError(
+				`Could not check which jurisdiction this checkout's environment files set, so nothing was changed: ${error}`,
+			),
+		),
+	)
 
 /**
  * Only for a stage with no recorded jurisdiction, such as one deployed before it was
@@ -562,7 +572,8 @@ const RecordedJurisdiction = Schema.fromJsonString(Schema.NullOr(Schema.String))
 
 const recordedJurisdictionPath = (checkout: Checkout, accountId: string, stage: string) =>
 	Effect.map(Path.Path, (path) =>
-		path.join(checkout.root, ".checkfu", "jurisdictions", accountId, `${stage}.json`),
+		// Hex, so stages whose names differ only in case stay apart on a case-insensitive disk.
+		path.join(checkout.root, ".checkfu", "jurisdictions", accountId, `${Hex.encode(stage)}.json`),
 	)
 
 const readRecordedJurisdiction = (checkout: Checkout, accountId: string, stage: string) =>
@@ -714,13 +725,6 @@ export const deployCommand = Command.make(
 				})
 			}
 
-			yield* writeRecordedJurisdiction(
-				checkout,
-				accountId,
-				stage,
-				jurisdiction === "" ? null : jurisdiction,
-			)
-
 			// Recorded before anything else can fail, so the record always names what was
 			// last deployed; its URL follows once Alchemy has been asked for it.
 			// A redeploy of the same target keeps the URL it already had, so `destroy` can
@@ -737,6 +741,14 @@ export const deployCommand = Command.make(
 					onSome: (previous) => (previous.url === undefined ? {} : { url: previous.url }),
 				}),
 			})
+			// After the deployment record, so a failure here leaves this stage looking unrecorded,
+			// which is checked as cautiously as an upgrade.
+			yield* writeRecordedJurisdiction(
+				checkout,
+				accountId,
+				stage,
+				jurisdiction === "" ? null : jurisdiction,
+			)
 			const { url, mcp } = yield* readDeployedUrl(target, stage, retry)
 			yield* writeDeploymentRecord(checkout, { ...deployed, url })
 			yield* writeStderrLine(`Waiting for ${url} to come up…`)

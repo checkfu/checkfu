@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as Stream from "effect/Stream"
 import { providerForKey, readDotEnvValue, setDotEnvValue } from "../src/Commands/Deploy.ts"
 import { COMMAND, invocation } from "../src/Invocation.ts"
@@ -20,7 +21,7 @@ const record = (
 	`${JSON.stringify({ stage, profile, account_id: account, ...(url === null ? {} : { url }) }, null, "\t")}\n`
 
 const jurisdictionFile = (stage: string, account = ACCOUNT) =>
-	`/checkout/.checkfu/jurisdictions/${account}/${stage}.json`
+	`/checkout/.checkfu/jurisdictions/${account}/${Hex.encode(stage)}.json`
 const recorded = (jurisdiction: string | null) => `${JSON.stringify(jurisdiction)}
 `
 
@@ -66,6 +67,8 @@ const fakeAlchemy = (
 		readonly deployExitCode?: number
 		/** The jurisdiction Bun's own env files in the checkout set, as `bun -e` reports it. */
 		readonly bunLoads?: string
+		/** What `bun -e` prints instead, such as nothing when Bun exits early. */
+		readonly bunAnswer?: string
 	} = {},
 ) => {
 	let account = options.account === undefined ? ACCOUNT : options.account
@@ -76,7 +79,7 @@ const fakeAlchemy = (
 	return (args: ReadonlyArray<string>) => {
 		const command = args.slice(1)
 		if (command[0] === "eval") {
-			return { exitCode: 0, stdout: options.bunLoads ?? "" }
+			return { exitCode: 0, stdout: options.bunAnswer ?? JSON.stringify(options.bunLoads ?? null) }
 		}
 		calls.push(command)
 		if (command[0] === "query" && command[1] === "account") {
@@ -675,6 +678,49 @@ describe("checkfu deploy", () => {
 				const named = yield* deploy(virtualFiles({ ...checkout, [ENV_FILE]: env(dotenv) }), shell)
 				expect([dotenv, named.errorMessage, named.asked]).toEqual([dotenv, undefined, 0])
 			}
+		}),
+	)
+
+	it.live("refuses when it cannot tell what Bun's own env files set", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			for (const bunAnswer of ["", "not json", "{}"]) {
+				const calls: Array<ReadonlyArray<string>> = []
+				const files = virtualFiles({
+					...checkout,
+					[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\nCHECKFU_JURISDICTION=\n`,
+				})
+				const result = yield* cli.run(["deploy", "--yes"], {
+					env: { CHECKFU_CONFIG_DIR: "/config" },
+					files,
+					spawn: fakeAlchemy(calls, { bunAnswer }),
+				})
+				expect([bunAnswer, result.exitCode]).toEqual([bunAnswer, 1])
+				expect(result.errorMessage).toContain("nothing was changed")
+				expect(calls.some((call) => call[0] === "deploy")).toBe(false)
+			}
+		}),
+	)
+
+	it.live("keeps stages whose names differ only in case apart", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const files = virtualFiles({
+				...checkout,
+				[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\nCHECKFU_JURISDICTION=eu\n`,
+			})
+			for (const stage of ["Live", "live"]) {
+				const result = yield* cli.run(["deploy", "--yes", "--stage", stage], {
+					env: { CHECKFU_CONFIG_DIR: "/config" },
+					files,
+					spawn: fakeAlchemy([]),
+				})
+				expect([stage, result.errorMessage]).toEqual([stage, undefined])
+			}
+			const recordedFiles = Object.keys(files).filter((name) =>
+				name.startsWith("/checkout/.checkfu/jurisdictions/"),
+			)
+			expect(new Set(recordedFiles.map((name) => name.toLowerCase())).size).toBe(2)
 		}),
 	)
 
