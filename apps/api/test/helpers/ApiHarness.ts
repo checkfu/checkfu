@@ -253,33 +253,42 @@ export const makePiDurableTestLayer = (
 
 	const unreachable = new Set<string>()
 	const conversations: Array<string> = []
-	const executorLayer = makePiTurnExecutorLayer({
-		recoverTurn: (conversation, operationId) =>
-			Effect.suspend(() =>
-				unreachable.has(conversation)
-					? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
-					: !objects.has(conversation)
-						? Effect.succeed(null)
-						: onObject(conversation, (backend) => recoverPiDurableTurn(backend, operationId)),
-			),
-		runTurn: (conversation, request) =>
-			Effect.suspend(() => {
-				if (unreachable.has(conversation)) {
-					return Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
-				}
-				requests.push(request)
-				conversations.push(conversation)
-				return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
-			}),
-		abortTurn: (conversation, operationId) =>
-			Effect.suspend(() =>
-				unreachable.has(conversation)
-					? Effect.never
-					: onObject(conversation, (backend) =>
-							Effect.asVoid(abortPiDurableTurn(backend, operationId)),
-						),
-			),
-	})
+	const discardedWorkspaces: Array<string> = []
+	const executorLayer = makePiTurnExecutorLayer(
+		{
+			recoverTurn: (conversation, operationId) =>
+				Effect.suspend(() =>
+					unreachable.has(conversation)
+						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+						: !objects.has(conversation)
+							? Effect.succeed(null)
+							: onObject(conversation, (backend) => recoverPiDurableTurn(backend, operationId)),
+				),
+			runTurn: (conversation, request) =>
+				Effect.suspend(() => {
+					if (unreachable.has(conversation)) {
+						return Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+					}
+					requests.push(request)
+					conversations.push(conversation)
+					return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
+				}),
+			abortTurn: (conversation, operationId) =>
+				Effect.suspend(() =>
+					unreachable.has(conversation)
+						? Effect.never
+						: onObject(conversation, (backend) =>
+								Effect.asVoid(abortPiDurableTurn(backend, operationId)),
+							),
+				),
+		},
+		{
+			discardWorkspace: (sessionId) =>
+				Effect.sync(() => {
+					discardedWorkspaces.push(sessionId)
+				}),
+		},
+	)
 
 	const CheckfuLive = Checkfu.layer(
 		CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
@@ -321,7 +330,16 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 	)
 
-	return { layer, closeAll, requests, forgetPiState, unreachable, conversations, resets }
+	return {
+		layer,
+		closeAll,
+		requests,
+		forgetPiState,
+		unreachable,
+		conversations,
+		resets,
+		discardedWorkspaces,
+	}
 }
 
 export const sendRequest = (

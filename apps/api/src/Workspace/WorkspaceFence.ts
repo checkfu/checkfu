@@ -1,6 +1,5 @@
-/** A turn as the workspace orders turns: by harness generation, then by turn number. */
+/** A turn of the session. Turn numbers only grow, so they order the session's turns. */
 export interface TurnToken {
-	readonly generation: number
 	readonly turn: number
 }
 
@@ -10,10 +9,8 @@ export interface FenceStore {
 	readonly put: (token: TurnToken) => void
 }
 
-const order = (a: TurnToken, b: TurnToken): number => a.generation - b.generation || a.turn - b.turn
-
 /**
- * A session keeps one workspace across its turns and harness generations. A
+ * A session keeps one workspace across its turns. A
  * turn that was interrupted or abandoned may still have calls on their way.
  * Once a later turn is admitted, the workspace refuses every call of an older
  * one, and admission waits for the calls already running to finish, so no
@@ -23,7 +20,7 @@ export const makeTurnFence = (store: FenceStore) => {
 	const running = new Set<Promise<unknown>>()
 	const isCurrent = (token: TurnToken): boolean => {
 		const newest = store.get()
-		return newest === undefined || order(token, newest) >= 0
+		return newest === undefined || token.turn >= newest.turn
 	}
 	const drain = async (): Promise<void> => {
 		await Promise.allSettled(running)
