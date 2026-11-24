@@ -46,7 +46,10 @@ interface SessionEventItem {
 	readonly name?: string
 	readonly input?: Schema.JsonObject
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
-	readonly stop_reason?: { readonly type: string }
+	readonly stop_reason?: { readonly type: string; readonly event_ids?: ReadonlyArray<string> }
+	readonly evaluated_permission?: string
+	readonly result?: string
+	readonly deny_message?: string
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -141,6 +144,9 @@ const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyAr
 
 const echoScript = (server: string, text: string) =>
 	`return await tools.mcp__${server}__echo({ text: ${JSON.stringify(text)} });`
+
+const post = (text: string) => [{ name: "mcp__desk__post", arguments: { text } }]
+const echo = (text: string) => [{ name: "mcp__desk__echo", arguments: { text } }]
 
 const startAlchemyDev = async (openAIBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
@@ -900,6 +906,75 @@ describe("PiSession real Durable Object under workerd", () => {
 	const agentEvents = async (sessionId: string) =>
 		(await listAllEvents(sessionId)).filter((event) => event.type.startsWith("agent."))
 
+	const confirm = (
+		sessionId: string,
+		tool_use_id: string,
+		result: "allow" | "deny",
+		deny_message?: string,
+	) =>
+		apiJson<{ readonly error?: { readonly message: string } }>(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: {
+				events: [
+					{
+						type: "user.tool_confirmation",
+						tool_use_id,
+						result,
+						...(deny_message === undefined ? {} : { deny_message }),
+					},
+				],
+			},
+		})
+
+	/** Waits until the session has gone idle `count` times, and returns the last time's reason. */
+	const idle = async (sessionId: string, count: number, timeoutMs = 30_000) => {
+		const deadline = Date.now() + timeoutMs
+		while (Date.now() < deadline) {
+			const idles = (await listAllEvents(sessionId)).filter(
+				(event) => event.type === "session.status_idle",
+			)
+			if (idles.length >= count) {
+				await waitForSession(sessionId, (session) => session.status === "idle")
+				return idles[count - 1]?.stop_reason
+			}
+			await sleep(100)
+		}
+		throw new Error(`session ${sessionId} did not go idle ${count} time(s)`)
+	}
+
+	const sessionFor = async (url: string, tools?: ReadonlyArray<Schema.JsonObject>) => {
+		const agent = await createResource<{ readonly id: string; readonly tools?: unknown }>(
+			"/v1/agents",
+			{
+				name: "Approvals",
+				model: "gpt-4o-mini",
+				mcp_servers: [{ type: "url", name: "desk", url }],
+				...(tools === undefined ? {} : { tools }),
+			},
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agent.id,
+			environment_id: environmentId,
+		})
+		return { agent, session }
+	}
+
+	// Finds the tool, calls it as the user message says, then reports what came back.
+	const callDirectly = (
+		calls: (text: string) => ReadonlyArray<{ name: string; arguments: { text: string } }>,
+	) => {
+		fakeOpenAI.setHandler((req) => {
+			switch (req.toolOutputs.length) {
+				case 0:
+					return { kind: "tool_call", name: "tool_search", arguments: { query: "post echo" } }
+				case 1:
+					return { kind: "tool_calls", calls: calls(req.lastUserText) }
+				default:
+					return { kind: "reply", text: `Done: ${req.toolOutputs.slice(1).join(" | ")}` }
+			}
+		})
+	}
+
 	describe("MCP servers", () => {
 		const servers: Array<FakeMcpServer> = []
 		const mcpServer = async (accepted: ReadonlyArray<string> | null) => {
@@ -1145,6 +1220,311 @@ describe("PiSession real Durable Object under workerd", () => {
 			).toEqual(["mcp__open__echo", "tool_search"])
 			expect(events.at(-1)?.content?.[0]?.text).toContain("echo:direct")
 		}, 60_000)
+	})
+
+	describe("Tool approvals", () => {
+		const servers: Array<FakeMcpServer> = []
+		const mcpServer = async () => {
+			const server = await startFakeMcpServer(null)
+			servers.push(server)
+			return server
+		}
+		afterAll(async () => {
+			await Promise.all(servers.map((server) => server.close()))
+		})
+
+		it("pauses on a tool that asks, runs it once when allowed, and refuses a second answer", async () => {
+			const mcp = await mcpServer()
+			const { session } = await sessionFor(mcp.url)
+			callDirectly(post)
+
+			expect((await sender(session.id)("hello")).status).toBe(200)
+			const paused = await idle(session.id, 1)
+			expect(paused?.type).toBe("requires_action")
+			expect(paused?.event_ids).toHaveLength(1)
+			const [waiting] = paused?.event_ids ?? []
+			expect(mcp.calls).toEqual([])
+
+			const before = await listAllEvents(session.id)
+			expect(before.filter((event) => event.type === "agent.mcp_tool_use")).toEqual([
+				expect.objectContaining({
+					tool_use_id: waiting,
+					mcp_server_name: "desk",
+					name: "post",
+					input: { text: "hello" },
+					evaluated_permission: "ask",
+				}),
+			])
+			expect(before.some((event) => event.type === "agent.mcp_tool_result")).toBe(false)
+			expect((await apiJson<SessionResource>(`/v1/sessions/${session.id}`)).body.status).toBe(
+				"idle",
+			)
+
+			// A message cannot jump ahead of the answer, and an unknown call has no answer to take.
+			expect((await sender(session.id)("hurry up")).status).toBe(409)
+			expect((await confirm(session.id, "call_nope", "allow")).status).toBe(409)
+			expect(mcp.calls).toEqual([])
+
+			expect((await confirm(session.id, waiting ?? "", "allow")).status).toBe(200)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(mcp.calls).toEqual([{ tool: "post", arguments: { text: "hello" }, token: undefined }])
+
+			const events = await listAllEvents(session.id)
+			expect(events.filter((event) => event.type === "agent.mcp_tool_use")).toHaveLength(1)
+			expect(events.filter((event) => event.type === "agent.mcp_tool_result")).toEqual([
+				expect.objectContaining({
+					tool_use_id: waiting,
+					content: [{ type: "text", text: "posted:hello" }],
+					is_error: false,
+				}),
+			])
+			expect(events.find((event) => event.type === "user.tool_confirmation")).toMatchObject({
+				tool_use_id: waiting,
+				result: "allow",
+			})
+			expect(events.findLast((event) => event.type === "agent.message")?.content?.[0]?.text).toBe(
+				"Done: posted:hello",
+			)
+
+			expect((await confirm(session.id, waiting ?? "", "allow")).status).toBe(409)
+			expect(mcp.calls).toHaveLength(1)
+		}, 90_000)
+
+		it("lets the resumed turn use the workspace after an approval", async () => {
+			const mcp = await mcpServer()
+			const { session } = await sessionFor(mcp.url)
+			const path = "/workspace/after-approval.txt"
+			fakeOpenAI.setHandler((req) => {
+				switch (req.toolOutputs.length) {
+					case 0:
+						return { kind: "tool_call", name: "tool_search", arguments: { query: "post" } }
+					case 1:
+						return { kind: "tool_calls", calls: post("hello") }
+					case 2:
+						return { kind: "tool_call", name: "write", arguments: { path, content: "RESUMED-7" } }
+					case 3:
+						return { kind: "tool_call", name: "read", arguments: { path } }
+					default:
+						return { kind: "reply", text: `Read: ${req.toolOutputs.at(-1) ?? ""}` }
+				}
+			})
+
+			expect((await sender(session.id)("hello")).status).toBe(200)
+			const [waiting] = (await idle(session.id, 1))?.event_ids ?? []
+			expect((await confirm(session.id, waiting ?? "", "allow")).status).toBe(200)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+
+			const events = await listAllEvents(session.id)
+			const workspaceResults = events.filter(
+				(event) =>
+					event.type === "agent.tool_result" &&
+					events.some(
+						(use) =>
+							use.type === "agent.tool_use" &&
+							use.tool_use_id === event.tool_use_id &&
+							(use.name === "write" || use.name === "read"),
+					),
+			)
+			expect(workspaceResults.map((event) => event.is_error)).toEqual([false, false])
+			expect(
+				events.findLast((event) => event.type === "agent.message")?.content?.[0]?.text,
+			).toContain("RESUMED-7")
+			expect(mcp.calls).toHaveLength(1)
+		}, 90_000)
+
+		it("tells the model why a call was denied and never calls the server", async () => {
+			const mcp = await mcpServer()
+			const { session } = await sessionFor(mcp.url)
+			callDirectly(post)
+
+			await sender(session.id)("hello")
+			const [waiting] = (await idle(session.id, 1))?.event_ids ?? []
+			expect((await confirm(session.id, waiting ?? "", "deny", "Not on a Friday.")).status).toBe(
+				200,
+			)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(mcp.calls).toEqual([])
+
+			const events = await listAllEvents(session.id)
+			expect(events.find((event) => event.type === "user.tool_confirmation")).toMatchObject({
+				tool_use_id: waiting,
+				result: "deny",
+				deny_message: "Not on a Friday.",
+			})
+			const [refusal] = events.filter((event) => event.type === "agent.mcp_tool_result")
+			expect(refusal).toMatchObject({ tool_use_id: waiting, is_error: true })
+			expect(refusal?.content?.[0]?.text).toContain("Not on a Friday.")
+			expect(
+				events.findLast((event) => event.type === "agent.message")?.content?.[0]?.text,
+			).toContain("Not on a Friday.")
+		}, 90_000)
+
+		it("refuses the call from a script without pausing, and says to make it directly", async () => {
+			const mcp = await mcpServer()
+			const { session } = await sessionFor(mcp.url)
+			fakeOpenAI.setHandler((req) => {
+				const [output] = req.toolOutputs
+				return output === undefined
+					? {
+							kind: "tool_call",
+							name: "codemode",
+							arguments: {
+								code: 'return await tools.mcp__desk__post({ text: "sneak" }).catch((error) => "refused: " + error.message);',
+							},
+						}
+					: { kind: "reply", text: `Done: ${output}` }
+			})
+
+			await sender(session.id)("go")
+			expect((await idle(session.id, 1))?.type).toBe("end_turn")
+			expect(mcp.calls).toEqual([])
+
+			const events = await agentEvents(session.id)
+			expect(events.map((event) => event.type)).toEqual([
+				"agent.tool_use",
+				"agent.tool_result",
+				"agent.mcp_tool_use",
+				"agent.mcp_tool_result",
+				"agent.message",
+			])
+			const [script, , call, refusal, reply] = events
+			expect(call).toMatchObject({
+				parent_tool_use_id: script?.tool_use_id,
+				mcp_server_name: "desk",
+				name: "post",
+				input: { text: "sneak" },
+				evaluated_permission: "ask",
+			})
+			expect(refusal).toMatchObject({ tool_use_id: call?.tool_use_id, is_error: true })
+			expect(refusal?.content?.[0]?.text).toContain("Call mcp__desk__post directly")
+			expect(reply?.content?.[0]?.text).toContain("needs a person's approval")
+		}, 60_000)
+
+		it("lets a read-only tool through on the server's word, unless the agent says to ask", async () => {
+			const mcp = await mcpServer()
+			callDirectly(echo)
+
+			const trusting = await sessionFor(mcp.url)
+			await sender(trusting.session.id)("free")
+			expect((await idle(trusting.session.id, 1))?.type).toBe("end_turn")
+			expect(mcp.calls).toEqual([{ tool: "echo", arguments: { text: "free" }, token: undefined }])
+			expect(
+				(await listAllEvents(trusting.session.id)).find(
+					(event) => event.type === "agent.mcp_tool_use",
+				),
+			).toMatchObject({ name: "echo", evaluated_permission: "allow" })
+
+			const tools = [
+				{
+					type: "mcp_toolset",
+					mcp_server_name: "desk",
+					configs: [{ name: "echo", permission_policy: { type: "always_ask" } }],
+				},
+			]
+			const careful = await sessionFor(mcp.url, tools)
+			expect(careful.agent.tools).toEqual(tools)
+			await sender(careful.session.id)("asked")
+			const paused = await idle(careful.session.id, 1)
+			expect(paused?.type).toBe("requires_action")
+			expect(mcp.calls).toHaveLength(1)
+			expect(
+				(await confirm(careful.session.id, paused?.event_ids?.[0] ?? "", "allow")).status,
+			).toBe(200)
+			expect((await idle(careful.session.id, 2))?.type).toBe("end_turn")
+			expect(mcp.calls.at(-1)).toMatchObject({ tool: "echo", arguments: { text: "asked" } })
+
+			// And the other way: the agent may let a tool that changes things run unasked.
+			const relaxed = await sessionFor(mcp.url, [
+				{
+					type: "mcp_toolset",
+					mcp_server_name: "desk",
+					default_config: { permission_policy: { type: "always_allow" } },
+				},
+			])
+			callDirectly(post)
+			await sender(relaxed.session.id)("unasked")
+			expect((await idle(relaxed.session.id, 1))?.type).toBe("end_turn")
+			expect(mcp.calls.at(-1)).toMatchObject({ tool: "post", arguments: { text: "unasked" } })
+		}, 120_000)
+
+		it("gives up a waiting call on an interrupt and takes a new message afterwards", async () => {
+			const mcp = await mcpServer()
+			const { session } = await sessionFor(mcp.url)
+			callDirectly(post)
+
+			await sender(session.id)("hello")
+			const [waiting] = (await idle(session.id, 1))?.event_ids ?? []
+			const interrupted = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.interrupt" }] },
+			})
+			expect(interrupted.status).toBe(200)
+
+			// Once the interrupt has reached the harness, the late answer finds nothing waiting.
+			const deadline = Date.now() + 20_000
+			let late = await confirm(session.id, waiting ?? "", "allow")
+			while (late.status !== 409 && Date.now() < deadline) {
+				await sleep(100)
+				late = await confirm(session.id, waiting ?? "", "allow")
+			}
+			expect(late.status).toBe(409)
+			expect(mcp.calls).toEqual([])
+			expect((await apiJson<SessionResource>(`/v1/sessions/${session.id}`)).body.status).toBe(
+				"idle",
+			)
+
+			fakeOpenAI.setHandler((req) => ({ kind: "reply", text: `Heard: ${req.lastUserText}` }))
+			expect((await sender(session.id)("something else")).status).toBe(200)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(mcp.calls).toEqual([])
+			const events = await listAllEvents(session.id)
+			expect(events.map((event) => event.type)).toContain("user.interrupt")
+			expect(events.findLast((event) => event.type === "agent.message")?.content?.[0]?.text).toBe(
+				"Heard: something else",
+			)
+		}, 90_000)
+
+		it("waits on two calls at once and takes their answers one at a time", async () => {
+			const mcp = await mcpServer()
+			const { session } = await sessionFor(mcp.url)
+			callDirectly((text) => [
+				{ name: "mcp__desk__post", arguments: { text: `${text}-a` } },
+				{ name: "mcp__desk__post", arguments: { text: `${text}-b` } },
+			])
+
+			await sender(session.id)("two")
+			const paused = await idle(session.id, 1)
+			expect(paused?.type).toBe("requires_action")
+			expect(paused?.event_ids).toHaveLength(2)
+			const waiting = (await listAllEvents(session.id)).filter(
+				(event) => event.type === "agent.mcp_tool_use",
+			)
+			expect(waiting.map((event) => event.input)).toEqual([{ text: "two-a" }, { text: "two-b" }])
+			const [first, second] = waiting.map((event) => event.tool_use_id ?? "")
+
+			expect((await confirm(session.id, first ?? "", "allow")).status).toBe(200)
+			const again = await idle(session.id, 2)
+			expect(again).toEqual({ type: "requires_action", event_ids: [second] })
+			expect(mcp.calls).toEqual([{ tool: "post", arguments: { text: "two-a" }, token: undefined }])
+
+			expect((await confirm(session.id, second ?? "", "deny", "One is enough.")).status).toBe(200)
+			expect((await idle(session.id, 3))?.type).toBe("end_turn")
+			expect(mcp.calls).toHaveLength(1)
+
+			const events = await listAllEvents(session.id)
+			expect(events.filter((event) => event.type === "agent.mcp_tool_use")).toHaveLength(2)
+			expect(
+				events
+					.filter((event) => event.type === "agent.mcp_tool_result")
+					.map((event) => [event.tool_use_id, event.is_error]),
+			).toEqual([
+				[first, false],
+				[second, true],
+			])
+			const reply = events.findLast((event) => event.type === "agent.message")?.content?.[0]?.text
+			expect(reply).toContain("posted:two-a")
+			expect(reply).toContain("One is enough.")
+		}, 120_000)
 	})
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {

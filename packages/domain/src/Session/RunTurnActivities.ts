@@ -27,6 +27,9 @@ export const TurnOutcome = Schema.Union([
 		stop_reason: ModelStopReason,
 	}),
 	Schema.Struct({
+		ok: Schema.Literal("paused"),
+	}),
+	Schema.Struct({
 		ok: Schema.Literal(false),
 		interrupted: Schema.Literal(true),
 		model_usage: ModelUsage,

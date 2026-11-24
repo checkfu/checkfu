@@ -5,9 +5,11 @@ import {
 	MemoryStorage,
 	ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable"
-import type { Id, Storage } from "@earendil-works/pi-durable"
+import type { Id, SignalResult, Storage, TaskId } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
+import { TOOL_DECISION_KEY, ToolDecision } from "../../src/Pi/PiApprovals.ts"
+import type { ToolGate } from "../../src/Pi/PiApprovals.ts"
 import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
@@ -15,6 +17,11 @@ import { CHECKFU_PI_DOCS } from "../../src/Pi/PiTurnUsage.ts"
 
 export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly storage: InMemoryStorage
+	/** Delivers a person's answer to a parked tool call. */
+	readonly signalTool: (
+		taskId: TaskId,
+		value: { readonly allow: boolean; readonly message: string },
+	) => Promise<SignalResult>
 	readonly close: () => Promise<void>
 	/** Ends this object as a reset does: nothing it does afterwards reaches the storage. */
 	readonly retire: () => void
@@ -148,8 +155,10 @@ export const createInMemoryPiDurableBackend = async (
 		/** Reopen Pi over another backend's storage, as a reset Durable Object does. */
 		readonly storage?: InMemoryStorage
 		readonly reset?: PiDurableBackend["reset"]
+		readonly gate?: Pick<ToolGate, "settleOrPause">
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
+	const { gate } = object
 	const shared = object.storage ?? new InstrumentedMemoryStorage()
 	const storage = new ObjectStorage(shared)
 	// Kept with the storage, as the session object's fence table is, so it survives a reset.
@@ -174,6 +183,24 @@ export const createInMemoryPiDurableBackend = async (
 		BACKGROUND_CONTEXT,
 	)
 	pi.resume()
+
+	const wait: PiDurableBackend["wait"] = async (operationId, signal) => {
+		const ctx =
+			signal === undefined ? BACKGROUND_CONTEXT : withAbortSignal(signal, BACKGROUND_CONTEXT)
+		const record = await storage.submissionByRequest(ROOT_CONVERSATION_ID, operationId, ctx)
+		if (record === undefined) {
+			return { status: "unanswered", reason: "not_found" }
+		}
+		const submission = await pi.submission(record.id, ctx)
+		if (submission === undefined) {
+			return { status: "unanswered", reason: "not_found" }
+		}
+		const settled = await submission.wait(ctx)
+		if (settled.status === "unanswered") {
+			return { status: "unanswered", reason: settled.reason }
+		}
+		return { status: "done" }
+	}
 
 	return {
 		storage: shared,
@@ -204,23 +231,11 @@ export const createInMemoryPiDurableBackend = async (
 				BACKGROUND_CONTEXT,
 			)
 		},
-		wait: async (operationId, signal) => {
-			const ctx =
-				signal === undefined ? BACKGROUND_CONTEXT : withAbortSignal(signal, BACKGROUND_CONTEXT)
-			const record = await storage.submissionByRequest(ROOT_CONVERSATION_ID, operationId, ctx)
-			if (record === undefined) {
-				return { status: "unanswered", reason: "not_found" }
-			}
-			const submission = await pi.submission(record.id, ctx)
-			if (submission === undefined) {
-				return { status: "unanswered", reason: "not_found" }
-			}
-			const settled = await submission.wait(ctx)
-			if (settled.status === "unanswered") {
-				return { status: "unanswered", reason: settled.reason }
-			}
-			return { status: "done" }
-		},
+		settleOrPause: (operationId, signal) =>
+			gate === undefined
+				? wait(operationId, signal)
+				: gate.settleOrPause((stop) => wait(operationId, stop), signal),
+		wait,
 		abort: (operationId) =>
 			// Match `PiSession.do.ts`: once cancellation is recorded, keep permit
 			// acquisition and abort delivery uninterruptible so an interrupted
@@ -257,6 +272,8 @@ export const createInMemoryPiDurableBackend = async (
 					)
 				}),
 			),
+		signalTool: (taskId, value) =>
+			pi.signal(taskId, ToolDecision, TOOL_DECISION_KEY, value, BACKGROUND_CONTEXT),
 		close: () => pi.close(BACKGROUND_CONTEXT),
 		retire: () => {
 			storage.retire()

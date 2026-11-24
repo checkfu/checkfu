@@ -33,10 +33,22 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(Effect.suspend(() => harness.runTurn(conversation, request))).pipe(
 					Effect.withSpan("PiHarness.runTurn"),
 				),
+			resumeTurn: (conversation, operationId, decisions) =>
+				harnessCall(
+					Effect.suspend(() => harness.resumeTurn(conversation, operationId, decisions)),
+				).pipe(Effect.withSpan("PiHarness.resumeTurn")),
 			abortTurn: (conversation, operationId) =>
 				harnessCall(Effect.suspend(() => harness.abortTurn(conversation, operationId))).pipe(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
+				),
+			waitingCalls: (conversation) =>
+				harnessCall(Effect.suspend(() => harness.waitingCalls(conversation))).pipe(
+					Effect.withSpan("PiHarness.waitingCalls"),
+				),
+			cancelWaiting: (conversation, operationId) =>
+				harnessCall(Effect.suspend(() => harness.cancelWaiting(conversation, operationId))).pipe(
+					Effect.withSpan("PiHarness.cancelWaiting"),
 				),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(

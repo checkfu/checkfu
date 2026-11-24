@@ -321,6 +321,46 @@
 			"RepublishAgent.RepublishingMintsTheNextVersionUnchanged": {
 				"kind": "transition",
 				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === before.agent.version + 1,\n\t\t\t\tafter.agent.current_version_id === command.next_version_id,\n\t\t\t\tafter.agent.name === before.agent.name,\n\t\t\t\tafter.agent.model_id === before.agent.model_id,\n\t\t\t\tafter.agent.has_system === before.agent.has_system,\n\t\t\t\tafter.agent.system === before.agent.system,\n\t\t\t\tafter.agent.has_description === before.agent.has_description,\n\t\t\t\tafter.agent.description === before.agent.description,\n\t\t\t].every((ok) => ok)"
+			},
+			"Session.OnlyAPauseLeavesTheSessionAwaiting": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tafter._tag !== \"Idle\" ||\n\t\t\t!after.awaiting ||\n\t\t\t(before._tag === \"Idle\" && before.awaiting) ||\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.status_idle\" && event.stop_reason.type === \"requires_action\",\n\t\t\t)"
+			},
+			"Session.AnAwaitingSessionTakesNoUserMessage": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Idle\" ||\n\t\t\t!before.awaiting ||\n\t\t\tevents.every((event) => event._tag !== \"user.message\")"
+			},
+			"Session.APauseKeepsNoQueuedMessage": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tbefore.pending_user_messages === 0 ||\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" || event.stop_reason.type !== \"requires_action\",\n\t\t\t)"
+			},
+			"ToolConfirmation.OnlyADenialCarriesAMessage": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"denied\", s.deny_message === \"\"].some((ok) => ok)"
+			},
+			"ToolConfirmation.ASettledConfirmationNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tbefore.status === \"pending\",\n\t\t\t\t[after.status === before.status, after.deny_message === before.deny_message].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"ToolConfirmation.AConfirmationKeepsItsCall": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[after.session_id === before.session_id, after.tool_use_id === before.tool_use_id].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"ToolConfirmation.OnlyAPendingConfirmationIsAnswered": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === after.status,\n\t\t\t\tafter.status === \"pending\",\n\t\t\t\tafter.status === \"cancelled\",\n\t\t\t\tbefore.status === \"pending\",\n\t\t\t].some((ok) => ok)"
+			},
+			"ConfirmTool.OnlyAPendingConfirmationOfTheSessionIsAnswered": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.confirmation.status === \"pending\" &&\n\t\t\tbefore.confirmation.session_id !== \"\" &&\n\t\t\t(after.confirmation.status === \"allowed\" || after.confirmation.status === \"denied\")"
+			},
+			"ConfirmTool.AnAnswerResumesAWaitingSession": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Idle\" ||\n\t\t\t(before.session.awaiting &&\n\t\t\t\tafter.session._tag === \"Running\" &&\n\t\t\t\tafter.session.turn === before.session.turn + 1)"
+			},
+			"ConfirmTool.AnAnswerLeavesARunningTurnRunning": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Running\" ||\n\t\t\t(after.session._tag === \"Running\" && after.session.turn === before.session.turn)"
 			}
 		}
 	}

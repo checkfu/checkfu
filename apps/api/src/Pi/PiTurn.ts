@@ -33,6 +33,19 @@ export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
 	model_usage: Schema.optionalKey(ModelUsage),
 })
 
+/**
+ * The turn cannot go on until a person answers the tool calls in `waiting`. Pi keeps them parked
+ * and has nothing else to do.
+ */
+export const PiTurnPaused = Schema.Struct({
+	ok: Schema.Literal(false),
+	waiting: Schema.Array(Schema.String),
+	tool_calls: Schema.optionalKey(Schema.Array(ToolCall)),
+	/** The turn that asked carries on an operation an earlier turn started. */
+	carried: Schema.optionalKey(Schema.Literal(true)),
+})
+export type PiTurnPaused = typeof PiTurnPaused.Type
+
 export const PiTurnOutcome = Schema.Union([
 	Schema.Struct({
 		ok: Schema.Literal(true),
@@ -44,8 +57,19 @@ export const PiTurnOutcome = Schema.Union([
 		ok: Schema.Literal(false),
 		error: Schema.Union([PiTurnFailed, TurnInterrupted]),
 	}),
+	PiTurnPaused,
 ])
 export type PiTurnOutcome = typeof PiTurnOutcome.Type
+
+export const isPaused = (outcome: PiTurnOutcome): outcome is PiTurnPaused => "waiting" in outcome
+
+/** A person's answer to one waiting tool call. */
+export const PiToolDecision = Schema.Struct({
+	tool_use_id: Schema.String,
+	allow: Schema.Boolean,
+	/** Why a call was denied, as the model is told; empty for the default wording. */
+	message: Schema.String,
+})
 
 export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
 
@@ -54,6 +78,13 @@ export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
 export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
+	// A paused turn carries on once the answers to its waiting calls arrive.
+	resumeTurn: {
+		args: Schema.Tuple([Schema.String, Schema.String, Schema.Array(PiToolDecision)]),
+		result: PiRecoveredTurn,
+	},
+	waitingCalls: { args: Schema.Tuple([Schema.String]), result: Schema.Array(Schema.String) },
+	cancelWaiting: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Void },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	// The workspace is the harness's: its tools run next to the session object that calls them.
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },

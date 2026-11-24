@@ -107,6 +107,13 @@ const STANDING = {
 	"Session.AbandonedTurnEnds": "proved",
 	"Session.AgentMessageEndsTheTurn": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
+	"Session.OnlyAPauseLeavesTheSessionAwaiting": "proved",
+	"Session.AnAwaitingSessionTakesNoUserMessage": "proved",
+	"Session.APauseKeepsNoQueuedMessage": "proved",
+	"ToolConfirmation.OnlyADenialCarriesAMessage": "proved",
+	"ToolConfirmation.ASettledConfirmationNeverChanges": "proved",
+	"ToolConfirmation.AConfirmationKeepsItsCall": "proved",
+	"ToolConfirmation.OnlyAPendingConfirmationIsAnswered": "proved",
 	"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": "proved",
 	"IdempotencyClaim.ClaimedFingerprintNeverChanges": "proved",
 	"IdempotencyClaim.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": "proved",
@@ -143,6 +150,9 @@ const STANDING = {
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"ConfirmTool.OnlyAPendingConfirmationOfTheSessionIsAnswered": "proved",
+	"ConfirmTool.AnAnswerResumesAWaitingSession": "proved",
+	"ConfirmTool.AnAnswerLeavesARunningTurnRunning": "proved",
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
@@ -206,6 +216,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"AdmitSession",
 			"SendUserMessage",
 			"SendUserInterrupt",
+			"ConfirmTool",
 			"ArchiveSession",
 			"ClaimIdempotencyKey",
 			"AdmitAutomation",
@@ -607,7 +618,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const completedSessionV1 = results.completedTurnWorld.Session.find(
 			(row) => row.id === "sess_post_v1",
 		)
-		expect(completedSessionV1?.state).toEqual({ _tag: "Idle", turn: 2 })
+		expect(completedSessionV1?.state).toEqual({ _tag: "Idle", turn: 2, awaiting: false })
 		expect(
 			completedSessionV1?.events.filter((event) => event._tag === "session.status_running").length,
 		).toBe(2)
@@ -663,7 +674,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const runSession = automationWorld.Session.find(
 			(row) => row.id === `sess_${automationRef.id}_1`,
 		)
-		expect(runSession?.state).toEqual({ _tag: "Idle", turn: 1 })
+		expect(runSession?.state).toEqual({ _tag: "Idle", turn: 1, awaiting: false })
 		expect(runSession?.events.map((event) => event._tag).slice(0, 3)).toEqual([
 			"session.created",
 			"user.message",

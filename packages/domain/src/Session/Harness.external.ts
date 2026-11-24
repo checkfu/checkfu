@@ -40,6 +40,14 @@ export const TurnInterrupted = Schema.TaggedStruct("TurnInterrupted", {
 })
 export type TurnInterrupted = typeof TurnInterrupted.Type
 
+/**
+ * The turn stopped on tool calls a person has yet to answer. The harness has
+ * already told the session, which went idle naming them; the calls stay parked
+ * and a later turn carries on from there.
+ */
+export const TurnPaused = Schema.TaggedStruct("TurnPaused", {})
+export type TurnPaused = typeof TurnPaused.Type
+
 export const HARNESS_UNAVAILABLE = "harness_unavailable"
 export const HARNESS_UNAVAILABLE_MESSAGE = "The agent runtime could not be reached."
 export const TURN_TIMEOUT = "model_request_timeout"
@@ -59,6 +67,8 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			// The last turn whose reply the session published; the model must not keep a later one's.
 			// Absent for a turn started before it was recorded, and then nothing is dropped.
 			last_reply_turn: Schema.optionalKey(NonNegativeInt),
+			// The turn resumes a paused one; its input is only a placeholder.
+			resume: Schema.optionalKey(Schema.Literal(true)),
 		},
 		success: {
 			thinking: Schema.NullOr(ThinkingText),
@@ -68,7 +78,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			output_tokens: NonNegativeInt,
 			stop_reason: ModelStopReason,
 		},
-		error: [TurnFailed, TurnInterrupted, HarnessUnavailable],
+		error: [TurnFailed, TurnInterrupted, TurnPaused, HarnessUnavailable],
 	},
 	interrupt: {
 		args: {
@@ -162,7 +172,11 @@ export const boundedHarness = <R = never>(
 				readonly turn: number
 				readonly input: ReadonlyArray<string>
 				readonly last_reply_turn?: number
-			}) => Effect.Effect<HarnessReply, TurnFailed | TurnInterrupted | HarnessUnavailable>
+				readonly resume?: true
+			}) => Effect.Effect<
+				HarnessReply,
+				TurnFailed | TurnInterrupted | TurnPaused | HarnessUnavailable
+			>
 			readonly interrupt: (args: {
 				readonly session_id: SessionId
 				readonly turn: number

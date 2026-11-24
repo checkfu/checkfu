@@ -192,6 +192,38 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 	})
 
+	it("sends a tool confirmation and reports that nothing was waiting for it", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const sessionId = yield* createReadySession(cli)
+
+					const sent = yield* cli.run([
+						"sessions:events",
+						"send",
+						"--session-id",
+						sessionId,
+						"--event",
+						'{"type":"user.tool_confirmation","tool_use_id":"call_1","result":"allow"}',
+					])
+					expect(sent.exitCode).not.toBe(0)
+					expect(sent.stderr).toContain("waiting for an answer")
+
+					const malformed = yield* cli.run([
+						"sessions:events",
+						"send",
+						"--session-id",
+						sessionId,
+						"--event",
+						'{"type":"user.tool_confirmation","tool_use_id":"call_1","result":"maybe"}',
+					])
+					expect(malformed.exitCode).not.toBe(0)
+				}),
+			),
+		)
+	})
+
 	it("reconnects SSE streams losslessly with Last-Event-ID on transient disconnect", async () => {
 		await Effect.runPromise(
 			Effect.scoped(

@@ -28,13 +28,25 @@ export class PendingMessageQueueFull extends Domain.Rejection(
 	},
 ) {}
 
+export class SessionAwaitingAction extends Domain.Rejection(
+	"SessionAwaitingAction",
+	{
+		session_id: SessionId,
+	},
+	{
+		httpApiStatus: 409,
+		description:
+			"The session is waiting for tool calls to be answered. Answer them or send an interrupt first.",
+	},
+) {}
+
 export class SendUserMessage extends Domain.Command("SendUserMessage", {
 	input: {
 		session_id: SessionId,
 		text: MessageText,
 	},
 	events: [UserMessage, SessionStatusRunning],
-	rejects: [SessionNotFound, SessionTerminated, PendingMessageQueueFull],
+	rejects: [SessionNotFound, SessionTerminated, PendingMessageQueueFull, SessionAwaitingAction],
 	reply: {
 		turn: PositiveInt,
 	},

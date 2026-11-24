@@ -462,3 +462,150 @@ describe("Binding an agent's MCP servers when a session is created", () => {
 		)
 	})
 })
+
+describe("When an agent's MCP tools ask first", () => {
+	const ASK = { type: "always_ask" }
+	const ALLOW = { type: "always_allow" }
+
+	it("keeps each server's policy with the agent's version and returns it as it was given", async () => {
+		await world().run(({ call }) =>
+			Effect.gen(function* () {
+				const tools = [
+					{
+						type: "mcp_toolset",
+						mcp_server_name: "tracker",
+						default_config: { permission_policy: ALLOW },
+						configs: [{ name: "close_issue", permission_policy: ASK }],
+					},
+				]
+				const made = yield* call("POST", "/v1/agents", {
+					name: "Agent",
+					model: "gpt-4o-mini",
+					mcp_servers: [
+						{ type: "url", name: "tracker", url: TRACKER },
+						{ type: "url", name: "wiki", url: WIKI },
+					],
+					tools,
+				})
+				expect(made.status, errorMessage(made)).toBe(201)
+				expect(made.body["tools"]).toEqual(tools)
+				expect(made.body["mcp_servers"]).toEqual([
+					{ type: "url", name: "tracker", url: TRACKER },
+					{ type: "url", name: "wiki", url: WIKI },
+				])
+				const id = String(made.body["id"])
+
+				// Replacing the servers keeps the policy of the one that stays.
+				const fewer = yield* call("POST", `/v1/agents/${id}`, {
+					version: 1,
+					mcp_servers: [{ type: "url", name: "tracker", url: TRACKER }],
+				})
+				expect(fewer.body).toMatchObject({ version: 2, tools })
+
+				// Replacing the tools replaces every policy, and mints a version of its own.
+				const wikiOnly = [
+					{
+						type: "mcp_toolset",
+						mcp_server_name: "tracker",
+						default_config: { permission_policy: ASK },
+					},
+				]
+				const replaced = yield* call("POST", `/v1/agents/${id}`, { version: 2, tools: wikiOnly })
+				expect(replaced.body).toMatchObject({ version: 3, tools: wikiOnly })
+
+				const cleared = yield* call("POST", `/v1/agents/${id}`, { version: 3, tools: [] })
+				expect(cleared.body).toMatchObject({ version: 4, tools: [] })
+			}),
+		)
+	})
+
+	it("refuses a toolset for a server the agent does not have, or a second one for the same server", async () => {
+		await world().run(({ call }) =>
+			Effect.gen(function* () {
+				const agent = (tools: ReadonlyArray<Fields>) =>
+					call("POST", "/v1/agents", {
+						name: "Agent",
+						model: "gpt-4o-mini",
+						mcp_servers: [{ type: "url", name: "tracker", url: TRACKER }],
+						tools,
+					})
+				const unknown = yield* agent([{ type: "mcp_toolset", mcp_server_name: "wiki" }])
+				expect(unknown.status).toBe(400)
+				expect(errorMessage(unknown)).toContain("wiki")
+
+				const twice = yield* agent([
+					{ type: "mcp_toolset", mcp_server_name: "tracker" },
+					{ type: "mcp_toolset", mcp_server_name: "tracker" },
+				])
+				expect(twice.status).toBe(400)
+				expect(errorMessage(twice)).toContain("more than one mcp_toolset")
+
+				const repeated = yield* agent([
+					{
+						type: "mcp_toolset",
+						mcp_server_name: "tracker",
+						configs: [
+							{ name: "search", permission_policy: ASK },
+							{ name: "search", permission_policy: ALLOW },
+						],
+					},
+				])
+				expect(repeated.status).toBe(400)
+
+				const auto = yield* agent([
+					{
+						type: "mcp_toolset",
+						mcp_server_name: "tracker",
+						default_config: { permission_policy: { type: "auto" } },
+					},
+				])
+				expect(auto.status).toBe(400)
+			}),
+		)
+	})
+
+	it("refuses servers and policies too large together before claiming the create", async () => {
+		await world().run(({ fetch }) =>
+			Effect.gen(function* () {
+				const servers = ["a", "b", "c"].map((name) => ({
+					type: "url",
+					name,
+					url: `https://mcp.${name}.example/mcp`,
+				}))
+				const policies = servers.map((server) => ({
+					type: "mcp_toolset",
+					mcp_server_name: server.name,
+					configs: Array.from({ length: 128 }, (_, index) => ({
+						name: `${"tool_".repeat(40)}${index}`,
+						permission_policy: { type: "always_ask" },
+					})),
+				}))
+				const create = (body: unknown) =>
+					Effect.flatMap(
+						sendRequest(fetch, {
+							method: "POST",
+							path: "/v1/agents",
+							headers: { ...AUTH_HEADERS, "idempotency-key": "large-agent" },
+							body,
+						}),
+						(res) =>
+							Effect.map(
+								Effect.promise(() => res.json()),
+								(json) => ({ status: res.status, body: json as Schema.JsonObject }),
+							),
+					)
+				const large = yield* create({
+					name: "Agent",
+					model: "gpt-4o-mini",
+					mcp_servers: servers,
+					tools: policies,
+				})
+				expect(large.status, errorMessage(large)).toBe(400)
+				expect(errorMessage(large)).toContain("at most 65536 fit")
+				// Nothing was claimed, so the same key still creates the agent it is sent with next.
+				const small = yield* create({ name: "Agent", model: "gpt-4o-mini", mcp_servers: servers })
+				expect(small.status, errorMessage(small)).toBe(201)
+			}),
+		)
+	})
+})

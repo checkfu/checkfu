@@ -38,6 +38,15 @@ export interface PiDurableBackend {
 	) => Promise<
 		{ readonly status: "done" } | { readonly status: "unanswered"; readonly reason?: string }
 	>
+	/** As `wait`, but also returns once the operation only waits on tool calls a person must answer. */
+	readonly settleOrPause: (
+		operationId: string,
+		signal?: AbortSignal,
+	) => Promise<
+		| { readonly status: "done" }
+		| { readonly status: "unanswered"; readonly reason?: string }
+		| { readonly status: "paused"; readonly waiting: ReadonlyArray<string> }
+	>
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
 	readonly reset: Effect.Effect<never>
 	/** How the session object names calls Pi's transcript does not: MCP and script calls. */
@@ -397,6 +406,22 @@ const admitPiTurnUnderWay = (
 	})
 }
 
+const settlePiTurn = (
+	backend: PiDurableBackend,
+	operationId: string,
+	providerForLog: string,
+): Effect.Effect<PiTurnOutcome> =>
+	Effect.gen(function* () {
+		const settled = yield* Effect.promise((signal) => backend.settleOrPause(operationId, signal))
+		if (settled.status !== "paused") {
+			return yield* resolveSettledPiTurn(backend, operationId, settled, providerForLog)
+		}
+		const tool_calls = yield* Effect.promise(async () =>
+			readTurnToolCalls(await backend.pi(), operationId, backend.servedToolCalls?.()),
+		)
+		return { ok: false, waiting: settled.waiting, tool_calls }
+	})
+
 const resolveSettledPiTurn = (
 	backend: PiDurableBackend,
 	operationId: string,
@@ -488,8 +513,7 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	if (probe === "cancelled") {
 		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
-	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))
-	return yield* resolveSettledPiTurn(backend, operationId, settled, "unknown")
+	return yield* settlePiTurn(backend, operationId, "unknown")
 })
 
 export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
@@ -513,6 +537,5 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
 
-	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))
-	return yield* resolveSettledPiTurn(backend, operationId, settled, request.provider)
+	return yield* settlePiTurn(backend, operationId, request.provider)
 })

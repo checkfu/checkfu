@@ -29,12 +29,14 @@ import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
+import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
 import { DiscardWorkspace } from "./Session/DiscardWorkspace.policy.ts"
 import { RunTurn } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest } from "./Session/StopModelRequest.policy.ts"
+import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 import { SessionsHandlersLive } from "./Sessions.model.ts"
 
@@ -45,7 +47,15 @@ import { SessionsHandlersLive } from "./Sessions.model.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [Agent, Environment, Session, IdempotencyClaim, Automation, AutomationCapacity],
+	aggregates: [
+		Agent,
+		Environment,
+		Session,
+		ToolConfirmation,
+		IdempotencyClaim,
+		Automation,
+		AutomationCapacity,
+	],
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
@@ -53,6 +63,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AdmitSessionDecision,
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
+		ConfirmToolDecision,
 	],
 	views: [
 		AgentView,
@@ -353,6 +364,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"AdmitSession",
 		"SendUserMessage",
 		"SendUserInterrupt",
+		"ConfirmTool",
 		"ArchiveSession",
 		"ClaimIdempotencyKey",
 		"AdmitAutomation",

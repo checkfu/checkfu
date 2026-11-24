@@ -33,7 +33,8 @@ const readBody = async (request: IncomingMessage): Promise<string> => {
 }
 
 /**
- * A real MCP server over streamable HTTP with three tools, `echo`, `add` and `picture`.
+ * A real MCP server over streamable HTTP. `echo`, `add` and `picture` are marked
+ * read-only; `post` is not, as a tool that changes something would be.
  * It answers 401 to a request whose bearer token it does not accept.
  */
 export const startFakeMcpServer = async (
@@ -52,7 +53,11 @@ export const startFakeMcpServer = async (
 		const server = new McpServer({ name: "fake-mcp", version: "1.0.0" })
 		server.registerTool(
 			"echo",
-			{ description: "Echo a text back.", inputSchema: z.object({ text: z.string() }) },
+			{
+				description: "Echo a text back.",
+				inputSchema: z.object({ text: z.string() }),
+				annotations: { readOnlyHint: true },
+			},
 			(args) => {
 				calls.push({ tool: "echo", arguments: args, token, session: session() })
 				return { content: [{ type: "text", text: `echo:${args.text}` }] }
@@ -64,6 +69,7 @@ export const startFakeMcpServer = async (
 				description: "Add two numbers.",
 				inputSchema: z.object({ a: z.number(), b: z.number() }),
 				outputSchema: z.object({ sum: z.number() }),
+				annotations: { readOnlyHint: true },
 			},
 			(args) => {
 				calls.push({ tool: "add", arguments: args, token, session: session() })
@@ -79,6 +85,7 @@ export const startFakeMcpServer = async (
 			{
 				description: "Return two images of the given base64 lengths.",
 				inputSchema: z.object({ first: z.number(), second: z.number() }),
+				annotations: { readOnlyHint: true },
 			},
 			(args) => {
 				calls.push({ tool: "picture", arguments: args, token, session: session() })
@@ -117,6 +124,14 @@ export const startFakeMcpServer = async (
 					content: [{ type: "text", text: `sent ${spellings.join(" | ")}` }],
 					structuredContent: { nested: { secret, list: spellings } },
 				}
+			},
+		)
+		server.registerTool(
+			"post",
+			{ description: "Post a message.", inputSchema: z.object({ text: z.string() }) },
+			(args) => {
+				calls.push({ tool: "post", arguments: args, token, session: session() })
+				return { content: [{ type: "text", text: `posted:${args.text}` }] }
 			},
 		)
 		return server

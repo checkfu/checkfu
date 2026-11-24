@@ -122,6 +122,14 @@ An agent lists the MCP servers it uses in `mcp_servers` (`{ "type": "url", "name
 
 The agent reaches a server's tools from scripts as `tools.mcp__<server>__<tool>(...)`, or calls one directly after `tool_search` has loaded it. Every request to the server is made by the credential's own Durable Object, which sends the secret only to the URL it was stored for. Each call is on the session's event log as `agent.mcp_tool_use` and `agent.mcp_tool_result`, with `parent_tool_use_id` naming the script call when a script made it.
 
+## Tool approvals
+
+An MCP tool either runs on its own or waits for a person. The agent decides per server in `tools`: `{ "type": "mcp_toolset", "mcp_server_name": "tracker", "default_config": { "permission_policy": { "type": "always_ask" } }, "configs": [{ "name": "search", "permission_policy": { "type": "always_allow" } }] }`. A tool's own entry wins over the server's default. With neither, a tool the server marks read-only runs and every other tool asks; that mark is the server's own claim, so set `always_ask` where it should not be trusted. Each `agent.mcp_tool_use` event says how the call was let through in `evaluated_permission` (`allow` or `ask`).
+
+When the agent calls a tool that asks, the tool does not run. The session goes idle with `stop_reason: { "type": "requires_action", "event_ids": [...] }`, where each id is the `tool_use_id` of a waiting `agent.mcp_tool_use` event, and nothing runs while it waits. Answer each with a `user.tool_confirmation` event: `{ "type": "user.tool_confirmation", "tool_use_id": "...", "result": "allow" }`, or `"deny"` with an optional `deny_message` the agent is told. The first answer sets the session running again; if other calls still wait, it goes idle again naming those. While it waits a session takes no `user.message` (409); a `user.interrupt` gives the waiting calls up, after which their answers are refused.
+
+A script cannot wait for a person. A call from a script to a tool that asks is refused at once with a message telling the agent to make the call directly.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`, `vaults`, `vaults:credentials`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

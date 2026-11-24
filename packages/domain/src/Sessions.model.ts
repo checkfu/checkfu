@@ -1,15 +1,18 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
+import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
 import { DiscardWorkspace, DiscardWorkspaceLive } from "./Session/DiscardWorkspace.policy.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest, StopModelRequestLive } from "./Session/StopModelRequest.policy.ts"
+import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 
 export class Sessions extends Domain.Model("Sessions", {
-	aggregates: [Session],
+	aggregates: [Session, ToolConfirmation],
+	decisions: [ConfirmToolDecision],
 	views: [SessionView, TurnInput],
 	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
 	sagas: [RunTurn],
@@ -110,7 +113,13 @@ export class Sessions extends Domain.Model("Sessions", {
 
 export class SessionsApi extends Domain.Api("SessionsApi", {
 	model: Sessions,
-	commands: ["CreateSession", "SendUserMessage", "SendUserInterrupt", "ArchiveSession"],
+	commands: [
+		"CreateSession",
+		"SendUserMessage",
+		"SendUserInterrupt",
+		"ConfirmTool",
+		"ArchiveSession",
+	],
 	views: ["SessionView"],
 }) {}
 

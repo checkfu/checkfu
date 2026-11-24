@@ -92,6 +92,14 @@ const agentsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "tools",
+			flagName: "tools",
+			wireName: "tools",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -127,6 +135,13 @@ const agentsCreateCommand = CommandMake(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
 				"MCP servers this agent connects to. Names must be unique. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		tools: FlagString("tools").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -238,6 +253,14 @@ const agentsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "structured",
 			required: false,
 		},
+		{
+			propName: "tools",
+			flagName: "tools",
+			wireName: "tools",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
 	],
 }
 
@@ -272,6 +295,13 @@ const agentsUpdateCommand = CommandMake(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
 				"MCP servers this agent connects to. Names must be unique. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		tools: FlagString("tools").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -1244,6 +1274,11 @@ const sessionsEventsSendCommand = CommandMake(
 			command:
 				'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.interrupt"}\'',
 			description: "Interrupt an active session turn",
+		},
+		{
+			command:
+				'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.tool_confirmation","tool_use_id":"call_1","result":"allow"}\'',
+			description: "Allow a tool call the session is waiting on",
 		},
 	]),
 )

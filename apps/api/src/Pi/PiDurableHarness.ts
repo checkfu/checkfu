@@ -11,10 +11,26 @@ import {
 } from "@checkfu/domain/Mcp/McpServerSet.aggregate"
 import { McpServerBindingList, McpServerList } from "@checkfu/domain/Mcp/McpServers"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
-import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import type {
+	HarnessReply,
+	HarnessUnavailable,
+	TurnFailed,
+	TurnInterrupted,
+	TurnPaused,
+} from "@checkfu/domain/Session/Harness.external"
+import { PauseTurn } from "@checkfu/domain/Session/PauseTurn.command"
 import { recordToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
+import { ResumeTurn } from "@checkfu/domain/Session/ResumeTurn.command"
+import { turnKey } from "@checkfu/domain/Session/RunTurn.saga"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import { MAX_WAITING_TOOL_USES, ToolUseIds } from "@checkfu/domain/Session/SessionTypes"
+import {
+	CancelToolConfirmation,
+	RequestToolConfirmation,
+	ToolConfirmation,
+} from "@checkfu/domain/Session/ToolConfirmation.aggregate"
+import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -24,6 +40,8 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { resolveCatalogModel } from "./PiCatalog.ts"
 import { bindSessionServers } from "../Connection/McpBindings.ts"
+import type { ToolDecisionValue } from "./PiApprovals.ts"
+import { isPaused } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -49,7 +67,22 @@ export interface PiTurnExecutorService {
 		conversation: string,
 		request: PiTurnRequest,
 	) => Effect.Effect<PiTurnOutcome, HarnessCallFailed>
+	/** Hands answers to the tool calls that wait, then follows the operation to where it ends or pauses next. */
+	readonly resumeTurn: (
+		conversation: string,
+		operationId: string,
+		decisions: ReadonlyArray<ToolDecisionValue>,
+	) => Effect.Effect<PiTurnOutcome | null, HarnessCallFailed>
 	readonly abortTurn: (
+		conversation: string,
+		operationId: string,
+	) => Effect.Effect<void, HarnessCallFailed>
+	/** The tool calls a person has yet to answer. */
+	readonly waitingCalls: (
+		conversation: string,
+	) => Effect.Effect<ReadonlyArray<string>, HarnessCallFailed>
+	/** Gives up whatever waits for a person, so `operationId` can run as a turn of its own. */
+	readonly cancelWaiting: (
 		conversation: string,
 		operationId: string,
 	) => Effect.Effect<void, HarnessCallFailed>
@@ -103,11 +136,31 @@ const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<st
 		turnOperationId(lastReplyTurn + 1 + i),
 	)
 
+const NOTHING_WAITING: TurnFailed = {
+	_tag: "TurnFailed",
+	error_type: "tool_call_not_waiting",
+	message: "The tool calls this turn was to carry on are no longer waiting.",
+	terminal: false,
+}
+
+const QUEUED_MESSAGE_DENIAL =
+	"A new message from the user arrived before this call was approved, so it did not run."
+const CANCELLED_DENIAL = "This call was cancelled before it was approved, so it did not run."
+
+const unreachable = (conversation: string) => (error: HarnessCallFailed) =>
+	Effect.andThen(
+		Effect.logError("Harness unreachable", conversation, error.cause),
+		Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
+	)
+
+const isResume = (args: { readonly resume?: true }): boolean => args.resume === true
+
 export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const executor = yield* PiTurnExecutor
 		const sessions = yield* Session
+		const confirmations = yield* ToolConfirmation
 		const serverSets = yield* McpServerSet
 		const environments = yield* Environment
 		// A session admitted without a recorded binding (an automation's, for one) is bound here,
@@ -145,30 +198,170 @@ export const PiDurableHarnessLive = boundedHarness(
 				return McpServerBindingList.decode((yield* serverSets.get(setId)).servers)
 			})
 
-		const settled = (
-			args: { readonly session_id: SessionId; readonly turn: number },
-			outcome: PiTurnOutcome,
-		) =>
-			outcome.ok
-				? Effect.as(
-						recordToolCalls({
+		type TurnRef = { readonly session_id: SessionId; readonly turn: number }
+
+		const record = (args: TurnRef, outcome: PiTurnOutcome) =>
+			recordToolCalls({
+				session_id: args.session_id,
+				turn: args.turn,
+				calls: "tool_calls" in outcome ? (outcome.tool_calls ?? []) : [],
+			}).pipe(
+				Effect.provideService(Session, sessions),
+				// Pi kept what it did. Failing the turn any other way would leave it in a
+				// conversation the session log says never answered.
+				Effect.catchDefect((defect) =>
+					Effect.andThen(
+						Effect.logError("Tool calls not recorded", args.session_id, defect),
+						Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
+					),
+				),
+			)
+
+		const answersTo = (args: TurnRef, waiting: ReadonlyArray<string>) =>
+			Effect.map(
+				Effect.forEach(waiting, (tool_use_id) =>
+					Effect.map(
+						confirmations.get(toolConfirmationId(args.session_id, tool_use_id)),
+						(state): ReadonlyArray<ToolDecisionValue> => {
+							if (state.status === "allowed") {
+								return [{ tool_use_id, allow: true, message: "" }]
+							}
+							if (state.status === "denied") {
+								return [{ tool_use_id, allow: false, message: state.deny_message }]
+							}
+							return state.status === "cancelled"
+								? [{ tool_use_id, allow: false, message: CANCELLED_DENIAL }]
+								: []
+						},
+					),
+				),
+				(answers) => answers.flat(),
+			)
+
+		const cancelConfirmations = (args: TurnRef, waiting: ReadonlyArray<string>) =>
+			Effect.forEach(
+				waiting,
+				(tool_use_id) =>
+					confirmations.send(
+						new CancelToolConfirmation({
+							confirmation_id: toolConfirmationId(args.session_id, tool_use_id),
+						}),
+					),
+				{ discard: true },
+			)
+
+		/**
+		 * What to do about tool calls that wait for a person: the answers already
+		 * given, or "paused" once the session has gone idle naming the calls. A
+		 * turn with messages queued behind it cannot wait, so its calls are denied.
+		 */
+		const answersOrPause = Effect.fn("PiDurableHarness.answersOrPause")(function* (
+			args: TurnRef,
+			every: ReadonlyArray<string>,
+		) {
+			// More than a pause can name wait their turn: the next pause names them.
+			const waiting = every.slice(0, MAX_WAITING_TOOL_USES)
+			if (waiting.length === 0) {
+				return []
+			}
+			yield* Effect.forEach(
+				waiting,
+				(tool_use_id) =>
+					confirmations.send(
+						new RequestToolConfirmation({
+							confirmation_id: toolConfirmationId(args.session_id, tool_use_id),
 							session_id: args.session_id,
-							turn: args.turn,
-							calls: outcome.tool_calls ?? [],
-						}).pipe(
-							Effect.provideService(Session, sessions),
-							// Pi kept this reply. Failing the turn any other way would leave it in a
-							// conversation the session log says never answered.
-							Effect.catchDefect((defect) =>
+							tool_use_id,
+						}),
+					),
+				{ discard: true },
+			)
+			const given = yield* answersTo(args, waiting)
+			if (given.length > 0) {
+				return given
+			}
+			const paused = yield* sessions
+				.send(
+					new PauseTurn({
+						session_id: args.session_id,
+						turn: args.turn,
+						request_seq: 1,
+						model_request_start_id: `${turnKey(args.session_id, args.turn)}:req:1`,
+						event_ids: ToolUseIds.encode(waiting),
+					}),
+				)
+				.pipe(
+					Effect.as(true),
+					Effect.catchTag("UserMessagesQueued", () => Effect.succeed(false)),
+					// The turn is over already, paused by an earlier attempt or ended some other way.
+					Effect.catchTag(
+						["SessionNotFound", "SessionNotRunning", "StaleTurn", "UnknownModelRequest"],
+						() => Effect.succeed(true),
+					),
+				)
+			if (!paused) {
+				yield* cancelConfirmations(args, waiting)
+				return waiting.map((tool_use_id): ToolDecisionValue => ({
+					tool_use_id,
+					allow: false,
+					message: QUEUED_MESSAGE_DENIAL,
+				}))
+			}
+			// An answer given while the turn was pausing found the session still running.
+			if ((yield* answersTo(args, waiting)).length > 0) {
+				yield* sessions.send(new ResumeTurn({ session_id: args.session_id, turn: args.turn }))
+			}
+			return "paused" as const
+		})
+
+		/**
+		 * Publishes what the turn did and ends it the way Pi did. A turn whose
+		 * tool calls wait for a person either carries on from the answers there
+		 * are, or leaves the session idle naming the calls.
+		 */
+		const settle = (
+			args: TurnRef,
+			conversation: string,
+			operationId: string,
+			first: PiTurnOutcome,
+			timeout: Duration.Duration,
+		): Effect.Effect<
+			HarnessReply,
+			TurnFailed | TurnInterrupted | TurnPaused | HarnessUnavailable
+		> =>
+			Effect.gen(function* () {
+				let outcome = first
+				while (true) {
+					yield* record(args, outcome)
+					if (outcome.ok) {
+						return outcome.reply
+					}
+					if (!isPaused(outcome)) {
+						return yield* Effect.fail(outcome.error)
+					}
+					const answers = yield* answersOrPause(args, outcome.waiting)
+					if (answers === "paused") {
+						return yield* Effect.fail<TurnPaused>({ _tag: "TurnPaused" })
+					}
+					const next = yield* withRetry(
+						executor.resumeTurn(conversation, operationId, answers),
+					).pipe(
+						Effect.catchTag("HarnessCallFailed", unreachable(conversation)),
+						Effect.timeoutOrElse({
+							duration: timeout,
+							orElse: () =>
 								Effect.andThen(
-									Effect.logError("Tool calls not recorded", args.session_id, defect),
+									Effect.logError("Harness did not settle the turn in time", conversation),
 									Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
 								),
-							),
-						),
-						outcome.reply,
+						}),
 					)
-				: Effect.fail(outcome.error)
+					if (next === null) {
+						return yield* Effect.fail(NOTHING_WAITING)
+					}
+					outcome = next
+				}
+			})
 
 		return {
 			runTurn: (args) =>
@@ -200,7 +393,16 @@ export const PiDurableHarnessLive = boundedHarness(
 						}),
 					)
 					if (recovered !== null) {
-						return yield* settled(args, recovered)
+						if (!isPaused(recovered) || recovered.carried !== true || isResume(args)) {
+							return yield* settle(args, conversation, operationId, recovered, settleTimeout)
+						}
+						// A new message reached a conversation whose last turn still waits: the wait is over.
+						yield* cancelConfirmations(args, recovered.waiting)
+						yield* withRetry(executor.cancelWaiting(conversation, operationId)).pipe(
+							Effect.catchTag("HarnessCallFailed", unreachable(conversation)),
+						)
+					} else if (isResume(args)) {
+						return yield* Effect.fail(NOTHING_WAITING)
 					}
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
@@ -289,14 +491,17 @@ export const PiDurableHarnessLive = boundedHarness(
 						}),
 					)
 
-					return yield* settled(args, outcome)
+					return yield* settle(args, conversation, operationId, outcome, settleTimeout)
 				}),
 			interrupt: (args) =>
 				Effect.gen(function* () {
 					const { interruptTimeout } = yield* HarnessLimits
-					yield* withRetry(
-						executor.abortTurn(conversationName(args.session_id), turnOperationId(args.turn)),
-					).pipe(Effect.timeout(interruptTimeout))
+					const conversation = conversationName(args.session_id)
+					// Whatever waits for a person is given up first, so no late answer is taken for it.
+					yield* Effect.gen(function* () {
+						yield* cancelConfirmations(args, yield* withRetry(executor.waitingCalls(conversation)))
+						yield* withRetry(executor.abortTurn(conversation, turnOperationId(args.turn)))
+					}).pipe(Effect.timeout(interruptTimeout))
 				}).pipe(
 					Effect.tapError((error) =>
 						Effect.logError("Interrupt not delivered to the harness", error),
@@ -315,9 +520,20 @@ export const PiDurableHarnessLive = boundedHarness(
 	}),
 )
 
+type WaitingCalls = Pick<PiTurnExecutorService, "resumeTurn" | "waitingCalls" | "cancelWaiting">
+
 export const makePiTurnExecutorLayer = (
-	turns: Omit<PiTurnExecutorService, "discardWorkspace">,
+	turns: Omit<PiTurnExecutorService, "discardWorkspace" | keyof WaitingCalls> &
+		Partial<WaitingCalls>,
 	workspaces: Pick<PiTurnExecutorService, "discardWorkspace"> = {
 		discardWorkspace: () => Effect.void,
 	},
-) => Layer.succeed(PiTurnExecutor, { ...turns, ...workspaces })
+) =>
+	Layer.succeed(PiTurnExecutor, {
+		// A harness with no tools that ask has nothing waiting.
+		resumeTurn: () => Effect.succeed(null),
+		waitingCalls: () => Effect.succeed([]),
+		cancelWaiting: () => Effect.void,
+		...turns,
+		...workspaces,
+	})

@@ -1,3 +1,4 @@
+import { evaluateMcpPermission } from "@checkfu/domain/Mcp/McpServers"
 import type { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { isJsonValue } from "@earendil-works/chord/json"
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable"
@@ -75,6 +76,34 @@ const INTERRUPTED = {
 }
 
 /**
+ * Which of the servers' tools run on their own and which ask a person first,
+ * by the name the model calls them. Two tools that come out under one name
+ * share the first one's answer, as they share its registration.
+ */
+export const mcpToolPermissions = (
+	servers: ReadonlyArray<McpServerTools>,
+): Map<string, { readonly server: string; readonly tool: string; readonly ask: boolean }> => {
+	const permissions = new Map<
+		string,
+		{ readonly server: string; readonly tool: string; readonly ask: boolean }
+	>()
+	for (const { binding, tools } of servers) {
+		for (const tool of tools ?? []) {
+			const name = mcpToolName(binding.name, tool.name)
+			if (!permissions.has(name)) {
+				permissions.set(name, {
+					server: binding.name,
+					tool: tool.name,
+					ask:
+						evaluateMcpPermission(binding.permissions, tool.name, tool.readOnly === true) === "ask",
+				})
+			}
+		}
+	}
+	return permissions
+}
+
+/**
  * One server's tools as a Pi extension. Scripts find and call them by
  * namespace; the model is offered one only after tool search loads it, and
  * never one whose name a provider would refuse.
@@ -108,7 +137,14 @@ export const mcpExtension = (
 					return INTERRUPTED
 				}
 				const input = isJsonObject(args) ? args : {}
-				calls.began({ call_id: api.callId, server: binding.name, tool: tool.name, input })
+				// A call that had to ask is already in the ledger, marked so; this leaves it as it is.
+				calls.began({
+					call_id: api.callId,
+					server: binding.name,
+					tool: tool.name,
+					input,
+					permission: "allow",
+				})
 				const outcome = await calls.call(binding, tool.name, input).catch(() => UNREACHABLE)
 				if (!outcome.ok) {
 					const content = [{ type: "text" as const, text: outcome.message }]

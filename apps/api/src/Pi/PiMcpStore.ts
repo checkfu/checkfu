@@ -20,6 +20,8 @@ export interface McpCall {
 	readonly server: string
 	readonly tool: string
 	readonly input: Schema.JsonObject
+	/** Whether the call ran on its own or had to ask a person first. */
+	readonly permission: "allow" | "ask"
 }
 
 const McpCallResult = Schema.Struct({
@@ -47,6 +49,7 @@ const CallRow = Schema.Struct({
 	tool: Schema.String,
 	input: Schema.fromJsonString(Schema.JsonObject),
 	truncated: Schema.Finite,
+	permission: Schema.Literals(["allow", "ask"]),
 	result: Schema.NullOr(Schema.fromJsonString(Schema.toCodecJson(McpCallResult))),
 })
 
@@ -54,6 +57,7 @@ const DirectRow = Schema.Struct({
 	call_id: Schema.String,
 	server: Schema.String,
 	tool: Schema.String,
+	permission: Schema.Literals(["allow", "ask"]),
 })
 
 const decodeServerRow = Schema.decodeUnknownSync(ServerRow)
@@ -99,7 +103,7 @@ export class PiMcpStore {
 					"CREATE TABLE IF NOT EXISTS checkfu_mcp_servers (name TEXT PRIMARY KEY, position INTEGER NOT NULL, binding TEXT NOT NULL, tools TEXT, unavailable TEXT)",
 				)
 				this.#sql.exec(
-					"CREATE TABLE IF NOT EXISTS checkfu_mcp_calls (seq INTEGER PRIMARY KEY AUTOINCREMENT, call_id TEXT NOT NULL UNIQUE, parent_id TEXT, server TEXT NOT NULL, tool TEXT NOT NULL, input TEXT NOT NULL, truncated INTEGER NOT NULL, result TEXT)",
+					"CREATE TABLE IF NOT EXISTS checkfu_mcp_tool_calls (seq INTEGER PRIMARY KEY AUTOINCREMENT, call_id TEXT NOT NULL UNIQUE, parent_id TEXT, server TEXT NOT NULL, tool TEXT NOT NULL, input TEXT NOT NULL, truncated INTEGER NOT NULL, permission TEXT NOT NULL, result TEXT)",
 				)
 			})
 			this.#initialized = true
@@ -168,13 +172,14 @@ export class PiMcpStore {
 		const input = JSON.stringify(call.input)
 		const fits = input.length <= MAX_TOOL_INPUT_JSON_LENGTH
 		this.#exec(
-			"INSERT OR IGNORE INTO checkfu_mcp_calls (call_id, parent_id, server, tool, input, truncated) VALUES (?, ?, ?, ?, ?, ?)",
+			"INSERT OR IGNORE INTO checkfu_mcp_tool_calls (call_id, parent_id, server, tool, input, truncated, permission) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			call.call_id,
 			parentCallId(call.call_id),
 			call.server,
 			call.tool,
 			fits ? input : "{}",
 			fits ? 0 : 1,
+			call.permission,
 		)
 	}
 
@@ -186,7 +191,7 @@ export class PiMcpStore {
 			return { type: "text" as const, text: kept }
 		})
 		this.#exec(
-			"UPDATE checkfu_mcp_calls SET result = ? WHERE call_id = ?",
+			"UPDATE checkfu_mcp_tool_calls SET result = ? WHERE call_id = ?",
 			encodeResult({ content, is_error: result.is_error }),
 			callId,
 		)
@@ -194,7 +199,7 @@ export class PiMcpStore {
 
 	/** Forgets the calls of earlier turns: a turn's calls are published before the next turn starts. */
 	forgetCalls(): void {
-		this.#exec("DELETE FROM checkfu_mcp_calls")
+		this.#exec("DELETE FROM checkfu_mcp_tool_calls")
 	}
 
 	/**
@@ -204,16 +209,16 @@ export class PiMcpStore {
 	 */
 	served(): ServedToolCalls {
 		const direct = new Map(
-			this.#exec("SELECT call_id, server, tool FROM checkfu_mcp_calls WHERE parent_id IS NULL").map(
-				(row) => {
-					const call = decodeDirectRow(row)
-					return [call.call_id, call] as const
-				},
-			),
+			this.#exec(
+				"SELECT call_id, server, tool, permission FROM checkfu_mcp_tool_calls WHERE parent_id IS NULL",
+			).map((row) => {
+				const call = decodeDirectRow(row)
+				return [call.call_id, call] as const
+			}),
 		)
 		const rows = (scriptCallId: string) =>
 			this.#rows(
-				"SELECT call_id, parent_id, server, tool, input, truncated, result FROM checkfu_mcp_calls WHERE parent_id = ? ORDER BY seq",
+				"SELECT call_id, parent_id, server, tool, input, truncated, permission, result FROM checkfu_mcp_tool_calls WHERE parent_id = ? ORDER BY seq",
 				scriptCallId,
 			)
 		return {
@@ -234,6 +239,7 @@ export class PiMcpStore {
 							mcp_server_name: call.server,
 							name: call.tool,
 							input: event.input,
+							evaluated_permission: call.permission,
 							...(event.truncated === true ? { truncated: true as const } : {}),
 						}
 			},
@@ -247,6 +253,7 @@ export class PiMcpStore {
 						mcp_server_name: nested.server,
 						name: nested.tool,
 						input: nested.input,
+						evaluated_permission: nested.permission,
 						parent_tool_use_id: scriptCallId,
 						...(nested.truncated === 1 ? { truncated: true as const } : {}),
 					}

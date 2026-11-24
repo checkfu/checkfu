@@ -8,10 +8,12 @@ import { makeMcpUpstream } from "../src/Connection/McpUpstream.ts"
 import { secretForms } from "../src/Connection/Scrub.ts"
 import { boundStructured } from "../src/Connection/ResultBounds.ts"
 import type { McpCallOutcome, McpUpstream } from "../src/Connection/McpUpstream.ts"
+import { evaluateMcpPermission } from "@checkfu/domain/Mcp/McpServers"
 import {
 	fencedMcpCall,
 	mcpExtension,
 	mcpToolName,
+	mcpToolPermissions,
 	withoutRemoteReferences,
 } from "../src/Pi/PiMcp.ts"
 import { MAX_MCP_TOOL_LIST_BYTES, PiMcpStore, parentCallId } from "../src/Pi/PiMcpStore.ts"
@@ -71,6 +73,62 @@ const withMcpCalls = (mcp: PiMcpStore, events: ReadonlyArray<ToolEvent>): Array<
 	)
 }
 
+describe("whether an MCP tool asks a person first", () => {
+	it("takes the author's word for a tool, then for the server, and only then the server's own", () => {
+		expect(evaluateMcpPermission(undefined, "read", true)).toBe("allow")
+		expect(evaluateMcpPermission(undefined, "write", false)).toBe("ask")
+		expect(evaluateMcpPermission({}, "write", false)).toBe("ask")
+
+		expect(evaluateMcpPermission({ default: "always_allow" }, "write", false)).toBe("allow")
+		expect(evaluateMcpPermission({ default: "always_ask" }, "read", true)).toBe("ask")
+
+		const perTool = {
+			default: "always_allow" as const,
+			tools: [{ name: "write", permission_policy: "always_ask" as const }],
+		}
+		expect(evaluateMcpPermission(perTool, "write", false)).toBe("ask")
+		expect(evaluateMcpPermission(perTool, "other", false)).toBe("allow")
+		// A server's claim never overrides the author asking for a confirmation.
+		expect(
+			evaluateMcpPermission(
+				{ tools: [{ name: "read", permission_policy: "always_ask" }] },
+				"read",
+				true,
+			),
+		).toBe("ask")
+	})
+
+	it("answers by the name the model calls a tool", () => {
+		const permissions = mcpToolPermissions([
+			{
+				binding: { ...TRACKER, permissions: { default: "always_allow" } },
+				tools: [
+					{ name: "search.items", description: "", inputSchema: {}, readOnly: true },
+					{ name: "close", description: "", inputSchema: {} },
+				],
+			},
+			{
+				binding: { name: "wiki", url: "https://mcp.wiki.example/mcp", credential_id: null },
+				tools: [
+					{ name: "read", description: "", inputSchema: {}, readOnly: true },
+					{ name: "edit", description: "", inputSchema: {} },
+				],
+			},
+			{
+				binding: { name: "down", url: "https://down.example/mcp", credential_id: null },
+				tools: null,
+			},
+		])
+		expect(Object.fromEntries(permissions)).toEqual({
+			mcp__tracker__search_items: { server: "tracker", tool: "search.items", ask: false },
+			mcp__tracker__close: { server: "tracker", tool: "close", ask: false },
+			mcp__wiki__read: { server: "wiki", tool: "read", ask: false },
+			mcp__wiki__edit: { server: "wiki", tool: "edit", ask: true },
+		})
+		expect(permissions.get("read")).toBeUndefined()
+	})
+})
+
 describe("the session's MCP store", () => {
 	it("remembers the bound servers and each one's tools", () => {
 		const mcp = store()
@@ -113,7 +171,13 @@ describe("the session's MCP store", () => {
 
 	it("names a call the model made to an MCP tool, keeping what the transcript recorded", () => {
 		const mcp = store()
-		mcp.began({ call_id: "call-1", server: "tracker", tool: "search.items", input: { q: "a" } })
+		mcp.began({
+			call_id: "call-1",
+			server: "tracker",
+			tool: "search.items",
+			input: { q: "a" },
+			permission: "allow",
+		})
 		mcp.ended("call-1", { content: [{ type: "text", text: "ledger copy" }], is_error: false })
 
 		expect(
@@ -132,6 +196,7 @@ describe("the session's MCP store", () => {
 				mcp_server_name: "tracker",
 				name: "search.items",
 				input: { q: "a" },
+				evaluated_permission: "allow",
 			},
 			{ ...result("call-1", "3 found"), type: "mcp_tool_result" },
 		])
@@ -141,11 +206,29 @@ describe("the session's MCP store", () => {
 		const mcp = store()
 		expect(parentCallId("call-1/c2")).toBe("call-1")
 		expect(parentCallId("call-1")).toBeNull()
-		mcp.began({ call_id: "call-1/c1", server: "tracker", tool: "echo", input: { text: "a" } })
+		mcp.began({
+			call_id: "call-1/c1",
+			server: "tracker",
+			tool: "echo",
+			input: { text: "a" },
+			permission: "allow",
+		})
 		mcp.ended("call-1/c1", { content: [{ type: "text", text: "echo:a" }], is_error: false })
-		mcp.began({ call_id: "call-1/c2", server: "tracker", tool: "echo", input: { text: "b" } })
+		mcp.began({
+			call_id: "call-1/c2",
+			server: "tracker",
+			tool: "echo",
+			input: { text: "b" },
+			permission: "allow",
+		})
 		// A rerun of the script reattaches to the call it already made.
-		mcp.began({ call_id: "call-1/c1", server: "tracker", tool: "echo", input: { text: "a" } })
+		mcp.began({
+			call_id: "call-1/c1",
+			server: "tracker",
+			tool: "echo",
+			input: { text: "a" },
+			permission: "allow",
+		})
 
 		const merged = withMcpCalls(mcp, [use("call-1", "codemode"), result("call-1", "done")])
 		expect(merged.map((event) => [event.type, event.tool_use_id])).toEqual([
@@ -173,6 +256,7 @@ describe("the session's MCP store", () => {
 			server: "tracker",
 			tool: "echo",
 			input: { text: "a".repeat(20_000) },
+			permission: "allow",
 		})
 		mcp.ended("x/c1", { content: [{ type: "text", text: "b".repeat(20_000) }], is_error: false })
 		const [, call, answer] = withMcpCalls(mcp, [use("x", "codemode")])
@@ -289,7 +373,16 @@ describe("an MCP server's tools as a Pi extension", () => {
 			isError: false,
 		})
 		expect(seen).toEqual([
-			["began", { call_id: "call-9", server: "tracker", tool: "echo", input: { text: "hi" } }],
+			[
+				"began",
+				{
+					call_id: "call-9",
+					server: "tracker",
+					tool: "echo",
+					input: { text: "hi" },
+					permission: "allow",
+				},
+			],
 			["call", "echo", { text: "hi" }],
 			[
 				"ended",
@@ -433,11 +526,12 @@ describe("a connection's MCP client", () => {
 			makeConnectionProxy(() => ({ url: open.url, token: null })),
 		)
 		const listed = await client.listTools()
-		expect(listed.ok && listed.tools.map((tool) => tool.name)).toEqual([
-			"echo",
-			"add",
-			"picture",
-			"leak",
+		expect(listed.ok && listed.tools.map((tool) => [tool.name, tool.readOnly])).toEqual([
+			["echo", true],
+			["add", true],
+			["picture", true],
+			["leak", undefined],
+			["post", undefined],
 		])
 		expect(listed.ok && listed.tools[1]?.outputSchema).toMatchObject({ type: "object" })
 		expect(await client.callTool("add", { a: 2, b: 3 })).toMatchObject({

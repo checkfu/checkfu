@@ -11,19 +11,24 @@ import type { McpUpstream } from "../Connection/McpUpstream.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
+import { PiApprovalStore, TOOL_DECISION_KEY, ToolDecision, makeToolGate } from "./PiApprovals.ts"
+import type { ToolDecisionValue, ToolGate } from "./PiApprovals.ts"
 import { codemodeSandboxes, loadToolSurface, withScriptDeadline } from "./PiCodemode.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
-import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
-import { fencedMcpCall, mcpExtension } from "./PiMcp.ts"
+import { fencedMcpCall, mcpExtension, mcpToolPermissions } from "./PiMcp.ts"
 import { PiMcpStore } from "./PiMcpStore.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import { makePiTurns } from "./PiTurns.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
 // One server cannot crowd out the rest of a conversation's tools.
 const MAX_MCP_SERVER_TOOLS = 512
+
+// Until Pi is open there is no call an answer could reach.
+const NOT_OPEN: Parameters<typeof makeToolGate>[0]["signal"] = () => Promise.resolve("not_found")
 
 type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
 
@@ -43,10 +48,20 @@ export const makePiHarnessBackend = (
 	reset: () => void,
 	enterWorkspace: (turn: number) => Promise<boolean>,
 	mcp?: Pick<PiMcpStore, "served">,
+	gate?: Pick<ToolGate, "settleOrPause">,
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
+
+	const wait: PiDurableBackend["wait"] = async (operationId, signal) => {
+		const result = await harness.wait(operationId, signal === undefined ? {} : { signal })
+		return result.status === "done"
+			? { status: "done" }
+			: result.reason === undefined
+				? { status: "unanswered" }
+				: { status: "unanswered", reason: result.reason }
+	}
 
 	return {
 		withLock,
@@ -68,14 +83,11 @@ export const makePiHarnessBackend = (
 		submit: async (text, operationId) => {
 			await harness.submit(text, { operationId, whenBusy: "followUp", onAbort: "keep" })
 		},
-		wait: async (operationId, signal) => {
-			const result = await harness.wait(operationId, signal === undefined ? {} : { signal })
-			return result.status === "done"
-				? { status: "done" }
-				: result.reason === undefined
-					? { status: "unanswered" }
-					: { status: "unanswered", reason: result.reason }
-		},
+		wait,
+		settleOrPause: (operationId, signal) =>
+			gate === undefined
+				? wait(operationId, signal)
+				: gate.settleOrPause((stop) => wait(operationId, stop), signal),
 		abort: (operationId) =>
 			// Once the durable cancellation fence is written, keep both permit
 			// acquisition and `harness.abort` uninterruptible so an interrupted
@@ -100,6 +112,14 @@ export interface PiSessionShape {
 	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
 	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnOutcome>
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
+	readonly resumeTurn: (
+		operationId: string,
+		decisions: ReadonlyArray<ToolDecisionValue>,
+	) => Effect.Effect<PiTurnOutcome | null>
+	// A Durable Object RPC method: the stub calls it, so it cannot be a plain Effect value.
+	// oxlint-disable-next-line effecttsgo/lazy-effect
+	readonly waitingCalls: () => Effect.Effect<ReadonlyArray<string>>
+	readonly cancelWaiting: (operationId: string) => Effect.Effect<void>
 }
 
 export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShape>()("PiSession") {}
@@ -184,10 +204,25 @@ export const PiSessionLive = PiSession.make(
 					})
 					return created
 				}
+				const approvals = new PiApprovalStore(sql)
+				let permissions = mcpToolPermissions([])
+				let signalTool = NOT_OPEN
+				const gate = makeToolGate({
+					store: approvals,
+					permission: (toolName) => permissions.get(toolName),
+					ledger: {
+						began: (call) => mcp.began(call),
+						ended: (callId, result) => mcp.ended(callId, result),
+					},
+					signal: (taskId, value) => signalTool(taskId, value),
+				})
 				let registry: Registry | undefined
 				// Installing a name that is installed replaces it, so this also refreshes.
 				const installTools = async (into: Registry) => {
+					const servers = mcp.servers()
+					permissions = mcpToolPermissions(servers)
 					const extensions = withToolSurface(sandbox, [
+						gate.extension,
 						workspaceExtension(workspaceTools, (call, signal) =>
 							Effect.runPromise(
 								// The turn this call belongs to is the one admitted when it starts.
@@ -195,7 +230,7 @@ export const PiSessionLive = PiSession.make(
 								signal === undefined ? undefined : { signal },
 							),
 						),
-						...mcp.servers().map((server) =>
+						...servers.map((server) =>
 							mcpExtension(server, {
 								call: fencedMcpCall(
 									() => Effect.runPromise(workspace().enter({ turn: admittedTurn() })),
@@ -215,7 +250,7 @@ export const PiSessionLive = PiSession.make(
 				 * per conversation, so what the model is offered does not shift under
 				 * it; a server that could not be reached is asked again next turn.
 				 */
-				const useMcpServers = async (servers: ReadonlyArray<McpServerBinding>) => {
+				const bindMcpServers = async (servers: ReadonlyArray<McpServerBinding>) => {
 					let changed = mcp.bind(servers)
 					for (const { binding, tools } of mcp.servers()) {
 						if (tools !== null) {
@@ -255,6 +290,10 @@ export const PiSessionLive = PiSession.make(
 				})
 				const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
 				const fence = new SqliteTurnFence(sql)
+				signalTool = async (taskId, value) => {
+					await lifecycle.start()
+					return harness.signal(taskId, ToolDecision, TOOL_DECISION_KEY, value)
+				}
 				const backend = makePiHarnessBackend(
 					harness,
 					fence,
@@ -270,28 +309,30 @@ export const PiSessionLive = PiSession.make(
 						return entered
 					},
 					mcp,
+					gate,
 				)
+				const turns = makePiTurns({
+					backend,
+					approvals,
+					gate,
+					prepare: (request) => bindMcpServers(request.mcp_servers ?? []),
+					// A turn Pi has not seen yet starts after the last one's calls were published.
+					begin: () => mcp.forgetCalls(),
+				})
 
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
-					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
-					runTurn: (request) =>
-						Effect.gen(function* () {
-							yield* Effect.promise(async () => {
-								await useMcpServers(request.mcp_servers ?? [])
-								// A turn Pi has not seen yet starts after the last one's calls were published.
-								const pi = await harness.pi()
-								const known = await pi.commit(
-									(tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, request.operationId),
-									BACKGROUND_CONTEXT,
-								)
-								if (known === undefined) {
-									mcp.forgetCalls()
-								}
-							})
-							return yield* runPiDurableTurn(backend, request)
-						}),
-					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
+					recoverTurn: (operationId: string): Effect.Effect<PiTurnOutcome | null> =>
+						turns.recoverTurn(operationId),
+					runTurn: (request: PiTurnRequest): Effect.Effect<PiTurnOutcome> => turns.runTurn(request),
+					resumeTurn: (
+						operationId: string,
+						decisions: ReadonlyArray<ToolDecisionValue>,
+					): Effect.Effect<PiTurnOutcome | null> => turns.resumeTurn(operationId, decisions),
+					abortTurn: (operationId: string): Effect.Effect<boolean> => turns.abortTurn(operationId),
+					waitingCalls: (): Effect.Effect<ReadonlyArray<string>> => turns.waitingCalls(),
+					cancelWaiting: (operationId: string): Effect.Effect<void> =>
+						turns.cancelWaiting(operationId),
 				}
 			}),
 	),
