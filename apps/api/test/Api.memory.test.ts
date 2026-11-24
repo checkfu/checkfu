@@ -266,6 +266,14 @@ describe("Memory stores", () => {
 				expect((yield* create("/notes-archive"))[0]).toBe(201)
 				expect((yield* create("/team/plan/q3.md.bak"))[0]).toBe(201)
 				expect((yield* create("/team/plans"))[0]).toBe(201)
+
+				// A deleted store's index outlives it, but none of its old paths answer for it.
+				expect((yield* request(apiFetch, "DELETE", `/v1/memory_stores/${store.id}`)).status).toBe(
+					200,
+				)
+				const [status, message] = yield* create("/notes/after-delete.md")
+				expect(status).toBe(404)
+				expect(message).not.toContain("/notes")
 			}),
 		))
 

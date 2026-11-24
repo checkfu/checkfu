@@ -204,6 +204,8 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 			.handle("createMemory", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const storeId = params.memory_store_id
+					// The index outlives its store: a deleted store's old paths must not answer for it.
+					yield* storeMissing(storeId)
 					const memoryId = MemoryId.make(yield* memoryIdOf(digest, storeId, payload.path))
 					// A store is mounted as files, where one path cannot be both a file and a
 					// directory. The index is read, not locked: two writers at the same instant can
