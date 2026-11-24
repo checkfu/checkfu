@@ -827,7 +827,7 @@ describe("Memory stores in a session", () => {
 						"memoryChanges",
 						"memoryContents",
 						"memorySaved",
-					].map((call) => `${call} ${session.id} 0:1`),
+					].map((call) => `${call} ${session.id} 1`),
 				)
 			}),
 		))
