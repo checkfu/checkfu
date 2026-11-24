@@ -2898,7 +2898,7 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("starts `bun checkfu` with .env loading off, refuses anything extra, and stops when its runner dies", async () => {
+	it("starts `bun checkfu` with .env loading off, refuses anything extra, and stops on a forwarded SIGTERM", async () => {
 		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 		const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
 			readonly scripts?: Record<string, string>
@@ -2936,8 +2936,9 @@ describe("CLI sessions:events and sessions connect", () => {
 			expect(refused.stderr).toContain("--no-env-file")
 		}
 
-		// Killing `bun checkfu`'s PID kills Bun's script runner. The CLI must notice and stop,
-		// closing the caller's output and the stream connection.
+		// `bun checkfu`'s PID is Bun's script runner, which passes SIGTERM on to the CLI. The
+		// CLI must stop, closing the caller's output and the stream connection. SIGKILL cannot
+		// be passed on; the README says to kill the process group, or to use the binary.
 		let streamClosed = false
 		const server = Http.createServer((req, res) => {
 			res.writeHead(200, {
@@ -2982,14 +2983,14 @@ describe("CLI sessions:events and sessions connect", () => {
 				let killed = false
 				const timer = setTimeout(() => {
 					child.kill("SIGKILL")
-					reject(new Error(`stream did not stop after its PID was killed: ${stdout}`))
+					reject(new Error(`stream did not stop after SIGTERM to its PID: ${stdout}`))
 				}, 15_000)
 				child.stdout.setEncoding("utf8")
 				child.stdout.on("data", (chunk: string) => {
 					stdout += chunk
 					if (!killed && stdout.includes("session.status_running")) {
 						killed = true
-						child.kill("SIGKILL")
+						child.kill("SIGTERM")
 					}
 				})
 				child.stdout.on("end", () => {
@@ -3001,7 +3002,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					resolve({ stdoutEnded, signal })
 				})
 			})
-			expect(outcome.signal).toBe("SIGKILL")
 			expect(outcome.stdoutEnded).toBe(true)
 			for (let waited = 0; waited < 3000 && !streamClosed; waited += 50) {
 				await new Promise<void>((resolve) => {

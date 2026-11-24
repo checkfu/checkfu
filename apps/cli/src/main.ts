@@ -73,21 +73,6 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 
 	process.on("SIGINT", onSigint)
 	process.on("SIGTERM", onSigterm)
-
-	// `bun checkfu` runs this as a child of Bun's script runner. If the runner is killed,
-	// this process is handed to another parent; stop then, as the old launcher did when
-	// its IPC channel closed, so a long-lived stream does not outlive the command.
-	if (process.env["npm_lifecycle_event"] === "checkfu") {
-		const runner = process.ppid
-		const watch = setInterval(() => {
-			if (process.ppid !== runner) {
-				exitSignalCode ??= 129
-				fiber.interruptUnsafe(fiber.id)
-			}
-		}, 200)
-		watch.unref()
-		fiber.addObserver(() => clearInterval(watch))
-	}
 })
 
 runMain(runCli().pipe(Effect.provide(MainLive)), {
