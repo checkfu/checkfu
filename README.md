@@ -4,7 +4,7 @@ Managed agents on Cloudflare, built on Pi Durable, Alchemy, and Effect.
 
 ## Deploy your own
 
-You need [Bun](https://bun.sh) 1.4+, Node.js, a Cloudflare account, and an Anthropic or OpenAI API key. The Workers Paid plan is the safe choice: the free plan allows 10 ms of CPU per request, which an agent turn can exceed.
+You need [Bun](https://bun.sh) 1.4+, Node.js 22.18+, a Cloudflare account, and an Anthropic or OpenAI API key. The Workers Paid plan is the safe choice: the free plan allows 10 ms of CPU per request, which an agent turn can exceed.
 
 ```sh
 git clone https://github.com/checkfu/checkfu && cd checkfu
