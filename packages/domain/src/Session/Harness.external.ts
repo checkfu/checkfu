@@ -54,7 +54,6 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			agent_version: PositiveInt,
 			environment_id: ResourceId,
 			turn: PositiveInt,
-			generation: NonNegativeInt,
 			input: Schema.Array(MessageText),
 			// The last turn whose reply the session published; the model must not keep a later one's.
 			// Absent for a turn started before it was recorded, and then nothing is dropped.
@@ -74,7 +73,6 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 		args: {
 			session_id: SessionId,
 			turn: PositiveInt,
-			generation: NonNegativeInt,
 		},
 		error: HarnessUnavailable,
 	},
@@ -156,14 +154,12 @@ export const boundedHarness = <R = never>(
 				readonly agent_version: number
 				readonly environment_id: string
 				readonly turn: number
-				readonly generation: number
 				readonly input: ReadonlyArray<string>
 				readonly last_reply_turn?: number
 			}) => Effect.Effect<HarnessReply, TurnFailed | TurnInterrupted | HarnessUnavailable>
 			readonly interrupt: (args: {
 				readonly session_id: SessionId
 				readonly turn: number
-				readonly generation: number
 			}) => Effect.Effect<void, HarnessUnavailable>
 		},
 		never,

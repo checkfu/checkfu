@@ -2216,7 +2216,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusRunning({ turn: 1, generation: 0 }),
+				event: new SessionStatusRunning({ turn: 1 }),
 				expectedJson: {
 					id: "evt_3",
 					seq: 3,
@@ -2302,7 +2302,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				expectedJson: {
 					id: "evt_10",
 					seq: 10,

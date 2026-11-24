@@ -33,7 +33,7 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 				}),
 			),
 			session.record(new UserMessage({ content: [{ type: "text", text: cmd.text }] })),
-			session.record(new SessionStatusRunning({ turn: 1, generation: 0 })),
+			session.record(new SessionStatusRunning({ turn: 1 })),
 		]
 	},
 	transitions: {
@@ -47,7 +47,6 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 		AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued: ({ after, events }) =>
 			after.session._tag === "Running" &&
 			after.session.turn === 1 &&
-			after.session.generation === 0 &&
 			after.session.pending_user_messages === 0 &&
 			events.length === 3,
 		AnAutomationSessionPinsAVersionWithinTheAgentHead: ({ before, command }) =>

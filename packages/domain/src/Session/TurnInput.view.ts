@@ -13,7 +13,6 @@ export const TurnInputState = Schema.Struct({
 	agent_version: PositiveInt,
 	environment_id: ResourceId,
 	turn: NonNegativeInt,
-	harness_generation: NonNegativeInt,
 	input: Schema.Array(MessageText),
 	unsent: Schema.Array(MessageText),
 	// The last turn whose reply the session published. A later turn's reply never reached the
@@ -44,7 +43,6 @@ export class TurnInput extends Domain.View("TurnInput", {
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,
 						turn: 0,
-						harness_generation: 0,
 						input: [],
 						unsent: [],
 						last_reply_turn: 0,
@@ -65,13 +63,11 @@ export class TurnInput extends Domain.View("TurnInput", {
 				: {
 						...state,
 						turn: e.turn,
-						harness_generation: e.generation,
 						input: state.unsent,
 						unsent: [],
 					},
 		"agent.message": (state) => (state === null ? null : { ...state, last_reply_turn: state.turn }),
-		"session.status_idle": (state, e) =>
-			state === null ? null : { ...state, harness_generation: e.generation, input: [] },
+		"session.status_idle": (state) => (state === null ? null : { ...state, input: [] }),
 		"session.status_terminated": (state) =>
 			state === null ? null : { ...state, input: [], unsent: [] },
 	},

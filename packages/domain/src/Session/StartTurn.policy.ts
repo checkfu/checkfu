@@ -52,7 +52,6 @@ export const StartTurnLive = StartTurn.toLayer(
 				agent_version: state.agent_version,
 				environment_id: state.environment_id,
 				turn: state.turn,
-				generation: state.harness_generation,
 				input: state.input,
 				...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
 			})

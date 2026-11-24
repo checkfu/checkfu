@@ -252,17 +252,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					),
 				),
 			].every((ok) => ok),
-		TurnInputGenerationMatchesSession: (m) =>
-			m.Session.every((s) => {
-				const view = m.TurnInput.find((v) => v.id === s.id)
-				if (s.state._tag !== "Idle" && s.state._tag !== "Running") {
-					return true
-				}
-				if (view === undefined) {
-					return false
-				}
-				return view.state.harness_generation === s.state.generation
-			}),
 		EnvironmentViewConfigMatchesEnvironment: (m) =>
 			m.Environment.every((e) => {
 				const view = m.EnvironmentView.find((v) => v.id === e.id)

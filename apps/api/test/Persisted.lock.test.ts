@@ -206,7 +206,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							agent_version: 1,
 							environment_id: "env_1",
 							turn: 1,
-							generation: 0,
 							input: ["hi"],
 							__cause: {
 								correlationId: "corr_1",
@@ -252,10 +251,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				persistedShapes.filter((shape) => shape.id !== id),
 			)
 			expect(missing).toEqual([expect.stringContaining(`${id} shipped`)])
-			const changed = replacing(
-				id,
-				Schema.Struct({ ...AbandonTurn.fields, generation: Schema.Int }),
-			)
+			const changed = replacing(id, Schema.Struct({ ...AbandonTurn.fields, attempt: Schema.Int }))
 			const narrowed = yield* shipBlockers(lock, changed)
 			expect(narrowed).toEqual([expect.stringContaining(`${id} can no longer read`)])
 		}),
@@ -436,7 +432,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		"reads TurnInput state queued before last_reply_turn existed, and drops nothing for it",
 		() =>
 			Effect.gen(function* () {
-				const queued = yield* Schema.decodeEffect(TurnInputState)({
+				const queued = yield* Schema.decodeUnknownEffect(TurnInputState)({
 					agent_id: "agent_1",
 					agent_version: 1,
 					environment_id: "env_1",

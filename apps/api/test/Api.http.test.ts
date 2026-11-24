@@ -535,7 +535,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							agent_version: 1,
 							environment_id: "env_1",
 							turn: 5,
-							generation: 0,
 							input: [],
 						}),
 					)

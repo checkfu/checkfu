@@ -59,7 +59,6 @@ export interface ModelTurnInput {
 	readonly agent_version: number
 	readonly environment_id: string
 	readonly turn: number
-	readonly generation: number
 	readonly input: ReadonlyArray<string>
 }
 
@@ -70,7 +69,6 @@ export interface ModelHandler {
 	readonly interrupt?: (args: {
 		readonly session_id: SessionId
 		readonly turn: number
-		readonly generation: number
 	}) => Effect.Effect<void, HarnessUnavailable>
 }
 

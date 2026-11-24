@@ -91,7 +91,6 @@ const STANDING = {
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
 	"Session.OpenModelRequestRequiresStartedCount": "proved",
-	"Session.GenerationIsNonNegative": "proved",
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
@@ -102,15 +101,11 @@ const STANDING = {
 	"Session.PendingUserMessagesGrowsByAtMostOneWithinTurn": "proved",
 	"Session.OnlySendUserMessageAddsPendingMessages": "proved",
 	"Session.OnlyArchiveSessionSetsArchivedFlag": "proved",
-	"Session.GenerationNeverDecreases": "proved",
-	"Session.GenerationAdvancesByAtMostOne": "proved",
-	"Session.GenerationHoldsWithinTurn": "proved",
-	"Session.IdleSessionStartsTurnUnderItsGeneration": "proved",
-	"Session.StatusRunningCarriesStartedTurnAndGeneration": "proved",
-	"Session.StatusIdleCarriesEndedTurnAndNextGeneration": "proved",
-	"Session.AbandonedTurnRetiresItsGeneration": "proved",
-	"Session.TruncatedReplyRetiresGeneration": "proved",
-	"Session.OnlyAbandonmentOrTruncationRetiresGeneration": "proved",
+	"Session.IdleSessionStartsTheNextTurn": "proved",
+	"Session.StatusRunningCarriesStartedTurn": "proved",
+	"Session.StatusIdleCarriesEndedTurn": "proved",
+	"Session.AbandonedTurnEnds": "proved",
+	"Session.AgentMessageEndsTheTurn": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
 	"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": "proved",
 	"IdempotencyClaim.ClaimedFingerprintNeverChanges": "proved",
@@ -150,7 +145,6 @@ const STANDING = {
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
-	"Checkfu.TurnInputGenerationMatchesSession": "checked",
 	"Checkfu.AutomationViewsMatchAutomations": "checked",
 	"Checkfu.AutomationDirectoryListsLiveAutomations": "checked",
 	"Checkfu.AnIdempotencyKeyIsClaimed": "reached",
@@ -598,7 +592,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				EverySessionReferencesExistingAgentVersion: true,
 				EverySessionReferencesKnownEnvironment: true,
 				HostedViewsMatchAggregates: true,
-				TurnInputGenerationMatchesSession: true,
 				EnvironmentViewConfigMatchesEnvironment: true,
 				AutomationViewsMatchAutomations: true,
 				AutomationDirectoryListsLiveAutomations: true,
@@ -611,7 +604,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const completedSessionV1 = results.completedTurnWorld.Session.find(
 			(row) => row.id === "sess_post_v1",
 		)
-		expect(completedSessionV1?.state).toEqual({ _tag: "Idle", turn: 2, generation: 0 })
+		expect(completedSessionV1?.state).toEqual({ _tag: "Idle", turn: 2 })
 		expect(
 			completedSessionV1?.events.filter((event) => event._tag === "session.status_running").length,
 		).toBe(2)
@@ -667,7 +660,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const runSession = automationWorld.Session.find(
 			(row) => row.id === `sess_${automationRef.id}_1`,
 		)
-		expect(runSession?.state).toEqual({ _tag: "Idle", turn: 1, generation: 0 })
+		expect(runSession?.state).toEqual({ _tag: "Idle", turn: 1 })
 		expect(runSession?.events.map((event) => event._tag).slice(0, 3)).toEqual([
 			"session.created",
 			"user.message",
@@ -751,7 +744,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesExistingAgentVersion: true,
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
-			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
@@ -767,7 +759,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesExistingAgentVersion: false,
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
-			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
@@ -809,7 +800,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesExistingAgentVersion: true,
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
-			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
@@ -823,7 +813,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesExistingAgentVersion: true,
 			EverySessionReferencesKnownEnvironment: false,
 			HostedViewsMatchAggregates: true,
-			TurnInputGenerationMatchesSession: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
@@ -842,25 +831,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EverySessionReferencesExistingAgentVersion: true,
 			EverySessionReferencesKnownEnvironment: true,
 			HostedViewsMatchAggregates: false,
-			TurnInputGenerationMatchesSession: true,
-			EnvironmentViewConfigMatchesEnvironment: true,
-			AutomationViewsMatchAutomations: true,
-			AutomationDirectoryListsLiveAutomations: true,
-		})
-		expect(
-			evaluateCheckfuInvariants({
-				...results.finalWorld,
-				TurnInput: results.finalWorld.TurnInput.map((row) =>
-					row.id === "sess_post_v2"
-						? { ...row, state: { ...row.state, harness_generation: 1 } }
-						: row,
-				),
-			}),
-		).toEqual({
-			EverySessionReferencesExistingAgentVersion: true,
-			EverySessionReferencesKnownEnvironment: true,
-			HostedViewsMatchAggregates: true,
-			TurnInputGenerationMatchesSession: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,

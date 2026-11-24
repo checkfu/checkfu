@@ -90,49 +90,25 @@
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Session.every((s) => {\n\t\t\t\t\tconst view = m.TurnInput.find((v) => v.id === s.id)\n\t\t\t\t\tconst sessionView = m.SessionView.find((v) => v.id === s.id)\n\t\t\t\t\tif (s.state._tag === \"Uninitialized\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined || sessionView === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\tconst common = [\n\t\t\t\t\t\tview.state.agent_id === sessionView.state.agent_id,\n\t\t\t\t\t\tview.state.agent_version === sessionView.state.agent_version,\n\t\t\t\t\t\tview.state.environment_id === sessionView.state.environment_id,\n\t\t\t\t\t\tview.state.turn === sessionView.state.turn,\n\t\t\t\t\t]\n\t\t\t\t\tif (s.state._tag === \"Idle\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...common,\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\tview.state.input.length === 0,\n\t\t\t\t\t\t\tview.state.unsent.length <= 8,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Running\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\t...common,\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\tview.state.input.length >= 1,\n\t\t\t\t\t\t\tview.state.unsent.length === s.state.pending_user_messages,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\treturn [...common, view.state.input.length === 0, view.state.unsent.length === 0].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t)\n\t\t\t\t}),\n\t\t\t\tm.TurnInput.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
 			},
-			"Session.GenerationIsNonNegative": {
-				"kind": "invariant",
-				"source": "(s) =>\n\t\t\t(s._tag !== \"Idle\" && s._tag !== \"Running\") || s.generation >= 0"
-			},
-			"Session.GenerationNeverDecreases": {
+			"Session.IdleSessionStartsTheNextTurn": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.generation >= before.generation"
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Idle\" || after._tag !== \"Running\" || after.turn === before.turn + 1"
 			},
-			"Session.GenerationAdvancesByAtMostOne": {
+			"Session.StatusRunningCarriesStartedTurn": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.generation <= before.generation + 1"
+				"source": "({ after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_running\" ||\n\t\t\t\t\t(after._tag === \"Running\" && event.turn === after.turn),\n\t\t\t)"
 			},
-			"Session.GenerationHoldsWithinTurn": {
+			"Session.StatusIdleCarriesEndedTurn": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.generation === before.generation"
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\")),\n\t\t\t)"
 			},
-			"Session.IdleSessionStartsTurnUnderItsGeneration": {
+			"Session.AbandonedTurnEnds": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Idle\" ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\t(after.turn === before.turn + 1 && after.generation === before.generation)"
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.abandoned\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
 			},
-			"Session.StatusRunningCarriesStartedTurnAndGeneration": {
+			"Session.AgentMessageEndsTheTurn": {
 				"kind": "transition",
-				"source": "({ after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_running\" ||\n\t\t\t\t\t(after._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === after.turn &&\n\t\t\t\t\t\tevent.generation === after.generation),\n\t\t\t)"
-			},
-			"Session.StatusIdleCarriesEndedTurnAndNextGeneration": {
-				"kind": "transition",
-				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\") &&\n\t\t\t\t\t\tevent.generation === after.generation),\n\t\t\t)"
-			},
-			"Session.AbandonedTurnRetiresItsGeneration": {
-				"kind": "transition",
-				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.abandoned\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tevent.turn === before.turn &&\n\t\t\t\t\t\tevent.generation === before.generation &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\") &&\n\t\t\t\t\t\tafter.generation === before.generation + 1),\n\t\t\t)"
-			},
-			"Session.TruncatedReplyRetiresGeneration": {
-				"kind": "transition",
-				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\tevent.truncated !== true ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" || after._tag === \"Running\") &&\n\t\t\t\t\t\tafter.generation === before.generation + 1),\n\t\t\t)"
-			},
-			"Session.OnlyAbandonmentOrTruncationRetiresGeneration": {
-				"kind": "transition",
-				"source": "({ before, after, events }) =>\n\t\t\t(before._tag !== \"Idle\" && before._tag !== \"Running\") ||\n\t\t\t(after._tag !== \"Idle\" && after._tag !== \"Running\") ||\n\t\t\tafter.generation === before.generation ||\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"turn.abandoned\" ||\n\t\t\t\t\t(event._tag === \"agent.message\" && event.truncated === true),\n\t\t\t)"
-			},
-			"Sessions.TurnInputGenerationMatchesSession": {
-				"kind": "model invariant",
-				"source": "(m) =>\n\t\t\tm.Session.every((s) => {\n\t\t\t\tconst view = m.TurnInput.find((v) => v.id === s.id)\n\t\t\t\tif (s.state._tag !== \"Idle\" && s.state._tag !== \"Running\") {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\treturn view.state.harness_generation === s.state.generation\n\t\t\t})"
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
 			}
 		}
 	}

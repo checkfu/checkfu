@@ -180,7 +180,7 @@ const opened = (run: number, agent_version: number) => [
 			title: config.name,
 		}),
 		new UserMessage({ content: [{ type: "text", text: config.text }] }),
-		new SessionStatusRunning({ turn: 1, generation: 0 }),
+		new SessionStatusRunning({ turn: 1 }),
 		new SpanModelRequestStart({ model_request_start_id: `${sessionOf(run).id}:turn:1:req:1` }),
 	),
 	Story.call(Harness.runTurn, {
@@ -205,7 +205,7 @@ const opened = (run: number, agent_version: number) => [
 			model_usage: { input_tokens: 10, output_tokens: 5 },
 			is_error: false,
 		}),
-		new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+		new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 	),
 ]
 

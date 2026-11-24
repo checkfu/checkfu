@@ -277,7 +277,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							agent_version,
 							environment_id: "env_1",
 							turn: number,
-							generation: 0,
 							input: [text],
 							last_reply_turn,
 						})
@@ -383,7 +382,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						agent_version: 1,
 						environment_id: env.id,
 						turn: 1,
-						generation: 0,
 						input: ["New question"],
 					})
 					expect(reply.text).toBe("Seeded reply")

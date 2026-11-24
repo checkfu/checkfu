@@ -122,7 +122,6 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 							agent_version: 1,
 							environment_id: env.id,
 							turn: 1,
-							generation: 0,
 							input: ["Hi"],
 						}),
 					)
@@ -136,7 +135,6 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 							agent_version: 1,
 							environment_id: "env_1",
 							turn: 1,
-							generation: 0,
 							input: ["Hi"],
 						}),
 					)

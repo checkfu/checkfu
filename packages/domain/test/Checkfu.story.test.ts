@@ -392,7 +392,6 @@ describe("Checkfu unified hosted model stories", () => {
 					agent_version: 2,
 					environment_id: env.id,
 					turn: 0,
-					harness_generation: 0,
 					input: [],
 					unsent: [],
 				}),
@@ -430,7 +429,7 @@ describe("Checkfu unified hosted model stories", () => {
 				Story.then(
 					sessionV1,
 					new UserMessage({ content: [{ type: "text", text: "Hello Checkfu" }] }),
-					new SessionStatusRunning({ turn: 1, generation: 0 }),
+					new SessionStatusRunning({ turn: 1 }),
 				),
 				Story.then(sessionV1, new SpanModelRequestStart({ model_request_start_id: reqId })),
 				Story.call(Harness.runTurn, {
@@ -455,7 +454,7 @@ describe("Checkfu unified hosted model stories", () => {
 						model_usage: { input_tokens: 10, output_tokens: 5 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, generation: 0 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				),
 				Story.saga(RunTurn, turnKey(sessionV1.id, 1), {
 					_tag: "Completed",

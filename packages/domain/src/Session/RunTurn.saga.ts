@@ -35,7 +35,6 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		agent_version: PositiveInt,
 		environment_id: ResourceId,
 		turn: PositiveInt,
-		generation: NonNegativeInt,
 		input: Schema.Array(MessageText),
 		last_reply_turn: Schema.optionalKey(NonNegativeInt),
 	},
@@ -91,7 +90,6 @@ export const RunTurnLive = RunTurn.toLayer(
 						agent_version: payload.agent_version,
 						environment_id: payload.environment_id,
 						turn: payload.turn,
-						generation: payload.generation,
 						input: payload.input,
 						...(payload.last_reply_turn === undefined
 							? {}
