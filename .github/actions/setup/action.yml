@@ -1,0 +1,35 @@
+name: Set up
+description: Install Bun, Node and dependencies, and restore the turbo cache for one job.
+
+inputs:
+  cache:
+    description: The turbo cache this job reads, and saves on main.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - id: bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: package.json
+
+    - id: node
+      uses: actions/setup-node@v5
+      with:
+        node-version: 24
+
+    - uses: actions/cache@v4
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+        restore-keys: bun-${{ runner.os }}-
+
+    - run: bun install --frozen-lockfile
+      shell: bash
+
+    - uses: actions/cache@v4
+      with:
+        path: .turbo/cache
+        key: turbo-${{ inputs.cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-${{ github.sha }}
+        restore-keys: turbo-${{ inputs.cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-

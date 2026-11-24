@@ -12,47 +12,89 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  TURBO_CACHE_DIR: .turbo/cache
+  TURBO_TELEMETRY_DISABLED: 1
+
+# The jobs together run exactly what `bun run check`, `test:bun` and `test:workerd` run:
+# the two test jobs split the workspace with `--filter=@checkfu/domain` and its negation.
 jobs:
-  check:
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      TURBO_CACHE_DIR: .turbo/cache
-      TURBO_TELEMETRY_DISABLED: 1
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-
-      - id: bun
-        uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/setup
         with:
-          bun-version-file: package.json
+          cache: static
+      # Each check runs even when one before it fails, so a run lists every failure.
+      - run: bun run generate:check
+      - if: ${{ !cancelled() }}
+        run: bun run format:check
+      - if: ${{ !cancelled() }}
+        run: bun run lint
+      - if: ${{ !cancelled() }}
+        name: Fail if a check changed any tracked file
+        run: git diff --exit-code
 
-      - id: node
-        uses: actions/setup-node@v5
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v5
         with:
-          node-version: 24
-
-      - uses: actions/cache@v4
+          persist-credentials: false
+      - uses: ./.github/actions/setup
         with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
+          cache: typecheck
+      - run: bun run typecheck
 
-      - run: bun install --frozen-lockfile
-
-      - uses: actions/cache@v4
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
         with:
-          path: .turbo/cache
-          key: turbo-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-${{ github.sha }}
-          restore-keys: turbo-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: test
+      - run: bun x turbo run test --filter='!@checkfu/domain'
+      - if: ${{ !cancelled() }}
+        run: bun run test:bun
+      - if: ${{ !cancelled() }}
+        name: Fail if a test changed any tracked file
+        run: git diff --exit-code
 
-      - run: bun run check
+  # The Z3 proofs in packages/domain take minutes, so they get a runner of their own.
+  domain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: domain
+      - run: bun x turbo run test --filter=@checkfu/domain
+      - if: ${{ !cancelled() }}
+        name: Fail if a test changed any tracked file
+        run: git diff --exit-code
 
-      - run: bun run test:bun
-
+  workerd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: workerd
       - run: bun run test:workerd
-
-      - name: Fail if the check changed any tracked file
+      - if: ${{ !cancelled() }}
+        name: Fail if a test changed any tracked file
         run: git diff --exit-code
