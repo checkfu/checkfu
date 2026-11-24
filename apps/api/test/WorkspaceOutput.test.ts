@@ -3,7 +3,10 @@ import type { TranscriptContext } from "@earendil-works/pi-ai"
 import * as Effect from "effect/Effect"
 import { runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
+import { grepWithin, readLongLine } from "../src/Workspace/WorkspacePaging.ts"
+import type { PagingFiles } from "../src/Workspace/WorkspacePaging.ts"
 import {
+	READ_PAGE_BYTES,
 	WORKSPACE_TOOL_OPTIONS,
 	boundWorkspaceResult,
 	workspaceExtension,
@@ -143,5 +146,141 @@ describe("workspace tool output", () => {
 		for (const tool of tools ?? []) {
 			expect([tool.name, tool.outputLimits]).toEqual([tool.name, workspaceOutputLimits(tool.name)])
 		}
+	})
+
+	it("keeps a change a success when its result is too large to return", () => {
+		const big = "x".repeat(200_000)
+		const edited = boundWorkspaceResult("edit", {
+			content: [
+				{
+					type: "text",
+					text: JSON.stringify({ path: "/workspace/a", editsApplied: 2, diff: big, patch: big }),
+				},
+			],
+			isError: false,
+		})
+		expect(edited.isError).toBe(false)
+		const kept = JSON.parse(textOf(edited)) as {
+			readonly path?: string
+			readonly editsApplied?: number
+			readonly diff?: string
+			readonly note?: string
+		}
+		expect(kept).toMatchObject({ path: "/workspace/a", editsApplied: 2 })
+		expect(kept).not.toHaveProperty("diff")
+		expect(kept.note).toContain("diff, patch")
+
+		const committed = boundWorkspaceResult("git", {
+			content: [{ type: "text", text: `[main 1a2b3c] Big\n${big}` }],
+			isError: false,
+		})
+		expect(committed.isError).toBe(false)
+		expect(textOf(committed).startsWith("[main 1a2b3c] Big")).toBe(true)
+		expect(textOf(committed)).toContain("more bytes of its output are not shown")
+		expect(new TextEncoder().encode(textOf(committed)).byteLength).toBeLessThanOrEqual(
+			workspaceOutputLimits("git").maxBytes,
+		)
+	})
+
+	it("collects grep matches a batch at a time and ends a page at its byte budget", async () => {
+		const line = "match ".repeat(20_000)
+		const asked: Array<number> = []
+		const files: PagingFiles = {
+			grep: (_query, path, options) => {
+				asked.push(options.limit)
+				const total = 300
+				const from = options.offset
+				const to = Math.min(total, from + options.limit)
+				return Promise.resolve(
+					Array.from({ length: Math.max(0, to - from) }, (_, index) => ({
+						path: `${path}/file.min.js`,
+						line: from + index + 1,
+						text: line,
+						context: [{ line: from + index, text: line, isMatch: false }],
+					})),
+				)
+			},
+			stat: () => Promise.reject(new Error("not used")),
+			readFile: () => Promise.reject(new Error("not used")),
+		}
+		const { maxBytes } = workspaceOutputLimits("grep")
+		const page = await grepWithin(files, { query: "match", context: 1 }, maxBytes)
+		expect(page.isError).toBe(false)
+		expect(new TextEncoder().encode(textOf(page)).byteLength).toBeLessThanOrEqual(maxBytes)
+		const parsed = JSON.parse(textOf(page)) as { count: number; nextOffset?: number; note?: string }
+		expect(parsed.count).toBeGreaterThan(0)
+		expect(parsed.nextOffset).toBe(parsed.count)
+		expect(parsed.note).toContain("nextOffset")
+		expect(Math.max(...asked)).toBeLessThanOrEqual(20)
+
+		const short: PagingFiles = {
+			...files,
+			grep: (_query, path, options) =>
+				Promise.resolve(
+					Array.from(
+						{ length: Math.max(0, Math.min(250, options.offset + options.limit) - options.offset) },
+						(_, index) => ({
+							path,
+							line: options.offset + index + 1,
+							text: "match",
+						}),
+					),
+				),
+		}
+		const first = JSON.parse(textOf(await grepWithin(short, { query: "match" }, maxBytes))) as {
+			count: number
+			nextOffset?: number
+		}
+		expect(first).toMatchObject({ count: 200, nextOffset: 200 })
+		const last = JSON.parse(
+			textOf(await grepWithin(short, { query: "match", offset: 200 }, maxBytes)),
+		) as { count: number; nextOffset?: number }
+		expect(last.count).toBe(50)
+		expect(last).not.toHaveProperty("nextOffset")
+	})
+
+	it("reads a line longer than a page in byte slices that join back into the line", async () => {
+		const line = `${'{"k":"välue"},'.repeat(12_000)}`
+		const bytes = new TextEncoder().encode(`short first line\n${line}\nlast\n`)
+		const fs = oneFile("/workspace/data.min.json", bytes)
+		const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
+		const { execute } = createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } })
+		const files: PagingFiles = { ...fs, grep: () => Promise.reject(new Error("not used")) }
+		interface ReadPosition {
+			readonly offset?: number
+			readonly byteOffset?: number
+			readonly limit: number
+		}
+		const read = async (args: ReadPosition) => {
+			const result = await execute(
+				{ id: "call", name: "read", arguments: { path: "/workspace/data.min.json", ...args } },
+				{},
+			)
+			const text = textOf(result)
+			if (!result.isError) {
+				return text
+			}
+			const page = await readLongLine(
+				files,
+				{ path: "/workspace/data.min.json", ...args },
+				READ_PAGE_BYTES,
+			)
+			return page === undefined ? text : textOf(page)
+		}
+		let joined = ""
+		let next: ReadPosition = { offset: 2, limit: 1 }
+		for (let pages = 0; pages < 20; pages += 1) {
+			const page = JSON.parse(await read(next)) as {
+				content: string
+				nextOffset?: number
+				nextByteOffset?: number
+			}
+			joined += page.content
+			if (page.nextByteOffset === undefined || joined.length >= line.length) {
+				break
+			}
+			next = { offset: page.nextOffset ?? 2, byteOffset: page.nextByteOffset, limit: 1 }
+		}
+		expect(joined.startsWith(line)).toBe(true)
 	})
 })

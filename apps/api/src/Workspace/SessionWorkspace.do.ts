@@ -3,7 +3,13 @@ import * as Effect from "effect/Effect"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
-import { WORKSPACE_TOOL_OPTIONS, boundWorkspaceResult } from "./WorkspaceTools.ts"
+import { grepWithin, readLongLine } from "./WorkspacePaging.ts"
+import {
+	READ_PAGE_BYTES,
+	WORKSPACE_TOOL_OPTIONS,
+	boundWorkspaceResult,
+	workspaceOutputLimits,
+} from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 
 const DISCARDED = "discarded"
@@ -60,7 +66,18 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						}
 						const result = await fence.run(token, async () => {
 							await initialize()
+							if (call.name === "grep") {
+								return grepWithin(fs, call.arguments, workspaceOutputLimits("grep").maxBytes)
+							}
 							const { content, isError } = await execute(call, { abortSignal })
+							if (isError && call.name === "read") {
+								const page = await readLongLine(fs, call.arguments, READ_PAGE_BYTES).catch(
+									() => undefined,
+								)
+								if (page !== undefined) {
+									return page
+								}
+							}
 							return boundWorkspaceResult(call.name, { content, isError })
 						})
 						return (
