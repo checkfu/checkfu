@@ -68,6 +68,13 @@ describe("schedule firings", () => {
 		).toEqual(["2026-03-08T07:15:00.000Z", "2026-03-09T06:15:00.000Z"])
 	})
 
+	it("returns no firings for a count that is not a positive whole number, without searching", () => {
+		for (const count of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect([count, upcomingOccurrences("0 9 * * *", "UTC", 0, count)]).toEqual([count, []])
+		}
+		expect(upcomingOccurrences("0 9 * * *", "UTC", 0, 2)).toHaveLength(2)
+	})
+
 	it("finds a sparse schedule's firings in the zone without a long search", () => {
 		const firings = upcomingOccurrences(
 			"59 23 29 2 */7",

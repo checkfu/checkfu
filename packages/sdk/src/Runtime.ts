@@ -362,10 +362,16 @@ export const resolveRequiredIdempotencyKey = (
 	runtime: EffectSdkRuntime,
 	options: AnyRequestOptions | undefined,
 ): Effect.Effect<ClientEventId, BadRequestError> =>
-	Effect.filterOrElse(
-		resolveCallIdempotencyKey(runtime, options, true),
+	Effect.filterOrFail(
+		resolveCallIdempotencyKey({ ...runtime, autoIdempotencyKey: false }, options, true),
 		(key): key is ClientEventId => key !== undefined,
-		() => Effect.flatMap(runtime.generateIdempotencyKey, decodeClientIdempotencyKey),
+		() =>
+			new BadRequestError({
+				status: 400,
+				errorType: "invalid_request_error",
+				message:
+					"This operation needs an idempotencyKey you keep: resending the request with the same key returns what the first request created.",
+			}),
 	)
 
 export const withResolvedIdempotencyKey = (

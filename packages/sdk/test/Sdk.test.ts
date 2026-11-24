@@ -2211,7 +2211,7 @@ describe("@checkfu/sdk", () => {
 				yield* Effect.gen(function* () {
 					const client = yield* CheckfuClient
 					const created = yield* client.waitForPending(
-						yield* client.automations.create(body),
+						yield* client.automations.create(body, { idempotencyKey: "effect-create" }),
 						pollOpts,
 					)
 					expect(created.id).toBe("auto_new")
@@ -2250,7 +2250,7 @@ describe("@checkfu/sdk", () => {
 					})
 					try {
 						const created = await promiseClient.waitForPending(
-							await promiseClient.automations.create(body),
+							await promiseClient.automations.create(body, { idempotencyKey: "promise-create" }),
 							pollOpts,
 						)
 						expect(created.id).toBe("auto_new")
@@ -2265,22 +2265,21 @@ describe("@checkfu/sdk", () => {
 					} finally {
 						await promiseClient.close()
 					}
-					const withoutAutoKeys = new Checkfu({
+					const unkeyed = new Checkfu({
 						apiKey: "ck_test_key",
 						baseUrl: "http://localhost:1337",
 						maxRetries: 0,
-						autoIdempotencyKey: false,
 						fetch: automationFetch,
 					})
 					try {
-						await withoutAutoKeys.automations.create(body)
-						await withoutAutoKeys.automations.create(body, { idempotencyKey: "mine" })
+						await expect(
+							// @ts-expect-error -- boundary: a JavaScript caller can leave out the key the type requires
+							unkeyed.automations.create(body),
+						).rejects.toMatchObject({ _tag: "BadRequestError" })
 					} finally {
-						await withoutAutoKeys.close()
+						await unkeyed.close()
 					}
-					expect(createKeys).toHaveLength(4)
-					expect(createKeys.every((key) => key !== null && key.length > 0)).toBe(true)
-					expect(createKeys.at(-1)).toBe("mine")
+					expect(createKeys).toEqual(["effect-create", "promise-create"])
 				})
 			}),
 		)

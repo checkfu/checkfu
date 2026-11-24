@@ -16,6 +16,9 @@ const firings = Option.liftThrowable(
 		count: number,
 	): ReadonlyArray<number> => {
 		const found: Array<number> = []
+		if (!Number.isSafeInteger(count) || count < 1) {
+			return found
+		}
 		const wallClockAfter =
 			after + DateTime.zonedOffset(DateTime.makeZonedUnsafe(after, { timeZone: zone }))
 		for (const wallClock of Cron.sequence(cron, wallClockAfter - LOOKBACK_MILLIS)) {

@@ -131,15 +131,18 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(missingEnvErr._tag).toBe("NotFoundError")
 
 							// Automation create, run on request, run list, archive
-							const automation = yield* client.automations.create({
-								name: "sdk-automation",
-								agent: agent.id,
-								environment_id: env.id,
-								initial_events: [
-									{ type: "user.message", content: [{ type: "text", text: "Report." }] },
-								],
-								schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
-							})
+							const automation = yield* client.automations.create(
+								{
+									name: "sdk-automation",
+									agent: agent.id,
+									environment_id: env.id,
+									initial_events: [
+										{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+									],
+									schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
+								},
+								{ idempotencyKey: "sdk-effect-create" },
+							)
 							if ("pending" in automation) {
 								return yield* Effect.die(new Error("automation create stayed pending"))
 							}
@@ -176,15 +179,18 @@ describe("@checkfu/sdk live API integration", () => {
 							)
 							expect(Array.from(pagedNewestFirst, (entry) => entry.run)).toEqual([3, 2, 1])
 							const tooFrequent = yield* Effect.flip(
-								client.automations.create({
-									name: "too-frequent",
-									agent: agent.id,
-									environment_id: env.id,
-									initial_events: [
-										{ type: "user.message", content: [{ type: "text", text: "Report." }] },
-									],
-									schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" },
-								}),
+								client.automations.create(
+									{
+										name: "too-frequent",
+										agent: agent.id,
+										environment_id: env.id,
+										initial_events: [
+											{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+										],
+										schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" },
+									},
+									{ idempotencyKey: "sdk-too-frequent" },
+								),
 							)
 							expect(tooFrequent._tag).toBe("BadRequestError")
 							const archivedAutomation = yield* client.automations.archive(automation.id)
@@ -360,15 +366,18 @@ describe("@checkfu/sdk live API integration", () => {
 
 								// Auto-paginated for-await over an automation's runs, with and without an order
 								const automation = await client.waitForPending(
-									await client.automations.create({
-										name: "promise-automation",
-										agent: agent.id,
-										environment_id: env.id,
-										initial_events: [
-											{ type: "user.message", content: [{ type: "text", text: "Report." }] },
-										],
-										schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
-									}),
+									await client.automations.create(
+										{
+											name: "promise-automation",
+											agent: agent.id,
+											environment_id: env.id,
+											initial_events: [
+												{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+											],
+											schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
+										},
+										{ idempotencyKey: "sdk-promise-create" },
+									),
 								)
 								for (const expected of [1, 2, 3]) {
 									expect((await client.automations.run(automation.id)).run).toBe(expected)

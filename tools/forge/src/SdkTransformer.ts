@@ -299,12 +299,13 @@ const generateResourcesFile = (
 					",",
 				)
 			}
+			const keyed = op.requiresIdempotencyKey ? " & { readonly idempotencyKey: string }" : ""
 			if (mode === "withResponse") {
-				out("options: ", WithResponseRequestOptions, ",")
+				out("options: ", WithResponseRequestOptions, keyed, ",")
 			} else if (mode === "default") {
-				out("options?: ", RequestOptions, ",")
+				out(op.requiresIdempotencyKey ? "options: " : "options?: ", RequestOptions, keyed, ",")
 			} else {
-				out("options?: ", AnyRequestOptions, ",")
+				out(op.requiresIdempotencyKey ? "options: " : "options?: ", AnyRequestOptions, keyed, ",")
 			}
 		}
 
@@ -770,7 +771,11 @@ const generateResourcesFile = (
 					">>,",
 				)
 			}
-			out("options?: ", PromiseRequestOptions, ",")
+			if (op.requiresIdempotencyKey) {
+				out("options: ", PromiseRequestOptions, " & { readonly idempotencyKey: string },")
+			} else {
+				out("options?: ", PromiseRequestOptions, ",")
+			}
 		})
 		out("): ", APIPromise, "<", EndpointJsonSuccess, "<", g, ", ", e, ">> {")
 		out.indent(() => {
@@ -787,7 +792,11 @@ const generateResourcesFile = (
 						out("body,")
 						out("query,")
 					}
-					out("{ ...effectOpts, withResponse: true },")
+					out(
+						op.requiresIdempotencyKey
+							? "{ ...effectOpts, idempotencyKey: options?.idempotencyKey, withResponse: true },"
+							: "{ ...effectOpts, withResponse: true },",
+					)
 				})
 				out("),")
 			})

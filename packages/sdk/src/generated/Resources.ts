@@ -486,15 +486,15 @@ export class EffectAutomationsResource {
 	/** Create an automation that opens a new session with its message every time its schedule fires */
 	create(
 		params: EndpointBody<"automations", "create">,
-		options: WithResponseRequestOptions,
+		options: WithResponseRequestOptions & { readonly idempotencyKey: string },
 	): Effect<WithResponse<EndpointSuccess<"automations", "create">>, CheckfuSdkError>
 	create(
 		params: EndpointBody<"automations", "create">,
-		options?: RequestOptions,
+		options: RequestOptions & { readonly idempotencyKey: string },
 	): Effect<EndpointSuccess<"automations", "create">, CheckfuSdkError>
 	create(
 		params: EndpointBody<"automations", "create">,
-		options?: AnyRequestOptions,
+		options: AnyRequestOptions & { readonly idempotencyKey: string },
 	): Effect<
 		| EndpointSuccess<"automations", "create">
 		| WithResponse<EndpointSuccess<"automations", "create">>,
@@ -1287,11 +1287,12 @@ export class AutomationsResource {
 	/** Create an automation that opens a new session with its message every time its schedule fires */
 	create(
 		params: EndpointBody<"automations", "create">,
-		options?: PromiseRequestOptions,
+		options: PromiseRequestOptions & { readonly idempotencyKey: string },
 	): APIPromise<EndpointJsonSuccess<"automations", "create">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).create(params, {
 				...effectOpts,
+				idempotencyKey: options?.idempotencyKey,
 				withResponse: true,
 			}),
 		)
