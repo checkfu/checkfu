@@ -1,6 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
-import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import type { Api, AssistantMessage, Model, TranscriptContext } from "@earendil-works/pi-ai"
 import { createModels, createProvider } from "@earendil-works/pi-ai/models"
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
@@ -19,7 +18,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
-import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../../src/Pi/PiDurableEngine.ts"
@@ -174,6 +173,7 @@ export const makePiDurableTestLayer = (
 		OPENAI_API_KEY: "sk-openai-test",
 		ANTHROPIC_API_KEY: "sk-anthropic-test",
 	},
+	platform = Domain.InMemory,
 ) => {
 	const backends = new Map<
 		string,
@@ -238,7 +238,7 @@ export const makePiDurableTestLayer = (
 	})
 
 	const CheckfuLive = Checkfu.layer(
-		SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+		CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 	).pipe(Layer.provide(executorLayer))
 	const PiProviderLive = PiDurableHarnessLive.pipe(
 		Layer.provide(executorLayer),
@@ -271,7 +271,7 @@ export const makePiDurableTestLayer = (
 				settleMargin: "50 millis",
 			}),
 		),
-		Layer.provide(Domain.InMemory),
+		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),

@@ -101,7 +101,10 @@ interface ModelClass {
 }
 
 // Only commands submitted with aggregate.schedule are persisted for later delivery.
-const SCHEDULED_COMMANDS = new Set(["Checkfu.Session/AbandonTurn"])
+const SCHEDULED_COMMANDS = new Set([
+	"Checkfu.Session/AbandonTurn",
+	"Checkfu.Automation/FireAutomation",
+])
 
 const commandReply = (model: string, command: CommandClass): PersistedShape => ({
 	id: `command-reply:${model}/${command.tag}`,

@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import * as Layer from "effect/Layer"
 import { Agent } from "./Agent/Agent.aggregate.ts"
 import { AgentVersion } from "./Agent/AgentVersion.aggregate.ts"
 import { AgentVersionByNumberView } from "./Agent/AgentVersionByNumberView.view.ts"
@@ -6,6 +7,21 @@ import { AgentVersionView } from "./Agent/AgentVersionView.view.ts"
 import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
+import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.policy.ts"
+import { Automation } from "./Automation/Automation.aggregate.ts"
+import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
+import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
+import { OpenAutomationSessionDecision } from "./Automation/OpenAutomationSession.decision.ts"
+import {
+	FreeAutomationSlot,
+	FreeAutomationSlotLive,
+} from "./Automation/FreeAutomationSlot.policy.ts"
+import { AutomationRunView } from "./Automation/AutomationRunView.view.ts"
+import { AutomationView } from "./Automation/AutomationView.view.ts"
+import {
+	StartAutomationRun,
+	StartAutomationRunLive,
+} from "./Automation/StartAutomationRun.policy.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
@@ -16,6 +32,7 @@ import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest } from "./Session/StopModelRequest.policy.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
+import { SessionsHandlersLive } from "./Sessions.model.ts"
 
 /**
  * Unified hosted domain model.
@@ -24,8 +41,22 @@ import { TurnInput } from "./Session/TurnInput.view.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [Agent, AgentVersion, Environment, Session, IdempotencyClaim],
-	decisions: [CreateAgentDecision, UpdateAgentDecision, AdmitSessionDecision],
+	aggregates: [
+		Agent,
+		AgentVersion,
+		Environment,
+		Session,
+		IdempotencyClaim,
+		Automation,
+		AutomationCapacity,
+	],
+	decisions: [
+		CreateAgentDecision,
+		UpdateAgentDecision,
+		AdmitSessionDecision,
+		AdmitAutomationDecision,
+		OpenAutomationSessionDecision,
+	],
 	views: [
 		AgentView,
 		AgentVersionView,
@@ -33,8 +64,10 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		EnvironmentView,
 		SessionView,
 		TurnInput,
+		AutomationView,
+		AutomationRunView,
 	],
-	policies: [StartTurn, StopModelRequest],
+	policies: [StartTurn, StopModelRequest, ArmAutomation, StartAutomationRun, FreeAutomationSlot],
 	sagas: [RunTurn],
 	invariants: {
 		EverySessionReferencesExistingAgentVersion: (m) =>
@@ -253,6 +286,31 @@ export class Checkfu extends Domain.Model("Checkfu", {
 							)),
 				].every((ok) => ok)
 			}),
+		AutomationViewsMatchAutomations: (m) =>
+			[
+				m.Automation.every((a) => {
+					const view = m.AutomationView.find((v) => v.id === a.id)
+					const runs = m.AutomationRunView.find((v) => v.id === a.id)
+					if (a.state.status === "") {
+						return view === undefined
+					}
+					if (view === undefined) {
+						return false
+					}
+					return [
+						view.state.id === a.id,
+						view.state.status === a.state.status,
+						view.state.runs === a.state.runs,
+						view.state.activation === a.state.activation,
+						(view.state.pause_reason !== null) === (a.state.status === "paused"),
+						!!view.state.archived_at === (a.state.status === "archived"),
+						(runs === undefined ? 0 : runs.state.recorded) === a.state.reported,
+					].every((ok) => ok)
+				}),
+				m.AutomationView.every((v) =>
+					m.Automation.some((a) => [a.id === v.id, a.state.status !== ""].every((ok) => ok)),
+				),
+			].every((ok) => ok),
 	},
 	relations: {
 		AMintedVersionBelongsToItsAgent: Domain.Relation({
@@ -323,6 +381,11 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"SendUserInterrupt",
 		"ArchiveSession",
 		"ClaimIdempotencyKey",
+		"AdmitAutomation",
+		"PauseAutomation",
+		"UnpauseAutomation",
+		"ArchiveAutomation",
+		"RunAutomation",
 	],
 	views: [
 		"AgentView",
@@ -330,5 +393,14 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"AgentVersionByNumberView",
 		"EnvironmentView",
 		"SessionView",
+		"AutomationView",
+		"AutomationRunView",
 	],
 }) {}
+
+export const CheckfuHandlersLive = Layer.mergeAll(
+	SessionsHandlersLive,
+	ArmAutomationLive,
+	StartAutomationRunLive,
+	FreeAutomationSlotLive,
+)

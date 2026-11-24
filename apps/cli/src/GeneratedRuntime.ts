@@ -300,7 +300,8 @@ export const invokeGeneratedOperation = (
 
 		if (endpoint.headers !== undefined) {
 			const effectiveHeaders =
-				spec.apiGroup === "sessions" && spec.apiEndpoint === "sendEvents"
+				(spec.apiGroup === "sessions" && spec.apiEndpoint === "sendEvents") ||
+				(spec.apiGroup === "automations" && spec.apiEndpoint === "create")
 					? yield* ensureIdempotencyKeyHeader(client, parts.headers)
 					: parts.headers
 			request.headers = yield* decodeWithTop(

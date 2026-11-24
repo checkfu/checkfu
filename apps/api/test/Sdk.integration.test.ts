@@ -9,6 +9,7 @@ import {
 import type { JsonSessionEvent, SessionEvent } from "@checkfu/sdk"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schedule from "effect/Schedule"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Stream from "effect/Stream"
@@ -128,6 +129,75 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(deleted).toEqual({ id: env2.id, type: "environment_deleted" })
 							const missingEnvErr = yield* Effect.flip(client.environments.retrieve(env2.id))
 							expect(missingEnvErr._tag).toBe("NotFoundError")
+
+							// Automation create, run on request, run list, archive
+							const automation = yield* client.automations.create(
+								{
+									name: "sdk-automation",
+									agent: agent.id,
+									environment_id: env.id,
+									initial_events: [
+										{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+									],
+									schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
+								},
+								{ idempotencyKey: "sdk-effect-create" },
+							)
+							if ("pending" in automation) {
+								return yield* Effect.die(new Error("automation create stayed pending"))
+							}
+							expect(automation.status).toBe("active")
+							expect(automation.upcoming_runs_at).toHaveLength(5)
+							const queued = yield* client.automations.run(automation.id)
+							expect(queued).toEqual({
+								type: "automation_run",
+								automation_id: automation.id,
+								run: 1,
+								status: "queued",
+								trigger: { type: "manual" },
+							})
+							yield* client.automations.run(automation.id)
+							yield* client.automations.run(automation.id)
+							const runs = yield* client.automations.runs.list(automation.id, { limit: 5 }).pipe(
+								Effect.repeat({
+									schedule: Schedule.spaced("5 millis"),
+									times: 400,
+									until: (page) => page.data.length >= 3,
+								}),
+							)
+							expect(runs.data[0]).toMatchObject({
+								run: 1,
+								status: "started",
+								session_id: `sess_${automation.id}_1`,
+							})
+							const paged = yield* Stream.runCollect(
+								client.automations.runs.listStream(automation.id, { limit: 1 }),
+							)
+							expect(Array.from(paged, (entry) => entry.run)).toEqual([1, 2, 3])
+							const pagedNewestFirst = yield* Stream.runCollect(
+								client.automations.runs.listStream(automation.id, { limit: 1, order: "desc" }),
+							)
+							expect(Array.from(pagedNewestFirst, (entry) => entry.run)).toEqual([3, 2, 1])
+							const tooFrequent = yield* Effect.flip(
+								client.automations.create(
+									{
+										name: "too-frequent",
+										agent: agent.id,
+										environment_id: env.id,
+										initial_events: [
+											{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+										],
+										schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" },
+									},
+									{ idempotencyKey: "sdk-too-frequent" },
+								),
+							)
+							expect(tooFrequent._tag).toBe("BadRequestError")
+							const archivedAutomation = yield* client.automations.archive(automation.id)
+							if ("pending" in archivedAutomation) {
+								return yield* Effect.die(new Error("automation archive stayed pending"))
+							}
+							expect(archivedAutomation.status).toBe("archived")
 
 							// 3. Session create, send events, live SSE stream, paginated list, archive, 204
 							const session = yield* client.waitForPending(
@@ -293,6 +363,37 @@ describe("@checkfu/sdk live API integration", () => {
 									allEvents.push(event)
 								}
 								expect(allEvents.length).toBeGreaterThanOrEqual(seen.length)
+
+								// Auto-paginated for-await over an automation's runs, with and without an order
+								const automation = await client.waitForPending(
+									await client.automations.create(
+										{
+											name: "promise-automation",
+											agent: agent.id,
+											environment_id: env.id,
+											initial_events: [
+												{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+											],
+											schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
+										},
+										{ idempotencyKey: "sdk-promise-create" },
+									),
+								)
+								for (const expected of [1, 2, 3]) {
+									expect((await client.automations.run(automation.id)).run).toBe(expected)
+								}
+								const runNumbers = async (order?: "asc" | "desc") => {
+									const numbers: Array<number> = []
+									for await (const entry of client.automations.runs.list(automation.id, {
+										limit: 1,
+										...(order === undefined ? {} : { order }),
+									})) {
+										numbers.push(entry.run)
+									}
+									return numbers
+								}
+								await expect.poll(() => runNumbers(), { timeout: 5000 }).toEqual([1, 2, 3])
+								expect(await runNumbers("desc")).toEqual([3, 2, 1])
 
 								// 404 unwraps directly to NotFoundError
 								await expect(client.sessions.retrieve("sess_does_not_exist")).rejects.toThrow(

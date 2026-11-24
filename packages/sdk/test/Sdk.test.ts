@@ -111,6 +111,31 @@ const sampleAgent = (overrides?: {
 	...overrides,
 })
 
+const sampleAutomation = (overrides?: {
+	readonly id?: string
+	readonly status?: "active" | "paused" | "archived"
+	readonly archived_at?: string | null
+}) => ({
+	id: "auto_1",
+	type: "automation" as const,
+	name: "Morning report",
+	agent: { id: "agent_1", version: null },
+	environment_id: "env_1",
+	initial_events: [
+		{ type: "user.message" as const, content: [{ type: "text" as const, text: "Report." }] },
+	],
+	schedule: { type: "cron" as const, expression: "0 9 * * *", timezone: "UTC" },
+	status: "active" as const,
+	pause_reason: null,
+	run_count: 0,
+	last_run_at: null,
+	upcoming_runs_at: [],
+	created_at: ISO_NOW,
+	updated_at: ISO_NOW,
+	archived_at: null,
+	...overrides,
+})
+
 const sampleEnvironment = (overrides?: {
 	readonly id?: string
 	readonly version?: number
@@ -2107,6 +2132,156 @@ describe("@checkfu/sdk", () => {
 						{ after: null, lastEventId: "100" },
 					])
 				}),
+		)
+
+		it.live("waits for pending automation receipts in both clients", () =>
+			Effect.gen(function* () {
+				let createPolls = 0
+				const createKeys: Array<string | null> = []
+				let pausePolls = 0
+				let archivePolls = 0
+				const pending = (id: string) => jsonResponse({ id, type: "automation", pending: true }, 202)
+				const automationFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (req.method === "POST" && url.pathname === "/v1/automations") {
+						createKeys.push(req.headers.get("idempotency-key"))
+						return pending("auto_new")
+					}
+					if (req.method === "GET" && url.pathname === "/v1/automations/auto_new") {
+						createPolls += 1
+						return createPolls < 3
+							? jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+							: jsonResponse(sampleAutomation({ id: "auto_new" }))
+					}
+					if (req.method === "POST" && url.pathname === "/v1/automations/auto_pause/pause") {
+						return pending("auto_pause")
+					}
+					if (req.method === "GET" && url.pathname === "/v1/automations/auto_pause") {
+						pausePolls += 1
+						return jsonResponse(
+							sampleAutomation({ id: "auto_pause", status: pausePolls < 3 ? "active" : "paused" }),
+						)
+					}
+					if (req.method === "POST" && url.pathname === "/v1/automations/auto_arch/archive") {
+						return pending("auto_arch")
+					}
+					if (req.method === "GET" && url.pathname === "/v1/automations/auto_arch") {
+						archivePolls += 1
+						return jsonResponse(
+							sampleAutomation({
+								id: "auto_arch",
+								status: archivePolls < 2 ? "active" : "archived",
+								archived_at: archivePolls < 2 ? null : ISO_NOW,
+							}),
+						)
+					}
+					if (req.method === "POST" && url.pathname === "/v1/automations/auto_run/run") {
+						return jsonResponse(
+							{
+								type: "automation_run",
+								automation_id: "auto_run",
+								run: 4,
+								status: "queued",
+								trigger: { type: "manual" },
+							},
+							201,
+						)
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+				const pollOpts = {
+					initialDelay: "1 millis" as const,
+					maxDelay: "2 millis" as const,
+					timeout: "2 seconds" as const,
+				}
+				const body = {
+					name: "Morning report",
+					agent: "agent_1",
+					environment_id: "env_1",
+					initial_events: [
+						{
+							type: "user.message" as const,
+							content: [{ type: "text" as const, text: "Report." }],
+						},
+					],
+					schedule: { type: "cron" as const, expression: "0 9 * * *", timezone: "UTC" },
+				}
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const created = yield* client.waitForPending(
+						yield* client.automations.create(body, { idempotencyKey: "effect-create" }),
+						pollOpts,
+					)
+					expect(created.id).toBe("auto_new")
+					expect(createPolls).toBe(3)
+
+					const pausePending = yield* client.automations.pause("auto_pause")
+					const needsUntil = yield* Effect.flip(client.waitForPending(pausePending, pollOpts))
+					expect(needsUntil._tag).toBe("CheckfuConfigError")
+					const paused = yield* client.waitForPending(pausePending, {
+						...pollOpts,
+						until: (automation) => automation.status === "paused",
+					})
+					expect(paused.status).toBe("paused")
+					expect(pausePolls).toBe(3)
+
+					const archived = yield* client.waitForPending(
+						yield* client.automations.archive("auto_arch"),
+						pollOpts,
+					)
+					expect(archived.status).toBe("archived")
+					expect(archivePolls).toBe(2)
+
+					const queued = yield* client.automations.run("auto_run")
+					expect(queued).toMatchObject({ run: 4, status: "queued" })
+					expect("pending" in queued).toBe(false)
+				}).pipe(Effect.provide(makeEffectLayer(automationFetch, { maxRetries: 0 })))
+
+				createPolls = 0
+				archivePolls = 0
+				yield* Effect.promise(async () => {
+					const promiseClient = new Checkfu({
+						apiKey: "ck_test_key",
+						baseUrl: "http://localhost:1337",
+						maxRetries: 0,
+						fetch: automationFetch,
+					})
+					try {
+						const created = await promiseClient.waitForPending(
+							await promiseClient.automations.create(body, { idempotencyKey: "promise-create" }),
+							pollOpts,
+						)
+						expect(created.id).toBe("auto_new")
+						expect(created.created_at).toBe(ISO_NOW)
+						expect(createPolls).toBe(3)
+						const archived = await promiseClient.waitForPending(
+							await promiseClient.automations.archive("auto_arch"),
+							pollOpts,
+						)
+						expect(archived.archived_at).toBe(ISO_NOW)
+						expect(archivePolls).toBe(2)
+					} finally {
+						await promiseClient.close()
+					}
+					const unkeyed = new Checkfu({
+						apiKey: "ck_test_key",
+						baseUrl: "http://localhost:1337",
+						maxRetries: 0,
+						fetch: automationFetch,
+					})
+					try {
+						await expect(
+							// @ts-expect-error -- boundary: a JavaScript caller can leave out the key the type requires
+							unkeyed.automations.create(body),
+						).rejects.toMatchObject({ _tag: "BadRequestError" })
+					} finally {
+						await unkeyed.close()
+					}
+					expect(createKeys).toEqual(["effect-create", "promise-create"])
+				})
+			}),
 		)
 
 		it.live(

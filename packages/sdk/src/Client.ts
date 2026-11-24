@@ -9,9 +9,11 @@ import type * as Redacted from "effect/Redacted"
 import { isPendingResource, makeCheckfuHttpApiClientWith } from "./Api.ts"
 import type {
 	Agent,
+	Automation,
 	CheckfuHttpApiClient,
 	Environment,
 	PendingAgent,
+	PendingAutomation,
 	PendingEnvironment,
 	PendingSession,
 	Session,
@@ -99,6 +101,10 @@ export interface WaitForPendingMethod {
 		result: Session | PendingSession,
 		options?: WaitForPendingOptions<Session>,
 	): Effect.Effect<Session, CheckfuSdkError>
+	(
+		result: Automation | PendingAutomation,
+		options?: WaitForPendingOptions<Automation>,
+	): Effect.Effect<Automation, CheckfuSdkError>
 }
 
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
@@ -145,9 +151,21 @@ export class CheckfuSdkClient extends EffectResources {
 		options?: WaitForPendingOptions<Session>,
 	): Effect.Effect<Session, CheckfuSdkError>
 	waitForPending(
-		result: Agent | PendingAgent | Environment | PendingEnvironment | Session | PendingSession,
-		options?: WaitForPendingOptions<Agent | Environment | Session>,
-	): Effect.Effect<Agent | Environment | Session, CheckfuSdkError> {
+		result: Automation | PendingAutomation,
+		options?: WaitForPendingOptions<Automation>,
+	): Effect.Effect<Automation, CheckfuSdkError>
+	waitForPending(
+		result:
+			| Agent
+			| PendingAgent
+			| Environment
+			| PendingEnvironment
+			| Session
+			| PendingSession
+			| Automation
+			| PendingAutomation,
+		options?: WaitForPendingOptions<Agent | Environment | Session | Automation>,
+	): Effect.Effect<Agent | Environment | Session | Automation, CheckfuSdkError> {
 		if (!isPendingResource(result)) {
 			return Effect.succeed(result)
 		}
@@ -173,6 +191,11 @@ export class CheckfuSdkClient extends EffectResources {
 				return pollPending(result, (id, opts) => this.sessions.retrieve(id, opts), {
 					...baseOpts,
 					...(until === undefined ? {} : { until: (resource: Session) => until(resource) }),
+				})
+			case "automation":
+				return pollPending(result, (id, opts) => this.automations.retrieve(id, opts), {
+					...baseOpts,
+					...(until === undefined ? {} : { until: (resource: Automation) => until(resource) }),
 				})
 		}
 	}

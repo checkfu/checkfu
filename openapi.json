@@ -3,7 +3,7 @@
 	"info": {
 		"title": "Checkfu API",
 		"version": "0.0.1",
-		"description": "Managed agents API for managing agents, environments, and sessions."
+		"description": "Managed agents API for managing agents, environments, sessions, and automations."
 	},
 	"paths": {
 		"/health": {
@@ -8397,6 +8397,3911 @@
 					]
 				}
 			}
+		},
+		"/v1/automations": {
+			"post": {
+				"tags": ["automations"],
+				"operationId": "automations.create",
+				"parameters": [
+					{
+						"name": "idempotency-key",
+						"in": "header",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Idempotency-Key header. Required: resending the request with the same key returns the automation the first request created, so a lost response never leaves a second schedule running"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"name": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"environment_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"schedule": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["cron"]
+												},
+												"expression": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"timezone": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												}
+											},
+											"required": ["type", "expression", "timezone"],
+											"additionalProperties": false
+										},
+										"status": {
+											"type": "string",
+											"enum": ["active", "paused", "archived"]
+										},
+										"pause_reason": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"last_run_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										},
+										"archived_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"agent": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"version": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false
+										},
+										"initial_events": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["user.message"]
+													},
+													"content": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["text"]
+																},
+																"text": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"required": ["type", "text"],
+															"additionalProperties": false
+														},
+														"minItems": 1
+													}
+												},
+												"required": ["type", "content"],
+												"additionalProperties": false
+											},
+											"minItems": 1,
+											"maxItems": 1
+										},
+										"run_count": {
+											"type": "integer",
+											"minimum": -9007199254740991,
+											"maximum": 9007199254740991
+										},
+										"upcoming_runs_at": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"environment_id",
+										"schedule",
+										"status",
+										"pause_reason",
+										"last_run_at",
+										"created_at",
+										"updated_at",
+										"archived_at",
+										"agent",
+										"initial_events",
+										"run_count",
+										"upcoming_runs_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"pending": {
+											"type": "boolean",
+											"enum": [true]
+										}
+									},
+									"required": ["id", "type", "pending"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["payload_too_large"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"415": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["unsupported_media_type"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Create an automation that opens a new session with its message every time its schedule fires",
+				"summary": "Create an automation",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 256,
+										"description": "Human-readable automation name"
+									},
+									"agent": {
+										"anyOf": [
+											{
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											},
+											{
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"version": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
+													}
+												},
+												"required": ["id"],
+												"additionalProperties": false
+											}
+										],
+										"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+									},
+									"environment_id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 256,
+										"description": "Environment ID each run's session uses"
+									},
+									"initial_events": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["user.message"]
+												},
+												"content": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["text"]
+															},
+															"text": {
+																"type": "string",
+																"minLength": 1
+															}
+														},
+														"required": ["type", "text"],
+														"additionalProperties": false
+													},
+													"minItems": 1
+												}
+											},
+											"required": ["type", "content"],
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"maxItems": 1,
+										"description": "The one user message each run's session starts with"
+									},
+									"schedule": {
+										"type": "object",
+										"properties": {
+											"type": {
+												"type": "string",
+												"enum": ["cron"]
+											},
+											"expression": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											},
+											"timezone": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 64
+											}
+										},
+										"required": ["type", "expression", "timezone"],
+										"additionalProperties": false,
+										"description": "When the automation fires: a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York"
+									}
+								},
+								"required": ["name", "agent", "environment_id", "initial_events", "schedule"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": true
+				},
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "create"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_createAutomation",
+					"destructive": false
+				},
+				"x-checkfu-cli": {
+					"textOrObjectFields": ["agent"],
+					"repeatArrayField": {
+						"field": "initial_events",
+						"flag": "initial-event",
+						"description": "The user message each run starts with, as JSON, YAML, or @file"
+					},
+					"examples": [
+						{
+							"command": "checkfu automations create --name \"Morning report\" --agent agent_123 --environment-id env_456 --initial-event '{\"type\":\"user.message\",\"content\":[{\"type\":\"text\",\"text\":\"Write the morning report.\"}]}' --schedule '{\"type\":\"cron\",\"expression\":\"0 9 * * 1-5\",\"timezone\":\"America/New_York\"}'",
+							"description": "Run an agent at 09:00 New York time on weekdays"
+						}
+					]
+				}
+			}
+		},
+		"/v1/automations/{automation_id}": {
+			"get": {
+				"tags": ["automations"],
+				"operationId": "automations.get",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"name": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"environment_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"schedule": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["cron"]
+												},
+												"expression": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"timezone": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												}
+											},
+											"required": ["type", "expression", "timezone"],
+											"additionalProperties": false
+										},
+										"status": {
+											"type": "string",
+											"enum": ["active", "paused", "archived"]
+										},
+										"pause_reason": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"last_run_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										},
+										"archived_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"agent": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"version": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false
+										},
+										"initial_events": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["user.message"]
+													},
+													"content": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["text"]
+																},
+																"text": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"required": ["type", "text"],
+															"additionalProperties": false
+														},
+														"minItems": 1
+													}
+												},
+												"required": ["type", "content"],
+												"additionalProperties": false
+											},
+											"minItems": 1,
+											"maxItems": 1
+										},
+										"run_count": {
+											"type": "integer",
+											"minimum": -9007199254740991,
+											"maximum": 9007199254740991
+										},
+										"upcoming_runs_at": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"environment_id",
+										"schedule",
+										"status",
+										"pause_reason",
+										"last_run_at",
+										"created_at",
+										"updated_at",
+										"archived_at",
+										"agent",
+										"initial_events",
+										"run_count",
+										"upcoming_runs_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Retrieve an automation by ID",
+				"summary": "Retrieve an automation",
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "get"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_getAutomation"
+				}
+			}
+		},
+		"/v1/automations/{automation_id}/pause": {
+			"post": {
+				"tags": ["automations"],
+				"operationId": "automations.pause",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"name": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"environment_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"schedule": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["cron"]
+												},
+												"expression": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"timezone": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												}
+											},
+											"required": ["type", "expression", "timezone"],
+											"additionalProperties": false
+										},
+										"status": {
+											"type": "string",
+											"enum": ["active", "paused", "archived"]
+										},
+										"pause_reason": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"last_run_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										},
+										"archived_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"agent": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"version": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false
+										},
+										"initial_events": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["user.message"]
+													},
+													"content": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["text"]
+																},
+																"text": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"required": ["type", "text"],
+															"additionalProperties": false
+														},
+														"minItems": 1
+													}
+												},
+												"required": ["type", "content"],
+												"additionalProperties": false
+											},
+											"minItems": 1,
+											"maxItems": 1
+										},
+										"run_count": {
+											"type": "integer",
+											"minimum": -9007199254740991,
+											"maximum": 9007199254740991
+										},
+										"upcoming_runs_at": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"environment_id",
+										"schedule",
+										"status",
+										"pause_reason",
+										"last_run_at",
+										"created_at",
+										"updated_at",
+										"archived_at",
+										"agent",
+										"initial_events",
+										"run_count",
+										"upcoming_runs_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"pending": {
+											"type": "boolean",
+											"enum": [true]
+										}
+									},
+									"required": ["id", "type", "pending"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Stop an automation's schedule until it is unpaused; it can still be run on request",
+				"summary": "Pause an automation",
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "pause",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "pause"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_pauseAutomation"
+				}
+			}
+		},
+		"/v1/automations/{automation_id}/unpause": {
+			"post": {
+				"tags": ["automations"],
+				"operationId": "automations.unpause",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"name": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"environment_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"schedule": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["cron"]
+												},
+												"expression": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"timezone": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												}
+											},
+											"required": ["type", "expression", "timezone"],
+											"additionalProperties": false
+										},
+										"status": {
+											"type": "string",
+											"enum": ["active", "paused", "archived"]
+										},
+										"pause_reason": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"last_run_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										},
+										"archived_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"agent": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"version": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false
+										},
+										"initial_events": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["user.message"]
+													},
+													"content": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["text"]
+																},
+																"text": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"required": ["type", "text"],
+															"additionalProperties": false
+														},
+														"minItems": 1
+													}
+												},
+												"required": ["type", "content"],
+												"additionalProperties": false
+											},
+											"minItems": 1,
+											"maxItems": 1
+										},
+										"run_count": {
+											"type": "integer",
+											"minimum": -9007199254740991,
+											"maximum": 9007199254740991
+										},
+										"upcoming_runs_at": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"environment_id",
+										"schedule",
+										"status",
+										"pause_reason",
+										"last_run_at",
+										"created_at",
+										"updated_at",
+										"archived_at",
+										"agent",
+										"initial_events",
+										"run_count",
+										"upcoming_runs_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"pending": {
+											"type": "boolean",
+											"enum": [true]
+										}
+									},
+									"required": ["id", "type", "pending"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Resume an automation's schedule from now, without running the occurrences it missed",
+				"summary": "Unpause an automation",
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "unpause",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "unpause"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_unpauseAutomation"
+				}
+			}
+		},
+		"/v1/automations/{automation_id}/archive": {
+			"post": {
+				"tags": ["automations"],
+				"operationId": "automations.archive",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"name": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"environment_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"schedule": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["cron"]
+												},
+												"expression": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"timezone": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												}
+											},
+											"required": ["type", "expression", "timezone"],
+											"additionalProperties": false
+										},
+										"status": {
+											"type": "string",
+											"enum": ["active", "paused", "archived"]
+										},
+										"pause_reason": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"last_run_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										},
+										"archived_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"agent": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"version": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false
+										},
+										"initial_events": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["user.message"]
+													},
+													"content": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["text"]
+																},
+																"text": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"required": ["type", "text"],
+															"additionalProperties": false
+														},
+														"minItems": 1
+													}
+												},
+												"required": ["type", "content"],
+												"additionalProperties": false
+											},
+											"minItems": 1,
+											"maxItems": 1
+										},
+										"run_count": {
+											"type": "integer",
+											"minimum": -9007199254740991,
+											"maximum": 9007199254740991
+										},
+										"upcoming_runs_at": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"environment_id",
+										"schedule",
+										"status",
+										"pause_reason",
+										"last_run_at",
+										"created_at",
+										"updated_at",
+										"archived_at",
+										"agent",
+										"initial_events",
+										"run_count",
+										"upcoming_runs_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"pending": {
+											"type": "boolean",
+											"enum": [true]
+										}
+									},
+									"required": ["id", "type", "pending"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Archive an automation so it never runs again",
+				"summary": "Archive an automation",
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "archive"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_archiveAutomation"
+				},
+				"x-checkfu-idempotent": true
+			}
+		},
+		"/v1/automations/{automation_id}/run": {
+			"post": {
+				"tags": ["automations"],
+				"operationId": "automations.run",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"201": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["automation_run"]
+										},
+										"automation_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"run": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
+										"status": {
+											"type": "string",
+											"enum": ["queued"]
+										},
+										"trigger": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["manual"]
+												}
+											},
+											"required": ["type"],
+											"additionalProperties": false
+										}
+									},
+									"required": ["type", "automation_id", "run", "status", "trigger"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+				"summary": "Run an automation now",
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "run",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "run"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_runAutomation"
+				}
+			}
+		},
+		"/v1/automations/{automation_id}/runs": {
+			"get": {
+				"tags": ["automations"],
+				"operationId": "automations.listRuns",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					},
+					{
+						"name": "after",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\d{1,15}$",
+							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+						},
+						"required": false
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^(?:[1-9]\\d?|100)$",
+							"description": "Maximum number of events to return (1-100)"
+						},
+						"required": false
+					},
+					{
+						"name": "order",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"],
+							"description": "Sort order: asc or desc"
+						},
+						"required": false
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"data": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["automation_run"]
+													},
+													"automation_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													},
+													"run": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
+													},
+													"status": {
+														"type": "string",
+														"enum": ["started", "failed"]
+													},
+													"trigger": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["schedule"]
+																	},
+																	"scheduled_at": {
+																		"type": "string"
+																	}
+																},
+																"required": ["type", "scheduled_at"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["manual"]
+																	}
+																},
+																"required": ["type"],
+																"additionalProperties": false
+															}
+														]
+													},
+													"session_id": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"error": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string"
+																	},
+																	"message": {
+																		"type": "string"
+																	}
+																},
+																"required": ["type", "message"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"created_at": {
+														"type": "string"
+													}
+												},
+												"required": [
+													"type",
+													"automation_id",
+													"run",
+													"status",
+													"trigger",
+													"session_id",
+													"error",
+													"created_at"
+												],
+												"additionalProperties": false
+											}
+										},
+										"has_more": {
+											"type": "boolean"
+										},
+										"next_cursor": {
+											"anyOf": [
+												{
+													"type": "number"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"required": ["data", "has_more", "next_cursor"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "List the runs of an automation that have started or failed, oldest first by default",
+				"summary": "List automation runs",
+				"x-forge-group-name": "automations.runs",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "listRuns"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_listRuns"
+				},
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"after": {
+							"min": 0,
+							"metavar": "SEQ"
+						},
+						"limit": {
+							"min": 1,
+							"max": 100,
+							"metavar": "N"
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {
@@ -8888,6 +12793,10 @@
 		{
 			"name": "sessions",
 			"description": "Manage sessions"
+		},
+		{
+			"name": "automations",
+			"description": "Manage automations"
 		}
 	]
 }

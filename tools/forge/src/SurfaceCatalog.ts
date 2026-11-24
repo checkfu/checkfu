@@ -60,6 +60,7 @@ export interface SurfaceOperation {
 	readonly bodyRequired: boolean
 	readonly headers: ReadonlyArray<SurfaceParam>
 	readonly supportsIdempotencyKey: boolean
+	readonly requiresIdempotencyKey: boolean
 	readonly supportsPending: boolean
 	readonly kind: SurfaceOperationKind
 	readonly retrySafety: SurfaceRetrySafety
@@ -425,6 +426,9 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 
 	const headers = (method.headers?.fields ?? []).map(fieldToParam)
 	const supportsIdempotencyKey = headers.some((h) => h.wireName.toLowerCase() === "idempotency-key")
+	const requiresIdempotencyKey = headers.some(
+		(h) => h.wireName.toLowerCase() === "idempotency-key" && h.required,
+	)
 	const supportsPending = method.responses.some((r) => r.status === "202")
 
 	const sse = detectSse(method, queryParams, endpointRef)
@@ -465,6 +469,7 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 		bodyRequired: method.body?.required ?? false,
 		headers,
 		supportsIdempotencyKey,
+		requiresIdempotencyKey,
 		supportsPending,
 		kind,
 		retrySafety,

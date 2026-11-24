@@ -27,6 +27,7 @@ import {
 	executeWithRetries,
 	pendingUpdateReadiness,
 	resolveCallIdempotencyKey,
+	resolveRequiredIdempotencyKey,
 	unwrapResponse,
 	withPendingReadiness,
 	withResolvedIdempotencyKey,
@@ -74,6 +75,48 @@ export interface CheckfuOperations {
 		EndpointQuery<"agents", "update">,
 		EndpointBody<"agents", "update">,
 		EndpointSuccess<"agents", "update">
+	>
+	readonly "automations.archive": OperationShape<
+		EndpointParams<"automations", "archive">,
+		EndpointQuery<"automations", "archive">,
+		EndpointBody<"automations", "archive">,
+		EndpointSuccess<"automations", "archive">
+	>
+	readonly "automations.create": OperationShape<
+		EndpointParams<"automations", "create">,
+		EndpointQuery<"automations", "create">,
+		EndpointBody<"automations", "create">,
+		EndpointSuccess<"automations", "create">
+	>
+	readonly "automations.pause": OperationShape<
+		EndpointParams<"automations", "pause">,
+		EndpointQuery<"automations", "pause">,
+		EndpointBody<"automations", "pause">,
+		EndpointSuccess<"automations", "pause">
+	>
+	readonly "automations.retrieve": OperationShape<
+		EndpointParams<"automations", "get">,
+		EndpointQuery<"automations", "get">,
+		EndpointBody<"automations", "get">,
+		EndpointSuccess<"automations", "get">
+	>
+	readonly "automations.run": OperationShape<
+		EndpointParams<"automations", "run">,
+		EndpointQuery<"automations", "run">,
+		EndpointBody<"automations", "run">,
+		EndpointSuccess<"automations", "run">
+	>
+	readonly "automations.unpause": OperationShape<
+		EndpointParams<"automations", "unpause">,
+		EndpointQuery<"automations", "unpause">,
+		EndpointBody<"automations", "unpause">,
+		EndpointSuccess<"automations", "unpause">
+	>
+	readonly "automations.runs.list": OperationShape<
+		EndpointParams<"automations", "listRuns">,
+		RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		EndpointBody<"automations", "listRuns">,
+		EndpointSuccess<"automations", "listRuns">
 	>
 	readonly "environments.archive": OperationShape<
 		EndpointParams<"environments", "archive">,
@@ -290,6 +333,341 @@ export class EffectAgentsResource {
 					),
 					pendingUpdateReadiness(params, "agents.update"),
 				),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectAutomationsRunsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List the runs of an automation that have started or failed, oldest first by default */
+	list(
+		automationId: string,
+		params: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError>
+	list(
+		automationId: string,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError>
+	list(
+		automationId: string,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "listRuns">
+		| WithResponse<EndpointSuccess<"automations", "listRuns">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "listRuns", { automation_id: automationId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.runs.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.automations.listRuns({
+								params: pathParams,
+								query: {
+									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List the runs of an automation that have started or failed, oldest first by default */
+	listPages(
+		automationId: string,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					automationId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List the runs of an automation that have started or failed, oldest first by default */
+	listStream(
+		automationId: string,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					automationId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+}
+
+export class EffectAutomationsResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly runs: EffectAutomationsRunsResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.runs = new EffectAutomationsRunsResource(runtime)
+	}
+
+	/** Archive an automation so it never runs again */
+	archive(
+		automationId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "archive">>, CheckfuSdkError>
+	archive(
+		automationId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "archive">, CheckfuSdkError>
+	archive(
+		automationId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "archive">
+		| WithResponse<EndpointSuccess<"automations", "archive">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "archive", { automation_id: automationId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.archive",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.automations.archive({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "archive" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Create an automation that opens a new session with its message every time its schedule fires */
+	create(
+		params: EndpointBody<"automations", "create">,
+		options: WithResponseRequestOptions & { readonly idempotencyKey: string },
+	): Effect<WithResponse<EndpointSuccess<"automations", "create">>, CheckfuSdkError>
+	create(
+		params: EndpointBody<"automations", "create">,
+		options: RequestOptions & { readonly idempotencyKey: string },
+	): Effect<EndpointSuccess<"automations", "create">, CheckfuSdkError>
+	create(
+		params: EndpointBody<"automations", "create">,
+		options: AnyRequestOptions & { readonly idempotencyKey: string },
+	): Effect<
+		| EndpointSuccess<"automations", "create">
+		| WithResponse<EndpointSuccess<"automations", "create">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(resolveRequiredIdempotencyKey(this.#runtime, options), (key) =>
+				withPendingReadiness(
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.create",
+						key !== undefined ? "idempotent" : "pre-commit-only",
+						withResolvedIdempotencyKey(options, key),
+						() =>
+							this.#runtime.raw.automations.create({
+								headers: { "idempotency-key": key },
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+					{ kind: "create" },
+				),
+			),
+			options,
+		)
+	}
+
+	/** Stop an automation's schedule until it is unpaused; it can still be run on request */
+	pause(
+		automationId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "pause">>, CheckfuSdkError>
+	pause(
+		automationId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "pause">, CheckfuSdkError>
+	pause(
+		automationId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"automations", "pause"> | WithResponse<EndpointSuccess<"automations", "pause">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "pause", { automation_id: automationId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.pause",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.automations.pause({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "automations.pause" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve an automation by ID */
+	retrieve(
+		automationId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "get">>, CheckfuSdkError>
+	retrieve(
+		automationId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "get">, CheckfuSdkError>
+	retrieve(
+		automationId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"automations", "get"> | WithResponse<EndpointSuccess<"automations", "get">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "get", { automation_id: automationId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.automations.get({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to */
+	run(
+		automationId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "run">>, CheckfuSdkError>
+	run(
+		automationId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "run">, CheckfuSdkError>
+	run(
+		automationId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"automations", "run"> | WithResponse<EndpointSuccess<"automations", "run">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "run", { automation_id: automationId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.run",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.automations.run({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Resume an automation's schedule from now, without running the occurrences it missed */
+	unpause(
+		automationId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "unpause">>, CheckfuSdkError>
+	unpause(
+		automationId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "unpause">, CheckfuSdkError>
+	unpause(
+		automationId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "unpause">
+		| WithResponse<EndpointSuccess<"automations", "unpause">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "unpause", { automation_id: automationId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.unpause",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.automations.unpause({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "automations.unpause" },
+					),
 			),
 			options,
 		)
@@ -780,11 +1158,13 @@ export class EffectSessionsResource {
 
 export class EffectResources {
 	readonly agents: EffectAgentsResource
+	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
 	readonly sessions: EffectSessionsResource
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.agents = new EffectAgentsResource(runtime)
+		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
 	}
@@ -841,6 +1221,129 @@ export class AgentsResource {
 	): APIPromise<EndpointJsonSuccess<"agents", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAgentsResource(effectRuntime).update(agentId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class AutomationsRunsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List the runs of an automation that have started or failed, oldest first by default */
+	list(
+		automationId: string,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "listRuns">>, number>,
+		ItemOf<EndpointJsonSuccess<"automations", "listRuns">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectAutomationsRunsResource(effectRuntime).list(
+					automationId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+}
+
+export class AutomationsResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly runs: AutomationsRunsResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.runs = new AutomationsRunsResource(runtime)
+	}
+
+	/** Archive an automation so it never runs again */
+	archive(
+		automationId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "archive">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).archive(automationId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Create an automation that opens a new session with its message every time its schedule fires */
+	create(
+		params: EndpointBody<"automations", "create">,
+		options: PromiseRequestOptions & { readonly idempotencyKey: string },
+	): APIPromise<EndpointJsonSuccess<"automations", "create">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).create(params, {
+				...effectOpts,
+				idempotencyKey: options?.idempotencyKey,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Stop an automation's schedule until it is unpaused; it can still be run on request */
+	pause(
+		automationId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "pause">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).pause(automationId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve an automation by ID */
+	retrieve(
+		automationId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "get">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).retrieve(automationId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to */
+	run(
+		automationId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "run">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).run(automationId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Resume an automation's schedule from now, without running the occurrences it missed */
+	unpause(
+		automationId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "unpause">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).unpause(automationId, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -1032,11 +1535,13 @@ export class SessionsResource {
 
 export class PromiseResources {
 	readonly agents: AgentsResource
+	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
 	readonly sessions: SessionsResource
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.agents = new AgentsResource(runtime)
+		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
 		this.sessions = new SessionsResource(runtime)
 	}

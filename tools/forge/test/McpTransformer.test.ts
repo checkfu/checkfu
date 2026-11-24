@@ -101,6 +101,8 @@ describe("MCP tool projection", () => {
 			tools.filter((tool) => tool.idempotent && !tool.readOnly).map((tool) => tool.name),
 		).toEqual([
 			"agents_archiveAgent",
+			"automations_archiveAutomation",
+			"automations_createAutomation",
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
 			"sessions_archiveSession",
@@ -110,7 +112,12 @@ describe("MCP tool projection", () => {
 		// Only an operation that declares itself additive may drop the destructive hint.
 		expect(
 			tools.filter((tool) => !tool.readOnly && !tool.destructive).map((tool) => tool.name),
-		).toEqual(["agents_createAgent", "environments_createEnvironment", "sessions_createSession"])
+		).toEqual([
+			"agents_createAgent",
+			"automations_createAutomation",
+			"environments_createEnvironment",
+			"sessions_createSession",
+		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])
 	})
 

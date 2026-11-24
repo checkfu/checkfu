@@ -4,7 +4,6 @@ import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
-import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import type { TranscriptContext } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -12,7 +11,7 @@ import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { SEED_MESSAGE_OVERHEAD_TOKENS, seedTokenBudget } from "../src/Pi/PiContextBudget.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
@@ -97,7 +96,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			})),
 		)
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(
+			CheckfuHandlersLive.pipe(
 				Layer.provide(PiDurableHarnessLive.pipe(Layer.provide(CountingSessionView))),
 			),
 		).pipe(Layer.provide(executorLayer))
@@ -372,7 +371,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 				}),
 		})
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
@@ -689,7 +688,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			})),
 		)
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
@@ -882,7 +881,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 			abortTurn: () => Effect.void,
 		})
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),

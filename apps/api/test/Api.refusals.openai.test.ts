@@ -1,7 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -10,7 +9,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
-import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import type { PiTurnResult } from "../src/Pi/PiTurn.ts"
@@ -357,7 +356,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -1708,7 +1707,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(
-				SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+				CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),

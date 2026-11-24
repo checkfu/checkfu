@@ -123,6 +123,7 @@ const generateResourcesFile = (
 	const executeWithRetries = runtimeMod.ident("executeWithRetries")
 	const pendingUpdateReadiness = runtimeMod.ident("pendingUpdateReadiness")
 	const resolveCallIdempotencyKey = runtimeMod.ident("resolveCallIdempotencyKey")
+	const resolveRequiredIdempotencyKey = runtimeMod.ident("resolveRequiredIdempotencyKey")
 	const unwrapResponse = runtimeMod.ident("unwrapResponse")
 	const withPendingReadiness = runtimeMod.ident("withPendingReadiness")
 	const withResolvedIdempotencyKey = runtimeMod.ident("withResolvedIdempotencyKey")
@@ -298,12 +299,13 @@ const generateResourcesFile = (
 					",",
 				)
 			}
+			const keyed = op.requiresIdempotencyKey ? " & { readonly idempotencyKey: string }" : ""
 			if (mode === "withResponse") {
-				out("options: ", WithResponseRequestOptions, ",")
+				out("options: ", WithResponseRequestOptions, keyed, ",")
 			} else if (mode === "default") {
-				out("options?: ", RequestOptions, ",")
+				out(op.requiresIdempotencyKey ? "options: " : "options?: ", RequestOptions, keyed, ",")
 			} else {
-				out("options?: ", AnyRequestOptions, ",")
+				out(op.requiresIdempotencyKey ? "options: " : "options?: ", AnyRequestOptions, keyed, ",")
 			}
 		}
 
@@ -399,7 +401,9 @@ const generateResourcesFile = (
 							})
 							out("},")
 						}
-						if (op.supportsIdempotencyKey) {
+						if (op.requiresIdempotencyKey) {
+							out('headers: { "idempotency-key": key },')
+						} else if (op.supportsIdempotencyKey) {
 							out('headers: key === undefined ? {} : { "idempotency-key": key },')
 						}
 						if (op.hasBody) {
@@ -448,8 +452,10 @@ const generateResourcesFile = (
 				out(
 					EffectFlatMap,
 					"(",
-					resolveCallIdempotencyKey,
-					"(this.#runtime, options, true), (key) =>",
+					op.requiresIdempotencyKey ? resolveRequiredIdempotencyKey : resolveCallIdempotencyKey,
+					op.requiresIdempotencyKey
+						? "(this.#runtime, options), (key) =>"
+						: "(this.#runtime, options, true), (key) =>",
 				)
 				out.indent(() => emitInvoke())
 				out(")")
@@ -765,7 +771,11 @@ const generateResourcesFile = (
 					">>,",
 				)
 			}
-			out("options?: ", PromiseRequestOptions, ",")
+			if (op.requiresIdempotencyKey) {
+				out("options: ", PromiseRequestOptions, " & { readonly idempotencyKey: string },")
+			} else {
+				out("options?: ", PromiseRequestOptions, ",")
+			}
 		})
 		out("): ", APIPromise, "<", EndpointJsonSuccess, "<", g, ", ", e, ">> {")
 		out.indent(() => {
@@ -782,7 +792,11 @@ const generateResourcesFile = (
 						out("body,")
 						out("query,")
 					}
-					out("{ ...effectOpts, withResponse: true },")
+					out(
+						op.requiresIdempotencyKey
+							? "{ ...effectOpts, idempotencyKey: options?.idempotencyKey, withResponse: true },"
+							: "{ ...effectOpts, withResponse: true },",
+					)
 				})
 				out("),")
 			})

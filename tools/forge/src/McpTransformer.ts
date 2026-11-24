@@ -282,8 +282,9 @@ const projectOperation = (
 		method: httpMethod,
 		path: method.path,
 		readOnly,
-		// The same retry-safety rule the CLI and SDK are generated from.
-		idempotent: operation.retrySafety === "idempotent",
+		// The same retry-safety rule the CLI and SDK are generated from. A required retry key is
+		// one of the tool's arguments, so repeating the same call repeats the same key.
+		idempotent: operation.retrySafety === "idempotent" || operation.requiresIdempotencyKey,
 		// MCP reads "not destructive" as "only adds", so an operation has to claim that itself.
 		destructive: !readOnly && exposure.destructive !== false,
 		inputSchema,

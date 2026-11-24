@@ -6,9 +6,11 @@ import * as Schema from "effect/Schema"
 import { isPendingResource } from "./Api.ts"
 import type {
 	Agent,
+	Automation,
 	Environment,
 	ListSessionEventsResponse,
 	PendingAgent,
+	PendingAutomation,
 	PendingEnvironment,
 	PendingSession,
 	Session,
@@ -83,6 +85,7 @@ export type {
 export type JsonAgent = IsoDateTimes<Agent>
 export type JsonEnvironment = IsoDateTimes<Environment>
 export type JsonSession = IsoDateTimes<Session>
+export type JsonAutomation = IsoDateTimes<Automation>
 export type JsonSessionEvent = IsoDateTimes<SessionEvent>
 export type JsonListSessionEventsResponse = IsoDateTimes<ListSessionEventsResponse>
 export type EventsPage = CursorPage<JsonSessionEvent>
@@ -306,6 +309,10 @@ export class Checkfu extends PromiseResources {
 		result: JsonSession | PendingSession,
 		options?: PromiseWaitForPendingOptions<JsonSession>,
 	): Promise<JsonSession>
+	waitForPending(
+		result: JsonAutomation | PendingAutomation,
+		options?: PromiseWaitForPendingOptions<JsonAutomation>,
+	): Promise<JsonAutomation>
 	async waitForPending(
 		result:
 			| JsonAgent
@@ -313,9 +320,13 @@ export class Checkfu extends PromiseResources {
 			| JsonEnvironment
 			| PendingEnvironment
 			| JsonSession
-			| PendingSession,
-		options?: PromiseWaitForPendingOptions<JsonAgent | JsonEnvironment | JsonSession>,
-	): Promise<JsonAgent | JsonEnvironment | JsonSession> {
+			| PendingSession
+			| JsonAutomation
+			| PendingAutomation,
+		options?: PromiseWaitForPendingOptions<
+			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation
+		>,
+	): Promise<JsonAgent | JsonEnvironment | JsonSession | JsonAutomation> {
 		if (!isPendingResource(result)) {
 			return result
 		}
@@ -331,12 +342,17 @@ export class Checkfu extends PromiseResources {
 			...(requestOptions === undefined ? {} : { requestOptions }),
 		}
 		const effect: Effect.Effect<
-			JsonAgent | JsonEnvironment | JsonSession,
+			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation,
 			CheckfuSdkError,
 			CheckfuClient
 		> = Effect.flatMap(
 			CheckfuClient,
-			(client): Effect.Effect<JsonAgent | JsonEnvironment | JsonSession, CheckfuSdkError> => {
+			(
+				client,
+			): Effect.Effect<
+				JsonAgent | JsonEnvironment | JsonSession | JsonAutomation,
+				CheckfuSdkError
+			> => {
 				const until = options?.until
 				switch (result.type) {
 					case "agent":
@@ -366,6 +382,16 @@ export class Checkfu extends PromiseResources {
 								...(until === undefined
 									? {}
 									: { until: (resource: Session) => until(toIsoJson(resource)) }),
+							}),
+							toIsoJson,
+						)
+					case "automation":
+						return Effect.map(
+							client.waitForPending(result, {
+								...baseEffectOpts,
+								...(until === undefined
+									? {}
+									: { until: (resource: Automation) => until(toIsoJson(resource)) }),
 							}),
 							toIsoJson,
 						)

@@ -20,6 +20,7 @@ import * as Path from "effect/Path"
 import * as References from "effect/References"
 import * as Stream from "effect/Stream"
 import { AgentsLive } from "./AgentsHandlers.ts"
+import { AutomationsLive } from "./AutomationsHandlers.ts"
 import { CheckfuApi, REQUEST_ID_HEADER, RequestId, apiError } from "./Api.ts"
 import { EnvironmentsLive } from "./EnvironmentsHandlers.ts"
 import {
@@ -85,7 +86,14 @@ const OpenApiRouteLive = HttpRouter.add(
 )
 
 const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi), OpenApiRouteLive).pipe(
-	Layer.provide([HealthLive, AuthLive, AgentsLive, EnvironmentsLive, SessionsLive]),
+	Layer.provide([
+		HealthLive,
+		AuthLive,
+		AgentsLive,
+		EnvironmentsLive,
+		SessionsLive,
+		AutomationsLive,
+	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 		RequestValidationLive,

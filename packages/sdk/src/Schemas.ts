@@ -11,6 +11,11 @@ export const MAX_AGENT_SYSTEM_LENGTH = 100_000
 export const MAX_ENVIRONMENT_NAME_LENGTH = 256
 export const MAX_ENVIRONMENT_DESCRIPTION_LENGTH = 1024
 
+export const MAX_AUTOMATION_ID_LENGTH = 128
+export const MAX_AUTOMATION_NAME_LENGTH = 256
+export const MAX_CRON_EXPRESSION_LENGTH = 256
+export const MAX_TIMEZONE_LENGTH = 64
+
 export const MAX_IDENTIFIER_LENGTH = 256
 export const MAX_TITLE_LENGTH = 1024
 export const MAX_MESSAGE_TEXT_LENGTH = 16_384
@@ -68,6 +73,13 @@ export const SessionId = Schema.String.check(
 	SinglePathSegmentCheck,
 ).pipe(Schema.brand("SessionId"))
 export type SessionId = typeof SessionId.Type
+
+export const AutomationId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_AUTOMATION_ID_LENGTH),
+	SinglePathSegmentCheck,
+).pipe(Schema.brand("AutomationId"))
+export type AutomationId = typeof AutomationId.Type
 
 // ---------------------------------------------------------------------------
 // Agent schemas
@@ -264,3 +276,58 @@ export const SessionSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type SessionSnapshot = typeof SessionSnapshot.Type
+
+// ---------------------------------------------------------------------------
+// Automations
+// ---------------------------------------------------------------------------
+
+export const AutomationName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_AUTOMATION_NAME_LENGTH),
+)
+
+export const CronExpression = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_CRON_EXPRESSION_LENGTH),
+)
+export const Timezone = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_TIMEZONE_LENGTH),
+)
+
+export const AutomationSchedule = Schema.Struct({
+	type: Schema.Literal("cron"),
+	expression: CronExpression,
+	timezone: Timezone,
+})
+export type AutomationSchedule = typeof AutomationSchedule.Type
+
+export const AutomationTrigger = Schema.Literals(["schedule", "manual"])
+export type AutomationTrigger = typeof AutomationTrigger.Type
+
+export const AutomationRunError = Schema.Struct({
+	type: Schema.String,
+	message: Schema.String,
+})
+export type AutomationRunError = typeof AutomationRunError.Type
+
+export const AutomationSnapshot = Schema.Struct({
+	id: AutomationId,
+	type: Schema.Literal("automation"),
+	name: AutomationName,
+	agent_id: ResourceId,
+	agent_version: Schema.NullOr(PositiveInt),
+	environment_id: ResourceId,
+	text: MessageText,
+	schedule: AutomationSchedule,
+	status: Schema.Literals(["active", "paused", "archived"]),
+	pause_reason: Schema.NullOr(Schema.String),
+	runs: NonNegativeInt,
+	activation: NonNegativeInt,
+	upcoming: Schema.Array(NonNegativeInt),
+	last_run_at: Schema.NullOr(Schema.DateTimeUtc),
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type AutomationSnapshot = typeof AutomationSnapshot.Type
