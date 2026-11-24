@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
+import { WORKSPACE_TOOL_OPTIONS } from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 
 const DISCARDED = "discarded"
@@ -26,7 +27,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 			])
 			const { storage } = state.raw
 			const { fs } = new Workspace({ storage })
-			const { execute } = createPiTools({ workspace: { fs } })
+			const { execute } = createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } })
 			const fence = makeTurnFence({
 				get: () => storage.kv.get<TurnToken>(NEWEST_TURN),
 				put: (token) => storage.kv.put(NEWEST_TURN, token),

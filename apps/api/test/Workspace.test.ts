@@ -3,7 +3,12 @@ import { conversationName, parseConversation } from "../src/Pi/PiConversation.ts
 import { makeTurnFence } from "../src/Workspace/WorkspaceFence.ts"
 import type { TurnToken } from "../src/Workspace/WorkspaceFence.ts"
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
-import { workspaceExtension, workspaceToolDeclarations } from "../src/Workspace/WorkspaceTools.ts"
+import {
+	MAX_INLINE_IMAGE_BYTES,
+	WORKSPACE_TOOL_OPTIONS,
+	workspaceExtension,
+	workspaceToolDeclarations,
+} from "../src/Workspace/WorkspaceTools.ts"
 import type { WorkspaceTool } from "../src/Workspace/WorkspaceTools.ts"
 
 const store = () => {
@@ -193,5 +198,55 @@ describe("session workspace", () => {
 		expect(sent[0]?.signal?.aborted).toBe(false)
 		live.abort()
 		expect(sent[0]?.signal?.aborted).toBe(true)
+	})
+
+	it("sends an image inline only as large as one stored tool result can hold", async () => {
+		const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
+		const png = (size: number) => {
+			const bytes = new Uint8Array(size)
+			bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+			return bytes
+		}
+		const files = new Map([
+			["/workspace/small.png", png(1000)],
+			["/workspace/large.png", png(MAX_INLINE_IMAGE_BYTES + 1)],
+		])
+		const unused = () => Promise.reject(new Error("not used by read"))
+		const { execute } = createPiTools({
+			...WORKSPACE_TOOL_OPTIONS,
+			workspace: {
+				fs: {
+					stat: (path: string) => {
+						const bytes = files.get(path)
+						return bytes === undefined
+							? Promise.reject(new Error(`ENOENT: ${path}`))
+							: Promise.resolve({
+									size: bytes.byteLength,
+									mtime: 0,
+									mode: 0o644,
+									isFile: true,
+									isDirectory: false,
+								})
+					},
+					readFile: (path: string, options?: { byteOffset?: number; byteLength?: number }) => {
+						const bytes = files.get(path) ?? new Uint8Array()
+						const start = options?.byteOffset ?? 0
+						const end = options?.byteLength === undefined ? undefined : start + options.byteLength
+						return Promise.resolve(new Blob([bytes.slice(start, end)]).stream())
+					},
+					writeFile: unused,
+					mkdir: unused,
+					rm: unused,
+					find: unused,
+					grep: unused,
+					readdir: unused,
+				},
+			},
+		})
+		const read = (path: string) => execute({ id: "call_1", name: "read", arguments: { path } }, {})
+		const small = await read("/workspace/small.png")
+		expect(small.content.map(({ type }) => type)).toEqual(["text", "image"])
+		const large = await read("/workspace/large.png")
+		expect(large.content.map(({ type }) => type)).toEqual(["text"])
 	})
 })
