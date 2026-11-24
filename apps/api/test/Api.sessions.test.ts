@@ -1333,8 +1333,22 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					// 1. Caller omits agent_version; concurrent update moves head to v2 whose view times out -> 202 pending.
+					// 1. Caller omits agent_version and an update moves the head to v2 just before
+					// admission: the session keeps v1, the version its servers were read for.
 					raceUpdateToV2 = true
+					const racedRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					expect(racedRes.status).toBe(201)
+					expect(yield* Effect.promise(() => racedRes.json())).toMatchObject({
+						agent: { id: agent.id, version: 1 },
+					})
+					expect(version2Waits).toBe(0)
+
+					// 2. The head is v2 now and its view times out -> 202 pending.
 					lagVersion2Mode = "timeout"
 					const pendingRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1382,7 +1396,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						agent: { id: agent.id, version: 2 },
 					})
 
-					// 2. When v2 catches up during the post-commit readiness wait -> 201 with pinned v2.
+					// 3. When v2 catches up during the post-commit readiness wait -> 201 with pinned v2.
 					lagVersion2Mode = "recover"
 					const readyRes = yield* sendRequest(apiFetch, {
 						method: "POST",

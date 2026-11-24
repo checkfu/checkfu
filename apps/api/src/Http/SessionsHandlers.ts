@@ -692,9 +692,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						new AdmitSession({
 							session_id: id,
 							agent_id: agentId,
-							// Servers were bound for one version, so that version is the one admitted.
-							agent_version:
-								mcpServers === "" && apiServers === "" ? agentVersion : declared.version,
+							// Servers were read for one version, so that version is the one admitted:
+							// an agent that gains servers meanwhile cannot leave this session with none.
+							agent_version: declared.version,
 							environment_id: environmentId,
 							title,
 						}),
