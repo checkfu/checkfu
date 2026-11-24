@@ -1,7 +1,9 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { AgentVersion } from "./AgentVersion.aggregate.ts"
-import { AgentVersionSnapshot } from "./AgentVersionView.view.ts"
+import { AgentModel, NonEmptyString, PositiveInt } from "./AgentTypes.ts"
+import { Agent } from "./Agent.aggregate.ts"
+import { AgentId } from "./Agent.id.ts"
+import { AgentVersionId } from "./AgentVersion.id.ts"
 
 export const AgentVersionLookupId = Schema.String.check(Schema.isMinLength(1)).pipe(
 	Schema.brand("AgentVersionLookupId"),
@@ -11,33 +13,55 @@ export type AgentVersionLookupId = typeof AgentVersionLookupId.Type
 export const agentVersionLookupKey = (agentId: string, version: number): AgentVersionLookupId =>
 	AgentVersionLookupId.make(`${agentId}@${version}`)
 
-/**
- * Immutable O(1) lookup of an agent version by `(agent_id, version)` without
- * growing the head `AgentView` row as new versions are minted.
- */
+export const AgentVersionSnapshot = Schema.Struct({
+	id: AgentVersionId,
+	agent_id: AgentId,
+	type: Schema.Literal("agent"),
+	version: PositiveInt,
+	name: NonEmptyString,
+	model: AgentModel,
+	system: Schema.NullOr(Schema.String),
+	description: Schema.NullOr(Schema.String),
+	created_at: Schema.DateTimeUtc,
+})
+export type AgentVersionSnapshot = typeof AgentVersionSnapshot.Type
+
 export class AgentVersionByNumberView extends Domain.View("AgentVersionByNumberView", {
-	version: 1,
-	from: [AgentVersion],
+	version: 2,
+	from: [Agent],
 	key: AgentVersionLookupId,
 	keyOf: {
-		"agent_version.minted": ({ event }) => agentVersionLookupKey(event.agent_id, event.version),
+		"agent.created": ({ event, source }) => agentVersionLookupKey(source.id, event.version),
+		"agent.updated": ({ event, source }) => agentVersionLookupKey(source.id, event.version),
+		"agent.archived": () => undefined,
 	},
 	state: Schema.NullOr(AgentVersionSnapshot),
 	initial: null,
 	evolve: {
-		"agent_version.minted": (state, e, ctx) =>
-			state !== null
-				? state
-				: {
-						id: ctx.source.id,
-						agent_id: e.agent_id,
-						type: "agent" as const,
-						version: e.version,
-						name: e.name,
-						model: e.model,
-						system: e.system,
-						description: e.description,
-						created_at: ctx.at,
-					},
+		"agent.created": (state, e, ctx) =>
+			state ?? {
+				id: e.version_id,
+				agent_id: ctx.source.id,
+				type: "agent" as const,
+				version: e.version,
+				name: e.name,
+				model: e.model,
+				system: e.system,
+				description: e.description,
+				created_at: ctx.at,
+			},
+		"agent.updated": (state, e, ctx) =>
+			state ?? {
+				id: e.version_id,
+				agent_id: ctx.source.id,
+				type: "agent" as const,
+				version: e.version,
+				name: e.name,
+				model: e.model,
+				system: e.system,
+				description: e.description,
+				created_at: ctx.at,
+			},
+		"agent.archived": (state) => state,
 	},
 }) {}

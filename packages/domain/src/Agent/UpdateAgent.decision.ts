@@ -2,15 +2,13 @@ import * as Domain from "@alchemy.run/domain"
 import { Agent } from "./Agent.aggregate.ts"
 import { AgentArchivedError } from "./AgentArchived.rejection.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
-import { AgentVersion, AgentVersionMinted } from "./AgentVersion.aggregate.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
-import { AgentVersionAlreadyExists } from "./AgentVersionAlreadyExists.rejection.ts"
 import { AgentUpdated, AgentVersionConflict, UpdateAgent } from "./UpdateAgent.command.ts"
 
 export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
-	reads: { agent: Agent, version: AgentVersion },
-	keyOf: (cmd) => ({ agent: cmd.agent_id, version: cmd.next_version_id }),
-	decide: ({ agent, version }, cmd) => {
+	reads: { agent: Agent },
+	keyOf: (cmd) => ({ agent: cmd.agent_id }),
+	decide: ({ agent }, cmd) => {
 		if (agent.state.status === "") {
 			return new AgentNotFound({ agent_id: agent.id })
 		}
@@ -48,9 +46,6 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 		) {
 			return []
 		}
-		if (version.state.minted) {
-			return new AgentVersionAlreadyExists({ version_id: version.id })
-		}
 		const nextVersion = head.version + 1
 		const next = {
 			name,
@@ -59,8 +54,9 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 			description: hasDescription ? description : null,
 		}
 		return [
-			agent.record(new AgentUpdated({ version: nextVersion, version_id: version.id, ...next })),
-			version.record(new AgentVersionMinted({ agent_id: agent.id, version: nextVersion, ...next })),
+			agent.record(
+				new AgentUpdated({ version: nextVersion, version_id: cmd.next_version_id, ...next }),
+			),
 		]
 	},
 	transitions: {
@@ -98,7 +94,6 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 						unchanged,
 						after.agent.version === before.agent.version,
 						after.agent.current_version_id === before.agent.current_version_id,
-						after.version.minted === before.version.minted,
 					].every((ok) => ok),
 					[
 						!unchanged,
@@ -110,10 +105,6 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 						after.agent.system === system,
 						after.agent.has_description === hasDescription,
 						after.agent.description === description,
-						!before.version.minted,
-						after.version.minted,
-						after.version.version === after.agent.version,
-						after.version.agent_id === command.agent_id,
 					].every((ok) => ok),
 				].some((ok) => ok),
 			].every((ok) => ok)
@@ -148,7 +139,6 @@ export class UpdateAgentDecision extends Domain.Decision(UpdateAgent, {
 					after.agent.status === "active",
 					after.agent.version === before.agent.version,
 					after.agent.current_version_id === before.agent.current_version_id,
-					after.version.minted === before.version.minted,
 				].every((ok) => ok),
 			].some((ok) => ok)
 		},

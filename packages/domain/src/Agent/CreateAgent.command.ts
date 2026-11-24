@@ -9,9 +9,7 @@ import {
 	PositiveInt,
 } from "./AgentTypes.ts"
 import { AgentId } from "./Agent.id.ts"
-import { AgentVersionMinted } from "./AgentVersion.aggregate.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
-import { AgentVersionAlreadyExists } from "./AgentVersionAlreadyExists.rejection.ts"
 
 export class AgentCreated extends Domain.Event("agent.created", {
 	version: PositiveInt,
@@ -37,8 +35,8 @@ export class CreateAgent extends Domain.Command("CreateAgent", {
 		system: Schema.NullOr(AgentSystem),
 		description: Schema.NullOr(AgentDescription),
 	},
-	events: [AgentCreated, AgentVersionMinted],
-	rejects: [AgentAlreadyExists, AgentVersionAlreadyExists],
+	events: [AgentCreated],
+	rejects: [AgentAlreadyExists],
 	reply: {
 		version: PositiveInt,
 		version_id: AgentVersionId,

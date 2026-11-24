@@ -4,7 +4,6 @@ import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentArchivedError } from "../src/Agent/AgentArchived.rejection.ts"
 import { AgentNotFound } from "../src/Agent/AgentNotFound.rejection.ts"
-import { AgentVersion, AgentVersionMinted } from "../src/Agent/AgentVersion.aggregate.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import {
 	AgentVersionByNumberView,
@@ -103,8 +102,8 @@ describe("Checkfu unified hosted model stories", () => {
 		() => {
 			const agent = Agent.ref(AgentId.make("agent_verify_1"))
 			const boundedAgentId = BoundedAgentId.make(agent.id)
-			const v1 = AgentVersion.ref(AgentVersionId.make("aver_verify_1"))
-			const v2 = AgentVersion.ref(AgentVersionId.make("aver_verify_2"))
+			const v1 = AgentVersionId.make("aver_verify_1")
+			const v2 = AgentVersionId.make("aver_verify_2")
 			const env = Environment.ref(EnvironmentId.make("env_verify_1"))
 			const boundedEnvId = BoundedEnvironmentId.make(env.id)
 			const archivedEnv = Environment.ref(EnvironmentId.make("env_verify_archived"))
@@ -147,7 +146,7 @@ describe("Checkfu unified hosted model stories", () => {
 				Story.when(
 					new CreateAgent({
 						agent_id: agent.id,
-						version_id: v1.id,
+						version_id: v1,
 						name: "Verified Agent",
 						model: { id: "gpt-4o-mini" },
 						system: "Be concise.",
@@ -158,18 +157,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent,
 					new AgentCreated({
 						version: 1,
-						version_id: v1.id,
-						name: "Verified Agent",
-						model: { id: "gpt-4o-mini" },
-						system: "Be concise.",
-						description: null,
-					}),
-				),
-				Story.then(
-					v1,
-					new AgentVersionMinted({
-						agent_id: agent.id,
-						version: 1,
+						version_id: v1,
 						name: "Verified Agent",
 						model: { id: "gpt-4o-mini" },
 						system: "Be concise.",
@@ -180,7 +168,7 @@ describe("Checkfu unified hosted model stories", () => {
 					new UpdateAgent({
 						agent_id: agent.id,
 						expected_version: 1,
-						next_version_id: v2.id,
+						next_version_id: v2,
 						changes: {
 							name: "Verified Agent v2",
 							model: { id: "gpt-4o-mini" },
@@ -193,18 +181,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent,
 					new AgentUpdated({
 						version: 2,
-						version_id: v2.id,
-						name: "Verified Agent v2",
-						model: { id: "gpt-4o-mini" },
-						system: "Be extra concise.",
-						description: null,
-					}),
-				),
-				Story.then(
-					v2,
-					new AgentVersionMinted({
-						agent_id: agent.id,
-						version: 2,
+						version_id: v2,
 						name: "Verified Agent v2",
 						model: { id: "gpt-4o-mini" },
 						system: "Be extra concise.",
@@ -364,7 +341,7 @@ describe("Checkfu unified hosted model stories", () => {
 
 				// Verify hosted cross-domain views for both pinned v1 and head v2 admissions.
 				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 1), {
-					id: v1.id,
+					id: v1,
 					agent_id: agent.id,
 					type: "agent",
 					version: 1,
@@ -375,7 +352,7 @@ describe("Checkfu unified hosted model stories", () => {
 					created_at: t0,
 				}),
 				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 2), {
-					id: v2.id,
+					id: v2,
 					agent_id: agent.id,
 					type: "agent",
 					version: 2,
@@ -427,7 +404,7 @@ describe("Checkfu unified hosted model stories", () => {
 					id: agent.id,
 					type: "agent",
 					version: 2,
-					current_version_id: v2.id,
+					current_version_id: v2,
 					name: "Verified Agent v2",
 					model: { id: "gpt-4o-mini" },
 					system: "Be extra concise.",

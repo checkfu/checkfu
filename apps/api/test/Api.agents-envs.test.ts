@@ -3,17 +3,11 @@ import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import { Agent, AgentStateSnapshot } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
-import {
-	AgentVersion,
-	AgentVersionMinted,
-	AgentVersionStateSnapshot,
-} from "@checkfu/domain/Agent/AgentVersion.aggregate"
 import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
-import { AgentVersionView } from "@checkfu/domain/Agent/AgentVersionView.view"
 import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
 import { AgentCreated, CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
@@ -975,7 +969,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		}
 	})
 
-	it("waits for the existing version or returns 202 pending on a no-op agent update when AgentVersionByNumberView lags", async () => {
+	it("reads a no-op agent update's version at the agent's own commit, so a lagging AgentVersionByNumberView cannot fail it", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
 		)
@@ -983,19 +977,41 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const realVersionsByNumber = yield* AgentVersionByNumberView
-					let lagMode: "off" | "recover" | "timeout" = "off"
+					let lagging = false
+					let stalled = false
+					const stalledTimeouts: Array<unknown> = []
 					let waitCalls = 0
-					const seenAtLeastWhenLagging: Array<unknown> = []
+					const checkpoints: Array<unknown> = []
+					// While lagging, the view has nothing for a read without a checkpoint, and every
+					// wait times out. A read at a checkpoint is served, as the real view does once it
+					// has applied that commit.
 					const laggingVersionsByNumber = {
 						...realVersionsByNumber,
 						get: (
 							key: Parameters<typeof realVersionsByNumber.get>[0],
 							options?: Parameters<typeof realVersionsByNumber.get>[1],
 						) => {
-							if (lagMode !== "off") {
-								// No-op update must NOT pass an atLeast checkpoint for an unminted nextVersionId.
-								seenAtLeastWhenLagging.push(options?.atLeast)
-								return Effect.succeedNone
+							if (lagging) {
+								checkpoints.push(options?.atLeast)
+								if (options?.atLeast === undefined) {
+									return Effect.succeedNone
+								}
+								// A view that never reaches the checkpoint answers when its timeout runs
+								// out: the one the caller passes, or the domain's own 10 seconds.
+								if (stalled) {
+									stalledTimeouts.push(options.timeout)
+									return Effect.sleep(options.timeout ?? "10 seconds").pipe(
+										Effect.andThen(
+											Effect.fail(
+												new Domain.ConsistencyTimeout({
+													view: "AgentVersionByNumberView",
+													key: String(key),
+													...options.atLeast,
+												}),
+											),
+										),
+									)
+								}
 							}
 							return realVersionsByNumber.get(key, options)
 						},
@@ -1005,12 +1021,9 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							options: Parameters<typeof realVersionsByNumber.waitFor>[2],
 						) => {
 							waitCalls += 1
-							if (lagMode === "timeout") {
+							if (lagging) {
 								return Effect.fail(
-									new Domain.WaitTimeout({
-										view: "AgentVersionByNumberView",
-										key: String(key),
-									}),
+									new Domain.WaitTimeout({ view: "AgentVersionByNumberView", key: String(key) }),
 								)
 							}
 							return realVersionsByNumber.waitFor(key, filter, options)
@@ -1024,46 +1037,39 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						method: "POST",
 						path: "/v1/agents",
 						headers: AUTH_HEADERS,
-						body: {
-							name: "No-op Agent",
-							model: "gpt-4o-mini",
-							system: "Keep steady.",
-						},
+						body: { name: "No-op Agent", model: "gpt-4o-mini", system: "Keep steady." },
 					})
 					expect(createRes.status).toBe(201)
-					const created = (yield* Effect.promise(() => createRes.json())) as {
-						id: string
-						version: number
-					}
+					const created = (yield* Effect.promise(() => createRes.json())) as { id: string }
 
-					// 1. Lagging view catches up during waitFor -> 200 with existing version 1 (no 500).
-					lagMode = "recover"
-					const recoveredRes = yield* sendRequest(apiFetch, {
+					lagging = true
+					const noOpRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/agents/${created.id}`,
 						headers: AUTH_HEADERS,
 						body: { version: 1, name: "No-op Agent" },
 					})
-					expect(recoveredRes.status).toBe(200)
-					expect(waitCalls).toBe(1)
-					expect(yield* Effect.promise(() => recoveredRes.json())).toMatchObject({
+					expect(noOpRes.status).toBe(200)
+					expect(yield* Effect.promise(() => noOpRes.json())).toMatchObject({
 						id: created.id,
 						version: 1,
 						name: "No-op Agent",
 					})
+					expect(waitCalls).toBe(0)
+					expect(checkpoints).toEqual([expect.objectContaining({ stream: `Agent/${created.id}` })])
 
-					// 2. Lagging view times out -> 202 pending (no 500).
-					lagMode = "timeout"
-					const pendingRes = yield* sendRequest(apiFetch, {
+					// A checkpointed read that cannot be served gives up within the configured version
+					// budget (50 ms here), not the domain's default, and reports the version as pending.
+					stalled = true
+					const stalledRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/agents/${created.id}`,
 						headers: AUTH_HEADERS,
 						body: { version: 1, name: "No-op Agent" },
 					})
-					expect(pendingRes.status).toBe(202)
-					expect(waitCalls).toBe(2)
-					expect(seenAtLeastWhenLagging).toEqual([undefined, undefined])
-					expect(yield* Effect.promise(() => pendingRes.json())).toEqual({
+					expect(stalledRes.status).toBe(202)
+					expect(stalledTimeouts).toEqual(["50 millis"])
+					expect(yield* Effect.promise(() => stalledRes.json())).toEqual({
 						id: created.id,
 						type: "agent",
 						pending: true,
@@ -2790,7 +2796,6 @@ describe("Agent and environment field length limits", () => {
 						const createAgent = yield* CreateAgentDecision
 						const updateAgent = yield* UpdateAgentDecision
 						const agentViews = yield* AgentView
-						const versionViews = yield* AgentVersionView
 						const byNumberViews = yield* AgentVersionByNumberView
 						const environments = yield* Environment
 						const envViews = yield* EnvironmentView
@@ -2823,15 +2828,8 @@ describe("Agent and environment field length limits", () => {
 						).toBe(true)
 						expect(
 							Option.isSome(
-								yield* versionViews.get(AgentVersion.ref(v1Id), {
-									atLeast: commitFor(createReceipt.commits, `AgentVersion/${v1Id}`),
-								}),
-							),
-						).toBe(true)
-						expect(
-							Option.isSome(
 								yield* byNumberViews.get(agentVersionLookupKey(agentId, 1), {
-									atLeast: commitFor(createReceipt.commits, `AgentVersion/${v1Id}`),
+									atLeast: commitFor(createReceipt.commits, `Agent/${agentId}`),
 								}),
 							),
 						).toBe(true)
@@ -2930,7 +2928,9 @@ describe("Agent and environment field length limits", () => {
 			(write) => write.className === "AgentAggregate" && write.key === "intent",
 		)
 		expect(primaryIntents.length).toBeGreaterThanOrEqual(4)
-		expect(Math.max(...primaryIntents.map((write) => write.bytes))).toBeGreaterThan(1_500_000)
+		// The largest write is one agent event with every field at its limit in four-byte
+		// characters, which shows the worst case was exercised.
+		expect(Math.max(...primaryIntents.map((write) => write.bytes))).toBeGreaterThan(750_000)
 		expect(writes.some((write) => write.key.startsWith("decided:"))).toBe(true)
 		expect(writes.some((write) => write.key.startsWith("receipt:"))).toBe(true)
 		expect(writes.some((write) => write.key.startsWith("event:"))).toBe(true)
@@ -2964,24 +2964,6 @@ describe("Agent and environment field length limits", () => {
 		expect(decodedAgentSnapshot.name).toBe(legacyAgentName)
 		expect(decodedAgentSnapshot.system).toBe(legacyAgentSystem)
 		expect(decodedAgentSnapshot.description).toBe(legacyAgentDescription)
-
-		const decodedAgentVersionSnapshot = Schema.decodeSync(AgentVersionStateSnapshot)({
-			schema_version: 1,
-			state: {
-				minted: true,
-				agent_id: "agent_legacy_snap",
-				version: 1,
-				name: legacyAgentName,
-				model_id: "openai/gpt-4o-mini",
-				has_system: true,
-				system: legacyAgentSystem,
-				has_description: true,
-				description: legacyAgentDescription,
-			},
-		})
-		expect(decodedAgentVersionSnapshot.name).toBe(legacyAgentName)
-		expect(decodedAgentVersionSnapshot.system).toBe(legacyAgentSystem)
-		expect(decodedAgentVersionSnapshot.description).toBe(legacyAgentDescription)
 
 		const decodedEnvSnapshot = Schema.decodeSync(EnvironmentStateSnapshot)({
 			schema_version: 1,
@@ -3059,9 +3041,7 @@ describe("Agent and environment field length limits", () => {
 					const seedLayer = makeDurableObjectsPlatform(seedScope, persistedStore)
 					yield* Effect.gen(function* () {
 						const agents = yield* Agent
-						const agentVersions = yield* AgentVersion
 						const agentViews = yield* AgentView
-						const versionViews = yield* AgentVersionView
 						const byNumberViews = yield* AgentVersionByNumberView
 						const environments = yield* Environment
 						const envViews = yield* EnvironmentView
@@ -3088,34 +3068,6 @@ describe("Agent and environment field length limits", () => {
 							],
 							{ commandId: "import:do_agent_legacy" },
 						)
-						const v1Import = yield* agentVersions.import(
-							doV1Id,
-							[
-								new AgentVersionMinted({
-									agent_id: doAgentId,
-									version: 1,
-									name: legacyAgentName,
-									model: { id: "openai/gpt-4o-mini" },
-									system: legacyAgentSystem,
-									description: legacyAgentDescription,
-								}),
-							],
-							{ commandId: "import:do_aver_legacy_1" },
-						)
-						const v2Import = yield* agentVersions.import(
-							doV2Id,
-							[
-								new AgentVersionMinted({
-									agent_id: doAgentId,
-									version: 2,
-									name: `${legacyAgentName}!`,
-									model: { id: "openai/gpt-4o-mini" },
-									system: `${legacyAgentSystem}!`,
-									description: `${legacyAgentDescription}!`,
-								}),
-							],
-							{ commandId: "import:do_aver_legacy_2" },
-						)
 						const envImport = yield* environments.import(
 							doEnvId,
 							[
@@ -3139,13 +3091,8 @@ describe("Agent and environment field length limits", () => {
 						).toBe(true)
 						expect(
 							Option.isSome(
-								yield* versionViews.get(AgentVersion.ref(doV1Id), { atLeast: v1Import }),
-							),
-						).toBe(true)
-						expect(
-							Option.isSome(
 								yield* byNumberViews.get(agentVersionLookupKey(doAgentId, 2), {
-									atLeast: v2Import,
+									atLeast: agentImport,
 								}),
 							),
 						).toBe(true)
@@ -3173,10 +3120,8 @@ describe("Agent and environment field length limits", () => {
 					const upgradedLayer = makeDurableObjectsPlatform(upgradedScope, persistedStore)
 					yield* Effect.gen(function* () {
 						const agents = yield* Agent
-						const agentVersions = yield* AgentVersion
 						const updateAgent = yield* UpdateAgentDecision
 						const agentViews = yield* AgentView
-						const versionViews = yield* AgentVersionView
 						const byNumberViews = yield* AgentVersionByNumberView
 						const environments = yield* Environment
 						const envViews = yield* EnvironmentView
@@ -3186,9 +3131,12 @@ describe("Agent and environment field length limits", () => {
 						expect(committedAgent.system).toBe(`${legacyAgentSystem}!`)
 						expect(committedAgent.description).toBe(`${legacyAgentDescription}!`)
 
-						const committedV1 = yield* agentVersions.get(doV1Id)
-						expect(committedV1.name).toBe(legacyAgentName)
-						expect(committedV1.system).toBe(legacyAgentSystem)
+						const committedV1 = Option.getOrNull(
+							yield* byNumberViews.get(agentVersionLookupKey(doAgentId, 1)),
+						)
+						expect(committedV1?.id).toBe(doV1Id)
+						expect(committedV1?.name).toBe(legacyAgentName)
+						expect(committedV1?.system).toBe(legacyAgentSystem)
 
 						const committedEnv = yield* environments.get(doEnvId)
 						expect(committedEnv.name).toBe(`${legacyEnvName}!`)
@@ -3196,9 +3144,6 @@ describe("Agent and environment field length limits", () => {
 						expect(Option.getOrNull(yield* agentViews.get(Agent.ref(doAgentId)))?.description).toBe(
 							`${legacyAgentDescription}!`,
 						)
-						expect(
-							Option.getOrNull(yield* versionViews.get(AgentVersion.ref(doV1Id)))?.system,
-						).toBe(legacyAgentSystem)
 						expect(
 							Option.getOrNull(yield* byNumberViews.get(agentVersionLookupKey(doAgentId, 2)))?.name,
 						).toBe(`${legacyAgentName}!`)
@@ -3254,9 +3199,7 @@ describe("Agent and environment field length limits", () => {
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const agents = yield* Agent
-					const agentVersions = yield* AgentVersion
 					const agentViews = yield* AgentView
-					const versionViews = yield* AgentVersionView
 					const byNumberViews = yield* AgentVersionByNumberView
 					const environments = yield* Environment
 					const envViews = yield* EnvironmentView
@@ -3277,34 +3220,17 @@ describe("Agent and environment field length limits", () => {
 						],
 						{ commandId: "import:agent_legacy_repair" },
 					)
-					const repairVersionImport = yield* agentVersions.import(
-						repairV1Id,
-						[
-							new AgentVersionMinted({
-								agent_id: repairAgentId,
-								version: 1,
-								name: legacyAgentName,
-								model: { id: "openai/gpt-4o-mini" },
-								system: legacyAgentSystem,
-								description: legacyAgentDescription,
-							}),
-						],
-						{ commandId: "import:aver_legacy_repair_1" },
-					)
 					expect(
 						Option.isSome(
 							yield* agentViews.get(Agent.ref(repairAgentId), { atLeast: repairAgentImport }),
 						),
 					).toBe(true)
-					const projectedVersion = yield* versionViews.get(AgentVersion.ref(repairV1Id), {
-						atLeast: repairVersionImport,
-					})
-					expect(Option.getOrNull(projectedVersion)?.system).toBe(legacyAgentSystem)
 					const projectedByNumber = yield* byNumberViews.get(
 						agentVersionLookupKey(repairAgentId, 1),
-						{ atLeast: repairVersionImport },
+						{ atLeast: repairAgentImport },
 					)
 					expect(Option.getOrNull(projectedByNumber)?.description).toBe(legacyAgentDescription)
+					expect(Option.getOrNull(projectedByNumber)?.system).toBe(legacyAgentSystem)
 
 					const getLegacyAgentRes = yield* sendRequest(apiFetch, {
 						method: "GET",
