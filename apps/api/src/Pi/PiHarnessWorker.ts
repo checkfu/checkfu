@@ -36,6 +36,16 @@ export default PiHarnessWorker.make(
 				Effect.orDie(workspace(sessionId).prepare(token, repositories, allowedHosts)),
 			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
 				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token, replace)),
+			mountMemory: (sessionId, token, mount) =>
+				Effect.orDie(workspace(sessionId).mountMemory(token, mount)),
+			fillMemory: (sessionId, token, mountPath, memories) =>
+				Effect.orDie(workspace(sessionId).fillMemory(token, mountPath, memories)),
+			memoryChanges: (sessionId, token, mountPath) =>
+				Effect.orDie(workspace(sessionId).memoryChanges(token, mountPath)),
+			memoryContents: (sessionId, token, mountPath, paths) =>
+				Effect.orDie(workspace(sessionId).memoryContents(token, mountPath, paths)),
+			memorySaved: (sessionId, token, mountPath, saved) =>
+				Effect.orDie(workspace(sessionId).memorySaved(token, mountPath, saved)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
 		})
 	}).pipe(

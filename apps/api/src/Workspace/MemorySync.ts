@@ -1,36 +1,20 @@
-import type { MemoryAccess } from "@checkfu/domain/Session/SessionResource"
+import type {
+	MemoryChanges,
+	MemoryFile,
+	MemoryManifestEntry,
+	MemoryMount,
+	MemorySaved,
+	MemoryWrite,
+} from "./WorkspaceShapes.ts"
 
-export interface MemoryManifestEntry {
-	readonly path: string
-	readonly content_sha256: string
-}
-
-export interface MemoryMount {
-	readonly mount_path: string
-	readonly access: MemoryAccess
-	readonly manifest: ReadonlyArray<MemoryManifestEntry>
-}
-
-export interface MemoryFile extends MemoryManifestEntry {
-	readonly content: string
-}
-
-/** A file that differs from the store, without its content. `base` is what the store last had. */
-export interface MemoryWrite extends MemoryManifestEntry {
-	readonly size_bytes: number
-	readonly base: string | null
-}
-
-export interface MemoryChanges {
-	readonly written: ReadonlyArray<MemoryWrite>
-	readonly deleted: ReadonlyArray<{ readonly path: string; readonly base: string }>
-}
-
-/** What the store took: the hashes now there, and the paths now gone. */
-export interface MemorySaved {
-	readonly written: ReadonlyArray<MemoryManifestEntry>
-	readonly deleted: ReadonlyArray<string>
-}
+export type {
+	MemoryChanges,
+	MemoryFile,
+	MemoryManifestEntry,
+	MemoryMount,
+	MemorySaved,
+	MemoryWrite,
+} from "./WorkspaceShapes.ts"
 
 /** The files of a workspace, as far as copying a memory store in and out needs them. */
 export interface MemoryFiles {

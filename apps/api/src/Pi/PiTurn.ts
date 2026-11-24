@@ -1,7 +1,15 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
-import { RepositoryMount, TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
+import {
+	MemoryChanges,
+	MemoryFile,
+	MemoryMount,
+	MemorySaved,
+	RepositoryMount,
+	TurnToken,
+	WorkspacePreparation,
+} from "../Workspace/WorkspaceShapes.ts"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
 export const PiTurnRequest = Schema.Struct({
@@ -62,6 +70,26 @@ export const PiHarnessCalls = {
 	},
 	storeRepositoryToken: {
 		args: Schema.Tuple([Schema.String, Schema.String, Schema.String, Schema.Boolean]),
+		result: Schema.Void,
+	},
+	mountMemory: {
+		args: Schema.Tuple([Schema.String, TurnToken, MemoryMount]),
+		result: Schema.Array(Schema.String),
+	},
+	fillMemory: {
+		args: Schema.Tuple([Schema.String, TurnToken, Schema.String, Schema.Array(MemoryFile)]),
+		result: Schema.Void,
+	},
+	memoryChanges: {
+		args: Schema.Tuple([Schema.String, TurnToken, Schema.String]),
+		result: MemoryChanges,
+	},
+	memoryContents: {
+		args: Schema.Tuple([Schema.String, TurnToken, Schema.String, Schema.Array(Schema.String)]),
+		result: Schema.Array(MemoryFile),
+	},
+	memorySaved: {
+		args: Schema.Tuple([Schema.String, TurnToken, Schema.String, MemorySaved]),
 		result: Schema.Void,
 	},
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
