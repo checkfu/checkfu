@@ -427,7 +427,8 @@ const generateResourcesFile = (
 				out.indent(() => {
 					emitRawInvoke()
 					out(",")
-					if (op.apiEndpoint === "create") {
+					// A memory is created through its store's createMemory endpoint.
+					if (op.apiEndpoint === "create" || op.apiEndpoint === "createMemory") {
 						out('{ kind: "create" },')
 					} else if (op.apiEndpoint === "archive") {
 						out('{ kind: "archive" },')

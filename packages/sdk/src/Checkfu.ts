@@ -12,10 +12,13 @@ import type {
 	PendingAgent,
 	PendingAutomation,
 	PendingEnvironment,
+	PendingMemory,
+	PendingMemoryStore,
 	PendingSession,
 	Session,
 	SessionEvent,
 } from "./Api.ts"
+import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import {
 	CheckfuClient,
 	INTERNAL_EFFECT_RUNTIME,
@@ -86,6 +89,8 @@ export type JsonAgent = IsoDateTimes<Agent>
 export type JsonEnvironment = IsoDateTimes<Environment>
 export type JsonSession = IsoDateTimes<Session>
 export type JsonAutomation = IsoDateTimes<Automation>
+export type JsonMemoryStore = IsoDateTimes<MemoryStoreSnapshot>
+export type JsonMemory = IsoDateTimes<MemorySnapshot>
 export type JsonSessionEvent = IsoDateTimes<SessionEvent>
 export type JsonListSessionEventsResponse = IsoDateTimes<ListSessionEventsResponse>
 export type EventsPage = CursorPage<JsonSessionEvent>
@@ -313,6 +318,14 @@ export class Checkfu extends PromiseResources {
 		result: JsonAutomation | PendingAutomation,
 		options?: PromiseWaitForPendingOptions<JsonAutomation>,
 	): Promise<JsonAutomation>
+	waitForPending(
+		result: JsonMemoryStore | PendingMemoryStore,
+		options?: PromiseWaitForPendingOptions<JsonMemoryStore>,
+	): Promise<JsonMemoryStore>
+	waitForPending(
+		result: JsonMemory | PendingMemory,
+		options?: PromiseWaitForPendingOptions<JsonMemory>,
+	): Promise<JsonMemory>
 	async waitForPending(
 		result:
 			| JsonAgent
@@ -322,11 +335,17 @@ export class Checkfu extends PromiseResources {
 			| JsonSession
 			| PendingSession
 			| JsonAutomation
-			| PendingAutomation,
+			| PendingAutomation
+			| JsonMemoryStore
+			| PendingMemoryStore
+			| JsonMemory
+			| PendingMemory,
 		options?: PromiseWaitForPendingOptions<
-			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation
+			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory
 		>,
-	): Promise<JsonAgent | JsonEnvironment | JsonSession | JsonAutomation> {
+	): Promise<
+		JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory
+	> {
 		if (!isPendingResource(result)) {
 			return result
 		}
@@ -342,7 +361,7 @@ export class Checkfu extends PromiseResources {
 			...(requestOptions === undefined ? {} : { requestOptions }),
 		}
 		const effect: Effect.Effect<
-			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation,
+			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory,
 			CheckfuSdkError,
 			CheckfuClient
 		> = Effect.flatMap(
@@ -350,7 +369,7 @@ export class Checkfu extends PromiseResources {
 			(
 				client,
 			): Effect.Effect<
-				JsonAgent | JsonEnvironment | JsonSession | JsonAutomation,
+				JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory,
 				CheckfuSdkError
 			> => {
 				const until = options?.until
@@ -392,6 +411,26 @@ export class Checkfu extends PromiseResources {
 								...(until === undefined
 									? {}
 									: { until: (resource: Automation) => until(toIsoJson(resource)) }),
+							}),
+							toIsoJson,
+						)
+					case "memory_store":
+						return Effect.map(
+							client.waitForPending(result, {
+								...baseEffectOpts,
+								...(until === undefined
+									? {}
+									: { until: (resource: MemoryStoreSnapshot) => until(toIsoJson(resource)) }),
+							}),
+							toIsoJson,
+						)
+					case "memory":
+						return Effect.map(
+							client.waitForPending(result, {
+								...baseEffectOpts,
+								...(until === undefined
+									? {}
+									: { until: (resource: MemorySnapshot) => until(toIsoJson(resource)) }),
 							}),
 							toIsoJson,
 						)

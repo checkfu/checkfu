@@ -169,6 +169,19 @@ export const orPending =
 			),
 		)
 
+/** For a resource read through a parent: a pending answer names the parent too. */
+export const orPendingWithin =
+	<const T extends PendingResourceType, const P extends Readonly<Record<string, string>>>(
+		id: string,
+		type: T,
+		parent: P,
+	) =>
+	<A, E, R>(read: Effect.Effect<A, E, R>) =>
+		read.pipe(
+			orPending(id, type),
+			Effect.map((result) => (isPending(result) ? { ...result, ...parent } : result)),
+		)
+
 export const bestEffortAfterCommit = <A, E, R>(
 	read: Effect.Effect<A, E, R>,
 ): Effect.Effect<void, E, R> =>

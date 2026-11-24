@@ -15,9 +15,12 @@ import type {
 	PendingAgent,
 	PendingAutomation,
 	PendingEnvironment,
+	PendingMemory,
+	PendingMemoryStore,
 	PendingSession,
 	Session,
 } from "./Api.ts"
+import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import type { CheckfuConfigError, CheckfuSdkError } from "./Errors.ts"
 import { EffectResources } from "./generated/Resources.ts"
 import type { Op } from "./generated/Resources.ts"
@@ -105,6 +108,14 @@ export interface WaitForPendingMethod {
 		result: Automation | PendingAutomation,
 		options?: WaitForPendingOptions<Automation>,
 	): Effect.Effect<Automation, CheckfuSdkError>
+	(
+		result: MemoryStoreSnapshot | PendingMemoryStore,
+		options?: WaitForPendingOptions<MemoryStoreSnapshot>,
+	): Effect.Effect<MemoryStoreSnapshot, CheckfuSdkError>
+	(
+		result: MemorySnapshot | PendingMemory,
+		options?: WaitForPendingOptions<MemorySnapshot>,
+	): Effect.Effect<MemorySnapshot, CheckfuSdkError>
 }
 
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
@@ -155,6 +166,14 @@ export class CheckfuSdkClient extends EffectResources {
 		options?: WaitForPendingOptions<Automation>,
 	): Effect.Effect<Automation, CheckfuSdkError>
 	waitForPending(
+		result: MemoryStoreSnapshot | PendingMemoryStore,
+		options?: WaitForPendingOptions<MemoryStoreSnapshot>,
+	): Effect.Effect<MemoryStoreSnapshot, CheckfuSdkError>
+	waitForPending(
+		result: MemorySnapshot | PendingMemory,
+		options?: WaitForPendingOptions<MemorySnapshot>,
+	): Effect.Effect<MemorySnapshot, CheckfuSdkError>
+	waitForPending(
 		result:
 			| Agent
 			| PendingAgent
@@ -163,9 +182,18 @@ export class CheckfuSdkClient extends EffectResources {
 			| Session
 			| PendingSession
 			| Automation
-			| PendingAutomation,
-		options?: WaitForPendingOptions<Agent | Environment | Session | Automation>,
-	): Effect.Effect<Agent | Environment | Session | Automation, CheckfuSdkError> {
+			| PendingAutomation
+			| MemoryStoreSnapshot
+			| PendingMemoryStore
+			| MemorySnapshot
+			| PendingMemory,
+		options?: WaitForPendingOptions<
+			Agent | Environment | Session | Automation | MemoryStoreSnapshot | MemorySnapshot
+		>,
+	): Effect.Effect<
+		Agent | Environment | Session | Automation | MemoryStoreSnapshot | MemorySnapshot,
+		CheckfuSdkError
+	> {
 		if (!isPendingResource(result)) {
 			return Effect.succeed(result)
 		}
@@ -197,6 +225,26 @@ export class CheckfuSdkClient extends EffectResources {
 					...baseOpts,
 					...(until === undefined ? {} : { until: (resource: Automation) => until(resource) }),
 				})
+			case "memory_store":
+				return pollPending(result, (id, opts) => this.memoryStores.retrieve(id, opts), {
+					...baseOpts,
+					...(until === undefined
+						? {}
+						: { until: (resource: MemoryStoreSnapshot) => until(resource) }),
+				})
+			case "memory": {
+				const storeId = result.memory_store_id
+				return pollPending(
+					result,
+					(id, opts) => this.memoryStores.memories.retrieve(storeId, id, opts),
+					{
+						...baseOpts,
+						...(until === undefined
+							? {}
+							: { until: (resource: MemorySnapshot) => until(resource) }),
+					},
+				)
+			}
 		}
 	}
 }

@@ -18883,12 +18883,15 @@
 											"type": "string",
 											"enum": ["memory"]
 										},
+										"memory_store_id": {
+											"type": "string"
+										},
 										"pending": {
 											"type": "boolean",
 											"enum": [true]
 										}
 									},
-									"required": ["id", "type", "pending"],
+									"required": ["id", "type", "memory_store_id", "pending"],
 									"additionalProperties": false
 								}
 							}
@@ -20336,12 +20339,15 @@
 											"type": "string",
 											"enum": ["memory"]
 										},
+										"memory_store_id": {
+											"type": "string"
+										},
 										"pending": {
 											"type": "boolean",
 											"enum": [true]
 										}
 									},
-									"required": ["id", "type", "pending"],
+									"required": ["id", "type", "memory_store_id", "pending"],
 									"additionalProperties": false
 								}
 							}

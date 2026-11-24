@@ -639,7 +639,13 @@ export type PendingAutomation = typeof PendingAutomation.Type
 export const PendingMemoryStore = pendingResource("memory_store")
 export type PendingMemoryStore = typeof PendingMemoryStore.Type
 
-export const PendingMemory = pendingResource("memory")
+// A memory is read through its store, so a pending one names it.
+export const PendingMemory = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("memory"),
+	memory_store_id: Schema.String,
+	pending: Schema.Literal(true),
+}).pipe(HttpApiSchema.status(202))
 export type PendingMemory = typeof PendingMemory.Type
 
 export const PendingResource = Schema.Union([

@@ -21,6 +21,8 @@ export const MemoryStoreState = Schema.Struct({
 	name: Schema.String,
 	description: Schema.String,
 	memory_count: NonNegativeInt,
+	// How many memories have been created in or deleted from the store: its paths change only then.
+	layout_version: NonNegativeInt,
 })
 export type MemoryStoreState = typeof MemoryStoreState.Type
 
@@ -39,6 +41,7 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 		name: "",
 		description: "",
 		memory_count: 0,
+		layout_version: 0,
 	},
 	commands: [CreateMemoryStore, UpdateMemoryStore, ArchiveMemoryStore, DeleteMemoryStore],
 	events: [MemoryAdded, MemoryRemoved],
@@ -60,6 +63,7 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 			].some((ok) => ok),
 		HoldsNoMoreThanItsLimit: (s) =>
 			[s.memory_count >= 0, s.memory_count <= MAX_MEMORIES_PER_STORE].every((ok) => ok),
+		EveryHeldMemoryChangedTheLayout: (s) => s.layout_version >= s.memory_count,
 	},
 	transitions: {
 		CreatedStoreNeverReturnsToUninitialized: ({ before, after }) =>
@@ -87,6 +91,17 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 				after.memory_count === before.memory_count,
 				after.memory_count === before.memory_count + 1,
 				after.memory_count === before.memory_count - 1,
+			].some((ok) => ok),
+		TheLayoutChangesExactlyWhenTheCountDoes: ({ before, after }) =>
+			[
+				[
+					after.memory_count === before.memory_count,
+					after.layout_version === before.layout_version,
+				].every((ok) => ok),
+				[
+					after.memory_count !== before.memory_count,
+					after.layout_version === before.layout_version + 1,
+				].every((ok) => ok),
 			].some((ok) => ok),
 		UpdateKeepsWhatItDoesNotName: ({ before, after, command }) => {
 			if (command._tag !== "UpdateMemoryStore") {
@@ -143,7 +158,13 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 	evolve: {
 		"memory_store.created": (state, e) =>
 			state.status === ""
-				? { status: "active", name: e.name, description: e.description, memory_count: 0 }
+				? {
+						status: "active",
+						name: e.name,
+						description: e.description,
+						memory_count: 0,
+						layout_version: state.layout_version,
+					}
 				: state,
 		"memory_store.updated": (state, e) =>
 			state.status === "active" ? { ...state, name: e.name, description: e.description } : state,
@@ -159,11 +180,11 @@ export class MemoryStore extends Domain.Aggregate("MemoryStore", {
 				e.memory_count === state.memory_count + 1,
 				e.memory_count <= MAX_MEMORIES_PER_STORE,
 			].every((ok) => ok)
-				? { ...state, memory_count: e.memory_count }
+				? { ...state, memory_count: e.memory_count, layout_version: state.layout_version + 1 }
 				: state,
 		"memory_store.memory_removed": (state, e) =>
 			[state.status === "active", e.memory_count === state.memory_count - 1].every((ok) => ok)
-				? { ...state, memory_count: e.memory_count }
+				? { ...state, memory_count: e.memory_count, layout_version: state.layout_version + 1 }
 				: state,
 	},
 }) {}

@@ -28,6 +28,7 @@ import { MemoryView } from "../src/Memory/MemoryView.view.ts"
 import { MemoryStoreUpdated, UpdateMemoryStore } from "../src/Memory/UpdateMemoryStore.command.ts"
 import {
 	MemoryAdded,
+	MemoryLayoutChanged,
 	MemoryAlreadyExists,
 	MemoryNotFound,
 	MemoryPlacedElsewhere,
@@ -57,6 +58,7 @@ const write = (
 	hash: string,
 	precondition: WriteMemory["precondition"] = { type: "none" },
 	session_id: string | null = null,
+	layout_version = 0,
 ) =>
 	new WriteMemory({
 		memory_id: memory.id,
@@ -66,6 +68,7 @@ const write = (
 		content_sha256: hash,
 		content_size_bytes: content.length,
 		precondition,
+		layout_version,
 		session_id,
 	})
 
@@ -231,7 +234,7 @@ describe("Memories", () => {
 			Story.then(notes, written("/notes.md", "spaces", sha("b"), 2, "modified")),
 			Story.then(store),
 			Story.replied({ version: 2 }),
-			Story.when(write(todo, "/todo.md", "ship", sha("d"))),
+			Story.when(write(todo, "/todo.md", "ship", sha("d"), { type: "none" }, null, 1)),
 			Story.then(todo, written("/todo.md", "ship", sha("d"), 1, "created")),
 			Story.then(store, new MemoryAdded({ memory_count: 2 })),
 			Story.when(write(todo, "/todo.md", "shipped", sha("f"), { type: "present" })),
@@ -328,11 +331,28 @@ describe("Memories", () => {
 				Story.rejected(new MemoryNotFound({ memory_id: notes.id })),
 
 				Story.clock(t1),
-				Story.when(write(notes, "/notes.md", "again", sha("e"), { type: "absent" })),
+				Story.when(write(notes, "/notes.md", "again", sha("e"), { type: "absent" }, null, 2)),
 				Story.then(notes, written("/notes.md", "again", sha("e"), 3, "created")),
 				Story.then(store, new MemoryAdded({ memory_count: 1 })),
 				Story.view(MemoryView, notes, { content: "again", version: 3, created_at: t1 }),
 			),
+	)
+
+	it.effect("refuses a new path checked before another memory was created in the store", () =>
+		story(
+			Story.clock(t0),
+			Story.given(store, created, new MemoryAdded({ memory_count: 1 })),
+			Story.given(notes, written("/notes.md", "tabs", sha("a"), 1, "created")),
+			Story.when(write(todo, "/todo.md", "ship", sha("d"))),
+			Story.rejected(new MemoryLayoutChanged({ memory_store_id: store.id, layout_version: 1 })),
+			Story.when(write(todo, "/todo.md", "ship", sha("d"), { type: "none" }, null, 1)),
+			Story.then(todo, written("/todo.md", "ship", sha("d"), 1, "created")),
+			Story.then(store, new MemoryAdded({ memory_count: 2 })),
+			// A memory already there is not a new path, so its store's layout does not matter.
+			Story.when(write(notes, "/notes.md", "spaces", sha("b"))),
+			Story.then(notes, written("/notes.md", "spaces", sha("b"), 2, "modified")),
+			Story.then(store),
+		),
 	)
 
 	it.effect(

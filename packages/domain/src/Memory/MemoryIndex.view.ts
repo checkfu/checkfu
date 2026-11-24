@@ -8,9 +8,9 @@ import { MemoryStoreId } from "./MemoryStore.id.ts"
 export { MemoryIndexEntry }
 
 /**
- * Every memory a store holds, without its content: what a listing shows, and
- * what a workspace compares its copy against. A store holds at most 1,000, so the index stays
- * well within the one row it is stored in.
+ * Every memory a store holds, without its content: what a listing shows, and what a new path is
+ * checked against. `layout_version` counts the creates and deletes the index has applied, so it
+ * equals the store's own once the index holds every one of them, in whatever order they came.
  */
 export class MemoryIndex extends Domain.View("MemoryIndex", {
 	version: 1,
@@ -22,8 +22,11 @@ export class MemoryIndex extends Domain.View("MemoryIndex", {
 		"memory.deleted": ({ event }) =>
 			MemoryStore.ref(MemoryStoreId.make(event.memory_store_id, { disableChecks: true })),
 	},
-	state: Schema.Struct({ entries: Schema.Array(MemoryIndexEntry) }),
-	initial: { entries: [] },
+	state: Schema.Struct({
+		entries: Schema.Array(MemoryIndexEntry),
+		layout_version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	}),
+	initial: { entries: [], layout_version: 0 },
 	evolve: {
 		"memory.written": (state, e, ctx) => {
 			const existing = state.entries.find((entry) => entry.id === ctx.source.id)
@@ -40,10 +43,12 @@ export class MemoryIndex extends Domain.View("MemoryIndex", {
 					existing === undefined
 						? [...state.entries, written]
 						: state.entries.map((entry) => (entry.id === written.id ? written : entry)),
+				layout_version: state.layout_version + (e.operation === "created" ? 1 : 0),
 			}
 		},
 		"memory.deleted": (state, _e, ctx) => ({
 			entries: state.entries.filter((entry) => entry.id !== ctx.source.id),
+			layout_version: state.layout_version + 1,
 		}),
 	},
 }) {}

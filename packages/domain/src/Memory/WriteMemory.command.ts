@@ -54,6 +54,16 @@ export class MemoryStoreFull extends Domain.Rejection(
 	{ httpApiStatus: 409, description: "The memory store holds as many memories as it can." },
 ) {}
 
+export class MemoryLayoutChanged extends Domain.Rejection(
+	"MemoryLayoutChanged",
+	{ memory_store_id: MemoryStoreId, layout_version: NonNegativeInt },
+	{
+		httpApiStatus: 409,
+		description:
+			"Memories were created or deleted in the store since this path was checked. Check it again.",
+	},
+) {}
+
 export class MemoryPlacedElsewhere extends Domain.Rejection(
 	"MemoryPlacedElsewhere",
 	{ memory_id: MemoryId },
@@ -69,6 +79,9 @@ export class WriteMemory extends Domain.Command("WriteMemory", {
 		content_sha256: RecordedSha256,
 		content_size_bytes: MemorySize,
 		precondition: WritePrecondition,
+		// The store's layout version the path was checked against: a write that creates a memory
+		// commits only if no memory was created or deleted in the store since.
+		layout_version: NonNegativeInt,
 		session_id: Schema.NullOr(Schema.String),
 	},
 	events: [MemoryWritten, MemoryAdded],
@@ -80,6 +93,7 @@ export class WriteMemory extends Domain.Command("WriteMemory", {
 		MemoryNotFound,
 		MemoryPreconditionFailed,
 		MemoryPlacedElsewhere,
+		MemoryLayoutChanged,
 	],
 	reply: {
 		version: NonNegativeInt,

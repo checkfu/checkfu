@@ -393,6 +393,18 @@
 			"Checkfu.APresentMemoryIsInAStoreThatWasCreated": {
 				"kind": "relation",
 				"source": "({ memory, store }) =>\n\t\t\t\t[\n\t\t\t\t\tmemory.state.status !== \"present\",\n\t\t\t\t\tmemory.state.memory_store_id !== store.id,\n\t\t\t\t\tstore.state.status !== \"\",\n\t\t\t\t].some((ok) => ok)"
+			},
+			"MemoryStore.EveryHeldMemoryChangedTheLayout": {
+				"kind": "invariant",
+				"source": "(s) => s.layout_version >= s.memory_count"
+			},
+			"MemoryStore.TheLayoutChangesExactlyWhenTheCountDoes": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tafter.memory_count === before.memory_count,\n\t\t\t\t\tafter.layout_version === before.layout_version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tafter.memory_count !== before.memory_count,\n\t\t\t\t\tafter.layout_version === before.layout_version + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"WriteMemory.ANewPathCommitsOnlyAtTheLayoutItWasCheckedAgainst": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tbefore.memory.status === \"present\",\n\t\t\t\tbefore.store.layout_version === command.layout_version,\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

@@ -7,6 +7,7 @@ import { MAX_MEMORIES_PER_STORE } from "./MemoryTypes.ts"
 import {
 	MemoryAdded,
 	MemoryAlreadyExists,
+	MemoryLayoutChanged,
 	MemoryNotFound,
 	MemoryPlacedElsewhere,
 	MemoryPreconditionFailed,
@@ -71,6 +72,13 @@ export class WriteMemoryDecision extends Domain.Decision(WriteMemory, {
 				memory_count: store.state.memory_count,
 			})
 		}
+		// A new path was checked against the store's other paths; it holds only if none changed since.
+		if (!present && store.state.layout_version !== cmd.layout_version) {
+			return new MemoryLayoutChanged({
+				memory_store_id: store.id,
+				layout_version: store.state.layout_version,
+			})
+		}
 		const written = memory.record(
 			new MemoryWritten({
 				memory_store_id: store.id,
@@ -102,6 +110,11 @@ export class WriteMemoryDecision extends Domain.Decision(WriteMemory, {
 					before.store.memory_count + (before.memory.status === "present" ? 0 : 1),
 				after.store.memory_count <= MAX_MEMORIES_PER_STORE,
 			].every((ok) => ok),
+		ANewPathCommitsOnlyAtTheLayoutItWasCheckedAgainst: ({ before, command }) =>
+			[
+				before.memory.status === "present",
+				before.store.layout_version === command.layout_version,
+			].some((ok) => ok),
 		AnAbsentPreconditionNeverOverwrites: ({ before, command }) =>
 			[command.precondition.type !== "absent", before.memory.status !== "present"].some((ok) => ok),
 	},

@@ -1237,7 +1237,7 @@ export class EffectMemoryStoresMemoriesResource {
 									responseMode: "decoded-and-response",
 								}),
 						),
-						{ kind: "requires-until", operation: "memoryStores.memories.create" },
+						{ kind: "create" },
 					),
 			),
 			options,
