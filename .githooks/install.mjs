@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process"
-import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
 // Run by `bun install`. Adds a pre-commit hook that runs the committing worktree's
-// .githooks/pre-commit where no hook exists yet, and never changes a file that does.
+// .githooks/pre-commit where no hook exists yet, never changes a file that does, and
+// never fails the install.
 
 const SHIM = `#!/bin/sh
 hook="$(git rev-parse --show-toplevel)/.githooks/pre-commit"
@@ -16,35 +17,33 @@ const git = (...args) => {
 	return result.status === 0 ? result.stdout.trim() : undefined
 }
 
-const contents = (path) => {
-	try {
-		lstatSync(path)
-	} catch {
-		return undefined
-	}
+const read = (path) => {
 	try {
 		return readFileSync(path, "utf8")
 	} catch {
-		return null
+		return undefined
 	}
 }
+
+const skip = (why) =>
+	process.stderr.write(`githooks: .githooks/pre-commit is not installed: ${why}\n`)
 
 const top = git("rev-parse", "--show-toplevel")
 const hooks = git("rev-parse", "--git-path", "hooks")
 if (top !== undefined && hooks !== undefined && realpathSync(top) === realpathSync(".")) {
 	const hook = resolve(hooks, "pre-commit")
-	const existing = contents(hook)
 	if (git("config", "--get", "core.hooksPath") !== undefined) {
-		process.stderr.write(
-			"githooks: core.hooksPath is set, so .githooks/pre-commit is not installed\n",
-		)
-	} else if (existing === undefined) {
-		mkdirSync(dirname(hook), { recursive: true })
-		writeFileSync(hook, SHIM)
-		chmodSync(hook, 0o755)
-	} else if (existing !== SHIM) {
-		process.stderr.write(
-			`githooks: ${hook} already exists, so .githooks/pre-commit is not installed\n`,
-		)
+		skip("core.hooksPath is set")
+	} else {
+		try {
+			mkdirSync(dirname(hook), { recursive: true })
+			writeFileSync(hook, SHIM, { flag: "wx", mode: 0o755 })
+		} catch (error) {
+			if (error?.code !== "EEXIST") {
+				skip(String(error?.message ?? error))
+			} else if (read(hook) !== SHIM) {
+				skip(`${hook} already exists`)
+			}
+		}
 	}
 }
