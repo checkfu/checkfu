@@ -96,6 +96,48 @@ export function SessionsPage(): React.JSX.Element {
 	)
 }
 
+const selectedOrFirst = (
+	options: ReadonlyArray<{ readonly id: string }>,
+	chosen: string | undefined,
+): string =>
+	options.some((option) => option.id === chosen) ? (chosen ?? "") : (options[0]?.id ?? "")
+
+function OptionPicker<T extends { readonly id: string }>({
+	label,
+	noun,
+	options,
+	value,
+	onChange,
+	describe,
+}: {
+	readonly label: string
+	readonly noun: string
+	readonly options: ReturnType<typeof useMorePages<T>>
+	readonly value: string
+	readonly onChange: (id: string) => void
+	readonly describe: (option: T) => string
+}): React.JSX.Element {
+	return (
+		<div className="space-y-2">
+			<Field label={label}>
+				<Select value={value} onChange={(event) => onChange(event.target.value)}>
+					{options.items.map((option) => (
+						<option key={option.id} value={option.id}>
+							{describe(option)}
+						</option>
+					))}
+				</Select>
+			</Field>
+			{options.more === null ? null : (
+				<Button variant="ghost" size="sm" disabled={options.pending} onClick={options.more}>
+					Load more {noun}
+				</Button>
+			)}
+			{options.error === undefined ? null : <Callout tone="error">{options.error}</Callout>}
+		</div>
+	)
+}
+
 export function NewSessionPage(): React.JSX.Element {
 	const first = create.useLoaderData()
 	const navigate = useNavigate()
@@ -107,12 +149,8 @@ export function NewSessionPage(): React.JSX.Element {
 	const environments = environmentOptions.items
 	const [chosenAgent, setAgentId] = useState<string>()
 	const [chosenEnvironment, setEnvironmentId] = useState<string>()
-	const agentId = agents.some((agent) => agent.id === chosenAgent)
-		? (chosenAgent ?? "")
-		: (agents[0]?.id ?? "")
-	const environmentId = environments.some((environment) => environment.id === chosenEnvironment)
-		? (chosenEnvironment ?? "")
-		: (environments[0]?.id ?? "")
+	const agentId = selectedOrFirst(agents, chosenAgent)
+	const environmentId = selectedOrFirst(environments, chosenEnvironment)
 	const [title, setTitle] = useState("")
 	const startKey = useSubmissionKey()
 	const start = useAction(async () => {
@@ -149,53 +187,22 @@ export function NewSessionPage(): React.JSX.Element {
 						start.run()
 					}}
 				>
-					<Field label="Agent">
-						<Select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
-							{agents.map((agent) => (
-								<option key={agent.id} value={agent.id}>
-									{agent.name} ({agent.model.id})
-								</option>
-							))}
-						</Select>
-					</Field>
-					{agentOptions.more === null ? null : (
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={agentOptions.pending}
-							onClick={agentOptions.more}
-						>
-							Load more agents
-						</Button>
-					)}
-					{agentOptions.error === undefined ? null : (
-						<Callout tone="error">{agentOptions.error}</Callout>
-					)}
-					<Field label="Environment">
-						<Select
-							value={environmentId}
-							onChange={(event) => setEnvironmentId(event.target.value)}
-						>
-							{environments.map((environment) => (
-								<option key={environment.id} value={environment.id}>
-									{environment.name}
-								</option>
-							))}
-						</Select>
-					</Field>
-					{environmentOptions.more === null ? null : (
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={environmentOptions.pending}
-							onClick={environmentOptions.more}
-						>
-							Load more environments
-						</Button>
-					)}
-					{environmentOptions.error === undefined ? null : (
-						<Callout tone="error">{environmentOptions.error}</Callout>
-					)}
+					<OptionPicker
+						label="Agent"
+						noun="agents"
+						options={agentOptions}
+						value={agentId}
+						onChange={setAgentId}
+						describe={(agent) => `${agent.name} (${agent.model.id})`}
+					/>
+					<OptionPicker
+						label="Environment"
+						noun="environments"
+						options={environmentOptions}
+						value={environmentId}
+						onChange={setEnvironmentId}
+						describe={(environment) => environment.name}
+					/>
 					<Field label="Title">
 						<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 					</Field>
