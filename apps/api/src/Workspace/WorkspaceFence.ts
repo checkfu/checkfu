@@ -25,15 +25,21 @@ export const makeTurnFence = (store: FenceStore) => {
 		const newest = store.get()
 		return newest === undefined || order(token, newest) >= 0
 	}
+	const drain = async (): Promise<void> => {
+		await Promise.allSettled(running)
+	}
 	return {
 		enter: async (token: TurnToken): Promise<boolean> => {
 			if (!isCurrent(token)) {
 				return false
 			}
 			store.put(token)
-			await Promise.allSettled(running)
-			return true
+			await drain()
+			// A later turn may have entered while this one waited.
+			return isCurrent(token)
 		},
+		/** Waits for every call already running; one that starts later is not waited for. */
+		drain,
 		/** Runs a call of the given turn, or answers undefined when that turn is no longer current. */
 		run: async <A>(token: TurnToken, work: () => Promise<A>): Promise<A | undefined> => {
 			if (!isCurrent(token)) {

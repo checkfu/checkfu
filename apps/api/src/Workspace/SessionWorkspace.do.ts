@@ -46,7 +46,11 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				// of an ended session, is refused before it asks a model anything.
 				enter: (token: TurnToken): Effect.Effect<boolean> =>
 					Effect.promise(
-						async () => storage.kv.get(DISCARDED) !== true && (await fence.enter(token)),
+						async () =>
+							storage.kv.get(DISCARDED) !== true &&
+							(await fence.enter(token)) &&
+							// Discard may have come while entry waited.
+							storage.kv.get(DISCARDED) !== true,
 					),
 				runTool: (call: WorkspaceToolCall, token: TurnToken): Effect.Effect<WorkspaceToolResult> =>
 					Effect.promise(async (abortSignal) => {
@@ -67,6 +71,8 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				discard: (): Effect.Effect<void> =>
 					Effect.promise(async () => {
 						storage.kv.put(DISCARDED, true)
+						// A call that started before the marker could still write after a purge.
+						await fence.drain()
 						// Removing files through the filesystem would leave their paths in its change
 						// history, so its tables are emptied instead, with every other key, at once.
 						storage.transactionSync(() => {
