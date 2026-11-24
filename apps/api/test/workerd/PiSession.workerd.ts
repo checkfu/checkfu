@@ -994,10 +994,11 @@ describe("PiSession real Durable Object under workerd", () => {
 			resources,
 		})
 		expect(await replyAfterTurn(first.id, "What is the launch code?", 1)).toContain("KIWI-9")
-		// The plain path, the same path spelled with "." and "//", git, and a delete of the
-		// directory above the mount are all refused.
+		// The plain path, the same path spelled with "." and "//" and git are refused by the store's
+		// mount, and a delete of the directory above it by the workspace's own mount protection.
 		const refused = await replyAfterTurn(first.id, "Remember the customer's preference.", 2)
-		expect(refused.split("/mnt/memory/handbook is a read-only memory store.").length - 1).toBe(4)
+		expect(refused.split("The memory store handbook is read-only.").length - 1).toBe(3)
+		expect(refused).toContain("mount root can't be removed or renamed: /mnt/memory")
 		expect(refused.endsWith("Be kind.")).toBe(true)
 		expect(await storedMemories(notes.id)).toEqual({
 			"/customers/acme.md": "Prefers email.",

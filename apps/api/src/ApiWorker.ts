@@ -16,6 +16,43 @@ import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import type { SessionMemory } from "./Workspace/SessionMemory.ts"
+
+// workerd's runtime module, left to workerd at run time; only its RpcTarget class is used.
+const WORKERD_RUNTIME = "cloudflare:workers"
+
+const isConstructor = (value: unknown): value is new () => object => typeof value === "function"
+
+// The harness calls back into the session's memory stores while the turn runs: an RPC target is
+// passed by reference, and lives as long as the call that passed it.
+const memoryTarget = async (memory: SessionMemory): Promise<SessionMemory> => {
+	const runtime: unknown = await import(WORKERD_RUNTIME)
+	const RpcTarget =
+		typeof runtime === "object" && runtime !== null && "RpcTarget" in runtime
+			? runtime.RpcTarget
+			: undefined
+	if (!isConstructor(RpcTarget)) {
+		throw new Error("workerd's RpcTarget is not available.")
+	}
+	class SessionMemoryTarget extends RpcTarget {
+		mounts() {
+			return memory.mounts()
+		}
+		list(name: string) {
+			return memory.list(name)
+		}
+		read(name: string, path: string) {
+			return memory.read(name, path)
+		}
+		write(name: string, path: string, content: string, base: string | null | undefined) {
+			return memory.write(name, path, content, base)
+		}
+		remove(name: string, path: string, base: string | undefined) {
+			return memory.remove(name, path, base)
+		}
+	}
+	return new SessionMemoryTarget()
+}
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -26,10 +63,13 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(Effect.suspend(() => harness.recoverTurn(conversation, operationId))).pipe(
 					Effect.withSpan("PiHarness.recoverTurn"),
 				),
-			runTurn: (conversation, request) =>
-				harnessCall(Effect.suspend(() => harness.runTurn(conversation, request))).pipe(
-					Effect.withSpan("PiHarness.runTurn"),
-				),
+			runTurn: (conversation, request, memory) =>
+				harnessCall(
+					Effect.flatMap(
+						Effect.promise(() => memoryTarget(memory)),
+						(target) => harness.runTurn(conversation, request, target),
+					),
+				).pipe(Effect.withSpan("PiHarness.runTurn")),
 			abortTurn: (conversation, operationId) =>
 				harnessCall(Effect.suspend(() => harness.abortTurn(conversation, operationId))).pipe(
 					Effect.asVoid,
@@ -49,26 +89,6 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(
 					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
 				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
-			mountMemory: (sessionId, token, mount) =>
-				harnessCall(Effect.suspend(() => harness.mountMemory(sessionId, token, mount))).pipe(
-					Effect.withSpan("PiHarness.mountMemory"),
-				),
-			fillMemory: (sessionId, token, mountPath, memories) =>
-				harnessCall(
-					Effect.suspend(() => harness.fillMemory(sessionId, token, mountPath, memories)),
-				).pipe(Effect.withSpan("PiHarness.fillMemory")),
-			memoryChanges: (sessionId, token, mountPath) =>
-				harnessCall(Effect.suspend(() => harness.memoryChanges(sessionId, token, mountPath))).pipe(
-					Effect.withSpan("PiHarness.memoryChanges"),
-				),
-			memoryContents: (sessionId, token, mountPath, paths) =>
-				harnessCall(
-					Effect.suspend(() => harness.memoryContents(sessionId, token, mountPath, paths)),
-				).pipe(Effect.withSpan("PiHarness.memoryContents")),
-			memorySaved: (sessionId, token, mountPath, saved) =>
-				harnessCall(
-					Effect.suspend(() => harness.memorySaved(sessionId, token, mountPath, saved)),
-				).pipe(Effect.withSpan("PiHarness.memorySaved")),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),

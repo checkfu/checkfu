@@ -40,7 +40,8 @@ import {
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
-import { makeMemorySync } from "../../src/Workspace/MemorySync.ts"
+import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
+import type { SessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -190,6 +191,8 @@ export const checkfuWithHarness = <E, R>(
 	)
 }
 
+const memoryRel = (path: string) => path.slice("/mnt/memory/".length)
+
 export const makePiDurableTestLayer = (
 	handler: (
 		model: Model<Api>,
@@ -286,10 +289,8 @@ export const makePiDurableTestLayer = (
 	const beforeTokenStored: Array<() => Promise<Response>> = []
 	// Every token sent to a workspace, once per attempt.
 	const tokenDeliveries: Array<string> = []
-	// Each session's workspace files, kept in step with its memory stores by the same
-	// code the workspace object runs.
+	// Each session's workspace files.
 	const workspaces = new Map<string, Map<string, string>>()
-	const memoryBases = new Map<string, Readonly<Record<string, string>>>()
 	const workspaceFiles = (sessionId: string): Map<string, string> => {
 		let files = workspaces.get(sessionId)
 		if (files === undefined) {
@@ -298,31 +299,37 @@ export const makePiDurableTestLayer = (
 		}
 		return files
 	}
-	const memorySync = (sessionId: string) => {
-		const files = workspaceFiles(sessionId)
-		return makeMemorySync(
-			{
-				read: (file) => Promise.resolve(files.get(file) ?? null),
-				// As a filesystem would: the file takes the place of a directory at its path
-				// and of a file standing where one of its directories goes.
-				write: (file, content) => {
-					for (const other of files.keys()) {
-						if (other.startsWith(`${file}/`) || file.startsWith(`${other}/`)) {
-							files.delete(other)
-						}
-					}
-					files.set(file, content)
-					return Promise.resolve()
-				},
-				remove: (file) => Promise.resolve(void files.delete(file)),
-				list: (directory) =>
-					Promise.resolve([...files.keys()].filter((file) => file.startsWith(`${directory}/`))),
+	// /mnt/memory as each session's workspace serves it: the same mount, over the memory access the
+	// API hands the harness with each turn. A test acts as the agent's file tools through it.
+	const turnMemories = new Map<string, SessionMemory>()
+	const memoryMounts = new Map<string, ReturnType<typeof makeMemoryMount>>()
+	const memoryFiles = (sessionId: string) => {
+		let mount = memoryMounts.get(sessionId)
+		if (mount === undefined) {
+			mount = makeMemoryMount(() => turnMemories.get(sessionId))
+			memoryMounts.set(sessionId, mount)
+		}
+		const served = mount
+		return {
+			write: async (path: string, content: string) => {
+				await served.writeFile?.(memoryRel(path), new Blob([content]).stream(), {})
 			},
-			{
-				get: (mountPath) => memoryBases.get(`${sessionId}:${mountPath}`) ?? {},
-				put: (mountPath, base) => void memoryBases.set(`${sessionId}:${mountPath}`, base),
+			remove: async (path: string, recursive = false) => {
+				await served.rm?.(memoryRel(path), { recursive })
 			},
-		)
+			rename: async (from: string, to: string) => {
+				await served.rename?.(memoryRel(from), memoryRel(to), {})
+			},
+			read: async (path: string) => {
+				const read = await served.readFile(memoryRel(path))
+				return read === null ? null : await new Response(read.body).text()
+			},
+			list: async () =>
+				((await served.readdir("", { recursive: true })) ?? [])
+					.filter((entry) => entry.type === "file")
+					.map((entry) => `/mnt/memory/${entry.name}`)
+					.toSorted(),
+		}
 	}
 	const executorLayer = makePiTurnExecutorLayer(
 		{
@@ -334,11 +341,12 @@ export const makePiDurableTestLayer = (
 							? Effect.succeed(null)
 							: onObject(conversation, (backend) => recoverPiDurableTurn(backend, operationId)),
 				),
-			runTurn: (conversation, request) =>
+			runTurn: (conversation, request, memory) =>
 				Effect.suspend(() => {
 					if (unreachable.has(conversation)) {
 						return Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
 					}
+					turnMemories.set(conversation, memory)
 					requests.push(request)
 					conversations.push(conversation)
 					return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
@@ -382,31 +390,6 @@ export const makePiDurableTestLayer = (
 						}),
 					),
 				),
-			mountMemory: (sessionId, token, mount) =>
-				Effect.promise(() => {
-					workspaceCalls.push(`mountMemory ${sessionId} ${token.turn}`)
-					return memorySync(sessionId).mount(mount)
-				}),
-			fillMemory: (sessionId, token, mountPath, memories) =>
-				Effect.promise(() => {
-					workspaceCalls.push(`fillMemory ${sessionId} ${token.turn}`)
-					return memorySync(sessionId).fill(mountPath, memories)
-				}),
-			memoryChanges: (sessionId, token, mountPath) =>
-				Effect.promise(() => {
-					workspaceCalls.push(`memoryChanges ${sessionId} ${token.turn}`)
-					return memorySync(sessionId).changes(mountPath)
-				}),
-			memoryContents: (sessionId, token, mountPath, paths) =>
-				Effect.promise(() => {
-					workspaceCalls.push(`memoryContents ${sessionId} ${token.turn}`)
-					return memorySync(sessionId).contents(mountPath, paths)
-				}),
-			memorySaved: (sessionId, token, mountPath, saved) =>
-				Effect.sync(() => {
-					workspaceCalls.push(`memorySaved ${sessionId} ${token.turn}`)
-					memorySync(sessionId).saved(mountPath, saved)
-				}),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -474,6 +457,7 @@ export const makePiDurableTestLayer = (
 		beforeTokenStored,
 		tokenDeliveries,
 		workspaceFiles,
+		memoryFiles,
 	}
 }
 

@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { createRepositoryFetch, githubBaseUrl } from "./Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
+import { makeMemoryMount } from "./MemoryMount.ts"
+import type { SessionMemory } from "./SessionMemory.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
@@ -31,6 +33,15 @@ const refusedPreparation = (resourceId: string, message: string): WorkspacePrepa
 	message,
 })
 
+const MEMORY_ROOT = "/mnt/memory"
+
+// An RPC stub can be kept past the call that passed it; a plain object, as in tests, needs not.
+const isStub = (memory: SessionMemory): memory is SessionMemory & { dup(): SessionMemory } =>
+	"dup" in memory && typeof memory.dup === "function"
+
+const keep = (memory: SessionMemory | undefined): SessionMemory | undefined =>
+	memory !== undefined && isStub(memory) ? memory.dup() : memory
+
 const failed = (text: string): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],
 	isError: true,
@@ -58,8 +69,11 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				const { storage } = state.raw
 				const mounted = (): ReadonlyArray<MountedRepository> =>
 					storage.kv.get<ReadonlyArray<MountedRepository>>(REPOSITORIES) ?? []
+				// The memory stores of the turn that has the workspace, served live at /mnt/memory.
+				let turnMemory: SessionMemory | undefined
 				const { fs, git } = new Workspace({
 					storage,
+					mounts: { [MEMORY_ROOT]: makeMemoryMount(() => turnMemory) },
 					git: createGitClient({
 						fetch: createRepositoryFetch({
 							repositories: mounted,
@@ -143,14 +157,19 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				return {
 					// A new turn retires every turn before it. A turn that is no longer current, or one
 					// of an ended session, is refused before it asks a model anything.
-					enter: (token: TurnToken): Effect.Effect<boolean> =>
-						Effect.promise(
-							async () =>
+					enter: (token: TurnToken, memory?: SessionMemory): Effect.Effect<boolean> =>
+						Effect.promise(async () => {
+							const entered =
 								storage.kv.get(DISCARDED) !== true &&
 								(await fence.enter(token)) &&
 								// Discard may have come while entry waited.
-								storage.kv.get(DISCARDED) !== true,
-						),
+								storage.kv.get(DISCARDED) !== true
+							if (entered) {
+								// A stub passed in a call ends with it unless kept; the turn's tools use it later.
+								turnMemory = keep(memory)
+							}
+							return entered
+						}),
 					runTool: (
 						call: WorkspaceToolCall,
 						token: TurnToken,
