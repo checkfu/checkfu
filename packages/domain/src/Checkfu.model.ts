@@ -27,6 +27,8 @@ import {
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
+import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
+import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
 import { RunTurn } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
@@ -63,6 +65,8 @@ export class Checkfu extends Domain.Model("Checkfu", {
 	],
 	policies: [StartTurn, StopModelRequest, ArmAutomation, StartAutomationRun, FreeAutomationSlot],
 	sagas: [RunTurn],
+	projections: [Listing],
+	queries: [ListResources],
 	invariants: {
 		EverySessionReferencesExistingAgentVersion: (m) =>
 			m.SessionView.every((sv) =>
@@ -359,6 +363,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"AutomationRunView",
 		"AutomationDirectory",
 	],
+	queries: ["ListResources"],
 }) {}
 
 export const CheckfuHandlersLive = Layer.mergeAll(
@@ -366,4 +371,6 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	ArmAutomationLive,
 	StartAutomationRunLive,
 	FreeAutomationSlotLive,
+	ListingLive,
+	ListResourcesLive,
 )

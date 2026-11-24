@@ -160,6 +160,7 @@ describe("Checkfu MCP server", () => {
 				"agents_archiveAgent",
 				"agents_createAgent",
 				"agents_getAgent",
+				"agents_listAgents",
 				"agents_updateAgent",
 				"automations_archiveAutomation",
 				"automations_createAutomation",
@@ -173,11 +174,13 @@ describe("Checkfu MCP server", () => {
 				"environments_createEnvironment",
 				"environments_deleteEnvironment",
 				"environments_getEnvironment",
+				"environments_listEnvironments",
 				"environments_updateEnvironment",
 				"sessions_archiveSession",
 				"sessions_createSession",
 				"sessions_getSession",
 				"sessions_listEvents",
+				"sessions_listSessions",
 				"sessions_sendSessionEvents",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
@@ -198,6 +201,7 @@ describe("Checkfu MCP server", () => {
 				agents_archiveAgent: "writes, destructive, repeatable",
 				agents_createAgent: "writes, additive, not repeatable",
 				agents_getAgent: "read-only, additive, repeatable",
+				agents_listAgents: "read-only, additive, repeatable",
 				agents_updateAgent: "writes, destructive, not repeatable",
 				automations_archiveAutomation: "writes, destructive, repeatable",
 				automations_createAutomation: "writes, additive, repeatable",
@@ -211,11 +215,13 @@ describe("Checkfu MCP server", () => {
 				environments_createEnvironment: "writes, additive, not repeatable",
 				environments_deleteEnvironment: "writes, destructive, repeatable",
 				environments_getEnvironment: "read-only, additive, repeatable",
+				environments_listEnvironments: "read-only, additive, repeatable",
 				environments_updateEnvironment: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
 				sessions_getSession: "read-only, additive, repeatable",
 				sessions_listEvents: "read-only, additive, repeatable",
+				sessions_listSessions: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
@@ -353,6 +359,7 @@ describe("Checkfu MCP server", () => {
 				agents_archiveAgent: agent,
 				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
 				agents_getAgent: agent,
+				agents_listAgents: { query: { limit: "5", include_archived: "true" } },
 				agents_updateAgent: { ...agent, body: { version: 1, model } },
 				automations_archiveAutomation: automation,
 				automations_createAutomation: {
@@ -377,6 +384,7 @@ describe("Checkfu MCP server", () => {
 				environments_createEnvironment: { body: { name: "default", config } },
 				environments_deleteEnvironment: environment,
 				environments_getEnvironment: environment,
+				environments_listEnvironments: { query: { order: "desc" } },
 				environments_updateEnvironment: { ...environment, body: { version: 1, config } },
 				sessions_archiveSession: session,
 				sessions_createSession: {
@@ -384,6 +392,7 @@ describe("Checkfu MCP server", () => {
 				},
 				sessions_getSession: session,
 				sessions_listEvents: { ...session, query: { limit: "5" } },
+				sessions_listSessions: { query: { agent_id: "agent_1", after: "3" } },
 				sessions_sendSessionEvents: {
 					...session,
 					body: {

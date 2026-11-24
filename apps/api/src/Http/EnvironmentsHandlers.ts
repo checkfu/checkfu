@@ -14,6 +14,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
+import { makeLister } from "./Listing.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,
 	bestEffortAfterCommit,
@@ -39,6 +40,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
+		const list = yield* makeLister
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -132,6 +134,11 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					}
 					return yield* reject(500, "Failed to load created environment.")
 				}).pipe(handled),
+			)
+			.handle("list", ({ query }) =>
+				list("environment", query, (id) =>
+					environmentViews.get(Environment.ref(EnvironmentId.make(id))),
+				).pipe(handled),
 			)
 			.handle("get", ({ params }) =>
 				Effect.gen(function* () {

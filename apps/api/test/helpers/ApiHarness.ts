@@ -22,6 +22,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
 import {
@@ -283,7 +284,10 @@ export const makePiDurableTestLayer = (
 	})
 
 	const CheckfuLive = Checkfu.layer(
-		CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+		CheckfuHandlersLive.pipe(
+			Layer.provide(ListingStore.memory),
+			Layer.provide(PiDurableHarnessLive),
+		),
 	).pipe(Layer.provide(executorLayer))
 	const PiProviderLive = PiDurableHarnessLive.pipe(
 		Layer.provide(executorLayer),

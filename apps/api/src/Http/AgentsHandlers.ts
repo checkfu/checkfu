@@ -22,6 +22,7 @@ import * as Option from "effect/Option"
 import { resolveCatalogModel } from "../Pi/PiCatalog.ts"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
+import { makeLister } from "./Listing.ts"
 import {
 	claimIdempotency,
 	commitForStream,
@@ -61,6 +62,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const isSupportedModel = yield* IsSupportedAgentModel
+		const list = yield* makeLister
 		const supported = (model: AgentModel) =>
 			isSupportedModel(model.id) ? Effect.void : unsupportedModel(model)
 
@@ -188,6 +190,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						"Failed to load created agent.",
 					)
 				}).pipe(handled),
+			)
+			.handle("list", ({ query }) =>
+				list("agent", query, (id) => agentViews.get(Agent.ref(AgentId.make(id)))).pipe(handled),
 			)
 			.handle("get", ({ params }) =>
 				Effect.gen(function* () {

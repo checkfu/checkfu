@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import type { PiTurnOutcome } from "../src/Pi/PiTurn.ts"
@@ -352,7 +353,10 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -1677,7 +1681,10 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(
-				CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+				CheckfuHandlersLive.pipe(
+					Layer.provide(ListingStore.memory),
+					Layer.provide(PiDurableHarnessLive),
+				),
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),

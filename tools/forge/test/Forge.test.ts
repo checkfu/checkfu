@@ -38,6 +38,7 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/agents/{agent_id}/archive",
 			},
 			{ group: "agents", name: "create", httpMethod: "POST", path: "/v1/agents" },
+			{ group: "agents", name: "list", httpMethod: "GET", path: "/v1/agents" },
 			{ group: "agents", name: "retrieve", httpMethod: "GET", path: "/v1/agents/{agent_id}" },
 			{ group: "agents", name: "update", httpMethod: "POST", path: "/v1/agents/{agent_id}" },
 			{
@@ -91,6 +92,7 @@ describe("Cloudflare Forge pipeline", () => {
 				httpMethod: "DELETE",
 				path: "/v1/environments/{environment_id}",
 			},
+			{ group: "environments", name: "list", httpMethod: "GET", path: "/v1/environments" },
 			{
 				group: "environments",
 				name: "retrieve",
@@ -110,6 +112,7 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/sessions/{session_id}/archive",
 			},
 			{ group: "sessions", name: "create", httpMethod: "POST", path: "/v1/sessions" },
+			{ group: "sessions", name: "list", httpMethod: "GET", path: "/v1/sessions" },
 			{ group: "sessions", name: "retrieve", httpMethod: "GET", path: "/v1/sessions/{session_id}" },
 			{
 				group: "sessions:events",
@@ -408,7 +411,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(23)
+		expect(inspectedMethods.length).toBe(26)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

@@ -2,6 +2,7 @@ import { Story } from "@alchemy.run/domain/Story"
 import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
@@ -55,6 +56,7 @@ import {
 	SESSION_CONFLICT,
 } from "../src/Automation/StartAutomationRun.policy.ts"
 import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
+import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { EnvironmentCreated } from "../src/Environment/CreateEnvironment.command.ts"
 import {
 	DeleteEnvironment,
@@ -76,7 +78,7 @@ import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 
 const story = Story.make(Checkfu, {
-	layer: CheckfuHandlersLive,
+	layer: CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory)),
 	stub: [Harness],
 })
 

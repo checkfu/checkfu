@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type {
 	HarnessReply,
@@ -126,7 +127,9 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				interrupt: effective.interrupt,
 			}),
 		)
-		const CheckfuLive = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive)))
+		const CheckfuLive = Checkfu.layer(
+			CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
+		)
 		const ServerLayer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),

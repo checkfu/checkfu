@@ -49,6 +49,7 @@ import {
 	sha256Json,
 	toApiError,
 } from "./HttpHelpers.ts"
+import { makeLister } from "./Listing.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
@@ -241,6 +242,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
 		const sseMaxConnectionDuration = yield* SseMaxConnectionDuration
+		const list = yield* makeLister
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -382,6 +384,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						archived_at: null,
 					}
 				}).pipe(handled),
+			)
+			.handle("list", ({ query }) =>
+				list("session", query, (id) => sessionViews.get(Session.ref(SessionId.make(id)))).pipe(
+					Effect.map((page) => ({ ...page, data: page.data.map(serializeSession) })),
+					handled,
+				),
 			)
 			.handle("get", ({ params }) =>
 				Effect.gen(function* () {
