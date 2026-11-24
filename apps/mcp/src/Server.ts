@@ -71,13 +71,11 @@ const McpLive = Layer.mergeAll(
 // The API is addressed by path only; a service binding ignores the origin.
 const API_ORIGIN = "https://api.checkfu.internal"
 
-// A protected route for a resource that does not exist, as the CLI uses to check a key: the
-// API answers 401 to a credential it rejects and 404 to one it accepts.
-export const CREDENTIAL_PROBE_PATH = "/v1/agents/agent_unknown"
+// The API's own credential check: it runs the authentication every operation runs and reads
+// no stored data, so verifying a key costs nothing beyond that.
+export const CREDENTIAL_CHECK_PATH = "/v1/auth/verify"
 
-const isNotFound = Schema.is(
-	Schema.Struct({ error: Schema.Struct({ type: Schema.Literal("not_found_error") }) }),
-)
+const isVerified = Schema.is(Schema.Struct({ type: Schema.Literal("authentication_verified") }))
 
 const errorResponse = (
 	status: number,
@@ -129,12 +127,12 @@ const admission = <E, R>(
 		}
 		const verdict = yield* Effect.tryPromise({
 			try: async (): Promise<"accepted" | "rejected" | "unverified"> => {
-				const response = await api.fetch(`${API_ORIGIN}${CREDENTIAL_PROBE_PATH}`, {
+				const response = await api.fetch(`${API_ORIGIN}${CREDENTIAL_CHECK_PATH}`, {
 					headers: credentialHeaders(request.headers),
 				})
-				if (response.status === 404) {
+				if (response.status === 200) {
 					const body: unknown = await response.json()
-					return isNotFound(body) ? "accepted" : "unverified"
+					return isVerified(body) ? "accepted" : "unverified"
 				}
 				await response.body?.cancel()
 				return response.status === 401 ? "rejected" : "unverified"
@@ -144,7 +142,7 @@ const admission = <E, R>(
 		if (verdict === "rejected") {
 			return yield* unauthorizedResponse
 		}
-		// Only the API's own "no such agent" proves it accepted the credential. Any other
+		// Only the API's own confirmation proves it accepted the credential. Any other
 		// answer, such as its 503 when no key is configured, proves nothing.
 		if (verdict === "unverified") {
 			return yield* errorResponse(

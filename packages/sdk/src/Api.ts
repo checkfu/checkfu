@@ -621,6 +621,21 @@ const Health = HttpApiGroup.make("health").add(
 		.annotate(OpenApi.Override, { "x-forge-skip": true }),
 )
 
+const Auth = HttpApiGroup.make("auth")
+	.add(
+		HttpApiEndpoint.get("verify", "/v1/auth/verify", {
+			success: Schema.Struct({ type: Schema.Literal("authentication_verified") }),
+		})
+			.annotate(OpenApi.Summary, "Verify a credential")
+			.annotate(
+				OpenApi.Description,
+				"Succeeds when the request's API key is accepted. Reads no stored data.",
+			)
+			.annotate(OpenApi.Override, { "x-forge-skip": true }),
+	)
+	.annotate(OpenApi.Description, "Check a credential")
+	.middleware(Authentication)
+
 const Agents = HttpApiGroup.make("agents")
 	.add(
 		HttpApiEndpoint.post("create", "/v1/agents", {
@@ -971,6 +986,7 @@ const Sessions = HttpApiGroup.make("sessions")
 
 export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
+	.add(Auth)
 	.add(Agents)
 	.add(Environments)
 	.add(Sessions)

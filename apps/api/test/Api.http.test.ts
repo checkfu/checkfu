@@ -360,6 +360,27 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						body: { name: "A", model: "gpt-4o-mini" },
 					})
 					expect(xApiKeyRes.status).toBe(201)
+
+					// The credential check answers for the key alone, under either header.
+					const verify = (headers?: Record<string, string>) =>
+						sendRequest(apiFetch, {
+							method: "GET",
+							path: "/v1/auth/verify",
+							...(headers === undefined ? {} : { headers }),
+						})
+					for (const headers of [AUTH_HEADERS, { "x-api-key": TEST_API_KEY }]) {
+						const verified = yield* verify(headers)
+						expect(verified.status).toBe(200)
+						expect(yield* Effect.promise(() => verified.json())).toEqual({
+							type: "authentication_verified",
+						})
+						expect(verified.headers.get("cache-control")).toBe("no-store")
+					}
+					for (const headers of [undefined, { authorization: "Bearer wrong-key" }]) {
+						const refused = yield* verify(headers)
+						expect(refused.status).toBe(401)
+						expect(refused.headers.get("www-authenticate")).toBe("Bearer")
+					}
 				}).pipe(Effect.scoped, Effect.provide(authedLayer)),
 			)
 
@@ -379,6 +400,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						body: { name: "A", model: "gpt-4o-mini" },
 					})
 					expect(unconfiguredRes.status).toBe(503)
+
+					const unconfiguredVerify = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: "/v1/auth/verify",
+						headers: AUTH_HEADERS,
+					})
+					expect(unconfiguredVerify.status).toBe(503)
 				}).pipe(Effect.scoped, Effect.provide(unconfiguredLayer)),
 			)
 		} finally {
@@ -681,6 +709,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/agents",
 						"/v1/agents/{agent_id}",
 						"/v1/agents/{agent_id}/archive",
+						"/v1/auth/verify",
 						"/v1/environments",
 						"/v1/environments/{environment_id}",
 						"/v1/environments/{environment_id}/archive",

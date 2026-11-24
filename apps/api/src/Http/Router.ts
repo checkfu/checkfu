@@ -50,6 +50,10 @@ const HealthLive = HttpApiBuilder.group(CheckfuApi, "health", (handlers) =>
 	handlers.handle("health", () => Effect.succeed({ status: "ok" as const })),
 )
 
+const AuthLive = HttpApiBuilder.group(CheckfuApi, "auth", (handlers) =>
+	handlers.handle("verify", () => Effect.succeed({ type: "authentication_verified" as const })),
+)
+
 export const HealthTracerDisabledWhen: Layer.Layer<never> = Layer.succeed(
 	HttpMiddleware.TracerDisabledWhen,
 	(request) => requestPath(request) === "/health",
@@ -81,7 +85,7 @@ const OpenApiRouteLive = HttpRouter.add(
 )
 
 const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi), OpenApiRouteLive).pipe(
-	Layer.provide([HealthLive, AgentsLive, EnvironmentsLive, SessionsLive]),
+	Layer.provide([HealthLive, AuthLive, AgentsLive, EnvironmentsLive, SessionsLive]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 		RequestValidationLive,

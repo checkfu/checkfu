@@ -1052,8 +1052,10 @@ describe("@checkfu/sdk", () => {
 		})
 
 		it("exports complete Forge-generated SDK_OPERATION_BINDINGS and Op type helpers", () => {
+			// Operations marked `x-forge-skip` in the contract get no generated surface.
+			const ungenerated = new Set(["health", "auth"])
 			const expectedEndpoints = Object.entries(CheckfuApi.groups)
-				.filter(([group]) => group !== "health")
+				.filter(([group]) => !ungenerated.has(group))
 				.flatMap(([group, apiGroup]) =>
 					Object.keys(apiGroup.endpoints).map((endpoint) => `${group}.${endpoint}`),
 				)
