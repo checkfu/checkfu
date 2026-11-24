@@ -11,6 +11,7 @@ import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
+import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
@@ -48,6 +49,7 @@ const CheckfuLive = Checkfu.layer(
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
+	Layer.succeed(ViewEventsOverObjectSockets, true),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,

@@ -792,7 +792,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						yield* sessionViews.get(Session.ref(sessionId), { atLeast: lastReceipt })
 					}
 
-					// Both catch-up and live reads use bounded pages.
+					// Catch-up reads bounded pages, then live events follow from the last one.
 					listCalls.length = 0
 					eventsCalls.length = 0
 					const streamRes = yield* sendRequest(apiFetch, {
@@ -809,8 +809,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							(evt.error as { message?: string } | undefined)?.message === "Live after catchup",
 					)
 
-					// Let the reader catch up before appending another event.
-					yield* Effect.sleep("50 millis")
+					// Append the live event once catch-up is done and the stream follows live events.
+					yield* Effect.sleep("5 millis").pipe(
+						Effect.repeat({ until: () => eventsCalls.length > 0 }),
+						Effect.timeout("5 seconds"),
+					)
 					yield* sessions.import(sessionId, [testNotice("Live after catchup")], {
 						commandId: "test-notice-live",
 						expectedVersion: lastReceipt?.version ?? 1,
@@ -829,8 +832,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					for (const call of listCalls) {
 						expect(call.take).toBeLessThanOrEqual(SSE_CATCHUP_PAGE_SIZE)
 					}
-					expect(eventsCalls).toHaveLength(0)
-					expect(listCalls.some((call) => call.after === extraErrors)).toBe(true)
+					expect(eventsCalls).toEqual([{ after: extraErrors }])
 				}).pipe(Effect.scoped, Effect.provide(spiedLayer)),
 			)
 		} finally {
@@ -2087,7 +2089,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		}
 	})
 
-	it("polls SessionView.snapshot once per idle SSE tick without list or get reads, and closes on archive", async () => {
+	it("reads nothing from SessionView while an SSE stream is idle, and closes on archive", async () => {
 		let snapshotCalls = 0
 		let listCalls = 0
 		let getCalls = 0
@@ -2130,11 +2132,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(streamRes.status).toBe(200)
 
-					// Reset counters right after opening the stream so we measure only polling traffic.
-					snapshotCalls = 0
-					listCalls = 0
-					getCalls = 0
-
 					const readerPromise = readSseUntil(
 						streamRes,
 						(evt) =>
@@ -2142,23 +2139,28 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							(evt.error as { message?: string } | undefined)?.message === "Wake idle stream",
 					)
 
-					// Let the idle stream run through at least two backoff polls (>350ms).
+					// Reset counters once catch-up is done so we measure only the idle stream.
+					yield* Effect.sleep("50 millis")
+					snapshotCalls = 0
+					listCalls = 0
+					getCalls = 0
 					yield* Effect.sleep("420 millis")
-					expect(snapshotCalls).toBeGreaterThanOrEqual(2)
+					expect(snapshotCalls).toBe(0)
 					expect(listCalls).toBe(0)
 					expect(getCalls).toBe(0)
 
-					// Emit one live event: stream must wake via snapshot and fetch a single list page.
+					// Emit one live event: it is pushed to the stream without any read.
 					yield* sessions.import(sessionId, [testNotice("Wake idle stream")], {
 						commandId: "test-notice-wake",
 						expectedVersion: 1,
 					})
 					const frames = yield* Effect.promise(() => readerPromise)
 					expect(frames).toHaveLength(1)
-					expect(listCalls).toBe(1)
+					expect(snapshotCalls).toBe(0)
+					expect(listCalls).toBe(0)
 					expect(getCalls).toBe(0)
 
-					// A future-cursor SSE stream closes when archived using snapshot alone (0 list calls).
+					// A future-cursor SSE stream closes when the session is archived below its cursor.
 					const futureStream = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream?after=9999`,
@@ -2181,7 +2183,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(archiveRes.status).toBe(200)
 					const body = yield* Effect.promise(() => futureDone)
 					expect(body).not.toContain("event: session.archived")
-					expect(snapshotCalls).toBeGreaterThanOrEqual(1)
+					expect(snapshotCalls).toBe(0)
 					expect(listCalls).toBe(0)
 				}).pipe(Effect.scoped, Effect.provide(spiedLayer)),
 			)

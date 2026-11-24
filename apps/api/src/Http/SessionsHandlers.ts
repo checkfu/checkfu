@@ -1,4 +1,6 @@
 import type * as Domain from "@alchemy.run/domain"
+import { Envelope } from "@alchemy.run/domain/Aggregate"
+import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import {
 	AgentVersionByNumberView,
@@ -11,7 +13,7 @@ import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
-import { SessionView } from "@checkfu/domain/Session/SessionView.view"
+import { SessionView, SessionViewEvents } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -52,6 +54,7 @@ import {
 	toApiError,
 } from "./HttpHelpers.ts"
 import { makeLister } from "./Listing.ts"
+import { ViewEventsOverObjectSockets, objectSocketEvents } from "./ObjectSocketEvents.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
@@ -152,6 +155,11 @@ export interface SessionEventEntry {
 	readonly event: DomainSessionEvent
 }
 
+const SessionViewEntry = Schema.Struct({
+	event: Schema.Union(SessionViewEvents),
+	envelope: Envelope,
+})
+
 const encodeSessionEventJson = Schema.encodeSync(
 	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
 )
@@ -245,6 +253,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
 		const sseMaxConnectionDuration = yield* SseMaxConnectionDuration
 		const list = yield* makeLister
+		const overObjectSockets = yield* ViewEventsOverObjectSockets
+		const connectSessionView = overObjectSockets
+			? (yield* Model.Internals).views.get(SessionView.viewName)?.connect
+			: undefined
+		if (overObjectSockets && connectSessionView === undefined) {
+			return yield* Effect.die(new Error("SessionView is not pushed over object sockets."))
+		}
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -604,7 +619,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handleRaw("streamEvents", ({ params, query, request }) =>
 				Effect.gen(function* () {
 					const id = params.session_id
-					const snapshot = yield* existing(id)
+					yield* existing(id)
 					const header = request.headers["last-event-id"]
 					const rawCursor = header !== undefined && header.length > 0 ? header : query.after
 					const after =
@@ -614,70 +629,33 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									Effect.catch(() => reject(400, "Cursor must be a non-negative integer.")),
 								)
 					const ref = Session.ref(id)
-					let initialHead = 0
-					if (snapshot.archived_at !== null) {
-						const latest = yield* sessionViews.snapshot(ref)
-						if (latest.cursor <= (after ?? 0)) {
-							return HttpServerResponse.empty({ status: 204 })
-						}
-						initialHead = latest.cursor
+					const from = after ?? 0
+					const head = yield* sessionViews.snapshot(ref)
+					if (head.state !== null && head.state.archived_at !== null && head.cursor <= from) {
+						return HttpServerResponse.empty({ status: 204 })
 					}
-					// Poll `snapshot` (one view RPC) to observe both the latest emitted seq and
-					// archival state, fetching bounded event pages only when events exist past
-					// `state.cursor`. Back off while caught up, and drain busy sessions without sleeping.
-					const events = Stream.paginate(
-						{ cursor: after ?? 0, delayMs: 0, knownHead: initialHead },
-						(state) =>
-							Effect.gen(function* () {
-								if (state.delayMs > 0) {
-									yield* Effect.sleep(Duration.millis(state.delayMs))
-								}
-								let knownHead = state.knownHead
-								if (state.cursor >= knownHead) {
-									const latest = yield* sessionViews.snapshot(ref)
-									knownHead = latest.cursor
-									if (knownHead <= state.cursor) {
-										if (latest.state !== null && latest.state.archived_at !== null) {
-											return [[], Option.none()] as const
-										}
-										return [
-											[],
-											Option.some({
-												cursor: state.cursor,
-												delayMs: Math.min(1000, Math.max(300, state.delayMs * 2)),
-												knownHead,
-											}),
-										] as const
-									}
-								}
-								const page = yield* sessionViews.list(ref, {
-									after: state.cursor,
-									take: SSE_CATCHUP_PAGE_SIZE,
-									order: "asc",
-								})
-								const last = page.entries.at(-1)
-								if (last === undefined) {
-									return [
-										page.entries,
-										Option.some({
-											cursor: state.cursor,
-											delayMs: Math.min(1000, Math.max(300, state.delayMs * 2)),
-											knownHead: state.cursor,
+					let cursor = Math.min(from, head.cursor)
+					const catchUp =
+						cursor < head.cursor
+							? Stream.paginate(cursor, (seq: number) =>
+									Effect.map(
+										sessionViews.list(ref, {
+											after: seq,
+											take: SSE_CATCHUP_PAGE_SIZE,
+											order: "asc",
 										}),
-									] as const
-								}
-								return [
-									page.entries,
-									Option.some({
-										cursor: last.envelope.seq,
-										delayMs: 0,
-										knownHead: Math.max(knownHead, last.envelope.seq),
-									}),
-								] as const
-							}),
+										(page) => [page.entries, Option.fromNullOr(page.cursor)] as const,
+									),
+								).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
+							: Stream.empty
+					const live: Stream.Stream<SessionEventEntry> = Stream.suspend(() =>
+						connectSessionView === undefined
+							? sessionViews.events(ref, { after: cursor })
+							: objectSocketEvents(connectSessionView, SessionViewEntry, id, cursor),
 					)
-					const frames = events.pipe(
+					const frames = Stream.concat(catchUp, live).pipe(
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
+						Stream.filter((entry) => entry.envelope.seq > from),
 						Stream.map((entry) => {
 							const payload = serializeSessionEvent(entry)
 							return Sse.encoder.write({
