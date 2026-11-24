@@ -56,7 +56,8 @@ export const API_WORKER_PROPS = {
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	// The generated OpenAPI document is a static asset: GET /openapi.json is served without
 	// running the Worker, and the document is not part of the code every isolate loads.
-	assets: "./apps/api/public",
+	// Resolved from this module, like `main`, so Alchemy finds it from any working directory.
+	assets: decodeURIComponent(new URL("../public", import.meta.url).pathname),
 	observability: {
 		// Keep top-level Workers Observability enabled when adding `issues`, since
 		// providing `observability` bypasses Alchemy's DEFAULT_OBSERVABILITY fallback.
