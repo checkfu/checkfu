@@ -10,15 +10,17 @@ import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-route
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
+import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
 import { LifecycleStatus } from "../status.tsx"
-import { useAction } from "../use-action.ts"
+import { useAction, useSubmissionKey } from "../use-action.ts"
 
 const list = getRouteApi("/_app/agents/")
 const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
+	const search = list.useSearch()
 	return (
 		<>
 			<PageHeader
@@ -81,6 +83,7 @@ export function AgentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }
@@ -160,6 +163,7 @@ function AgentForm({
 
 export function NewAgentPage(): React.JSX.Element {
 	const navigate = useNavigate()
+	const createKey = useSubmissionKey()
 	return (
 		<>
 			<PageHeader title="New agent" breadcrumb={<Link to="/agents">Agents</Link>} />
@@ -167,7 +171,9 @@ export function NewAgentPage(): React.JSX.Element {
 				initial={{ name: "", model: "", system: "", description: "" }}
 				submitLabel="Create agent"
 				onSubmit={async (draft) => {
-					const agent = await checkfu.agents.create(bodyOf(draft))
+					const body = bodyOf(draft)
+					const agent = await checkfu.agents.create(body, createKey.keyFor(body))
+					createKey.settle()
 					await navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
 				}}
 			/>

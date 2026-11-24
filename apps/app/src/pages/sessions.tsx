@@ -10,10 +10,12 @@ import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-route
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
-import { checkfu } from "../api.ts"
+import { Pager } from "../pager.tsx"
+import { checkfu, newIdempotencyKey } from "../api.ts"
 import { Status } from "../status.tsx"
-import { useAction } from "../use-action.ts"
-import { Transcript, useSessionEvents } from "./transcript.tsx"
+import { useAction, useSubmissionKey } from "../use-action.ts"
+import { Transcript } from "./transcript.tsx"
+import { useSessionEvents } from "./use-session-events.ts"
 
 const list = getRouteApi("/_app/sessions/")
 const create = getRouteApi("/_app/sessions/new")
@@ -21,6 +23,7 @@ const detail = getRouteApi("/_app/sessions/$sessionId")
 
 export function SessionsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
+	const search = list.useSearch()
 	return (
 		<>
 			<PageHeader
@@ -86,6 +89,7 @@ export function SessionsPage(): React.JSX.Element {
 					},
 				]}
 			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }
@@ -96,12 +100,15 @@ export function NewSessionPage(): React.JSX.Element {
 	const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
 	const [environmentId, setEnvironmentId] = useState(environments[0]?.id ?? "")
 	const [title, setTitle] = useState("")
+	const startKey = useSubmissionKey()
 	const start = useAction(async () => {
-		const session = await checkfu.sessions.create({
+		const body = {
 			agent: agentId,
 			environment_id: environmentId,
 			title: title.trim() === "" ? null : title.trim(),
-		})
+		}
+		const session = await checkfu.sessions.create(body, startKey.keyFor(body))
+		startKey.settle()
 		await navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
 	})
 	return (
@@ -168,16 +175,28 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const router = useRouter()
-	const { events, status, error } = useSessionEvents(session.id, session.status)
+	const { events, status, error } = useSessionEvents(session.id, session.status, {
+		since: session.updated_at,
+		onTransition: () => void router.invalidate(),
+	})
 	const [text, setText] = useState("")
+	const sendKey = useSubmissionKey()
 	const send = useAction(async (message: string) => {
-		await checkfu.sessions.send(session.id, {
-			events: [{ type: "user.message", content: [{ type: "text", text: message }] }],
-		})
-		setText("")
+		const body = {
+			events: [
+				{ type: "user.message" as const, content: [{ type: "text" as const, text: message }] },
+			],
+		}
+		await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
+		sendKey.settle()
+		setText((current) => (current === message ? "" : current))
 	})
 	const interrupt = useAction(async () => {
-		await checkfu.sessions.send(session.id, { events: [{ type: "user.interrupt" }] })
+		await checkfu.sessions.send(
+			session.id,
+			{ events: [{ type: "user.interrupt" }] },
+			newIdempotencyKey(),
+		)
 	})
 	const archive = useAction(async () => {
 		await checkfu.sessions.archive(session.id)

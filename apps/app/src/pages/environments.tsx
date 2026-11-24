@@ -9,15 +9,17 @@ import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-route
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
+import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
 import { LifecycleStatus } from "../status.tsx"
-import { useAction } from "../use-action.ts"
+import { useAction, useSubmissionKey } from "../use-action.ts"
 
 const list = getRouteApi("/_app/environments/")
 const detail = getRouteApi("/_app/environments/$environmentId")
 
 export function EnvironmentsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
+	const search = list.useSearch()
 	return (
 		<>
 			<PageHeader
@@ -73,6 +75,7 @@ export function EnvironmentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }
@@ -81,11 +84,11 @@ export function NewEnvironmentPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const [name, setName] = useState("")
 	const [description, setDescription] = useState("")
+	const createKey = useSubmissionKey()
 	const create = useAction(async () => {
-		const environment = await checkfu.environments.create({
-			name: name.trim(),
-			description: description === "" ? null : description,
-		})
+		const body = { name: name.trim(), description: description === "" ? null : description }
+		const environment = await checkfu.environments.create(body, createKey.keyFor(body))
+		createKey.settle()
 		await navigate({
 			to: "/environments/$environmentId",
 			params: { environmentId: environment.id },

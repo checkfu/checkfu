@@ -128,4 +128,55 @@ describe("app worker", () => {
 		const response = await worker.fetch(new Request(`${ORIGIN}/sessions/abc`), env)
 		expect(await response.text()).toBe("index")
 	})
+
+	it("moves the shared localhost hostname to app.localhost and never signs in there", async () => {
+		const { env, seen } = makeEnv()
+		for (const host of ["localhost", "127.0.0.1"]) {
+			const moved = await worker.fetch(new Request(`http://${host}:1340/sessions?x=1`), env)
+			expect(moved.status).toBe(307)
+			expect(moved.headers.get("location")).toBe("http://app.localhost:1340/sessions?x=1")
+			const refused = await worker.fetch(
+				new Request(`http://${host}:1340/auth/sign-in`, {
+					method: "POST",
+					headers: { origin: `http://${host}:1340` },
+					body: new URLSearchParams({ key: KEY }),
+				}),
+				env,
+			)
+			expect(refused.status).toBe(421)
+			expect(refused.headers.get("set-cookie")).toBeNull()
+		}
+		expect(seen).toHaveLength(0)
+	})
+
+	it("reads at most a small form-encoded body before checking a key", async () => {
+		const { env, seen } = makeEnv()
+		const post = (body: BodyInit, contentType: string) =>
+			worker.fetch(
+				new Request(`${ORIGIN}/auth/sign-in`, {
+					method: "POST",
+					headers: { origin: ORIGIN, "content-type": contentType },
+					body,
+				}),
+				env,
+			)
+		expect(
+			(await post(`key=${"k".repeat(10_000)}`, "application/x-www-form-urlencoded")).status,
+		).toBe(413)
+		const form = new FormData()
+		form.set("key", KEY)
+		expect((await post(form, "multipart/form-data; boundary=x")).status).toBe(415)
+		expect(seen).toHaveLength(0)
+	})
+
+	it("tells caches not to keep a session check", async () => {
+		const { env } = makeEnv()
+		for (const cookie of [`checkfu_key=${KEY}`, "checkfu_key=stale", undefined]) {
+			const response = await worker.fetch(
+				new Request(`${ORIGIN}/auth/session`, cookie === undefined ? {} : { headers: { cookie } }),
+				env,
+			)
+			expect(response.headers.get("cache-control")).toBe("no-store")
+		}
+	})
 })

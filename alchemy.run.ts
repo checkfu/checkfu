@@ -62,7 +62,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				env: { API: api },
 				assets: {
 					notFoundHandling: "single-page-application",
-					runWorkerFirst: ["/v1/*", "/auth/*"],
+					runWorkerFirst: ["/*", "!/assets/*"],
 				},
 				dev: { port: 1340 },
 			})

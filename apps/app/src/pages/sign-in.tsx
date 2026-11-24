@@ -21,14 +21,16 @@ export function SignInPage(): React.JSX.Element {
 		event.preventDefault()
 		setPending(true)
 		setError(undefined)
-		void signIn(key).then((result) => {
-			setPending(false)
-			if (result === "ok") {
-				void navigate({ to: "/sessions" })
-			} else {
-				setError(MESSAGES[result])
-			}
-		})
+		void signIn(key)
+			.catch(() => "failed" as const)
+			.then((result) => {
+				setPending(false)
+				if (result === "ok") {
+					void navigate({ to: "/sessions" })
+				} else {
+					setError(MESSAGES[result])
+				}
+			})
 	}
 	return (
 		<main className="flex min-h-svh items-center justify-center px-5">

@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { errorMessage } from "./api.ts"
+import { useRef, useState } from "react"
+import { errorMessage, newIdempotencyKey } from "./api.ts"
 
 export function useAction<Args extends ReadonlyArray<unknown>>(
 	action: (...args: Args) => Promise<void>,
@@ -18,4 +18,20 @@ export function useAction<Args extends ReadonlyArray<unknown>>(
 		)
 	}
 	return { run, pending, error }
+}
+
+export function useSubmissionKey() {
+	const last = useRef<{ readonly body: string; readonly key: string }>(undefined)
+	return {
+		keyFor: (body: unknown): string => {
+			const json = JSON.stringify(body)
+			if (last.current?.body !== json) {
+				last.current = { body: json, key: newIdempotencyKey() }
+			}
+			return last.current.key
+		},
+		settle: (): void => {
+			last.current = undefined
+		},
+	}
 }

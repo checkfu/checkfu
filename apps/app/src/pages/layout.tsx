@@ -8,9 +8,14 @@ import type { ErrorComponentProps } from "@tanstack/react-router"
 import { BotIcon, BoxIcon, LogOutIcon, MessagesSquareIcon } from "lucide-react"
 import type * as React from "react"
 import { errorMessage, isSignedOut, signOut } from "../api.ts"
+import { useAction } from "../use-action.ts"
 
 export function Layout(): React.JSX.Element {
 	const navigate = useNavigate()
+	const signOutAction = useAction(async () => {
+		await signOut()
+		await navigate({ to: "/sign-in" })
+	})
 	return (
 		<AppShell
 			brand={
@@ -44,15 +49,17 @@ export function Layout(): React.JSX.Element {
 						variant="ghost"
 						size="icon-sm"
 						aria-label="Sign out"
-						onClick={() => {
-							void signOut().then(() => navigate({ to: "/sign-in" }))
-						}}
+						disabled={signOutAction.pending}
+						onClick={() => signOutAction.run()}
 					>
 						<LogOutIcon />
 					</Button>
 				</>
 			}
 		>
+			{signOutAction.error === undefined ? null : (
+				<Callout tone="error">{signOutAction.error}</Callout>
+			)}
 			<Outlet />
 		</AppShell>
 	)
