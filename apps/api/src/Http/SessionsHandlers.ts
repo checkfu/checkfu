@@ -457,20 +457,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return result
 					}
 					const snapshot = yield* present(result, 500, "Failed to load created session.")
+					// What was admitted, not what this request resolved: of two creates racing on one key,
+					// only one admission wins. A retry answers as the first create did, with the session
+					// as it was created.
 					return {
-						id,
-						type: "session" as const,
+						...serializeSession(snapshot),
 						status: "idle" as const,
-						agent: { id: agentId, version: pinnedVersion },
-						environment_id: environmentId,
-						title,
-						resources: serializeResources(resources, snapshot.created_at),
 						turn: 0,
-						usage: {
-							input_tokens: 0,
-							output_tokens: 0,
-						},
-						created_at: snapshot.created_at,
+						usage: { input_tokens: 0, output_tokens: 0 },
 						updated_at: snapshot.created_at,
 						archived_at: null,
 					}
