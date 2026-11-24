@@ -181,8 +181,8 @@ describe("Checkfu MCP server", () => {
 				"sessions_getResource",
 				"sessions_getSession",
 				"sessions_listEvents",
-				"sessions_listSessions",
 				"sessions_listResources",
+				"sessions_listSessions",
 				"sessions_sendSessionEvents",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
@@ -407,8 +407,8 @@ describe("Checkfu MCP server", () => {
 				sessions_getResource: { path: { session_id: "sess_1", resource_id: "sesrsc_1" } },
 				sessions_getSession: session,
 				sessions_listEvents: { ...session, query: { limit: "5" } },
-				sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
 				sessions_listResources: session,
+				sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
 				sessions_sendSessionEvents: {
 					...session,
 					body: {
