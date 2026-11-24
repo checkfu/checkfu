@@ -118,9 +118,10 @@ const eagerContributors = (files: ReadonlyArray<string>, top = 12) => {
 				if (source === undefined) {
 					return
 				}
-				const end = segments[at + 1]?.[0] ?? lines[index]?.length ?? column
+				// Columns count UTF-16 code units; the budget counts UTF-8 bytes.
+				const span = lines[index]?.slice(column, segments[at + 1]?.[0]) ?? ""
 				const key = contributorOf(map.sources?.[source] ?? "unknown")
-				bytesBySource.set(key, (bytesBySource.get(key) ?? 0) + Math.max(0, end - column))
+				bytesBySource.set(key, (bytesBySource.get(key) ?? 0) + Buffer.byteLength(span, "utf8"))
 			})
 		})
 	}
