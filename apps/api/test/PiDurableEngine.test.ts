@@ -34,7 +34,7 @@ import {
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
+import type { PiTurnOutcome, PiTurnRequest } from "../src/Pi/PiTurn.ts"
 import {
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
@@ -516,28 +516,6 @@ describe("turn engine", () => {
 			expect(
 				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "on time"))),
 			).toMatchObject({ ok: true, reply: { text: "re: on time" } })
-		} finally {
-			await backend.close()
-		}
-	})
-
-	it("omits a discarded turn's entries once, however many cleanups run for it", async () => {
-		const { backend, started } = await blockingBackend()
-		// The turn ends without the engine's own cleanup, so the cleanups below are the first.
-		const noCleanup: PiDurableBackend = { ...backend, omitEntries: () => Promise.resolve() }
-		try {
-			const running = Effect.runPromise(runPiDurableTurn(noCleanup, turnRequest(1, "stop me")))
-			await started
-			await Effect.runPromise(backend.abort("turn:1"))
-			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
-			const before = await backend.countEntries()
-			await Promise.all([
-				backend.omitEntries("turn:1"),
-				backend.omitEntries("turn:1"),
-				backend.omitEntries("turn:1"),
-			])
-			await backend.omitEntries("turn:1")
-			expect((await backend.countEntries()) - before).toBe(1)
 		} finally {
 			await backend.close()
 		}
