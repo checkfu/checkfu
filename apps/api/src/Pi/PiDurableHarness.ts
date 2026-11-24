@@ -2,6 +2,14 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import {
+	McpServerSet,
+	McpServerSetId,
+	RecordMcpServers,
+} from "@checkfu/domain/Mcp/McpServerSet.aggregate"
+import { McpServerBindingList, McpServerList } from "@checkfu/domain/Mcp/McpServers"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import { recordToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
@@ -15,6 +23,7 @@ import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { resolveCatalogModel } from "./PiCatalog.ts"
+import { bindSessionServers } from "../Connection/McpBindings.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -99,6 +108,42 @@ export const PiDurableHarnessLive = boundedHarness(
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const executor = yield* PiTurnExecutor
 		const sessions = yield* Session
+		const serverSets = yield* McpServerSet
+		const environments = yield* Environment
+		// A session admitted without a recorded binding (an automation's, for one) is bound here,
+		// at its first turn, by the same step as one created over HTTP: without credentials, under
+		// its environment's network rules. What is recorded then holds for the session's life.
+		const sessionMcpServers = (sessionId: string, versionId: string, environmentId: string) =>
+			Effect.gen(function* () {
+				const setId = McpServerSetId.make(sessionId)
+				const recorded = yield* serverSets.get(setId)
+				if (recorded.recorded) {
+					return McpServerBindingList.decode(recorded.servers)
+				}
+				const servers = McpServerList.decode(
+					(yield* serverSets.get(McpServerSetId.make(versionId))).servers,
+				)
+				if (servers.length === 0) {
+					return []
+				}
+				const environment = yield* environments.get(EnvironmentId.make(environmentId))
+				const bound = bindSessionServers({
+					servers,
+					explicit: [],
+					offered: [],
+					networking: environment.config === null ? null : environment.config.networking,
+				})
+				if (!bound.ok) {
+					return yield* Effect.fail<TurnFailed>({
+						_tag: "TurnFailed",
+						error_type: "mcp_servers_unavailable",
+						message: bound.message,
+						terminal: true,
+					})
+				}
+				yield* serverSets.send(new RecordMcpServers({ set_id: setId, servers: bound.mcpServers }))
+				return McpServerBindingList.decode((yield* serverSets.get(setId)).servers)
+			})
 
 		const settled = (
 			args: { readonly session_id: SessionId; readonly turn: number },
@@ -183,6 +228,12 @@ export const PiDurableHarnessLive = boundedHarness(
 						})
 					}
 
+					// What the session bound when it was created; it never changes afterwards.
+					const mcpServers = yield* sessionMcpServers(
+						args.session_id,
+						version.id,
+						args.environment_id,
+					)
 					const userText = args.input.join("\n")
 					if (userText.length === 0) {
 						return yield* Effect.fail<TurnFailed>({
@@ -203,6 +254,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						...(args.last_reply_turn === undefined
 							? {}
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
+						...(mcpServers.length === 0 ? {} : { mcp_servers: mcpServers }),
 					}
 					// A turn is submitted under its operation id, so sending it again after a
 					// lost reply joins the turn already there instead of starting another. The

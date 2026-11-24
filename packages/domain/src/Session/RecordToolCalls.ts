@@ -10,8 +10,11 @@ import {
 	MAX_TOOL_RESULT_TEXT_LENGTH,
 	MAX_TURN_TOOL_TEXT_LENGTH,
 } from "./SessionTypes.ts"
-import type { TextBlock, ToolCall, ToolEvent, ToolResult, ToolUse } from "./SessionTypes.ts"
+import type { TextBlock, ToolCall, ToolEvent } from "./SessionTypes.ts"
 import { truncateText } from "./TextBounds.ts"
+
+type CallUse = ToolCall["use"]
+type CallResult = Extract<ToolCall, { readonly _tag: "pair" }>["result"]
 
 const DIGEST_LENGTH = 16
 
@@ -57,11 +60,11 @@ export interface ToolCallBounds {
 export const boundToolCalls = (): ToolCallBounds => {
 	let budget = MAX_TURN_TOOL_TEXT_LENGTH
 	let awaiting = 0
-	const calls: Array<{ readonly use: ToolUse; result?: ToolResult }> = []
+	const calls: Array<{ readonly use: CallUse; result?: CallResult }> = []
 	const byId = new Map<string, number>()
 	return {
 		add: (event) => {
-			if (event.type === "tool_use") {
+			if (event.type === "tool_use" || event.type === "mcp_tool_use") {
 				// A reused id names a new call: the earlier one can no longer get a result, whether
 				// or not this one is kept.
 				const earlier = byId.get(event.tool_use_id)
@@ -79,14 +82,24 @@ export const boundToolCalls = (): ToolCallBounds => {
 				budget -= fits ? size : 0
 				byId.set(event.tool_use_id, calls.length)
 				awaiting += 1
+				const use = {
+					tool_use_id: publicToolUseId(event.tool_use_id),
+					name: clampName(event.name),
+					input: fits ? event.input : {},
+					...(fits ? {} : { truncated: true as const }),
+				}
 				calls.push({
-					use: {
-						type: "tool_use",
-						tool_use_id: publicToolUseId(event.tool_use_id),
-						name: clampName(event.name),
-						input: fits ? event.input : {},
-						...(fits ? {} : { truncated: true as const }),
-					},
+					use:
+						event.type === "tool_use"
+							? { type: "tool_use", ...use }
+							: {
+									type: "mcp_tool_use",
+									...use,
+									mcp_server_name: clampName(event.mcp_server_name),
+									...(event.parent_tool_use_id === undefined
+										? {}
+										: { parent_tool_use_id: publicToolUseId(event.parent_tool_use_id) }),
+								},
 				})
 				return
 			}
@@ -108,7 +121,7 @@ export const boundToolCalls = (): ToolCallBounds => {
 				}
 			}
 			call.result = {
-				type: "tool_result",
+				type: event.type,
 				tool_use_id: call.use.tool_use_id,
 				content,
 				is_error: event.is_error,

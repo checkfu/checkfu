@@ -22,7 +22,13 @@ import {
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
-import { AgentToolResult, AgentToolUse, RecordToolCall } from "./RecordToolCall.command.ts"
+import {
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+	RecordToolCall,
+} from "./RecordToolCall.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -337,25 +343,42 @@ export class Session extends Domain.Aggregate("Session", {
 					model_request_start_id: cmd.model_request_start_id,
 				})
 			}
-			const { use } = cmd.call
-			const used = new AgentToolUse({
-				tool_use_id: use.tool_use_id,
-				name: use.name,
-				input: use.input,
-				...(use.truncated === true ? { truncated: true as const } : {}),
-			})
-			if (cmd.call._tag === "use") {
+			const { call } = cmd
+			const { use } = call
+			const useTruncated = use.truncated === true ? { truncated: true as const } : {}
+			const used =
+				use.type === "tool_use"
+					? new AgentToolUse({
+							tool_use_id: use.tool_use_id,
+							name: use.name,
+							input: use.input,
+							...useTruncated,
+						})
+					: new AgentMcpToolUse({
+							tool_use_id: use.tool_use_id,
+							mcp_server_name: use.mcp_server_name,
+							name: use.name,
+							input: use.input,
+							...(use.parent_tool_use_id === undefined
+								? {}
+								: { parent_tool_use_id: use.parent_tool_use_id }),
+							...useTruncated,
+						})
+			if (call._tag === "use") {
 				return [used]
 			}
-			const { result } = cmd.call
+			const { result } = call
+			const recorded = {
+				tool_use_id: result.tool_use_id,
+				content: result.content,
+				is_error: result.is_error,
+				...(result.truncated === true ? { truncated: true as const } : {}),
+			}
 			return [
 				used,
-				new AgentToolResult({
-					tool_use_id: result.tool_use_id,
-					content: result.content,
-					is_error: result.is_error,
-					...(result.truncated === true ? { truncated: true as const } : {}),
-				}),
+				result.type === "tool_result"
+					? new AgentToolResult(recorded)
+					: new AgentMcpToolResult(recorded),
 			]
 		},
 
@@ -505,6 +528,8 @@ export class Session extends Domain.Aggregate("Session", {
 				: state,
 		"agent.tool_use": (state) => state,
 		"agent.tool_result": (state) => state,
+		"agent.mcp_tool_use": (state) => state,
+		"agent.mcp_tool_result": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>

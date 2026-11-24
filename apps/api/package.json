@@ -27,6 +27,7 @@
 		"@earendil-works/pi-codemode": "catalog:",
 		"@earendil-works/pi-durable": "catalog:",
 		"@earendil-works/pi-schema": "catalog:",
+		"@modelcontextprotocol/client": "catalog:",
 		"agents": "catalog:",
 		"alchemy": "catalog:",
 		"effect": "catalog:",
@@ -35,6 +36,7 @@
 	"devDependencies": {
 		"@effect/platform-bun": "catalog:",
 		"@effect/vitest": "catalog:",
+		"@modelcontextprotocol/server": "catalog:",
 		"vitest": "catalog:"
 	}
 }

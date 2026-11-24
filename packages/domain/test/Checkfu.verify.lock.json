@@ -317,6 +317,10 @@
 			"Session.AgentMessageEndsTheTurn": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"RepublishAgent.RepublishingMintsTheNextVersionUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === before.agent.version + 1,\n\t\t\t\tafter.agent.current_version_id === command.next_version_id,\n\t\t\t\tafter.agent.name === before.agent.name,\n\t\t\t\tafter.agent.model_id === before.agent.model_id,\n\t\t\t\tafter.agent.has_system === before.agent.has_system,\n\t\t\t\tafter.agent.system === before.agent.system,\n\t\t\t\tafter.agent.has_description === before.agent.has_description,\n\t\t\t\tafter.agent.description === before.agent.description,\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}

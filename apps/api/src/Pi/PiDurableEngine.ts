@@ -1,5 +1,5 @@
 import { boundToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
-import type { ModelUsage, ToolCall } from "@checkfu/domain/Session/SessionTypes"
+import type { ModelUsage, ToolCall, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import {
@@ -40,6 +40,8 @@ export interface PiDurableBackend {
 	>
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
 	readonly reset: Effect.Effect<never>
+	/** How the session object names calls Pi's transcript does not: MCP and script calls. */
+	readonly servedToolCalls?: () => ServedToolCalls
 }
 
 const submissionOf = (pi: Harness, operationId: string) =>
@@ -102,6 +104,14 @@ const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array
 	return ids
 }
 
+/** Calls a turn made that Pi's transcript does not name as such. */
+export interface ServedToolCalls {
+	/** The event as the session log names it: a call to an MCP tool becomes an MCP call. */
+	readonly named: (event: ToolEvent) => ToolEvent
+	/** The calls a script made, in order, read only as far as they are wanted. */
+	readonly nested: (scriptCallId: string) => Iterable<ToolEvent>
+}
+
 /**
  * The tool calls of a settled turn, bounded as the session log records them while the
  * transcript is read in small pages, so a long turn never has to fit in memory or in one RPC.
@@ -110,6 +120,7 @@ const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array
 export const readTurnToolCalls = async (
 	pi: Harness,
 	operationId: string,
+	served?: ServedToolCalls,
 ): Promise<Array<ToolCall>> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input" || record.entry === undefined) {
@@ -125,16 +136,23 @@ export const readTurnToolCalls = async (
 			if (message.role === "assistant") {
 				for (const block of message.content) {
 					if (block.type === "toolCall") {
-						bounds.add({
+						const use: ToolEvent = {
 							type: "tool_use",
 							tool_use_id: block.id,
 							name: block.name,
 							input: block.arguments,
-						})
+						}
+						bounds.add(served?.named(use) ?? use)
+						for (const nested of served?.nested(block.id) ?? []) {
+							if (bounds.complete()) {
+								break
+							}
+							bounds.add(nested)
+						}
 					}
 				}
 			} else if (message.role === "toolResult") {
-				bounds.add({
+				const result: ToolEvent = {
 					type: "tool_result",
 					tool_use_id: message.toolCallId,
 					content: message.content.map((block) => ({
@@ -142,7 +160,8 @@ export const readTurnToolCalls = async (
 						text: block.type === "text" ? block.text : `[${block.mimeType} image]`,
 					})),
 					is_error: message.isError,
-				})
+				}
+				bounds.add(served?.named(result) ?? result)
 			}
 		}
 	}
@@ -433,7 +452,9 @@ const resolveSettledPiTurn = (
 			if (!outcome.ok) {
 				return outcome
 			}
-			const tool_calls = yield* Effect.promise(() => readTurnToolCalls(pi, operationId))
+			const tool_calls = yield* Effect.promise(() =>
+				readTurnToolCalls(pi, operationId, backend.servedToolCalls?.()),
+			)
 			return tool_calls.length === 0 ? outcome : { ...outcome, tool_calls }
 		}),
 	)

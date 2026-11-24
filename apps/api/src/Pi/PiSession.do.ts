@@ -1,9 +1,13 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
+import type { Registry } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
+import type { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
+import { Connection, connectionName } from "../Connection/Connection.do.ts"
+import type { McpUpstream } from "../Connection/McpUpstream.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
@@ -11,10 +15,15 @@ import { codemodeSandboxes, loadToolSurface, withScriptDeadline } from "./PiCode
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
+import { fencedMcpCall, mcpExtension } from "./PiMcp.ts"
+import { PiMcpStore } from "./PiMcpStore.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
+
+// One server cannot crowd out the rest of a conversation's tools.
+const MAX_MCP_SERVER_TOOLS = 512
 
 type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
 
@@ -33,6 +42,7 @@ export const makePiHarnessBackend = (
 	apiKeys: Effect.Success<typeof providerApiKeys>,
 	reset: () => void,
 	enterWorkspace: (turn: number) => Promise<boolean>,
+	mcp?: Pick<PiMcpStore, "served">,
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
@@ -44,6 +54,7 @@ export const makePiHarnessBackend = (
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
 		enterWorkspace,
+		...(mcp === undefined ? {} : { servedToolCalls: () => mcp.served() }),
 		pi: () => harness.pi(),
 		ensureRoot: async (agent) => {
 			const pi = await harness.pi()
@@ -101,9 +112,10 @@ export const PiSessionLive = PiSession.make(
 			baseUrls: providerBaseUrls,
 			workspaces: SessionWorkspace,
 			sandboxes: codemodeSandboxes,
+			connections: Connection,
 			where: Effect.orDie(placement),
 		}),
-		({ state, apiKeys, baseUrls, workspaces, sandboxes, where }) =>
+		({ state, apiKeys, baseUrls, workspaces, sandboxes, connections, where }) =>
 			Effect.promise(async () => {
 				// Load workerd-only modules after Alchemy has evaluated the stack.
 				// Code mode loads here too, so only the isolates that host a session parse it.
@@ -132,6 +144,7 @@ export const PiSessionLive = PiSession.make(
 				const workspaceTools = await workspaceToolDeclarations()
 				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
 				const sandboxStub = placedStub(sandboxes, where)
+				const connection = placedStub(connections, where)
 				const sandbox = withScriptDeadline(
 					new RemoteCodemodeSandbox({
 						remote: () => ({
@@ -141,27 +154,92 @@ export const PiSessionLive = PiSession.make(
 					}),
 				)
 
+				const sql = {
+					exec: (query: string, ...bindings: ReadonlyArray<unknown>) =>
+						rawCtx.storage.sql.exec(query, ...bindings),
+					transaction: (run: () => void) => rawCtx.storage.transactionSync(run),
+				}
+				const mcp = new PiMcpStore(sql)
+				// This session's own MCP clients, one per bound server: their protocol state, such as a
+				// stateful server's session id, is never shared with another session. They live as long
+				// as this object and send every request through the server's connection.
+				const upstreams = new Map<string, Promise<McpUpstream>>()
+				const upstream = (binding: McpServerBinding): Promise<McpUpstream> => {
+					const key = JSON.stringify([binding.name, binding.url, binding.credential_id])
+					const existing = upstreams.get(key)
+					if (existing !== undefined) {
+						return existing
+					}
+					const created = import("../Connection/McpUpstream.ts").then(({ makeMcpUpstream }) =>
+						makeMcpUpstream(binding.url, (request) =>
+							Effect.runPromise(connection(connectionName(binding)).forward(request)),
+						),
+					)
+					upstreams.set(key, created)
+					return created
+				}
+				let registry: Registry | undefined
+				// Installing a name that is installed replaces it, so this also refreshes.
+				const installTools = async (into: Registry) => {
+					const extensions = withToolSurface(sandbox, [
+						workspaceExtension(workspaceTools, (call, signal) =>
+							Effect.runPromise(
+								// The turn this call belongs to is the one admitted when it starts.
+								workspace().runTool(call, { turn: admittedTurn() }),
+								signal === undefined ? undefined : { signal },
+							),
+						),
+						...mcp.servers().map((server) =>
+							mcpExtension(server, {
+								call: fencedMcpCall(
+									() => Effect.runPromise(workspace().enter({ turn: admittedTurn() })),
+									async (binding, tool, args) => (await upstream(binding)).callTool(tool, args),
+								),
+								began: (call) => mcp.began(call),
+								ended: (callId, result) => mcp.ended(callId, result),
+							}),
+						),
+					])
+					for (const extension of extensions) {
+						into.install(extension)
+					}
+				}
+				/**
+				 * A turn names the session's servers. Each one's tools are listed once
+				 * per conversation, so what the model is offered does not shift under
+				 * it; a server that could not be reached is asked again next turn.
+				 */
+				const useMcpServers = async (servers: ReadonlyArray<McpServerBinding>) => {
+					let changed = mcp.bind(servers)
+					for (const { binding, tools } of mcp.servers()) {
+						if (tools !== null) {
+							continue
+						}
+						const listed = await upstream(binding)
+							.then((client) => client.listTools())
+							.catch(() => undefined)
+						if (listed?.ok === true) {
+							mcp.listed(binding.name, listed.tools.slice(0, MAX_MCP_SERVER_TOOLS))
+							changed = true
+						}
+					}
+					if (changed && registry !== undefined) {
+						await installTools(registry)
+					}
+				}
+
 				// PiHarness calls this factory again when it reopens after a storage error.
 				const harness = new PiHarnessClass({
-					harness: ({ storage, context, onWake }) => {
+					harness: async ({ storage, context, onWake }) => {
 						const models = createPiModels(apiKeys, baseUrls)
-						const registry = createCheckfuRegistry()
-						for (const extension of withToolSurface(sandbox, [
-							workspaceExtension(workspaceTools, (call, signal) =>
-								Effect.runPromise(
-									// The turn this call belongs to is the one admitted when it starts.
-									workspace().runTool(call, { turn: admittedTurn() }),
-									signal === undefined ? undefined : { signal },
-								),
-							),
-						])) {
-							registry.install(extension)
-						}
+						const opened = createCheckfuRegistry()
+						await installTools(opened)
+						registry = opened
 						return Harness.open(
 							storage,
 							{
 								models,
-								registry,
+								registry: opened,
 								onWake,
 								settings: PI_HARNESS_SETTINGS,
 							},
@@ -170,9 +248,7 @@ export const PiSessionLive = PiSession.make(
 					},
 				})
 				const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
-				const fence = new SqliteTurnFence({
-					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
-				})
+				const fence = new SqliteTurnFence(sql)
 				const backend = makePiHarnessBackend(
 					harness,
 					fence,
@@ -187,12 +263,28 @@ export const PiSessionLive = PiSession.make(
 						}
 						return entered
 					},
+					mcp,
 				)
 
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
 					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
-					runTurn: (request) => runPiDurableTurn(backend, request),
+					runTurn: (request) =>
+						Effect.gen(function* () {
+							yield* Effect.promise(async () => {
+								await useMcpServers(request.mcp_servers ?? [])
+								// A turn Pi has not seen yet starts after the last one's calls were published.
+								const pi = await harness.pi()
+								const known = await pi.commit(
+									(tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, request.operationId),
+									BACKGROUND_CONTEXT,
+								)
+								if (known === undefined) {
+									mcp.forgetCalls()
+								}
+							})
+							return yield* runPiDurableTurn(backend, request)
+						}),
 					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
 				}
 			}),

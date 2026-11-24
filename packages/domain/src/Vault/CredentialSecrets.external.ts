@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
 import { CredentialId } from "./Credential.id.ts"
-import { CredentialSecret } from "./VaultTypes.ts"
+import { CredentialSecret, McpServerUrl } from "./VaultTypes.ts"
 
 export const CredentialSecretsUnavailable = Schema.TaggedStruct("CredentialSecretsUnavailable", {})
 export type CredentialSecretsUnavailable = typeof CredentialSecretsUnavailable.Type
@@ -11,9 +11,12 @@ export type CredentialSecretsUnavailable = typeof CredentialSecretsUnavailable.T
  * called by whoever receives the secret; the model only confirms and erases.
  */
 export class CredentialSecrets extends Domain.ExternalSystem("CredentialSecrets", {
-	/** Holds a new credential's secret until `keep` confirms the credential exists. */
+	/**
+	 * Holds a new credential's secret until `keep` confirms the credential exists,
+	 * together with the one server it may ever be sent to.
+	 */
 	store: {
-		args: { credential_id: CredentialId, secret: CredentialSecret },
+		args: { credential_id: CredentialId, secret: CredentialSecret, mcp_server_url: McpServerUrl },
 		success: { stored: Schema.Boolean },
 		error: CredentialSecretsUnavailable,
 	},

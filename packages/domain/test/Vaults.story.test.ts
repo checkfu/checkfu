@@ -45,6 +45,12 @@ import {
 } from "../src/Vault/SettleCredentialSecret.policy.ts"
 import { MAX_VAULT_CREDENTIALS } from "../src/Vault/VaultTypes.ts"
 import { VaultView } from "../src/Vault/VaultView.view.ts"
+import {
+	McpServerSet,
+	McpServersRecorded,
+	RecordMcpServers,
+} from "../src/Mcp/McpServerSet.aggregate.ts"
+import { McpServerBindingList, McpServerList } from "../src/Mcp/McpServers.ts"
 import { Vaults, VaultsHandlersLive } from "../src/Vaults.model.ts"
 
 const story = Story.make(Vaults, {
@@ -113,6 +119,31 @@ describe("Vaults", () => {
 			),
 		).pipe(Effect.provide(Domain.InMemory)),
 	)
+
+	it.effect("records the MCP servers of an agent version or a session once", () => {
+		const version = McpServerSet.ref("aver_servers_1")
+		const session = McpServerSet.ref("sess_servers_1")
+		const declared = McpServerList.encode([
+			{ type: "url", name: "tracker", url: "https://mcp.tracker.example/mcp" },
+		])
+		const bound = McpServerBindingList.encode([
+			{ name: "tracker", url: "https://mcp.tracker.example/mcp", credential_id: "vcrd_1" },
+		])
+		return story(
+			Story.state(version, { recorded: false, servers: "" }),
+			Story.when(new RecordMcpServers({ set_id: version.id, servers: declared })),
+			Story.then(version, new McpServersRecorded({ servers: declared })),
+			Story.when(new RecordMcpServers({ set_id: session.id, servers: bound })),
+			Story.then(session, new McpServersRecorded({ servers: bound })),
+			// What was recorded stands: a later write for the same owner changes nothing.
+			Story.when(new RecordMcpServers({ set_id: session.id, servers: declared })),
+			Story.then(session),
+			Story.when(new RecordMcpServers({ set_id: session.id, servers: bound })),
+			Story.then(session),
+			Story.state(session, { recorded: true, servers: bound }),
+			Story.state(version, { recorded: true, servers: declared }),
+		)
+	})
 
 	it.effect("creates, renames, archives and deletes a vault", () =>
 		story(

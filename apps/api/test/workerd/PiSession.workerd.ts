@@ -14,6 +14,8 @@ import {
 	measureBundle,
 } from "./BundleBudget.ts"
 import { removeStage } from "./StageCleanup.ts"
+import { startFakeMcpServer } from "./FakeMcpServer.ts"
+import type { FakeMcpServer } from "./FakeMcpServer.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
@@ -39,6 +41,8 @@ interface SessionEventItem {
 	readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>
 	readonly is_error?: boolean
 	readonly tool_use_id?: string
+	readonly parent_tool_use_id?: string
+	readonly mcp_server_name?: string
 	readonly name?: string
 	readonly input?: Schema.JsonObject
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
@@ -134,6 +138,9 @@ const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyAr
 	) as { readonly props?: { readonly env?: object } }
 	return Object.keys(saved.props?.env ?? {})
 }
+
+const echoScript = (server: string, text: string) =>
+	`return await tools.mcp__${server}__echo({ text: ${JSON.stringify(text)} });`
 
 const startAlchemyDev = async (openAIBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
@@ -851,6 +858,294 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(logged).not.toContain(token)
 		expect(logged).not.toContain(replacement)
 	}, 30_000)
+
+	const credentialFor = async (url: string, token: string) => {
+		const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
+			display_name: "mcp",
+		})
+		const credential = await createResource<{ readonly id: string }>(
+			`/v1/vaults/${vault.id}/credentials`,
+			{ auth: { type: "static_bearer", token, mcp_server_url: url } },
+		)
+		return { vault: vault.id, credential: credential.id }
+	}
+
+	const agentWith = (name: string, url: string) =>
+		createResource<{ readonly id: string }>("/v1/agents", {
+			name: `MCP ${name}`,
+			model: "gpt-4o-mini",
+			mcp_servers: [{ type: "url", name, url }],
+		})
+
+	const sender = (sessionId: string) => (text: string) =>
+		apiJson(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+		})
+
+	// Every turn: run the script the user message names, then say what it returned.
+	const scriptOnRequest = (server: string) => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			return output === undefined
+				? {
+						kind: "tool_call",
+						name: "codemode",
+						arguments: { code: echoScript(server, req.lastUserText) },
+					}
+				: { kind: "reply", text: `Done: ${output}` }
+		})
+	}
+
+	const agentEvents = async (sessionId: string) =>
+		(await listAllEvents(sessionId)).filter((event) => event.type.startsWith("agent."))
+
+	describe("MCP servers", () => {
+		const servers: Array<FakeMcpServer> = []
+		const mcpServer = async (accepted: ReadonlyArray<string> | null) => {
+			const server = await startFakeMcpServer(accepted)
+			servers.push(server)
+			return server
+		}
+		afterAll(async () => {
+			await Promise.all(servers.map((server) => server.close()))
+		})
+
+		it("keeps a turn whose MCP tool returns an image over the bound, with a note in its place", async () => {
+			const mcp = await mcpServer(null)
+			const agent = await agentWith("shots", mcp.url)
+			const script = [
+				// The second image is more base64 than a result keeps of images and details together.
+				"const r = await tools.mcp__shots__picture({ first: 1024, second: 2500000 });",
+				"const text = JSON.stringify(r);",
+				'return [text.includes("left out") ? "noted" : "kept", text.includes("image/png") ? "image" : "none"].join(" ");',
+			].join("\n")
+			fakeOpenAI.setHandler((req) => {
+				const [output] = req.toolOutputs
+				return output === undefined
+					? { kind: "tool_call", name: "codemode", arguments: { code: script } }
+					: { kind: "reply", text: `Done: ${output}` }
+			})
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+			expect((await sender(session.id)("pictures")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+			const reply = (await agentEvents(session.id)).find((event) => event.type === "agent.message")
+			// The small image reaches the script; the large one is a note the result hook left.
+			expect(reply?.content?.[0]?.text).toContain("noted image")
+		}, 60_000)
+
+		it("calls a server from a script with the session's credential, and logs the call", async () => {
+			const token = "tok_mcp_SCRIPT_do_not_leak"
+			const mcp = await mcpServer([token])
+			const { vault, credential } = await credentialFor(mcp.url, token)
+			const agent = await agentWith("tracker", mcp.url)
+			scriptOnRequest("tracker")
+
+			const session = await createResource<SessionResource & { readonly mcp_servers: unknown }>(
+				"/v1/sessions",
+				{ agent: agent.id, environment_id: environmentId, vault_ids: [vault] },
+			)
+			expect(session.mcp_servers).toEqual([
+				{ name: "tracker", url: mcp.url, credential_id: credential },
+			])
+			expect((await sender(session.id)("hello")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			expect(mcp.calls).toEqual([{ tool: "echo", arguments: { text: "hello" }, token }])
+
+			const events = await agentEvents(session.id)
+			// The script call is published whole, then the calls it made.
+			expect(events.map((event) => event.type)).toEqual([
+				"agent.tool_use",
+				"agent.tool_result",
+				"agent.mcp_tool_use",
+				"agent.mcp_tool_result",
+				"agent.message",
+			])
+			const [script, scriptResult, call, result, reply] = events
+			expect(script).toMatchObject({ name: "codemode" })
+			expect(call).toMatchObject({
+				tool_use_id: `${script?.tool_use_id}/c1`,
+				parent_tool_use_id: script?.tool_use_id,
+				mcp_server_name: "tracker",
+				name: "echo",
+				input: { text: "hello" },
+			})
+			expect(result).toMatchObject({
+				tool_use_id: call?.tool_use_id,
+				content: [{ type: "text", text: "echo:hello" }],
+				is_error: false,
+			})
+			expect(scriptResult).toMatchObject({ tool_use_id: script?.tool_use_id, is_error: false })
+			expect(reply?.content?.[0]?.text).toContain("echo:hello")
+
+			const everything = JSON.stringify([
+				await listAllEvents(session.id),
+				(await apiJson(`/v1/sessions/${session.id}`)).body,
+				(await apiJson(`/v1/agents/${agent.id}`)).body,
+			])
+			expect(everything).not.toContain(token)
+			expect(stripAnsi(workerLogs.join(""))).not.toContain(token)
+		}, 60_000)
+
+		it("refuses to choose between two credentials and uses the one a session binds", async () => {
+			const first = "tok_mcp_FIRST_do_not_leak"
+			const second = "tok_mcp_SECOND_do_not_leak"
+			const mcp = await mcpServer([first, second])
+			const one = await credentialFor(mcp.url, first)
+			const two = await credentialFor(mcp.url, second)
+			const agent = await agentWith("tracker", mcp.url)
+			scriptOnRequest("tracker")
+
+			const body = {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [one.vault, two.vault],
+			}
+			const ambiguous = await apiJson<{ readonly error?: { readonly message: string } }>(
+				"/v1/sessions",
+				{ method: "POST", body },
+			)
+			expect(ambiguous.status).toBe(400)
+			expect(ambiguous.body.error?.message).toContain("matches more than one credential")
+
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				...body,
+				mcp_server_credentials: [{ mcp_server_name: "tracker", credential_id: two.credential }],
+			})
+			expect((await sender(session.id)("which")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+			expect(mcp.calls.map((call) => call.token)).toEqual([second])
+			expect(mcp.tokens).not.toContain(first)
+		}, 60_000)
+
+		it("uses a rotated secret at once and fails closed once the credential is archived", async () => {
+			const original = "tok_mcp_ORIGINAL_do_not_leak"
+			const rotated = "tok_mcp_ROTATED_do_not_leak"
+			const mcp = await mcpServer([original])
+			const { vault, credential } = await credentialFor(mcp.url, original)
+			const agent = await agentWith("tracker", mcp.url)
+			scriptOnRequest("tracker")
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [vault],
+			})
+			const send = sender(session.id)
+			const path = `/v1/vaults/${vault}/credentials/${credential}`
+
+			expect((await send("one")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			mcp.accept([rotated])
+			expect(
+				(
+					await apiJson(path, {
+						method: "POST",
+						body: { auth: { type: "static_bearer", token: rotated } },
+					})
+				).status,
+			).toBe(200)
+			expect((await send("two")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+			expect(mcp.calls.map((call) => [call.arguments, call.token])).toEqual([
+				[{ text: "one" }, original],
+				[{ text: "two" }, rotated],
+			])
+
+			expect((await apiJson(`${path}/archive`, { method: "POST" })).status).toBe(200)
+			const erased = Date.now() + 10_000
+			while (
+				!stripAnsi(workerLogs.join("")).includes(`Credential secret erased ${credential}`) &&
+				Date.now() < erased
+			) {
+				await sleep(100)
+			}
+			const requestsBefore = mcp.tokens.length
+			expect((await send("three")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 3)
+
+			expect(mcp.calls).toHaveLength(2)
+			expect(mcp.tokens).toHaveLength(requestsBefore)
+			const events = await agentEvents(session.id)
+			const results = events.filter((event) => event.type === "agent.mcp_tool_result")
+			expect(results.map((event) => event.is_error)).toEqual([false, false, true])
+			expect(results[2]?.content?.[0]?.text).toContain("no longer available")
+			expect(events.at(-1)).toMatchObject({ type: "agent.message" })
+
+			const logged = stripAnsi(workerLogs.join(""))
+			expect(JSON.stringify(await listAllEvents(session.id))).not.toContain(original)
+			expect(JSON.stringify(await listAllEvents(session.id))).not.toContain(rotated)
+			expect(logged).not.toContain(original)
+			expect(logged).not.toContain(rotated)
+		}, 90_000)
+
+		it("uses a server without a credential, and offers a tool to the model only once it is found", async () => {
+			const mcp = await mcpServer(null)
+			const agent = await agentWith("open", mcp.url)
+			const offered: Array<ReadonlyArray<string>> = []
+			fakeOpenAI.setHandler((req) => {
+				offered.push(req.toolNames)
+				switch (req.toolOutputs.length) {
+					case 0:
+						return {
+							kind: "tool_call",
+							name: "mcp__open__echo",
+							arguments: { text: "too early" },
+						}
+					case 1:
+						return { kind: "tool_call", name: "tool_search", arguments: { query: "echo" } }
+					case 2:
+						return { kind: "tool_call", name: "mcp__open__echo", arguments: { text: "direct" } }
+					default:
+						return { kind: "reply", text: `Done: ${req.toolOutputs.at(-1)}` }
+				}
+			})
+
+			const session = await createResource<SessionResource & { readonly mcp_servers: unknown }>(
+				"/v1/sessions",
+				{ agent: agent.id, environment_id: environmentId },
+			)
+			expect(session.mcp_servers).toEqual([{ name: "open", url: mcp.url, credential_id: null }])
+			expect((await sender(session.id)("go")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			expect(offered[0]).toEqual(expect.arrayContaining(["codemode", "tool_search"]))
+			expect(offered[0]).not.toContain("mcp__open__echo")
+			expect(offered[1]).not.toContain("mcp__open__echo")
+			expect(offered[2]).toContain("mcp__open__echo")
+			expect(mcp.calls).toEqual([{ tool: "echo", arguments: { text: "direct" }, token: undefined }])
+
+			const events = await agentEvents(session.id)
+			const calls = events.filter((event) => event.type === "agent.mcp_tool_use")
+			expect(calls).toHaveLength(1)
+			expect(calls[0]).toMatchObject({
+				mcp_server_name: "open",
+				name: "echo",
+				input: { text: "direct" },
+			})
+			expect(calls[0]).not.toHaveProperty("parent_tool_use_id")
+			const results = events.filter((event) => event.type === "agent.mcp_tool_result")
+			expect(results).toEqual([
+				expect.objectContaining({
+					tool_use_id: calls[0]?.tool_use_id,
+					content: [{ type: "text", text: "echo:direct" }],
+					is_error: false,
+				}),
+			])
+			expect(events.indexOf(calls[0] as SessionEventItem)).toBeLessThan(
+				events.indexOf(results[0] as SessionEventItem),
+			)
+			// The refused call and the search are ordinary tool calls.
+			expect(
+				events.filter((event) => event.type === "agent.tool_use").map((event) => event.name),
+			).toEqual(["mcp__open__echo", "tool_search"])
+			expect(events.at(-1)?.content?.[0]?.text).toContain("echo:direct")
+		}, 60_000)
+	})
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"

@@ -536,7 +536,11 @@ describe("Vaults", () => {
 				const secrets = yield* CredentialSecrets
 				const orphan = CredentialId.make("vcrd_orphan")
 				expect(
-					yield* secrets.store({ credential_id: orphan, secret: Redacted.make(TOKEN) }),
+					yield* secrets.store({
+						credential_id: orphan,
+						secret: Redacted.make(TOKEN),
+						mcp_server_url: "https://mcp.example.com/mcp",
+					}),
 				).toEqual({
 					stored: true,
 				})
@@ -549,12 +553,20 @@ describe("Vaults", () => {
 				expect([...vaults.heldBy(orphan)]).toEqual([])
 
 				const kept = CredentialId.make("vcrd_kept")
-				yield* secrets.store({ credential_id: kept, secret: Redacted.make(TOKEN) })
+				yield* secrets.store({
+					credential_id: kept,
+					secret: Redacted.make(TOKEN),
+					mcp_server_url: "https://mcp.example.com/mcp",
+				})
 				yield* secrets.keep({ credential_id: kept })
 				yield* Effect.promise(() => vaults.advanceTo(UNCONFIRMED_SECRET_TTL_MS * 3))
 				expect(vaults.secretOf(kept)).toBe(TOKEN)
 				expect(
-					yield* secrets.store({ credential_id: kept, secret: Redacted.make(ROTATED) }),
+					yield* secrets.store({
+						credential_id: kept,
+						secret: Redacted.make(ROTATED),
+						mcp_server_url: "https://mcp.example.com/mcp",
+					}),
 				).toEqual({
 					stored: false,
 				})
@@ -563,7 +575,11 @@ describe("Vaults", () => {
 					yield* secrets.replace({ credential_id: kept, secret: Redacted.make(ROTATED) }),
 				).toEqual({ replaced: false })
 				expect(
-					yield* secrets.store({ credential_id: kept, secret: Redacted.make(ROTATED) }),
+					yield* secrets.store({
+						credential_id: kept,
+						secret: Redacted.make(ROTATED),
+						mcp_server_url: "https://mcp.example.com/mcp",
+					}),
 				).toEqual({
 					stored: false,
 				})

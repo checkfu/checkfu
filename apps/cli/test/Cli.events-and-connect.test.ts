@@ -319,6 +319,19 @@ describe("CLI sessions:events and sessions connect", () => {
 								content: [{ type: "text", text: "# A" }],
 								is_error: false,
 							},
+							{
+								type: "mcp_tool_use",
+								tool_use_id: "call_2",
+								mcp_server_name: "tracker",
+								name: "search\u001b[2J",
+								input: { query: "open" },
+							},
+							{
+								type: "mcp_tool_result",
+								tool_use_id: "call_2",
+								content: [{ type: "text", text: "3 issues" }],
+								is_error: false,
+							},
 						],
 					})
 					const sessionId = yield* createReadySession(cli)
@@ -329,6 +342,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(result.exitCode).toBe(0)
 					expect(result.stderr).toContain(`Connected to ${sessionId}`)
 					expect(result.stderr).toContain(String.raw`[tool] read\x1b[2J`)
+					expect(result.stderr).toContain(String.raw`[tool] tracker/search\x1b[2J`)
 					expect(result.stderr.indexOf("[tool] read")).toBeLessThan(
 						result.stderr.indexOf("[thinking] pondering"),
 					)
@@ -2180,6 +2194,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						description: null,
 						system: null,
 						model: { id: "gpt-6.2-sol" },
+						mcp_servers: [],
 						created_at: "2026-11-22T00:00:00.000Z",
 						updated_at: "2026-11-22T00:00:00.000Z",
 						archived_at: null,
@@ -2197,6 +2212,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						agent: { id: "agent_1", version: 1 },
 						environment_id: "env_1",
 						title: null,
+						mcp_servers: [],
 						turn: 0,
 						usage: { input_tokens: 0, output_tokens: 0 },
 						created_at: "2026-11-22T00:00:00.000Z",
@@ -3067,6 +3083,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							agent: { id: "agt_pty", version: 1 },
 							environment_id: "env_pty",
 							title: null,
+							mcp_servers: [],
 							created_at: "2026-11-22T00:00:00.000Z",
 							updated_at: "2026-11-22T00:00:00.000Z",
 							archived_at: null,
@@ -4520,6 +4537,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						agent: { id: "agt_env", version: 1 },
 						environment_id: "env_1",
 						title: null,
+						mcp_servers: [],
 						created_at: "2026-11-22T00:00:00.000Z",
 						updated_at: "2026-11-22T00:00:00.000Z",
 						archived_at: null,

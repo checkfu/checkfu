@@ -398,3 +398,13 @@ export const requestPath = (request: HttpServerRequest.HttpServerRequest): strin
 	const target = end === -1 ? raw : raw.slice(0, end)
 	return target.length > 0 ? target : "/"
 }
+
+/** One spelling per MCP server, so a server and the credential stored for it compare equal. */
+export const normalizeMcpServerUrl = (input: string): string | undefined => {
+	if (!URL.canParse(input)) {
+		return undefined
+	}
+	const url = new URL(input)
+	url.hash = ""
+	return url.href
+}

@@ -22,6 +22,8 @@
 			"@effect/platform-bun": "4.1.5",
 			"@effect/platform-node": "4.1.5",
 			"@effect/vitest": "4.1.5",
+			"@modelcontextprotocol/client": "2.4.0",
+			"@modelcontextprotocol/server": "2.4.0",
 			"@types/node": "26.6.6",
 			"agents": "0.34.0",
 			"alchemy": "https://pkg.alchemy.run/alchemy/-/3882966d5d3b5229ec2df019a1d53902e85bd720a17326cf3e24c6bba3cb78bc.tgz",

@@ -34,8 +34,8 @@ export default PiHarnessWorker.make(
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
-			storeSecret: (credentialId, secret) =>
-				Effect.orDie(connection(credentialId).storeSecret(secret)),
+			storeSecret: (credentialId, secret, mcpServerUrl) =>
+				Effect.orDie(connection(credentialId).storeSecret(secret, mcpServerUrl)),
 			replaceSecret: (credentialId, secret) =>
 				Effect.orDie(connection(credentialId).replaceSecret(secret)),
 			keepSecret: (credentialId) => Effect.orDie(connection(credentialId).keepSecret()),

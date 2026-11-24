@@ -21,7 +21,7 @@ interface InMemoryConnection {
  * The connection objects, in memory: the same custody rules as the Durable
  * Object, over a map per credential.
  */
-export const makeVaultsTestLayer = () => {
+export const makeVaultsTestLayer = (platform: typeof Domain.InMemory = Domain.InMemory) => {
 	const connections = new Map<string, InMemoryConnection>()
 	const unreachable = new Set<string>()
 	const calls: Array<{ readonly operation: string; readonly credentialId: string }> = []
@@ -78,13 +78,14 @@ export const makeVaultsTestLayer = () => {
 		Layer.provideMerge(CredentialSecretsLive),
 		Layer.provide(
 			makeConnectionExecutorLayer({
-				storeSecret: (id, secret) => call("store", id, (custody) => custody.store(secret)),
+				storeSecret: (id, secret, url) =>
+					call("store", id, (custody) => custody.store(secret, url)),
 				replaceSecret: (id, secret) => call("replace", id, (custody) => custody.replace(secret)),
 				keepSecret: (id) => call("keep", id, (custody) => custody.keep()),
 				erase: (id) => call("erase", id, (custody) => custody.erase()),
 			}),
 		),
-		Layer.provide(Domain.InMemory),
+		Layer.provide(platform),
 	)
 
 	// Another model hosted beside this one has internals of its own, so keep these.

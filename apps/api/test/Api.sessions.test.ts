@@ -24,7 +24,12 @@ import {
 	SpanModelRequestEnd,
 } from "@checkfu/domain/Session/CommitModelReply.command"
 import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
-import { AgentToolResult, AgentToolUse } from "@checkfu/domain/Session/RecordToolCall.command"
+import {
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+} from "@checkfu/domain/Session/RecordToolCall.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -2278,10 +2283,46 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new AgentThinking({ thinking: "Let me think" }),
+				event: new AgentMcpToolUse({
+					tool_use_id: "call_2/c1",
+					mcp_server_name: "tracker",
+					name: "search",
+					input: { query: "open" },
+					parent_tool_use_id: "call_2",
+				}),
 				expectedJson: {
 					id: "evt_7",
 					seq: 7,
+					type: "agent.mcp_tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_2/c1",
+					mcp_server_name: "tracker",
+					name: "search",
+					input: { query: "open" },
+					parent_tool_use_id: "call_2",
+				},
+			},
+			{
+				event: new AgentMcpToolResult({
+					tool_use_id: "call_2/c1",
+					content: [{ type: "text", text: "3 issues" }],
+					is_error: false,
+				}),
+				expectedJson: {
+					id: "evt_8",
+					seq: 8,
+					type: "agent.mcp_tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_2/c1",
+					content: [{ type: "text", text: "3 issues" }],
+					is_error: false,
+				},
+			},
+			{
+				event: new AgentThinking({ thinking: "Let me think" }),
+				expectedJson: {
+					id: "evt_9",
+					seq: 9,
 					type: "agent.thinking",
 					created_at: "2026-01-01T00:00:00.000Z",
 					thinking: "Let me think",
@@ -2290,8 +2331,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new AgentMessage({ content: [{ type: "text", text: "Hi there" }] }),
 				expectedJson: {
-					id: "evt_8",
-					seq: 8,
+					id: "evt_10",
+					seq: 10,
 					type: "agent.message",
 					created_at: "2026-01-01T00:00:00.000Z",
 					content: [{ type: "text", text: "Hi there" }],
@@ -2303,8 +2344,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					truncated: true,
 				}),
 				expectedJson: {
-					id: "evt_9",
-					seq: 9,
+					id: "evt_11",
+					seq: 11,
 					type: "agent.message",
 					created_at: "2026-01-01T00:00:00.000Z",
 					content: [{ type: "text", text: "Hi..." }],
@@ -2318,8 +2359,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					is_error: false,
 				}),
 				expectedJson: {
-					id: "evt_10",
-					seq: 10,
+					id: "evt_12",
+					seq: 12,
 					type: "span.model_request_end",
 					created_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
@@ -2334,8 +2375,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					is_error: null,
 				}),
 				expectedJson: {
-					id: "evt_11",
-					seq: 11,
+					id: "evt_13",
+					seq: 13,
 					type: "span.model_request_end",
 					created_at: "2026-01-01T00:00:00.000Z",
 					model_request_start_id: "sess_1:turn:1:req:1",
@@ -2346,8 +2387,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
 				expectedJson: {
-					id: "evt_12",
-					seq: 12,
+					id: "evt_14",
+					seq: 14,
 					type: "session.status_idle",
 					created_at: "2026-01-01T00:00:00.000Z",
 					stop_reason: { type: "end_turn" },
@@ -2363,8 +2404,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					},
 				}),
 				expectedJson: {
-					id: "evt_13",
-					seq: 13,
+					id: "evt_15",
+					seq: 15,
 					type: "session.error",
 					created_at: "2026-01-01T00:00:00.000Z",
 					error: {
@@ -2377,8 +2418,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionStatusTerminated(),
 				expectedJson: {
-					id: "evt_14",
-					seq: 14,
+					id: "evt_16",
+					seq: 16,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2386,8 +2427,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_15",
-					seq: 15,
+					id: "evt_17",
+					seq: 17,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2434,6 +2475,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						agent_version: 1,
 						environment_id: "env_1",
 						title: null,
+						mcp_servers: "",
 						turn: 1,
 						usage: { input_tokens: 10, output_tokens: 5 },
 						created_at: at,

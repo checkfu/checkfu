@@ -16,6 +16,7 @@ export interface ConnectionExecutorService {
 	readonly storeSecret: (
 		credentialId: string,
 		secret: string,
+		mcpServerUrl: string,
 	) => Effect.Effect<boolean, ConnectionCallFailed>
 	readonly replaceSecret: (
 		credentialId: string,
@@ -43,10 +44,12 @@ export const CredentialSecretsLive = CredentialSecrets.toLayer(
 		const connections = yield* ConnectionExecutor
 		return {
 			store: (args) =>
-				connections.storeSecret(args.credential_id, Redacted.value(args.secret)).pipe(
-					Effect.map((stored) => ({ stored })),
-					Effect.catchTag("ConnectionCallFailed", unavailable("stored", args.credential_id)),
-				),
+				connections
+					.storeSecret(args.credential_id, Redacted.value(args.secret), args.mcp_server_url)
+					.pipe(
+						Effect.map((stored) => ({ stored })),
+						Effect.catchTag("ConnectionCallFailed", unavailable("stored", args.credential_id)),
+					),
 			replace: (args) =>
 				connections.replaceSecret(args.credential_id, Redacted.value(args.secret)).pipe(
 					Effect.map((replaced) => ({ replaced })),

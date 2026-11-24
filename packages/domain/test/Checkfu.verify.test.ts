@@ -131,6 +131,7 @@ const STANDING = {
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
+	"RepublishAgent.RepublishingMintsTheNextVersionUnchanged": "proved",
 	"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
 	"AdmitSession.PinnedVersionWithinAgentHead": "proved",
 	"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
@@ -196,6 +197,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		expect(hostedCommands).toEqual([
 			"CreateAgent",
 			"UpdateAgent",
+			"RepublishAgent",
 			"ArchiveAgent",
 			"CreateEnvironment",
 			"UpdateEnvironment",

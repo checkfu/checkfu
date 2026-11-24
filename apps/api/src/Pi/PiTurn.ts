@@ -1,4 +1,5 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
+import { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { ModelUsage, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
@@ -11,6 +12,8 @@ export const PiTurnRequest = Schema.Struct({
 	system: Schema.NullOr(Schema.String),
 	text: Schema.String,
 	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
+	/** The agent's MCP servers, as this session bound them. */
+	mcp_servers: Schema.optionalKey(Schema.Array(McpServerBinding)),
 })
 export type PiTurnRequest = typeof PiTurnRequest.Type
 
@@ -56,7 +59,11 @@ export const PiHarnessCalls = {
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 	// A credential's secret is held by its connection object, which lives here beside the sessions
 	// that use it. The API stores, replaces, confirms and erases it by credential id.
-	storeSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	// The secret is stored with the one MCP server URL it may ever be sent to.
+	storeSecret: {
+		args: Schema.Tuple([Schema.String, Schema.String, Schema.String]),
+		result: Schema.Boolean,
+	},
 	replaceSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	keepSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 	eraseSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },

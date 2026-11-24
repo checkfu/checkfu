@@ -78,7 +78,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(8)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(9)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -95,6 +95,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"command-reply:Checkfu/ClaimIdempotencyKey",
 						"state:Vaults.Vault",
 						"state:Vaults.Credential",
+						"state:Vaults.McpServerSet",
+						"event:Vaults.McpServerSet/mcp_servers.recorded",
+						"event:Checkfu.Session/agent.mcp_tool_use",
 						"event:Vaults.Vault/vault.credential_attached",
 						"event:Vaults.Credential/vault_credential.created",
 						"command-reply:Vaults/CreateCredential",

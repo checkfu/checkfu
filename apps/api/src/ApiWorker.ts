@@ -62,10 +62,10 @@ const ConnectionExecutorLive = Layer.effect(
 	Effect.gen(function* () {
 		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
 		return {
-			storeSecret: (credentialId, secret) =>
-				connectionCall(Effect.suspend(() => harness.storeSecret(credentialId, secret))).pipe(
-					Effect.withSpan("Connection.storeSecret"),
-				),
+			storeSecret: (credentialId, secret, mcpServerUrl) =>
+				connectionCall(
+					Effect.suspend(() => harness.storeSecret(credentialId, secret, mcpServerUrl)),
+				).pipe(Effect.withSpan("Connection.storeSecret")),
 			replaceSecret: (credentialId, secret) =>
 				connectionCall(Effect.suspend(() => harness.replaceSecret(credentialId, secret))).pipe(
 					Effect.withSpan("Connection.replaceSecret"),
@@ -92,9 +92,9 @@ const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 	Layer.provide(PlacedDurableObjects),
 )
 
+// A session's turn reads the servers it bound, which the vault model records.
 const ApiWorkerLive = Layer.mergeAll(
-	CheckfuLive,
-	VaultsLive,
+	CheckfuLive.pipe(Layer.provideMerge(VaultsLive)),
 	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,

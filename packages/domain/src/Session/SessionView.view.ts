@@ -10,7 +10,12 @@ import {
 	SpanModelRequestEnd,
 } from "./CommitModelReply.command.ts"
 import { SpanModelRequestStart } from "./RecordModelRequestStart.command.ts"
-import { AgentToolResult, AgentToolUse } from "./RecordToolCall.command.ts"
+import {
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+} from "./RecordToolCall.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
@@ -30,6 +35,8 @@ export class SessionView extends Domain.View("SessionView", {
 		SpanModelRequestStart,
 		AgentToolUse,
 		AgentToolResult,
+		AgentMcpToolUse,
+		AgentMcpToolResult,
 		AgentThinking,
 		AgentMessage,
 		SpanModelRequestEnd,
@@ -76,6 +83,10 @@ export class SessionView extends Domain.View("SessionView", {
 		"agent.tool_use": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"agent.tool_result": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.mcp_tool_use": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.mcp_tool_result": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"agent.thinking": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },

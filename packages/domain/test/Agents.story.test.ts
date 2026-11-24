@@ -20,6 +20,7 @@ import {
 	AgentVersionConflict,
 	UpdateAgent,
 } from "../src/Agent/UpdateAgent.command.ts"
+import { RepublishAgent } from "../src/Agent/RepublishAgent.command.ts"
 import { Agents } from "../src/Agents.model.ts"
 
 const story = Story.make(Agents)
@@ -506,6 +507,53 @@ describe("Agents", () => {
 				updated_at: t0,
 				archived_at: null,
 			}),
+		)
+	})
+
+	it.effect("republishes an agent as its next version with nothing changed", () => {
+		const agent = Agent.ref("agent_republish")
+		const v1 = AgentVersionId.make("aver_republish_1")
+		const v2 = AgentVersionId.make("aver_republish_2")
+		const head = {
+			name: "Steady",
+			model: { id: "gpt-5.4" },
+			system: "Hold.",
+			description: null,
+		}
+		const republish = (expected: number, next = v2) =>
+			new RepublishAgent({
+				agent_id: agent.id,
+				expected_version: expected,
+				next_version_id: next,
+			})
+		return story(
+			Story.clock(t0),
+			Story.when(republish(1)),
+			Story.rejected(new AgentNotFound({ agent_id: agent.id })),
+			Story.given(agent, new AgentCreated({ version: 1, version_id: v1, ...head })),
+			Story.clock(t1),
+			Story.when(republish(2)),
+			Story.rejected(
+				new AgentVersionConflict({ agent_id: agent.id, expected_version: 2, current_version: 1 }),
+			),
+			Story.when(republish(1)),
+			Story.then(agent, new AgentUpdated({ version: 2, version_id: v2, ...head })),
+			Story.replied({ version: 2, version_id: v2 }),
+			Story.view(AgentView, agent, {
+				id: agent.id,
+				type: "agent",
+				version: 2,
+				current_version_id: v2,
+				...head,
+				created_at: t0,
+				updated_at: t1,
+				archived_at: null,
+			}),
+			Story.clock(t2),
+			Story.when(new ArchiveAgent({ agent_id: agent.id })),
+			Story.then(agent, new AgentArchived()),
+			Story.when(republish(2, AgentVersionId.make("aver_republish_3"))),
+			Story.rejected(new AgentArchivedError({ agent_id: agent.id })),
 		)
 	})
 
