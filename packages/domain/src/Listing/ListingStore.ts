@@ -31,7 +31,7 @@ export interface ListingFilter {
 	readonly order: ListingOrder
 }
 
-export const ListingEntry = Schema.Struct({ id: Schema.String })
+export const ListingEntry = Schema.Struct({ id: Schema.String, created_at: Schema.Int })
 export type ListingEntry = typeof ListingEntry.Type
 
 export interface ListingPosition {
@@ -109,7 +109,7 @@ export class ListingStore extends Context.Service<
 					const page = matching.slice(0, take)
 					const last = page.at(-1)
 					return {
-						entries: page.map(({ id }) => ({ id })),
+						entries: page.map(({ id, created_at }) => ({ id, created_at })),
 						cursor: matching.length > take && last !== undefined ? listingCursor(last) : null,
 					}
 				}),

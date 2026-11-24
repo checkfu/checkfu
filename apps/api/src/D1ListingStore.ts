@@ -93,7 +93,7 @@ export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
 					const page = results.slice(0, take)
 					const last = page.at(-1)
 					return {
-						entries: page.map(({ id }) => ({ id })),
+						entries: page.map(({ id, created_at }) => ({ id, created_at })),
 						cursor: results.length > take && last !== undefined ? listingCursor(last) : null,
 					}
 				},

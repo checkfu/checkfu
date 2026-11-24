@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
+import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/sdk/Schemas"
+import { LIST_PAGE_BYTES } from "../src/Http/Listing.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	AUTH_HEADERS,
@@ -189,6 +191,44 @@ describe("List endpoints", () => {
 				expect(
 					yield* call<ListBody>(apiFetch, "GET", "/v1/sessions?agent_id=agent_missing"),
 				).toMatchObject({ status: 200, body: { data: [], has_more: false, next_cursor: null } })
+			}),
+		))
+
+	it("ends a page before its encoded resources pass the byte budget and continues after it", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const system = "\u0001".repeat(MAX_AGENT_SYSTEM_LENGTH)
+				const ids: Array<string> = []
+				for (let n = 0; n < 8; n++) {
+					ids.push(
+						yield* create(apiFetch, "/v1/agents", {
+							name: `Big ${n}`,
+							model: "gpt-4o-mini",
+							system,
+						}),
+					)
+				}
+				yield* listed(apiFetch, "/v1/agents?limit=1", 1)
+				const seen: Array<string> = []
+				let path = "/v1/agents?limit=100"
+				let pages = 0
+				for (;;) {
+					const page = yield* call<ListBody>(apiFetch, "GET", path)
+					expect(page.status).toBe(200)
+					pages += 1
+					const encoded = page.body.data.reduce(
+						(sum, agent) => sum + JSON.stringify(agent).length,
+						0,
+					)
+					expect(page.body.data.length === 1 || encoded <= LIST_PAGE_BYTES).toBe(true)
+					seen.push(...idsOf(page))
+					if (page.body.next_cursor === null) {
+						break
+					}
+					path = `/v1/agents?limit=100&after=${encodeURIComponent(page.body.next_cursor)}`
+				}
+				expect(pages).toBeGreaterThan(1)
+				expect(seen).toEqual(ids)
 			}),
 		))
 

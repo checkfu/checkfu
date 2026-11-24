@@ -121,6 +121,16 @@ describe("ListResources", () => {
 			)
 			expect(rest).toMatchObject({ cursor: null })
 			expect(ids(rest)).toEqual(["sess_list_3"])
+
+			for (const after of ["bad", "12", "1:a/b", ""]) {
+				const refused = yield* Effect.flip(
+					domain.ListResources(
+						{ kind: "session", include_archived: true, agent_id: null, order: "asc" },
+						{ after },
+					),
+				)
+				expect([after, refused._tag]).toEqual([after, "InvalidListingCursor"])
+			}
 		}).pipe(Effect.scoped, Effect.provide(CheckfuInMemory)),
 	)
 })

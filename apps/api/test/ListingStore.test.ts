@@ -8,8 +8,7 @@ import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { ResourceListCursor } from "@checkfu/sdk/Api"
-import { AgentId } from "@checkfu/sdk/Schemas"
+import { AgentId, ResourceListCursor } from "@checkfu/sdk/Schemas"
 import {
 	listingDatabaseProps,
 	listingPageQuery,

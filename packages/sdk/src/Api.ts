@@ -33,6 +33,7 @@ import {
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
+	ResourceListCursor,
 	SessionEventFields,
 	SessionId,
 	SessionSnapshot,
@@ -660,13 +661,6 @@ const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, c
 		has_more: Schema.Boolean,
 		next_cursor: Schema.NullOr(cursor),
 	})
-
-export const ResourceListCursor = Schema.String.check(
-	Schema.isPattern(/^\d{1,15}:[^/\\]+$/u),
-).annotate({
-	description:
-		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-})
 
 export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type

@@ -466,6 +466,24 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(res.headers.get("request-id")).toBeNull()
 	})
 
+	const listedAgentIds = async () => {
+		const res = await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+			"/v1/agents?limit=100",
+		)
+		expect(res.status).toBe(200)
+		return res.body.data.map((agent) => agent.id)
+	}
+
+	it("answers successive list requests in one isolate", async () => {
+		const deadline = Date.now() + 20_000
+		while (!(await listedAgentIds()).includes(agentId) && Date.now() < deadline) {
+			await sleep(200)
+		}
+		for (const _ of [1, 2, 3]) {
+			expect(await listedAgentIds()).toContain(agentId)
+		}
+	}, 30_000)
+
 	it("keeps the code every isolate loads at start-up inside its budget", async () => {
 		for (const [worker, budget] of [
 			["ApiWorker", API_WORKER_BUDGET],
