@@ -483,6 +483,30 @@ export class EventStream<T> implements AsyncIterable<T> {
 			},
 		})
 	}
+
+	/**
+	 * Returns a Web `ReadableStream` of decoded event objects.
+	 */
+	toEventReadableStream(): ReadableStream<T> {
+		const iterator = this[Symbol.asyncIterator]()
+		return new ReadableStream<T>({
+			async pull(streamController) {
+				try {
+					const step = await iterator.next()
+					if (step.done) {
+						streamController.close()
+						return
+					}
+					streamController.enqueue(step.value)
+				} catch (error) {
+					streamController.error(error)
+				}
+			},
+			async cancel() {
+				await iterator.return?.()
+			},
+		})
+	}
 }
 
 export class EventStreamPromise<T> implements Promise<EventStream<T>>, AsyncIterable<T> {
