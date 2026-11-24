@@ -57,7 +57,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			const app = yield* Cloudflare.Website.Vite("App", {
 				rootDir: "apps/app",
 				main: "worker.ts",
-				compatibility: { date: "2026-11-17" },
+				compatibility: { date: COMPATIBILITY_DATE },
 				observability: { enabled: true },
 				env: { API: api },
 				assets: {
