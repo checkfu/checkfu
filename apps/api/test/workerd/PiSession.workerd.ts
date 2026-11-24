@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { removeStage } from "./StageCleanup.ts"
 import { API_WORKER_BUDGET, EAGER_BYTES_HELP, STARTUP_HELP, measureBundle } from "./BundleBudget.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
@@ -112,31 +113,6 @@ const ANSI_ESCAPE_RE = new RegExp(
 )
 
 const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
-
-const removeEntries = (dir: string, matches: (name: string) => boolean): void => {
-	let entries: Array<string>
-	try {
-		entries = readdirSync(dir)
-	} catch {
-		return
-	}
-	for (const entry of entries) {
-		if (matches(entry)) {
-			rmSync(join(dir, entry), { recursive: true, force: true })
-		}
-	}
-}
-
-// Whatever Workers the stack has, each leaves a bundle and local data named after the stage.
-const cleanupStageState = (stage: string): void => {
-	const alchemy = join(REPO_ROOT, ".alchemy")
-	rmSync(join(alchemy, "state", "Checkfu", stage), { recursive: true, force: true })
-	removeEntries(join(alchemy, "bundles"), (name) => name.startsWith(`Checkfu-${stage}-`))
-	const local = new RegExp(`^checkfu-[a-z]+-${stage}(?:-|$)`)
-	for (const subdir of ["local", join("local", "cache"), join("local", "workflows")]) {
-		removeEntries(join(alchemy, subdir), (name) => local.test(name))
-	}
-}
 
 const startAlchemyDev = async (openAIBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
@@ -258,7 +234,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		clearTimeout(startupTimer)
 		await stopProcessByPid(child)
 		rmSync(envDir, { recursive: true, force: true })
-		cleanupStageState(stage)
+		removeStage(join(REPO_ROOT, ".alchemy"), "Checkfu", stage)
 	}
 
 	try {
