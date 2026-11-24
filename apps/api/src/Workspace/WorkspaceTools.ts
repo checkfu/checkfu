@@ -15,6 +15,15 @@ const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 const WORKSPACE_PROMPT =
 	"You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths."
 
+/**
+ * The largest image `read` sends inline. A tool result is stored as one row of the session's
+ * storage, which holds 2 MB; the default 3.5 MiB is about 4.9 MB once base64-encoded. A larger
+ * image comes back as text saying so.
+ */
+export const MAX_INLINE_IMAGE_BYTES = 1024 * 1024
+
+export const WORKSPACE_TOOL_OPTIONS = { read: { maxModelBytes: MAX_INLINE_IMAGE_BYTES } } as const
+
 const declaredOnly = (): Promise<never> =>
 	Promise.reject(new Error("Workspace tools run in the session's workspace, not here."))
 
@@ -35,7 +44,7 @@ const DECLARATIONS_ONLY = {
 
 export const workspaceToolDeclarations = async (): Promise<ReadonlyArray<WorkspaceTool>> => {
 	const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
-	return createPiTools({ workspace: DECLARATIONS_ONLY }).tools
+	return createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools
 }
 
 const INTERRUPTED: ToolExecutionResult = {
