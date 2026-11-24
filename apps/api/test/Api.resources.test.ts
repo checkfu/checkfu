@@ -352,7 +352,7 @@ describe("Session resources", () => {
 						)
 					const first = yield* create()
 					yield* sendAndSettle(apiFetch, first.id, ["Look around."], 1)
-					expect(workspaceCalls).toEqual([`enter ${first.id} 0:1`, `prepare ${first.id} 0:1`])
+					expect(workspaceCalls).toEqual([`enter ${first.id} 1`, `prepare ${first.id} 1`])
 					expect(modelCalls).toBe(1)
 
 					// A later turn already has the workspace, or the session has ended.
@@ -368,7 +368,7 @@ describe("Session resources", () => {
 					}>(yield* request(apiFetch, "GET", `/v1/sessions/${second.id}/events`))
 					expect(events.data.at(-1)?.stop_reason).toEqual({ type: "interrupted" })
 					expect(workspaceCalls.filter((call) => call.includes(second.id))).toEqual([
-						`enter ${second.id} 0:1`,
+						`enter ${second.id} 1`,
 					])
 					expect(preparedWorkspaces.map(({ sessionId }) => sessionId)).toEqual([first.id])
 					expect(modelCalls).toBe(1)

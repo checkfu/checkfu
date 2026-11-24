@@ -534,6 +534,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							agent_id: okAgent.id,
 							agent_version: 1,
 							environment_id: "env_1",
+							resources: [],
 							turn: 5,
 							input: [],
 						}),
@@ -706,6 +707,8 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/sessions/{session_id}/archive",
 						"/v1/sessions/{session_id}/events",
 						"/v1/sessions/{session_id}/events/stream",
+						"/v1/sessions/{session_id}/resources",
+						"/v1/sessions/{session_id}/resources/{resource_id}",
 					])
 					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(

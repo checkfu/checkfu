@@ -3,16 +3,23 @@ import {
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
-import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import type {
+	HarnessUnavailable,
+	TurnFailed,
+	TurnInterrupted,
+} from "@checkfu/domain/Session/Harness.external"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { resolveCatalogModel } from "./PiCatalog.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import type { TurnToken } from "../Workspace/WorkspaceFence.ts"
+import type { RepositoryMount, WorkspacePreparation } from "../Workspace/Repositories.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
 	HarnessCallFailed,
@@ -28,7 +35,7 @@ export const harnessCall = <A, E, R>(
 			: Effect.fail(new HarnessCallFailed({ cause })),
 	)
 
-export interface PiTurnExecutorService {
+export interface TurnExecutorService {
 	readonly recoverTurn: (
 		conversation: string,
 		operationId: string,
@@ -40,6 +47,24 @@ export interface PiTurnExecutorService {
 	readonly abortTurn: (
 		conversation: string,
 		operationId: string,
+	) => Effect.Effect<void, HarnessCallFailed>
+}
+
+export interface WorkspaceExecutorService {
+	/** Gives the workspace to this turn; false when a later turn has it or the session has ended. */
+	readonly enterWorkspace: (
+		sessionId: string,
+		token: TurnToken,
+	) => Effect.Effect<boolean, HarnessCallFailed>
+	readonly prepareWorkspace: (
+		sessionId: string,
+		token: TurnToken,
+		repositories: ReadonlyArray<RepositoryMount>,
+	) => Effect.Effect<WorkspacePreparation, HarnessCallFailed>
+	readonly storeRepositoryToken: (
+		sessionId: string,
+		resourceId: string,
+		token: string,
 	) => Effect.Effect<void, HarnessCallFailed>
 	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
 }
@@ -68,6 +93,8 @@ const withRetry = <A>(call: Effect.Effect<A, HarnessCallFailed>) =>
 			schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
 		})
 	})
+
+export interface PiTurnExecutorService extends TurnExecutorService, WorkspaceExecutorService {}
 
 export class PiTurnExecutor extends Context.Service<PiTurnExecutor, PiTurnExecutorService>()(
 	"@checkfu/api/PiTurnExecutor",
@@ -98,6 +125,29 @@ const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<st
 	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
 		turnOperationId(lastReplyTurn + 1 + i),
 	)
+
+const checkoutLabel = ({ checkout }: RepositoryMount): string =>
+	checkout === null
+		? "default branch"
+		: checkout.type === "branch"
+			? `branch ${checkout.name}`
+			: `commit ${checkout.sha}`
+
+/** Tells the model what is mounted where, after the agent's own instructions. */
+export const describeMounts = (
+	system: string | null,
+	repositories: ReadonlyArray<RepositoryMount>,
+): string | null =>
+	repositories.length === 0
+		? system
+		: [
+				...(system === null || system.length === 0 ? [] : [system, ""]),
+				"Repositories mounted in your workspace:",
+				...repositories.map(
+					(repository) =>
+						`- ${repository.mount_path}: ${repository.url} (${checkoutLabel(repository)})`,
+				),
+			].join("\n")
 
 export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
@@ -162,12 +212,47 @@ export const PiDurableHarnessLive = boundedHarness(
 						})
 					}
 
+					// The workspace is given to this turn before anything is copied into it, so a late
+					// call of an earlier turn can no longer write into what this one copies or saves.
+					const token = { turn: args.turn }
+					const entered = yield* withRetry(executor.enterWorkspace(args.session_id, token)).pipe(
+						Effect.tapError((error) =>
+							Effect.logError("Workspace unreachable", args.session_id, error.cause),
+						),
+						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+					)
+					if (!entered) {
+						return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
+					}
+
+					const repositories = args.resources
+					if (repositories.length > 0) {
+						const prepared = yield* withRetry(
+							executor.prepareWorkspace(args.session_id, token, repositories),
+						).pipe(
+							Effect.tapError((error) =>
+								Effect.logError("Workspace unreachable", args.session_id, error.cause),
+							),
+							Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+						)
+						if (!prepared.ok) {
+							const failed = repositories.find(({ id }) => id === prepared.resource_id)
+							return yield* Effect.fail<TurnFailed>({
+								_tag: "TurnFailed",
+								error_type: "repository_unavailable",
+								message: `Could not clone ${failed?.url ?? prepared.resource_id}: ${prepared.message}`,
+								terminal: false,
+							})
+						}
+					}
+					const system = describeMounts(version.system, repositories)
+
 					const request: PiTurnRequest = {
 						operationId,
 						turn: args.turn,
 						provider: resolved.provider,
 						modelId: resolved.model.id,
-						system: version.system,
+						system,
 						text: userText,
 						...(args.last_reply_turn === undefined
 							? {}
@@ -228,6 +313,19 @@ export const PiDurableHarnessLive = boundedHarness(
 					),
 					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 				),
+			storeRepositoryToken: (args) =>
+				withRetry(
+					executor.storeRepositoryToken(
+						args.session_id,
+						args.resource_id,
+						Redacted.value(args.authorization_token),
+					),
+				).pipe(
+					Effect.tapError((error) =>
+						Effect.logError("Repository token not stored", args.session_id, error.cause),
+					),
+					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+				),
 			discardWorkspace: (args) =>
 				withRetry(executor.discardWorkspace(args.session_id)).pipe(
 					Effect.tap(() => Effect.logInfo("Workspace discarded", args.session_id)),
@@ -240,9 +338,14 @@ export const PiDurableHarnessLive = boundedHarness(
 	}),
 )
 
+const NO_WORKSPACES: WorkspaceExecutorService = {
+	enterWorkspace: () => Effect.succeed(true),
+	prepareWorkspace: () => Effect.succeed({ ok: true }),
+	storeRepositoryToken: () => Effect.void,
+	discardWorkspace: () => Effect.void,
+}
+
 export const makePiTurnExecutorLayer = (
-	turns: Omit<PiTurnExecutorService, "discardWorkspace">,
-	workspaces: Pick<PiTurnExecutorService, "discardWorkspace"> = {
-		discardWorkspace: () => Effect.void,
-	},
+	turns: TurnExecutorService,
+	workspaces: WorkspaceExecutorService = NO_WORKSPACES,
 ) => Layer.succeed(PiTurnExecutor, { ...turns, ...workspaces })

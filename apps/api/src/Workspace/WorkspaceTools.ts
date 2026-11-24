@@ -1,5 +1,6 @@
 import type { PiTool, PiToolCall, PiToolResult } from "@cloudflare/computer/tools/pi-ai"
 import type { Extension, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
 export type WorkspaceTool = PiTool
@@ -53,7 +54,7 @@ const RESULT_LINES = 2000
 
 // A page of `read` is sent as a JSON string. Escaping turns one byte into at most six characters
 // (a control character as \u00XX), and the page's offsets and flags follow it.
-const READ_PAGE_BYTES = 48 * 1024
+export const READ_PAGE_BYTES = 48 * 1024
 const READ_RESULT_BYTES = READ_PAGE_BYTES * 6 + 4 * 1024
 
 export const WORKSPACE_TOOL_OPTIONS = {

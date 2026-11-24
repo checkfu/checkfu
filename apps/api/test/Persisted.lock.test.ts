@@ -451,6 +451,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				})
 				expect(queued.turn).toBe(2)
 				expect(queued.last_reply_turn).toBeUndefined()
+				expect(queued.resources).toEqual([])
 			}),
 	)
 

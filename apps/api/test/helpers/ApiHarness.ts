@@ -312,12 +312,12 @@ export const makePiDurableTestLayer = (
 		{
 			enterWorkspace: (sessionId, token) =>
 				Effect.sync(() => {
-					workspaceCalls.push(`enter ${sessionId} ${token.generation}:${token.turn}`)
+					workspaceCalls.push(`enter ${sessionId} ${token.turn}`)
 					return !refusedWorkspaces.has(sessionId)
 				}),
 			prepareWorkspace: (sessionId, token, repositories) =>
 				Effect.sync(() => {
-					workspaceCalls.push(`prepare ${sessionId} ${token.generation}:${token.turn}`)
+					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
 					preparedWorkspaces.push({ sessionId, repositories })
 					return preparations.shift() ?? { ok: true }
 				}),
