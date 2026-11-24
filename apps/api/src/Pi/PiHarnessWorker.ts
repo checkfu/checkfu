@@ -1,5 +1,6 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
+import { Connection } from "../Connection/Connection.do.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
@@ -24,6 +25,8 @@ export default PiHarnessWorker.make(
 		const piSession = placedStub(yield* PiSession, where)
 		// A session's workspace is placed like the session itself.
 		const workspace = placedStub(yield* SessionWorkspace, where)
+		// A credential's secret is placed like the sessions that use it.
+		const connection = placedStub(yield* Connection, where)
 		return PiHarnessWorker.of({
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
@@ -31,6 +34,12 @@ export default PiHarnessWorker.make(
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
+			storeSecret: (credentialId, secret) =>
+				Effect.orDie(connection(credentialId).storeSecret(secret)),
+			replaceSecret: (credentialId, secret) =>
+				Effect.orDie(connection(credentialId).replaceSecret(secret)),
+			keepSecret: (credentialId) => Effect.orDie(connection(credentialId).keepSecret()),
+			eraseSecret: (credentialId) => Effect.orDie(connection(credentialId).erase()),
 		})
 	}).pipe(Effect.provide([PiSessionLive, Cloudflare.Telemetry({ headSamplingRate: 0.1 })])),
 )

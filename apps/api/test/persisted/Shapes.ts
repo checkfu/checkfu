@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { Vaults } from "@checkfu/domain/Vaults.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
@@ -451,6 +452,7 @@ const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
 
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
+	...shapesOfModel(Vaults as unknown as ModelClass),
 	...SAGA_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,

@@ -179,6 +179,17 @@ describe("Checkfu MCP server", () => {
 				"sessions_getSession",
 				"sessions_listEvents",
 				"sessions_sendSessionEvents",
+				"vaults_archiveCredential",
+				"vaults_archiveVault",
+				"vaults_createCredential",
+				"vaults_createVault",
+				"vaults_deleteCredential",
+				"vaults_deleteVault",
+				"vaults_getCredential",
+				"vaults_getVault",
+				"vaults_listCredentials",
+				"vaults_updateCredential",
+				"vaults_updateVault",
 			])
 			expect(tools.map((tool) => tool.inputSchema)).toEqual(
 				GENERATED_TOOLS.map((tool) => tool.inputSchema),
@@ -217,6 +228,17 @@ describe("Checkfu MCP server", () => {
 				sessions_getSession: "read-only, additive, repeatable",
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
+				vaults_archiveCredential: "writes, destructive, repeatable",
+				vaults_archiveVault: "writes, destructive, repeatable",
+				vaults_createCredential: "writes, additive, not repeatable",
+				vaults_createVault: "writes, additive, not repeatable",
+				vaults_deleteCredential: "writes, destructive, repeatable",
+				vaults_deleteVault: "writes, destructive, repeatable",
+				vaults_getCredential: "read-only, additive, repeatable",
+				vaults_getVault: "read-only, additive, repeatable",
+				vaults_listCredentials: "read-only, additive, repeatable",
+				vaults_updateCredential: "writes, destructive, not repeatable",
+				vaults_updateVault: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
 	)
@@ -349,6 +371,8 @@ describe("Checkfu MCP server", () => {
 			const environment = { path: { environment_id: "env_1" } }
 			const session = { path: { session_id: "sess_1" } }
 			const automation = { path: { automation_id: "auto_1" } }
+			const vault = { path: { vault_id: "vault_1" } }
+			const credential = { path: { vault_id: "vault_1", credential_id: "cred_1" } }
 			const calls = {
 				agents_archiveAgent: agent,
 				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
@@ -390,6 +414,29 @@ describe("Checkfu MCP server", () => {
 						events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
 					},
 				},
+				vaults_archiveCredential: credential,
+				vaults_archiveVault: vault,
+				vaults_createCredential: {
+					...vault,
+					body: {
+						auth: {
+							type: "static_bearer",
+							token: "tok_mcp_test",
+							mcp_server_url: "https://mcp.example.com/mcp",
+						},
+					},
+				},
+				vaults_createVault: { body: { display_name: "Team" } },
+				vaults_deleteCredential: credential,
+				vaults_deleteVault: vault,
+				vaults_getCredential: credential,
+				vaults_getVault: vault,
+				vaults_listCredentials: vault,
+				vaults_updateCredential: {
+					...credential,
+					body: { auth: { type: "static_bearer", token: "tok_mcp_next" } },
+				},
+				vaults_updateVault: { ...vault, body: { display_name: "Team" } },
 			} satisfies Record<string, Argument>
 			expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
 

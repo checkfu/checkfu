@@ -1,4 +1,8 @@
 import * as Domain from "@alchemy.run/domain"
+import {
+	CredentialSecretsLive,
+	makeConnectionExecutorLayer,
+} from "@checkfu/api/Connection/CredentialCustody"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
@@ -12,6 +16,7 @@ import { clampToolCalls, recordToolCalls } from "@checkfu/domain/Session/RecordT
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
+import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -142,7 +147,19 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			})),
 		)
 		const CheckfuLive = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive)))
-		const ServerLayer = CheckfuLive.pipe(
+		// These tests keep no secrets: the connection objects accept and forget.
+		const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
+			Layer.provideMerge(CredentialSecretsLive),
+			Layer.provide(
+				makeConnectionExecutorLayer({
+					storeSecret: () => Effect.succeed(true),
+					replaceSecret: () => Effect.succeed(true),
+					keepSecret: () => Effect.void,
+					erase: () => Effect.void,
+				}),
+			),
+		)
+		const ServerLayer = Layer.mergeAll(CheckfuLive, VaultsLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),

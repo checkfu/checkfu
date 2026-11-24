@@ -35,6 +35,7 @@ import {
 } from "./HttpHelpers.ts"
 import { OPENAPI_DOCUMENT_JSON } from "./OpenApiDocument.generated.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
+import { VaultsLive } from "./VaultsHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
 export { EnvironmentReadWaitTimeout } from "./EnvironmentsHandlers.ts"
@@ -46,6 +47,7 @@ export {
 	SseKeepaliveInterval,
 	SseMaxConnectionDuration,
 } from "./SessionsHandlers.ts"
+export { VaultReadWaitTimeout } from "./VaultsHandlers.ts"
 
 const HealthLive = HttpApiBuilder.group(CheckfuApi, "health", (handlers) =>
 	handlers.handle("health", () => Effect.succeed({ status: "ok" as const })),
@@ -93,6 +95,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi), OpenApiRouteLiv
 		EnvironmentsLive,
 		SessionsLive,
 		AutomationsLive,
+		VaultsLive,
 	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),

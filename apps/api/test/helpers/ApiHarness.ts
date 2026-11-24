@@ -39,6 +39,7 @@ import {
 } from "../../src/Pi/PiDurableHarness.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./VaultsHarness.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -184,6 +185,7 @@ export const makePiDurableTestLayer = (
 	},
 	platform = Domain.InMemory,
 	registry?: () => Registry,
+	vaults: typeof VaultsTestLive = VaultsTestLive,
 ) => {
 	interface SessionObject {
 		readonly backend: InMemoryPiDurableBackend
@@ -326,6 +328,7 @@ export const makePiDurableTestLayer = (
 		),
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
+		Layer.provideMerge(vaults),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),

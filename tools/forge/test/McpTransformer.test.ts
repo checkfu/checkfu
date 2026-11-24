@@ -106,6 +106,10 @@ describe("MCP tool projection", () => {
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
 			"sessions_archiveSession",
+			"vaults_archiveCredential",
+			"vaults_archiveVault",
+			"vaults_deleteCredential",
+			"vaults_deleteVault",
 		])
 		expect(tools.filter((tool) => tool.readOnly && !tool.idempotent)).toEqual([])
 
@@ -117,6 +121,8 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",
+			"vaults_createCredential",
+			"vaults_createVault",
 		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])
 	})

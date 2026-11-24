@@ -708,6 +708,12 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/sessions/{session_id}/archive",
 						"/v1/sessions/{session_id}/events",
 						"/v1/sessions/{session_id}/events/stream",
+						"/v1/vaults",
+						"/v1/vaults/{vault_id}",
+						"/v1/vaults/{vault_id}/archive",
+						"/v1/vaults/{vault_id}/credentials",
+						"/v1/vaults/{vault_id}/credentials/{credential_id}",
+						"/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
 					])
 					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(

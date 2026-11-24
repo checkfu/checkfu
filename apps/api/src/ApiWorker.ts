@@ -1,5 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
+import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Alchemy from "alchemy"
+import * as Cause from "effect/Cause"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
@@ -7,6 +9,11 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import {
+	ConnectionCallFailed,
+	ConnectionExecutor,
+	CredentialSecretsLive,
+} from "./Connection/CredentialCustody.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
@@ -39,12 +46,55 @@ const PiHarnessExecutorLive = Layer.effect(
 	}),
 )
 
+const connectionCall = <A, E, R>(
+	call: Effect.Effect<A, E, R>,
+): Effect.Effect<A, ConnectionCallFailed, R> =>
+	Effect.catchCause(call, (cause): Effect.Effect<never, ConnectionCallFailed> =>
+		Cause.hasInterruptsOnly(cause)
+			? Effect.interrupt
+			: Effect.fail(new ConnectionCallFailed({ cause })),
+	)
+
+// Connection objects live in the harness Worker, next to the sessions that use them; the API
+// reaches them through its calls.
+const ConnectionExecutorLive = Layer.effect(
+	ConnectionExecutor,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			storeSecret: (credentialId, secret) =>
+				connectionCall(Effect.suspend(() => harness.storeSecret(credentialId, secret))).pipe(
+					Effect.withSpan("Connection.storeSecret"),
+				),
+			replaceSecret: (credentialId, secret) =>
+				connectionCall(Effect.suspend(() => harness.replaceSecret(credentialId, secret))).pipe(
+					Effect.withSpan("Connection.replaceSecret"),
+				),
+			keepSecret: (credentialId) =>
+				connectionCall(Effect.suspend(() => harness.keepSecret(credentialId))).pipe(
+					Effect.withSpan("Connection.keepSecret"),
+				),
+			erase: (credentialId) =>
+				connectionCall(Effect.suspend(() => harness.eraseSecret(credentialId))).pipe(
+					Effect.withSpan("Connection.erase"),
+				),
+		}
+	}),
+)
+
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 ).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
 
+const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
+	Layer.provideMerge(CredentialSecretsLive),
+	Layer.provide(ConnectionExecutorLive),
+	Layer.provide(PlacedDurableObjects),
+)
+
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
+	VaultsLive,
 	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,

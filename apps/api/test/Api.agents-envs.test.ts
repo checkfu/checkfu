@@ -87,6 +87,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Agent and environment lifecycle, versioning, and projection consistency", () => {
 	it("resolves arbitrary stored AgentVersionIds (not synthetic agentId:vN) and rejects missing/archived resources", async () => {
@@ -1548,6 +1549,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					settleMargin: "5 seconds",
 				}),
 			),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1689,6 +1691,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						settleMargin: "5 seconds",
 					}),
 				),
+				Layer.provideMerge(VaultsTestLive),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
