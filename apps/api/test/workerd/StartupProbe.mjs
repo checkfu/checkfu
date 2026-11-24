@@ -33,3 +33,5 @@ const before = process.cpuUsage()
 await import(entry)
 const used = process.cpuUsage(before)
 writeFileSync(resultFile, JSON.stringify({ cpuMs: (used.user + used.system) / 1000, loaded }))
+// A dependency may leave a timer or port open; the result is written, so nothing else matters.
+process.exit(0)

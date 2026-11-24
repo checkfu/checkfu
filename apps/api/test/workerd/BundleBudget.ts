@@ -22,8 +22,16 @@ export interface BundleMeasurement {
 	readonly startupCpuMs: number
 }
 
+// Every sample is a cold import in plain Node, whatever the caller's environment: no compile
+// cache to reuse code compiled by an earlier sample, and none of the caller's Node options.
+const probeEnv = (): NodeJS.ProcessEnv => {
+	const { NODE_OPTIONS: _ignored, ...inherited } = process.env
+	return { ...inherited, NODE_DISABLE_COMPILE_CACHE: "1" }
+}
+
 const probe = async (entry: string, resultFile: string, timeout: number) => {
 	const child = spawn(process.execPath, [PROBE, pathToFileURL(entry).href, resultFile], {
+		env: probeEnv(),
 		// The entry's own output goes nowhere; the result comes back in the file.
 		stdio: ["ignore", "ignore", "inherit"],
 		timeout,

@@ -43,6 +43,38 @@ describe("bundle measurement", () => {
 		expect(measured.startupCpuMs).toBeGreaterThan(0)
 	})
 
+	it("measures an entry that leaves a timer running", async () => {
+		const dir = bundle({ "Entry.js": "setInterval(() => {}, 1000)" })
+		const measured = await measureBundle(dir, "Entry.js", 5000)
+		expect(measured.eagerFiles).toEqual(["Entry.js"])
+	})
+
+	it("imports cold in plain Node whatever compile cache and options the caller set", async () => {
+		const dir = bundle({
+			"Entry.js": [
+				'import { getCompileCacheDir } from "node:module"',
+				'if (getCompileCacheDir() !== undefined) throw new Error("The compile cache is on")',
+			].join("\n"),
+		})
+		const saved = { cache: process.env.NODE_COMPILE_CACHE, options: process.env.NODE_OPTIONS }
+		process.env.NODE_COMPILE_CACHE = join(dir, "cache")
+		process.env.NODE_OPTIONS = `--require ${join(dir, "absent.cjs")}`
+		try {
+			expect((await measureBundle(dir, "Entry.js")).eagerFiles).toEqual(["Entry.js"])
+		} finally {
+			for (const [name, value] of [
+				["NODE_COMPILE_CACHE", saved.cache],
+				["NODE_OPTIONS", saved.options],
+			] as const) {
+				if (value === undefined) {
+					delete process.env[name]
+				} else {
+					process.env[name] = value
+				}
+			}
+		}
+	})
+
 	it("kills a probe whose module scope never finishes", async () => {
 		const dir = bundle({ "Entry.js": "while (true) {}" })
 		await expect(measureBundle(dir, "Entry.js", 500)).rejects.toThrow("SIGKILL")
