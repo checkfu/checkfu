@@ -11,14 +11,12 @@ import {
 	finalizeSettledTurnFromStorage,
 	omitTurnEntriesFromStorage,
 	readAssistantMessageFromStorage,
-	readUnansweredSubmissionFromStorage,
 	recoverPiDurableTurn,
-	restoreRefusalEntryInStorage,
 	runPiDurableTurn,
 } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
-import { createCheckfuRegistry, rejectRefusalCompactions } from "./PiRefusals.ts"
+import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
@@ -108,17 +106,6 @@ export const makePiHarnessBackend = (
 			const storage = await harness.storage()
 			return readAssistantMessageFromStorage(pi, storage, operationId)
 		},
-		readUnansweredSubmission: async (operationId) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			const storage = await harness.storage()
-			return readUnansweredSubmissionFromStorage(pi, storage, operationId)
-		},
-		restoreRefusal: async (operationId, entryId, message) => {
-			await lifecycle.start()
-			const pi = await harness.pi()
-			await restoreRefusalEntryInStorage(pi, operationId, entryId, message)
-		},
 		omitEntries: async (operationId) => {
 			await lifecycle.start()
 			const pi = await harness.pi()
@@ -165,7 +152,7 @@ export const PiSessionLive = PiSession.make(
 						return Harness.open(
 							storage,
 							{
-								models: rejectRefusalCompactions(models),
+								models,
 								registry: createCheckfuRegistry(),
 								onWake,
 								settings: PI_HARNESS_SETTINGS,

@@ -437,7 +437,17 @@ const runAnthropicMessagesRefusalGuard = (
 						expectedRefusalErrorMessage !== null &&
 						event.error.errorMessage === expectedRefusalErrorMessage
 					if (isConfirmedRefusal) {
-						outer.push(event)
+						// Anthropic may explain a refusal in free text. Pi would keep it in a failed
+						// compaction's record and match it against its retryable errors, so the refusal
+						// carries the codec's own text for a refusal without an explanation.
+						outer.push(
+							event.error.rawStopReason === "sensitive"
+								? event
+								: {
+										...event,
+										error: { ...event.error, errorMessage: ANTHROPIC_DEFAULT_REFUSAL_ERROR },
+									},
+						)
 					} else {
 						const { rawStopReason: _dropped, ...rest } = event.error
 						outer.push({ ...event, error: rest })
