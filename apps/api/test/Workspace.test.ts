@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { conversationName, parseConversation } from "../src/Pi/PiConversation.ts"
 import { admitGeneration } from "../src/Workspace/WorkspaceFence.ts"
-import { workspaceExtension } from "../src/Workspace/WorkspaceTools.ts"
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
+import { workspaceExtension, workspaceToolDeclarations } from "../src/Workspace/WorkspaceTools.ts"
 import type { WorkspaceTool } from "../src/Workspace/WorkspaceTools.ts"
 
 const store = () => {
@@ -76,5 +77,62 @@ describe("session workspace", () => {
 			delete: "unsafe",
 			git: "unsafe",
 		})
+	})
+
+	it("declares the workspace tools without a workspace to read", async () => {
+		const declared = await workspaceToolDeclarations()
+		expect(declared.map(({ name }) => name)).toEqual([
+			"read",
+			"ls",
+			"find",
+			"grep",
+			"write",
+			"edit",
+			"delete",
+		])
+		expect(declared.every(({ description }) => description.length > 0)).toBe(true)
+	})
+
+	it("sends nothing to the workspace for a call whose turn was interrupted", async () => {
+		const sent: Array<{ readonly name: string; readonly signal: AbortSignal | undefined }> = []
+		const { tools } = workspaceExtension(
+			[{ name: "write", description: "write", parameters: { type: "object", properties: {} } }],
+			(call, signal) => {
+				sent.push({ name: call.name, signal })
+				return Promise.resolve({ content: [{ type: "text", text: "written" }], isError: false })
+			},
+		)
+		const write = tools?.[0]
+		if (write === undefined) {
+			throw new Error("The write tool is missing.")
+		}
+		const api = { callId: "call-1" } as Parameters<typeof write.execute>[1]
+		const interrupted = new AbortController()
+		interrupted.abort()
+		expect(
+			await write.execute(
+				{ path: "/workspace/a" },
+				api,
+				withAbortSignal(interrupted.signal, BACKGROUND_CONTEXT),
+			),
+		).toEqual({
+			output: [{ type: "text", text: "The turn was interrupted before this call ran." }],
+			isError: true,
+		})
+		expect(sent).toEqual([])
+
+		// A live call carries the turn's signal, so its wait ends with the turn.
+		const live = new AbortController()
+		expect(
+			await write.execute(
+				{ path: "/workspace/a" },
+				api,
+				withAbortSignal(live.signal, BACKGROUND_CONTEXT),
+			),
+		).toEqual({ output: [{ type: "text", text: "written" }], isError: false })
+		expect(sent.map(({ name }) => name)).toEqual(["write"])
+		expect(sent[0]?.signal?.aborted).toBe(false)
+		live.abort()
+		expect(sent[0]?.signal?.aborted).toBe(true)
 	})
 })
