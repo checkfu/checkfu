@@ -4,6 +4,7 @@ import {
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { CustomToolList, customToolSetId } from "@checkfu/domain/Mcp/CustomTools"
 import {
 	McpServerSet,
 	McpServerSetId,
@@ -40,7 +41,7 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { resolveCatalogModel } from "./PiCatalog.ts"
 import { bindSessionServers } from "../Connection/McpBindings.ts"
-import type { ToolDecisionValue } from "./PiApprovals.ts"
+import type { ToolAnswer } from "./PiApprovals.ts"
 import { isPaused } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
@@ -71,7 +72,7 @@ export interface PiTurnExecutorService {
 	readonly resumeTurn: (
 		conversation: string,
 		operationId: string,
-		decisions: ReadonlyArray<ToolDecisionValue>,
+		answers: ReadonlyArray<ToolAnswer>,
 	) => Effect.Effect<PiTurnOutcome | null, HarnessCallFailed>
 	readonly abortTurn: (
 		conversation: string,
@@ -146,6 +147,15 @@ const NOTHING_WAITING: TurnFailed = {
 const QUEUED_MESSAGE_DENIAL =
 	"A new message from the user arrived before this call was approved, so it did not run."
 const CANCELLED_DENIAL = "This call was cancelled before it was approved, so it did not run."
+const QUEUED_MESSAGE_NO_RESULT =
+	"A new message from the user arrived before this tool's result did, so the call has no result."
+const CANCELLED_NO_RESULT = "This call was cancelled before its result arrived."
+
+interface WaitingCalls {
+	readonly waiting: ReadonlyArray<string>
+	/** Those of `waiting` that wait for a result from the caller's application. */
+	readonly waiting_results?: ReadonlyArray<string>
+}
 
 const unreachable = (conversation: string) => (error: HarnessCallFailed) =>
 	Effect.andThen(
@@ -217,20 +227,40 @@ export const PiDurableHarnessLive = boundedHarness(
 				),
 			)
 
-		const answersTo = (args: TurnRef, waiting: ReadonlyArray<string>) =>
+		const answersTo = (
+			args: TurnRef,
+			waiting: ReadonlyArray<string>,
+			cancelled: (awaits: string) => string = (awaits) =>
+				awaits === "result" ? CANCELLED_NO_RESULT : CANCELLED_DENIAL,
+		) =>
 			Effect.map(
 				Effect.forEach(waiting, (tool_use_id) =>
 					Effect.map(
 						confirmations.get(toolConfirmationId(args.session_id, tool_use_id)),
-						(state): ReadonlyArray<ToolDecisionValue> => {
+						(state): ReadonlyArray<ToolAnswer> => {
 							if (state.status === "allowed") {
 								return [{ tool_use_id, allow: true, message: "" }]
 							}
 							if (state.status === "denied") {
 								return [{ tool_use_id, allow: false, message: state.deny_message }]
 							}
+							if (state.status === "returned") {
+								return [
+									{
+										tool_use_id,
+										content: [{ type: "text", text: state.result_text }],
+										is_error: state.result_is_error,
+									},
+								]
+							}
 							return state.status === "cancelled"
-								? [{ tool_use_id, allow: false, message: CANCELLED_DENIAL }]
+								? [
+										{
+											tool_use_id,
+											allow: false,
+											message: cancelled(state.awaits),
+										},
+									]
 								: []
 						},
 					),
@@ -257,13 +287,14 @@ export const PiDurableHarnessLive = boundedHarness(
 		 */
 		const answersOrPause = Effect.fn("PiDurableHarness.answersOrPause")(function* (
 			args: TurnRef,
-			every: ReadonlyArray<string>,
+			calls: WaitingCalls,
 		) {
 			// More than a pause can name wait their turn: the next pause names them.
-			const waiting = every.slice(0, MAX_WAITING_TOOL_USES)
+			const waiting = calls.waiting.slice(0, MAX_WAITING_TOOL_USES)
 			if (waiting.length === 0) {
 				return []
 			}
+			const results = new Set(calls.waiting_results)
 			yield* Effect.forEach(
 				waiting,
 				(tool_use_id) =>
@@ -272,6 +303,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							confirmation_id: toolConfirmationId(args.session_id, tool_use_id),
 							session_id: args.session_id,
 							tool_use_id,
+							awaits: results.has(tool_use_id) ? "result" : "confirmation",
 						}),
 					),
 				{ discard: true },
@@ -301,11 +333,11 @@ export const PiDurableHarnessLive = boundedHarness(
 				)
 			if (!paused) {
 				yield* cancelConfirmations(args, waiting)
-				return waiting.map((tool_use_id): ToolDecisionValue => ({
-					tool_use_id,
-					allow: false,
-					message: QUEUED_MESSAGE_DENIAL,
-				}))
+				// An answer can land between the read above and the cancellation; whichever won is what the
+				// model gets.
+				return yield* answersTo(args, waiting, (awaits) =>
+					awaits === "result" ? QUEUED_MESSAGE_NO_RESULT : QUEUED_MESSAGE_DENIAL,
+				)
 			}
 			// An answer given while the turn was pausing found the session still running.
 			if ((yield* answersTo(args, waiting)).length > 0) {
@@ -339,7 +371,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					if (!isPaused(outcome)) {
 						return yield* Effect.fail(outcome.error)
 					}
-					const answers = yield* answersOrPause(args, outcome.waiting)
+					const answers = yield* answersOrPause(args, outcome)
 					if (answers === "paused") {
 						return yield* Effect.fail<TurnPaused>({ _tag: "TurnPaused" })
 					}
@@ -436,6 +468,9 @@ export const PiDurableHarnessLive = boundedHarness(
 						version.id,
 						args.environment_id,
 					)
+					const customTools = CustomToolList.decode(
+						(yield* serverSets.get(customToolSetId(version.id))).servers,
+					)
 					const userText = args.input.join("\n")
 					if (userText.length === 0) {
 						return yield* Effect.fail<TurnFailed>({
@@ -457,6 +492,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							? {}
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
 						...(mcpServers.length === 0 ? {} : { mcp_servers: mcpServers }),
+						...(customTools.length === 0 ? {} : { custom_tools: customTools }),
 					}
 					// A turn is submitted under its operation id, so sending it again after a
 					// lost reply joins the turn already there instead of starting another. The
@@ -520,11 +556,14 @@ export const PiDurableHarnessLive = boundedHarness(
 	}),
 )
 
-type WaitingCalls = Pick<PiTurnExecutorService, "resumeTurn" | "waitingCalls" | "cancelWaiting">
+type WaitingCallOperations = Pick<
+	PiTurnExecutorService,
+	"resumeTurn" | "waitingCalls" | "cancelWaiting"
+>
 
 export const makePiTurnExecutorLayer = (
-	turns: Omit<PiTurnExecutorService, "discardWorkspace" | keyof WaitingCalls> &
-		Partial<WaitingCalls>,
+	turns: Omit<PiTurnExecutorService, "discardWorkspace" | keyof WaitingCallOperations> &
+		Partial<WaitingCallOperations>,
 	workspaces: Pick<PiTurnExecutorService, "discardWorkspace"> = {
 		discardWorkspace: () => Effect.void,
 	},

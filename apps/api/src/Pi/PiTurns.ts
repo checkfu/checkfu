@@ -1,16 +1,16 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
-import type { PiApprovalStore, ToolDecisionValue, ToolGate } from "./PiApprovals.ts"
+import type { PiApprovalStore, ToolAnswer, ToolGate } from "./PiApprovals.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { isPaused } from "./PiTurn.ts"
-import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import type { PiTurnOutcome, PiTurnPaused, PiTurnRequest } from "./PiTurn.ts"
 
 export interface PiTurnsOptions {
 	readonly backend: PiDurableBackend
 	readonly approvals: PiApprovalStore
-	readonly gate: Pick<ToolGate, "deliver" | "waiting">
+	readonly gate: Pick<ToolGate, "deliver" | "waiting" | "waitingResults">
 	/** Runs before a turn reaches Pi, such as to make its tools known. */
 	readonly prepare?: (request: PiTurnRequest) => Promise<void>
 	/** A turn Pi has not seen starts: what the last operation left behind is forgotten. */
@@ -57,6 +57,17 @@ export const makePiTurns = ({ backend, approvals, gate, prepare, begin }: PiTurn
 		return { ...outcome, tool_calls: approvals.unpublished(turnOperationId, outcome.tool_calls) }
 	}
 
+	// Says which of a pause's calls wait for a result from the caller's application.
+	const paused = <Outcome extends PiTurnOutcome | null>(
+		outcome: Outcome,
+	): Outcome | PiTurnPaused => {
+		if (outcome === null || !isPaused(outcome)) {
+			return outcome
+		}
+		const results = new Set(gate.waitingResults())
+		return { ...outcome, waiting_results: outcome.waiting.filter((id) => results.has(id)) }
+	}
+
 	const recoverTurn = (turnOperationId: string): Effect.Effect<PiTurnOutcome | null> =>
 		Effect.promise(() => operationOf(turnOperationId)).pipe(
 			Effect.flatMap((operationId) =>
@@ -66,7 +77,7 @@ export const makePiTurns = ({ backend, approvals, gate, prepare, begin }: PiTurn
 						: outcome,
 				),
 			),
-			Effect.map((outcome) => published(turnOperationId, outcome)),
+			Effect.map((outcome) => paused(published(turnOperationId, outcome))),
 		)
 
 	return {
@@ -81,14 +92,14 @@ export const makePiTurns = ({ backend, approvals, gate, prepare, begin }: PiTurn
 					}
 				})
 				const result = yield* runPiDurableTurn(backend, request)
-				return published(request.operationId, result)
+				return paused(published(request.operationId, result))
 			}),
 		/** Hands answers to the calls that wait, then follows the operation to where it ends or pauses next. */
 		resumeTurn: (
 			turnOperationId: string,
-			decisions: ReadonlyArray<ToolDecisionValue>,
+			answers: ReadonlyArray<ToolAnswer>,
 		): Effect.Effect<PiTurnOutcome | null> =>
-			Effect.promise(() => gate.deliver(decisions)).pipe(
+			Effect.promise(() => gate.deliver(answers)).pipe(
 				Effect.andThen(recoverTurn(turnOperationId)),
 			),
 		abortTurn: (turnOperationId: string): Effect.Effect<boolean> =>

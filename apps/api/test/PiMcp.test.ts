@@ -66,11 +66,11 @@ const result = (id: string, text: string): ToolEvent => ({
 // The events in the order the turn's reader takes them from the store.
 const withMcpCalls = (mcp: PiMcpStore, events: ReadonlyArray<ToolEvent>): Array<ToolEvent> => {
 	const served = mcp.served()
-	return events.flatMap((event) =>
-		event.type === "tool_use"
-			? [served.named(event), ...served.nested(event.tool_use_id)]
-			: [served.named(event)],
-	)
+	return events.flatMap((event) => {
+		const named = served.named(event)
+		const kept = named === undefined ? [] : [named]
+		return event.type === "tool_use" ? [...kept, ...served.nested(event.tool_use_id)] : kept
+	})
 }
 
 describe("whether an MCP tool asks a person first", () => {

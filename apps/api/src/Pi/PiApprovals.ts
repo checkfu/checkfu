@@ -1,10 +1,11 @@
-import type { ToolCall } from "@checkfu/domain/Session/SessionTypes"
+import type { TextBlock, ToolCall } from "@checkfu/domain/Session/SessionTypes"
+import type { ToolCallAwaits } from "@checkfu/domain/Session/ToolConfirmation.aggregate"
 import { ToolTask, defineSignal, hook } from "@earendil-works/pi-durable"
 import type { Extension, SignalResult, TaskId } from "@earendil-works/pi-durable"
 import { bool, obj, str } from "@earendil-works/pi-schema"
 import * as Schema from "effect/Schema"
 import type { McpCall, McpCallResult, SqlExecutor } from "./PiMcpStore.ts"
-import type { PiToolDecision } from "./PiTurn.ts"
+import type { PiToolAnswer, PiToolDecision, PiToolResult } from "./PiTurn.ts"
 
 export const APPROVALS_EXTENSION = "checkfu.approvals"
 
@@ -18,7 +19,12 @@ export const TOOL_DECISION_KEY = "decision"
 
 export type ToolDecisionValue = typeof PiToolDecision.Type
 
+export type ToolResultValue = typeof PiToolResult.Type
+
+export type ToolAnswer = typeof PiToolAnswer.Type
+
 export const DENIED_MESSAGE = "This tool call was not approved."
+export const NO_RESULT_MESSAGE = "This tool call was given no result."
 
 export const scriptBlockedMessage = (tool: string): string =>
 	`${tool} needs a person's approval, which a script cannot wait for. It did not run. Call ${tool} directly, outside a script (load it with tool_search first if it is not offered yet).`
@@ -27,6 +33,7 @@ const WaitingRow = Schema.Struct({
 	tool_use_id: Schema.String,
 	task_id: Schema.Finite,
 	operation_id: Schema.String,
+	awaits: Schema.Literals(["confirmation", "result"]),
 	answered: Schema.Finite,
 })
 const decodeWaitingRow = Schema.decodeUnknownSync(WaitingRow)
@@ -37,6 +44,7 @@ export interface WaitingCall {
 	readonly tool_use_id: string
 	readonly task_id: number
 	readonly operation_id: string
+	readonly awaits: ToolCallAwaits
 	readonly answered: boolean
 }
 
@@ -57,7 +65,7 @@ export class PiApprovalStore {
 		if (!this.#initialized) {
 			this.#sql.transaction(() => {
 				this.#sql.exec(
-					"CREATE TABLE IF NOT EXISTS checkfu_waiting_calls (tool_use_id TEXT PRIMARY KEY, task_id INTEGER NOT NULL, operation_id TEXT NOT NULL, answered INTEGER NOT NULL DEFAULT 0)",
+					"CREATE TABLE IF NOT EXISTS checkfu_waiting_calls (tool_use_id TEXT PRIMARY KEY, task_id INTEGER NOT NULL, operation_id TEXT NOT NULL, awaits TEXT NOT NULL, answered INTEGER NOT NULL DEFAULT 0)",
 				)
 				this.#sql.exec(
 					"CREATE TABLE IF NOT EXISTS checkfu_resumed_turns (turn_operation_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL)",
@@ -98,18 +106,23 @@ export class PiApprovalStore {
 		})
 	}
 
-	parked(call: { readonly tool_use_id: string; readonly task_id: number }): void {
+	parked(call: {
+		readonly tool_use_id: string
+		readonly task_id: number
+		readonly awaits: ToolCallAwaits
+	}): void {
 		this.#exec(
-			"INSERT OR IGNORE INTO checkfu_waiting_calls (tool_use_id, task_id, operation_id) VALUES (?, ?, ?)",
+			"INSERT OR IGNORE INTO checkfu_waiting_calls (tool_use_id, task_id, operation_id, awaits) VALUES (?, ?, ?, ?)",
 			call.tool_use_id,
 			call.task_id,
 			this.activeOperation() ?? "",
+			call.awaits,
 		)
 	}
 
 	calls(): Array<WaitingCall> {
 		return this.#exec(
-			"SELECT tool_use_id, task_id, operation_id, answered FROM checkfu_waiting_calls ORDER BY rowid",
+			"SELECT tool_use_id, task_id, operation_id, awaits, answered FROM checkfu_waiting_calls ORDER BY rowid",
 		).map((row) => {
 			const call = decodeWaitingRow(row)
 			return { ...call, answered: call.answered === 1 }
@@ -225,6 +238,11 @@ export interface ToolGateOptions {
 		taskId: TaskId,
 		value: { readonly allow: boolean; readonly message: string },
 	) => Promise<SignalResult>
+	/** Hands a result to a call that parked itself to wait for one. */
+	readonly signalResult: (
+		taskId: TaskId,
+		value: { readonly content: ReadonlyArray<TextBlock>; readonly is_error: boolean },
+	) => Promise<SignalResult>
 }
 
 // Calls of one round reach the gate one after another; a pause is declared once they all have.
@@ -244,15 +262,21 @@ type Settled =
  * make the call itself. Pi runs the gate again on every wake and reopen, so
  * each pass reads the answer afresh and repeats nothing.
  */
-export const makeToolGate = ({ store, permission, ledger, signal }: ToolGateOptions) => {
+export const makeToolGate = ({
+	store,
+	permission,
+	ledger,
+	signal,
+	signalResult,
+}: ToolGateOptions) => {
 	const executing = new Set<string>()
 	let listeners = new Set<() => void>()
 	let timer: ReturnType<typeof setTimeout> | undefined
 
-	const waiting = (): Array<string> =>
+	const waiting = (awaits?: ToolCallAwaits): Array<string> =>
 		store
 			.calls()
-			.filter((call) => !call.answered)
+			.filter((call) => !call.answered && (awaits === undefined || call.awaits === awaits))
 			.map((call) => call.tool_use_id)
 
 	// Nothing runs and nothing is on its way: every call left is one a person has yet to answer.
@@ -298,7 +322,7 @@ export const makeToolGate = ({ store, permission, ledger, signal }: ToolGateOpti
 					}
 					const decision = await api.readSignal(ToolDecision, TOOL_DECISION_KEY, context)
 					if (decision === undefined) {
-						store.parked({ tool_use_id: call.id, task_id: api.taskId })
+						store.parked({ tool_use_id: call.id, task_id: api.taskId, awaits: "confirmation" })
 						check()
 						return { sleep: { signals: [ToolDecision.key(TOOL_DECISION_KEY)] } }
 					}
@@ -326,18 +350,49 @@ export const makeToolGate = ({ store, permission, ledger, signal }: ToolGateOpti
 
 	return {
 		extension,
-		waiting,
+		waiting: () => waiting(),
+		/** Those of `waiting` that wait for a result from the caller's application. */
+		waitingResults: () => waiting("result"),
+		/**
+		 * A tool that waits for its result from outside parks itself; the turn
+		 * pauses on it as it does on a call that waits for a person.
+		 */
+		park: (call: { readonly tool_use_id: string; readonly task_id: number }) => {
+			store.parked({ ...call, awaits: "result" })
+			executing.delete(call.tool_use_id)
+			check()
+		},
 		/** Hands each answer to its parked call. An answer for a call that is gone is dropped. */
-		deliver: async (decisions: ReadonlyArray<ToolDecisionValue>): Promise<void> => {
-			for (const decision of decisions) {
-				const call = store.calls().find((row) => row.tool_use_id === decision.tool_use_id)
+		deliver: async (answers: ReadonlyArray<ToolAnswer>): Promise<void> => {
+			for (const answer of answers) {
+				const call = store.calls().find((row) => row.tool_use_id === answer.tool_use_id)
 				if (call === undefined || call.answered || !isTaskId(call.task_id)) {
 					continue
 				}
-				const result = await signal(call.task_id, {
-					allow: decision.allow,
-					message: decision.message,
-				})
+				// A result is no answer to a call that waits for a person; a denial ends a wait for a result as a failure.
+				const delivery =
+					call.awaits === "confirmation"
+						? "allow" in answer
+							? signal(call.task_id, { allow: answer.allow, message: answer.message })
+							: undefined
+						: signalResult(
+								call.task_id,
+								"content" in answer
+									? { content: answer.content, is_error: answer.is_error }
+									: {
+											content: [
+												{
+													type: "text",
+													text: answer.message === "" ? NO_RESULT_MESSAGE : answer.message,
+												},
+											],
+											is_error: true,
+										},
+							)
+				if (delivery === undefined) {
+					continue
+				}
+				const result = await delivery
 				if (result === "delivered" || result === "duplicate") {
 					store.answered(call.tool_use_id)
 				} else {

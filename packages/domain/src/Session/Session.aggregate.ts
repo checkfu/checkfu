@@ -14,6 +14,7 @@ import {
 	SpanModelRequestEnd,
 } from "./CommitModelReply.command.ts"
 import { UserToolConfirmation } from "./ConfirmTool.command.ts"
+import { UserCustomToolResult } from "./ReturnCustomToolResult.command.ts"
 import { CreateSession, SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
@@ -25,6 +26,7 @@ import {
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
 import {
+	AgentCustomToolUse,
 	AgentMcpToolResult,
 	AgentMcpToolUse,
 	AgentToolResult,
@@ -190,7 +192,7 @@ export class Session extends Domain.Aggregate("Session", {
 		AbandonTurn,
 		ArchiveSession,
 	],
-	events: [UserToolConfirmation],
+	events: [UserToolConfirmation, UserCustomToolResult],
 	keyOf: (cmd) => cmd.session_id,
 	invariants: {
 		RunningTurnIsPositive: (s) => s._tag !== "Running" || s.turn >= 1,
@@ -420,19 +422,26 @@ export class Session extends Domain.Aggregate("Session", {
 							input: use.input,
 							...useTruncated,
 						})
-					: new AgentMcpToolUse({
-							tool_use_id: use.tool_use_id,
-							mcp_server_name: use.mcp_server_name,
-							name: use.name,
-							input: use.input,
-							...(use.evaluated_permission === undefined
-								? {}
-								: { evaluated_permission: use.evaluated_permission }),
-							...(use.parent_tool_use_id === undefined
-								? {}
-								: { parent_tool_use_id: use.parent_tool_use_id }),
-							...useTruncated,
-						})
+					: use.type === "custom_tool_use"
+						? new AgentCustomToolUse({
+								tool_use_id: use.tool_use_id,
+								name: use.name,
+								input: use.input,
+								...useTruncated,
+							})
+						: new AgentMcpToolUse({
+								tool_use_id: use.tool_use_id,
+								mcp_server_name: use.mcp_server_name,
+								name: use.name,
+								input: use.input,
+								...(use.evaluated_permission === undefined
+									? {}
+									: { evaluated_permission: use.evaluated_permission }),
+								...(use.parent_tool_use_id === undefined
+									? {}
+									: { parent_tool_use_id: use.parent_tool_use_id }),
+								...useTruncated,
+							})
 			if (call._tag === "use") {
 				return [used]
 			}
@@ -616,6 +625,7 @@ export class Session extends Domain.Aggregate("Session", {
 		"user.interrupt": (state) =>
 			state._tag === "Idle" && state.awaiting ? { ...state, awaiting: false } : state,
 		"user.tool_confirmation": (state) => state,
+		"user.custom_tool_result": (state) => state,
 		"session.status_running": (state, e) =>
 			state._tag === "Idle"
 				? {
@@ -638,6 +648,7 @@ export class Session extends Domain.Aggregate("Session", {
 		"agent.tool_result": (state) => state,
 		"agent.mcp_tool_use": (state) => state,
 		"agent.mcp_tool_result": (state) => state,
+		"agent.custom_tool_use": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>

@@ -441,6 +441,41 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 	})
 
+	it("names a paused turn's custom tool call and how to answer each waiting call", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer({
+						toolEvents: () => [
+							{
+								type: "custom_tool_use",
+								tool_use_id: "call_lookup",
+								name: "lookup_order\u001b[2J",
+								input: { order: "A-1" },
+							},
+						],
+						waiting: () => ["call_lookup", "call_post"],
+					})
+					const sessionId = yield* createReadySession(cli)
+
+					const result = yield* cli.run(["sessions", "connect", sessionId], {
+						stdin: "where is A-1?\n",
+					})
+					expect(result.stderr).toContain(String.raw`[tool] lookup_order\x1b[2J`)
+					expect(result.stderr).toContain("[status: idle (requires_action)]")
+					expect(result.stderr).toContain(
+						`[needs result] call_lookup: checkfu sessions:events send --session-id ${sessionId} --event '{"type":"user.custom_tool_result","custom_tool_use_id":"call_lookup","content":[{"type":"text","text":"..."}]}'`,
+					)
+					// call_post was never shown on this stream, so its kind is not guessed.
+					expect(result.stderr).toContain(
+						`[needs answer] call_post: a call made before this stream started; answer a custom tool with checkfu sessions:events send --session-id ${sessionId} --event '{"type":"user.custom_tool_result","custom_tool_use_id":"call_post","content":[{"type":"text","text":"..."}]}', or a call waiting for approval with checkfu sessions:events send --session-id ${sessionId} --event '{"type":"user.tool_confirmation","tool_use_id":"call_post","result":"allow"}'`,
+					)
+					expect(result.stderr).not.toContain("[needs approval] call_post")
+				}),
+			),
+		)
+	})
+
 	it("handles Ctrl-C (SIGINT) during an active TTY turn by sending user.interrupt", async () => {
 		await Effect.runPromise(
 			Effect.scoped(

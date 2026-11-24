@@ -21,6 +21,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ToolConfirmation } from "@checkfu/domain/Session/ToolConfirmation.aggregate"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
 import {
@@ -31,6 +32,7 @@ import {
 } from "../../src/Pi/PiDurableEngine.ts"
 import { PiApprovalStore, makeToolGate } from "../../src/Pi/PiApprovals.ts"
 import type { ToolGateOptions } from "../../src/Pi/PiApprovals.ts"
+import { PiCustomToolStore, isCheckableInputSchema } from "../../src/Pi/PiCustomTools.ts"
 import type { PiTurnRequest } from "../../src/Pi/PiTurn.ts"
 import {
 	HarnessCallFailed,
@@ -45,6 +47,7 @@ import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import { memorySql } from "./SqliteExecutor.ts"
 import { VaultsTestLive } from "./VaultsHarness.ts"
+import { ToolSchemaCheck } from "../../src/Pi/PiToolSchemaCheck.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -177,7 +180,12 @@ export const makeScriptedPiModels = (
 	return models
 }
 
-const notOpen: ToolGateOptions["signal"] = () => Promise.resolve("not_found")
+const notOpen = () => Promise.resolve("not_found" as const)
+
+/** Pi's own check, run in process as the harness Worker runs it. */
+export const LocalToolSchemaCheck = Layer.succeed(ToolSchemaCheck, {
+	checkable: (schemas) => Effect.sync(() => schemas.map(isCheckableInputSchema)),
+})
 
 export const makePiDurableTestLayer = (
 	handler: (
@@ -195,6 +203,8 @@ export const makePiDurableTestLayer = (
 	vaults: typeof VaultsTestLive = VaultsTestLive,
 	/** Which tools ask a person first. With it, a session's Pi pauses and resumes as the session object's does. */
 	asks?: ToolGateOptions["permission"],
+	/** Wraps the waiting-call records the harness adapter reads, to make a race happen on cue. */
+	confirmationsSeen?: (client: ToolConfirmation["Service"]) => ToolConfirmation["Service"],
 ) => {
 	interface SessionObject {
 		readonly backend: InMemoryPiDurableBackend
@@ -242,24 +252,47 @@ export const makePiDurableTestLayer = (
 		const sql = sqls.get(sessionId) ?? memorySql()
 		sqls.set(sessionId, sql)
 		const approvals = new PiApprovalStore(sql)
+		const customTools = new PiCustomToolStore(sql)
 		let signal: ToolGateOptions["signal"] = notOpen
+		let signalResult: ToolGateOptions["signalResult"] = notOpen
 		const gate = makeToolGate({
 			store: approvals,
 			permission: asks,
 			ledger: { began: () => undefined, ended: () => undefined },
 			signal: (taskId, value) => signal(taskId, value),
+			signalResult: (taskId, value) => signalResult(taskId, value),
 		})
 		const opened = registry?.() ?? createCheckfuRegistry()
 		opened.install(gate.extension)
+		// As the session object does: what it remembers is offered again when it opens.
+		opened.install(customTools.extension(gate.park))
 		const backend = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(handler),
 			undefined,
 			opened,
 			hasApiKey,
-			{ ...(storage === undefined ? {} : { storage }), reset, gate },
+			{
+				...(storage === undefined ? {} : { storage }),
+				reset,
+				gate,
+				served: () => customTools.served(),
+			},
 		)
 		signal = backend.signalTool
-		return { backend, gone, turns: makePiTurns({ backend, approvals, gate }) }
+		signalResult = backend.signalToolResult
+		const turns = makePiTurns({
+			backend,
+			approvals,
+			gate,
+			prepare: (request) => {
+				if (customTools.bind(request.custom_tools ?? [])) {
+					opened.install(customTools.extension(gate.park))
+				}
+				return Promise.resolve()
+			},
+			begin: () => customTools.forgetRequests(),
+		})
+		return { backend, gone, turns }
 	}
 	const getObject = (sessionId: string) => {
 		let existing = objects.get(sessionId)
@@ -362,13 +395,18 @@ export const makePiDurableTestLayer = (
 		},
 	)
 
-	const CheckfuLive = Checkfu.layer(
-		CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
-	).pipe(Layer.provide(executorLayer))
-	const PiProviderLive = PiDurableHarnessLive.pipe(
+	const HarnessLive =
+		confirmationsSeen === undefined
+			? PiDurableHarnessLive
+			: PiDurableHarnessLive.pipe(
+					Layer.provide(
+						Layer.effect(ToolConfirmation, Effect.map(ToolConfirmation, confirmationsSeen)),
+					),
+				)
+	const CheckfuLive = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive))).pipe(
 		Layer.provide(executorLayer),
-		Layer.provide(CheckfuLive),
 	)
+	const PiProviderLive = HarnessLive.pipe(Layer.provide(executorLayer), Layer.provide(CheckfuLive))
 
 	const closeAll = async () => {
 		const pending = [...objects.values()]
@@ -398,6 +436,7 @@ export const makePiDurableTestLayer = (
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
 		Layer.provideMerge(vaults),
+		Layer.provideMerge(LocalToolSchemaCheck),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),

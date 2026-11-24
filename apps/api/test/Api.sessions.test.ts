@@ -27,11 +27,13 @@ import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.comman
 import { ToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
 import {
+	AgentCustomToolUse,
 	AgentMcpToolResult,
 	AgentMcpToolUse,
 	AgentToolResult,
 	AgentToolUse,
 } from "@checkfu/domain/Session/RecordToolCall.command"
+import { UserCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -2449,10 +2451,42 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated(),
+				event: new AgentCustomToolUse({
+					tool_use_id: "call_5",
+					name: "lookup_order",
+					input: { order: "A-1" },
+				}),
 				expectedJson: {
 					id: "evt_18",
 					seq: 18,
+					type: "agent.custom_tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_5",
+					name: "lookup_order",
+					input: { order: "A-1" },
+				},
+			},
+			{
+				event: new UserCustomToolResult({
+					custom_tool_use_id: "call_5",
+					content: [{ type: "text", text: "shipped" }],
+					is_error: true,
+				}),
+				expectedJson: {
+					id: "evt_19",
+					seq: 19,
+					type: "user.custom_tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					custom_tool_use_id: "call_5",
+					content: [{ type: "text", text: "shipped" }],
+					is_error: true,
+				},
+			},
+			{
+				event: new SessionStatusTerminated(),
+				expectedJson: {
+					id: "evt_20",
+					seq: 20,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2460,8 +2494,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_19",
-					seq: 19,
+					id: "evt_21",
+					seq: 21,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},

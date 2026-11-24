@@ -286,6 +286,9 @@ export const writeLockFile = (
 		)
 	})
 
+// Compared as text: what JSON keeps of each side is what Persisted.lock.json holds.
+const asStored = (value: unknown): string => JSON.stringify(value)
+
 export const shipBlockers = (
 	lock: PersistedLock,
 	shapes: ReadonlyArray<PersistedShape> = persistedShapes,
@@ -301,8 +304,9 @@ export const shipBlockers = (
 		}
 		const current = yield* cutBaseline(latest.label, latest.cut_at, shapes)
 		return isDeepStrictEqual(latest.schemas, current.schemas) &&
-			// oxlint-disable-next-line unicorn/prefer-structured-clone -- JSON round-trip normalizes undefined fields to match Persisted.lock.json
-			isDeepStrictEqual(latest.shapes, JSON.parse(JSON.stringify(current.shapes)))
+			// Both sides as Persisted.lock.json holds them: a JSON round trip drops undefined fields and
+			// turns sampled values JSON cannot keep (-0, a "__proto__" key) into what it reads back.
+			asStored(latest.shapes) === asStored(current.shapes)
 			? []
 			: [`Persisted shapes changed since "${latest.label}".`]
 	})

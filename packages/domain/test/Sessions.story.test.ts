@@ -46,6 +46,7 @@ import {
 	SpanModelRequestStart,
 } from "../src/Session/RecordModelRequestStart.command.ts"
 import {
+	AgentCustomToolUse,
 	AgentToolResult,
 	AgentToolUse,
 	RecordToolCall,
@@ -3589,13 +3590,23 @@ describe("Sessions", () => {
 						truncated: true,
 					}),
 				),
-				Story.when(record("req_1", { _tag: "use", use: { ...use, tool_use_id: "call_2" } })),
+				Story.when(
+					record("req_1", {
+						_tag: "use",
+						use: {
+							type: "custom_tool_use",
+							tool_use_id: "call_2",
+							name: "lookup_order",
+							input: { order: "A-1" },
+						},
+					}),
+				),
 				Story.then(
 					session,
-					new AgentToolUse({
+					new AgentCustomToolUse({
 						tool_use_id: "call_2",
-						name: "read",
-						input: { path: "/workspace/a.md" },
+						name: "lookup_order",
+						input: { order: "A-1" },
 					}),
 				),
 				Story.when(record("req_other", pair)),

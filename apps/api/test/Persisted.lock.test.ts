@@ -382,6 +382,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				[
 					"abortTurn",
 					"cancelWaiting",
+					"checkToolSchemas",
 					"discardWorkspace",
 					"eraseSecret",
 					"keepSecret",

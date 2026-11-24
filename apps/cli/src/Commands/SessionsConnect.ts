@@ -330,6 +330,9 @@ const renderConnectEvent = (
 	sessionId: SessionId,
 	event: SessionStreamEvent,
 	stateRef: Ref.Ref<ConnectState>,
+	// The kind of each tool call seen so far: a pause names its calls by id only, and a
+	// stream that started after a call was made has not seen it.
+	toolUseKinds: Map<string, "approval" | "result">,
 	settleDeferredRef: Ref.Ref<Deferred.Deferred<void>>,
 	stopConnectDeferred: Deferred.Deferred<void>,
 	expectArchivedEvent: boolean,
@@ -369,10 +372,18 @@ const renderConnectEvent = (
 				break
 			}
 			case "agent.mcp_tool_use": {
+				toolUseKinds.set(event.tool_use_id, "approval")
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(
 						`[tool] ${escapeTerminalControlCharacters(`${event.mcp_server_name}/${event.name}`)}`,
 					)
+				}
+				break
+			}
+			case "agent.custom_tool_use": {
+				toolUseKinds.set(event.tool_use_id, "result")
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(`[tool] ${escapeTerminalControlCharacters(event.name)}`)
 				}
 				break
 			}
@@ -416,14 +427,25 @@ const renderConnectEvent = (
 				// A paused session goes nowhere until each waiting call is answered.
 				if (!rawStructuredMode && event.stop_reason.type === "requires_action") {
 					for (const toolUseId of event.stop_reason.event_ids) {
-						const answer = JSON.stringify({
+						const send = `checkfu sessions:events send --session-id ${sessionId} --event`
+						const kind = toolUseKinds.get(toolUseId)
+						const result = `${send} '${JSON.stringify({
+							type: "user.custom_tool_result",
+							custom_tool_use_id: toolUseId,
+							content: [{ type: "text", text: "..." }],
+						})}'`
+						const approval = `${send} '${JSON.stringify({
 							type: "user.tool_confirmation",
 							tool_use_id: toolUseId,
 							result: "allow",
-						})
+						})}' (or "result":"deny")`
 						yield* writeStderrLine(
 							escapeTerminalControlCharacters(
-								`[needs approval] ${toolUseId}: checkfu sessions:events send --session-id ${sessionId} --event '${answer}' (or "result":"deny")`,
+								kind === "result"
+									? `[needs result] ${toolUseId}: ${result}`
+									: kind === "approval"
+										? `[needs approval] ${toolUseId}: ${approval}`
+										: `[needs answer] ${toolUseId}: a call made before this stream started; answer a custom tool with ${result}, or a call waiting for approval with ${approval}`,
 							),
 						)
 					}
@@ -433,6 +455,12 @@ const renderConnectEvent = (
 			case "user.tool_confirmation": {
 				if (!rawStructuredMode) {
 					yield* writeStderrLine(`[approval] ${escapeTerminalControlCharacters(event.result)}`)
+				}
+				break
+			}
+			case "user.custom_tool_result": {
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(event.is_error === true ? "[tool result] error" : "[tool result]")
 				}
 				break
 			}
@@ -862,6 +890,7 @@ export const sessionsConnectCommand = Command.make(
 				}),
 			)
 
+			const toolUseKinds = new Map<string, "approval" | "result">()
 			const settleDeferredRef = yield* Ref.make(yield* Deferred.make<void>())
 			const streamFailedRef = yield* Ref.make<CliFailure | null>(null)
 			const streamFailedDeferred = yield* Deferred.make<void>()
@@ -885,6 +914,7 @@ export const sessionsConnectCommand = Command.make(
 							sessionId,
 							event,
 							stateRef,
+							toolUseKinds,
 							settleDeferredRef,
 							stopConnectDeferred,
 							expectArchivedEvent,

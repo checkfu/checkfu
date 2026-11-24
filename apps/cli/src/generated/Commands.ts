@@ -141,7 +141,7 @@ const agentsCreateCommand = CommandMake(
 		tools: FlagString("tools").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server. (JSON, YAML, or @file)",
+				"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -301,7 +301,7 @@ const agentsUpdateCommand = CommandMake(
 		tools: FlagString("tools").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server. (JSON, YAML, or @file)",
+				"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -1279,6 +1279,11 @@ const sessionsEventsSendCommand = CommandMake(
 			command:
 				'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.tool_confirmation","tool_use_id":"call_1","result":"allow"}\'',
 			description: "Allow a tool call the session is waiting on",
+		},
+		{
+			command:
+				'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.custom_tool_result","custom_tool_use_id":"call_1","content":[{"type":"text","text":"42"}]}\'',
+			description: "Answer a custom tool call the session is waiting on",
 		},
 	]),
 )

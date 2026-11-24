@@ -79,13 +79,14 @@ export type McpServerBinding = typeof McpServerBinding.Type
  */
 export const McpServersText = Schema.String.check(Schema.isMaxLength(MAX_MCP_SERVERS_TEXT_LENGTH))
 
-const listText = <
+export const listText = <
 	S extends Schema.Top & { readonly DecodingServices: never; readonly EncodingServices: never },
 >(
 	item: S,
+	max: number = MAX_MCP_SERVERS,
 ) => {
 	const codec = Schema.fromJsonString(
-		Schema.toCodecJson(Schema.Array(item).check(Schema.isMaxLength(MAX_MCP_SERVERS))),
+		Schema.toCodecJson(Schema.Array(item).check(Schema.isMaxLength(max))),
 	)
 	const encode = Schema.encodeSync(codec)
 	const decode = Schema.decodeUnknownSync(codec)

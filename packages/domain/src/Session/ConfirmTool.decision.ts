@@ -25,6 +25,7 @@ export class ConfirmToolDecision extends Domain.Decision(ConfirmTool, {
 		}
 		if (
 			confirmation.state.status !== "pending" ||
+			confirmation.state.awaits !== "confirmation" ||
 			confirmation.state.session_id !== session.id ||
 			confirmation.state.tool_use_id !== cmd.tool_use_id ||
 			(session.state._tag === "Idle" && !session.state.awaiting)

@@ -149,6 +149,30 @@
 			"ConfirmTool.AnAnswerLeavesARunningTurnRunning": {
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Running\" ||\n\t\t\t(after.session._tag === \"Running\" && after.session.turn === before.session.turn)"
+			},
+			"ToolConfirmation.OnlyAReturnedResultIsAnError": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"returned\", !s.result_is_error].some((ok) => ok)"
+			},
+			"ToolConfirmation.ACallIsAnsweredWithWhatItAwaits": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.status === after.status ||\n\t\t\t(((after.status !== \"allowed\" && after.status !== \"denied\") ||\n\t\t\t\tbefore.awaits === \"confirmation\") &&\n\t\t\t\t(after.status !== \"returned\" || before.awaits === \"result\"))"
+			},
+			"ToolConfirmation.ACallKeepsWhatItAwaits": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.awaits === before.awaits].some((ok) => ok)"
+			},
+			"ReturnCustomToolResult.OnlyAPendingCallOfTheSessionGetsAResult": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.call.status === \"pending\" &&\n\t\t\tbefore.call.awaits === \"result\" &&\n\t\t\tbefore.call.session_id !== \"\" &&\n\t\t\tafter.call.status === \"returned\""
+			},
+			"ReturnCustomToolResult.AResultLeavesARunningTurnRunning": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Running\" ||\n\t\t\t(after.session._tag === \"Running\" && after.session.turn === before.session.turn)"
+			},
+			"ReturnCustomToolResult.AResultResumesAWaitingSession": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Idle\" ||\n\t\t\t(before.session.awaiting &&\n\t\t\t\tafter.session._tag === \"Running\" &&\n\t\t\t\tafter.session.turn === before.session.turn + 1)"
 			}
 		}
 	}

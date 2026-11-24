@@ -4,6 +4,7 @@ import { turnKey } from "./RunTurn.saga.ts"
 import { Session } from "./Session.aggregate.ts"
 import type { SessionId } from "./Session.id.ts"
 import {
+	MAX_CUSTOM_TOOL_INPUT_JSON_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
 	MAX_TOOL_CALLS_PER_TURN,
 	MAX_TOOL_INPUT_JSON_LENGTH,
@@ -59,32 +60,49 @@ export interface ToolCallBounds {
  * results. An input or result that does not fit its own limit or the turn's remaining budget is
  * cut and marked. Results find their call by the id the transcript gave it, not the published one;
  * an id used again names a new call, and a result goes to the latest call with its id.
+ *
+ * A custom tool's use is the request the application runs, not only a record of it, so it is
+ * exempt from the count and the turn's budget and keeps its whole input: the tool refuses to park
+ * a call whose input is over its own limit.
  */
 export const boundToolCalls = (): ToolCallBounds => {
 	let budget = MAX_TURN_TOOL_TEXT_LENGTH
+	let audited = 0
 	let awaiting = 0
 	const calls: Array<{ readonly use: CallUse; result?: CallResult }> = []
 	const byId = new Map<string, number>()
 	return {
 		add: (event) => {
-			if (event.type === "tool_use" || event.type === "mcp_tool_use") {
+			if (
+				event.type === "tool_use" ||
+				event.type === "mcp_tool_use" ||
+				event.type === "custom_tool_use"
+			) {
 				// A reused id names a new call: the earlier one can no longer get a result, whether
 				// or not this one is kept.
 				const earlier = byId.get(event.tool_use_id)
 				if (earlier !== undefined) {
 					byId.delete(event.tool_use_id)
-					if (calls[earlier]?.result === undefined) {
+					const replaced = calls[earlier]
+					if (replaced?.result === undefined && replaced?.use.type !== "custom_tool_use") {
 						awaiting -= 1
 					}
 				}
-				if (calls.length >= MAX_TOOL_CALLS_PER_TURN) {
+				const request = event.type === "custom_tool_use"
+				if (!request && audited >= MAX_TOOL_CALLS_PER_TURN) {
 					return
 				}
 				const size = JSON.stringify(event.input).length
-				const fits = size <= Math.min(MAX_TOOL_INPUT_JSON_LENGTH, budget)
-				budget -= fits ? size : 0
+				const fits = request
+					? size <= MAX_CUSTOM_TOOL_INPUT_JSON_LENGTH
+					: size <= Math.min(MAX_TOOL_INPUT_JSON_LENGTH, budget)
+				if (!request) {
+					audited += 1
+					budget -= fits ? size : 0
+				}
 				byId.set(event.tool_use_id, calls.length)
-				awaiting += 1
+				// The application answers a request with an event of its own, never in this transcript.
+				awaiting += request ? 0 : 1
 				const use = {
 					tool_use_id: publicToolUseId(event.tool_use_id),
 					name: clampName(event.name),
@@ -93,8 +111,8 @@ export const boundToolCalls = (): ToolCallBounds => {
 				}
 				calls.push({
 					use:
-						event.type === "tool_use"
-							? { type: "tool_use", ...use }
+						event.type !== "mcp_tool_use"
+							? { type: event.type, ...use }
 							: {
 									type: "mcp_tool_use",
 									...use,
@@ -135,7 +153,7 @@ export const boundToolCalls = (): ToolCallBounds => {
 			}
 			awaiting -= 1
 		},
-		complete: () => calls.length >= MAX_TOOL_CALLS_PER_TURN && awaiting === 0,
+		complete: () => audited >= MAX_TOOL_CALLS_PER_TURN && awaiting === 0,
 		calls: () =>
 			calls.map(({ use, result }) =>
 				result === undefined ? { _tag: "use", use } : { _tag: "pair", use, result },

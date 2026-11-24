@@ -6,6 +6,7 @@ import {
 	NonEmptyString,
 	PositiveInt,
 	SessionEventFields,
+	CustomToolInput,
 	ToolCall,
 	ToolInput,
 } from "./SessionTypes.ts"
@@ -32,6 +33,11 @@ export class AgentMcpToolResult extends Domain.Event(
 	SessionEventFields["agent.mcp_tool_result"],
 ) {}
 
+export class AgentCustomToolUse extends Domain.Event("agent.custom_tool_use", {
+	...SessionEventFields["agent.custom_tool_use"],
+	input: CustomToolInput,
+}) {}
+
 export class RecordToolCall extends Domain.Command("RecordToolCall", {
 	input: {
 		session_id: SessionId,
@@ -39,6 +45,6 @@ export class RecordToolCall extends Domain.Command("RecordToolCall", {
 		model_request_start_id: NonEmptyString,
 		call: ToolCall,
 	},
-	events: [AgentToolUse, AgentToolResult, AgentMcpToolUse, AgentMcpToolResult],
+	events: [AgentToolUse, AgentToolResult, AgentMcpToolUse, AgentMcpToolResult, AgentCustomToolUse],
 	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, UnknownModelRequest],
 }) {}

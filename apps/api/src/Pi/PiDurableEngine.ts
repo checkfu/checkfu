@@ -50,7 +50,7 @@ export interface PiDurableBackend {
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
 	readonly reset: Effect.Effect<never>
 	/** How the session object names calls Pi's transcript does not: MCP and script calls. */
-	readonly servedToolCalls?: () => ServedToolCalls
+	readonly servedToolCalls?: () => ServedToolCalls | undefined
 }
 
 const submissionOf = (pi: Harness, operationId: string) =>
@@ -115,10 +115,37 @@ const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array
 
 /** Calls a turn made that Pi's transcript does not name as such. */
 export interface ServedToolCalls {
-	/** The event as the session log names it: a call to an MCP tool becomes an MCP call. */
-	readonly named: (event: ToolEvent) => ToolEvent
+	/**
+	 * The event as the session log names it, such as a call to an MCP tool as an MCP call, or
+	 * nothing when the log records it some other way.
+	 */
+	readonly named: (event: ToolEvent) => ToolEvent | undefined
 	/** The calls a script made, in order, read only as far as they are wanted. */
 	readonly nested: (scriptCallId: string) => Iterable<ToolEvent>
+	/** The whole transcript must be read: a call past the audit bounds can still be published. */
+	readonly readToEnd?: boolean
+}
+
+/** Several sources of served calls, each naming what the one before it left alone. */
+export const servedFrom = (
+	...sources: ReadonlyArray<ServedToolCalls | undefined>
+): ServedToolCalls | undefined => {
+	const present = sources.filter((source) => source !== undefined)
+	return present.length === 0
+		? undefined
+		: {
+				named: (event) =>
+					present.reduce<ToolEvent | undefined>(
+						(named, source) => (named === undefined ? undefined : source.named(named)),
+						event,
+					),
+				*nested(scriptCallId) {
+					for (const source of present) {
+						yield* source.nested(scriptCallId)
+					}
+				},
+				readToEnd: present.some((source) => source.readToEnd === true),
+			}
 }
 
 /**
@@ -140,6 +167,7 @@ export const readTurnToolCalls = async (
 		return []
 	}
 	const bounds = boundToolCalls()
+	const done = () => served?.readToEnd !== true && bounds.complete()
 	const visit = (entry: EntryRecord) => {
 		for (const message of entry.model ?? []) {
 			if (message.role === "assistant") {
@@ -151,9 +179,12 @@ export const readTurnToolCalls = async (
 							name: block.name,
 							input: block.arguments,
 						}
-						bounds.add(served?.named(use) ?? use)
+						const named = served === undefined ? use : served.named(use)
+						if (named !== undefined) {
+							bounds.add(named)
+						}
 						for (const nested of served?.nested(block.id) ?? []) {
-							if (bounds.complete()) {
+							if (done()) {
 								break
 							}
 							bounds.add(nested)
@@ -170,7 +201,10 @@ export const readTurnToolCalls = async (
 					})),
 					is_error: message.isError,
 				}
-				bounds.add(served?.named(result) ?? result)
+				const named = served === undefined ? result : served.named(result)
+				if (named !== undefined) {
+					bounds.add(named)
+				}
 			}
 		}
 	}
@@ -191,7 +225,7 @@ export const readTurnToolCalls = async (
 			}
 			if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
 				visit(entry)
-				if (bounds.complete()) {
+				if (done()) {
 					return bounds.calls()
 				}
 			}

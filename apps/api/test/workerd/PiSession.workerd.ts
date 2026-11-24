@@ -1527,6 +1527,251 @@ describe("PiSession real Durable Object under workerd", () => {
 		}, 120_000)
 	})
 
+	const returnResult = (
+		sessionId: string,
+		custom_tool_use_id: string,
+		text: string,
+		isError = false,
+	) =>
+		apiJson<{ readonly error?: { readonly message: string } }>(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: {
+				events: [
+					{
+						type: "user.custom_tool_result",
+						custom_tool_use_id,
+						content: [{ type: "text", text }],
+						...(isError ? { is_error: true } : {}),
+					},
+				],
+			},
+		})
+	// Looks the order up, then reports what the application said.
+	const lookUpOrder = () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			return output === undefined
+				? { kind: "tool_call", name: "lookup_order", arguments: { order: req.lastUserText } }
+				: { kind: "reply", text: `Done: ${output}` }
+		})
+	}
+	const replyText = async (sessionId: string) =>
+		(await listAllEvents(sessionId)).findLast((event) => event.type === "agent.message")
+			?.content?.[0]?.text
+
+	// Finds the desk's tool, then looks the order up and posts about it in one round.
+	const lookUpAndPost = () =>
+		fakeOpenAI.setHandler((req) => {
+			switch (req.toolOutputs.length) {
+				case 0:
+					return { kind: "tool_call", name: "tool_search", arguments: { query: "post" } }
+				case 1:
+					return {
+						kind: "tool_calls",
+						calls: [
+							{ name: "lookup_order", arguments: { order: req.lastUserText } },
+							{ name: "mcp__desk__post", arguments: { text: req.lastUserText } },
+						],
+					}
+				default:
+					return { kind: "reply", text: `Done: ${req.toolOutputs.slice(1).join(" | ")}` }
+			}
+		})
+
+	describe("Custom tools", () => {
+		const servers: Array<FakeMcpServer> = []
+		afterAll(async () => {
+			await Promise.all(servers.map((server) => server.close()))
+		})
+
+		const lookup = {
+			type: "custom",
+			name: "lookup_order",
+			description: "Look an order up in the shop's own system.",
+			input_schema: {
+				type: "object",
+				properties: { order: { type: "string" } },
+				required: ["order"],
+			},
+		}
+		const shopSession = async (mcpUrl?: string) => {
+			const agent = await createResource<{ readonly id: string; readonly tools?: unknown }>(
+				"/v1/agents",
+				{
+					name: "Shop",
+					model: "gpt-4o-mini",
+					tools: [lookup],
+					...(mcpUrl === undefined
+						? {}
+						: { mcp_servers: [{ type: "url", name: "desk", url: mcpUrl }] }),
+				},
+			)
+			expect(agent.tools).toEqual([lookup])
+			return createResource<SessionResource>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+		}
+		it("pauses on a custom tool call and carries on from the application's result", async () => {
+			const session = await shopSession()
+			lookUpOrder()
+
+			expect((await sender(session.id)("A-1")).status).toBe(200)
+			const paused = await idle(session.id, 1)
+			expect(paused?.type).toBe("requires_action")
+			expect(paused?.event_ids).toHaveLength(1)
+			const [waiting] = paused?.event_ids ?? []
+			expect((await agentEvents(session.id)).map((event) => [event.type, event.name])).toEqual([
+				["agent.custom_tool_use", "lookup_order"],
+			])
+			expect((await agentEvents(session.id))[0]).toMatchObject({
+				tool_use_id: waiting,
+				input: { order: "A-1" },
+			})
+			const offered = fakeOpenAI.requests.at(-1)?.toolNames ?? []
+			expect(offered).toContain("lookup_order")
+
+			// Neither an approval nor a result for another call ends this wait.
+			expect((await confirm(session.id, waiting ?? "", "allow")).status).toBe(409)
+			expect((await returnResult(session.id, "call_nope", "shipped")).status).toBe(409)
+
+			expect((await returnResult(session.id, waiting ?? "", "shipped")).status).toBe(200)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(await replyText(session.id)).toBe("Done: shipped")
+
+			const events = await listAllEvents(session.id)
+			expect(events.filter((event) => event.type === "agent.custom_tool_use")).toHaveLength(1)
+			expect(events.some((event) => event.type === "agent.tool_result")).toBe(false)
+			expect(events.find((event) => event.type === "user.custom_tool_result")).toMatchObject({
+				content: [{ type: "text", text: "shipped" }],
+			})
+
+			expect((await returnResult(session.id, waiting ?? "", "lost")).status).toBe(409)
+		}, 90_000)
+
+		it("tells the model when the application says the tool failed", async () => {
+			const session = await shopSession()
+			lookUpOrder()
+
+			await sender(session.id)("A-2")
+			const [waiting] = (await idle(session.id, 1))?.event_ids ?? []
+			expect((await returnResult(session.id, waiting ?? "", "no such order", true)).status).toBe(
+				200,
+			)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(await replyText(session.id)).toBe("Done: no such order")
+			expect(
+				(await listAllEvents(session.id)).find((event) => event.type === "user.custom_tool_result"),
+			).toMatchObject({ is_error: true })
+		}, 90_000)
+
+		it("waits on a custom tool and an approval together, answered in either order", async () => {
+			const mcp = await startFakeMcpServer(null)
+			servers.push(mcp)
+			const waitingCalls = async (sessionId: string) => {
+				const events = await listAllEvents(sessionId)
+				return {
+					tool: events.find((event) => event.type === "agent.custom_tool_use")?.tool_use_id ?? "",
+					ask: events.find((event) => event.type === "agent.mcp_tool_use")?.tool_use_id ?? "",
+				}
+			}
+
+			lookUpAndPost()
+			const resultFirst = await shopSession(mcp.url)
+			await sender(resultFirst.id)("A-3")
+			const paused = await idle(resultFirst.id, 1)
+			expect(paused?.type).toBe("requires_action")
+			const first = await waitingCalls(resultFirst.id)
+			expect(paused?.event_ids?.toSorted()).toEqual([first.tool, first.ask].toSorted())
+			expect((await returnResult(resultFirst.id, first.tool, "shipped")).status).toBe(200)
+			expect(await idle(resultFirst.id, 2)).toEqual({
+				type: "requires_action",
+				event_ids: [first.ask],
+			})
+			expect(mcp.calls).toEqual([])
+			expect((await confirm(resultFirst.id, first.ask, "allow")).status).toBe(200)
+			expect((await idle(resultFirst.id, 3))?.type).toBe("end_turn")
+			expect(mcp.calls).toEqual([{ tool: "post", arguments: { text: "A-3" }, token: undefined }])
+			expect(await replyText(resultFirst.id)).toBe("Done: shipped | posted:A-3")
+
+			lookUpAndPost()
+			const approvalFirst = await shopSession(mcp.url)
+			await sender(approvalFirst.id)("A-4")
+			await idle(approvalFirst.id, 1)
+			const second = await waitingCalls(approvalFirst.id)
+			expect((await confirm(approvalFirst.id, second.ask, "allow")).status).toBe(200)
+			expect(await idle(approvalFirst.id, 2)).toEqual({
+				type: "requires_action",
+				event_ids: [second.tool],
+			})
+			expect(mcp.calls).toHaveLength(2)
+			expect((await returnResult(approvalFirst.id, second.tool, "shipped")).status).toBe(200)
+			expect((await idle(approvalFirst.id, 3))?.type).toBe("end_turn")
+			expect(await replyText(approvalFirst.id)).toBe("Done: shipped | posted:A-4")
+			expect(
+				(await listAllEvents(approvalFirst.id)).filter(
+					(event) => event.type === "agent.custom_tool_use",
+				),
+			).toHaveLength(1)
+		}, 180_000)
+
+		it("gives up a waiting custom tool call on an interrupt and takes a new message afterwards", async () => {
+			const session = await shopSession()
+			lookUpOrder()
+
+			await sender(session.id)("A-5")
+			const [waiting] = (await idle(session.id, 1))?.event_ids ?? []
+			const interrupted = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.interrupt" }] },
+			})
+			expect(interrupted.status).toBe(200)
+
+			const deadline = Date.now() + 20_000
+			let late = await returnResult(session.id, waiting ?? "", "shipped")
+			while (late.status !== 409 && Date.now() < deadline) {
+				await sleep(100)
+				late = await returnResult(session.id, waiting ?? "", "shipped")
+			}
+			expect(late.status).toBe(409)
+
+			fakeOpenAI.setHandler((req) => ({ kind: "reply", text: `Heard: ${req.lastUserText}` }))
+			expect((await sender(session.id)("something else")).status).toBe(200)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(await replyText(session.id)).toBe("Heard: something else")
+			expect(
+				(await listAllEvents(session.id)).some((event) => event.type === "user.custom_tool_result"),
+			).toBe(false)
+		}, 90_000)
+
+		it("does not let a script call a custom tool", async () => {
+			const session = await shopSession()
+			fakeOpenAI.setHandler((req) => {
+				const [output] = req.toolOutputs
+				return output === undefined
+					? {
+							kind: "tool_call",
+							name: "codemode",
+							arguments: {
+								code: 'return await tools.lookup_order({ order: "A-6" });',
+							},
+						}
+					: { kind: "reply", text: `Done: ${output}` }
+			})
+
+			await sender(session.id)("go")
+			expect((await idle(session.id, 1))?.type).toBe("end_turn")
+			const events = await agentEvents(session.id)
+			expect(events.map((event) => event.type)).toEqual([
+				"agent.tool_use",
+				"agent.tool_result",
+				"agent.message",
+			])
+			expect(events[1]).toMatchObject({ is_error: true })
+			expect(await replyText(session.id)).toContain("tools.lookup_order does not exist")
+		}, 60_000)
+	})
+
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
 		const queuedPrompt = "queued-after-interrupt"

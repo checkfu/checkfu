@@ -11,10 +11,14 @@ import type {
 	HarnessUnavailable,
 	TurnFailed,
 	TurnInterrupted,
+	TurnPaused,
 } from "@checkfu/domain/Session/Harness.external"
+import { PauseTurn } from "@checkfu/domain/Session/PauseTurn.command"
 import { clampToolCalls, recordToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
+import { turnKey } from "@checkfu/domain/Session/RunTurn.saga"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import { ToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Clock from "effect/Clock"
@@ -79,6 +83,8 @@ export interface ModelHandler {
 		readonly turn: number
 	}) => Effect.Effect<void, HarnessUnavailable>
 	readonly toolEvents?: (args: ModelTurnInput) => ReadonlyArray<ToolEvent>
+	/** The tool calls a turn pauses on, by id; none for a turn that runs to its reply. */
+	readonly waiting?: (args: ModelTurnInput) => ReadonlyArray<string>
 }
 
 export interface CliRunOptions {
@@ -122,6 +128,7 @@ const defaultModelHandler: Required<ModelHandler> = {
 		}),
 	interrupt: () => Effect.void,
 	toolEvents: () => [],
+	waiting: () => [],
 }
 
 export const makeTestServer = (handler?: ModelHandler) =>
@@ -130,18 +137,41 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			generate: handler?.generate ?? defaultModelHandler.generate,
 			interrupt: handler?.interrupt ?? defaultModelHandler.interrupt,
 			toolEvents: handler?.toolEvents ?? defaultModelHandler.toolEvents,
+			waiting: handler?.waiting ?? defaultModelHandler.waiting,
 		}
 		const HarnessLive = boundedHarness(
 			Effect.map(Session, (sessions) => ({
-				runTurn: (args: ModelTurnInput) =>
-					Effect.andThen(
+				runTurn: (args: ModelTurnInput) => {
+					const waiting = effective.waiting(args)
+					const settle: Effect.Effect<
+						HarnessReply,
+						TurnFailed | TurnInterrupted | TurnPaused | HarnessUnavailable
+					> =
+						waiting.length === 0
+							? effective.generate(args)
+							: Effect.andThen(
+									Effect.orDie(
+										sessions.send(
+											new PauseTurn({
+												session_id: args.session_id,
+												turn: args.turn,
+												request_seq: 1,
+												model_request_start_id: `${turnKey(args.session_id, args.turn)}:req:1`,
+												event_ids: ToolUseIds.encode(waiting),
+											}),
+										),
+									),
+									Effect.fail<TurnPaused>({ _tag: "TurnPaused" }),
+								)
+					return Effect.andThen(
 						recordToolCalls({
 							session_id: args.session_id,
 							turn: args.turn,
 							calls: clampToolCalls(effective.toolEvents(args)),
 						}).pipe(Effect.provideService(Session, sessions)),
-						effective.generate(args),
-					),
+						settle,
+					)
+				},
 				interrupt: effective.interrupt,
 				discardWorkspace: () => Effect.void,
 			})),

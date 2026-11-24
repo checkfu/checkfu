@@ -15,6 +15,13 @@ import { RepublishAgent } from "@checkfu/domain/Agent/RepublishAgent.command"
 import { RepublishAgentDecision } from "@checkfu/domain/Agent/RepublishAgent.decision"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import {
+	CustomToolList,
+	MAX_CUSTOM_TOOLS,
+	MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH,
+	customToolSetId,
+} from "@checkfu/domain/Mcp/CustomTools"
+import type { CustomTool } from "@checkfu/domain/Mcp/CustomTools"
+import {
 	McpServerSet,
 	McpServerSetId,
 	RecordMcpServers,
@@ -28,6 +35,8 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import { isReservedToolName } from "../Pi/PiToolNames.ts"
+import { ToolSchemaCheck, externalReference } from "../Pi/PiToolSchemaCheck.ts"
 import { resolveCatalogModel } from "../Pi/PiCatalog.ts"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
@@ -203,7 +212,75 @@ const changesConfiguration = (
 				: head.has_description && changes.description === head.description),
 	].every(Boolean)
 
-const mcpFields = (servers: string) => {
+type AgentTool = McpToolset | CustomTool
+
+const toolsetsIn = (tools: ReadonlyArray<AgentTool>) =>
+	tools.filter((tool): tool is McpToolset => tool.type === "mcp_toolset")
+const customToolsIn = (tools: ReadonlyArray<AgentTool>) =>
+	tools.filter((tool): tool is CustomTool => tool.type === "custom")
+
+const customToolsText = (tools: ReadonlyArray<CustomTool>) =>
+	Effect.gen(function* () {
+		if (tools.length > MAX_CUSTOM_TOOLS) {
+			return yield* reject(400, `An agent has at most ${MAX_CUSTOM_TOOLS} custom tools.`)
+		}
+		for (const [index, tool] of tools.entries()) {
+			if (tools.findIndex((other) => other.name === tool.name) !== index) {
+				return yield* reject(400, `Custom tool name "${tool.name}" is used more than once.`)
+			}
+			if (isReservedToolName(tool.name)) {
+				return yield* reject(
+					400,
+					`Custom tool name "${tool.name}" is reserved: it starts with mcp__ or names a built-in tool.`,
+				)
+			}
+			if (tool.input_schema["type"] !== "object") {
+				return yield* reject(
+					400,
+					`The input_schema of custom tool "${tool.name}" must have type "object".`,
+				)
+			}
+			if (JSON.stringify(tool.input_schema).length > MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH) {
+				return yield* reject(
+					400,
+					`The input_schema of custom tool "${tool.name}" is longer than ${MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH} characters of JSON.`,
+				)
+			}
+			const reference = externalReference(tool.input_schema)
+			if (reference !== undefined) {
+				return yield* reject(
+					400,
+					`The input_schema of custom tool "${tool.name}" references "${reference}", which cannot be resolved: only references within the schema (starting with #) are supported.`,
+				)
+			}
+		}
+		// Pi checks every call's arguments against its tool's schema, so a schema Pi cannot compile
+		// is refused now rather than failing the agent's calls later.
+		const checkable =
+			tools.length === 0
+				? []
+				: yield* (yield* ToolSchemaCheck).checkable(tools.map((tool) => tool.input_schema))
+		const uncheckable = tools.find((_, index) => checkable[index] !== true)
+		if (uncheckable !== undefined) {
+			return yield* reject(
+				400,
+				`The input_schema of custom tool "${uncheckable.name}" is not a valid JSON Schema: check its $ref and pattern keywords.`,
+			)
+		}
+		const text = CustomToolList.encode(
+			tools.map(({ type, name, description, input_schema }) => ({
+				type,
+				name,
+				description,
+				input_schema,
+			})),
+		)
+		return text.length > MAX_MCP_SERVERS_TEXT_LENGTH
+			? yield* reject(400, "The agent's custom tools are too large together.")
+			: text
+	})
+
+const toolFields = (servers: string, customTools: string) => {
 	const decoded = McpServerList.decode(servers)
 	return {
 		mcp_servers: decoded.map((server) => ({
@@ -211,7 +288,7 @@ const mcpFields = (servers: string) => {
 			name: server.name,
 			url: server.url,
 		})),
-		tools: toolsetsOf(decoded),
+		tools: [...toolsetsOf(decoded), ...CustomToolList.decode(customTools)],
 	}
 }
 
@@ -231,18 +308,25 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const supported = (model: AgentModel) =>
 			isSupportedModel(model.id) ? Effect.void : unsupportedModel(model)
 
-		// A version's servers are recorded under its id before the version is minted.
-		const serversOf = (versionId: string) =>
-			Effect.map(serverSets.get(McpServerSetId.make(versionId)), (set) => set.servers)
-		const recordServers = (versionId: string, servers: string) =>
-			servers === ""
-				? Effect.void
-				: serverSets.send(new RecordMcpServers({ set_id: McpServerSetId.make(versionId), servers }))
+		// A version's servers and custom tools are recorded under its id before the version is minted.
+		const recorded = (set_id: McpServerSetId) =>
+			Effect.map(serverSets.get(set_id), (set) => set.servers)
+		const record = (set_id: McpServerSetId, servers: string) =>
+			servers === "" ? Effect.void : serverSets.send(new RecordMcpServers({ set_id, servers }))
+		const serversOf = (versionId: string) => recorded(McpServerSetId.make(versionId))
+		const customToolsOf = (versionId: string) => recorded(customToolSetId(versionId))
+		const recordTools = (versionId: string, servers: string, customTools: string) =>
+			Effect.andThen(
+				record(McpServerSetId.make(versionId), servers),
+				record(customToolSetId(versionId), customTools),
+			)
+		const toolFieldsOf = (versionId: string) =>
+			Effect.map(
+				Effect.all([serversOf(versionId), customToolsOf(versionId)]),
+				([servers, customTools]) => toolFields(servers, customTools),
+			)
 		const serializeAgent = <A extends { readonly current_version_id: string }>(agent: A) =>
-			Effect.map(serversOf(agent.current_version_id), (servers) => ({
-				...agent,
-				...mcpFields(servers),
-			}))
+			Effect.map(toolFieldsOf(agent.current_version_id), (fields) => ({ ...agent, ...fields }))
 
 		const loadCommittedAgentVersion = (
 			id: AgentId,
@@ -299,7 +383,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					model: minted.model,
 					system: minted.system,
 					description: minted.description,
-					...mcpFields(yield* serversOf(minted.id)),
+					...(yield* toolFieldsOf(minted.id)),
 					created_at: head.created_at,
 					updated_at: minted.created_at,
 					archived_at: null,
@@ -313,7 +397,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null
-					const mcpServers = yield* mcpServersText(payload.mcp_servers ?? [], payload.tools ?? [])
+					const tools = payload.tools ?? []
+					const mcpServers = yield* mcpServersText(payload.mcp_servers ?? [], toolsetsIn(tools))
+					const customTools = yield* customToolsText(customToolsIn(tools))
 					let id: AgentId
 					let versionId: AgentVersionId
 					let sendOptions: { readonly commandId: string } | undefined
@@ -331,6 +417,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							system,
 							description,
 							...(mcpServers === "" ? {} : { mcp_servers: mcpServers }),
+							...(customTools === "" ? {} : { custom_tools: customTools }),
 						})
 						if (!isSupportedModel(model.id)) {
 							const claim = yield* idempotencyClaims.get(batchId)
@@ -353,7 +440,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						id = AgentId.make(yield* randomId(random, "agent"))
 						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
 					}
-					yield* recordServers(versionId, mcpServers)
+					yield* recordTools(versionId, mcpServers, customTools)
 					const receipt = yield* createAgent.send(
 						new CreateAgent({
 							agent_id: id,
@@ -399,13 +486,8 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
-					const {
-						version,
-						model: modelInput,
-						mcp_servers: servers,
-						tools: toolsets,
-						...fields
-					} = payload
+					const { version, model: modelInput, mcp_servers: servers, tools, ...fields } = payload
+					const toolsets = tools === undefined ? undefined : toolsetsIn(tools)
 					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
 					if (model !== undefined) {
 						yield* supported(model)
@@ -428,13 +510,21 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 											nextServers.some((server) => server.name === toolset.mcp_server_name),
 										),
 								)
+					// Replaced tools replace the custom tools too; otherwise the next version keeps them.
+					const currentCustomTools = isHead ? yield* customToolsOf(head.current_version_id) : ""
+					const nextCustomTools =
+						tools === undefined ? currentCustomTools : yield* customToolsText(customToolsIn(tools))
 					const nextVersionId = AgentVersionId.make(yield* randomId(random, "aver"))
 					const changes = model === undefined ? fields : { ...fields, model }
-					// Servers are staged only for a version that will be minted, so an update that
-					// changes nothing leaves nothing behind.
-					const staged = isHead && (next !== current || changesConfiguration(head, changes))
+					// Servers and tools are staged only for a version that will be minted, so an update
+					// that changes nothing leaves nothing behind.
+					const staged =
+						isHead &&
+						(next !== current ||
+							nextCustomTools !== currentCustomTools ||
+							changesConfiguration(head, changes))
 					if (staged) {
-						yield* recordServers(nextVersionId, next)
+						yield* recordTools(nextVersionId, next, nextCustomTools)
 					}
 					const updated = yield* updateAgent.send(
 						new UpdateAgent({
@@ -445,11 +535,12 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						}),
 					)
 					if (!staged && updated.reply.version !== version) {
-						yield* recordServers(updated.reply.version_id, next)
+						yield* recordTools(updated.reply.version_id, next, nextCustomTools)
 					}
-					// An update that changed nothing else mints no version, so new servers get their own.
+					// An update that changed nothing else mints no version, so new servers or tools get their own.
 					const receipt =
-						next !== current && updated.reply.version === version
+						(next !== current || nextCustomTools !== currentCustomTools) &&
+						updated.reply.version === version
 							? yield* republishAgent.send(
 									new RepublishAgent({
 										agent_id: id,
