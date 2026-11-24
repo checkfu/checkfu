@@ -48,12 +48,18 @@ const accepted = (connect: Connect, key: string, after: number) =>
 			return socket
 		}),
 		(socket) => Effect.sync(() => socket.close(1000, "")),
+		// The upgrade can be retried for a while during a deploy; a client that left stops it.
+		{ interruptible: true },
 	)
+
+// Cloudflare's WebSocket cannot pause, so frames a slow client has not read wait in the Worker.
+// Past this many bytes the stream ends and the client resumes from the last event it received.
+export const SOCKET_BUFFER_BYTES = 1024 * 1024
 
 /**
  * A view key's events after `after`, pushed by the Durable Object that owns the key over a
- * hibernatable WebSocket, decoded with `entry`. Ends when the object closes the socket; the
- * caller resumes from the last `seq` it saw.
+ * hibernatable WebSocket, decoded with `entry`. Ends when the object closes the socket or the
+ * caller falls `SOCKET_BUFFER_BYTES` behind; the caller resumes from the last `seq` it saw.
  */
 export const objectSocketEvents = <A extends object, I>(
 	connect: Connect,
@@ -76,12 +82,17 @@ export const objectSocketEvents = <A extends object, I>(
 	const text = new TextDecoder()
 	return Stream.unwrap(
 		Effect.map(
-			Socket.fromWebSocket(accepted(connect, key, after), { disableReconnects: true }),
+			Socket.fromWebSocket(accepted(connect, key, after), {
+				disableReconnects: true,
+				highWaterMark: SOCKET_BUFFER_BYTES,
+			}),
 			Socket.toStream,
 		),
 	).pipe(
+		// A closed or overflowed socket ends the stream after the frames it delivered.
 		Stream.catchIf(
-			(error) => error.reason._tag === "SocketCloseError",
+			(error) =>
+				error.reason._tag === "SocketCloseError" || error.reason._tag === "SocketReadError",
 			() => Stream.empty,
 		),
 		Stream.mapEffect((bytes) => decodeFrame(text.decode(bytes))),
