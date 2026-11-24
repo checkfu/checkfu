@@ -978,6 +978,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Effect.gen(function* () {
 					const realVersionsByNumber = yield* AgentVersionByNumberView
 					let lagging = false
+					let stalled = false
+					const stalledTimeouts: Array<unknown> = []
 					let waitCalls = 0
 					const checkpoints: Array<unknown> = []
 					// While lagging, the view has nothing for a read without a checkpoint, and every
@@ -993,6 +995,22 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								checkpoints.push(options?.atLeast)
 								if (options?.atLeast === undefined) {
 									return Effect.succeedNone
+								}
+								// A view that never reaches the checkpoint answers when its timeout runs
+								// out: the one the caller passes, or the domain's own 10 seconds.
+								if (stalled) {
+									stalledTimeouts.push(options.timeout)
+									return Effect.sleep(options.timeout ?? "10 seconds").pipe(
+										Effect.andThen(
+											Effect.fail(
+												new Domain.ConsistencyTimeout({
+													view: "AgentVersionByNumberView",
+													key: String(key),
+													...options.atLeast,
+												}),
+											),
+										),
+									)
 								}
 							}
 							return realVersionsByNumber.get(key, options)
@@ -1039,6 +1057,23 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(waitCalls).toBe(0)
 					expect(checkpoints).toEqual([expect.objectContaining({ stream: `Agent/${created.id}` })])
+
+					// A checkpointed read that cannot be served gives up within the configured version
+					// budget (50 ms here), not the domain's default, and reports the version as pending.
+					stalled = true
+					const stalledRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/agents/${created.id}`,
+						headers: AUTH_HEADERS,
+						body: { version: 1, name: "No-op Agent" },
+					})
+					expect(stalledRes.status).toBe(202)
+					expect(stalledTimeouts).toEqual(["50 millis"])
+					expect(yield* Effect.promise(() => stalledRes.json())).toEqual({
+						id: created.id,
+						type: "agent",
+						pending: true,
+					})
 				}).pipe(
 					Effect.scoped,
 					Effect.provide(

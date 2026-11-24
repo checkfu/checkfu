@@ -772,6 +772,30 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewsMatchAutomations: true,
 			AutomationDirectoryListsLiveAutomations: true,
 		})
+		// A pinned session reads its version's row, so a wrong historical row must be caught
+		// even when the row is present and the head is right.
+		for (const tamper of [
+			{ system: "Tampered system prompt" },
+			{ model: { id: "tampered-model" } },
+			{ id: AgentVersionId.make("aver_tampered") },
+		]) {
+			expect(
+				evaluateCheckfuInvariants({
+					...results.finalWorld,
+					AgentVersionByNumberView: results.finalWorld.AgentVersionByNumberView.map((row) =>
+						row.state.version === 1 ? { ...row, state: { ...row.state, ...tamper } } : row,
+					),
+				}),
+				JSON.stringify(tamper),
+			).toEqual({
+				AutomationViewsMatchAutomations: true,
+				EverySessionReferencesExistingAgentVersion: true,
+				EverySessionReferencesKnownEnvironment: true,
+				HostedViewsMatchAggregates: false,
+				TurnInputGenerationMatchesSession: true,
+				EnvironmentViewConfigMatchesEnvironment: true,
+			})
+		}
 		const v2LookupRow = results.finalWorld.AgentVersionByNumberView.find(
 			(row) => row.state.version === 2,
 		)!

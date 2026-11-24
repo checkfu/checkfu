@@ -144,14 +144,27 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					].every((ok) => ok)
 				}),
 				m.AgentVersionByNumberView.every((v) =>
-					m.Agent.some((a) =>
-						[
+					m.Agent.some((a) => {
+						// A pinned session reads its version's row, so every row, not only the head's,
+						// must say what the agent's own event for that version says.
+						const source = a.events
+							.filter((event) => event._tag === "agent.created" || event._tag === "agent.updated")
+							.find((event) => event.version === v.state.version)
+						if (source === undefined) {
+							return false
+						}
+						return [
 							a.id === v.state.agent_id,
 							a.state.status !== "",
 							v.state.version <= a.state.version,
 							v.id === `${a.id}@${v.state.version}`,
-						].every((ok) => ok),
-					),
+							source.version_id === v.state.id,
+							source.name === v.state.name,
+							source.model.id === v.state.model.id,
+							source.system === v.state.system,
+							source.description === v.state.description,
+						].every((ok) => ok)
+					}),
 				),
 				m.Environment.every((e) => {
 					const view = m.EnvironmentView.find((v) => v.id === e.id)

@@ -48,7 +48,7 @@
 			},
 			"Agents.EveryRecordedVersionBelongsToItsAgent": {
 				"kind": "model invariant",
-				"source": "(m) =>\n\t\t\tm.AgentVersionByNumberView.every((v) =>\n\t\t\t\tm.Agent.some((a) =>\n\t\t\t\t\t[\n\t\t\t\t\t\ta.id === v.state.agent_id,\n\t\t\t\t\t\ta.state.status !== \"\",\n\t\t\t\t\t\tv.state.version <= a.state.version,\n\t\t\t\t\t\tv.id === `${a.id}@${v.state.version}`,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t),\n\t\t\t)"
+				"source": "(m) =>\n\t\t\tm.AgentVersionByNumberView.every((v) =>\n\t\t\t\tm.Agent.some((a) => {\n\t\t\t\t\t// A pinned session reads its version's row, so every row, not only the head's,\n\t\t\t\t\t// must say what the agent's own event for that version says.\n\t\t\t\t\tconst source = a.events\n\t\t\t\t\t\t.filter((event) => event._tag === \"agent.created\" || event._tag === \"agent.updated\")\n\t\t\t\t\t\t.find((event) => event.version === v.state.version)\n\t\t\t\t\tif (source === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\ta.id === v.state.agent_id,\n\t\t\t\t\t\ta.state.status !== \"\",\n\t\t\t\t\t\tv.state.version <= a.state.version,\n\t\t\t\t\t\tv.id === `${a.id}@${v.state.version}`,\n\t\t\t\t\t\tsource.version_id === v.state.id,\n\t\t\t\t\t\tsource.name === v.state.name,\n\t\t\t\t\t\tsource.model.id === v.state.model.id,\n\t\t\t\t\t\tsource.system === v.state.system,\n\t\t\t\t\t\tsource.description === v.state.description,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t)"
 			},
 			"Agents.EveryVersionIsRecordedByNumber": {
 				"kind": "model invariant",

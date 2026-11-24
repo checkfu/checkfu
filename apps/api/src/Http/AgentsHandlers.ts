@@ -90,7 +90,10 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 				const lookupKey = agentVersionLookupKey(id, version)
 				const versionResult = yield* agentVersionsByNumber
-					.get(lookupKey, agentCommit === undefined ? {} : { atLeast: agentCommit })
+					.get(
+						lookupKey,
+						agentCommit === undefined ? {} : { atLeast: agentCommit, timeout: waitTimeout },
+					)
 					.pipe(orPending(id, "agent"))
 				if (isPending(versionResult)) {
 					return versionResult
