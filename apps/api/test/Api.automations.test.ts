@@ -321,6 +321,39 @@ describe("Automations API", () => {
 			}),
 		))
 
+	it("answers a lifecycle request that changes nothing at once, after a run has been recorded", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/run`)
+				yield* settledRuns(apiFetch, id, 1)
+				const unpaused = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					`/v1/automations/${id}/unpause`,
+				)
+				expect([unpaused.status, unpaused.body.status]).toEqual([200, "active"])
+
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/pause`)
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/run`)
+				yield* settledRuns(apiFetch, id, 2)
+				const pausedAgain = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					`/v1/automations/${id}/pause`,
+				)
+				expect([pausedAgain.status, pausedAgain.body.status]).toEqual([200, "paused"])
+			}),
+		))
+
 	it("pauses, unpauses and archives, and refuses changes once archived", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {

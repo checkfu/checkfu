@@ -11,7 +11,7 @@ import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
 export { AutomationSnapshot }
 
 export class AutomationView extends Domain.View("AutomationView", {
-	version: 1,
+	version: 2,
 	from: [Automation],
 	key: Automation,
 	state: Schema.NullOr(AutomationSnapshot),
@@ -81,5 +81,7 @@ export class AutomationView extends Domain.View("AutomationView", {
 						last_run_at: ctx.at,
 						updated_at: ctx.at,
 					},
+		"automation.run_started": (state) => state,
+		"automation.run_failed": (state) => state,
 	},
 }) {}

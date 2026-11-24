@@ -102,6 +102,7 @@ describe("MCP tool projection", () => {
 		).toEqual([
 			"agents_archiveAgent",
 			"automations_archiveAutomation",
+			"automations_createAutomation",
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
 			"sessions_archiveSession",

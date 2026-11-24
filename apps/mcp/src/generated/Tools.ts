@@ -279,7 +279,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/automations",
 		readOnly: false,
-		idempotent: false,
+		idempotent: true,
 		destructive: false,
 		inputSchema: {
 			type: "object",

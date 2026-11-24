@@ -199,7 +199,7 @@ describe("Checkfu MCP server", () => {
 				agents_getAgent: "read-only, additive, repeatable",
 				agents_updateAgent: "writes, destructive, not repeatable",
 				automations_archiveAutomation: "writes, destructive, repeatable",
-				automations_createAutomation: "writes, additive, not repeatable",
+				automations_createAutomation: "writes, additive, repeatable",
 				automations_getAutomation: "read-only, additive, repeatable",
 				automations_listRuns: "read-only, additive, repeatable",
 				automations_pauseAutomation: "writes, destructive, not repeatable",
