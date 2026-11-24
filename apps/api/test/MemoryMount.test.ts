@@ -1,13 +1,18 @@
 import { describe, expect, it } from "@effect/vitest"
 import { makeMemoryMount } from "../src/Workspace/MemoryMount.ts"
+import type { SeenHashes } from "../src/Workspace/MemoryMount.ts"
 import type { MemoryOutcome, SessionMemory } from "../src/Workspace/SessionMemory.ts"
 
-// One store held in a map, served the way the API serves a session's stores.
+// One store held in a map, served the way the API serves a session's stores: a write or remove
+// is refused when the store does not hold what its precondition expects.
 const fakeMemory = (
 	files: Map<string, string>,
 	access: "read_write" | "read_only" = "read_write",
+	mutations: Array<string> = [],
 ) => {
-	const ok = (content: string): MemoryOutcome => ({ ok: true, content_sha256: `sha:${content}` })
+	const sha = (content: string) => `sha:${content}`
+	const ok = (content: string): MemoryOutcome => ({ ok: true, content_sha256: sha(content) })
+	const changed: MemoryOutcome = { ok: false, code: "EEXIST", message: "changed" }
 	const memory: SessionMemory = {
 		mounts: () => Promise.resolve([{ name: "notes", access }]),
 		list: () =>
@@ -17,35 +22,84 @@ const fakeMemory = (
 		read: (_name, path) => {
 			const content = files.get(path)
 			return Promise.resolve(
-				content === undefined ? null : { content, content_sha256: `sha:${content}` },
+				content === undefined ? null : { content, content_sha256: sha(content), updated_at: 1 },
 			)
 		},
-		write: (_name, path, content) => {
+		write: (_name, path, content, precondition, mutationId) => {
+			mutations.push(mutationId)
+			const now = files.get(path)
+			const holds =
+				precondition.type === "none" ||
+				(precondition.type === "absent" && now === undefined) ||
+				(precondition.type === "content_sha256" &&
+					now !== undefined &&
+					sha(now) === precondition.content_sha256)
+			if (!holds) {
+				return Promise.resolve(changed)
+			}
 			files.set(path, content)
 			return Promise.resolve(ok(content))
 		},
-		remove: (_name, path) => {
-			const content = files.get(path) ?? ""
+		remove: (_name, path, expected, mutationId) => {
+			mutations.push(mutationId)
+			const now = files.get(path)
+			if (now === undefined || (expected !== null && sha(now) !== expected)) {
+				return Promise.resolve(changed)
+			}
 			files.delete(path)
-			return Promise.resolve(ok(content))
+			return Promise.resolve(ok(now))
 		},
 	}
 	return memory
 }
 
-const code = (operation: Promise<unknown>) =>
-	operation.then(
+const mapSeen = (seen = new Map<string, string>()): SeenHashes => ({
+	get: (key) => seen.get(key),
+	set: (key, value) => {
+		seen.set(key, value)
+	},
+	delete: (key) => {
+		seen.delete(key)
+	},
+})
+
+let counter = 0
+const nextId = () => `m${++counter}`
+
+const mountOver = (
+	files: Map<string, string>,
+	options: {
+		readonly access?: "read_write" | "read_only"
+		readonly seen?: SeenHashes
+		readonly mutations?: Array<string>
+	} = {},
+) =>
+	makeMemoryMount(
+		fakeMemory(files, options.access, options.mutations),
+		options.seen ?? mapSeen(),
+		nextId,
+	)
+
+const code = (operation: Promise<unknown> | undefined) =>
+	(operation ?? Promise.resolve()).then(
 		() => "ok",
 		(error: unknown) => (error as { readonly code?: string }).code ?? String(error),
 	)
 
+const body = (text: string | Uint8Array<ArrayBuffer>) => new Blob([text]).stream()
+const text = async (mount: ReturnType<typeof mountOver>, rel: string) => {
+	const read = await mount.readFile(rel)
+	return read === null ? null : new Uint8Array(await new Response(read.body).arrayBuffer())
+}
+
 describe("memory mount", () => {
 	it("shows a store as directories that exist while a memory is below them", async () => {
-		const files = new Map([
-			["/todo.md", "Ship."],
-			["/team/plan/q3.md", "Plan."],
-		])
-		const mount = makeMemoryMount(() => fakeMemory(files))
+		const mount = mountOver(
+			new Map([
+				["/todo.md", "Ship."],
+				["/team/plan/q3.md", "Plan."],
+			]),
+		)
 		expect((await mount.readdir("", {}))?.map(({ name, type }) => [name, type])).toEqual([
 			["notes", "dir"],
 		])
@@ -70,35 +124,89 @@ describe("memory mount", () => {
 			["/team/a.md", "A."],
 			["/team/b.md", "B."],
 		])
-		const mount = makeMemoryMount(() => fakeMemory(files))
-		expect(await code(mount.rm?.("notes/team", {}) ?? Promise.resolve())).toBe("ENOTEMPTY")
-		expect(await code(mount.rm?.("notes", { recursive: true }) ?? Promise.resolve())).toBe("EBUSY")
-		expect(await code(mount.mkdir?.("notes/team/a.md", {}) ?? Promise.resolve())).toBe("EEXIST")
-		expect(await code(mount.rm?.("notes/team", { recursive: true }) ?? Promise.resolve())).toBe(
-			"ok",
-		)
+		const mount = mountOver(files)
+		expect(await code(mount.rm?.("notes/team", {}))).toBe("ENOTEMPTY")
+		expect(await code(mount.rm?.("notes", { recursive: true }))).toBe("EBUSY")
+		expect(await code(mount.mkdir?.("notes/team/a.md", {}))).toBe("EEXIST")
+		expect(await code(mount.rm?.("notes/team", { recursive: true }))).toBe("ok")
 		expect([...files.keys()]).toEqual([])
-		expect(await code(mount.rm?.("notes/team", {}) ?? Promise.resolve())).toBe("ENOENT")
+		expect(await code(mount.rm?.("notes/team", {}))).toBe("ENOENT")
 	})
 
 	it("refuses every write to a read-only store, and any write outside a store", async () => {
 		const files = new Map([["/rules.md", "Be kind."]])
-		const mount = makeMemoryMount(() => fakeMemory(files, "read_only"))
-		const body = () => new Blob(["Be cruel."]).stream()
+		const mount = mountOver(files, { access: "read_only" })
 		expect(
 			await Promise.all([
-				code(mount.writeFile?.("notes/rules.md", body(), {}) ?? Promise.resolve()),
-				code(mount.rm?.("notes/rules.md", {}) ?? Promise.resolve()),
-				code(mount.mkdir?.("notes/new", {}) ?? Promise.resolve()),
-				code(mount.rename?.("notes/rules.md", "notes/moved.md", {}) ?? Promise.resolve()),
-				code(mount.writeFile?.("another-store/x.md", body(), {}) ?? Promise.resolve()),
+				code(mount.writeFile?.("notes/rules.md", body("Be cruel."), {})),
+				code(mount.rm?.("notes/rules.md", {})),
+				code(mount.mkdir?.("notes/new", {})),
+				code(mount.rename?.("notes/rules.md", "notes/moved.md", {})),
+				code(mount.writeFile?.("another-store/x.md", body("x"), {})),
 			]),
 		).toEqual(["EROFS", "EROFS", "EROFS", "EROFS", "EROFS"])
 		expect([...files]).toEqual([["/rules.md", "Be kind."]])
 	})
 
-	it("is reachable only while a turn has the workspace", async () => {
-		const mount = makeMemoryMount(() => undefined)
-		expect(await code(mount.readdir("", {}))).toBe("EIO")
+	it("leaves a memory renamed onto itself, and refuses to move a directory into itself", async () => {
+		const files = new Map([
+			["/a.md", "A."],
+			["/dir/x.md", "X."],
+			["/dir/y.md", "Y."],
+		])
+		const mount = mountOver(files)
+		expect(await code(mount.rename?.("notes/a.md", "notes/a.md", {}))).toBe("ok")
+		expect(await code(mount.rename?.("notes/dir", "notes/dir/sub", {}))).toBe("EINVAL")
+		expect(Object.fromEntries(files)).toEqual({
+			"/a.md": "A.",
+			"/dir/x.md": "X.",
+			"/dir/y.md": "Y.",
+		})
+		expect(await code(mount.rename?.("notes/dir", "notes/moved", {}))).toBe("ok")
+		expect(Object.fromEntries(files)).toEqual({
+			"/a.md": "A.",
+			"/moved/x.md": "X.",
+			"/moved/y.md": "Y.",
+		})
+	})
+
+	it("keeps a memory's bytes exactly, and refuses bytes that are not UTF-8", async () => {
+		const files = new Map<string, string>()
+		const mount = mountOver(files)
+		const withMark = new Uint8Array([0xef, 0xbb, 0xbf, 0x68, 0x69])
+		expect(await code(mount.writeFile?.("notes/bom.md", body(withMark), {}))).toBe("ok")
+		expect(await text(mount, "notes/bom.md")).toEqual(withMark)
+		const binary = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe])
+		expect(await code(mount.writeFile?.("notes/image.png", body(binary), {}))).toBe("EINVAL")
+		expect(files.has("/image.png")).toBe(false)
+	})
+
+	it("replaces only what it read, also after a restart, and checking a path is not reading it", async () => {
+		const files = new Map([["/a.md", "first"]])
+		const stored = new Map<string, string>()
+		const before = mountOver(files, { seen: mapSeen(stored) })
+		await text(before, "notes/a.md")
+		// Another writer changes it; the workspace object restarts, keeping what it stores.
+		files.set("/a.md", "theirs")
+		const after = mountOver(files, { seen: mapSeen(stored) })
+		await after.stat("notes/a.md")
+		expect(await code(after.writeFile?.("notes/a.md", body("mine"), {}))).toBe("EEXIST")
+		expect(files.get("/a.md")).toBe("theirs")
+		await text(after, "notes/a.md")
+		expect(await code(after.writeFile?.("notes/a.md", body("mine"), {}))).toBe("ok")
+		// A memory it never read is not overwritten unseen either.
+		files.set("/b.md", "someone's")
+		expect(await code(after.writeFile?.("notes/b.md", body("mine"), {}))).toBe("EEXIST")
+	})
+
+	it("names every change with its own id, so the same content twice is two writes", async () => {
+		const mutations: Array<string> = []
+		const files = new Map<string, string>()
+		const mount = mountOver(files, { mutations })
+		for (const content of ["A", "B", "A", "B"]) {
+			expect(await code(mount.writeFile?.("notes/x.md", body(content), {}))).toBe("ok")
+		}
+		expect(files.get("/x.md")).toBe("B")
+		expect(new Set(mutations).size).toBe(4)
 	})
 })

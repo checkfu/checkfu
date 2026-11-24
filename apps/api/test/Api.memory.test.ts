@@ -614,6 +614,8 @@ describe("Memory stores in a session", () => {
 				let savedDuringTurn: Record<string, string> = {}
 				onTurn(async () => {
 					listed = await files.list()
+					// As the edit tool does: a memory is read before it is replaced.
+					await files.read(`${MOUNT}/style.md`)
 					await files.write(`${MOUNT}/style.md`, "Spaces.")
 					await files.write(`${MOUNT}/new/idea.md`, "Ship it.")
 					await files.remove(`${MOUNT}/old.md`)
@@ -787,6 +789,30 @@ describe("Memory stores in a session", () => {
 				yield* sendAndSettle(apiFetch, session.id, ["Move the plan."], 1)
 				expect(outcomes).toEqual(["ok", "EISDIR"])
 				expect(yield* stored).toEqual({ "/plans/q3.md": "Q3 plan.", "/taken.md": "Already here." })
+			}),
+		))
+
+	it("writes each change, also content written back and forth in one turn", () =>
+		withSessions((apiFetch, { memoryFiles, onTurn }) =>
+			Effect.gen(function* () {
+				const { store, createSession, stored } = yield* setUp(apiFetch, {})
+				const session = yield* json<{ id: string }>(
+					yield* createSession([{ type: "memory_store", memory_store_id: store.id }]),
+				)
+				const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+				const seen: Array<string | undefined> = []
+				onTurn(async () => {
+					const files = memoryFiles(session.id)
+					for (const content of ["A", "B", "A", "B"]) {
+						await files.write(`${MOUNT}/flip.md`, content)
+						seen.push((await runPromise(stored))["/flip.md"])
+					}
+					await files.remove(`${MOUNT}/flip.md`)
+					await files.write(`${MOUNT}/flip.md`, "B")
+				})
+				yield* sendAndSettle(apiFetch, session.id, ["Flip it."], 1)
+				expect(seen).toEqual(["A", "B", "A", "B"])
+				expect(yield* stored).toEqual({ "/flip.md": "B" })
 			}),
 		))
 

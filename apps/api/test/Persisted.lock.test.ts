@@ -367,7 +367,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
-	it.effect("locks the arguments and the result of every harness Worker call", () =>
+	it.effect("locks the arguments and the result of every call between the Workers", () =>
 		Effect.gen(function* () {
 			expect(
 				persistedShapes
@@ -376,17 +376,22 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.toSorted(),
 			).toEqual(
 				[
-					"abortTurn",
-					"discardWorkspace",
-					"enterWorkspace",
-					"prepareWorkspace",
-					"recoverTurn",
-					"runTurn",
-					"storeRepositoryToken",
-				].flatMap((method) => [
-					`harness-call:PiHarness.${method}/args`,
-					`harness-call:PiHarness.${method}/result`,
-				]),
+					...["memoryList", "memoryMounts", "memoryRead", "memoryRemove", "memoryWrite"].flatMap(
+						(method) => [`harness-call:Api.${method}/args`, `harness-call:Api.${method}/result`],
+					),
+					...[
+						"abortTurn",
+						"discardWorkspace",
+						"enterWorkspace",
+						"prepareWorkspace",
+						"recoverTurn",
+						"runTurn",
+						"storeRepositoryToken",
+					].flatMap((method) => [
+						`harness-call:PiHarness.${method}/args`,
+						`harness-call:PiHarness.${method}/result`,
+					]),
+				].toSorted(),
 			)
 			const id = "harness-call:PiHarness.abortTurn/args"
 			const sent = lockWith({ [id]: [["sess_1", "turn:1"]] })

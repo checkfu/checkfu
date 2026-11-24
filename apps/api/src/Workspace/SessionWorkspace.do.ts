@@ -3,7 +3,9 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { createRepositoryFetch, githubBaseUrl } from "./Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
+import { ApiWorker } from "../Api.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
+import type { SeenHashes } from "./MemoryMount.ts"
 import type { SessionMemory } from "./SessionMemory.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
@@ -35,12 +37,7 @@ const refusedPreparation = (resourceId: string, message: string): WorkspacePrepa
 
 const MEMORY_ROOT = "/mnt/memory"
 
-// An RPC stub can be kept past the call that passed it; a plain object, as in tests, needs not.
-const isStub = (memory: SessionMemory): memory is SessionMemory & { dup(): SessionMemory } =>
-	"dup" in memory && typeof memory.dup === "function"
-
-const keep = (memory: SessionMemory | undefined): SessionMemory | undefined =>
-	memory !== undefined && isStub(memory) ? memory.dup() : memory
+const seenKey = (key: string) => `memory-seen:${key}`
 
 const failed = (text: string): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],
@@ -57,8 +54,16 @@ const messageOf = (error: unknown): string =>
 export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>()(
 	"SessionWorkspace",
 	Effect.map(
-		Effect.all({ state: Cloudflare.DurableObjectState, baseUrl: githubBaseUrl }),
-		({ state, baseUrl }) =>
+		Effect.all({
+			state: Cloudflare.DurableObjectState,
+			baseUrl: githubBaseUrl,
+			// By reference to its logical id: the API Worker binds this Worker too.
+			api: Cloudflare.Workers.bindWorker(Cloudflare.Worker.ref(ApiWorker)),
+			// The binding is resolved from the Worker's environment on each call, which runs from the
+			// filesystem's promises, outside the object's methods.
+			services: Effect.context<never>(),
+		}),
+		({ state, baseUrl, api, services }) =>
 			Effect.promise(async () => {
 				// Load workerd-only modules after Alchemy has evaluated the stack.
 				const [{ Workspace }, { createPiTools }, { createGitClient }] = await Promise.all([
@@ -69,11 +74,30 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				const { storage } = state.raw
 				const mounted = (): ReadonlyArray<MountedRepository> =>
 					storage.kv.get<ReadonlyArray<MountedRepository>>(REPOSITORIES) ?? []
-				// The memory stores of the turn that has the workspace, served live at /mnt/memory.
-				let turnMemory: SessionMemory | undefined
+				// The object is named by its session.
+				const sessionId = state.raw.id.name ?? ""
+				// The session's memory stores, served live by the API Worker at /mnt/memory.
+				const call = Effect.runPromiseWith(services)
+				const memory: SessionMemory = {
+					mounts: () => call(api.memoryMounts(sessionId)),
+					list: (name) => call(api.memoryList(sessionId, name)),
+					read: (name, path) => call(api.memoryRead(sessionId, name, path)),
+					write: (name, path, content, precondition, mutationId) =>
+						call(api.memoryWrite(sessionId, name, path, content, precondition, mutationId)),
+					remove: (name, path, expected, mutationId) =>
+						call(api.memoryRemove(sessionId, name, path, expected, mutationId)),
+				}
+				// Kept with the files, so a restarted object still knows what it last read.
+				const seen: SeenHashes = {
+					get: (key) => storage.kv.get<string>(seenKey(key)),
+					set: (key, sha) => storage.kv.put(seenKey(key), sha),
+					delete: (key) => storage.kv.delete(seenKey(key)),
+				}
 				const { fs, git } = new Workspace({
 					storage,
-					mounts: { [MEMORY_ROOT]: makeMemoryMount(() => turnMemory) },
+					mounts: {
+						[MEMORY_ROOT]: makeMemoryMount(memory, seen, () => crypto.randomUUID()),
+					},
 					git: createGitClient({
 						fetch: createRepositoryFetch({
 							repositories: mounted,
@@ -157,19 +181,14 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				return {
 					// A new turn retires every turn before it. A turn that is no longer current, or one
 					// of an ended session, is refused before it asks a model anything.
-					enter: (token: TurnToken, memory?: SessionMemory): Effect.Effect<boolean> =>
-						Effect.promise(async () => {
-							const entered =
+					enter: (token: TurnToken): Effect.Effect<boolean> =>
+						Effect.promise(
+							async () =>
 								storage.kv.get(DISCARDED) !== true &&
 								(await fence.enter(token)) &&
 								// Discard may have come while entry waited.
-								storage.kv.get(DISCARDED) !== true
-							if (entered) {
-								// A stub passed in a call ends with it unless kept; the turn's tools use it later.
-								turnMemory = keep(memory)
-							}
-							return entered
-						}),
+								storage.kv.get(DISCARDED) !== true,
+						),
 					runTool: (
 						call: WorkspaceToolCall,
 						token: TurnToken,

@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
-import ApiWorker from "./apps/api/src/ApiWorker.ts"
+import { ApiWorker } from "./apps/api/src/Api.ts"
+import ApiWorkerLive from "./apps/api/src/ApiWorker.ts"
 import { COMPATIBILITY_DATE } from "./apps/api/src/Compatibility.ts"
 import { customDomains } from "./apps/api/src/CustomDomain.ts"
 import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
@@ -81,7 +82,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				mcp: mcp.url.as<string>(),
 				app: app.url.as<string>(),
 			}
-		}).pipe(Effect.provide(PiHarnessWorkerLive), protectInProduction),
+		}).pipe(Effect.provide([PiHarnessWorkerLive, ApiWorkerLive]), protectInProduction),
 	)
 
 export default checkfuStack(requireShippedBaseline)

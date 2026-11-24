@@ -8,6 +8,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
+import { ApiCalls } from "../../src/Api.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
 import { CANCELLED_OPS_TABLE } from "../../src/Pi/TurnFence.ts"
 
@@ -441,6 +442,14 @@ const HARNESS_CALLS: ReadonlyArray<PersistedShape> = Object.entries(PiHarnessCal
 	],
 )
 
+// Calls the other way, from the harness Worker into the API Worker, are held to the same rule.
+const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMap(
+	([method, { args, result }]): ReadonlyArray<PersistedShape> => [
+		{ id: `harness-call:Api.${method}/args`, kind: "harness-call", schema: args },
+		{ id: `harness-call:Api.${method}/result`, kind: "harness-call", schema: result },
+	],
+)
+
 const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
 	{
 		id: "session-table:checkfu_cancelled_ops",
@@ -454,6 +463,7 @@ export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...SAGA_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,
+	...API_CALLS,
 	...SESSION_TABLES,
 ]
 

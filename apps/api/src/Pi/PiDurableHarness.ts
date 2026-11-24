@@ -23,9 +23,7 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import { resolveCatalogModel } from "./PiCatalog.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
-import type { SessionMemory } from "../Workspace/SessionMemory.ts"
 import type { TurnToken } from "../Workspace/WorkspaceFence.ts"
-import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../Workspace/Repositories.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -47,11 +45,9 @@ export interface TurnExecutorService {
 		conversation: string,
 		operationId: string,
 	) => Effect.Effect<PiTurnOutcome | null, HarnessCallFailed>
-	/** `memory` serves the session's memory stores to its workspace while the turn runs. */
 	readonly runTurn: (
 		conversation: string,
 		request: PiTurnRequest,
-		memory: SessionMemory,
 	) => Effect.Effect<PiTurnOutcome, HarnessCallFailed>
 	readonly abortTurn: (
 		conversation: string,
@@ -198,8 +194,6 @@ export const PiDurableHarnessLive = boundedHarness(
 		const environments = yield* Environment
 		const executor = yield* PiTurnExecutor
 
-		const sessionMemory = yield* SessionMemoryAccess
-
 		return {
 			runTurn: (args) => {
 				const conversation = conversationName(args.session_id)
@@ -299,8 +293,6 @@ export const PiDurableHarnessLive = boundedHarness(
 							})
 						}
 					}
-					// Memory is served to the workspace for this turn, not copied into it.
-					const memory = sessionMemory(args.session_id, args.turn, stores)
 					const system = describeMounts(version.system, repositories, stores)
 
 					const request: PiTurnRequest = {
@@ -321,7 +313,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					// With no attempts allowed the turn is never submitted; Pi is only asked.
 					const submitted =
 						attempts > 0
-							? withRetry(executor.runTurn(conversation, request, memory))
+							? withRetry(executor.runTurn(conversation, request))
 							: Effect.fail(new HarnessCallFailed({ cause: "No submission attempts are allowed" }))
 					const outcome = yield* submitted.pipe(
 						Effect.catchTag("HarnessCallFailed", (failed) =>

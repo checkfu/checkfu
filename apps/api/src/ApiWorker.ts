@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
+import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
@@ -16,43 +17,7 @@ import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
-import type { SessionMemory } from "./Workspace/SessionMemory.ts"
-
-// workerd's runtime module, left to workerd at run time; only its RpcTarget class is used.
-const WORKERD_RUNTIME = "cloudflare:workers"
-
-const isConstructor = (value: unknown): value is new () => object => typeof value === "function"
-
-// The harness calls back into the session's memory stores while the turn runs: an RPC target is
-// passed by reference, and lives as long as the call that passed it.
-const memoryTarget = async (memory: SessionMemory): Promise<SessionMemory> => {
-	const runtime: unknown = await import(WORKERD_RUNTIME)
-	const RpcTarget =
-		typeof runtime === "object" && runtime !== null && "RpcTarget" in runtime
-			? runtime.RpcTarget
-			: undefined
-	if (!isConstructor(RpcTarget)) {
-		throw new Error("workerd's RpcTarget is not available.")
-	}
-	class SessionMemoryTarget extends RpcTarget {
-		mounts() {
-			return memory.mounts()
-		}
-		list(name: string) {
-			return memory.list(name)
-		}
-		read(name: string, path: string) {
-			return memory.read(name, path)
-		}
-		write(name: string, path: string, content: string, base: string | null | undefined) {
-			return memory.write(name, path, content, base)
-		}
-		remove(name: string, path: string, base: string | undefined) {
-			return memory.remove(name, path, base)
-		}
-	}
-	return new SessionMemoryTarget()
-}
+import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -63,13 +28,10 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(Effect.suspend(() => harness.recoverTurn(conversation, operationId))).pipe(
 					Effect.withSpan("PiHarness.recoverTurn"),
 				),
-			runTurn: (conversation, request, memory) =>
-				harnessCall(
-					Effect.flatMap(
-						Effect.promise(() => memoryTarget(memory)),
-						(target) => harness.runTurn(conversation, request, target),
-					),
-				).pipe(Effect.withSpan("PiHarness.runTurn")),
+			runTurn: (conversation, request) =>
+				harnessCall(Effect.suspend(() => harness.runTurn(conversation, request))).pipe(
+					Effect.withSpan("PiHarness.runTurn"),
+				),
 			abortTurn: (conversation, operationId) =>
 				harnessCall(Effect.suspend(() => harness.abortTurn(conversation, operationId))).pipe(
 					Effect.asVoid,
@@ -135,8 +97,7 @@ export const API_WORKER_PROPS = {
 	},
 } satisfies Cloudflare.WorkerProps
 
-export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
-	"ApiWorker",
+export default ApiWorker.make(
 	Effect.map(customDomains, ({ api }) => ({ ...API_WORKER_PROPS, ...api })),
 	Effect.gen(function* () {
 		// Platform pins the owning instance/build Scope onto the Worker init context.
@@ -147,6 +108,18 @@ export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 			return yield* Effect.die(new Error("ApiWorker requires an owning instance Scope."))
 		}
 		const services = yield* Layer.buildWithScope(ApiWorkerLive, scope)
-		return yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
+		const handler = yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
+		// The session workspaces in the harness Worker reach their memory stores through these.
+		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
+		return ApiWorker.of({
+			...handler,
+			memoryMounts: (sessionId) => Effect.orDie(memory.memoryMounts(sessionId)),
+			memoryList: (sessionId, name) => Effect.orDie(memory.memoryList(sessionId, name)),
+			memoryRead: (sessionId, name, path) => Effect.orDie(memory.memoryRead(sessionId, name, path)),
+			memoryWrite: (sessionId, name, path, content, precondition, mutationId) =>
+				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, precondition, mutationId)),
+			memoryRemove: (sessionId, name, path, expected, mutationId) =>
+				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected, mutationId)),
+		})
 	}),
-) {}
+)

@@ -174,7 +174,8 @@ Attach stores when you create a session. Each is mounted in the workspace as a d
 
 - The agent reads and writes memories with its file tools, and is told where each store is mounted, with its description and your `instructions`.
 - The mount is live: a read reads the store, and a write, delete or move is saved to the store as it is made. Nothing is copied into the workspace or saved when the turn ends.
-- A write or delete is refused if another writer changed that memory since the session last read it, so one session never silently undoes another's change. The agent reads it again and decides. A move writes the new path before it removes the old one, so a refused move leaves the memory where it was.
+- A write replaces only what the session last read there: it is refused if another writer changed that memory since, or if the memory is one the session never read, so one session never silently undoes another's change. The agent reads it again and decides. What the session last read is kept with its workspace, so a restart does not forget it. A move writes the new path before it removes the old one, so a refused move leaves the memory where it was.
+- A memory is UTF-8 text, stored byte for byte; a file that is not UTF-8 is refused. One path is either a memory or a directory of memories, never both, however many sessions write at once.
 - A store deleted while a session is attached is empty and read-only to that session from then on.
 - `access` is `read_write` by default. A `read_only` store refuses every write, including through `git`, and the directory a store is mounted at cannot be removed or replaced. Use read-only for reference material, and for any agent that reads untrusted input.
 - A session takes up to 8 stores, each attached once. A store must be active when the session is created; the session keeps the store's name and description as they were then.

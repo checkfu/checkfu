@@ -28,8 +28,7 @@ export default PiHarnessWorker.make(
 		return PiHarnessWorker.of({
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
-			runTurn: (conversation, request, memory) =>
-				Effect.orDie(piSession(conversation).runTurn(request, memory)),
+			runTurn: (conversation, request) => Effect.orDie(piSession(conversation).runTurn(request)),
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),
 			enterWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).enter(token)),

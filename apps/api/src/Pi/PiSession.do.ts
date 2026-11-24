@@ -6,7 +6,6 @@ import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
-import type { SessionMemory } from "../Workspace/SessionMemory.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
@@ -87,7 +86,7 @@ export const makePiHarnessBackend = (
 export interface PiSessionShape {
 	readonly alarm: (info?: Cloudflare.AlarmInvocationInfo) => Effect.Effect<void>
 	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
-	readonly runTurn: (request: PiTurnRequest, memory?: SessionMemory) => Effect.Effect<PiTurnOutcome>
+	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnOutcome>
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
 }
 
@@ -153,7 +152,6 @@ export const PiSessionLive = PiSession.make(
 				const fence = new SqliteTurnFence({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 				})
-				let turnMemory: SessionMemory | undefined
 				const backend = makePiHarnessBackend(
 					harness,
 					fence,
@@ -162,7 +160,7 @@ export const PiSessionLive = PiSession.make(
 						rawCtx.abort("A turn did not stop when aborted")
 					},
 					async (turn) => {
-						const entered = await Effect.runPromise(workspace().enter({ turn }, turnMemory))
+						const entered = await Effect.runPromise(workspace().enter({ turn }))
 						if (entered) {
 							rawCtx.storage.kv.put(ADMITTED_TURN, turn)
 						}
@@ -173,12 +171,7 @@ export const PiSessionLive = PiSession.make(
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
 					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
-					runTurn: (request, memory) =>
-						Effect.suspend(() => {
-							// What the turn's workspace serves at /mnt/memory, given to it as the turn enters.
-							turnMemory = memory
-							return runPiDurableTurn(backend, request)
-						}),
+					runTurn: (request) => runPiDurableTurn(backend, request),
 					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
 				}
 			}),

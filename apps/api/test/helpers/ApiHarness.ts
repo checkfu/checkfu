@@ -40,6 +40,7 @@ import {
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
 import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
 import type { SessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
@@ -299,14 +300,64 @@ export const makePiDurableTestLayer = (
 		}
 		return files
 	}
-	// /mnt/memory as each session's workspace serves it: the same mount, over the memory access the
-	// API hands the harness with each turn. A test acts as the agent's file tools through it.
-	const turnMemories = new Map<string, SessionMemory>()
+	// /mnt/memory as each session's workspace serves it: the same mount, over the same calls the
+	// API Worker answers, with a map for the workspace's own storage. A test acts as the agent's
+	// file tools through it.
+	let memoryCalls:
+		| {
+				readonly access: Effect.Success<typeof SessionMemoryAccess>
+				readonly run: <A>(effect: Effect.Effect<A>) => Promise<A>
+		  }
+		| undefined
+	const memoryCallsLive = Layer.effectDiscard(
+		Effect.gen(function* () {
+			const access = yield* SessionMemoryAccess
+			const services = yield* Effect.context<never>()
+			memoryCalls = { access, run: (effect) => Effect.runPromiseWith(services)(effect) }
+		}),
+	)
+	const run = <A, E>(
+		effect: (access: Effect.Success<typeof SessionMemoryAccess>) => Effect.Effect<A, E>,
+	) => {
+		if (memoryCalls === undefined) {
+			throw new Error("The test layer is not built yet.")
+		}
+		return memoryCalls.run(Effect.orDie(effect(memoryCalls.access)))
+	}
+	const sessionMemoryOf = (sessionId: string): SessionMemory => {
+		return {
+			mounts: () => run((access) => access.memoryMounts(sessionId)),
+			list: (name) => run((access) => access.memoryList(sessionId, name)),
+			read: (name, path) => run((access) => access.memoryRead(sessionId, name, path)),
+			write: (name, path, content, precondition, mutationId) =>
+				run((access) =>
+					access.memoryWrite(sessionId, name, path, content, precondition, mutationId),
+				),
+			remove: (name, path, expected, mutationId) =>
+				run((access) => access.memoryRemove(sessionId, name, path, expected, mutationId)),
+		}
+	}
+	// Each session's workspace keeps what it last read for as long as the session's tests run.
+	const seenBySession = new Map<string, Map<string, string>>()
 	const memoryMounts = new Map<string, ReturnType<typeof makeMemoryMount>>()
 	const memoryFiles = (sessionId: string) => {
 		let mount = memoryMounts.get(sessionId)
 		if (mount === undefined) {
-			mount = makeMemoryMount(() => turnMemories.get(sessionId))
+			const seen = seenBySession.get(sessionId) ?? new Map<string, string>()
+			seenBySession.set(sessionId, seen)
+			mount = makeMemoryMount(
+				sessionMemoryOf(sessionId),
+				{
+					get: (key) => seen.get(key),
+					set: (key, sha) => {
+						seen.set(key, sha)
+					},
+					delete: (key) => {
+						seen.delete(key)
+					},
+				},
+				() => crypto.randomUUID(),
+			)
 			memoryMounts.set(sessionId, mount)
 		}
 		const served = mount
@@ -341,12 +392,11 @@ export const makePiDurableTestLayer = (
 							? Effect.succeed(null)
 							: onObject(conversation, (backend) => recoverPiDurableTurn(backend, operationId)),
 				),
-			runTurn: (conversation, request, memory) =>
+			runTurn: (conversation, request) =>
 				Effect.suspend(() => {
 					if (unreachable.has(conversation)) {
 						return Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
 					}
-					turnMemories.set(conversation, memory)
 					requests.push(request)
 					conversations.push(conversation)
 					return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
@@ -424,7 +474,7 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
-	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
+	const base = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
@@ -439,6 +489,7 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 	)
+	const layer = memoryCallsLive.pipe(Layer.provideMerge(base))
 
 	return {
 		layer,
