@@ -17,22 +17,9 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import { startupRefusal } from "../src/Standalone.ts"
+import { cliProcessEnv } from "./helpers/ProcessEnv.ts"
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
-
-interface ProcessEnv {
-	[name: string]: string
-}
-
-const cleanEnv = (extra: ProcessEnv = {}): ProcessEnv => {
-	const env: ProcessEnv = {}
-	for (const [key, value] of Object.entries(process.env)) {
-		if (value !== undefined && !key.startsWith("CHECKFU_")) {
-			env[key] = value
-		}
-	}
-	return { ...env, ...extra }
-}
 
 describe.skipIf(process.platform === "win32")("standalone binary", () => {
 	it("ignores .env and bunfig preloads in the current directory and can run as Bun", () => {
@@ -66,7 +53,7 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 
 			const call = spawnSync(binary, ["sessions", "retrieve", "--session-id", "sess_x"], {
 				cwd: hostile,
-				env: cleanEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
+				env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
 				encoding: "utf8",
 				timeout: 30_000,
 			})
@@ -84,7 +71,7 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			] as const) {
 				const hint = spawnSync(binary, ["sessions", "retrieve", "--session-id", "sess_x"], {
 					cwd,
-					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
+					env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(scratch, "config") }),
 					encoding: "utf8",
 					timeout: 30_000,
 				})
@@ -93,7 +80,7 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 
 			const asBun = spawnSync(binary, ["--version"], {
 				cwd: hostile,
-				env: cleanEnv({ BUN_BE_BUN: "1" }),
+				env: cliProcessEnv({ BUN_BE_BUN: "1" }),
 				encoding: "utf8",
 				timeout: 30_000,
 			})
@@ -130,7 +117,10 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 				["--base-url", `http://127.0.0.1:${port}`, "sessions", "retrieve", "--session-id", "s"],
 				{
 					stdio: ["ignore", "ignore", "ignore", "ipc"],
-					env: cleanEnv({ CHECKFU_API_KEY: "key", CHECKFU_CONFIG_DIR: join(scratch, "config") }),
+					env: cliProcessEnv({
+						CHECKFU_API_KEY: "key",
+						CHECKFU_CONFIG_DIR: join(scratch, "config"),
+					}),
 				},
 			)
 			const exited = once(child, "exit").then(([code]) => code as number | null)
@@ -233,7 +223,7 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 	}
 
 	// Asynchronous, so the servers above can see a request while the CLI is running.
-	const run = (cwd: string, env: ProcessEnv) =>
+	const run = (cwd: string, env: Record<string, string>) =>
 		new Promise<{ readonly status: number | null; readonly stderr: string }>((resolve, reject) => {
 			const child = spawn("bun", ["checkfu", "sessions", "retrieve", "--session-id", "s"], {
 				cwd,
@@ -261,7 +251,10 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 				writeFileSync(join(checkout, file), dotenv)
 			}
 			for (const nodeEnv of ["development", "production"]) {
-				const base = cleanEnv({ CHECKFU_CONFIG_DIR: join(checkout, "config"), NODE_ENV: nodeEnv })
+				const base = cliProcessEnv({
+					CHECKFU_CONFIG_DIR: join(checkout, "config"),
+					NODE_ENV: nodeEnv,
+				})
 
 				const nothingExported = await run(checkout, base)
 				expect(nothingExported.status).toBe(1)
@@ -292,7 +285,7 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 			// Bun itself still loads these files for everything else started in the checkout.
 			const tool = spawnSync("bun", ["-e", "console.log(process.env.CHECKFU_API_KEY ?? 'unset')"], {
 				cwd: checkout,
-				env: cleanEnv(),
+				env: cliProcessEnv(),
 				encoding: "utf8",
 				timeout: 20_000,
 			})

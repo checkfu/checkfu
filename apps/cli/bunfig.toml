@@ -1,7 +1,10 @@
-# Bun configuration for the CLI when it is started explicitly, from any directory:
+# Bun configuration for the CLI. The `checkfu` package script, which is how
+# `bun checkfu` runs, starts Bun with exactly
 #
-#   bun --no-env-file --config=<checkout>/apps/cli/bunfig.toml <checkout>/apps/cli/src/main.ts
+#   bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts
 #
-# `--no-env-file` keeps that directory's .env out; this file pins the config so its
-# bunfig.toml and preloads are not read. The default `bun checkfu` does not use this file.
+# and the CLI refuses any other start. `--no-env-file` keeps .env files out, and this
+# file replaces the bunfig of the directory Bun starts in, so that file's preloads are
+# not run. Anything added here, a preload above all, runs in every `bun checkfu`, with
+# the caller's exported credentials in reach.
 preload = []

@@ -14,6 +14,7 @@ import * as Stream from "effect/Stream"
 import * as YAML from "yaml"
 import { makeSigintController } from "../src/Signals.ts"
 import { makeTestServer } from "./helpers/CliHarness.ts"
+import { cliProcessEnv } from "./helpers/ProcessEnv.ts"
 
 type TestCli = Effect.Success<ReturnType<typeof makeTestServer>>
 
@@ -2228,7 +2229,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					`http://127.0.0.1:${port}`,
 				])
 				const child = spawn(cmd, cmdArgs, {
-					env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+					env: cliProcessEnv({ CHECKFU_API_KEY: "ck_subproc" }),
 					stdio: ["pipe", "pipe", "pipe"],
 				})
 				let stderr = ""
@@ -2273,7 +2274,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					`http://127.0.0.1:${port}`,
 				])
 				const child = spawn(cmd, cmdArgs, {
-					env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+					env: cliProcessEnv({ CHECKFU_API_KEY: "ck_subproc" }),
 					stdio: ["ignore", "pipe", "pipe"],
 				})
 				let stdout = ""
@@ -2312,7 +2313,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					`http://127.0.0.1:${port}`,
 				])
 				const child = spawn(cmd, cmdArgs, {
-					env: { ...process.env, CHECKFU_API_KEY: "ck_subproc" },
+					env: cliProcessEnv({ CHECKFU_API_KEY: "ck_subproc" }),
 					stdio: ["ignore", "pipe", "pipe"],
 				})
 				let stdout = ""
@@ -2908,12 +2909,7 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 
 		// Children must not see a key the developer has exported, and must never print one.
-		const env: Record<string, string> = {}
-		for (const [name, value] of Object.entries(process.env)) {
-			if (value !== undefined && !name.startsWith("CHECKFU_") && name !== "BUN_OPTIONS") {
-				env[name] = value
-			}
-		}
+		const env = cliProcessEnv()
 		const start = (args: ReadonlyArray<string>, extraEnv: Record<string, string> = {}) =>
 			spawnSync("bun", [...args, "--help"], {
 				cwd: repoRoot,
@@ -2945,12 +2941,7 @@ describe("CLI sessions:events and sessions connect", () => {
 			// CLI must stop, closing the caller's output and the stream connection. SIGKILL cannot
 			// be passed on; the README says to kill the process group, or to use the binary.
 			const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
-			const env: Record<string, string> = {}
-			for (const [name, value] of Object.entries(process.env)) {
-				if (value !== undefined && !name.startsWith("CHECKFU_") && name !== "BUN_OPTIONS") {
-					env[name] = value
-				}
-			}
+			const env = cliProcessEnv()
 			let streamClosed = false
 			const server = Http.createServer((req, res) => {
 				res.writeHead(200, {
@@ -3161,7 +3152,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					readonly output: string
 				}>((resolve, reject) => {
 					const driver = spawn("python3", ["-c", ptyScript, String(port), repoRoot], {
-						env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+						env: cliProcessEnv({ CHECKFU_API_KEY: "ck_pty" }),
 						stdio: ["ignore", "pipe", "pipe"],
 					})
 					let stdout = ""
@@ -3263,7 +3254,7 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					readonly output: string
 				}>((resolve, reject) => {
 					const driver = spawn("python3", ["-c", pidSigintConnectScript, String(port), repoRoot], {
-						env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+						env: cliProcessEnv({ CHECKFU_API_KEY: "ck_pty" }),
 						stdio: ["ignore", "pipe", "pipe"],
 					})
 					let stdout = ""
@@ -3356,7 +3347,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					readonly output: string
 				}>((resolve, reject) => {
 					const driver = spawn("python3", ["-c", pidSigintStreamScript, String(port), repoRoot], {
-						env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+						env: cliProcessEnv({ CHECKFU_API_KEY: "ck_pty" }),
 						stdio: ["ignore", "pipe", "pipe"],
 					})
 					let stdout = ""
@@ -3414,7 +3405,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						],
 						{
 							cwd: repoRoot,
-							env: { ...process.env, CHECKFU_API_KEY: "ck_pty" },
+							env: cliProcessEnv({ CHECKFU_API_KEY: "ck_pty" }),
 							stdio: ["ignore", "pipe", "pipe"],
 						},
 					)
@@ -4554,13 +4545,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				)
 				writeFileSync(join(dir, "bunfig.toml"), 'preload = ["./evil-preload.js"]\n')
 			}
-			const baseEnv: Record<string, string> = {}
-			for (const [k, v] of Object.entries(process.env)) {
-				if (v !== undefined && !k.startsWith("CHECKFU_")) {
-					baseEnv[k] = v
-				}
-			}
-			baseEnv["CHECKFU_CONFIG_DIR"] = cleanDir
+			const baseEnv = cliProcessEnv({ CHECKFU_CONFIG_DIR: cleanDir })
 			const runBun = (
 				args: ReadonlyArray<string>,
 				env: Record<string, string>,

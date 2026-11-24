@@ -4,22 +4,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
+import { cliProcessEnv } from "./helpers/ProcessEnv.ts"
 
 const cliRoot = fileURLToPath(new URL("..", import.meta.url))
-
-interface ProcessEnv {
-	[name: string]: string
-}
-
-const cleanEnv = (extra: ProcessEnv = {}): ProcessEnv => {
-	const env: ProcessEnv = {}
-	for (const [key, value] of Object.entries(process.env)) {
-		if (value !== undefined && !key.startsWith("CHECKFU_")) {
-			env[key] = value
-		}
-	}
-	return { ...env, ...extra }
-}
 
 describe.skipIf(process.platform === "win32")("the CLI started from another project", () => {
 	it("gets nothing from that project's .env when a package script starts it with both flags", () => {
@@ -54,7 +41,7 @@ describe.skipIf(process.platform === "win32")("the CLI started from another proj
 				],
 				{
 					cwd: project,
-					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(project, "config") }),
+					env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(project, "config") }),
 					encoding: "utf8",
 					timeout: 60_000,
 				},
