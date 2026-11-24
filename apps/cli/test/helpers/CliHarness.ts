@@ -180,12 +180,14 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		// These tests keep no secrets: the connection objects accept and forget.
 		const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 			Layer.provideMerge(CredentialSecretsLive),
-			Layer.provide(
+			Layer.provideMerge(
 				makeConnectionExecutorLayer({
 					storeSecret: () => Effect.succeed(true),
-					replaceSecret: () => Effect.succeed(true),
+					replaceSecret: () => Effect.succeed(2),
 					keepSecret: () => Effect.void,
 					erase: () => Effect.void,
+					refreshReport: () => Effect.succeed(null),
+					acknowledgeRefresh: () => Effect.void,
 				}),
 			),
 		)

@@ -15,6 +15,7 @@ import {
 } from "./BundleBudget.ts"
 import { removeStage } from "./StageCleanup.ts"
 import { startFakeMcpServer } from "./FakeMcpServer.ts"
+import { startFakeOAuthServer } from "./FakeOAuthServer.ts"
 import type { FakeMcpServer } from "./FakeMcpServer.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
@@ -144,6 +145,21 @@ const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyAr
 
 const echoScript = (server: string, text: string) =>
 	`return await tools.mcp__${server}__echo({ text: ${JSON.stringify(text)} });`
+
+const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString()
+const aMinuteAgo = () => new Date(Date.now() - 60_000).toISOString()
+
+/** Reads until what is read meets the condition, and returns the last reading either way. */
+const eventually = async <A>(read: () => Promise<A>, met: (value: A) => boolean) => {
+	const deadline = Date.now() + 15_000
+	for (;;) {
+		const value = await read()
+		if (met(value) || Date.now() > deadline) {
+			return value
+		}
+		await sleep(100)
+	}
+}
 
 const post = (text: string) => [{ name: "mcp__desk__post", arguments: { text } }]
 const echo = (text: string) => [{ name: "mcp__desk__echo", arguments: { text } }]
@@ -974,6 +990,243 @@ describe("PiSession real Durable Object under workerd", () => {
 			}
 		})
 	}
+
+	describe("OAuth credentials", () => {
+		const CLIENT_SECRET = "ocs_wd_CLIENT_do_not_leak"
+		const closers: Array<() => Promise<void>> = []
+		afterAll(async () => {
+			await Promise.all(closers.map((close) => close()))
+		})
+
+		interface OAuthCredential {
+			readonly auth: { readonly expires_at: string | null }
+			readonly refresh_failed_at: string | null
+		}
+
+		/**
+		 * An MCP server that takes one access token at a time, an authorization
+		 * server whose every new token becomes that one, and a session bound to a
+		 * credential holding the first.
+		 */
+		const grant = async (label: string) => {
+			const access = `oat_wd_${label}_do_not_leak`
+			const refresh = `ort_wd_${label}_do_not_leak`
+			const mcp = await startFakeMcpServer([access])
+			const oauth = await startFakeOAuthServer()
+			closers.push(mcp.close, oauth.close)
+			oauth.grant(refresh)
+			oauth.onIssue((next) => mcp.accept([next]))
+			const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
+				display_name: `oauth ${label}`,
+			})
+			const credential = await createResource<{ readonly id: string }>(
+				`/v1/vaults/${vault.id}/credentials`,
+				{
+					auth: {
+						type: "mcp_oauth",
+						mcp_server_url: mcp.url,
+						access_token: access,
+						expires_at: inAnHour(),
+						refresh: {
+							token_endpoint: oauth.tokenEndpoint,
+							client_id: "client_wd",
+							refresh_token: refresh,
+							token_endpoint_auth: { type: "client_secret_post", client_secret: CLIENT_SECRET },
+						},
+					},
+				},
+			)
+			const agent = await agentWith("desk", mcp.url)
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [vault.id],
+			})
+			const path = `/v1/vaults/${vault.id}/credentials/${credential.id}`
+			const send = sender(session.id)
+			const replace = (access_token: string, expires_at: string) =>
+				apiJson<OAuthCredential>(path, {
+					method: "POST",
+					body: { auth: { type: "mcp_oauth", access_token, expires_at } },
+				})
+			return {
+				id: credential.id,
+				access,
+				refresh,
+				mcp,
+				oauth,
+				session,
+				replace,
+				read: async () => (await apiJson<OAuthCredential>(path)).body,
+				/** Sends a message and waits for the turn it starts to end. */
+				turn: async (number: number, text: string) => {
+					expect((await send(text)).status).toBe(200)
+					await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number)
+				},
+				/** Fails if any secret this grant ever had is in what a client or an operator can read. */
+				expectNoLeak: async () => {
+					const readable = JSON.stringify([
+						await listAllEvents(session.id),
+						(await apiJson(path)).body,
+						(await apiJson(`/v1/sessions/${session.id}`)).body,
+					])
+					const logged = stripAnsi(workerLogs.join(""))
+					for (const secret of [access, refresh, CLIENT_SECRET, ...oauth.issued]) {
+						expect(readable).not.toContain(secret)
+						expect(logged).not.toContain(secret)
+					}
+				},
+			}
+		}
+
+		it("uses an access token while it is valid, refreshes it once, and records the new expiry", async () => {
+			const g = await grant("valid")
+			scriptOnRequest("desk")
+			await g.turn(1, "one")
+			expect(g.mcp.calls).toEqual([{ tool: "echo", arguments: { text: "one" }, token: g.access }])
+			expect(g.oauth.requests).toEqual([])
+
+			expect((await g.replace(g.access, aMinuteAgo())).status).toBe(200)
+			await g.turn(2, "two")
+			expect(g.oauth.requests).toEqual([
+				{
+					form: {
+						grant_type: "refresh_token",
+						refresh_token: g.refresh,
+						// The renewed token is asked for the same MCP server the grant was for.
+						resource: g.mcp.url,
+						client_id: "client_wd",
+						client_secret: CLIENT_SECRET,
+					},
+					authorization: undefined,
+				},
+			])
+			const [issued] = g.oauth.issued
+			expect(g.mcp.calls.at(-1)).toEqual({
+				tool: "echo",
+				arguments: { text: "two" },
+				token: issued,
+			})
+
+			const recorded = await eventually(
+				g.read,
+				(seen) => Date.parse(seen.auth.expires_at ?? "") > Date.now() + 50 * 60_000,
+			)
+			expect(Date.parse(recorded.auth.expires_at ?? "")).toBeGreaterThan(Date.now() + 50 * 60_000)
+			expect(recorded.refresh_failed_at).toBeNull()
+			expect(stripAnsi(workerLogs.join(""))).not.toContain("Credential refresh not reported")
+
+			// Only the connection can report a refresh: to an API caller the route is not there.
+			const forged = await apiFetch("/internal/credential-refresh", {
+				method: "POST",
+				body: { credential_id: g.id, refreshes: 99, expires_at: null, refresh_failed: true },
+			})
+			expect(forged.status).toBe(404)
+			await sleep(300)
+			expect((await g.read()).refresh_failed_at).toBeNull()
+
+			await g.turn(3, "three")
+			expect(g.oauth.requests).toHaveLength(1)
+			expect(g.mcp.calls.at(-1)).toMatchObject({ arguments: { text: "three" }, token: issued })
+			await g.expectNoLeak()
+		}, 90_000)
+
+		it("makes one refresh for ten calls that need the token at once", async () => {
+			const g = await grant("many")
+			const ten =
+				"const all = await Promise.all(Array.from({ length: 10 }, (_, i) => tools.mcp__desk__echo({ text: String(i) }))); return all.length;"
+			fakeOpenAI.setHandler((req) => {
+				const [output] = req.toolOutputs
+				return output === undefined
+					? {
+							kind: "tool_call",
+							name: "codemode",
+							arguments: {
+								code: req.lastUserText === "many" ? ten : echoScript("desk", req.lastUserText),
+							},
+						}
+					: { kind: "reply", text: `Done: ${output}` }
+			})
+			await g.turn(1, "one")
+
+			expect((await g.replace(g.access, aMinuteAgo())).status).toBe(200)
+			g.oauth.delay(500)
+			await g.turn(2, "many")
+			expect(g.oauth.requests).toHaveLength(1)
+			const calls = g.mcp.calls.slice(1)
+			expect(calls).toHaveLength(10)
+			expect(new Set(calls.map((call) => call.token))).toEqual(new Set([g.oauth.issued[0]]))
+			await g.expectNoLeak()
+		}, 90_000)
+
+		it("fails closed and says so when the refresh is refused, until new tokens arrive", async () => {
+			const g = await grant("refused")
+			scriptOnRequest("desk")
+			await g.turn(1, "one")
+
+			expect((await g.replace(g.access, aMinuteAgo())).status).toBe(200)
+			g.oauth.fail("invalid_grant", 100)
+			await g.turn(2, "two")
+			expect(g.mcp.calls).toHaveLength(1)
+			const refusal = (await agentEvents(g.session.id))
+				.filter((event) => event.type === "agent.mcp_tool_result")
+				.at(-1)
+			expect(refusal).toMatchObject({ is_error: true })
+			expect(JSON.stringify(refusal)).toContain("needs to be re-authorized")
+			const failed = await eventually(g.read, (seen) => seen.refresh_failed_at !== null)
+			expect(failed.refresh_failed_at).not.toBeNull()
+			expect(g.oauth.requests).toHaveLength(1)
+
+			// Nothing is tried again on its own.
+			await g.turn(3, "three")
+			expect(g.oauth.requests).toHaveLength(1)
+			expect(g.mcp.calls).toHaveLength(1)
+
+			const fresh = "oat_wd_refused_FRESH_do_not_leak"
+			g.mcp.accept([fresh])
+			const renewed = await g.replace(fresh, inAnHour())
+			expect(renewed.body.refresh_failed_at).toBeNull()
+			await g.turn(4, "four")
+			expect(g.mcp.calls.at(-1)).toEqual({
+				tool: "echo",
+				arguments: { text: "four" },
+				token: fresh,
+			})
+			expect(g.oauth.requests).toHaveLength(1)
+			const logged = stripAnsi(workerLogs.join(""))
+			expect(logged).not.toContain(fresh)
+			await g.expectNoLeak()
+		}, 120_000)
+
+		it("retries a failing authorization server, and refreshes when the server drops the token early", async () => {
+			const g = await grant("outage")
+			scriptOnRequest("desk")
+			await g.turn(1, "one")
+
+			expect((await g.replace(g.access, aMinuteAgo())).status).toBe(200)
+			g.oauth.fail("server_error", 1)
+			await g.turn(2, "two")
+			expect(g.oauth.requests).toHaveLength(2)
+			expect(g.mcp.calls.at(-1)).toMatchObject({
+				arguments: { text: "two" },
+				token: g.oauth.issued[0],
+			})
+			expect((await g.read()).refresh_failed_at).toBeNull()
+
+			// The server stops taking a token whose expiry is still an hour away.
+			g.mcp.accept(["oat_wd_someone_elses"])
+			await g.turn(3, "three")
+			expect(g.oauth.requests).toHaveLength(3)
+			expect(g.mcp.calls.at(-1)).toEqual({
+				tool: "echo",
+				arguments: { text: "three" },
+				token: g.oauth.issued[2],
+			})
+			expect(g.mcp.tokens).toContain(g.oauth.issued[0])
+			expect((await g.read()).refresh_failed_at).toBeNull()
+			await g.expectNoLeak()
+		}, 90_000)
+	})
 
 	describe("MCP servers", () => {
 		const servers: Array<FakeMcpServer> = []

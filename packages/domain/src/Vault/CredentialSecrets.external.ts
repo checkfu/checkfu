@@ -1,7 +1,11 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
 import { CredentialId } from "./Credential.id.ts"
-import { CredentialSecret, McpServerUrl } from "./VaultTypes.ts"
+import {
+	CredentialSecretMaterial,
+	CredentialSecretReplacement,
+	McpServerUrl,
+} from "./VaultTypes.ts"
 
 export const CredentialSecretsUnavailable = Schema.TaggedStruct("CredentialSecretsUnavailable", {})
 export type CredentialSecretsUnavailable = typeof CredentialSecretsUnavailable.Type
@@ -16,14 +20,21 @@ export class CredentialSecrets extends Domain.ExternalSystem("CredentialSecrets"
 	 * together with the one server it may ever be sent to.
 	 */
 	store: {
-		args: { credential_id: CredentialId, secret: CredentialSecret, mcp_server_url: McpServerUrl },
+		args: {
+			credential_id: CredentialId,
+			secret: CredentialSecretMaterial,
+			mcp_server_url: McpServerUrl,
+		},
 		success: { stored: Schema.Boolean },
 		error: CredentialSecretsUnavailable,
 	},
-	/** Replaces a secret that is still held. A credential without one keeps none. */
+	/**
+	 * Replaces a secret of the same kind that is still held, answering with the
+	 * secret's new revision. Null when nothing was held to replace.
+	 */
 	replace: {
-		args: { credential_id: CredentialId, secret: CredentialSecret },
-		success: { replaced: Schema.Boolean },
+		args: { credential_id: CredentialId, secret: CredentialSecretReplacement },
+		success: { revision: Schema.NullOr(Schema.Int) },
 		error: CredentialSecretsUnavailable,
 	},
 	keep: {

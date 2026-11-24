@@ -9,7 +9,7 @@ import {
 	makeConnectionExecutorLayer,
 } from "../../src/Connection/CredentialCustody.ts"
 import { makeSecretCustody } from "../../src/Connection/SecretCustody.ts"
-import type { SecretCustody } from "../../src/Connection/SecretCustody.ts"
+import type { HeldSecret, SecretCustody } from "../../src/Connection/SecretCustody.ts"
 
 interface InMemoryConnection {
 	readonly custody: SecretCustody
@@ -76,13 +76,17 @@ export const makeVaultsTestLayer = (platform: typeof Domain.InMemory = Domain.In
 
 	const model = Vaults.layer(VaultsHandlersLive).pipe(
 		Layer.provideMerge(CredentialSecretsLive),
-		Layer.provide(
+		Layer.provideMerge(
 			makeConnectionExecutorLayer({
 				storeSecret: (id, secret, url) =>
 					call("store", id, (custody) => custody.store(secret, url)),
 				replaceSecret: (id, secret) => call("replace", id, (custody) => custody.replace(secret)),
 				keepSecret: (id) => call("keep", id, (custody) => custody.keep()),
 				erase: (id) => call("erase", id, (custody) => custody.erase()),
+				refreshReport: (id) =>
+					call("report", id, (custody) => (custody.unreported() ? custody.report() : null)),
+				acknowledgeRefresh: (id, refreshes) =>
+					call("acknowledge", id, (custody) => custody.reported(refreshes)),
 			}),
 		),
 		Layer.provide(platform),
@@ -111,7 +115,13 @@ export const makeVaultsTestLayer = (platform: typeof Domain.InMemory = Domain.In
 					? Effect.die(new Error(`no stored events for ${aggregate}`))
 					: read(id)
 			}),
-		secretOf: (credentialId: string): string | null => open(credentialId).custody.read(),
+		/** The token the connection would send: a bearer token, or an OAuth access token. */
+		secretOf: (credentialId: string): string | null => {
+			const held = open(credentialId).custody.read()
+			return held === null ? null : held.type === "static_bearer" ? held.token : held.access_token
+		},
+		held: (credentialId: string): HeldSecret | null => open(credentialId).custody.read(),
+		custodyOf: (credentialId: string): SecretCustody => open(credentialId).custody,
 		heldBy: (credentialId: string): ReadonlyMap<string, string> => open(credentialId).storage,
 		alarmOf: (credentialId: string): number | null => open(credentialId).alarm,
 		/** Moves the clock to `at` and fires every alarm that is due, as the object's runtime would. */

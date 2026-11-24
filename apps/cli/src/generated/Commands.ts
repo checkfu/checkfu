@@ -1731,7 +1731,7 @@ const vaultsCredentialsUpdateCommand = CommandMake(
 		auth: FlagString("auth").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Replacement secret. The MCP server URL cannot change. (JSON, YAML, or @file)",
+				"Replacement secret. The credential's type and MCP server URL cannot change. New tokens clear a failed refresh. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),

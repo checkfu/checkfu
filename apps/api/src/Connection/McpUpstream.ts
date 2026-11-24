@@ -25,6 +25,7 @@ export type {
 	McpFailureReason,
 	McpListOutcome,
 	McpTarget,
+	McpTargetAuth,
 } from "./McpTools.ts"
 
 const decodeTools = Schema.decodeUnknownSync(McpToolDescriptors)
@@ -47,13 +48,16 @@ const failure = (reason: McpFailureReason, message: string): McpFailure => ({
 	message,
 })
 
+const isUnauthorized = (error: unknown): boolean =>
+	UnauthorizedError.isInstance(error) || (SdkHttpError.isInstance(error) && error.status === 401)
+
 const failed = (error: unknown): McpFailure => {
 	const forwarded = forwardFailure(error)
 	if (forwarded !== undefined) {
 		return forwarded
 	}
 	const status = SdkHttpError.isInstance(error) ? error.status : undefined
-	if (UnauthorizedError.isInstance(error) || status === 401) {
+	if (isUnauthorized(error)) {
 		return failure("unauthorized", "The MCP server did not accept the credential (401).")
 	}
 	if (status === 403) {

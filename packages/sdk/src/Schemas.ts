@@ -439,8 +439,46 @@ export const StaticBearerAuth = Schema.Struct({
 	mcp_server_url: McpServerUrl,
 })
 
+export const MAX_OAUTH_CLIENT_ID_LENGTH = 1024
+export const MAX_OAUTH_SCOPE_LENGTH = 2048
+
+export const OAuthTokenEndpoint = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+)
+export const OAuthClientId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_OAUTH_CLIENT_ID_LENGTH),
+)
+export const OAuthScope = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_OAUTH_SCOPE_LENGTH),
+)
+export const TokenEndpointAuthMethod = Schema.Literals([
+	"none",
+	"client_secret_basic",
+	"client_secret_post",
+])
+export type TokenEndpointAuthMethod = typeof TokenEndpointAuthMethod.Type
+
+// How the token is refreshed. The refresh token and any client secret are not part of it.
+export const McpOAuthRefresh = Schema.Struct({
+	token_endpoint: OAuthTokenEndpoint,
+	client_id: OAuthClientId,
+	scope: Schema.NullOr(OAuthScope),
+	token_endpoint_auth: Schema.Struct({ type: TokenEndpointAuthMethod }),
+})
+export type McpOAuthRefresh = typeof McpOAuthRefresh.Type
+
+export const McpOAuthAuth = Schema.Struct({
+	type: Schema.Literal("mcp_oauth"),
+	mcp_server_url: McpServerUrl,
+	expires_at: Schema.NullOr(Schema.DateTimeUtc),
+	refresh: Schema.NullOr(McpOAuthRefresh),
+})
+
 // What a credential authenticates against. The secret is never part of it.
-export const CredentialAuth = Schema.Union([StaticBearerAuth])
+export const CredentialAuth = Schema.Union([StaticBearerAuth, McpOAuthAuth])
 export type CredentialAuth = typeof CredentialAuth.Type
 
 // Held only by the credential's connection object: no command, event or view carries it.
@@ -448,6 +486,44 @@ export const CredentialSecret = Schema.Redacted(
 	Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CREDENTIAL_SECRET_LENGTH)),
 )
 export type CredentialSecret = typeof CredentialSecret.Type
+
+const TokenEndpointClientAuth = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("none") }),
+	Schema.Struct({ type: Schema.Literal("client_secret_basic"), client_secret: CredentialSecret }),
+	Schema.Struct({ type: Schema.Literal("client_secret_post"), client_secret: CredentialSecret }),
+])
+
+// Everything secret about a credential, as it is handed to custody and nowhere else.
+export const CredentialSecretMaterial = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("static_bearer"), token: CredentialSecret }),
+	Schema.Struct({
+		type: Schema.Literal("mcp_oauth"),
+		access_token: CredentialSecret,
+		expires_at: Schema.NullOr(Schema.DateTimeUtc),
+		refresh: Schema.NullOr(
+			Schema.Struct({
+				token_endpoint: OAuthTokenEndpoint,
+				client_id: OAuthClientId,
+				scope: Schema.NullOr(OAuthScope),
+				token_endpoint_auth: TokenEndpointClientAuth,
+				refresh_token: CredentialSecret,
+			}),
+		),
+	}),
+])
+export type CredentialSecretMaterial = typeof CredentialSecretMaterial.Type
+
+// What replaces a held secret. Where it is sent, and how it is refreshed, cannot change.
+export const CredentialSecretReplacement = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("static_bearer"), token: CredentialSecret }),
+	Schema.Struct({
+		type: Schema.Literal("mcp_oauth"),
+		access_token: CredentialSecret,
+		expires_at: Schema.NullOr(Schema.DateTimeUtc),
+		refresh_token: Schema.NullOr(CredentialSecret),
+	}),
+])
+export type CredentialSecretReplacement = typeof CredentialSecretReplacement.Type
 
 export const VaultSnapshot = Schema.Struct({
 	id: VaultId,
@@ -465,6 +541,8 @@ export const CredentialSnapshot = Schema.Struct({
 	vault_id: VaultId,
 	auth: CredentialAuth,
 	display_name: Schema.NullOr(Schema.String),
+	// When the authorization server last refused to refresh the token; new tokens clear it.
+	refresh_failed_at: Schema.NullOr(Schema.DateTimeUtc),
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),

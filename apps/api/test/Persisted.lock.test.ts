@@ -101,7 +101,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"event:Vaults.Vault/vault.credential_attached",
 						"event:Vaults.Credential/vault_credential.created",
 						"command-reply:Vaults/CreateCredential",
-						"view:Vaults.CredentialView@v0",
+						"view:Vaults.CredentialView@v1",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
 					]),
@@ -381,8 +381,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			).toEqual(
 				[
 					"abortTurn",
+					"acknowledgeCredentialRefresh",
 					"cancelWaiting",
 					"checkToolSchemas",
+					"credentialRefreshReport",
 					"discardWorkspace",
 					"eraseSecret",
 					"keepSecret",

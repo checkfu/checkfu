@@ -121,6 +121,10 @@
 			"McpServerSet.RecordedServersNeverChange": {
 				"kind": "transition",
 				"source": "({ before, after }) =>\n\t\t\t[!before.recorded, [after.recorded, after.servers === before.servers].every((ok) => ok)].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Credential.CustodyRevisionNeverGoesBack": {
+				"kind": "transition",
+				"source": "({ before, after }) => after.revision >= before.revision"
 			}
 		}
 	}

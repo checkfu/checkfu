@@ -31,6 +31,14 @@ import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
 import { CredentialView } from "../src/Vault/CredentialView.view.ts"
 import { CredentialDeleted, DeleteCredential } from "../src/Vault/DeleteCredential.command.ts"
 import { DeleteVault, VaultDeleted } from "../src/Vault/DeleteVault.command.ts"
+import {
+	CredentialRefreshFailed,
+	FailCredentialRefresh,
+} from "../src/Vault/FailCredentialRefresh.command.ts"
+import {
+	CredentialRefreshed,
+	RecordCredentialRefresh,
+} from "../src/Vault/RecordCredentialRefresh.command.ts"
 import { RetireCredential } from "../src/Vault/RetireCredential.command.ts"
 import { CredentialRotated, RotateCredential } from "../src/Vault/RotateCredential.command.ts"
 import { CredentialRenamed, UpdateCredential } from "../src/Vault/UpdateCredential.command.ts"
@@ -108,7 +116,7 @@ describe("Vaults", () => {
 							CredentialSecrets.toLayer(
 								Effect.succeed({
 									store: () => Effect.succeed({ stored: true }),
-									replace: () => Effect.succeed({ replaced: true }),
+									replace: () => Effect.succeed({ revision: 2 }),
 									keep: () => Effect.void,
 									erase: () => Effect.void,
 								}),
@@ -353,8 +361,15 @@ describe("Vaults", () => {
 				updated_at: t1,
 			}),
 			Story.clock(t2),
-			Story.when(new RotateCredential({ vault_id: vault.id, credential_id: credential.id })),
-			Story.then(credential, new CredentialRotated()),
+			Story.when(
+				new RotateCredential({
+					vault_id: vault.id,
+					credential_id: credential.id,
+					expires_at: null,
+					revision: 2,
+				}),
+			),
+			Story.then(credential, new CredentialRotated({ expires_at: null, revision: 2 })),
 			Story.view(CredentialView, credential, { display_name: "Renamed", updated_at: t2 }),
 			Story.when(
 				new UpdateCredential({
@@ -366,6 +381,92 @@ describe("Vaults", () => {
 			Story.then(credential, new CredentialRenamed({ display_name: null })),
 		),
 	)
+
+	it.effect("follows an OAuth credential's refreshes, and new tokens clear a refused one", () => {
+		const expires = DateTime.makeUnsafe("2026-01-01T01:00:00.000Z")
+		const later = DateTime.makeUnsafe("2026-01-01T02:00:00.000Z")
+		const oauth = {
+			type: "mcp_oauth" as const,
+			mcp_server_url: "https://mcp.github.example/mcp",
+			expires_at: expires,
+			refresh: {
+				token_endpoint: "https://auth.github.example/oauth/token",
+				client_id: "client_1",
+				scope: null,
+				token_endpoint_auth: { type: "none" as const },
+			},
+		}
+		const missing = Credential.ref("vcrd_none")
+		return story(
+			created,
+			Story.clock(t0),
+			Story.given(vault, new CredentialAttached({ credential_id: credential.id, auth: oauth })),
+			Story.given(
+				credential,
+				new CredentialCreated({ vault_id: vault.id, auth: oauth, display_name: null }),
+			),
+			Story.view(CredentialView, credential, { auth: oauth, refresh_failed_at: null }),
+			Story.clock(t1),
+			Story.when(
+				new RecordCredentialRefresh({
+					credential_id: credential.id,
+					expires_at: later,
+					revision: 2,
+				}),
+			),
+			Story.then(credential, new CredentialRefreshed({ expires_at: later, revision: 2 })),
+			Story.view(CredentialView, credential, {
+				auth: { ...oauth, expires_at: later },
+				refresh_failed_at: null,
+				updated_at: t1,
+			}),
+			Story.clock(t2),
+			Story.when(new FailCredentialRefresh({ credential_id: credential.id, revision: 3 })),
+			Story.then(credential, new CredentialRefreshFailed({ revision: 3 })),
+			Story.view(CredentialView, credential, { refresh_failed_at: t2, updated_at: t2 }),
+			Story.when(
+				new RotateCredential({
+					vault_id: vault.id,
+					credential_id: credential.id,
+					expires_at: expires,
+					revision: 4,
+				}),
+			),
+			Story.then(credential, new CredentialRotated({ expires_at: expires, revision: 4 })),
+			Story.view(CredentialView, credential, { auth: oauth, refresh_failed_at: null }),
+			// Reports read before the rotation and sent after it are about the tokens it replaced.
+			Story.when(new FailCredentialRefresh({ credential_id: credential.id, revision: 3 })),
+			Story.then(credential),
+			Story.when(
+				new RecordCredentialRefresh({
+					credential_id: credential.id,
+					expires_at: later,
+					revision: 4,
+				}),
+			),
+			Story.then(credential),
+			Story.view(CredentialView, credential, { auth: oauth, refresh_failed_at: null }),
+			Story.state(credential, { revision: 4 }),
+			Story.when(
+				new RecordCredentialRefresh({ credential_id: missing.id, expires_at: null, revision: 1 }),
+			),
+			Story.rejected(new CredentialNotFound({ credential_id: missing.id })),
+			Story.when(new ArchiveCredential({ vault_id: vault.id, credential_id: credential.id })),
+			Story.then(vault, new CredentialDetached({ credential_id: credential.id })),
+			Story.then(credential, new CredentialArchived()),
+			...erased(credential),
+			Story.when(new FailCredentialRefresh({ credential_id: credential.id, revision: 9 })),
+			Story.rejected(new CredentialArchivedError({ credential_id: credential.id })),
+			Story.when(
+				new RecordCredentialRefresh({
+					credential_id: credential.id,
+					expires_at: later,
+					revision: 9,
+				}),
+			),
+			Story.rejected(new CredentialArchivedError({ credential_id: credential.id })),
+		)
+	})
 
 	it.effect("archives a credential once, frees its URL, and erases its secret", () => {
 		const replacement = Credential.ref("vcrd_002")
@@ -383,7 +484,14 @@ describe("Vaults", () => {
 			Story.when(new ArchiveCredential({ vault_id: vault.id, credential_id: credential.id })),
 			Story.then(vault),
 			Story.then(credential),
-			Story.when(new RotateCredential({ vault_id: vault.id, credential_id: credential.id })),
+			Story.when(
+				new RotateCredential({
+					vault_id: vault.id,
+					credential_id: credential.id,
+					expires_at: null,
+					revision: 2,
+				}),
+			),
 			Story.rejected(new CredentialArchivedError({ credential_id: credential.id })),
 			Story.when(
 				new UpdateCredential({
@@ -457,7 +565,14 @@ describe("Vaults", () => {
 			Story.rejected(new CredentialNotFound({ credential_id: credential.id })),
 			Story.when(new DeleteCredential({ vault_id: other.id, credential_id: credential.id })),
 			Story.rejected(new CredentialNotFound({ credential_id: credential.id })),
-			Story.when(new RotateCredential({ vault_id: other.id, credential_id: credential.id })),
+			Story.when(
+				new RotateCredential({
+					vault_id: other.id,
+					credential_id: credential.id,
+					expires_at: null,
+					revision: 2,
+				}),
+			),
 			Story.rejected(new CredentialNotFound({ credential_id: credential.id })),
 			Story.when(
 				new UpdateCredential({

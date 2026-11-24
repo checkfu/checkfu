@@ -47,6 +47,10 @@ export default PiHarnessWorker.make(
 				Effect.orDie(connection(credentialId).replaceSecret(secret)),
 			keepSecret: (credentialId) => Effect.orDie(connection(credentialId).keepSecret()),
 			eraseSecret: (credentialId) => Effect.orDie(connection(credentialId).erase()),
+			credentialRefreshReport: (credentialId) =>
+				Effect.orDie(connection(credentialId).refreshReport()),
+			acknowledgeCredentialRefresh: (credentialId, refreshes) =>
+				Effect.orDie(connection(credentialId).acknowledgeRefresh(refreshes)),
 		})
 	}).pipe(Effect.provide([PiSessionLive, Cloudflare.Telemetry({ headSamplingRate: 0.1 })])),
 )

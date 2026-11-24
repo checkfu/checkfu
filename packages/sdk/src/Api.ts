@@ -43,6 +43,8 @@ import {
 	McpServerBinding,
 	McpServerName,
 	NonEmptyString,
+	OAuthClientId,
+	OAuthScope,
 	PermissionPolicy,
 	PositiveInt,
 	ResourceId,
@@ -620,6 +622,27 @@ export const UpdateVaultBody = Schema.Struct({
 })
 export type UpdateVaultBody = typeof UpdateVaultBody.Type
 
+const OAuthTokenEndpointInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an OAuth token endpoint" }),
+)
+
+const TokenEndpointAuthInput = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("none") }),
+	Schema.Struct({
+		type: Schema.Literal("client_secret_basic"),
+		client_secret: CredentialSecret.annotate({ description: "Client secret. Never returned." }),
+	}),
+	Schema.Struct({
+		type: Schema.Literal("client_secret_post"),
+		client_secret: CredentialSecret.annotate({ description: "Client secret. Never returned." }),
+	}),
+]).annotate({ description: "How the client authenticates to the token endpoint" })
+
+const AccessTokenExpiry = Schema.NullOr(Schema.DateTimeUtc).annotate({
+	description: "When the access token expires (RFC 3339), if known",
+})
+
 export const CreateCredentialBody = Schema.Struct({
 	auth: Schema.Union([
 		Schema.Struct({
@@ -630,6 +653,37 @@ export const CreateCredentialBody = Schema.Struct({
 			mcp_server_url: McpServerUrlInput.annotate({
 				description: "URL of the MCP server this credential authenticates against",
 			}),
+		}),
+		Schema.Struct({
+			type: Schema.Literal("mcp_oauth"),
+			mcp_server_url: McpServerUrlInput.annotate({
+				description: "URL of the MCP server this credential authenticates against",
+			}),
+			access_token: CredentialSecret.annotate({
+				description: "OAuth access token sent to the MCP server. Never returned.",
+			}),
+			expires_at: Schema.optionalKey(AccessTokenExpiry),
+			refresh: Schema.optionalKey(
+				Schema.NullOr(
+					Schema.Struct({
+						token_endpoint: OAuthTokenEndpointInput.annotate({
+							description: "Token endpoint the access token is refreshed at. Cannot change.",
+						}),
+						client_id: OAuthClientId.annotate({ description: "OAuth client id" }),
+						scope: Schema.optionalKey(
+							Schema.NullOr(OAuthScope).annotate({
+								description: "Scope to request on refresh; omitted asks for the granted scope",
+							}),
+						),
+						refresh_token: CredentialSecret.annotate({
+							description: "OAuth refresh token. Never returned.",
+						}),
+						token_endpoint_auth: TokenEndpointAuthInput,
+					}),
+				).annotate({
+					description: "Lets Checkfu refresh the access token. Without it the token is used as is.",
+				}),
+			),
 		}),
 	]).annotate({ description: "What the credential authenticates against, and its secret" }),
 	display_name: Schema.optionalKey(
@@ -651,7 +705,27 @@ export const UpdateCredentialBody = Schema.Struct({
 					}),
 				),
 			}),
-		]).annotate({ description: "Replacement secret. The MCP server URL cannot change." }),
+			Schema.Struct({
+				type: Schema.Literal("mcp_oauth"),
+				access_token: CredentialSecret.annotate({
+					description: "Replacement OAuth access token. Never returned.",
+				}),
+				expires_at: Schema.optionalKey(AccessTokenExpiry),
+				refresh: Schema.optionalKey(
+					Schema.Struct({
+						refresh_token: CredentialSecret.annotate({
+							description: "Replacement OAuth refresh token. Never returned.",
+						}),
+					}).annotate({
+						description:
+							"Only for a credential created with refresh; the token endpoint and client stay",
+					}),
+				),
+			}),
+		]).annotate({
+			description:
+				"Replacement secret. The credential's type and MCP server URL cannot change. New tokens clear a failed refresh.",
+		}),
 	),
 	display_name: Schema.optionalKey(
 		Schema.NullOr(CredentialDisplayName).annotate({
