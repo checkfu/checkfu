@@ -10,7 +10,7 @@ import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
 import { isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
-import { isStandalone } from "./Standalone.ts"
+import { checkoutRoot, isStandalone } from "./Standalone.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
 const resolvePhysicalPath = (path: string): string | undefined => {
@@ -39,12 +39,14 @@ const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean =
 	})
 }
 
-// Bun loads `.env` and `bunfig.toml` preloads from the directory it starts in. The
-// `checkfu` package script switches both off before Bun starts; refuse to run when
-// started any other way, so a directory can never inject configuration or code.
-if (!isStandalone && !launchedWithPinnedCliConfig(process.execArgv)) {
+// Bun loads `bunfig.toml` preloads and `.env` from the directory it starts in. In the
+// checkout that is the checkout's own bunfig, which switches `.env` loading off. Anywhere
+// else both flags must have switched the directory's files off before Bun started.
+const startedInCheckout = resolvePhysicalPath(process.cwd()) === resolvePhysicalPath(checkoutRoot)
+
+if (!isStandalone && !startedInCheckout && !launchedWithPinnedCliConfig(process.execArgv)) {
 	process.stderr.write(
-		"Error: Start the Checkfu CLI with `bun checkfu` from the checkout, or build the standalone binary with `bun run checkfu:build`. Starting src/main.ts directly would let the current directory's .env and bunfig.toml apply.\n",
+		"Error: Run `bun checkfu` from the Checkfu checkout. To use the CLI from another directory, build the standalone binary with `bun run checkfu:build` and call it by its path.\n",
 	)
 	process.exit(1)
 }
@@ -65,23 +67,10 @@ const releaseStdin = () => {
 	}
 }
 
-// `bun run` forwards SIGINT to the script it started, and a terminal also delivers the same
-// Ctrl-C to that script directly. Under `bun checkfu` one key press therefore arrives as two
-// signals a millisecond or two apart, or as one when the kernel merges them. Only the
-// spacing tells that echo from a second press, so a second signal this soon is ignored.
-const startedByBunRun = !isStandalone && process.env["npm_lifecycle_event"] === "checkfu"
-const SIGINT_ECHO_WINDOW_MS = 100
-
 const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 	let exitSignalCode: number | undefined
-	let lastSigintAt = Number.NEGATIVE_INFINITY
 
 	const onSigint = () => {
-		const now = performance.now()
-		if (startedByBunRun && now - lastSigintAt < SIGINT_ECHO_WINDOW_MS) {
-			return
-		}
-		lastSigintAt = now
 		if (sigintController.handleSigint()) {
 			return
 		}

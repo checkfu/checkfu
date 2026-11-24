@@ -2848,24 +2848,124 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("starts through a package script that switches off .env and bunfig autoloading", () => {
-		const rootPkg = JSON.parse(
-			readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
-		) as { readonly scripts?: Record<string, string> }
-		expect(rootPkg.scripts?.["checkfu"]).toBe(
-			"bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts",
-		)
-		expect(readFileSync(new URL("../bunfig.toml", import.meta.url), "utf8")).toContain(
-			"preload = []",
-		)
+	it("runs `bun checkfu` as one process that does not load the checkout's .env", async () => {
+		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
+		const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
+			readonly scripts?: Record<string, string>
+		}
+		// A package script would put Bun's script runner between the caller and the CLI: it
+		// forwards each Ctrl-C a second time and leaves the CLI running when it is killed.
+		expect(rootPkg.scripts?.["checkfu"]).toBeUndefined()
+		expect(readFileSync(join(repoRoot, "checkfu.ts"), "utf8")).toContain("apps/cli/src/main.ts")
 
 		const help = spawnSync("bun", ["checkfu", "--help"], {
-			cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+			cwd: repoRoot,
 			encoding: "utf8",
 			timeout: 20_000,
 		})
 		expect(help.status).toBe(0)
 		expect(help.stdout).toContain("sessions")
+
+		// The checkout's bunfig is what keeps its .env out; check Bun honours that file.
+		const checkoutLike = mkdtempSync(join(tmpdir(), "checkfu-bunfig-"))
+		try {
+			writeFileSync(
+				join(checkoutLike, "bunfig.toml"),
+				readFileSync(join(repoRoot, "bunfig.toml"), "utf8"),
+			)
+			writeFileSync(join(checkoutLike, ".env"), "CHECKFU_API_KEY=planted\n")
+			writeFileSync(join(checkoutLike, ".env.local"), "CHECKFU_URL=https://planted.example\n")
+			const seen = spawnSync(
+				"bun",
+				["-e", "console.log(process.env.CHECKFU_API_KEY ?? '', process.env.CHECKFU_URL ?? '')"],
+				{ cwd: checkoutLike, encoding: "utf8", timeout: 20_000 },
+			)
+			expect(seen.status).toBe(0)
+			expect(seen.stdout.trim()).toBe("")
+		} finally {
+			rmSync(checkoutLike, { recursive: true, force: true })
+		}
+
+		// Killing the command's PID must stop a long-lived stream and close its output.
+		let streamClosed = false
+		const server = Http.createServer((req, res) => {
+			res.writeHead(200, {
+				"content-type": "text/event-stream; charset=utf-8",
+				"cache-control": "no-cache",
+			})
+			res.write(
+				'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
+			)
+			req.on("close", () => {
+				streamClosed = true
+			})
+		})
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve)
+		})
+		try {
+			const port = (server.address() as { port: number }).port
+			const outcome = await new Promise<{
+				readonly stdoutEnded: boolean
+				readonly signal: NodeJS.Signals | null
+			}>((resolve, reject) => {
+				const child = spawn(
+					"bun",
+					[
+						"checkfu",
+						"sessions:events",
+						"stream",
+						"--session-id",
+						"sess_kill",
+						"--base-url",
+						`http://127.0.0.1:${port}`,
+					],
+					{
+						cwd: repoRoot,
+						env: { ...process.env, CHECKFU_API_KEY: "ck_kill" },
+						stdio: ["ignore", "pipe", "pipe"],
+					},
+				)
+				let stdout = ""
+				let stdoutEnded = false
+				let killed = false
+				const timer = setTimeout(() => {
+					child.kill("SIGKILL")
+					reject(new Error(`stream did not stop after its PID was killed: ${stdout}`))
+				}, 15_000)
+				child.stdout.setEncoding("utf8")
+				child.stdout.on("data", (chunk: string) => {
+					stdout += chunk
+					if (!killed && stdout.includes("session.status_running")) {
+						killed = true
+						child.kill("SIGKILL")
+					}
+				})
+				child.stdout.on("end", () => {
+					stdoutEnded = true
+				})
+				child.on("error", reject)
+				child.on("close", (_code, signal) => {
+					clearTimeout(timer)
+					resolve({ stdoutEnded, signal })
+				})
+			})
+			expect(outcome.signal).toBe("SIGKILL")
+			expect(outcome.stdoutEnded).toBe(true)
+			for (let waited = 0; waited < 3000 && !streamClosed; waited += 50) {
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 50)
+				})
+			}
+			expect(streamClosed).toBe(true)
+		} finally {
+			server.closeAllConnections()
+			await new Promise<void>((resolve) => {
+				server.close(() => {
+					resolve()
+				})
+			})
+		}
 	})
 
 	it.runIf(ptySupported)(
@@ -2968,9 +3068,6 @@ while time.time() < deadline:
         stage = 1
         os.write(master, b"\\x03")
     elif stage == 1 and b"Press Ctrl-C again to disconnect." in out:
-        # A person presses again no sooner than this; bun run's echo of the first press
-        # arrives within a millisecond or two and must not count as the second.
-        time.sleep(0.2)
         alive_after_first = p.poll() is None
         stage = 2
         os.write(master, b"\\x03")
