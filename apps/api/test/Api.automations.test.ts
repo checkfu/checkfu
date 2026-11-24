@@ -512,6 +512,8 @@ describe("Automations API", () => {
 					["unknown time zone", schedule("0 9 * * *", "Mars/Olympus"), 400],
 					["offset time zone", schedule("0 9 * * *", "+02:00"), 400],
 					["impossible offset", schedule("0 9 * * *", "+99:99"), 400],
+					["hour-only offset", schedule("0 9 * * *", "+02"), 400],
+					["negative zero offset", schedule("0 9 * * *", "-00"), 400],
 					["empty time zone", schedule("0 9 * * *", ""), 400],
 					["interval type", { schedule: { type: "interval", every: "1 hour" } }, 400],
 					["two messages", { initial_events: [...message("a"), ...message("b")] }, 400],
