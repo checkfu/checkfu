@@ -538,7 +538,7 @@ describe("Vaults", () => {
 				expect(
 					yield* secrets.store({
 						credential_id: orphan,
-						secret: Redacted.make(TOKEN),
+						secret: { type: "static_bearer", token: Redacted.make(TOKEN) },
 						mcp_server_url: "https://mcp.example.com/mcp",
 					}),
 				).toEqual({
@@ -555,7 +555,7 @@ describe("Vaults", () => {
 				const kept = CredentialId.make("vcrd_kept")
 				yield* secrets.store({
 					credential_id: kept,
-					secret: Redacted.make(TOKEN),
+					secret: { type: "static_bearer", token: Redacted.make(TOKEN) },
 					mcp_server_url: "https://mcp.example.com/mcp",
 				})
 				yield* secrets.keep({ credential_id: kept })
@@ -564,7 +564,7 @@ describe("Vaults", () => {
 				expect(
 					yield* secrets.store({
 						credential_id: kept,
-						secret: Redacted.make(ROTATED),
+						secret: { type: "static_bearer", token: Redacted.make(ROTATED) },
 						mcp_server_url: "https://mcp.example.com/mcp",
 					}),
 				).toEqual({
@@ -572,12 +572,15 @@ describe("Vaults", () => {
 				})
 				yield* secrets.erase({ credential_id: kept })
 				expect(
-					yield* secrets.replace({ credential_id: kept, secret: Redacted.make(ROTATED) }),
-				).toEqual({ replaced: false })
+					yield* secrets.replace({
+						credential_id: kept,
+						secret: { type: "static_bearer", token: Redacted.make(ROTATED) },
+					}),
+				).toEqual({ revision: null })
 				expect(
 					yield* secrets.store({
 						credential_id: kept,
-						secret: Redacted.make(ROTATED),
+						secret: { type: "static_bearer", token: Redacted.make(ROTATED) },
 						mcp_server_url: "https://mcp.example.com/mcp",
 					}),
 				).toEqual({
@@ -586,5 +589,319 @@ describe("Vaults", () => {
 				expect(vaults.secretOf(kept)).toBeNull()
 			}),
 		)
+	})
+})
+
+const ACCESS = "oat_live_ACCESS_do_not_leak_11aa"
+const REFRESH = "ort_live_REFRESH_do_not_leak_22bb"
+const CLIENT_SECRET = "ocs_live_CLIENT_do_not_leak_33cc"
+const NEW_ACCESS = "oat_live_NEWACCESS_do_not_leak_44dd"
+const NEW_REFRESH = "ort_live_NEWREFRESH_do_not_leak_55ee"
+const OAUTH_SECRETS = [ACCESS, REFRESH, CLIENT_SECRET, NEW_ACCESS, NEW_REFRESH]
+const TOKEN_ENDPOINT = "https://auth.github.example/oauth/token"
+const EXPIRES = "2030-01-01T00:00:00.000Z"
+const LATER = "2030-06-01T00:00:00.000Z"
+
+interface OAuthCredentialBody {
+	readonly id: string
+	readonly auth: {
+		readonly type: string
+		readonly mcp_server_url: string
+		readonly expires_at: string | null
+		readonly refresh: unknown
+	}
+	readonly refresh_failed_at: string | null
+}
+
+const REFRESH_INPUT = {
+	token_endpoint: TOKEN_ENDPOINT,
+	client_id: "client_1",
+	refresh_token: REFRESH,
+	token_endpoint_auth: { type: "client_secret_post", client_secret: CLIENT_SECRET },
+}
+
+type AuthOverrides = Partial<
+	Record<"mcp_server_url" | "access_token" | "expires_at" | "token", string | undefined>
+> & { readonly refresh?: object | undefined }
+
+const oauthAuth = (overrides: AuthOverrides = {}) => ({
+	type: "mcp_oauth",
+	mcp_server_url: GITHUB,
+	access_token: ACCESS,
+	expires_at: "2030-01-01T00:00:00Z",
+	refresh: REFRESH_INPUT,
+	...overrides,
+})
+
+const createOAuth = (call: Call, vaultId: string, overrides: AuthOverrides = {}) =>
+	call("POST", `/v1/vaults/${vaultId}/credentials`, { auth: oauthAuth(overrides) })
+
+const leaked = (text: string): ReadonlyArray<string> =>
+	OAUTH_SECRETS.filter((secret) => text.includes(secret))
+
+describe("Vault OAuth credentials", () => {
+	it("stores an OAuth grant: its record says what it is for, only its connection has the secrets", async () => {
+		const { run, vaults, logs, transcript } = world()
+		const recorded = await run(({ call }) =>
+			Effect.gen(function* () {
+				const vault = yield* createVault(call)
+				const created = yield* createOAuth(call, vault.id)
+				expect(created.status).toBe(201)
+				const credential = created.body as OAuthCredentialBody
+				expect(credential.auth).toEqual({
+					type: "mcp_oauth",
+					mcp_server_url: GITHUB,
+					expires_at: EXPIRES,
+					refresh: {
+						token_endpoint: TOKEN_ENDPOINT,
+						client_id: "client_1",
+						scope: null,
+						token_endpoint_auth: { type: "client_secret_post" },
+					},
+				})
+				expect(credential.refresh_failed_at).toBeNull()
+				expect(vaults.held(credential.id)).toEqual({
+					type: "mcp_oauth",
+					access_token: ACCESS,
+					expires_at: Date.parse(EXPIRES),
+					refresh: {
+						token_endpoint: TOKEN_ENDPOINT,
+						client_id: "client_1",
+						scope: null,
+						auth: { type: "client_secret_post", client_secret: CLIENT_SECRET },
+						refresh_token: REFRESH,
+					},
+					refresh_failed: false,
+				})
+				expect(vaults.custodyOf(credential.id).target()).toBe(GITHUB)
+
+				const bare = yield* createOAuth(call, vault.id, {
+					mcp_server_url: "https://mcp.gitlab.example/mcp",
+					expires_at: undefined,
+					refresh: undefined,
+				})
+				expect(bare.status).toBe(201)
+				expect((bare.body as OAuthCredentialBody).auth).toMatchObject({
+					expires_at: null,
+					refresh: null,
+				})
+				yield* call("GET", `/v1/vaults/${vault.id}/credentials`)
+				return JSON.stringify([
+					yield* vaults.storedEvents("Vault", vault.id),
+					yield* vaults.storedEvents("Credential", credential.id),
+				])
+			}),
+		)
+		expect(recorded).toContain("mcp_oauth")
+		expect(leaked([recorded, ...transcript, ...logs.map(String)].join("\n"))).toEqual([])
+	})
+
+	it("refuses a token endpoint a refresh token must not be sent to, and misspelled fields", async () => {
+		const { run, transcript } = world()
+		await run(({ call }) =>
+			Effect.gen(function* () {
+				const vault = yield* createVault(call)
+				const refused: ReadonlyArray<readonly [string, AuthOverrides]> = [
+					[
+						"plain http",
+						{ refresh: { ...REFRESH_INPUT, token_endpoint: "http://auth.example.com/t" } },
+					],
+					[
+						"userinfo",
+						{ refresh: { ...REFRESH_INPUT, token_endpoint: "https://u:p@auth.example.com/t" } },
+					],
+					["no endpoint", { refresh: { ...REFRESH_INPUT, token_endpoint: undefined } }],
+					["no refresh token", { refresh: { ...REFRESH_INPUT, refresh_token: undefined } }],
+					["misspelled", { refresh: { ...REFRESH_INPUT, refresh_tokn: REFRESH } }],
+					[
+						"unknown client auth",
+						{ refresh: { ...REFRESH_INPUT, token_endpoint_auth: { type: "private_key_jwt" } } },
+					],
+					[
+						"secret for a public client",
+						{
+							refresh: {
+								...REFRESH_INPUT,
+								token_endpoint_auth: { type: "none", client_secret: CLIENT_SECRET },
+							},
+						},
+					],
+					["no access token", { access_token: undefined }],
+					["bad expiry", { expires_at: "next tuesday" }],
+					["a bearer token too", { token: ACCESS }],
+				]
+				for (const [name, overrides] of refused) {
+					expect(`${name} -> ${(yield* createOAuth(call, vault.id, overrides)).status}`).toBe(
+						`${name} -> 400`,
+					)
+				}
+				const loopback = yield* createOAuth(call, vault.id, {
+					refresh: { ...REFRESH_INPUT, token_endpoint: "http://127.0.0.1:9000/token" },
+				})
+				expect(loopback.status).toBe(201)
+				const listed = yield* call("GET", `/v1/vaults/${vault.id}/credentials`)
+				expect((listed.body as { data: ReadonlyArray<unknown> }).data).toHaveLength(1)
+			}),
+		)
+		expect(leaked(transcript.join("\n"))).toEqual([])
+	})
+
+	it("replaces tokens without changing what the credential is for or how it is refreshed", async () => {
+		const { run, vaults, logs, transcript } = world()
+		await run(({ call }) =>
+			Effect.gen(function* () {
+				const vault = yield* createVault(call)
+				const credential = (yield* createOAuth(call, vault.id)).body as OAuthCredentialBody
+				const path = `/v1/vaults/${vault.id}/credentials/${credential.id}`
+
+				const updated = yield* call("POST", path, {
+					auth: {
+						type: "mcp_oauth",
+						access_token: NEW_ACCESS,
+						expires_at: LATER,
+						refresh: { refresh_token: NEW_REFRESH },
+					},
+				})
+				expect(updated.status).toBe(200)
+				expect((updated.body as OAuthCredentialBody).auth).toMatchObject({
+					mcp_server_url: GITHUB,
+					expires_at: LATER,
+					refresh: { token_endpoint: TOKEN_ENDPOINT },
+				})
+				expect(vaults.held(credential.id)).toMatchObject({
+					access_token: NEW_ACCESS,
+					expires_at: Date.parse(LATER),
+					refresh: {
+						token_endpoint: TOKEN_ENDPOINT,
+						refresh_token: NEW_REFRESH,
+						auth: { client_secret: CLIENT_SECRET },
+					},
+				})
+
+				// Only the access token: the refresh token it had stays, and the expiry is unknown again.
+				expect(
+					(yield* call("POST", path, { auth: { type: "mcp_oauth", access_token: ACCESS } })).status,
+				).toBe(200)
+				expect(vaults.held(credential.id)).toMatchObject({
+					access_token: ACCESS,
+					expires_at: null,
+					refresh: { refresh_token: NEW_REFRESH },
+				})
+
+				for (const [name, auth] of [
+					["another kind", { type: "static_bearer", token: TOKEN }],
+					["no access token", { type: "mcp_oauth", refresh: { refresh_token: NEW_REFRESH } }],
+					[
+						"a new endpoint",
+						{
+							type: "mcp_oauth",
+							access_token: NEW_ACCESS,
+							refresh: { refresh_token: NEW_REFRESH, token_endpoint: "https://evil.example/t" },
+						},
+					],
+					[
+						"a new server",
+						{ type: "mcp_oauth", access_token: NEW_ACCESS, mcp_server_url: "https://evil.example" },
+					],
+				] as const) {
+					expect(`${name} -> ${(yield* call("POST", path, { auth })).status}`).toBe(
+						`${name} -> 400`,
+					)
+				}
+				expect(vaults.held(credential.id)).toMatchObject({ access_token: ACCESS })
+
+				const bearer = (yield* createCredential(call, vault.id, "https://mcp.gitlab.example/mcp"))
+					.body as CredentialBody
+				expect(
+					(yield* call("POST", `/v1/vaults/${vault.id}/credentials/${bearer.id}`, {
+						auth: { type: "mcp_oauth", access_token: NEW_ACCESS },
+					})).status,
+				).toBe(400)
+				expect(vaults.secretOf(bearer.id)).toBe(TOKEN)
+
+				const bare = (yield* createOAuth(call, vault.id, {
+					mcp_server_url: "https://mcp.linear.example/mcp",
+					refresh: undefined,
+				})).body as OAuthCredentialBody
+				expect(
+					(yield* call("POST", `/v1/vaults/${vault.id}/credentials/${bare.id}`, {
+						auth: {
+							type: "mcp_oauth",
+							access_token: NEW_ACCESS,
+							refresh: { refresh_token: NEW_REFRESH },
+						},
+					})).status,
+				).toBe(400)
+				expect(vaults.held(bare.id)).toMatchObject({ access_token: ACCESS, refresh: null })
+			}),
+		)
+		expect(leaked([...transcript, ...logs.map(String)].join("\n"))).toEqual([])
+	})
+
+	it("records what a refresh came to on the next read of the credential, once", async () => {
+		const { run, vaults, logs, transcript } = world()
+		await run(({ call }) =>
+			Effect.gen(function* () {
+				const vault = yield* createVault(call)
+				const credential = (yield* createOAuth(call, vault.id)).body as OAuthCredentialBody
+				const path = `/v1/vaults/${vault.id}/credentials/${credential.id}`
+				const read = Effect.map(call("GET", path), (res) => res.body as OAuthCredentialBody)
+				const recordedTags = Effect.map(
+					vaults.storedEvents("Credential", credential.id),
+					(events) => [...JSON.stringify(events).matchAll(/vault_credential\.\w+/g)].map(String),
+				)
+				const custody = vaults.custodyOf(credential.id)
+				// What the connection's OAuth refresh writes when it gets a new token, or a refusal.
+				const refresh = (next: {
+					readonly expires_at: number
+					readonly refresh_failed: boolean
+				}) => {
+					const held = custody.read()
+					if (held?.type !== "mcp_oauth") {
+						throw new Error("expected an OAuth grant")
+					}
+					custody.refreshed({ ...held, ...next }, custody.revision())
+				}
+
+				expect((yield* read).auth.expires_at).toBe(EXPIRES)
+				refresh({ expires_at: Date.parse(LATER), refresh_failed: false })
+				const after = yield* Effect.repeat(read, {
+					schedule: Schedule.spaced("5 millis"),
+					times: 400,
+					until: (seen) => seen.auth.expires_at === LATER,
+				})
+				expect(after.auth.expires_at).toBe(LATER)
+				// Read again: the outcome was acknowledged, so it is not recorded twice.
+				yield* read
+				expect(yield* recordedTags).toEqual([
+					"vault_credential.created",
+					"vault_credential.refreshed",
+				])
+
+				refresh({ expires_at: Date.parse(LATER), refresh_failed: true })
+				const failed = yield* Effect.repeat(read, {
+					schedule: Schedule.spaced("5 millis"),
+					times: 400,
+					until: (seen) => seen.refresh_failed_at !== null,
+				})
+				expect(failed.refresh_failed_at).not.toBeNull()
+				expect((yield* recordedTags).at(-1)).toBe("vault_credential.refresh_failed")
+
+				// New tokens are the way out.
+				const renewed = yield* call("POST", path, {
+					auth: { type: "mcp_oauth", access_token: NEW_ACCESS, expires_at: EXPIRES },
+				})
+				expect(renewed.body).toMatchObject({
+					refresh_failed_at: null,
+					auth: { expires_at: EXPIRES },
+				})
+
+				// An archived credential keeps no secret, so there is nothing more to record.
+				expect((yield* call("POST", `${path}/archive`)).status).toBe(200)
+				yield* call("GET", path)
+				expect((yield* recordedTags).filter((tag) => tag.endsWith("refreshed"))).toHaveLength(1)
+			}),
+		)
+		expect(leaked([...transcript, ...logs.map(String)].join("\n"))).toEqual([])
 	})
 })

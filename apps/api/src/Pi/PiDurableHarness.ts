@@ -44,6 +44,7 @@ import { bindSessionServers } from "../Connection/McpBindings.ts"
 import type { ToolAnswer } from "./PiApprovals.ts"
 import { isPaused } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import { makeCredentialRefreshRecorder } from "../Connection/CredentialRefresh.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
 	HarnessCallFailed,
@@ -207,6 +208,24 @@ export const PiDurableHarnessLive = boundedHarness(
 				yield* serverSets.send(new RecordMcpServers({ set_id: setId, servers: bound.mcpServers }))
 				return McpServerBindingList.decode((yield* serverSets.get(setId)).servers)
 			})
+		const recordCredentialRefresh = yield* makeCredentialRefreshRecorder
+		// The connections a session's turn used may have refreshed their tokens; their outcomes
+		// reach the credentials' records through the API, after each turn whatever it ended with.
+		const recordSessionRefreshes = (sessionId: SessionId) =>
+			Effect.gen(function* () {
+				const servers = McpServerBindingList.decode(
+					(yield* serverSets.get(McpServerSetId.make(sessionId))).servers,
+				)
+				yield* Effect.forEach(
+					servers.flatMap((server) =>
+						server.credential_id === null ? [] : [server.credential_id],
+					),
+					recordCredentialRefresh,
+					{ discard: true },
+				)
+			}).pipe(
+				Effect.catchCause((cause) => Effect.logWarning("Credential refreshes not read", cause)),
+			)
 
 		type TurnRef = { readonly session_id: SessionId; readonly turn: number }
 
@@ -528,7 +547,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					)
 
 					return yield* settle(args, conversation, operationId, outcome, settleTimeout)
-				}),
+				}).pipe(Effect.ensuring(recordSessionRefreshes(args.session_id))),
 			interrupt: (args) =>
 				Effect.gen(function* () {
 					const { interruptTimeout } = yield* HarnessLimits

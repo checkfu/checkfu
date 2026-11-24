@@ -29,6 +29,7 @@ const STANDING = {
 	"Credential.CredentialNeverChangesVault": "checked",
 	"Credential.ArchivedNeverReactivates": "checked",
 	"Credential.DeletedStaysDeleted": "checked",
+	"Credential.CustodyRevisionNeverGoesBack": "checked",
 	"McpServerSet.NothingRecordedMeansNoServers": "proved",
 	"McpServerSet.RecordedServersNeverChange": "proved",
 	"CreateCredential.OnlyAnActiveVaultTakesANewCredential": "checked",

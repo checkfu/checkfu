@@ -92,6 +92,14 @@ const ConnectionExecutorLive = Layer.effect(
 				connectionCall(Effect.suspend(() => harness.eraseSecret(credentialId))).pipe(
 					Effect.withSpan("Connection.erase"),
 				),
+			refreshReport: (credentialId) =>
+				connectionCall(Effect.suspend(() => harness.credentialRefreshReport(credentialId))).pipe(
+					Effect.withSpan("Connection.refreshReport"),
+				),
+			acknowledgeRefresh: (credentialId, refreshes) =>
+				connectionCall(
+					Effect.suspend(() => harness.acknowledgeCredentialRefresh(credentialId, refreshes)),
+				).pipe(Effect.withSpan("Connection.acknowledgeRefresh")),
 		}
 	}),
 )
@@ -117,7 +125,8 @@ const CheckfuLive = Checkfu.layer(
 
 const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 	Layer.provideMerge(CredentialSecretsLive),
-	Layer.provide(ConnectionExecutorLive),
+	// The API's handlers and a session's turn also ask the connections for refresh outcomes.
+	Layer.provideMerge(ConnectionExecutorLive),
 	Layer.provide(PlacedDurableObjects),
 )
 

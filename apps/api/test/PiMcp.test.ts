@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest"
 import { makeConnectionProxy } from "../src/Connection/ConnectionProxy.ts"
 import type { ConnectionProxy } from "../src/Connection/ConnectionProxy.ts"
 import { makeMcpUpstream } from "../src/Connection/McpUpstream.ts"
+import { makeOAuthRefresher } from "../src/Connection/OAuthRefresh.ts"
 import { secretForms } from "../src/Connection/Scrub.ts"
 import { boundStructured } from "../src/Connection/ResultBounds.ts"
 import type { McpCallOutcome, McpUpstream } from "../src/Connection/McpUpstream.ts"
@@ -47,6 +48,19 @@ const executor = (db: DatabaseSync): SqlExecutor => ({
 })
 
 const store = () => new PiMcpStore(executor(new DatabaseSync(":memory:")))
+
+const bearer = (token: () => string | null) =>
+	makeOAuthRefresher({
+		read: () => {
+			const held = token()
+			return held === null ? null : { type: "static_bearer", token: held }
+		},
+		revision: () => 0,
+		write: () => false,
+		exclusive: async (work) => work(),
+		resource: () => null,
+		now: () => 0,
+	})
 
 const TRACKER = { name: "tracker", url: "https://mcp.tracker.example/mcp", credential_id: "vcrd_1" }
 
@@ -501,7 +515,7 @@ describe("a connection's MCP client", () => {
 	it("sends the secret only to the server it was stored for, whatever URL a caller names", async () => {
 		const stored = await server(["tok_a"])
 		const other = await server(null)
-		const proxy = makeConnectionProxy(() => ({ url: stored.url, token: () => "tok_a" }))
+		const proxy = makeConnectionProxy(() => ({ url: stored.url, auth: bearer(() => "tok_a") }))
 
 		const wrong = sessionClient(other.url, proxy)
 		expect(await wrong.callTool("echo", { text: "x" })).toMatchObject({
@@ -523,7 +537,7 @@ describe("a connection's MCP client", () => {
 		const open = await server(null)
 		const client = sessionClient(
 			open.url,
-			makeConnectionProxy(() => ({ url: open.url, token: null })),
+			makeConnectionProxy(() => ({ url: open.url, auth: null })),
 		)
 		const listed = await client.listTools()
 		expect(listed.ok && listed.tools.map((tool) => [tool.name, tool.readOnly])).toEqual([
@@ -545,7 +559,7 @@ describe("a connection's MCP client", () => {
 		const open = await server(null)
 		const client = sessionClient(
 			open.url,
-			makeConnectionProxy(() => ({ url: open.url, token: null })),
+			makeConnectionProxy(() => ({ url: open.url, auth: null })),
 		)
 		const answer = await client.callTool("picture", { first: 1024, second: 4096 })
 		expect(answer.ok && answer.content.map((block) => block.type)).toEqual(["image", "image"])
@@ -556,7 +570,7 @@ describe("a connection's MCP client", () => {
 		let secret: string | null = "tok_a"
 		const client = sessionClient(
 			guarded.url,
-			makeConnectionProxy(() => ({ url: guarded.url, token: () => secret })),
+			makeConnectionProxy(() => ({ url: guarded.url, auth: bearer(() => secret) })),
 		)
 		expect(await client.callTool("echo", { text: "1" })).toMatchObject({ ok: true })
 
@@ -587,7 +601,7 @@ describe("a connection's MCP client", () => {
 
 	it("keeps each session's MCP session to itself on one connection", async () => {
 		const stateful = await server(["tok_a"], { stateful: true })
-		const proxy = makeConnectionProxy(() => ({ url: stateful.url, token: () => "tok_a" }))
+		const proxy = makeConnectionProxy(() => ({ url: stateful.url, auth: bearer(() => "tok_a") }))
 		const first = sessionClient(stateful.url, proxy)
 		const second = sessionClient(stateful.url, proxy)
 
@@ -606,7 +620,7 @@ describe("a connection's MCP client", () => {
 		const echoing = await server([secret])
 		const client = sessionClient(
 			echoing.url,
-			makeConnectionProxy(() => ({ url: echoing.url, token: () => secret })),
+			makeConnectionProxy(() => ({ url: echoing.url, auth: bearer(() => secret) })),
 		)
 		const answer = await client.callTool("leak", {})
 		expect(answer).toMatchObject({ ok: true })

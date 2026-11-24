@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema"
+import type { RecoverOutcome, TokenOutcome, TokenUnavailable } from "./OAuthRefresh.ts"
 
 export const McpToolDescriptor = Schema.Struct({
 	name: Schema.String,
@@ -17,7 +18,7 @@ export type McpContent =
 	| { readonly type: "image"; readonly data: string; readonly mimeType: string }
 
 export type McpFailureReason =
-	| "credential_unavailable"
+	| TokenUnavailable
 	| "wrong_server"
 	| "unauthorized"
 	| "forbidden"
@@ -60,8 +61,16 @@ export type ForwardOutcome =
 	  }
 	| McpFailure
 
-/** Where a connection may send requests, and the secret it sends there, if it has one. */
+/** How a connection authenticates: the token to send now, and what to keep out of answers. */
+export interface McpTargetAuth {
+	readonly token: () => Promise<TokenOutcome>
+	/** After the server refused a token: whether another one is now worth one more try. */
+	readonly recover: (rejected: string) => Promise<RecoverOutcome>
+	readonly secrets: () => ReadonlyArray<string>
+}
+
+/** Where a connection may send requests, and how it authenticates there, if it does. */
 export interface McpTarget {
 	readonly url: string
-	readonly token: (() => string | null) | null
+	readonly auth: McpTargetAuth | null
 }

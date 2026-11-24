@@ -1,4 +1,5 @@
 import type { ForwardOutcome, ForwardRequest, McpFailure, McpTarget } from "./McpTools.ts"
+import type { TokenUnavailable } from "./OAuthRefresh.ts"
 import { makeScrubber } from "./Scrub.ts"
 
 /** Longest one forwarded request may take, response body included. */
@@ -25,10 +26,22 @@ const failure = (reason: McpFailure["reason"], message: string): McpFailure => (
 	message,
 })
 
-const CREDENTIAL_UNAVAILABLE = failure(
-	"credential_unavailable",
-	"The credential for this MCP server is no longer available.",
-)
+const TOKEN_UNAVAILABLE: Record<TokenUnavailable, McpFailure> = {
+	credential_unavailable: failure(
+		"credential_unavailable",
+		"The credential for this MCP server is no longer available.",
+	),
+	reauthorization_required: failure(
+		"reauthorization_required",
+		"The connection to this MCP server needs to be re-authorized: its sign-in expired and could not be renewed. Tell the user to reconnect it; calling again will not help.",
+	),
+	refresh_unavailable: failure(
+		"refresh_unavailable",
+		"The sign-in for this MCP server could not be renewed right now. Try again later.",
+	),
+}
+
+const isFailure = (value: Response | McpFailure): value is McpFailure => "reason" in value
 
 /** Reads at most `limit` bytes of a body; undefined when it holds more. */
 const readBounded = async (response: Response, limit: number): Promise<string | undefined> => {
@@ -73,7 +86,7 @@ export const makeConnectionProxy = (
 	forward: async (request: ForwardRequest): Promise<ForwardOutcome> => {
 		const to = target()
 		if (to === null) {
-			return CREDENTIAL_UNAVAILABLE
+			return TOKEN_UNAVAILABLE.credential_unavailable
 		}
 		if (request.url !== to.url) {
 			return failure("wrong_server", "This connection is for a different MCP server.")
@@ -82,27 +95,54 @@ export const makeConnectionProxy = (
 		if (request.method === "GET") {
 			return { ok: true, status: 405, headers: [["allow", "POST, DELETE"]], body: "" }
 		}
-		const secret = to.token === null ? null : to.token()
-		if (to.token !== null && secret === null) {
-			return CREDENTIAL_UNAVAILABLE
-		}
-		const scrub = makeScrubber(secret === null ? [] : [secret])
-		const headers = new Headers(
-			request.headers.flatMap(([name, value]): Array<[string, string]> =>
-				REQUEST_HEADERS.has(name.toLowerCase()) ? [[name, value]] : [],
-			),
-		)
-		if (secret !== null) {
-			headers.set("authorization", `Bearer ${secret}`)
-		}
-		try {
-			const response = await fetchFn(to.url, {
+		const { auth } = to
+		const sent: Array<string> = []
+		const send = async (): Promise<Response | McpFailure> => {
+			const headers = new Headers(
+				request.headers.flatMap(([name, value]): Array<[string, string]> =>
+					REQUEST_HEADERS.has(name.toLowerCase()) ? [[name, value]] : [],
+				),
+			)
+			if (auth !== null) {
+				const token = await auth.token()
+				if (!token.ok) {
+					return TOKEN_UNAVAILABLE[token.reason]
+				}
+				sent.push(token.token)
+				headers.set("authorization", `Bearer ${token.token}`)
+			}
+			return fetchFn(to.url, {
 				method: request.method,
 				headers,
 				...(request.body === null ? {} : { body: request.body }),
 				redirect: "manual",
 				signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
 			})
+		}
+		const scrubber = () => makeScrubber([...sent, ...(auth?.secrets() ?? [])])
+		try {
+			let response = await send()
+			// A token the server no longer accepts may have a successor: one more try, with that.
+			const rejected = sent.at(-1)
+			if (
+				!isFailure(response) &&
+				response.status === 401 &&
+				auth !== null &&
+				rejected !== undefined
+			) {
+				const recovered = await auth.recover(rejected)
+				if (recovered === "retry") {
+					await response.body?.cancel()
+					response = await send()
+				} else if (recovered !== "none") {
+					await response.body?.cancel()
+					return TOKEN_UNAVAILABLE[recovered]
+				}
+			}
+			if (isFailure(response)) {
+				return response
+			}
+			const scrub = scrubber()
 			const body = await readBounded(response, MAX_FORWARD_RESPONSE_BYTES)
 			if (body === undefined) {
 				return failure(
@@ -119,7 +159,7 @@ export const makeConnectionProxy = (
 				body: scrub.body(response.headers.get("content-type"), body),
 			}
 		} catch (error) {
-			return failure("failed", scrub.text(`The MCP server request failed: ${String(error)}`))
+			return failure("failed", scrubber().text(`The MCP server request failed: ${String(error)}`))
 		}
 	},
 })

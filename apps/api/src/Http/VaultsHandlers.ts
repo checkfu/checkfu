@@ -16,6 +16,7 @@ import { UpdateCredential } from "@checkfu/domain/Vault/UpdateCredential.command
 import { UpdateVault } from "@checkfu/domain/Vault/UpdateVault.command"
 import { Vault } from "@checkfu/domain/Vault/Vault.aggregate"
 import { VaultId } from "@checkfu/domain/Vault/Vault.id"
+import type { CredentialAuth, CredentialSecretMaterial } from "@checkfu/domain/Vault/VaultTypes"
 import { VaultView } from "@checkfu/domain/Vault/VaultView.view"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -23,7 +24,9 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import { makeCredentialRefreshRecorder } from "../Connection/CredentialRefresh.ts"
 import { CheckfuApi } from "./Api.ts"
+import type { CreateCredentialBody } from "./Api.ts"
 import {
 	bestEffortAfterCommit,
 	commitForStream,
@@ -36,6 +39,50 @@ import {
 	reject,
 } from "./HttpHelpers.ts"
 
+/** A new credential's two halves: what its record says, and the secrets only its connection gets. */
+const splitAuth = (
+	auth: CreateCredentialBody["auth"],
+	mcpServerUrl: string,
+): { readonly auth: CredentialAuth; readonly secret: CredentialSecretMaterial } | undefined => {
+	if (auth.type === "static_bearer") {
+		return {
+			auth: { type: "static_bearer", mcp_server_url: mcpServerUrl },
+			secret: { type: "static_bearer", token: auth.token },
+		}
+	}
+	const expires_at = auth.expires_at ?? null
+	const refresh = auth.refresh ?? null
+	if (refresh === null) {
+		return {
+			auth: { type: "mcp_oauth", mcp_server_url: mcpServerUrl, expires_at, refresh: null },
+			secret: { type: "mcp_oauth", access_token: auth.access_token, expires_at, refresh: null },
+		}
+	}
+	const token_endpoint = normalizeMcpServerUrl(refresh.token_endpoint)
+	if (token_endpoint === undefined) {
+		return undefined
+	}
+	const shared = { token_endpoint, client_id: refresh.client_id, scope: refresh.scope ?? null }
+	return {
+		auth: {
+			type: "mcp_oauth",
+			mcp_server_url: mcpServerUrl,
+			expires_at,
+			refresh: { ...shared, token_endpoint_auth: { type: refresh.token_endpoint_auth.type } },
+		},
+		secret: {
+			type: "mcp_oauth",
+			access_token: auth.access_token,
+			expires_at,
+			refresh: {
+				...shared,
+				token_endpoint_auth: refresh.token_endpoint_auth,
+				refresh_token: refresh.refresh_token,
+			},
+		},
+	}
+}
+
 export const VaultReadWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/VaultReadWaitTimeout",
 	{ defaultValue: () => "5 seconds" },
@@ -47,6 +94,7 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 		const vaultViews = yield* VaultView
 		const credentials = yield* Credential
 		const credentialViews = yield* CredentialView
+		const recordCredentialRefresh = yield* makeCredentialRefreshRecorder
 		const createCredential = yield* CreateCredentialDecision
 		const archiveCredential = yield* ArchiveCredentialDecision
 		const deleteCredential = yield* DeleteCredentialDecision
@@ -185,11 +233,15 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 					if (mcpServerUrl === undefined) {
 						return yield* reject(400, "auth.mcp_server_url is not a valid URL.")
 					}
+					const split = splitAuth(payload.auth, mcpServerUrl)
+					if (split === undefined) {
+						return yield* reject(400, "auth.refresh.token_endpoint is not a valid URL.")
+					}
 					yield* requireVault(params.vault_id)
 					const id = CredentialId.make(yield* randomId(random, "vcrd"))
 					// The secret goes straight to the credential's connection: no command carries it.
 					const { stored } = yield* secrets
-						.store({ credential_id: id, secret: payload.auth.token, mcp_server_url: mcpServerUrl })
+						.store({ credential_id: id, secret: split.secret, mcp_server_url: mcpServerUrl })
 						.pipe(
 							Effect.catchTag("CredentialSecretsUnavailable", () =>
 								reject(503, "Credential storage is unavailable. Try again."),
@@ -203,7 +255,7 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 							new CreateCredential({
 								vault_id: params.vault_id,
 								credential_id: id,
-								auth: { type: "static_bearer", mcp_server_url: mcpServerUrl },
+								auth: split.auth,
 								display_name: payload.display_name ?? null,
 							}),
 						)
@@ -231,7 +283,11 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 					const vault = yield* requireVault(params.vault_id)
 					const data = yield* Effect.forEach(
 						vault.credentials,
-						(held) => readCredential(held.credential_id),
+						(held) =>
+							Effect.andThen(
+								recordCredentialRefresh(held.credential_id),
+								readCredential(held.credential_id),
+							),
 						{ concurrency: "unbounded" },
 					)
 					return { data }
@@ -240,6 +296,7 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 			.handle("getCredential", ({ params }) =>
 				Effect.gen(function* () {
 					yield* requireCredential(params.vault_id, params.credential_id)
+					yield* recordCredentialRefresh(params.credential_id)
 					return yield* readCredential(params.credential_id)
 				}).pipe(handled),
 			)
@@ -249,21 +306,55 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 					// Checked before the secret is touched, so no other vault can replace it.
 					yield* requireCredential(params.vault_id, id)
 					const commits: Array<{ readonly stream: string; readonly version: number }> = []
-					const token = payload.auth?.token
-					if (token !== undefined && token !== null) {
-						const { replaced } = yield* secrets
-							.replace({ credential_id: id, secret: token })
+					const { auth } = payload
+					if (auth !== undefined) {
+						const current = (yield* readCredential(id)).auth
+						if (current.type !== auth.type) {
+							return yield* reject(400, `auth.type cannot change: it is ${current.type}.`)
+						}
+						if (
+							auth.type === "mcp_oauth" &&
+							auth.refresh !== undefined &&
+							(current.type !== "mcp_oauth" || current.refresh === null)
+						) {
+							return yield* reject(
+								400,
+								"auth.refresh can only replace the refresh token of a credential created with refresh.",
+							)
+						}
+					}
+					const replacement =
+						auth === undefined
+							? undefined
+							: auth.type === "mcp_oauth"
+								? {
+										type: "mcp_oauth" as const,
+										access_token: auth.access_token,
+										expires_at: auth.expires_at ?? null,
+										refresh_token: auth.refresh?.refresh_token ?? null,
+									}
+								: auth.token === undefined || auth.token === null
+									? undefined
+									: { type: "static_bearer" as const, token: auth.token }
+					if (replacement !== undefined) {
+						const { revision } = yield* secrets
+							.replace({ credential_id: id, secret: replacement })
 							.pipe(
 								Effect.catchTag("CredentialSecretsUnavailable", () =>
 									reject(503, "Credential storage is unavailable. Send the token again."),
 								),
 							)
-						if (!replaced) {
+						if (revision === null) {
 							return yield* reject(409, `Credential ${id} no longer holds a secret.`)
 						}
 						commits.push(
 							yield* credentials.send(
-								new RotateCredential({ vault_id: params.vault_id, credential_id: id }),
+								new RotateCredential({
+									vault_id: params.vault_id,
+									credential_id: id,
+									expires_at: replacement.type === "mcp_oauth" ? replacement.expires_at : null,
+									revision,
+								}),
 							),
 						)
 					}

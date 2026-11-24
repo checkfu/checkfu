@@ -4,6 +4,7 @@ import { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { ModelUsage, TextBlock, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
+import { CustodyReport, HeldSecret, SecretReplacement } from "../Connection/SecretCustody.ts"
 
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
@@ -113,10 +114,24 @@ export const PiHarnessCalls = {
 	// that use it. The API stores, replaces, confirms and erases it by credential id.
 	// The secret is stored with the one MCP server URL it may ever be sent to.
 	storeSecret: {
-		args: Schema.Tuple([Schema.String, Schema.String, Schema.String]),
+		args: Schema.Tuple([Schema.String, HeldSecret, Schema.String]),
 		result: Schema.Boolean,
 	},
-	replaceSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	// The secret's new revision, or null when it held nothing to replace.
+	replaceSecret: {
+		args: Schema.Tuple([Schema.String, SecretReplacement]),
+		result: Schema.NullOr(Schema.Int),
+	},
 	keepSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 	eraseSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	// What a credential's last token refresh came to, until the API records it and acknowledges
+	// it by its count: the domain lives in the API Worker.
+	credentialRefreshReport: {
+		args: Schema.Tuple([Schema.String]),
+		result: Schema.NullOr(CustodyReport),
+	},
+	acknowledgeCredentialRefresh: {
+		args: Schema.Tuple([Schema.String, Schema.Int]),
+		result: Schema.Void,
+	},
 } as const

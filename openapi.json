@@ -16496,6 +16496,137 @@
 												},
 												"required": ["type", "token", "mcp_server_url"],
 												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["mcp_oauth"]
+													},
+													"mcp_server_url": {
+														"type": "string",
+														"maxLength": 2048,
+														"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+														"description": "URL of the MCP server this credential authenticates against"
+													},
+													"access_token": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 16384
+													},
+													"expires_at": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														],
+														"description": "When the access token expires (RFC 3339), if known"
+													},
+													"refresh": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"token_endpoint": {
+																		"type": "string",
+																		"maxLength": 2048,
+																		"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+																		"description": "Token endpoint the access token is refreshed at. Cannot change."
+																	},
+																	"client_id": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 1024,
+																		"description": "OAuth client id"
+																	},
+																	"scope": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"minLength": 1,
+																				"maxLength": 2048
+																			},
+																			{
+																				"type": "null"
+																			}
+																		],
+																		"description": "Scope to request on refresh; omitted asks for the granted scope"
+																	},
+																	"refresh_token": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 16384
+																	},
+																	"token_endpoint_auth": {
+																		"anyOf": [
+																			{
+																				"type": "object",
+																				"properties": {
+																					"type": {
+																						"type": "string",
+																						"enum": ["none"]
+																					}
+																				},
+																				"required": ["type"],
+																				"additionalProperties": false
+																			},
+																			{
+																				"type": "object",
+																				"properties": {
+																					"type": {
+																						"type": "string",
+																						"enum": ["client_secret_basic"]
+																					},
+																					"client_secret": {
+																						"type": "string",
+																						"minLength": 1,
+																						"maxLength": 16384
+																					}
+																				},
+																				"required": ["type", "client_secret"],
+																				"additionalProperties": false
+																			},
+																			{
+																				"type": "object",
+																				"properties": {
+																					"type": {
+																						"type": "string",
+																						"enum": ["client_secret_post"]
+																					},
+																					"client_secret": {
+																						"type": "string",
+																						"minLength": 1,
+																						"maxLength": 16384
+																					}
+																				},
+																				"required": ["type", "client_secret"],
+																				"additionalProperties": false
+																			}
+																		],
+																		"description": "How the client authenticates to the token endpoint"
+																	}
+																},
+																"required": [
+																	"token_endpoint",
+																	"client_id",
+																	"refresh_token",
+																	"token_endpoint_auth"
+																],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														],
+														"description": "Lets Checkfu refresh the access token. Without it the token is used as is."
+													}
+												},
+												"required": ["type", "mcp_server_url", "access_token"],
+												"additionalProperties": false
 											}
 										],
 										"description": "What the credential authenticates against, and its secret"
@@ -17783,9 +17914,49 @@
 												},
 												"required": ["type"],
 												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["mcp_oauth"]
+													},
+													"access_token": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 16384
+													},
+													"expires_at": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														],
+														"description": "When the access token expires (RFC 3339), if known"
+													},
+													"refresh": {
+														"type": "object",
+														"properties": {
+															"refresh_token": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 16384
+															}
+														},
+														"required": ["refresh_token"],
+														"additionalProperties": false,
+														"description": "Only for a credential created with refresh; the token endpoint and client stay"
+													}
+												},
+												"required": ["type", "access_token"],
+												"additionalProperties": false
 											}
 										],
-										"description": "Replacement secret. The MCP server URL cannot change."
+										"description": "Replacement secret. The credential's type and MCP server URL cannot change. New tokens clear a failed refresh."
 									},
 									"display_name": {
 										"anyOf": [
@@ -18634,10 +18805,93 @@
 								},
 								"required": ["type", "mcp_server_url"],
 								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"type": {
+										"type": "string",
+										"enum": ["mcp_oauth"]
+									},
+									"mcp_server_url": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 2048
+									},
+									"expires_at": {
+										"anyOf": [
+											{
+												"type": "string"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"refresh": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"token_endpoint": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"client_id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 1024
+													},
+													"scope": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 2048
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"token_endpoint_auth": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["none", "client_secret_basic", "client_secret_post"]
+															}
+														},
+														"required": ["type"],
+														"additionalProperties": false
+													}
+												},
+												"required": ["token_endpoint", "client_id", "scope", "token_endpoint_auth"],
+												"additionalProperties": false
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"required": ["type", "mcp_server_url", "expires_at", "refresh"],
+								"additionalProperties": false
 							}
 						]
 					},
 					"display_name": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"refresh_failed_at": {
 						"anyOf": [
 							{
 								"type": "string"
@@ -18670,6 +18924,7 @@
 					"vault_id",
 					"auth",
 					"display_name",
+					"refresh_failed_at",
 					"created_at",
 					"updated_at",
 					"archived_at"
