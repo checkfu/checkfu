@@ -19,9 +19,10 @@ const record = (
 ) =>
 	`${JSON.stringify({ stage, profile, account_id: account, ...(url === null ? {} : { url }) }, null, "\t")}\n`
 
-const HISTORY_FILE = "/checkout/.checkfu/jurisdictions.json"
-const history = (entries: Record<string, string | null>) =>
-	`${JSON.stringify(entries, null, "\t")}\n`
+const jurisdictionFile = (stage: string, account = ACCOUNT) =>
+	`/checkout/.checkfu/jurisdictions/${account}/${stage}.json`
+const recorded = (jurisdiction: string | null) => `${JSON.stringify(jurisdiction)}
+`
 
 interface VirtualFiles {
 	[path: string]: string
@@ -63,6 +64,8 @@ const fakeAlchemy = (
 		/** The MCP Worker's URL, for a stack that deploys one. */
 		readonly mcp?: string
 		readonly deployExitCode?: number
+		/** The jurisdiction Bun's own env files in the checkout set, as `bun -e` reports it. */
+		readonly bunLoads?: string
 	} = {},
 ) => {
 	let account = options.account === undefined ? ACCOUNT : options.account
@@ -72,6 +75,9 @@ const fakeAlchemy = (
 	})
 	return (args: ReadonlyArray<string>) => {
 		const command = args.slice(1)
+		if (command[0] === "eval") {
+			return { exitCode: 0, stdout: options.bunLoads ?? "" }
+		}
 		calls.push(command)
 		if (command[0] === "query" && command[1] === "account") {
 			if (options.accountError !== undefined) {
@@ -498,7 +504,7 @@ describe("checkfu deploy", () => {
 			const cli = yield* makeTestServer()
 			const env = (dotenv: string) =>
 				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n${dotenv}`
-			const live = `${ACCOUNT}/live`
+			const live = jurisdictionFile("live")
 			const describe = (value: string | null) =>
 				value === null ? "no jurisdiction" : `jurisdiction ${value}`
 			const deploy = (
@@ -525,11 +531,11 @@ describe("checkfu deploy", () => {
 				["eu", "CHECKFU_JURISDICTION=us\n", {}, "us"],
 				[null, "CHECKFU_JURISDICTION=\n", { CHECKFU_JURISDICTION: "eu" }, "eu"],
 			] as const) {
-				const seeded = history({ [live]: was })
+				const seeded = recorded(was)
 				const files = virtualFiles({
 					...checkout,
 					[RECORD_FILE]: record("live"),
-					[HISTORY_FILE]: seeded,
+					[live]: seeded,
 					[ENV_FILE]: env(dotenv),
 				})
 				const refused = yield* deploy(files, shell)
@@ -538,20 +544,20 @@ describe("checkfu deploy", () => {
 					`with ${describe(was)}, and this deploy would use ${describe(now)}.`,
 				)
 				expect(refused.errorMessage).toContain("Nothing was changed")
-				expect(files[HISTORY_FILE]).toBe(seeded)
+				expect(files[live]).toBe(seeded)
 				expect(files[RECORD_FILE]).toBe(record("live"))
 				expect(files[ENV_FILE]).toBe(env(dotenv))
 
 				const allowed = yield* deploy(files, shell, ["--change-jurisdiction"])
 				expect(allowed.errorMessage).toBeUndefined()
-				expect(files[HISTORY_FILE]).toBe(history({ [live]: now }))
+				expect(files[live]).toBe(recorded(now))
 			}
 
 			// Refused before the deploy writes anything to .env, such as a key from the shell.
 			const untouched = "CHECKFU_JURISDICTION=us\n"
 			const unwritten = virtualFiles({
 				...checkout,
-				[HISTORY_FILE]: history({ [live]: "eu" }),
+				[live]: recorded("eu"),
 				[ENV_FILE]: untouched,
 			})
 			const early = yield* deploy(unwritten, {
@@ -570,7 +576,7 @@ describe("checkfu deploy", () => {
 				const same = yield* deploy(
 					virtualFiles({
 						...checkout,
-						[HISTORY_FILE]: history({ [live]: "eu" }),
+						[live]: recorded("eu"),
 						[ENV_FILE]: env(dotenv),
 					}),
 					shell,
@@ -595,7 +601,10 @@ describe("checkfu deploy", () => {
 			expect((yield* deploy(files)).errorMessage).toBeUndefined()
 			files[ENV_FILE] = env("CHECKFU_JURISDICTION=us\n")
 			expect((yield* deploy(files, {}, ["--stage", "staging"])).errorMessage).toBeUndefined()
-			expect(files[HISTORY_FILE]).toBe(history({ [live]: "eu", [`${ACCOUNT}/staging`]: "us" }))
+			expect([files[live], files[jurisdictionFile("staging")]]).toEqual([
+				recorded("eu"),
+				recorded("us"),
+			])
 			const back = yield* deploy(files, {}, ["--stage", "live"])
 			expect(back.errorMessage).toContain(
 				'deployed "live" with jurisdiction eu, and this deploy would use jurisdiction us.',
@@ -611,7 +620,7 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
-	it.live("stops when a file older deploys read names a jurisdiction this one would drop", () =>
+	it.live("stops when Bun's own env files named a jurisdiction this deploy would drop", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
 			const env = (dotenv: string) =>
@@ -622,52 +631,49 @@ describe("checkfu deploy", () => {
 				args: ReadonlyArray<string> = [],
 			) => {
 				const calls: Array<ReadonlyArray<string>> = []
+				let asked = 0
+				const alchemy = fakeAlchemy(calls, { bunLoads: "eu" })
 				return Effect.map(
 					cli.run(["deploy", "--yes", ...args], {
 						env: { CHECKFU_CONFIG_DIR: "/config", ...shell },
 						files,
-						spawn: fakeAlchemy(calls),
+						spawn: (spawned) => {
+							asked += spawned[1] === "eval" ? 1 : 0
+							return alchemy(spawned)
+						},
 					}),
-					(result) => ({ ...result, deployed: calls.some((call) => call[0] === "deploy") }),
+					(result) => ({
+						...result,
+						asked,
+						deployed: calls.some((call) => call[0] === "deploy"),
+					}),
 				)
 			}
 
-			for (const [name, shell] of [
-				[".env.local", {}],
-				[".env.development", {}],
-				[".env.production", { NODE_ENV: "production" }],
-			] as const) {
-				const files = virtualFiles({
-					...checkout,
-					[ENV_FILE]: env("CHECKFU_JURISDICTION=\n"),
-					[`/checkout/${name}`]: "CHECKFU_JURISDICTION=eu\n",
-				})
-				const refused = yield* deploy(files, shell)
-				expect([name, refused.deployed]).toEqual([name, false])
-				expect(refused.errorMessage).toContain(`${name} sets CHECKFU_JURISDICTION=eu`)
-				expect(refused.errorMessage).toContain("Nothing was changed")
-				expect(files[HISTORY_FILE]).toBeUndefined()
+			// A stage with no recorded jurisdiction, and .env and the shell leaving it empty:
+			// Bun's own files named eu, so an earlier deploy used it.
+			const files = virtualFiles({ ...checkout, [ENV_FILE]: env("CHECKFU_JURISDICTION=\n") })
+			const refused = yield* deploy(files)
+			expect([refused.exitCode, refused.deployed]).toEqual([1, false])
+			expect(refused.errorMessage).toContain("sets CHECKFU_JURISDICTION=eu")
+			expect(refused.errorMessage).toContain("Nothing was changed")
+			expect(files[jurisdictionFile("live")]).toBeUndefined()
 
-				const allowed = yield* deploy(files, shell, ["--change-jurisdiction"])
-				expect([name, allowed.errorMessage]).toEqual([name, undefined])
-			}
+			// Accepting the change records it, and the next identical deploy is not a change.
+			const accepted = yield* deploy(files, {}, ["--change-jurisdiction"])
+			expect(accepted.errorMessage).toBeUndefined()
+			expect(files[jurisdictionFile("live")]).toBe(recorded(null))
+			const again = yield* deploy(files)
+			expect([again.errorMessage, again.deployed, again.asked]).toEqual([undefined, true, 0])
 
-			// Nothing is dropped when .env or the shell names a jurisdiction, which an older
-			// deploy also used, or when the file is one Bun would not have loaded.
-			for (const [dotenv, shell, name] of [
-				["CHECKFU_JURISDICTION=us\n", {}, ".env.local"],
-				["CHECKFU_JURISDICTION=\n", { CHECKFU_JURISDICTION: "us" }, ".env.local"],
-				["CHECKFU_JURISDICTION=\n", {}, ".env.production"],
+			// Bun is not asked when .env or the shell names a jurisdiction, which an older deploy
+			// used as well.
+			for (const [dotenv, shell] of [
+				["CHECKFU_JURISDICTION=us\n", {}],
+				["CHECKFU_JURISDICTION=\n", { CHECKFU_JURISDICTION: "us" }],
 			] as const) {
-				const passed = yield* deploy(
-					virtualFiles({
-						...checkout,
-						[ENV_FILE]: env(dotenv),
-						[`/checkout/${name}`]: "CHECKFU_JURISDICTION=eu\n",
-					}),
-					shell,
-				)
-				expect([dotenv, name, passed.errorMessage]).toEqual([dotenv, name, undefined])
+				const named = yield* deploy(virtualFiles({ ...checkout, [ENV_FILE]: env(dotenv) }), shell)
+				expect([dotenv, named.errorMessage, named.asked]).toEqual([dotenv, undefined, 0])
 			}
 		}),
 	)
@@ -678,7 +684,8 @@ describe("checkfu deploy", () => {
 			const files = virtualFiles({
 				...checkout,
 				[RECORD_FILE]: record("staging"),
-				[HISTORY_FILE]: history({ [`${ACCOUNT}/live`]: "eu", [`${ACCOUNT}/staging`]: "us" }),
+				[jurisdictionFile("live")]: recorded("eu"),
+				[jurisdictionFile("staging")]: recorded("us"),
 			})
 			const result = yield* cli.run(["destroy", "--stage", "staging", "--yes"], {
 				env: { CHECKFU_CONFIG_DIR: "/config" },
@@ -686,7 +693,11 @@ describe("checkfu deploy", () => {
 				spawn: fakeAlchemy([]),
 			})
 			expect(result.errorMessage).toBeUndefined()
-			expect(files[HISTORY_FILE]).toBe(history({ [`${ACCOUNT}/live`]: "eu" }))
+			expect([files[jurisdictionFile("live")], files[jurisdictionFile("staging")]]).toEqual([
+				recorded("eu"),
+				undefined,
+			])
+			expect(files[RECORD_FILE]).toBeUndefined()
 		}),
 	)
 
@@ -696,7 +707,7 @@ describe("checkfu deploy", () => {
 			const files = (): VirtualFiles =>
 				virtualFiles({
 					...checkout,
-					[HISTORY_FILE]: history({ [`${ACCOUNT}/live`]: "eu" }),
+					[jurisdictionFile("live")]: recorded("eu"),
 					[ENV_FILE]: `CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\nCHECKFU_JURISDICTION=us\n`,
 				})
 			const consent = (on: VirtualFiles, output?: "error") =>
@@ -712,11 +723,11 @@ describe("checkfu deploy", () => {
 			expect(unfinished.errorMessage).toContain(
 				`Run \`${COMMAND} deploy --change-jurisdiction\` again`,
 			)
-			expect(failed[HISTORY_FILE]).toBe(history({ [`${ACCOUNT}/live`]: "eu" }))
+			expect(failed[jurisdictionFile("live")]).toBe(recorded("eu"))
 			// After it, the history already holds it, so the retry does not.
-			const recorded = yield* consent(files(), "error")
-			expect(recorded.errorMessage).toContain(`Run \`${COMMAND} deploy\` again`)
-			expect(recorded.errorMessage).not.toContain("--change-jurisdiction")
+			const afterDeploy = yield* consent(files(), "error")
+			expect(afterDeploy.errorMessage).toContain(`Run \`${COMMAND} deploy\` again`)
+			expect(afterDeploy.errorMessage).not.toContain("--change-jurisdiction")
 		}),
 	)
 

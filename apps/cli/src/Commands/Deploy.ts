@@ -499,10 +499,34 @@ const deployedJurisdiction = (envFile: string) =>
 	})
 
 /**
- * Before the deploy started Alchemy with `--no-env-file`, Bun also loaded `.env.local` and
- * `.env.<NODE_ENV>` (`.env.development` when unset) in the checkout. Those only mattered when
- * `.env` and the shell left the jurisdiction empty. If one of them names a jurisdiction there,
- * an earlier deploy used it, and dropping it now would move the stage away from its data.
+ * What the jurisdiction was in the environment of the Bun that ran Alchemy before the deploy
+ * started it with `--no-env-file`. That Bun also loaded `.env.local`, `.env.<NODE_ENV>` and
+ * the like from the checkout, and Bun itself, started the same way, is asked rather than
+ * repeating its rules for which files it loads.
+ */
+export const jurisdictionBunWouldLoad = (checkout: Checkout) =>
+	Effect.gen(function* () {
+		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+		const value = yield* spawner.string(
+			ChildProcess.make(
+				checkout.runtime,
+				["-e", `process.stdout.write(process.env.${JURISDICTION_ENV} ?? "")`],
+				{
+					cwd: checkout.root,
+					env: checkout.runtimeEnv,
+					extendEnv: true,
+					stdin: "ignore",
+					stderr: "ignore",
+				},
+			),
+		)
+		return value.trim()
+	}).pipe(Effect.mapError((error) => configError(`Could not start Bun in the checkout: ${error}`)))
+
+/**
+ * Only for a stage with no recorded jurisdiction, such as one deployed before it was
+ * recorded: when `.env` and the shell leave the jurisdiction empty, an earlier deploy may have
+ * taken it from one of the files Bun loaded on its own, and this deploy would drop it.
  */
 const requireNoIgnoredJurisdiction = (
 	checkout: Checkout,
@@ -513,25 +537,16 @@ const requireNoIgnoredJurisdiction = (
 		if (jurisdiction !== "" || allowChange) {
 			return
 		}
-		const path = yield* Path.Path
-		const mode = yield* envValue("NODE_ENV")
-		const modeFile =
-			mode === "production" ? ".env.production" : mode === "test" ? ".env.test" : ".env.development"
-		for (const name of [".env.local", modeFile]) {
-			const contents = yield* readIfPresent(path.join(checkout.root, name))
-			if (Option.isNone(contents)) {
-				continue
-			}
-			const ignored = (yield* readDotEnvValue(contents.value, JURISDICTION_ENV)).trim()
-			if (ignored !== "") {
-				return yield* usageError(
-					[
-						`${name} sets ${JURISDICTION_ENV}=${ignored}, which earlier versions of this command deployed but this one no longer reads; this deploy would use no jurisdiction.`,
-						"Data kept in one jurisdiction is not visible from another. Nothing was changed.",
-						`Move the setting into .env, or run again with --change-jurisdiction to deploy with no jurisdiction.`,
-					].join(" "),
-				)
-			}
+		const ignored = yield* jurisdictionBunWouldLoad(checkout)
+		if (ignored !== "") {
+			return yield* usageError(
+				[
+					`An environment file in this checkout other than .env, such as .env.local, sets ${JURISDICTION_ENV}=${ignored}.`,
+					"Earlier versions of this command deployed it, but this one reads only .env and your shell, so this deploy would use no jurisdiction.",
+					"Data kept in one jurisdiction is not visible from another. Nothing was changed.",
+					`Move the setting into .env, or run again with --change-jurisdiction to deploy with no jurisdiction.`,
+				].join(" "),
+			)
 		}
 	})
 
@@ -539,37 +554,43 @@ const describeJurisdiction = (value: string | null) =>
 	value === null || value === "" ? "no jurisdiction" : `jurisdiction ${value}`
 
 /**
- * The jurisdiction each stage this checkout deployed was deployed with, keyed by account and
- * stage, or null for none. Kept apart from the deployment record, which names only the last
- * stage deployed, so going back to an earlier stage is still checked.
+ * The jurisdiction a stage was deployed with, or null for none: one file per account and
+ * stage, so deploys and destroys of different stages never rewrite each other's entries, and
+ * kept apart from the deployment record, which names only the last stage deployed.
  */
-const JurisdictionHistory = Schema.fromJsonString(
-	Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
-	{ space: "\t" },
-)
-type JurisdictionHistory = typeof JurisdictionHistory.Type
+const RecordedJurisdiction = Schema.fromJsonString(Schema.NullOr(Schema.String))
 
-const historyKey = (accountId: string, stage: string) => `${accountId}/${stage}`
+const recordedJurisdictionPath = (checkout: Checkout, accountId: string, stage: string) =>
+	Effect.map(Path.Path, (path) =>
+		path.join(checkout.root, ".checkfu", "jurisdictions", accountId, `${stage}.json`),
+	)
 
-const jurisdictionHistoryPath = (checkout: Checkout) =>
-	Effect.map(Path.Path, (path) => path.join(checkout.root, ".checkfu", "jurisdictions.json"))
-
-const readJurisdictionHistory = (checkout: Checkout) =>
+const readRecordedJurisdiction = (checkout: Checkout, accountId: string, stage: string) =>
 	Effect.gen(function* () {
-		const file = yield* jurisdictionHistoryPath(checkout)
+		const file = yield* recordedJurisdictionPath(checkout, accountId, stage)
 		const contents = yield* readIfPresent(file)
 		if (Option.isNone(contents)) {
-			return {}
+			return undefined
 		}
-		return yield* Schema.decodeEffect(JurisdictionHistory)(contents.value).pipe(
+		return yield* Schema.decodeEffect(RecordedJurisdiction)(contents.value.trim()).pipe(
 			Effect.mapError(() => configError(`${file} is not valid. Fix or delete it, then run again.`)),
 		)
 	})
 
-const writeJurisdictionHistory = (checkout: Checkout, history: JurisdictionHistory) =>
+const writeRecordedJurisdiction = (
+	checkout: Checkout,
+	accountId: string,
+	stage: string,
+	jurisdiction: string | null,
+) =>
 	Effect.gen(function* () {
-		const contents = yield* Schema.encodeEffect(JurisdictionHistory)(history).pipe(Effect.orDie)
-		yield* writePrivate(yield* jurisdictionHistoryPath(checkout), `${contents}\n`)
+		const contents = yield* Schema.encodeEffect(RecordedJurisdiction)(jurisdiction).pipe(
+			Effect.orDie,
+		)
+		yield* writePrivate(
+			yield* recordedJurisdictionPath(checkout, accountId, stage),
+			`${contents}\n`,
+		)
 	})
 
 /**
@@ -671,15 +692,12 @@ export const deployCommand = Command.make(
 			const checked = yield* resolveTarget(checkout, envFile, record)
 			const accountId = yield* requireAccount(checked, Option.some({ retry: retryBeforeRecord }))
 			yield* requireRecordedAccount(record, stage, accountId)
-			const history = yield* readJurisdictionHistory(checkout)
+			const previous = yield* readRecordedJurisdiction(checkout, accountId, stage)
 			const jurisdiction = yield* deployedJurisdiction(envFile)
-			yield* requireNoIgnoredJurisdiction(checkout, jurisdiction, input.changeJurisdiction)
-			yield* requireRecordedJurisdiction(
-				stage,
-				history[historyKey(accountId, stage)],
-				jurisdiction,
-				input.changeJurisdiction,
-			)
+			if (previous === undefined) {
+				yield* requireNoIgnoredJurisdiction(checkout, jurisdiction, input.changeJurisdiction)
+			}
+			yield* requireRecordedJurisdiction(stage, previous, jurisdiction, input.changeJurisdiction)
 			const { apiKey, provider } = yield* prepareEnvFile(envFile, retryBeforeRecord)
 			const target = { ...checked, envFile: Option.some(envFile) } satisfies Target
 
@@ -696,10 +714,12 @@ export const deployCommand = Command.make(
 				})
 			}
 
-			yield* writeJurisdictionHistory(checkout, {
-				...history,
-				[historyKey(accountId, stage)]: jurisdiction === "" ? null : jurisdiction,
-			})
+			yield* writeRecordedJurisdiction(
+				checkout,
+				accountId,
+				stage,
+				jurisdiction === "" ? null : jurisdiction,
+			)
 
 			// Recorded before anything else can fail, so the record always names what was
 			// last deployed; its URL follows once Alchemy has been asked for it.
@@ -795,11 +815,10 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 			return yield* new CliFailure({ message: "Destroy did not finish.", exitCode })
 		}
 		yield* writeStderrLine(`Removed the "${stage}" deployment and all of its data.`)
-		yield* removeIfPresent(yield* deploymentRecordPath(checkout))
 		// A later deploy of this stage starts from nothing, in whichever jurisdiction it names.
-		const { [historyKey(accountId, stage)]: _destroyed, ...history } =
-			yield* readJurisdictionHistory(checkout)
-		yield* writeJurisdictionHistory(checkout, history)
+		// The deployment record goes last, so a failure before it leaves `destroy` able to run again.
+		yield* removeIfPresent(yield* recordedJurisdictionPath(checkout, accountId, stage))
+		yield* removeIfPresent(yield* deploymentRecordPath(checkout))
 		const saved = yield* readSavedConnection
 		if (Option.isSome(saved) && saved.value.url === record.url) {
 			yield* removeSavedConnection

@@ -244,13 +244,16 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						// Every Alchemy process starts with the deploy's runtime flags; calls to the
 						// Alchemy query script reach `spawn` as `query <question> ...`.
 						const [flag, program = "", ...rest] = command.args.map(String)
-						if (flag !== "--no-env-file") {
+						// `bun -e <script>` reaches `spawn` as `bun eval <script>`.
+						if (flag !== "--no-env-file" && flag !== "-e") {
 							return Effect.die(`Alchemy was started without --no-env-file: ${flag}`)
 						}
 						const result = options.spawn(
-							program.endsWith("alchemy-query.ts")
-								? [program, "query", ...rest]
-								: [program, ...rest],
+							flag === "-e"
+								? ["bun", "eval", program]
+								: program.endsWith("alchemy-query.ts")
+									? [program, "query", ...rest]
+									: [program, ...rest],
 						)
 						const stdout = Stream.make(new TextEncoder().encode(result.stdout ?? ""))
 						return Effect.succeed(
