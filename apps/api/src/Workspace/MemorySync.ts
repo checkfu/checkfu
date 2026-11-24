@@ -85,98 +85,134 @@ const withoutDirectories = (
  * session's. `contents` reads the ones to send, and `saved` records what the
  * store took as the new base. A change the store did not take stays pending.
  */
-export const makeMemorySync = (files: MemoryFiles, bases: MemoryBases) => ({
-	/** Returns the paths whose content the workspace needs. */
-	mount: async (mount: MemoryMount): Promise<ReadonlyArray<string>> => {
-		const manifest = withoutDirectories(mount.manifest)
-		const base = { ...bases.get(mount.mount_path) }
-		// What the store dropped goes first, so that a path that was a directory can become a file.
-		const listed = new Set(manifest.map(({ path }) => path))
-		for (const path of Object.keys(base)) {
-			if (!listed.has(path)) {
-				await files.remove(`${mount.mount_path}${path}`)
-				delete base[path]
+export const makeMemorySync = (files: MemoryFiles, bases: MemoryBases) => {
+	// A read-only mount is never saved, so nothing local is kept: every file the store does not
+	// hold goes, and every file is checked against the store rather than against the last base.
+	// That also undoes a write that reached the mount some other way than the file tools.
+	const verify = async (
+		mountPath: string,
+		manifest: ReadonlyArray<MemoryManifestEntry>,
+		listed: ReadonlySet<string>,
+	): Promise<ReadonlyArray<string>> => {
+		for (const file of await files.list(mountPath)) {
+			if (!listed.has(file.slice(mountPath.length))) {
+				await files.remove(file)
 			}
 		}
+		const base: Record<string, string> = {}
 		const needed: Array<string> = []
 		for (const { path, content_sha256 } of manifest) {
-			if (base[path] === content_sha256) {
-				continue
-			}
-			const local = await files.read(`${mount.mount_path}${path}`)
+			const local = await files.read(`${mountPath}${path}`)
 			if (local !== null && (await sha256Hex(local)) === content_sha256) {
 				base[path] = content_sha256
 			} else {
 				needed.push(path)
 			}
 		}
-		bases.put(mount.mount_path, base)
+		bases.put(mountPath, base)
 		return needed
-	},
-
-	fill: async (mountPath: string, memories: ReadonlyArray<MemoryFile>): Promise<void> => {
-		const base = { ...bases.get(mountPath) }
-		for (const { path, content, content_sha256 } of memories) {
-			await files.write(`${mountPath}${path}`, content)
-			base[path] = content_sha256
-		}
-		bases.put(mountPath, base)
-	},
-
-	changes: async (mountPath: string): Promise<MemoryChanges> => {
-		const base = bases.get(mountPath)
-		const written: Array<MemoryWrite> = []
-		const present = new Set<string>()
-		for (const file of await files.list(mountPath)) {
-			const path = file.slice(mountPath.length)
-			const content = await files.read(file)
-			if (content === null) {
-				continue
+	}
+	return {
+		/** Returns the paths whose content the workspace needs. */
+		mount: async (mount: MemoryMount): Promise<ReadonlyArray<string>> => {
+			const manifest = withoutDirectories(mount.manifest)
+			const listed = new Set(manifest.map(({ path }) => path))
+			if (mount.access === "read_only") {
+				return verify(mount.mount_path, manifest, listed)
 			}
-			present.add(path)
-			const content_sha256 = await sha256Hex(content)
-			if (base[path] !== content_sha256) {
-				written.push({
-					path,
-					content_sha256,
-					size_bytes: byteLength(content),
-					base: base[path] ?? null,
-				})
+			const base = { ...bases.get(mount.mount_path) }
+			// What the store dropped goes first, so that a path that was a directory can become a file.
+			// A path the session has since made a directory holds the session's own new files: only the
+			// record of the old memory goes.
+			for (const path of Object.keys(base)) {
+				if (!listed.has(path)) {
+					const file = `${mount.mount_path}${path}`
+					if ((await files.read(file)) !== null) {
+						await files.remove(file)
+					}
+					delete base[path]
+				}
 			}
-		}
-		return {
-			written,
-			deleted: Object.entries(base)
-				.filter(([path]) => !present.has(path))
-				.map(([path, hash]) => ({ path, base: hash })),
-		}
-	},
-
-	/** The content of the named memories as it is now. One that is gone is left out. */
-	contents: async (
-		mountPath: string,
-		paths: ReadonlyArray<string>,
-	): Promise<ReadonlyArray<MemoryFile>> => {
-		const read: Array<MemoryFile> = []
-		for (const path of paths) {
-			const content = await files.read(`${mountPath}${path}`)
-			if (content !== null) {
-				read.push({ path, content, content_sha256: await sha256Hex(content) })
+			const needed: Array<string> = []
+			for (const { path, content_sha256 } of manifest) {
+				if (base[path] === content_sha256) {
+					continue
+				}
+				const local = await files.read(`${mount.mount_path}${path}`)
+				if (local !== null && (await sha256Hex(local)) === content_sha256) {
+					base[path] = content_sha256
+				} else {
+					needed.push(path)
+				}
 			}
-		}
-		return read
-	},
+			bases.put(mount.mount_path, base)
+			return needed
+		},
 
-	saved: (mountPath: string, saved: MemorySaved): void => {
-		const base = { ...bases.get(mountPath) }
-		for (const { path, content_sha256 } of saved.written) {
-			base[path] = content_sha256
-		}
-		for (const path of saved.deleted) {
-			delete base[path]
-		}
-		bases.put(mountPath, base)
-	},
-})
+		fill: async (mountPath: string, memories: ReadonlyArray<MemoryFile>): Promise<void> => {
+			const base = { ...bases.get(mountPath) }
+			for (const { path, content, content_sha256 } of memories) {
+				await files.write(`${mountPath}${path}`, content)
+				base[path] = content_sha256
+			}
+			bases.put(mountPath, base)
+		},
+
+		changes: async (mountPath: string): Promise<MemoryChanges> => {
+			const base = bases.get(mountPath)
+			const written: Array<MemoryWrite> = []
+			const present = new Set<string>()
+			for (const file of await files.list(mountPath)) {
+				const path = file.slice(mountPath.length)
+				const content = await files.read(file)
+				if (content === null) {
+					continue
+				}
+				present.add(path)
+				const content_sha256 = await sha256Hex(content)
+				if (base[path] !== content_sha256) {
+					written.push({
+						path,
+						content_sha256,
+						size_bytes: byteLength(content),
+						base: base[path] ?? null,
+					})
+				}
+			}
+			return {
+				written,
+				deleted: Object.entries(base)
+					.filter(([path]) => !present.has(path))
+					.map(([path, hash]) => ({ path, base: hash })),
+			}
+		},
+
+		/** The content of the named memories as it is now. One that is gone is left out. */
+		contents: async (
+			mountPath: string,
+			paths: ReadonlyArray<string>,
+		): Promise<ReadonlyArray<MemoryFile>> => {
+			const read: Array<MemoryFile> = []
+			for (const path of paths) {
+				const content = await files.read(`${mountPath}${path}`)
+				if (content !== null) {
+					read.push({ path, content, content_sha256: await sha256Hex(content) })
+				}
+			}
+			return read
+		},
+
+		saved: (mountPath: string, saved: MemorySaved): void => {
+			const base = { ...bases.get(mountPath) }
+			for (const { path, content_sha256 } of saved.written) {
+				base[path] = content_sha256
+			}
+			for (const path of saved.deleted) {
+				delete base[path]
+			}
+			bases.put(mountPath, base)
+		},
+	}
+}
 
 export type MemorySync = ReturnType<typeof makeMemorySync>

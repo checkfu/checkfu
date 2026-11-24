@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+	followLinks,
 	readOnlyMountOf,
 	readOnlyMountOfGit,
 	resolvePath,
@@ -72,5 +73,37 @@ describe("read-only mounts", () => {
 		expect(inMount(["status"], "/workspace/repo")).toBeUndefined()
 		expect(inMount(["commit", "-m", "Update /mnt notes"], "/workspace/repo")).toBeUndefined()
 		expect(inMount(["add", "mnt/memory/handbook"], "/workspace/repo")).toBeUndefined()
+	})
+
+	it("follows symbolic links along a path to what a call on it would reach", async () => {
+		const links = new Map([
+			["/workspace/repo/notes", "/mnt/memory/handbook"],
+			["/workspace/repo/up", "../../mnt/artifacts"],
+			["/workspace/repo/loop", "/workspace/repo/loop"],
+		])
+		const existing = new Set([
+			"/workspace",
+			"/workspace/repo",
+			"/mnt",
+			"/mnt/memory",
+			"/mnt/artifacts",
+		])
+		const reader = {
+			lstat: (path: string) =>
+				links.has(path) || existing.has(path)
+					? Promise.resolve({ isSymbolicLink: links.has(path) })
+					: Promise.reject(new Error(`ENOENT: ${path}`)),
+			readlink: (path: string) => Promise.resolve(links.get(path) ?? ""),
+		}
+		const reached = (path: string) => followLinks(path, reader)
+		expect(await reached("/workspace/repo/notes/rules.md")).toBe("/mnt/memory/handbook/rules.md")
+		expect(await reached("/workspace/repo/up/q3-data/new.csv")).toBe(
+			"/mnt/artifacts/q3-data/new.csv",
+		)
+		expect(await reached("/workspace/repo/plain/file.md")).toBe("/workspace/repo/plain/file.md")
+		expect(await reached("/workspace/repo/loop/x")).toBe("/workspace/repo/loop/x")
+		expect(readOnlyMountOf(MOUNTS, await reached("/workspace/repo/notes/rules.md"))).toBe(
+			"/mnt/memory/handbook",
+		)
 	})
 })

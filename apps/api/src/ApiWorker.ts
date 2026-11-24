@@ -53,22 +53,22 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(Effect.suspend(() => workspace(sessionId).mountMemory(mount))).pipe(
 					Effect.withSpan("SessionWorkspace.mountMemory"),
 				),
-			fillMemory: (sessionId, mountPath, memories) =>
+			fillMemory: (sessionId, token, mountPath, memories) =>
 				harnessCall(
-					Effect.suspend(() => workspace(sessionId).fillMemory(mountPath, memories)),
+					Effect.suspend(() => workspace(sessionId).fillMemory(token, mountPath, memories)),
 				).pipe(Effect.withSpan("SessionWorkspace.fillMemory")),
-			memoryChanges: (sessionId, mountPath) =>
-				harnessCall(Effect.suspend(() => workspace(sessionId).memoryChanges(mountPath))).pipe(
-					Effect.withSpan("SessionWorkspace.memoryChanges"),
-				),
-			memoryContents: (sessionId, mountPath, paths) =>
+			memoryChanges: (sessionId, token, mountPath) =>
 				harnessCall(
-					Effect.suspend(() => workspace(sessionId).memoryContents(mountPath, paths)),
+					Effect.suspend(() => workspace(sessionId).memoryChanges(token, mountPath)),
+				).pipe(Effect.withSpan("SessionWorkspace.memoryChanges")),
+			memoryContents: (sessionId, token, mountPath, paths) =>
+				harnessCall(
+					Effect.suspend(() => workspace(sessionId).memoryContents(token, mountPath, paths)),
 				).pipe(Effect.withSpan("SessionWorkspace.memoryContents")),
-			memorySaved: (sessionId, mountPath, saved) =>
-				harnessCall(Effect.suspend(() => workspace(sessionId).memorySaved(mountPath, saved))).pipe(
-					Effect.withSpan("SessionWorkspace.memorySaved"),
-				),
+			memorySaved: (sessionId, token, mountPath, saved) =>
+				harnessCall(
+					Effect.suspend(() => workspace(sessionId).memorySaved(token, mountPath, saved)),
+				).pipe(Effect.withSpan("SessionWorkspace.memorySaved")),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),

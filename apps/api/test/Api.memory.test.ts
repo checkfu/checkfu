@@ -497,22 +497,26 @@ describe("Memory stores in a session", () => {
 				readonly workspaceFiles: (sessionId: string) => Map<string, string>
 				readonly systems: Array<string>
 				readonly onTurn: (edit: () => void | Promise<void>) => void
+				readonly workspaceCalls: ReadonlyArray<string>
 			},
 		) => Effect.Effect<void>,
 	) => {
 		const systems: Array<string> = []
 		let edit: () => void | Promise<void> = () => undefined
-		const { layer, closeAll, workspaceFiles } = makePiDurableTestLayer(async (model, context) => {
-			systems.push(extractSystemText(context))
-			await edit()
-			return makeAssistantReply(model, null, "ok", 1, 1)
-		})
+		const { layer, closeAll, workspaceFiles, workspaceCalls } = makePiDurableTestLayer(
+			async (model, context) => {
+				systems.push(extractSystemText(context))
+				await edit()
+				return makeAssistantReply(model, null, "ok", 1, 1)
+			},
+		)
 		try {
 			await Effect.runPromise(
 				Effect.flatMap(makeApiHandler, ({ fetch: apiFetch }) =>
 					run(apiFetch, {
 						workspaceFiles,
 						systems,
+						workspaceCalls,
 						onTurn: (next) => {
 							edit = next
 						},
@@ -786,6 +790,45 @@ describe("Memory stores in a session", () => {
 				const saved = yield* stored
 				expect(Object.keys(saved).toSorted()).toEqual(paths.toSorted())
 				expect(saved["/big/44.txt"]).toBe("4".repeat(99_000))
+			}),
+		))
+
+	it("saves an empty memory, also when it is the only change", () =>
+		withSessions((apiFetch, { workspaceFiles, onTurn }) =>
+			Effect.gen(function* () {
+				const { store, createSession, stored } = yield* setUp(apiFetch, {})
+				const session = yield* json<{ id: string }>(
+					yield* createSession([{ type: "memory_store", memory_store_id: store.id }]),
+				)
+				onTurn(() => {
+					workspaceFiles(session.id).set(`${MOUNT}/empty.md`, "")
+				})
+				yield* sendAndSettle(apiFetch, session.id, ["Leave a placeholder."], 1)
+				expect(yield* stored).toEqual({ "/empty.md": "" })
+			}),
+		))
+
+	it("copies memory in and saves it out as the turn's own calls, after the turn has the workspace", () =>
+		withSessions((apiFetch, { workspaceFiles, onTurn, workspaceCalls }) =>
+			Effect.gen(function* () {
+				const { store, createSession } = yield* setUp(apiFetch, { "/a.md": "A." })
+				const session = yield* json<{ id: string }>(
+					yield* createSession([{ type: "memory_store", memory_store_id: store.id }]),
+				)
+				onTurn(() => {
+					workspaceFiles(session.id).set(`${MOUNT}/b.md`, "B.")
+				})
+				yield* sendAndSettle(apiFetch, session.id, ["Write b."], 1)
+				expect(workspaceCalls.filter((call) => call.includes(session.id))).toEqual(
+					[
+						"enter",
+						"mountMemory",
+						"fillMemory",
+						"memoryChanges",
+						"memoryContents",
+						"memorySaved",
+					].map((call) => `${call} ${session.id} 0:1`),
+				)
 			}),
 		))
 

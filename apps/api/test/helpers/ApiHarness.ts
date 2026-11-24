@@ -382,15 +382,31 @@ export const makePiDurableTestLayer = (
 						}),
 					),
 				),
-			mountMemory: (sessionId, mount) => Effect.promise(() => memorySync(sessionId).mount(mount)),
-			fillMemory: (sessionId, mountPath, memories) =>
-				Effect.promise(() => memorySync(sessionId).fill(mountPath, memories)),
-			memoryChanges: (sessionId, mountPath) =>
-				Effect.promise(() => memorySync(sessionId).changes(mountPath)),
-			memoryContents: (sessionId, mountPath, paths) =>
-				Effect.promise(() => memorySync(sessionId).contents(mountPath, paths)),
-			memorySaved: (sessionId, mountPath, saved) =>
-				Effect.sync(() => memorySync(sessionId).saved(mountPath, saved)),
+			mountMemory: (sessionId, token, mount) =>
+				Effect.promise(() => {
+					workspaceCalls.push(`mountMemory ${sessionId} ${token.generation}:${token.turn}`)
+					return memorySync(sessionId).mount(mount)
+				}),
+			fillMemory: (sessionId, token, mountPath, memories) =>
+				Effect.promise(() => {
+					workspaceCalls.push(`fillMemory ${sessionId} ${token.generation}:${token.turn}`)
+					return memorySync(sessionId).fill(mountPath, memories)
+				}),
+			memoryChanges: (sessionId, token, mountPath) =>
+				Effect.promise(() => {
+					workspaceCalls.push(`memoryChanges ${sessionId} ${token.generation}:${token.turn}`)
+					return memorySync(sessionId).changes(mountPath)
+				}),
+			memoryContents: (sessionId, token, mountPath, paths) =>
+				Effect.promise(() => {
+					workspaceCalls.push(`memoryContents ${sessionId} ${token.generation}:${token.turn}`)
+					return memorySync(sessionId).contents(mountPath, paths)
+				}),
+			memorySaved: (sessionId, token, mountPath, saved) =>
+				Effect.sync(() => {
+					workspaceCalls.push(`memorySaved ${sessionId} ${token.generation}:${token.turn}`)
+					memorySync(sessionId).saved(mountPath, saved)
+				}),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
