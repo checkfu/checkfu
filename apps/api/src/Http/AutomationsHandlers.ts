@@ -9,6 +9,7 @@ import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
 import { AutomationCapacity } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
 import { AutomationDirectory } from "@checkfu/domain/Automation/AutomationDirectory.view"
+import type { AutomationDirectoryEntry } from "@checkfu/domain/Automation/AutomationDirectory.view"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
@@ -93,6 +94,29 @@ const automationRunResource = (
 	created_at: entry.envelope.at,
 })
 
+export const listPage = <E, R>(
+	live: ReadonlyArray<AutomationDirectoryEntry>,
+	query: { readonly after?: number; readonly limit?: number; readonly order?: "asc" | "desc" },
+	snapshotOf: (id: AutomationId) => Effect.Effect<AutomationSnapshot, E, R>,
+) =>
+	Effect.gen(function* () {
+		const order = query.order ?? "asc"
+		const { after } = query
+		const remaining = (order === "asc" ? live : live.toReversed()).filter(
+			(entry) => after === undefined || (order === "asc" ? entry.seq > after : entry.seq < after),
+		)
+		const page = remaining.slice(0, query.limit ?? 50)
+		const snapshots = yield* Effect.forEach(page, (entry) => snapshotOf(entry.automation_id), {
+			concurrency: "unbounded",
+		})
+		const has_more = remaining.length > page.length
+		return {
+			data: snapshots.filter((snapshot) => snapshot.status !== "archived"),
+			has_more,
+			next_cursor: has_more ? (page.at(-1)?.seq ?? null) : null,
+		}
+	})
+
 const present = (snapshot: AutomationSnapshot) =>
 	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
@@ -130,6 +154,25 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				return head === null
 					? { id, type: "automation" as const, pending: true as const }
 					: yield* present(head)
+			})
+
+		const projected = (id: AutomationId) =>
+			Effect.gen(function* () {
+				const snapshot = yield* automationViews.waitFor(
+					Automation.ref(id),
+					{ id },
+					{ timeout: yield* AutomationReadWaitTimeout },
+				)
+				if (snapshot === null) {
+					return yield* reject(503, `Automation ${id} projection is not ready.`)
+				}
+				return snapshot
+			})
+
+		const snapshotOf = (id: AutomationId) =>
+			Effect.flatMap(automationViews.get(Automation.ref(id)), (found) => {
+				const snapshot = Option.getOrNull(found)
+				return snapshot === null ? projected(id) : Effect.succeed(snapshot)
 			})
 
 		return handlers
@@ -196,33 +239,8 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const directory = Option.getOrNull(
 						yield* directories.get(AutomationCapacity.ref(AUTOMATION_CAPACITY)),
 					)
-					const order = query.order ?? "asc"
-					const live = directory?.live ?? []
-					const after = query.after
-					const remaining = (order === "asc" ? live : live.toReversed()).filter(
-						(entry) =>
-							after === undefined || (order === "asc" ? entry.seq > after : entry.seq < after),
-					)
-					const take = query.limit ?? 50
-					const page = remaining.slice(0, take)
-					const snapshots = yield* Effect.forEach(
-						page,
-						(entry) => automationViews.get(Automation.ref(entry.automation_id)),
-						{ concurrency: "unbounded" },
-					)
-					const data = yield* Effect.forEach(
-						snapshots.flatMap((snapshot) => {
-							const found = Option.getOrNull(snapshot)
-							return found === null ? [] : [found]
-						}),
-						present,
-					)
-					const has_more = remaining.length > page.length
-					return {
-						data,
-						has_more,
-						next_cursor: has_more ? (page.at(-1)?.seq ?? null) : null,
-					}
+					const page = yield* listPage(directory?.live ?? [], query, snapshotOf)
+					return { ...page, data: yield* Effect.forEach(page.data, present) }
 				}).pipe(handled),
 			)
 			.handle("get", ({ params }) =>
@@ -234,15 +252,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						return yield* present(found)
 					}
 					yield* committed(id)
-					const projected = yield* automationViews.waitFor(
-						ref,
-						{ id },
-						{ timeout: yield* AutomationReadWaitTimeout },
-					)
-					if (projected === null) {
-						return yield* reject(503, `Automation ${id} projection is not ready.`)
-					}
-					return yield* present(projected)
+					return yield* present(yield* projected(id))
 				}).pipe(handled),
 			)
 			.handle("pause", ({ params }) =>

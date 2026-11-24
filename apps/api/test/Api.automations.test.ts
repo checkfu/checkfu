@@ -7,6 +7,10 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
+import { listPage } from "../src/Http/AutomationsHandlers.ts"
+import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
+import * as DateTime from "effect/DateTime"
 import {
 	AUTH_HEADERS,
 	extractLastUserText,
@@ -783,5 +787,71 @@ describe("Automations API", () => {
 				}),
 			),
 		30_000,
+	)
+})
+
+describe("Automation list pages while its two views catch up separately", () => {
+	const snapshot = (id: string, status: AutomationSnapshot["status"]): AutomationSnapshot => ({
+		id: AutomationId.make(id),
+		type: "automation",
+		name: id,
+		agent_id: "agent_1",
+		agent_version: null,
+		environment_id: "env_1",
+		text: "Report.",
+		schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+		status,
+		pause_reason: null,
+		runs: 0,
+		activation: 0,
+		upcoming: [],
+		last_run_at: null,
+		created_at: DateTime.makeUnsafe(NOW),
+		updated_at: DateTime.makeUnsafe(NOW),
+		archived_at: status === "archived" ? DateTime.makeUnsafe(NOW) : null,
+	})
+	const live = ["auto_a", "auto_b", "auto_c"].map((id, index) => ({
+		automation_id: AutomationId.make(id),
+		seq: index + 1,
+	}))
+	const ids = (page: { readonly data: ReadonlyArray<AutomationSnapshot> }) =>
+		page.data.map((entry) => entry.id)
+
+	it.effect(
+		"leaves out an automation archived before its slot is released, and pages past it",
+		() =>
+			Effect.gen(function* () {
+				const read = (id: AutomationId) =>
+					Effect.succeed(snapshot(id, id === "auto_b" ? "archived" : "active"))
+				const first = yield* listPage(live, { limit: 2 }, read)
+				expect([ids(first), first.has_more, first.next_cursor]).toEqual([["auto_a"], true, 2])
+				const second = yield* listPage(live, { limit: 2, after: 2 }, read)
+				expect([ids(second), second.has_more, second.next_cursor]).toEqual([
+					["auto_c"],
+					false,
+					null,
+				])
+				const newest = yield* listPage(live, { limit: 2, order: "desc" }, read)
+				expect([ids(newest), newest.next_cursor]).toEqual([["auto_c"], 2])
+			}),
+	)
+
+	it.live("waits for an automation the directory lists before its own view has it", () =>
+		Effect.gen(function* () {
+			const late = (id: AutomationId) =>
+				id === "auto_a"
+					? Effect.as(Effect.sleep("20 millis"), snapshot(id, "active"))
+					: Effect.succeed(snapshot(id, "active"))
+			const page = yield* listPage(live, { limit: 1 }, late)
+			expect([ids(page), page.next_cursor]).toEqual([["auto_a"], 1])
+		}),
+	)
+
+	it.effect("answers no page and no cursor while an automation's view is not ready", () =>
+		Effect.gen(function* () {
+			const notReady = (id: AutomationId) =>
+				id === "auto_a" ? Effect.fail("not ready" as const) : Effect.succeed(snapshot(id, "active"))
+			expect(yield* Effect.flip(listPage(live, { limit: 1 }, notReady))).toBe("not ready")
+		}),
 	)
 })
