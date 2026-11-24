@@ -14,7 +14,7 @@ import {
 } from "./RunTurnActivities.ts"
 import { Session } from "./Session.aggregate.ts"
 import { SessionId } from "./Session.id.ts"
-import { MessageText, PositiveInt, ResourceId } from "./SessionTypes.ts"
+import { MessageText, NonNegativeInt, PositiveInt, ResourceId } from "./SessionTypes.ts"
 
 export { TurnOutcome, RUN_TURN_ACTIVITIES, StepOutcome }
 

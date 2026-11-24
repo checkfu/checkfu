@@ -432,7 +432,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		"reads TurnInput state queued before last_reply_turn existed, and drops nothing for it",
 		() =>
 			Effect.gen(function* () {
-				const queued = yield* Schema.decodeEffect(TurnInputState)({
+				const queued = yield* Schema.decodeUnknownEffect(TurnInputState)({
 					agent_id: "agent_1",
 					agent_version: 1,
 					environment_id: "env_1",
