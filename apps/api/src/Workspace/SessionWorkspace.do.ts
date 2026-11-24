@@ -164,7 +164,15 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						repositories: ReadonlyArray<RepositoryMount>,
 					): Effect.Effect<WorkspacePreparation> =>
 						Effect.promise(() => {
-							const next = preparing.then(() => prepare(repositories))
+							if (storage.kv.get(DISCARDED) === true) {
+								return Promise.resolve({
+									ok: false,
+									resource_id: repositories[0]?.id ?? "",
+									message: "The session has ended and its workspace was discarded.",
+								})
+							}
+							// Held by the fence, so a discard waits for a clone under way before it purges.
+							const next = fence.hold(() => preparing.then(() => prepare(repositories)))
 							preparing = next.catch(() => undefined)
 							return next
 						}),

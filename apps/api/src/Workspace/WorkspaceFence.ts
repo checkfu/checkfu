@@ -22,6 +22,15 @@ export const makeTurnFence = (store: FenceStore) => {
 		const newest = store.get()
 		return newest === undefined || token.turn >= newest.turn
 	}
+	const hold = async <A>(work: () => Promise<A>): Promise<A> => {
+		const done = work()
+		running.add(done)
+		try {
+			return await done
+		} finally {
+			running.delete(done)
+		}
+	}
 	const drain = async (): Promise<void> => {
 		await Promise.allSettled(running)
 	}
@@ -38,17 +47,9 @@ export const makeTurnFence = (store: FenceStore) => {
 		/** Waits for every call already running; one that starts later is not waited for. */
 		drain,
 		/** Runs a call of the given turn, or answers undefined when that turn is no longer current. */
-		run: async <A>(token: TurnToken, work: () => Promise<A>): Promise<A | undefined> => {
-			if (!isCurrent(token)) {
-				return undefined
-			}
-			const done = work()
-			running.add(done)
-			try {
-				return await done
-			} finally {
-				running.delete(done)
-			}
-		},
+		run: async <A>(token: TurnToken, work: () => Promise<A>): Promise<A | undefined> =>
+			isCurrent(token) ? hold(work) : undefined,
+		/** Runs work that belongs to no turn, such as copying a repository in, so drain waits for it. */
+		hold,
 	}
 }

@@ -76,6 +76,24 @@ describe("session workspace", () => {
 		expect(await third).toBe(true)
 	})
 
+	it("drains work that belongs to no turn as well", async () => {
+		const fence = makeTurnFence(store())
+		const order: Array<string> = []
+		let finish: () => void = () => undefined
+		const clone = fence.hold(async () => {
+			await new Promise<void>((resolve) => {
+				finish = resolve
+			})
+			order.push("clone finished")
+			return "cloned"
+		})
+		const drained = fence.drain().then(() => order.push("drained"))
+		finish()
+		expect(await clone).toBe("cloned")
+		await drained
+		expect(order).toEqual(["clone finished", "drained"])
+	})
+
 	it("drains the calls already running, and not one that starts later", async () => {
 		const fence = makeTurnFence(store())
 		await fence.enter(turn(1))
