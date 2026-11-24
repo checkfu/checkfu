@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { removeStage } from "./StageCleanup.ts"
+import { API_WORKER_BUDGET, EAGER_BYTES_HELP, STARTUP_HELP, measureBundle } from "./BundleBudget.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
@@ -111,41 +113,6 @@ const ANSI_ESCAPE_RE = new RegExp(
 )
 
 const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
-
-const cleanupStageState = (stage: string): void => {
-	const stateDir = join(REPO_ROOT, ".alchemy", "state", "Checkfu", stage)
-	let workerName: string | null = null
-	try {
-		const saved = JSON.parse(readFileSync(join(stateDir, "ApiWorker.json"), "utf8")) as {
-			readonly attr?: { readonly workerName?: unknown }
-		}
-		if (typeof saved.attr?.workerName === "string") {
-			workerName = saved.attr.workerName
-		}
-	} catch {
-		workerName = null
-	}
-	rmSync(stateDir, { recursive: true, force: true })
-	rmSync(join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-ApiWorker`), {
-		recursive: true,
-		force: true,
-	})
-	const prefix = workerName ?? `checkfu-apiworker-${stage}`
-	for (const subdir of ["local", join("local", "cache"), join("local", "workflows")]) {
-		const dir = join(REPO_ROOT, ".alchemy", subdir)
-		let entries: Array<string>
-		try {
-			entries = readdirSync(dir)
-		} catch {
-			continue
-		}
-		for (const entry of entries) {
-			if (entry === prefix || entry.startsWith(`${prefix}-`)) {
-				rmSync(join(dir, entry), { recursive: true, force: true })
-			}
-		}
-	}
-}
 
 const startAlchemyDev = async (openAIBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
@@ -267,7 +234,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		clearTimeout(startupTimer)
 		await stopProcessByPid(child)
 		rmSync(envDir, { recursive: true, force: true })
-		cleanupStageState(stage)
+		removeStage(join(REPO_ROOT, ".alchemy"), "Checkfu", stage)
 	}
 
 	try {
@@ -293,7 +260,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
-					return { baseUrl, logs, stop }
+					return { baseUrl, logs, stage, stop }
 				}
 			} catch {
 				const sleepMs = Math.min(100, healthDeadline - Date.now())
@@ -317,6 +284,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
 	let baseUrl: string
+	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
 	let agentId: string
 	let environmentId: string
@@ -444,6 +412,7 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		const worker = await startAlchemyDev(fakeOpenAI.baseUrl)
 		baseUrl = worker.baseUrl
+		stage = worker.stage
 		stopWorker = worker.stop
 
 		const createdAgent = await createResource<{ readonly id: string }>(
@@ -467,6 +436,23 @@ describe("PiSession real Durable Object under workerd", () => {
 		await stopWorker?.()
 		await fakeOpenAI?.close()
 	}, 30_000)
+
+	it("keeps the code every isolate loads at start-up inside its budget", async () => {
+		const measured = await measureBundle(
+			join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-ApiWorker`),
+			"ApiWorker.js",
+		)
+		const found = JSON.stringify(measured)
+		expect(measured.eagerBytes, `${EAGER_BYTES_HELP} Measured ${found}`).toBeLessThanOrEqual(
+			API_WORKER_BUDGET.eagerBytes,
+		)
+		expect(measured.totalBytes, `Measured ${found}`).toBeLessThanOrEqual(
+			API_WORKER_BUDGET.totalBytes,
+		)
+		expect(measured.startupCpuMs, `${STARTUP_HELP} Measured ${found}`).toBeLessThanOrEqual(
+			API_WORKER_BUDGET.startupCpuMs,
+		)
+	}, 60_000)
 
 	it("runs a turn from message to reply and remembers the first turn on the second", async () => {
 		fakeOpenAI.setHandler((req) => {
