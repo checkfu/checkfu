@@ -22,6 +22,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
+import type * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Sink from "effect/Sink"
 import * as Stdio from "effect/Stdio"
@@ -83,7 +84,10 @@ export interface CliRunOptions {
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
 	readonly onChmod?: (filePath: string, mode: number) => void
 	readonly readyWithin?: Duration.Input
-	readonly spawn?: (args: ReadonlyArray<string>) => {
+	readonly spawn?: (
+		args: ReadonlyArray<string>,
+		env: NonNullable<ChildProcess.CommandOptions["env"]>,
+	) => {
 		readonly exitCode: number
 		readonly stdout?: string
 	}
@@ -247,6 +251,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 							program.endsWith("alchemy-query.ts")
 								? [program, "query", ...rest]
 								: [program, ...rest],
+							command.options.env ?? {},
 						)
 						const stdout = Stream.make(new TextEncoder().encode(result.stdout ?? ""))
 						return Effect.succeed(

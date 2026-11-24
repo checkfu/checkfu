@@ -220,8 +220,22 @@ const inCheckout = (target: Target) => ({
 	extendEnv: true,
 })
 
+/**
+ * The environment Alchemy deploys under. The jurisdiction the guard checked is set in it, so
+ * an environment file Bun loads on its own in the checkout, such as `.env.local`, cannot
+ * deploy a different one; Bun leaves a variable that is already set alone, even when empty.
+ */
+export const alchemyDeployEnv = (checkout: Checkout, jurisdiction: string) => ({
+	...checkout.runtimeEnv,
+	[JURISDICTION_ENV]: jurisdiction,
+})
+
 /** Runs an Alchemy command attached to the terminal and returns its exit code. */
-const run = (target: Target, args: ReadonlyArray<string>) =>
+const run = (
+	target: Target,
+	args: ReadonlyArray<string>,
+	env: Readonly<Record<string, string>> = target.checkout.runtimeEnv,
+) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -239,7 +253,7 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 						"--profile",
 						target.profile,
 					],
-					{ ...inCheckout(target), stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+					{ ...inCheckout(target), env, stdin: "inherit", stdout: "inherit", stderr: "inherit" },
 				),
 			)
 			.pipe(Effect.mapError((error) => configError(`Could not start Alchemy: ${error}`)))
@@ -583,12 +597,15 @@ export const deployCommand = Command.make(
 
 			// What to type to run this same deploy again; a bare retry could pick another stage.
 			const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
+			// Until a successful deploy records the new jurisdiction, running it again needs the
+			// same consent.
+			const retryBeforeRecord = input.changeJurisdiction ? `${retry} --change-jurisdiction` : retry
 
 			// The account is settled before any secret is written, so a refusal leaves the
 			// checkout exactly as it was. The profile it was checked under is the one the
 			// deploy then uses; the env file is not consulted again for it.
 			const checked = yield* resolveTarget(checkout, envFile, record)
-			const accountId = yield* requireAccount(checked, Option.some({ retry }))
+			const accountId = yield* requireAccount(checked, Option.some({ retry: retryBeforeRecord }))
 			yield* requireRecordedAccount(record, stage, accountId)
 			const known = Option.filter(
 				record,
@@ -596,18 +613,17 @@ export const deployCommand = Command.make(
 			)
 			const jurisdiction = yield* deployedJurisdiction(envFile)
 			yield* requireRecordedJurisdiction(known, jurisdiction, input.changeJurisdiction)
-			const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
+			const { apiKey, provider } = yield* prepareEnvFile(envFile, retryBeforeRecord)
 			const target = { ...checked, envFile: Option.some(envFile) } satisfies Target
 
-			const exitCode = yield* run(target, [
-				"deploy",
-				"--stage",
-				stage,
-				...(input.yes ? ["--yes"] : []),
-			])
+			const exitCode = yield* run(
+				target,
+				["deploy", "--stage", stage, ...(input.yes ? ["--yes"] : [])],
+				alchemyDeployEnv(checkout, jurisdiction),
+			)
 			if (exitCode !== 0) {
 				return yield* new CliFailure({
-					message: `Deploy did not finish. Run \`${retry}\` again when you are ready.`,
+					message: `Deploy did not finish. Run \`${retryBeforeRecord}\` again when you are ready.`,
 					exitCode,
 				})
 			}

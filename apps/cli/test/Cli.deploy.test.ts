@@ -610,6 +610,59 @@ describe("checkfu deploy", () => {
 		}),
 	)
 
+	it.live("deploys under the jurisdiction it checked, and keeps consent in early retries", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const env = (dotenv: string) =>
+				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n${dotenv}`
+
+			// Alchemy is given the value the guard checked, so nothing Bun loads on its own in the
+			// checkout can replace it.
+			for (const [dotenv, shell, deployed] of [
+				["CHECKFU_JURISDICTION=\n", {}, ""],
+				["CHECKFU_JURISDICTION=eu\n", {}, "eu"],
+				["CHECKFU_JURISDICTION=\n", { CHECKFU_JURISDICTION: "eu" }, "eu"],
+				["CHECKFU_JURISDICTION=us\n", { CHECKFU_JURISDICTION: "eu" }, "us"],
+			] as const) {
+				const seen: Array<unknown> = []
+				const calls: Array<ReadonlyArray<string>> = []
+				const alchemy = fakeAlchemy(calls)
+				const result = yield* cli.run(["deploy", "--yes"], {
+					env: { CHECKFU_CONFIG_DIR: "/config", ...shell },
+					files: virtualFiles({ ...checkout, [ENV_FILE]: env(dotenv) }),
+					spawn: (args, childEnv) => {
+						if (args[1] === "deploy") {
+							seen.push(childEnv["CHECKFU_JURISDICTION"])
+						}
+						return alchemy(args)
+					},
+				})
+				expect(result.errorMessage).toBeUndefined()
+				expect([dotenv, seen]).toEqual([dotenv, [deployed]])
+			}
+
+			const consent = (args: ReadonlyArray<string>, output?: "error") =>
+				cli.run(["deploy", "--yes", ...args], {
+					env: { CHECKFU_CONFIG_DIR: "/config" },
+					files: virtualFiles({
+						...checkout,
+						[RECORD_FILE]: record("live", "default", ACCOUNT, DEPLOYED_URL, "eu"),
+						[ENV_FILE]: env("CHECKFU_JURISDICTION=us\n"),
+					}),
+					spawn: fakeAlchemy([], output === undefined ? { deployExitCode: 1 } : { output }),
+				})
+			// Before a successful deploy records the new jurisdiction, the retry needs the flag.
+			const unfinished = yield* consent(["--change-jurisdiction"])
+			expect(unfinished.errorMessage).toContain(
+				`Run \`${COMMAND} deploy --change-jurisdiction\` again`,
+			)
+			// After it, the record already holds it, so the retry does not.
+			const recorded = yield* consent(["--change-jurisdiction"], "error")
+			expect(recorded.errorMessage).toContain(`Run \`${COMMAND} deploy\` again`)
+			expect(recorded.errorMessage).not.toContain("--change-jurisdiction")
+		}),
+	)
+
 	it.live("names the stage in the command it suggests for trying again", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
