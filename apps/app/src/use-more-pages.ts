@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useAction } from "./use-action.ts"
 
 interface Page<T> {
 	readonly data: ReadonlyArray<T>
@@ -7,24 +8,17 @@ interface Page<T> {
 
 export function useMorePages<T>(first: Page<T>, load: (after: string) => Promise<Page<T>>) {
 	const [later, setLater] = useState<ReadonlyArray<Page<T>>>([])
-	const [pending, setPending] = useState(false)
-	const last = later.at(-1) ?? first
-	const cursor = last.next_cursor
+	const cursor = (later.at(-1) ?? first).next_cursor
+	const more = useAction(async () => {
+		if (cursor !== null) {
+			const page = await load(cursor)
+			setLater((loaded) => [...loaded, page])
+		}
+	})
 	return {
 		items: [first, ...later].flatMap((page) => page.data),
-		pending,
-		more:
-			cursor === null
-				? null
-				: () => {
-						setPending(true)
-						load(cursor).then(
-							(page) => {
-								setLater((loaded) => [...loaded, page])
-								setPending(false)
-							},
-							() => setPending(false),
-						)
-					},
+		pending: more.pending,
+		error: more.error,
+		more: cursor === null ? null : () => more.run(),
 	}
 }

@@ -5,7 +5,7 @@ import type {
 	SendSessionEventsBody,
 	UpdateAgentBody,
 } from "@checkfu/sdk/Api"
-import type { JsonAgent, JsonEnvironment, JsonSession } from "@checkfu/sdk/client"
+import type { JsonAgent, JsonEnvironment, JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
 
 export class ApiError extends Error {
 	readonly status: number
@@ -20,6 +20,12 @@ interface Page<T> {
 	readonly data: ReadonlyArray<T>
 	readonly has_more: boolean
 	readonly next_cursor: string | null
+}
+
+export interface EventPage {
+	readonly data: ReadonlyArray<JsonSessionEvent>
+	readonly has_more: boolean
+	readonly next_cursor: number | null
 }
 
 interface Pending {
@@ -148,7 +154,13 @@ export const checkfu = {
 		...resource<JsonSession, CreateSessionBody>("/v1/sessions"),
 		send: (id: string, body: SendSessionEventsBody, idempotencyKey: string) =>
 			call<unknown>("POST", `/v1/sessions/${encodeURIComponent(id)}/events`, body, idempotencyKey),
-		streamUrl: (id: string) => `/v1/sessions/${encodeURIComponent(id)}/events/stream`,
+		events: (id: string, before?: number) =>
+			call<EventPage>(
+				"GET",
+				`/v1/sessions/${encodeURIComponent(id)}/events?order=desc&limit=100${before === undefined ? "" : `&after=${before}`}`,
+			),
+		streamUrl: (id: string, after: number) =>
+			`/v1/sessions/${encodeURIComponent(id)}/events/stream?after=${after}`,
 	},
 }
 

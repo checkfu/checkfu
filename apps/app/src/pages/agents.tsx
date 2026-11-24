@@ -109,6 +109,17 @@ const bodyOf = (draft: AgentDraft) => ({
 	description: draft.description === "" ? null : draft.description,
 })
 
+const changesFrom = (from: JsonAgent, draft: AgentDraft) => {
+	const before = draftOf(from)
+	const after = bodyOf(draft)
+	return {
+		...(after.name === before.name ? {} : { name: after.name }),
+		...(after.model === before.model ? {} : { model: after.model }),
+		...(draft.system === before.system ? {} : { system: after.system }),
+		...(draft.description === before.description ? {} : { description: after.description }),
+	}
+}
+
 function AgentForm({
 	initial,
 	submitLabel,
@@ -183,6 +194,10 @@ export function NewAgentPage(): React.JSX.Element {
 
 export function AgentPage(): React.JSX.Element {
 	const agent = detail.useLoaderData()
+	return <AgentView key={agent.id} agent={agent} />
+}
+
+function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
 	const router = useRouter()
 	const [editingFrom, setEditingFrom] = useState<JsonAgent | null>(null)
 	const archive = useAction(async () => {
@@ -240,10 +255,13 @@ export function AgentPage(): React.JSX.Element {
 					submitLabel="Save new version"
 					onCancel={() => setEditingFrom(null)}
 					onSubmit={async (draft) => {
-						await checkfu.agents.update(editingFrom.id, {
-							version: editingFrom.version,
-							...bodyOf(draft),
-						})
+						const changes = changesFrom(editingFrom, draft)
+						if (Object.keys(changes).length > 0) {
+							await checkfu.agents.update(editingFrom.id, {
+								version: editingFrom.version,
+								...changes,
+							})
+						}
 						setEditingFrom(null)
 						await router.invalidate()
 					}}

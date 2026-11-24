@@ -3,6 +3,12 @@ import { checkfu } from "../../../api.ts"
 import { SessionPage } from "../../../pages/sessions.tsx"
 
 export const Route = createFileRoute("/_app/sessions/$sessionId")({
-	loader: ({ params }) => checkfu.sessions.retrieve(params.sessionId),
+	loader: async ({ params }) => {
+		const [session, history] = await Promise.all([
+			checkfu.sessions.retrieve(params.sessionId),
+			checkfu.sessions.events(params.sessionId),
+		])
+		return { session, history }
+	},
 	component: SessionPage,
 })

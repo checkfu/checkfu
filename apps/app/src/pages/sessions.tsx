@@ -12,6 +12,7 @@ import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
+import type { EventPage } from "../api.ts"
 import { useMorePages } from "../use-more-pages.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
@@ -127,7 +128,8 @@ export function NewSessionPage(): React.JSX.Element {
 	return (
 		<>
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />
-			{agents.length === 0 || environments.length === 0 ? (
+			{(agents.length === 0 && agentOptions.more === null) ||
+			(environments.length === 0 && environmentOptions.more === null) ? (
 				<Callout>
 					A session needs an{" "}
 					<Link to="/agents/new" className="underline">
@@ -166,6 +168,9 @@ export function NewSessionPage(): React.JSX.Element {
 							Load more agents
 						</Button>
 					)}
+					{agentOptions.error === undefined ? null : (
+						<Callout tone="error">{agentOptions.error}</Callout>
+					)}
 					<Field label="Environment">
 						<Select
 							value={environmentId}
@@ -188,6 +193,9 @@ export function NewSessionPage(): React.JSX.Element {
 							Load more environments
 						</Button>
 					)}
+					{environmentOptions.error === undefined ? null : (
+						<Callout tone="error">{environmentOptions.error}</Callout>
+					)}
 					<Field label="Title">
 						<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 					</Field>
@@ -202,15 +210,22 @@ export function NewSessionPage(): React.JSX.Element {
 }
 
 export function SessionPage(): React.JSX.Element {
-	const session = detail.useLoaderData()
-	return <SessionView key={session.id} session={session} />
+	const { session, history } = detail.useLoaderData()
+	return <SessionView key={session.id} session={session} history={history} />
 }
 
-function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
+function SessionView({
+	session,
+	history,
+}: {
+	readonly session: JsonSession
+	readonly history: EventPage
+}): React.JSX.Element {
 	const router = useRouter()
-	const { events, status, turn, error } = useSessionEvents({
+	const { events, status, turn, error, earlier } = useSessionEvents({
 		sessionId: session.id,
 		snapshot: session,
+		history,
 		onTransition: () => void router.invalidate(),
 	})
 	const [text, setText] = useState("")
@@ -282,6 +297,19 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 						{message}
 					</Callout>
 				),
+			)}
+			{earlier === null ? null : (
+				<div className="space-y-2">
+					<Button
+						variant="ghost"
+						size="sm"
+						disabled={earlier.pending}
+						onClick={() => earlier.run()}
+					>
+						Load earlier messages
+					</Button>
+					{earlier.error === undefined ? null : <Callout tone="error">{earlier.error}</Callout>}
+				</div>
 			)}
 			<Transcript events={events} />
 			{open ? (

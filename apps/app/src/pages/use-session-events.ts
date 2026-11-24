@@ -3,6 +3,8 @@ import type { SessionEventType } from "@checkfu/sdk/Schemas"
 import { useMountEffect } from "@checkfu/ui/use-mount-effect"
 import { useState } from "react"
 import { checkfu } from "../api.ts"
+import type { EventPage } from "../api.ts"
+import { useAction } from "../use-action.ts"
 
 type Status = "idle" | "running" | "terminated"
 
@@ -37,24 +39,44 @@ const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
 
 const BATCH_MS = 50
 
+const ascending = (page: EventPage) => page.data.toReversed()
+const olderThan = (page: EventPage) => (page.has_more ? page.next_cursor : null)
+
+const turnAfter = (turn: number, event: JsonSessionEvent): number =>
+	event.type === "session.status_running" && "turn" in event && typeof event.turn === "number"
+		? event.turn
+		: turn
+
 export function useSessionEvents({
 	sessionId,
 	snapshot,
+	history,
 	onTransition,
 }: {
 	readonly sessionId: string
-	readonly snapshot: { readonly status: Status; readonly turn: number; readonly updated_at: string }
+	readonly snapshot: { readonly status: Status; readonly turn: number }
+	readonly history: EventPage
 	readonly onTransition: () => void
 }) {
-	const since = snapshot.updated_at
-	const [events, setEvents] = useState<ReadonlyArray<JsonSessionEvent>>([])
-	const [status, setStatus] = useState(snapshot.status)
-	const [turn, setTurn] = useState(snapshot.turn)
+	const [events, setEvents] = useState(() => ascending(history))
+	const [older, setOlder] = useState(() => olderThan(history))
+	const [status, setStatus] = useState(() =>
+		ascending(history).reduce(statusAfter, snapshot.status),
+	)
+	const [turn, setTurn] = useState(() => ascending(history).reduce(turnAfter, snapshot.turn))
 	const [error, setError] = useState<string>()
+	const earlier = useAction(async () => {
+		if (older === null) {
+			return
+		}
+		const page = await checkfu.sessions.events(sessionId, older)
+		setEvents((loaded) => ascending(page).concat(loaded))
+		setOlder(olderThan(page))
+	})
 	useMountEffect(() => {
-		const source = new EventSource(checkfu.sessions.streamUrl(sessionId))
+		let lastSeq = history.data[0]?.seq ?? 0
+		const source = new EventSource(checkfu.sessions.streamUrl(sessionId, lastSeq))
 		let slowReconnect: ReturnType<typeof setTimeout> | undefined
-		let lastSeq = 0
 		let pending: Array<JsonSessionEvent> = []
 		let flushTimer: ReturnType<typeof setTimeout> | undefined
 		const settle = () => {
@@ -66,12 +88,8 @@ export function useSessionEvents({
 			pending = []
 			flushTimer = undefined
 			setEvents((seen) => seen.concat(batch))
-			const live = batch.filter((event) => event.created_at > since)
-			setStatus((current) => live.reduce(statusAfter, current))
-			const running = live.findLast((event) => event.type === "session.status_running")
-			if (running !== undefined && "turn" in running && typeof running.turn === "number") {
-				setTurn(running.turn)
-			}
+			setStatus((current) => batch.reduce(statusAfter, current))
+			setTurn((current) => batch.reduce(turnAfter, current))
 		}
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
@@ -84,8 +102,7 @@ export function useSessionEvents({
 			if (flushTimer === undefined) {
 				flushTimer = setTimeout(flush, BATCH_MS)
 			}
-			const transition = event.type === "session.status_idle" || event.type === "session.archived"
-			if (transition && event.created_at > since) {
+			if (event.type === "session.status_idle" || event.type === "session.archived") {
 				onTransition()
 			}
 			if (event.type === "session.archived") {
@@ -117,5 +134,5 @@ export function useSessionEvents({
 			source.close()
 		}
 	})
-	return { events, status, turn, error }
+	return { events, status, turn, error, earlier: older === null ? null : earlier }
 }

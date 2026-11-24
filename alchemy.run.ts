@@ -8,6 +8,7 @@ import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection
 import PiHarnessWorkerLive from "./apps/api/src/Pi/PiHarnessWorker.ts"
 import * as Alchemy from "alchemy"
 import * as Config from "effect/Config"
+import * as Option from "effect/Option"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
@@ -55,12 +56,19 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				env: { API: api },
 				dev: { port: 1338 },
 			})
+			const dashboardKey = yield* Config.option(Config.Redacted("CHECKFU_API_KEY"))
 			const app = yield* Cloudflare.Website.Vite("App", {
 				rootDir: "apps/app",
 				main: "worker.ts",
 				compatibility: { date: COMPATIBILITY_DATE },
 				observability: { enabled: true },
-				env: { API: api, CHECKFU_API_KEY: Config.Redacted("CHECKFU_API_KEY") },
+				env: {
+					API: api,
+					...Option.match(dashboardKey, {
+						onNone: () => ({}),
+						onSome: (key) => ({ CHECKFU_API_KEY: key }),
+					}),
+				},
 				assets: {
 					notFoundHandling: "single-page-application",
 					runWorkerFirst: ["/*", "!/assets/*"],
