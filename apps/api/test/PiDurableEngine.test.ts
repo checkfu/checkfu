@@ -25,6 +25,7 @@ import {
 	PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
 	PI_HARNESS_SETTINGS,
 } from "../src/Pi/PiContextBudget.ts"
+import { resolveCatalogModel } from "../src/Pi/PiCatalog.ts"
 import {
 	AbortGrace,
 	abortPiDurableTurn,
@@ -56,7 +57,6 @@ import { makePiHarnessBackend } from "../src/Pi/PiSession.do.ts"
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
-	extractConversationMessageCount,
 	extractLastUserText,
 	makeAssistantReply,
 	makePiDurableTestLayer,
@@ -346,60 +346,18 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		}
 	})
 
-	it("sizes compaction thresholds below small-context models like gpt-4 and compacts instead of overflowing", async () => {
-		// Every model too small for Pi's default thresholds has thresholds of its own that fit.
-		const overrides: Readonly<
-			Record<string, { readonly reserveTokens: number; readonly keepRecentTokens: number }>
-		> = PI_HARNESS_SETTINGS.compaction.modelOverrides
-		const small = createPiModels({ openai: null, anthropic: null })
-			.getModels()
-			.filter((model) => model.contextWindow < PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW)
-		expect(small.map((model) => `${model.provider}/${model.id}`).toSorted()).toEqual(
-			Object.keys(overrides).toSorted(),
+	it("offers no model whose context window is too small for Pi's compaction defaults", () => {
+		const models = createPiModels({ openai: null, anthropic: null }).getModels()
+		const small = models.filter(
+			(model) => model.contextWindow < PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
 		)
+		expect(small.map((model) => `${model.provider}/${model.id}`)).toContain("openai/gpt-4")
 		for (const model of small) {
-			const policy = overrides[`${model.provider}/${model.id}`]
-			expect((policy?.reserveTokens ?? 0) + (policy?.keepRecentTokens ?? 0)).toBeLessThan(
-				model.contextWindow,
-			)
+			expect(resolveCatalogModel(`${model.provider}/${model.id}`)).toBeNull()
 		}
-
-		let compactionCalls = 0
-		const turnMessageCounts: Array<number> = []
-		const backend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(async (model, context) => {
-				const lastText = extractLastUserText(context)
-				if (lastText.startsWith("<conversation>")) {
-					compactionCalls += 1
-					return makeAssistantReply(model, null, "Compact summary of earlier turns.", 200, 40)
-				}
-				turnMessageCounts.push(extractConversationMessageCount(context))
-				const estimatedInput = Math.ceil(JSON.stringify(context.messages).length / 4)
-				return makeAssistantReply(model, null, "r".repeat(6000), estimatedInput, 1500)
-			}),
-		)
-		try {
-			// Each turn adds ~3,000 tokens (user + assistant); by turn 4 history exceeds
-			// gpt-4's 6,144-token blocking compaction threshold while staying well below Pi's 20,000-token default.
-			for (let turn = 1; turn <= 4; turn++) {
-				const result = await Effect.runPromise(
-					runPiDurableTurn(backend, {
-						operationId: `turn:${turn}`,
-						turn,
-						provider: "openai",
-						modelId: "gpt-4",
-						system: null,
-						text: `turn-${turn}: ${"u".repeat(6000)}`,
-					}),
-				)
-				expect(result).toMatchObject({ ok: true })
-			}
-			expect(compactionCalls).toBeGreaterThanOrEqual(1)
-			// After compaction, the active message list shrinks rather than growing monotonically.
-			expect(turnMessageCounts.at(-1)).toBeLessThan(7)
-		} finally {
-			await backend.close()
-		}
+		expect(resolveCatalogModel("gpt-4")).toBeNull()
+		expect(resolveCatalogModel("gpt-4o-mini")).not.toBeNull()
+		expect("modelOverrides" in PI_HARNESS_SETTINGS.compaction).toBe(false)
 	})
 
 	it("logs a bounded error category without echoing raw provider error bodies", async () => {

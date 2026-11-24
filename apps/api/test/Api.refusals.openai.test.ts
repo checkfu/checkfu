@@ -1042,6 +1042,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			].join("")
 
 		let responseSeq = 0
+		let turnResponses = 0
 		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			responseSeq += 1
 			const rawBody = typeof init?.body === "string" ? init.body : ""
@@ -1064,9 +1065,12 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					headers: { "content-type": "text/event-stream" },
 				})
 			}
-			const estimatedInput = Math.ceil(rawBody.length / 4)
+			turnResponses += 1
+			// The second reply reports a request near gpt-4o-mini's 128,000-token window, so the
+			// next turn has to compact first.
+			const reportedInput = turnResponses === 2 ? 115_000 : Math.ceil(rawBody.length / 4)
 			return new Response(
-				makeOpenAITextResponse(`resp_turn_${responseSeq}`, "r".repeat(6000), estimatedInput, 1500),
+				makeOpenAITextResponse(`resp_turn_${responseSeq}`, "r".repeat(40_000), reportedInput, 1500),
 				{
 					status: 200,
 					headers: { "content-type": "text/event-stream" },
@@ -1080,7 +1084,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
-			// Run turns on gpt-4 (8,192 context window) until blocking compaction triggers.
+			// Run turns until blocking compaction triggers. Each exchange is about 20,000 estimated
+			// tokens, so Pi, which keeps the newest 20,000, has an older turn to summarize.
 			let failedTurn: PiTurnOutcome | undefined
 			for (let turn = 1; turn <= 4; turn++) {
 				const result = await Effect.runPromise(
@@ -1088,9 +1093,9 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 						operationId: `turn:${turn}`,
 						turn,
 						provider: "openai",
-						modelId: "gpt-4",
+						modelId: "gpt-4o-mini",
 						system: null,
-						text: `preserved-turn-${turn}: ${"u".repeat(6000)}`,
+						text: `preserved-turn-${turn}: ${"u".repeat(40_000)}`,
 					}),
 				)
 				if (!result.ok) {
@@ -1115,9 +1120,9 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					operationId: "turn:5",
 					turn: 5,
 					provider: "openai",
-					modelId: "gpt-4",
+					modelId: "gpt-4o-mini",
 					system: null,
-					text: `recovery-turn: ${"u".repeat(6000)}`,
+					text: `recovery-turn: ${"u".repeat(40_000)}`,
 				}),
 			)
 			expect(recovered).toMatchObject({ ok: true })
@@ -1596,8 +1601,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				return makeAssistantReply(
 					model,
 					null,
-					"r".repeat(6000),
-					normalTurns === 2 ? 7000 : 2000,
+					"r".repeat(40_000),
+					normalTurns === 2 ? 115_000 : 2000,
 					1500,
 				)
 			})
@@ -1610,7 +1615,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 						method: "POST",
 						path: "/v1/agents",
 						headers: AUTH_HEADERS,
-						body: { name: "OpenAI Fallback 2", model: "gpt-4" },
+						body: { name: "OpenAI Fallback 2", model: "gpt-4o-mini" },
 					})
 					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
 					const envRes = yield* sendRequest(apiFetch, {
@@ -1629,7 +1634,9 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
 					for (let turn = 1; turn <= 2; turn++) {
-						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${"u".repeat(6000)}`], turn)
+						// One message may hold 16,384 characters, so the turn's text comes as three.
+						const part = "u".repeat(14_000)
+						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${part}`, part, part], turn)
 					}
 					yield* sendAndSettle(apiFetch, session.id, ["trigger-compaction-refusal"], 3)
 
@@ -1650,7 +1657,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			)
 			expect(warnCalls).toContainEqual([
 				"pi refusal fallback",
-				{ provider: "openai", model: "gpt-4", rawStopReason: "refusal" },
+				{ provider: "openai", model: "gpt-4o-mini", rawStopReason: "refusal" },
 			])
 			expect(JSON.stringify(warnCalls)).not.toContain(secretDetail)
 
