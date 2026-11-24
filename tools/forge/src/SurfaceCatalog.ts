@@ -1,4 +1,4 @@
-import type { Field, Forge, Group, Json, Method, Name, Type } from "@cloudflare/forge"
+import type { Field, Forge, Group, Json, Method, Type } from "@cloudflare/forge"
 import { PREAMBLE } from "@cloudflare/forge/ts"
 
 export interface GeneratedFile {
@@ -17,14 +17,12 @@ export type SurfaceRetrySafety = "idempotent" | "pre-commit-only" | "idempotency
 export interface SurfaceParam {
 	readonly wireName: string
 	readonly camelName: string
-	readonly pascalName: string
 	readonly required: boolean
 	readonly description: string
 	readonly type: Type
 }
 
 export interface SurfacePaginationSpec {
-	readonly itemsField: "data"
 	readonly cursorParam: string
 	readonly cursorType: "number" | "string"
 	readonly hasOrderParam: boolean
@@ -37,22 +35,16 @@ export interface SurfaceSseSpec {
 
 export interface SurfaceOperation {
 	readonly operationId: string
-	readonly memberPath: ReadonlyArray<string>
-	readonly groupPath: ReadonlyArray<Name>
 	readonly groupPathCamel: ReadonlyArray<string>
-	readonly groupPathPascal: ReadonlyArray<string>
 	readonly cliGroup: string
-	readonly cliMethod: string
 	readonly cliCommand: string
 	readonly methodName: string
-	readonly methodPascal: string
 	readonly apiGroup: string
 	readonly apiEndpoint: string
 	readonly httpMethod: string
 	readonly path: string
 	readonly summary: string
 	readonly description: string
-	readonly deprecated: boolean
 	readonly pathParams: ReadonlyArray<SurfaceParam>
 	readonly queryParams: ReadonlyArray<SurfaceParam>
 	readonly hasRequiredQuery: boolean
@@ -74,7 +66,6 @@ export interface SurfaceGroupNode {
 	readonly name: string
 	readonly pascalPath: string
 	readonly path: ReadonlyArray<string>
-	readonly cliName: string
 	readonly description: string
 	readonly children: ReadonlyArray<SurfaceGroupNode>
 	readonly operations: ReadonlyArray<SurfaceOperation>
@@ -295,7 +286,6 @@ const extractPathParamOrder = (pathTemplate: string): ReadonlyArray<string> => {
 const fieldToParam = (field: Field): SurfaceParam => ({
 	wireName: field.wireName,
 	camelName: field.name.camel(),
-	pascalName: field.name.pascal(),
 	required: field.required,
 	description: field.description,
 	type: field.type,
@@ -342,7 +332,6 @@ const detectPagination = (
 	}
 	const cursorType = isNumberScalar(nextCursorField.type) ? "number" : "string"
 	return {
-		itemsField: "data",
 		cursorParam: cursorField.wireName,
 		cursorType,
 		hasOrderParam: queryParams.some((q) => q.wireName === "order"),
@@ -376,9 +365,7 @@ const detectSse = (
 
 const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 	const groupPathCamel = group.path.map((part) => part.camel())
-	const groupPathPascal = group.path.map((part) => part.pascal())
 	const methodName = method.name.camel()
-	const methodPascal = method.name.pascal()
 	const cliGroup = group.path.map((part) => part.kebab()).join(":")
 	const cliMethod = method.name.kebab()
 	const cliCommand = cliGroup.length > 0 ? `${cliGroup} ${cliMethod}` : cliMethod
@@ -446,22 +433,16 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 
 	return {
 		operationId,
-		memberPath,
-		groupPath: group.path,
 		groupPathCamel,
-		groupPathPascal,
 		cliGroup,
-		cliMethod,
 		cliCommand,
 		methodName,
-		methodPascal,
 		apiGroup: endpointRef.group,
 		apiEndpoint: endpointRef.endpoint,
 		httpMethod,
 		path: method.path,
 		summary: method.summary,
 		description: method.description,
-		deprecated: method.deprecated,
 		pathParams,
 		queryParams,
 		hasRequiredQuery: queryParams.some((q) => q.required),
@@ -489,7 +470,6 @@ const buildGroupNode = (
 	const name = isRoot ? "" : (group.path.at(-1)?.camel() ?? "")
 	const path = group.path.map((part) => part.camel())
 	const pascalPath = group.path.map((part) => part.pascal()).join("")
-	const cliName = group.path.map((part) => part.kebab()).join(":")
 
 	const operations: Array<SurfaceOperation> = []
 	const seenMethodNames = new Set<string>()
@@ -552,7 +532,6 @@ const buildGroupNode = (
 		name,
 		pascalPath,
 		path,
-		cliName,
 		description: group.description,
 		children,
 		operations,
@@ -567,7 +546,6 @@ export const buildSurfaceCatalog = (forge: Forge): SurfaceCatalog => {
 				name: "",
 				pascalPath: "",
 				path: [],
-				cliName: "",
 				description: "",
 				children: [],
 				operations: [],
@@ -581,7 +559,6 @@ export const buildSurfaceCatalog = (forge: Forge): SurfaceCatalog => {
 		name: "",
 		pascalPath: "",
 		path: [],
-		cliName: "",
 		description: "",
 		children: [],
 		operations: [],
