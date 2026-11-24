@@ -1,8 +1,14 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
-import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
-import type { AgentChange, EntryId, Harness } from "@earendil-works/pi-durable"
+import {
+	AssistantEntry,
+	ROOT_CONVERSATION_ID,
+	ResetEntry,
+	ToolResultEntry,
+	UserEntry,
+} from "@earendil-works/pi-durable"
+import type { AgentChange, Cursor, EntryId, Harness } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -20,6 +26,8 @@ export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 	readonly hasApiKey: (provider: SupportedProvider) => boolean
 	readonly isCancelled: (operationId: string) => boolean
+	/** Gives the session's workspace to this turn; false when a later turn already has it. */
+	readonly enterWorkspace: (turn: number) => Promise<boolean>
 	readonly pi: () => Promise<Harness>
 	readonly ensureRoot: (agent: AgentChange) => Promise<void>
 	readonly submit: (text: string, operationId: string) => Promise<void>
@@ -59,25 +67,54 @@ const readAssistantMessage = async (
 	return firstMessage?.role === "assistant" ? firstMessage : null
 }
 
+const TURN_ENTRY_PAGE_SIZE = 8
+
+// A turn's entries: its user entry and everything after it up to the next turn, the tool rounds
+// of a turn that used tools included.
+const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array<EntryId>> => {
+	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
+	if (conversation === undefined) {
+		return []
+	}
+	const ids: Array<EntryId> = [userEntryId]
+	let cursor: Cursor | undefined
+	do {
+		const page = await conversation.entries(
+			{ minEntryId: userEntryId, order: "ascending" },
+			TURN_ENTRY_PAGE_SIZE,
+			cursor,
+			BACKGROUND_CONTEXT,
+		)
+		for (const entry of page.items) {
+			if (entry.id <= userEntryId) {
+				continue
+			}
+			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
+				return ids
+			}
+			if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
+				ids.push(entry.id)
+			}
+		}
+		cursor = page.next
+	} while (cursor !== undefined)
+	return ids
+}
+
 /**
- * Omits a non-committed turn's placed user (and, if present, answer) entries
- * from Pi's live model context, so the model does not see a prompt the session
- * records as interrupted or failed, whether the interrupt or failure landed
- * before or after Pi placed the user entry.
+ * Omits everything a non-committed turn placed in Pi's live model context: its user entry, every
+ * tool round and any answer, so the model does not see a turn the session records as interrupted
+ * or failed, whether the interrupt or failure landed before or after Pi placed the user entry.
  */
 const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> => {
 	const record = await submissionOf(pi, operationId)
-	if (record?.type !== "input") {
+	if (record?.type !== "input" || record.entry === undefined) {
 		return
 	}
-	const targets: Array<EntryId> = []
-	if (record.status === "unanswered") {
-		if (record.entry !== undefined) {
-			targets.push(record.entry)
-		}
-	} else if (record.status === "done") {
-		targets.push(record.entry, record.answer)
+	if (record.status !== "unanswered" && record.status !== "done") {
+		return
 	}
+	const targets = await readTurnEntries(pi, record.entry)
 	if (targets.length === 0) {
 		return
 	}
@@ -239,6 +276,12 @@ const admitPiTurnUnderWay = (
 							continue
 						}
 						break
+					}
+					// Inside admission, so recovery waits for it, and after the turn before has ended,
+					// so this does not refuse a turn that is still running.
+					if (!(await backend.enterWorkspace(request.turn))) {
+						await settleTurnUsage(pi, operationId)
+						return false
 					}
 					// A turn the session never published a reply for (abandoned, failed or interrupted)
 					// must not reach the model, whatever Pi made of it.
