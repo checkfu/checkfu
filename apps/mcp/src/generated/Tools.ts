@@ -1503,6 +1503,37 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "sessions_listResources",
+		title: "List session resources",
+		description: "List what is mounted in a session's workspace",
+		method: "GET",
+		path: "/v1/sessions/{session_id}/resources",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						session_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Session ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["session_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "sessions_listSessions",
 		title: "List sessions",
 		description:
@@ -1551,37 +1582,6 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				},
 			},
 			required: [],
-			additionalProperties: false,
-		},
-	},
-	{
-		name: "sessions_listResources",
-		title: "List session resources",
-		description: "List what is mounted in a session's workspace",
-		method: "GET",
-		path: "/v1/sessions/{session_id}/resources",
-		readOnly: true,
-		idempotent: true,
-		destructive: false,
-		inputSchema: {
-			type: "object",
-			properties: {
-				path: {
-					type: "object",
-					properties: {
-						session_id: {
-							type: "string",
-							minLength: 1,
-							maxLength: 256,
-							description: "Session ID",
-							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
-						},
-					},
-					required: ["session_id"],
-					additionalProperties: false,
-				},
-			},
-			required: ["path"],
 			additionalProperties: false,
 		},
 	},
