@@ -635,19 +635,28 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return HttpServerResponse.empty({ status: 204 })
 					}
 					let cursor = Math.min(from, head.cursor)
-					const catchUp =
-						cursor < head.cursor
-							? Stream.paginate(cursor, (seq: number) =>
-									Effect.map(
-										sessionViews.list(ref, {
-											after: seq,
-											take: SSE_CATCHUP_PAGE_SIZE,
-											order: "asc",
-										}),
-										(page) => [page.entries, Option.fromNullOr(page.cursor)] as const,
+					// Bounded pages until one comes back empty. A client still reading the last page lets
+					// events pile up; reading again before the live read starts keeps its first delivery
+					// to what arrived during that one read. A cursor at the head needs no page: the
+					// snapshot just read is that read.
+					const pages = Stream.paginate(cursor, (seq: number) =>
+						Effect.map(
+							sessionViews.list(ref, {
+								after: seq,
+								take: SSE_CATCHUP_PAGE_SIZE,
+								order: "asc",
+							}),
+							(page) =>
+								[
+									page.entries,
+									Option.map(
+										Option.fromUndefinedOr(page.entries.at(-1)),
+										(last) => last.envelope.seq,
 									),
-								).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
-							: Stream.empty
+								] as const,
+						),
+					).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
+					const catchUp = cursor < head.cursor ? pages : Stream.empty
 					const live: Stream.Stream<SessionEventEntry> = Stream.suspend(() =>
 						connectSessionView === undefined
 							? sessionViews.events(ref, { after: cursor })

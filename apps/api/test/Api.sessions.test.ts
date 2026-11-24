@@ -646,7 +646,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 
 	it("pages SSE catch-up and percent-decodes route IDs", async () => {
 		// 2. Percent-decoded resource IDs + 400 on malformed escapes + bounded paged SSE catch-up
-		const listCalls: Array<{ readonly after?: number; readonly take?: number }> = []
+		const listCalls: Array<{ after?: number; take?: number; returned?: number }> = []
 		const eventsCalls: Array<{ readonly after?: number }> = []
 
 		const { layer: baseLayer, closeAll } = makePiDurableTestLayer(async (model, context) =>
@@ -657,11 +657,14 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			Effect.map(SessionView, (originalViews) => ({
 				...originalViews,
 				list: (ref, opts) => {
-					listCalls.push({
+					const call: (typeof listCalls)[number] = {
 						...(opts?.after === undefined ? {} : { after: opts.after }),
 						...(opts?.take === undefined ? {} : { take: opts.take }),
-					})
-					return originalViews.list(ref, opts)
+					}
+					listCalls.push(call)
+					return originalViews
+						.list(ref, opts)
+						.pipe(Effect.tap((page) => Effect.sync(() => (call.returned = page.entries.length))))
 				},
 				events: (ref, opts) => {
 					eventsCalls.push(opts?.after === undefined ? {} : { after: opts.after })
@@ -833,6 +836,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						expect(call.take).toBeLessThanOrEqual(SSE_CATCHUP_PAGE_SIZE)
 					}
 					expect(eventsCalls).toEqual([{ after: extraErrors }])
+					// The live read starts right after a read that found nothing new at its cursor.
+					expect(listCalls.at(-1)).toMatchObject({ after: extraErrors, returned: 0 })
 				}).pipe(Effect.scoped, Effect.provide(spiedLayer)),
 			)
 		} finally {
@@ -2093,6 +2098,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		let snapshotCalls = 0
 		let listCalls = 0
 		let getCalls = 0
+		let liveReads = 0
 
 		const { layer: baseLayer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "unused", 1, 1),
@@ -2112,6 +2118,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				get: (ref, opts) => {
 					getCalls += 1
 					return real.get(ref, opts)
+				},
+				events: (ref, opts) => {
+					liveReads += 1
+					return real.events(ref, opts)
 				},
 			})),
 		)
@@ -2139,8 +2149,12 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							(evt.error as { message?: string } | undefined)?.message === "Wake idle stream",
 					)
 
-					// Reset counters once catch-up is done so we measure only the idle stream.
-					yield* Effect.sleep("50 millis")
+					// Reset counters once catch-up is done and the live read started, so only the idle
+					// stream is measured.
+					yield* Effect.sleep("5 millis").pipe(
+						Effect.repeat({ until: () => liveReads > 0 }),
+						Effect.timeout("5 seconds"),
+					)
 					snapshotCalls = 0
 					listCalls = 0
 					getCalls = 0
