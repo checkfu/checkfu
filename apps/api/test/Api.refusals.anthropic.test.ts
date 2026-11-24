@@ -30,6 +30,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Anthropic Messages refusals and stream errors", () => {
 	it("keeps a published Anthropic refusal in the next turn's model context through the real Messages codec", async () => {
@@ -187,6 +188,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -454,6 +456,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1054,6 +1057,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			).pipe(
 				Layer.provide(normalizedExecutor),
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(VaultsTestLive),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
@@ -1262,6 +1266,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(VaultsTestLive),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

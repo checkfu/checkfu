@@ -1320,4 +1320,473 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 			additionalProperties: false,
 		},
 	},
+	{
+		name: "vaults_archiveCredential",
+		title: "Archive a credential",
+		description: "Archive a credential and erase its secret",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_archiveVault",
+		title: "Archive a vault",
+		description: "Archive a vault and its credentials, and erase their secrets",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_createCredential",
+		title: "Create a credential",
+		description: "Store a credential in a vault. Its secret is never returned.",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/credentials",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						auth: {
+							anyOf: [
+								{
+									type: "object",
+									properties: {
+										type: {
+											type: "string",
+											enum: ["static_bearer"],
+										},
+										token: {
+											type: "string",
+											minLength: 1,
+											maxLength: 16384,
+										},
+										mcp_server_url: {
+											type: "string",
+											maxLength: 2048,
+											pattern:
+												"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+											description: "URL of the MCP server this credential authenticates against",
+										},
+									},
+									required: ["type", "token", "mcp_server_url"],
+									additionalProperties: false,
+								},
+							],
+							description: "What the credential authenticates against, and its secret",
+						},
+						display_name: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 255,
+								},
+								{
+									type: "null",
+								},
+							],
+							description: "Human-readable credential name",
+						},
+					},
+					required: ["auth"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_createVault",
+		title: "Create a vault",
+		description: "Create a vault to hold credentials for agents to use",
+		method: "POST",
+		path: "/v1/vaults",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				body: {
+					type: "object",
+					properties: {
+						display_name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 255,
+							description: "Human-readable vault name",
+						},
+					},
+					required: ["display_name"],
+					additionalProperties: false,
+				},
+			},
+			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_deleteCredential",
+		title: "Delete a credential",
+		description: "Delete a credential and erase its secret",
+		method: "DELETE",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_deleteVault",
+		title: "Delete a vault",
+		description: "Delete a vault, its credentials and their secrets",
+		method: "DELETE",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_getCredential",
+		title: "Retrieve a credential",
+		description: "Retrieve a credential by ID. Its secret is never returned.",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_getVault",
+		title: "Retrieve a vault",
+		description: "Retrieve a vault by ID",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_listCredentials",
+		title: "List credentials",
+		description: "List a vault's active credentials",
+		method: "GET",
+		path: "/v1/vaults/{vault_id}/credentials",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_updateCredential",
+		title: "Update a credential",
+		description: "Rename a credential or replace its secret",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						credential_id: {
+							type: "string",
+							minLength: 1,
+							description: "Credential ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id", "credential_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						auth: {
+							anyOf: [
+								{
+									type: "object",
+									properties: {
+										type: {
+											type: "string",
+											enum: ["static_bearer"],
+										},
+										token: {
+											anyOf: [
+												{
+													type: "string",
+													minLength: 1,
+													maxLength: 16384,
+												},
+												{
+													type: "null",
+												},
+											],
+											description: "Replacement bearer token. Never returned.",
+										},
+									},
+									required: ["type"],
+									additionalProperties: false,
+								},
+							],
+							description: "Replacement secret. The MCP server URL cannot change.",
+						},
+						display_name: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 255,
+								},
+								{
+									type: "null",
+								},
+							],
+							description: "Updated credential name, or null to clear it",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "vaults_updateVault",
+		title: "Update a vault",
+		description: "Rename a vault",
+		method: "POST",
+		path: "/v1/vaults/{vault_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						vault_id: {
+							type: "string",
+							minLength: 1,
+							description: "Vault ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["vault_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						display_name: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 255,
+								},
+								{
+									type: "null",
+								},
+							],
+							description: "Updated vault name",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
 ]

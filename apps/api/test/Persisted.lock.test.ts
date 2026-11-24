@@ -78,7 +78,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(6)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(8)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -93,6 +93,12 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"event:Checkfu.AutomationCapacity/automation_slot.reserved",
 						"event:Checkfu.IdempotencyClaim/idempotency_key.claimed",
 						"command-reply:Checkfu/ClaimIdempotencyKey",
+						"state:Vaults.Vault",
+						"state:Vaults.Credential",
+						"event:Vaults.Vault/vault.credential_attached",
+						"event:Vaults.Credential/vault_credential.created",
+						"command-reply:Vaults/CreateCredential",
+						"view:Vaults.CredentialView@v0",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
 					]),
@@ -370,7 +376,16 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.map((shape) => shape.id)
 					.toSorted(),
 			).toEqual(
-				["abortTurn", "discardWorkspace", "recoverTurn", "runTurn"].flatMap((method) => [
+				[
+					"abortTurn",
+					"discardWorkspace",
+					"eraseSecret",
+					"keepSecret",
+					"recoverTurn",
+					"replaceSecret",
+					"runTurn",
+					"storeSecret",
+				].flatMap((method) => [
 					`harness-call:PiHarness.${method}/args`,
 					`harness-call:PiHarness.${method}/result`,
 				]),

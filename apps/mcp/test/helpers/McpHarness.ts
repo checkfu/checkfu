@@ -1,7 +1,12 @@
 import * as Domain from "@alchemy.run/domain"
+import {
+	CredentialSecretsLive,
+	makeConnectionExecutorLayer,
+} from "@checkfu/api/Connection/CredentialCustody"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
+import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -38,8 +43,25 @@ export const makeTestServer = Effect.gen(function* () {
 			discardWorkspace: () => Effect.void,
 		}),
 	)
-	const ApiLayer = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive))).pipe(
+	// These tests keep no secrets: the connection objects accept and forget.
+	const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
+		Layer.provideMerge(CredentialSecretsLive),
+		Layer.provide(
+			makeConnectionExecutorLayer({
+				storeSecret: () => Effect.succeed(true),
+				replaceSecret: () => Effect.succeed(true),
+				keepSecret: () => Effect.void,
+				erase: () => Effect.void,
+			}),
+		),
 		Layer.provide(Domain.InMemory),
+	)
+	const ApiLayer = Layer.mergeAll(
+		Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive))).pipe(
+			Layer.provide(Domain.InMemory),
+		),
+		VaultsLive,
+	).pipe(
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(

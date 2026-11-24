@@ -791,6 +791,67 @@ describe("PiSession real Durable Object under workerd", () => {
 		])
 	}, 90_000)
 
+	it("keeps a credential's secret in its connection object until the credential ends", async () => {
+		const token = "tok_workerd_SECRET_do_not_leak"
+		const replacement = "tok_workerd_ROTATED_do_not_leak"
+		const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
+			display_name: "workerd",
+		})
+		const credential = await createResource<{ readonly id: string }>(
+			`/v1/vaults/${vault.id}/credentials`,
+			{
+				auth: {
+					type: "static_bearer",
+					token,
+					mcp_server_url: "https://mcp.example.com/mcp",
+				},
+			},
+		)
+		const path = `/v1/vaults/${vault.id}/credentials/${credential.id}`
+		const rotate = () =>
+			apiJson<{ readonly error?: { readonly message: string } }>(path, {
+				method: "POST",
+				body: { auth: { type: "static_bearer", token: replacement } },
+			})
+
+		// Only a connection that holds a secret can have it replaced.
+		expect((await rotate()).status).toBe(200)
+
+		const archived = await apiJson<{ readonly archived_at: string | null }>(`${path}/archive`, {
+			method: "POST",
+		})
+		expect(archived.status).toBe(200)
+		expect(archived.body.archived_at).not.toBeNull()
+
+		// Archiving erases the secret through a policy, so wait for the erase before rotating: a
+		// rotation that races it is refused by the archived credential instead.
+		const eraseDeadline = Date.now() + 10_000
+		while (
+			!stripAnsi(workerLogs.join("")).includes("Credential secret erased") &&
+			Date.now() < eraseDeadline
+		) {
+			await sleep(100)
+		}
+		expect(stripAnsi(workerLogs.join(""))).toContain("Credential secret erased")
+		const afterErase = await rotate()
+		expect(afterErase.status).toBe(409)
+		expect(afterErase.body.error?.message).toContain("no longer holds a secret")
+
+		const deleted = await apiJson<{ readonly type: string }>(path, { method: "DELETE" })
+		expect(deleted).toEqual({
+			status: 200,
+			body: { id: credential.id, type: "vault_credential_deleted" },
+		})
+		expect((await apiFetch(path)).status).toBe(404)
+		expect((await rotate()).status).toBe(404)
+
+		const logged = stripAnsi(workerLogs.join(""))
+		expect(logged).toContain("Credential secret erased")
+		expect(logged).toContain(credential.id)
+		expect(logged).not.toContain(token)
+		expect(logged).not.toContain(replacement)
+	}, 30_000)
+
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
 		const queuedPrompt = "queued-after-interrupt"

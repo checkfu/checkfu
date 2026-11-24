@@ -33,6 +33,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Provider refusals and OpenAI Responses codec", () => {
 	it("preserves provider refusals without draining queued prompts and keeps the session alive after a provider error", async () => {
@@ -356,6 +357,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1681,6 +1683,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(VaultsTestLive),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

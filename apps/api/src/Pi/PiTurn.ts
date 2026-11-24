@@ -54,4 +54,10 @@ export const PiHarnessCalls = {
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	// The workspace is the harness's: its tools run next to the session object that calls them.
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	// A credential's secret is held by its connection object, which lives here beside the sessions
+	// that use it. The API stores, replaces, confirms and erases it by credential id.
+	storeSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	replaceSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	keepSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	eraseSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 } as const

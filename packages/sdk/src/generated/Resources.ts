@@ -190,6 +190,72 @@ export interface CheckfuOperations {
 		never,
 		EndpointSseEvent<"sessions", "streamEvents">
 	>
+	readonly "vaults.archive": OperationShape<
+		EndpointParams<"vaults", "archive">,
+		EndpointQuery<"vaults", "archive">,
+		EndpointBody<"vaults", "archive">,
+		EndpointSuccess<"vaults", "archive">
+	>
+	readonly "vaults.create": OperationShape<
+		EndpointParams<"vaults", "create">,
+		EndpointQuery<"vaults", "create">,
+		EndpointBody<"vaults", "create">,
+		EndpointSuccess<"vaults", "create">
+	>
+	readonly "vaults.delete": OperationShape<
+		EndpointParams<"vaults", "delete">,
+		EndpointQuery<"vaults", "delete">,
+		EndpointBody<"vaults", "delete">,
+		EndpointSuccess<"vaults", "delete">
+	>
+	readonly "vaults.retrieve": OperationShape<
+		EndpointParams<"vaults", "get">,
+		EndpointQuery<"vaults", "get">,
+		EndpointBody<"vaults", "get">,
+		EndpointSuccess<"vaults", "get">
+	>
+	readonly "vaults.update": OperationShape<
+		EndpointParams<"vaults", "update">,
+		EndpointQuery<"vaults", "update">,
+		EndpointBody<"vaults", "update">,
+		EndpointSuccess<"vaults", "update">
+	>
+	readonly "vaults.credentials.archive": OperationShape<
+		EndpointParams<"vaults", "archiveCredential">,
+		EndpointQuery<"vaults", "archiveCredential">,
+		EndpointBody<"vaults", "archiveCredential">,
+		EndpointSuccess<"vaults", "archiveCredential">
+	>
+	readonly "vaults.credentials.create": OperationShape<
+		EndpointParams<"vaults", "createCredential">,
+		EndpointQuery<"vaults", "createCredential">,
+		EndpointBody<"vaults", "createCredential">,
+		EndpointSuccess<"vaults", "createCredential">
+	>
+	readonly "vaults.credentials.delete": OperationShape<
+		EndpointParams<"vaults", "deleteCredential">,
+		EndpointQuery<"vaults", "deleteCredential">,
+		EndpointBody<"vaults", "deleteCredential">,
+		EndpointSuccess<"vaults", "deleteCredential">
+	>
+	readonly "vaults.credentials.list": OperationShape<
+		EndpointParams<"vaults", "listCredentials">,
+		EndpointQuery<"vaults", "listCredentials">,
+		EndpointBody<"vaults", "listCredentials">,
+		EndpointSuccess<"vaults", "listCredentials">
+	>
+	readonly "vaults.credentials.retrieve": OperationShape<
+		EndpointParams<"vaults", "getCredential">,
+		EndpointQuery<"vaults", "getCredential">,
+		EndpointBody<"vaults", "getCredential">,
+		EndpointSuccess<"vaults", "getCredential">
+	>
+	readonly "vaults.credentials.update": OperationShape<
+		EndpointParams<"vaults", "updateCredential">,
+		EndpointQuery<"vaults", "updateCredential">,
+		EndpointBody<"vaults", "updateCredential">,
+		EndpointSuccess<"vaults", "updateCredential">
+	>
 }
 
 export type CheckfuOperationId = keyof CheckfuOperations
@@ -1231,17 +1297,463 @@ export class EffectSessionsResource {
 	}
 }
 
+export class EffectVaultsCredentialsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Archive a credential and erase its secret */
+	archive(
+		vaultId: string,
+		credentialId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "archiveCredential">>, CheckfuSdkError>
+	archive(
+		vaultId: string,
+		credentialId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "archiveCredential">, CheckfuSdkError>
+	archive(
+		vaultId: string,
+		credentialId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"vaults", "archiveCredential">
+		| WithResponse<EndpointSuccess<"vaults", "archiveCredential">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "archiveCredential", {
+					vault_id: vaultId,
+					credential_id: credentialId,
+				}),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.credentials.archive",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.vaults.archiveCredential({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "vaults.credentials.archive" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Store a credential in a vault. Its secret is never returned. */
+	create(
+		vaultId: string,
+		params: EndpointBody<"vaults", "createCredential">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "createCredential">>, CheckfuSdkError>
+	create(
+		vaultId: string,
+		params: EndpointBody<"vaults", "createCredential">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "createCredential">, CheckfuSdkError>
+	create(
+		vaultId: string,
+		params: EndpointBody<"vaults", "createCredential">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"vaults", "createCredential">
+		| WithResponse<EndpointSuccess<"vaults", "createCredential">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "createCredential", { vault_id: vaultId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.credentials.create",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.vaults.createCredential({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "vaults.credentials.create" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Delete a credential and erase its secret */
+	delete(
+		vaultId: string,
+		credentialId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "deleteCredential">>, CheckfuSdkError>
+	delete(
+		vaultId: string,
+		credentialId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "deleteCredential">, CheckfuSdkError>
+	delete(
+		vaultId: string,
+		credentialId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"vaults", "deleteCredential">
+		| WithResponse<EndpointSuccess<"vaults", "deleteCredential">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "deleteCredential", {
+					vault_id: vaultId,
+					credential_id: credentialId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.vaults.credentials.delete",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.vaults.deleteCredential({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List a vault's active credentials */
+	list(
+		vaultId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
+	list(
+		vaultId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "listCredentials">, CheckfuSdkError>
+	list(
+		vaultId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"vaults", "listCredentials">
+		| WithResponse<EndpointSuccess<"vaults", "listCredentials">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "listCredentials", { vault_id: vaultId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.vaults.credentials.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.vaults.listCredentials({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve a credential by ID. Its secret is never returned. */
+	retrieve(
+		vaultId: string,
+		credentialId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "getCredential">>, CheckfuSdkError>
+	retrieve(
+		vaultId: string,
+		credentialId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "getCredential">, CheckfuSdkError>
+	retrieve(
+		vaultId: string,
+		credentialId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"vaults", "getCredential">
+		| WithResponse<EndpointSuccess<"vaults", "getCredential">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "getCredential", {
+					vault_id: vaultId,
+					credential_id: credentialId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.vaults.credentials.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.vaults.getCredential({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Rename a credential or replace its secret */
+	update(
+		vaultId: string,
+		credentialId: string,
+		params: EndpointBody<"vaults", "updateCredential">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "updateCredential">>, CheckfuSdkError>
+	update(
+		vaultId: string,
+		credentialId: string,
+		params: EndpointBody<"vaults", "updateCredential">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "updateCredential">, CheckfuSdkError>
+	update(
+		vaultId: string,
+		credentialId: string,
+		params: EndpointBody<"vaults", "updateCredential">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"vaults", "updateCredential">
+		| WithResponse<EndpointSuccess<"vaults", "updateCredential">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "updateCredential", {
+					vault_id: vaultId,
+					credential_id: credentialId,
+				}),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.credentials.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.vaults.updateCredential({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "vaults.credentials.update" },
+					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectVaultsResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly credentials: EffectVaultsCredentialsResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.credentials = new EffectVaultsCredentialsResource(runtime)
+	}
+
+	/** Archive a vault and its credentials, and erase their secrets */
+	archive(
+		vaultId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "archive">>, CheckfuSdkError>
+	archive(
+		vaultId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "archive">, CheckfuSdkError>
+	archive(
+		vaultId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"vaults", "archive"> | WithResponse<EndpointSuccess<"vaults", "archive">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("vaults", "archive", { vault_id: vaultId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(this.#runtime, "checkfu.vaults.archive", "idempotent", options, () =>
+							this.#runtime.raw.vaults.archive({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+						),
+						{ kind: "archive" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Create a vault to hold credentials for agents to use */
+	create(
+		params: EndpointBody<"vaults", "create">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "create">>, CheckfuSdkError>
+	create(
+		params: EndpointBody<"vaults", "create">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "create">, CheckfuSdkError>
+	create(
+		params: EndpointBody<"vaults", "create">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"vaults", "create"> | WithResponse<EndpointSuccess<"vaults", "create">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			withPendingReadiness(
+				executeWithRetries(this.#runtime, "checkfu.vaults.create", "pre-commit-only", options, () =>
+					this.#runtime.raw.vaults.create({
+						payload: params,
+						responseMode: "decoded-and-response",
+					}),
+				),
+				{ kind: "create" },
+			),
+			options,
+		)
+	}
+
+	/** Delete a vault, its credentials and their secrets */
+	delete(
+		vaultId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "delete">>, CheckfuSdkError>
+	delete(
+		vaultId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "delete">, CheckfuSdkError>
+	delete(
+		vaultId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"vaults", "delete"> | WithResponse<EndpointSuccess<"vaults", "delete">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(decodeEndpointParams("vaults", "delete", { vault_id: vaultId }), (pathParams) =>
+				executeWithRetries(this.#runtime, "checkfu.vaults.delete", "idempotent", options, () =>
+					this.#runtime.raw.vaults.delete({
+						params: pathParams,
+						responseMode: "decoded-and-response",
+					}),
+				),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve a vault by ID */
+	retrieve(
+		vaultId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "get">>, CheckfuSdkError>
+	retrieve(
+		vaultId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "get">, CheckfuSdkError>
+	retrieve(
+		vaultId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"vaults", "get"> | WithResponse<EndpointSuccess<"vaults", "get">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(decodeEndpointParams("vaults", "get", { vault_id: vaultId }), (pathParams) =>
+				executeWithRetries(this.#runtime, "checkfu.vaults.retrieve", "idempotent", options, () =>
+					this.#runtime.raw.vaults.get({
+						params: pathParams,
+						responseMode: "decoded-and-response",
+					}),
+				),
+			),
+			options,
+		)
+	}
+
+	/** Rename a vault */
+	update(
+		vaultId: string,
+		params: EndpointBody<"vaults", "update">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "update">>, CheckfuSdkError>
+	update(
+		vaultId: string,
+		params: EndpointBody<"vaults", "update">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"vaults", "update">, CheckfuSdkError>
+	update(
+		vaultId: string,
+		params: EndpointBody<"vaults", "update">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"vaults", "update"> | WithResponse<EndpointSuccess<"vaults", "update">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(decodeEndpointParams("vaults", "update", { vault_id: vaultId }), (pathParams) =>
+				withPendingReadiness(
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.vaults.update",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.vaults.update({
+								params: pathParams,
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+					pendingUpdateReadiness(params, "vaults.update"),
+				),
+			),
+			options,
+		)
+	}
+}
+
 export class EffectResources {
 	readonly agents: EffectAgentsResource
 	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
 	readonly sessions: EffectSessionsResource
+	readonly vaults: EffectVaultsResource
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.agents = new EffectAgentsResource(runtime)
 		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
+		this.vaults = new EffectVaultsResource(runtime)
 	}
 }
 
@@ -1632,16 +2144,183 @@ export class SessionsResource {
 	}
 }
 
+export class VaultsCredentialsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Archive a credential and erase its secret */
+	archive(
+		vaultId: string,
+		credentialId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "archiveCredential">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsCredentialsResource(effectRuntime).archive(vaultId, credentialId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Store a credential in a vault. Its secret is never returned. */
+	create(
+		vaultId: string,
+		params: EndpointBody<"vaults", "createCredential">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "createCredential">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsCredentialsResource(effectRuntime).create(vaultId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Delete a credential and erase its secret */
+	delete(
+		vaultId: string,
+		credentialId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "deleteCredential">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsCredentialsResource(effectRuntime).delete(vaultId, credentialId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** List a vault's active credentials */
+	list(
+		vaultId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "listCredentials">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsCredentialsResource(effectRuntime).list(vaultId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve a credential by ID. Its secret is never returned. */
+	retrieve(
+		vaultId: string,
+		credentialId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "getCredential">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsCredentialsResource(effectRuntime).retrieve(vaultId, credentialId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Rename a credential or replace its secret */
+	update(
+		vaultId: string,
+		credentialId: string,
+		params: EndpointBody<"vaults", "updateCredential">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "updateCredential">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsCredentialsResource(effectRuntime).update(vaultId, credentialId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class VaultsResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly credentials: VaultsCredentialsResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.credentials = new VaultsCredentialsResource(runtime)
+	}
+
+	/** Archive a vault and its credentials, and erase their secrets */
+	archive(
+		vaultId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "archive">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsResource(effectRuntime).archive(vaultId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Create a vault to hold credentials for agents to use */
+	create(
+		params: EndpointBody<"vaults", "create">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "create">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsResource(effectRuntime).create(params, { ...effectOpts, withResponse: true }),
+		)
+	}
+
+	/** Delete a vault, its credentials and their secrets */
+	delete(
+		vaultId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "delete">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsResource(effectRuntime).delete(vaultId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve a vault by ID */
+	retrieve(
+		vaultId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "get">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsResource(effectRuntime).retrieve(vaultId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Rename a vault */
+	update(
+		vaultId: string,
+		params: EndpointBody<"vaults", "update">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"vaults", "update">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectVaultsResource(effectRuntime).update(vaultId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
 export class PromiseResources {
 	readonly agents: AgentsResource
 	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
 	readonly sessions: SessionsResource
+	readonly vaults: VaultsResource
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.agents = new AgentsResource(runtime)
 		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
 		this.sessions = new SessionsResource(runtime)
+		this.vaults = new VaultsResource(runtime)
 	}
 }

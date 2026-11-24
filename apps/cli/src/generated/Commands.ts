@@ -1243,6 +1243,410 @@ const sessionsEventsStreamCommand = CommandMake(
 	]),
 )
 
+const vaultsArchiveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults archive",
+	apiGroup: "vaults",
+	apiEndpoint: "archive",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsArchiveCommand = CommandMake(
+	"archive",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsArchiveCommandSpec, flags),
+).pipe(CommandWithDescription("Archive a vault and its credentials, and erase their secrets"))
+
+const vaultsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults create",
+	apiGroup: "vaults",
+	apiEndpoint: "create",
+	hasBody: true,
+	flags: [
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsCreateCommand = CommandMake(
+	"create",
+	{
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Human-readable vault name"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Create a vault to hold credentials for agents to use (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const vaultsDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults delete",
+	apiGroup: "vaults",
+	apiEndpoint: "delete",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsDeleteCommand = CommandMake(
+	"delete",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Delete a vault, its credentials and their secrets"))
+
+const vaultsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults retrieve",
+	apiGroup: "vaults",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a vault by ID"))
+
+const vaultsUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults update",
+	apiGroup: "vaults",
+	apiEndpoint: "update",
+	hasBody: true,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsUpdateCommand = CommandMake(
+	"update",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Updated vault name"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsUpdateCommandSpec, flags),
+).pipe(CommandWithDescription("Rename a vault (accepts flags and/or JSON/YAML on stdin)"))
+
+const vaultsCredentialsArchiveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials archive",
+	apiGroup: "vaults",
+	apiEndpoint: "archiveCredential",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsArchiveCommand = CommandMake(
+	"archive",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsArchiveCommandSpec, flags),
+).pipe(CommandWithDescription("Archive a credential and erase its secret"))
+
+const vaultsCredentialsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials create",
+	apiGroup: "vaults",
+	apiEndpoint: "createCredential",
+	hasBody: true,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "auth",
+			flagName: "auth",
+			wireName: "auth",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsCredentialsCreateCommand = CommandMake(
+	"create",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		auth: FlagString("auth").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"What the credential authenticates against, and its secret (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Human-readable credential name"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Store a credential in a vault. Its secret is never returned. (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
+const vaultsCredentialsDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials delete",
+	apiGroup: "vaults",
+	apiEndpoint: "deleteCredential",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsDeleteCommand = CommandMake(
+	"delete",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Delete a credential and erase its secret"))
+
+const vaultsCredentialsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials list",
+	apiGroup: "vaults",
+	apiEndpoint: "listCredentials",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsListCommand = CommandMake(
+	"list",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsListCommandSpec, flags),
+).pipe(CommandWithDescription("List a vault's active credentials"))
+
+const vaultsCredentialsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials retrieve",
+	apiGroup: "vaults",
+	apiEndpoint: "getCredential",
+	hasBody: false,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const vaultsCredentialsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve a credential by ID. Its secret is never returned."))
+
+const vaultsCredentialsUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "vaults:credentials update",
+	apiGroup: "vaults",
+	apiEndpoint: "updateCredential",
+	hasBody: true,
+	flags: [
+		{
+			propName: "vaultId",
+			flagName: "vault-id",
+			wireName: "vault_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "credentialId",
+			flagName: "credential-id",
+			wireName: "credential_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "auth",
+			flagName: "auth",
+			wireName: "auth",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "displayName",
+			flagName: "display-name",
+			wireName: "display_name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const vaultsCredentialsUpdateCommand = CommandMake(
+	"update",
+	{
+		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
+		credentialId: FlagString("credential-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Credential ID"),
+		),
+		auth: FlagString("auth").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Replacement secret. The MCP server URL cannot change. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		displayName: FlagString("display-name").pipe(
+			FlagWithDescription("Updated credential name, or null to clear it"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(vaultsCredentialsUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Rename a credential or replace its secret (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -1250,6 +1654,8 @@ export const buildGeneratedResourceCommands = <
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const VaultsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const VaultsCredentialsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
 	readonly automations?: AutomationsExtras
@@ -1257,6 +1663,8 @@ export const buildGeneratedResourceCommands = <
 	readonly environments?: EnvironmentsExtras
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
+	readonly vaults?: VaultsExtras
+	readonly "vaults:credentials"?: VaultsCredentialsExtras
 }) =>
 	[
 		CommandMake("agents").pipe(
@@ -1316,6 +1724,29 @@ export const buildGeneratedResourceCommands = <
 				sessionsEventsSendCommand,
 				sessionsEventsStreamCommand,
 				...(extras?.["sessions:events"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("vaults").pipe(
+			CommandWithDescription("Manage vaults"),
+			CommandWithSubcommands([
+				vaultsArchiveCommand,
+				vaultsCreateCommand,
+				vaultsDeleteCommand,
+				vaultsRetrieveCommand,
+				vaultsUpdateCommand,
+				...(extras?.["vaults"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("vaults:credentials").pipe(
+			CommandWithDescription("Manage vaults:credentials"),
+			CommandWithSubcommands([
+				vaultsCredentialsArchiveCommand,
+				vaultsCredentialsCreateCommand,
+				vaultsCredentialsDeleteCommand,
+				vaultsCredentialsListCommand,
+				vaultsCredentialsRetrieveCommand,
+				vaultsCredentialsUpdateCommand,
+				...(extras?.["vaults:credentials"] ?? ([] as const)),
 			]),
 		),
 	] as const

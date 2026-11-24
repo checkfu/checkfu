@@ -129,6 +129,72 @@ describe("Cloudflare Forge pipeline", () => {
 				httpMethod: "GET",
 				path: "/v1/sessions/{session_id}/events/stream",
 			},
+			{
+				group: "vaults",
+				name: "archive",
+				httpMethod: "POST",
+				path: "/v1/vaults/{vault_id}/archive",
+			},
+			{
+				group: "vaults",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/vaults",
+			},
+			{
+				group: "vaults",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/vaults/{vault_id}",
+			},
+			{
+				group: "vaults",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/vaults/{vault_id}",
+			},
+			{
+				group: "vaults",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/vaults/{vault_id}",
+			},
+			{
+				group: "vaults:credentials",
+				name: "archive",
+				httpMethod: "POST",
+				path: "/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+			},
+			{
+				group: "vaults:credentials",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/vaults/{vault_id}/credentials",
+			},
+			{
+				group: "vaults:credentials",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+			},
+			{
+				group: "vaults:credentials",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/vaults/{vault_id}/credentials",
+			},
+			{
+				group: "vaults:credentials",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+			},
+			{
+				group: "vaults:credentials",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/vaults/{vault_id}/credentials/{credential_id}",
+			},
 		])
 
 		for (const item of resolved) {
@@ -408,7 +474,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(23)
+		expect(inspectedMethods.length).toBe(34)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

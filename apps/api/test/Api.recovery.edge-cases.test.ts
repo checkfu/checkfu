@@ -31,6 +31,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("interrupted turns and turn recovery", () => {
 	it("keeps a prompt interrupted mid-stream out of the conversation", async () => {
@@ -215,6 +216,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -362,6 +364,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -550,6 +553,7 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 			),
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(VaultsTestLive),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
