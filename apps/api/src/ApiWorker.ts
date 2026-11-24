@@ -17,6 +17,10 @@ import {
 } from "./Connection/CredentialCustody.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
+import { ApiCatalogCallFailed, ApiCatalogExecutor } from "./OpenApi/ApiCatalogExecutor.ts"
+import { ApiCatalogsLive } from "./OpenApi/ApiCatalogKeeper.ts"
+import { ApiSpecCheck } from "./OpenApi/ApiSpecCheck.ts"
+import type { ApiSpecSelection } from "./OpenApi/ApiSpecCheck.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
@@ -76,9 +80,9 @@ const ConnectionExecutorLive = Layer.effect(
 	Effect.gen(function* () {
 		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
 		return {
-			storeSecret: (credentialId, secret, mcpServerUrl) =>
+			storeSecret: (credentialId, secret, target) =>
 				connectionCall(
-					Effect.suspend(() => harness.storeSecret(credentialId, secret, mcpServerUrl)),
+					Effect.suspend(() => harness.storeSecret(credentialId, secret, target)),
 				).pipe(Effect.withSpan("Connection.storeSecret")),
 			replaceSecret: (credentialId, secret) =>
 				connectionCall(Effect.suspend(() => harness.replaceSecret(credentialId, secret))).pipe(
@@ -119,12 +123,55 @@ const ToolSchemaCheckLive = Layer.effect(
 	}),
 )
 
+const catalogCall = <A, E, R>(
+	call: Effect.Effect<A, E, R>,
+): Effect.Effect<A, ApiCatalogCallFailed, R> =>
+	Effect.catchCause(call, (cause): Effect.Effect<never, ApiCatalogCallFailed> =>
+		Cause.hasInterruptsOnly(cause)
+			? Effect.interrupt
+			: Effect.fail(new ApiCatalogCallFailed({ cause })),
+	)
+
+// Catalog objects live in the harness Worker, beside the sessions that read them.
+const ApiCatalogExecutorLive = Layer.effect(
+	ApiCatalogExecutor,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			store: (catalogId, document, config) =>
+				catalogCall(Effect.suspend(() => harness.storeCatalog(catalogId, document, config))).pipe(
+					Effect.withSpan("ApiCatalog.store"),
+				),
+			keep: (catalogId) =>
+				catalogCall(Effect.suspend(() => harness.keepCatalog(catalogId))).pipe(
+					Effect.withSpan("ApiCatalog.keep"),
+				),
+		}
+	}),
+)
+
+const ApiSpecCheckLive = Layer.effect(
+	ApiSpecCheck,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			check: (document: string, selection: ApiSpecSelection) =>
+				harnessCall(Effect.suspend(() => harness.checkApiSpec(document, selection))).pipe(
+					Effect.withSpan("PiHarness.checkApiSpec"),
+					// An unreachable harness can say nothing about a document; the write fails and is sent again.
+					Effect.orDie,
+				),
+		}
+	}),
+)
+
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 ).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
 
 const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 	Layer.provideMerge(CredentialSecretsLive),
+	Layer.provideMerge(Layer.provide(ApiCatalogsLive, ApiCatalogExecutorLive)),
 	// The API's handlers and a session's turn also ask the connections for refresh outcomes.
 	Layer.provideMerge(ConnectionExecutorLive),
 	Layer.provide(PlacedDurableObjects),
@@ -134,6 +181,8 @@ const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive.pipe(Layer.provideMerge(VaultsLive)),
 	ToolSchemaCheckLive,
+	ApiSpecCheckLive,
+	ApiCatalogExecutorLive,
 	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,

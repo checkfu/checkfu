@@ -25,6 +25,7 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { makeCredentialRefreshRecorder } from "../Connection/CredentialRefresh.ts"
+import { TRANSPORT_HEADERS } from "../OpenApi/OpenApiTypes.ts"
 import { CheckfuApi } from "./Api.ts"
 import type { CreateCredentialBody } from "./Api.ts"
 import {
@@ -32,6 +33,7 @@ import {
 	commitForStream,
 	handled,
 	isPending,
+	normalizeApiBaseUrl,
 	normalizeMcpServerUrl,
 	orPending,
 	present,
@@ -48,6 +50,12 @@ const splitAuth = (
 		return {
 			auth: { type: "static_bearer", mcp_server_url: mcpServerUrl },
 			secret: { type: "static_bearer", token: auth.token },
+		}
+	}
+	if (auth.type === "api_key") {
+		return {
+			auth: { type: "api_key", base_url: mcpServerUrl, placement: auth.placement },
+			secret: { type: "api_key", token: auth.token, placement: auth.placement },
 		}
 	}
 	const expires_at = auth.expires_at ?? null
@@ -229,9 +237,27 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 			)
 			.handle("createCredential", ({ params, payload }) =>
 				Effect.gen(function* () {
-					const mcpServerUrl = normalizeMcpServerUrl(payload.auth.mcp_server_url)
+					const mcpServerUrl =
+						payload.auth.type === "api_key"
+							? normalizeApiBaseUrl(payload.auth.base_url)
+							: normalizeMcpServerUrl(payload.auth.mcp_server_url)
 					if (mcpServerUrl === undefined) {
-						return yield* reject(400, "auth.mcp_server_url is not a valid URL.")
+						return yield* reject(
+							400,
+							payload.auth.type === "api_key"
+								? "auth.base_url is not a valid URL without a query string."
+								: "auth.mcp_server_url is not a valid URL.",
+						)
+					}
+					if (
+						payload.auth.type === "api_key" &&
+						payload.auth.placement.in === "header" &&
+						TRANSPORT_HEADERS.has(payload.auth.placement.name.toLowerCase())
+					) {
+						return yield* reject(
+							400,
+							`auth.placement.name cannot be ${payload.auth.placement.name}: the HTTP client sets that header.`,
+						)
 					}
 					const split = splitAuth(payload.auth, mcpServerUrl)
 					if (split === undefined) {
@@ -333,9 +359,11 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 										expires_at: auth.expires_at ?? null,
 										refresh_token: auth.refresh?.refresh_token ?? null,
 									}
-								: auth.token === undefined || auth.token === null
-									? undefined
-									: { type: "static_bearer" as const, token: auth.token }
+								: auth.type === "api_key"
+									? { type: "api_key" as const, token: auth.token }
+									: auth.token === undefined || auth.token === null
+										? undefined
+										: { type: "static_bearer" as const, token: auth.token }
 					if (replacement !== undefined) {
 						const { revision } = yield* secrets
 							.replace({ credential_id: id, secret: replacement })

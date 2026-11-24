@@ -8,9 +8,11 @@ import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { Connection, connectionName } from "../Connection/Connection.do.ts"
 import type { McpUpstream } from "../Connection/McpUpstream.ts"
+import { ApiCatalog } from "../OpenApi/ApiCatalog.do.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
+import { apiExtension, apiToolPermissions, fencedApiCall } from "./PiApi.ts"
 import { PiApprovalStore, TOOL_DECISION_KEY, ToolDecision, makeToolGate } from "./PiApprovals.ts"
 import type { ToolAnswer, ToolGate } from "./PiApprovals.ts"
 import { codemodeSandboxes, loadToolSurface, withScriptDeadline } from "./PiCodemode.ts"
@@ -138,9 +140,10 @@ export const PiSessionLive = PiSession.make(
 			workspaces: SessionWorkspace,
 			sandboxes: codemodeSandboxes,
 			connections: Connection,
+			catalogs: ApiCatalog,
 			where: Effect.orDie(placement),
 		}),
-		({ state, apiKeys, baseUrls, workspaces, sandboxes, connections, where }) =>
+		({ state, apiKeys, baseUrls, workspaces, sandboxes, connections, catalogs, where }) =>
 			Effect.promise(async () => {
 				// Load workerd-only modules after Alchemy has evaluated the stack.
 				// Code mode loads here too, so only the isolates that host a session parse it.
@@ -170,6 +173,7 @@ export const PiSessionLive = PiSession.make(
 				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
 				const sandboxStub = placedStub(sandboxes, where)
 				const connection = placedStub(connections, where)
+				const catalog = placedStub(catalogs, where)
 				const sandbox = withScriptDeadline(
 					new RemoteCodemodeSandbox({
 						remote: () => ({
@@ -224,11 +228,15 @@ export const PiSessionLive = PiSession.make(
 					signal: (taskId, value) => signalTool(taskId, value),
 					signalResult: (taskId, value) => signalToolResult(taskId, value),
 				})
+				// A call belongs to the turn admitted when it starts, as a workspace call does.
+				const admitted = () => Effect.runPromise(workspace().enter({ turn: admittedTurn() }))
 				let registry: Registry | undefined
 				// Installing a name that is installed replaces it, so this also refreshes.
 				const installTools = async (into: Registry) => {
 					const servers = mcp.servers()
-					permissions = mcpToolPermissions(servers)
+					const apiServers = mcp.apiServers()
+					// A name both kinds of server could give a tool is prefixed by its kind, so none collide.
+					permissions = new Map([...mcpToolPermissions(servers), ...apiToolPermissions(apiServers)])
 					const extensions = withToolSurface(sandbox, [
 						gate.extension,
 						workspaceExtension(workspaceTools, (call, signal) =>
@@ -241,10 +249,31 @@ export const PiSessionLive = PiSession.make(
 						customTools.extension(gate.park),
 						...servers.map((server) =>
 							mcpExtension(server, {
-								call: fencedMcpCall(
-									() => Effect.runPromise(workspace().enter({ turn: admittedTurn() })),
-									async (binding, tool, args) => (await upstream(binding)).callTool(tool, args),
+								call: fencedMcpCall(admitted, async (binding, tool, args) =>
+									(await upstream(binding)).callTool(tool, args),
 								),
+								began: (call) => mcp.began(call),
+								ended: (callId, result) => mcp.ended(callId, result),
+							}),
+						),
+						...apiServers.map((server) =>
+							apiExtension(server, {
+								// The catalog turns the call into a request; only the connection sends it.
+								call: fencedApiCall(admitted, async (binding, operation, args) => {
+									const built = await Effect.runPromise(
+										catalog(binding.catalog_id).request(operation, args),
+									)
+									return built.ok
+										? Effect.runPromise(
+												connection(
+													connectionName({
+														url: binding.base_url,
+														credential_id: binding.credential_id,
+													}),
+												).callApi(binding.base_url, built.request),
+											)
+										: built
+								}),
 								began: (call) => mcp.began(call),
 								ended: (callId, result) => mcp.ended(callId, result),
 							}),
@@ -261,7 +290,8 @@ export const PiSessionLive = PiSession.make(
 				 */
 				const bindTools = async (request: PiTurnRequest) => {
 					const customToolsChanged = customTools.bind(request.custom_tools ?? [])
-					let changed = mcp.bind(request.mcp_servers ?? []) || customToolsChanged
+					const apiChanged = mcp.bindApi(request.api_servers ?? [])
+					let changed = mcp.bind(request.mcp_servers ?? []) || customToolsChanged || apiChanged
 					for (const { binding, tools } of mcp.servers()) {
 						if (tools !== null) {
 							continue
@@ -271,6 +301,18 @@ export const PiSessionLive = PiSession.make(
 							.catch(() => undefined)
 						if (listed?.ok === true) {
 							mcp.listed(binding.name, listed.tools.slice(0, MAX_MCP_SERVER_TOOLS))
+							changed = true
+						}
+					}
+					for (const { binding, tools } of mcp.apiServers()) {
+						if (tools !== null) {
+							continue
+						}
+						const listed = await Effect.runPromise(catalog(binding.catalog_id).tools()).catch(
+							() => undefined,
+						)
+						if (listed?.ok === true) {
+							mcp.listedApi(binding.name, listed.tools)
 							changed = true
 						}
 					}

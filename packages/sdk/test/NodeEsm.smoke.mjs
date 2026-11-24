@@ -33,6 +33,7 @@ const client = new Checkfu({
 				system: null,
 				description: null,
 				mcp_servers: [],
+				api_servers: [],
 				tools: [],
 				created_at: "2026-11-23T18:00:00.000Z",
 				updated_at: "2026-11-23T18:00:00.000Z",

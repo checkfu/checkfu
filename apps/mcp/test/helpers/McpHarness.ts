@@ -4,6 +4,8 @@ import {
 	makeConnectionExecutorLayer,
 } from "@checkfu/api/Connection/CredentialCustody"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
+import { makeApiCatalogExecutorLayer } from "@checkfu/api/OpenApi/ApiCatalogExecutor"
+import { ApiCatalogsLive } from "@checkfu/api/OpenApi/ApiCatalogKeeper"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
@@ -44,8 +46,13 @@ export const makeTestServer = Effect.gen(function* () {
 		}),
 	)
 	// These tests keep no secrets: the connection objects accept and forget.
+	const catalogExecutor = makeApiCatalogExecutorLayer({
+		store: () => Effect.succeed(true),
+		keep: () => Effect.void,
+	})
 	const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 		Layer.provideMerge(CredentialSecretsLive),
+		Layer.provideMerge(Layer.provide(ApiCatalogsLive, catalogExecutor)),
 		Layer.provideMerge(
 			makeConnectionExecutorLayer({
 				storeSecret: () => Effect.succeed(true),
@@ -63,6 +70,7 @@ export const makeTestServer = Effect.gen(function* () {
 			Layer.provide(Domain.InMemory),
 		),
 		VaultsLive,
+		catalogExecutor,
 	).pipe(
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),

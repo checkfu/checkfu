@@ -92,6 +92,14 @@ const agentsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "apiServers",
+			flagName: "api-servers",
+			wireName: "api_servers",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "tools",
 			flagName: "tools",
 			wireName: "tools",
@@ -138,10 +146,17 @@ const agentsCreateCommand = CommandMake(
 			),
 			FlagOptional,
 		),
+		apiServers: FlagString("api-servers").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"HTTP APIs this agent calls, each described by its OpenAPI document. Names must be unique. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
 		tools: FlagString("tools").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result. (JSON, YAML, or @file)",
+				"Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -254,6 +269,14 @@ const agentsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "apiServers",
+			flagName: "api-servers",
+			wireName: "api_servers",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "tools",
 			flagName: "tools",
 			wireName: "tools",
@@ -298,10 +321,17 @@ const agentsUpdateCommand = CommandMake(
 			),
 			FlagOptional,
 		),
+		apiServers: FlagString("api-servers").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Replaces the agent's API servers. Each needs its document again; omit the field to keep them as they are. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
 		tools: FlagString("tools").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result. (JSON, YAML, or @file)",
+				"Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -1042,6 +1072,14 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "apiServerCredentials",
+			flagName: "api-server-credentials",
+			wireName: "api_server_credentials",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -1081,7 +1119,7 @@ const sessionsCreateCommand = CommandMake(
 		vaultIds: FlagString("vault-ids").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials. (JSON, YAML, or @file)",
+				"Vaults whose credentials the session may use. An MCP or API server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials or api_server_credentials. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -1089,6 +1127,13 @@ const sessionsCreateCommand = CommandMake(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
 				"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		apiServerCredentials: FlagString("api-server-credentials").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Binds one of the agent's API servers to an api_key credential by id, whatever vault_ids would match. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -1731,7 +1776,7 @@ const vaultsCredentialsUpdateCommand = CommandMake(
 		auth: FlagString("auth").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Replacement secret. The credential's type and MCP server URL cannot change. New tokens clear a failed refresh. (JSON, YAML, or @file)",
+				"Replacement secret. The credential's type, URL and placement cannot change. New tokens clear a failed refresh. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),

@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
+import { KeepApiCatalogs, KeepApiCatalogsLive } from "./Mcp/KeepApiCatalogs.policy.ts"
 import { McpServerSet } from "./Mcp/McpServerSet.aggregate.ts"
 import { ArchiveCredentialDecision } from "./Vault/ArchiveCredential.decision.ts"
 import { CreateCredentialDecision } from "./Vault/CreateCredential.decision.ts"
@@ -27,7 +28,7 @@ export class Vaults extends Domain.Model("Vaults", {
 		RetireCredentialDecision,
 	],
 	views: [VaultView, CredentialView],
-	policies: [RetireReleasedCredential, SettleCredentialSecret],
+	policies: [RetireReleasedCredential, SettleCredentialSecret, KeepApiCatalogs],
 	invariants: {
 		VaultViewMatchesVault: (m) =>
 			[
@@ -125,6 +126,7 @@ export class Vaults extends Domain.Model("Vaults", {
 export const VaultsHandlersLive = Layer.mergeAll(
 	RetireReleasedCredentialLive,
 	SettleCredentialSecretLive,
+	KeepApiCatalogsLive,
 )
 
 export class VaultsApi extends Domain.Api("VaultsApi", {

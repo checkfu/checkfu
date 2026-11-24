@@ -97,8 +97,9 @@ const unauthorizedResponse = errorResponse(
 	{ "www-authenticate": "Bearer" },
 )
 
-// Largest API request body (an agent with a full system prompt) plus the JSON-RPC envelope.
-export const MAX_MCP_BODY_BYTES = 2 * 1024 * 1024
+// Largest API request body (an agent with a full system prompt and every API server's
+// document at its limit) plus the JSON-RPC envelope.
+export const MAX_MCP_BODY_BYTES = 10 * 1024 * 1024
 
 // Everything but the health check needs a credential, so no spelling of a route that the
 // router accepts can reach a handler without one.

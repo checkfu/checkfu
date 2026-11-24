@@ -76,6 +76,7 @@ export const boundToolCalls = (): ToolCallBounds => {
 			if (
 				event.type === "tool_use" ||
 				event.type === "mcp_tool_use" ||
+				event.type === "api_tool_use" ||
 				event.type === "custom_tool_use"
 			) {
 				// A reused id names a new call: the earlier one can no longer get a result, whether
@@ -109,21 +110,24 @@ export const boundToolCalls = (): ToolCallBounds => {
 					input: fits ? event.input : {},
 					...(fits ? {} : { truncated: true as const }),
 				}
+				if (event.type === "tool_use" || event.type === "custom_tool_use") {
+					calls.push({ use: { type: event.type, ...use } })
+					return
+				}
+				const served = {
+					...use,
+					...(event.evaluated_permission === undefined
+						? {}
+						: { evaluated_permission: event.evaluated_permission }),
+					...(event.parent_tool_use_id === undefined
+						? {}
+						: { parent_tool_use_id: publicToolUseId(event.parent_tool_use_id) }),
+				}
 				calls.push({
 					use:
-						event.type !== "mcp_tool_use"
-							? { type: event.type, ...use }
-							: {
-									type: "mcp_tool_use",
-									...use,
-									mcp_server_name: clampName(event.mcp_server_name),
-									...(event.evaluated_permission === undefined
-										? {}
-										: { evaluated_permission: event.evaluated_permission }),
-									...(event.parent_tool_use_id === undefined
-										? {}
-										: { parent_tool_use_id: publicToolUseId(event.parent_tool_use_id) }),
-								},
+						event.type === "mcp_tool_use"
+							? { type: event.type, ...served, mcp_server_name: clampName(event.mcp_server_name) }
+							: { type: event.type, ...served, api_server_name: clampName(event.api_server_name) },
 				})
 				return
 			}

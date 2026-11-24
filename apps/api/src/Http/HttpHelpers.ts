@@ -5,6 +5,7 @@ import {
 } from "@checkfu/domain/Agent/AgentTypes"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
+import { MAX_API_SERVERS, MAX_API_SPEC_JSON_BYTES } from "@checkfu/domain/Mcp/ApiServers"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
@@ -46,8 +47,11 @@ import type {
 } from "./Api.ts"
 
 export const MAX_REQUEST_BODY_BYTES = 160 * 1024
+// With room for every API server's document at its limit.
 export const MAX_AGENT_BODY_BYTES =
-	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) * 12 + 16 * 1024
+	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) * 12 +
+	16 * 1024 +
+	MAX_API_SERVERS * MAX_API_SPEC_JSON_BYTES
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
@@ -397,6 +401,24 @@ export const requestPath = (request: HttpServerRequest.HttpServerRequest): strin
 		queryIndex === -1 ? hashIndex : hashIndex === -1 ? queryIndex : Math.min(queryIndex, hashIndex)
 	const target = end === -1 ? raw : raw.slice(0, end)
 	return target.length > 0 ? target : "/"
+}
+
+/**
+ * One spelling per API base URL, so an API server and the key stored for it
+ * compare equal however either was written: no fragment, no query string, and
+ * no trailing slash on a path.
+ */
+export const normalizeApiBaseUrl = (input: string): string | undefined => {
+	if (!URL.canParse(input)) {
+		return undefined
+	}
+	const url = new URL(input)
+	if (url.search !== "") {
+		return undefined
+	}
+	url.hash = ""
+	url.pathname = url.pathname.replace(/\/+$/u, "")
+	return url.href
 }
 
 /** One spelling per MCP server, so a server and the credential stored for it compare equal. */

@@ -48,6 +48,8 @@ import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import { memorySql } from "./SqliteExecutor.ts"
 import { VaultsTestLive } from "./VaultsHarness.ts"
 import { ToolSchemaCheck } from "../../src/Pi/PiToolSchemaCheck.ts"
+import { checkApiServer } from "../../src/OpenApi/ApiCatalogStore.ts"
+import { ApiSpecCheck } from "../../src/OpenApi/ApiSpecCheck.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -181,6 +183,9 @@ export const makeScriptedPiModels = (
 }
 
 const notOpen = () => Promise.resolve("not_found" as const)
+
+/** The importer, run in process as the harness Worker runs it. */
+export const LocalApiSpecCheck = Layer.succeed(ApiSpecCheck, { check: checkApiServer })
 
 /** Pi's own check, run in process as the harness Worker runs it. */
 export const LocalToolSchemaCheck = Layer.succeed(ToolSchemaCheck, {
@@ -437,6 +442,7 @@ export const makePiDurableTestLayer = (
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
 		Layer.provideMerge(vaults),
 		Layer.provideMerge(LocalToolSchemaCheck),
+		Layer.provideMerge(LocalApiSpecCheck),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),

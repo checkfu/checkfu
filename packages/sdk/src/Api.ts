@@ -20,6 +20,11 @@ import {
 	AgentName,
 	AgentSnapshot,
 	AgentSystem,
+	ApiKeyPlacement,
+	ApiSelection,
+	ApiServerBinding,
+	ApiServerName,
+	ApiSpecSummary,
 	AutomationId,
 	AutomationName,
 	AutomationRunError,
@@ -36,6 +41,7 @@ import {
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
+	MAX_API_SERVERS,
 	MAX_CUSTOM_TOOLS,
 	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
@@ -363,7 +369,7 @@ export const CustomToolInput = Schema.Struct({
 	type: Schema.Literal("custom"),
 	name: CustomTool.fields.name.annotate({
 		description:
-			"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool.",
+			"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool.",
 	}),
 	description: CustomTool.fields.description.annotate({
 		description: "What the tool does, as the agent is told",
@@ -374,13 +380,90 @@ export const CustomToolInput = Schema.Struct({
 })
 export type CustomToolInput = typeof CustomToolInput.Type
 
-const AgentToolInput = Schema.Union([McpToolsetInput, CustomToolInput])
+const ApiBaseUrlInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// base URL of an HTTP API" }),
+)
 
-const AgentToolsInput = Schema.Array(AgentToolInput)
-	.check(Schema.isMaxLength(MAX_MCP_SERVERS + MAX_CUSTOM_TOOLS))
+const apiServerFields = {
+	type: Schema.Literal("openapi"),
+	name: ApiServerName.annotate({
+		description:
+			"Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers.",
+	}),
+	base_url: ApiBaseUrlInput.annotate({
+		description:
+			"Where the API is served. Every request goes to this origin, under this path; the document's own servers are ignored.",
+	}),
+	include: Schema.optionalKey(
+		ApiSelection.annotate({
+			description: "Keep only operations with one of these names or tags",
+		}),
+	),
+	exclude: Schema.optionalKey(
+		ApiSelection.annotate({
+			description: "Then drop operations with one of these names or tags",
+		}),
+	),
+}
+
+export const ApiServerInput = Schema.Struct({
+	...apiServerFields,
+	spec: Schema.JsonObject.annotate({
+		description:
+			"The API's OpenAPI 3.0 or 3.1 document, as JSON. Each operation becomes a tool. It is stored once and never returned.",
+	}),
+})
+export type ApiServerInput = typeof ApiServerInput.Type
+
+/** An agent's API server as it is returned: its document is summarized, never echoed. */
+export const ApiServerResource = Schema.Struct({
+	...apiServerFields,
+	base_url: Schema.String,
+	spec: ApiSpecSummary.annotate({
+		description: "The stored document's title, version, number of operations kept and digest",
+	}),
+})
+export type ApiServer = typeof ApiServerResource.Type
+
+const ApiServersInput = Schema.Array(ApiServerInput)
+	.check(Schema.isMaxLength(MAX_API_SERVERS))
 	.annotate({
 		description:
-			"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
+			"HTTP APIs this agent calls, each described by its OpenAPI document. Names must be unique.",
+	})
+
+export const ApiToolsetInput = Schema.Struct({
+	type: Schema.Literal("api_toolset"),
+	api_server_name: ApiServerName.annotate({
+		description: "The API server, by its name in api_servers, whose tools this configures",
+	}),
+	default_config: Schema.optionalKey(
+		Schema.Struct({ permission_policy: Schema.optionalKey(PermissionPolicyInput) }).annotate({
+			description:
+				"Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks.",
+		}),
+	),
+	configs: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				name: NonEmptyString.check(Schema.isMaxLength(256)).annotate({
+					description: "The operation's tool name",
+				}),
+				permission_policy: Schema.optionalKey(PermissionPolicyInput),
+			}),
+		).check(Schema.isMaxLength(MAX_MCP_TOOL_POLICIES)),
+	),
+})
+export type ApiToolsetInput = typeof ApiToolsetInput.Type
+
+const AgentToolInput = Schema.Union([McpToolsetInput, ApiToolsetInput, CustomToolInput])
+
+const AgentToolsInput = Schema.Array(AgentToolInput)
+	.check(Schema.isMaxLength(MAX_MCP_SERVERS + MAX_API_SERVERS + MAX_CUSTOM_TOOLS))
+	.annotate({
+		description:
+			"Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
 	})
 
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
@@ -397,6 +480,7 @@ export const CreateAgentBody = Schema.Struct({
 		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
 	),
 	mcp_servers: Schema.optionalKey(McpServersInput),
+	api_servers: Schema.optionalKey(ApiServersInput),
 	tools: Schema.optionalKey(AgentToolsInput),
 })
 export type CreateAgentBody = typeof CreateAgentBody.Type
@@ -420,6 +504,12 @@ export const UpdateAgentBody = Schema.Struct({
 		}),
 	),
 	mcp_servers: Schema.optionalKey(McpServersInput),
+	api_servers: Schema.optionalKey(
+		ApiServersInput.annotate({
+			description:
+				"Replaces the agent's API servers. Each needs its document again; omit the field to keep them as they are.",
+		}),
+	),
 	tools: Schema.optionalKey(AgentToolsInput),
 })
 export type UpdateAgentBody = typeof UpdateAgentBody.Type
@@ -473,7 +563,7 @@ const CreateSessionCommonFields = {
 	vault_ids: Schema.optionalKey(
 		Schema.Array(ResourceId).check(Schema.isMaxLength(MAX_MCP_SERVERS)).annotate({
 			description:
-				"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials.",
+				"Vaults whose credentials the session may use. An MCP or API server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials or api_server_credentials.",
 		}),
 	),
 	mcp_server_credentials: Schema.optionalKey(
@@ -487,6 +577,19 @@ const CreateSessionCommonFields = {
 			.annotate({
 				description:
 					"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match.",
+			}),
+	),
+	api_server_credentials: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				api_server_name: ApiServerName,
+				credential_id: ResourceId,
+			}),
+		)
+			.check(Schema.isMaxLength(MAX_API_SERVERS))
+			.annotate({
+				description:
+					"Binds one of the agent's API servers to an api_key credential by id, whatever vault_ids would match.",
 			}),
 	),
 }
@@ -598,6 +701,7 @@ export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 export const AgentResource = Schema.Struct({
 	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
 	mcp_servers: Schema.Array(McpServerInput),
+	api_servers: Schema.Array(ApiServerResource),
 	tools: Schema.Array(AgentToolInput),
 })
 export type Agent = typeof AgentResource.Type
@@ -685,6 +789,18 @@ export const CreateCredentialBody = Schema.Struct({
 				}),
 			),
 		}),
+		Schema.Struct({
+			type: Schema.Literal("api_key"),
+			base_url: ApiBaseUrlInput.annotate({
+				description:
+					"Base URL of the API this key authenticates against. The key is only ever sent to this origin, under this path.",
+			}),
+			token: CredentialSecret.annotate({ description: "The API key. Never returned." }),
+			placement: ApiKeyPlacement.annotate({
+				description:
+					'Where the key goes in each request: {in: "header", name, prefix?} or {in: "query", name}',
+			}),
+		}),
 	]).annotate({ description: "What the credential authenticates against, and its secret" }),
 	display_name: Schema.optionalKey(
 		Schema.NullOr(CredentialDisplayName).annotate({
@@ -722,9 +838,13 @@ export const UpdateCredentialBody = Schema.Struct({
 					}),
 				),
 			}),
+			Schema.Struct({
+				type: Schema.Literal("api_key"),
+				token: CredentialSecret.annotate({ description: "Replacement API key. Never returned." }),
+			}),
 		]).annotate({
 			description:
-				"Replacement secret. The credential's type and MCP server URL cannot change. New tokens clear a failed refresh.",
+				"Replacement secret. The credential's type, URL and placement cannot change. New tokens clear a failed refresh.",
 		}),
 	),
 	display_name: Schema.optionalKey(
@@ -761,6 +881,9 @@ export const SessionResource = Schema.Struct({
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
 	mcp_servers: Schema.Array(McpServerBinding).annotate({
 		description: "The agent's MCP servers with the credential this session bound each to",
+	}),
+	api_servers: Schema.Array(ApiServerBinding).annotate({
+		description: "The agent's API servers with the credential this session bound each to",
 	}),
 })
 export type Session = typeof SessionResource.Type
@@ -953,6 +1076,14 @@ export const AgentCustomToolUseSessionEvent = wireSessionEvent(
 	"agent.custom_tool_use",
 	SessionEventFields["agent.custom_tool_use"],
 )
+export const AgentApiToolUseSessionEvent = wireSessionEvent(
+	"agent.api_tool_use",
+	SessionEventFields["agent.api_tool_use"],
+)
+export const AgentApiToolResultSessionEvent = wireSessionEvent(
+	"agent.api_tool_result",
+	SessionEventFields["agent.api_tool_result"],
+)
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
@@ -994,6 +1125,8 @@ export const SessionEvent = Schema.Union([
 	AgentMcpToolUseSessionEvent,
 	AgentMcpToolResultSessionEvent,
 	AgentCustomToolUseSessionEvent,
+	AgentApiToolUseSessionEvent,
+	AgentApiToolResultSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,

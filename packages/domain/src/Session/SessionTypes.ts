@@ -104,12 +104,36 @@ export const CustomToolUse = Schema.Struct({
 })
 export type CustomToolUse = typeof CustomToolUse.Type
 
+/** A call to an operation of one of the agent's API servers. */
+export const ApiToolUse = Schema.Struct({
+	type: Schema.Literal("api_tool_use"),
+	tool_use_id: ResourceId,
+	api_server_name: ResourceId,
+	name: ResourceId,
+	input: ToolInput,
+	evaluated_permission: Schema.optionalKey(EvaluatedPermission),
+	parent_tool_use_id: Schema.optionalKey(ResourceId),
+	truncated: Schema.optionalKey(Schema.Literal(true)),
+})
+export type ApiToolUse = typeof ApiToolUse.Type
+
+export const ApiToolResult = Schema.Struct({
+	type: Schema.Literal("api_tool_result"),
+	tool_use_id: ResourceId,
+	content: Schema.Array(TextBlock),
+	is_error: Schema.Boolean,
+	truncated: Schema.optionalKey(Schema.Literal(true)),
+})
+export type ApiToolResult = typeof ApiToolResult.Type
+
 export const ToolEvent = Schema.Union([
 	ToolUse,
 	ToolResult,
 	McpToolUse,
 	McpToolResult,
 	CustomToolUse,
+	ApiToolUse,
+	ApiToolResult,
 ])
 export type ToolEvent = typeof ToolEvent.Type
 
@@ -118,11 +142,15 @@ export type ToolEvent = typeof ToolEvent.Type
 // on the call, published its use.
 export const ToolCall = Schema.Union([
 	Schema.TaggedStruct("pair", {
-		use: Schema.Union([ToolUse, McpToolUse, CustomToolUse]),
-		result: Schema.Union([ToolResult, McpToolResult]),
+		use: Schema.Union([ToolUse, McpToolUse, CustomToolUse, ApiToolUse]),
+		result: Schema.Union([ToolResult, McpToolResult, ApiToolResult]),
 	}),
-	Schema.TaggedStruct("use", { use: Schema.Union([ToolUse, McpToolUse, CustomToolUse]) }),
-	Schema.TaggedStruct("result", { result: Schema.Union([ToolResult, McpToolResult]) }),
+	Schema.TaggedStruct("use", {
+		use: Schema.Union([ToolUse, McpToolUse, CustomToolUse, ApiToolUse]),
+	}),
+	Schema.TaggedStruct("result", {
+		result: Schema.Union([ToolResult, McpToolResult, ApiToolResult]),
+	}),
 ])
 export type ToolCall = typeof ToolCall.Type
 

@@ -12,6 +12,7 @@ import {
 	McpServerSetId,
 	RecordMcpServers,
 } from "@checkfu/domain/Mcp/McpServerSet.aggregate"
+import { ApiServerBindingList, ApiServerList, apiServerSetId } from "@checkfu/domain/Mcp/ApiServers"
 import { McpServerBindingList, McpServerList } from "@checkfu/domain/Mcp/McpServers"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
@@ -28,6 +29,7 @@ import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import { Credential } from "@checkfu/domain/Vault/Credential.aggregate"
 import { CredentialId } from "@checkfu/domain/Vault/Credential.id"
+import { CredentialView } from "@checkfu/domain/Vault/CredentialView.view"
 import { Vault } from "@checkfu/domain/Vault/Vault.aggregate"
 import { VaultId } from "@checkfu/domain/Vault/Vault.id"
 import * as Context from "effect/Context"
@@ -72,6 +74,7 @@ import {
 	sha256Json,
 	toApiError,
 } from "./HttpHelpers.ts"
+import { VaultReadWaitTimeout } from "./VaultsHandlers.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
@@ -178,17 +181,27 @@ const eventBatchFingerprint = (
 		}),
 	)
 
-const serializeSession = (
-	{ agent_id, agent_version, ...snapshot }: SessionSnapshot,
-	mcpServers: string,
-) => ({
-	...snapshot,
-	agent: { id: agent_id, version: agent_version },
+const boundServerFields = (mcpServers: string, apiServers: string) => ({
 	mcp_servers: McpServerBindingList.decode(mcpServers).map((server) => ({
 		name: server.name,
 		url: server.url,
 		credential_id: server.credential_id,
 	})),
+	api_servers: ApiServerBindingList.decode(apiServers).map((server) => ({
+		name: server.name,
+		base_url: server.base_url,
+		credential_id: server.credential_id,
+	})),
+})
+
+const serializeSession = (
+	{ agent_id, agent_version, ...snapshot }: SessionSnapshot,
+	mcpServers: string,
+	apiServers: string,
+) => ({
+	...snapshot,
+	agent: { id: agent_id, version: agent_version },
+	...boundServerFields(mcpServers, apiServers),
 })
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
@@ -293,6 +306,29 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				is_error: event.is_error,
 				...(event.truncated === true ? { truncated: true as const } : {}),
 			}
+		case "agent.api_tool_use":
+			return {
+				...sessionEventEnvelope(entry, "agent.api_tool_use"),
+				tool_use_id: event.tool_use_id,
+				api_server_name: event.api_server_name,
+				name: event.name,
+				input: event.input,
+				...(event.evaluated_permission === undefined
+					? {}
+					: { evaluated_permission: event.evaluated_permission }),
+				...(event.parent_tool_use_id === undefined
+					? {}
+					: { parent_tool_use_id: event.parent_tool_use_id }),
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
+		case "agent.api_tool_result":
+			return {
+				...sessionEventEnvelope(entry, "agent.api_tool_result"),
+				tool_use_id: event.tool_use_id,
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				is_error: event.is_error,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
 		case "agent.thinking":
 			return {
 				...sessionEventEnvelope(entry, "agent.thinking"),
@@ -360,6 +396,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		// A session's servers, with the credential each was bound to, are recorded under its id.
 		const boundServers = (sessionId: string) =>
 			Effect.map(serverSets.get(McpServerSetId.make(sessionId)), (set) => set.servers)
+		const boundApiServers = (sessionId: string) =>
+			Effect.map(serverSets.get(apiServerSetId(sessionId)), (set) => set.servers)
+		const credentialViews = yield* CredentialView
 		const idempotencyClaims = yield* IdempotencyClaim
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
@@ -384,7 +423,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			Effect.gen(function* () {
 				const head = yield* agents.get(agentId)
 				if (head.status === "" || (requested !== undefined && requested > head.version)) {
-					return { version: requested ?? null, servers: [] }
+					return { version: requested ?? null, servers: [], apiServers: [] }
 				}
 				const version = requested ?? head.version
 				if (version === head.version) {
@@ -392,6 +431,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						version,
 						servers: McpServerList.decode(
 							(yield* serverSets.get(McpServerSetId.make(head.current_version_id))).servers,
+						),
+						apiServers: ApiServerList.decode(
+							(yield* serverSets.get(apiServerSetId(head.current_version_id))).servers,
 						),
 					}
 				}
@@ -407,6 +449,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					version,
 					servers: McpServerList.decode(
 						(yield* serverSets.get(McpServerSetId.make(pinned.id))).servers,
+					),
+					apiServers: ApiServerList.decode(
+						(yield* serverSets.get(apiServerSetId(pinned.id))).servers,
 					),
 				}
 			})
@@ -436,8 +481,50 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				)
 			})
 
-		const bindMcpServers = (
-			servers: ReturnType<typeof McpServerList.decode>,
+		// An API key is for an API server; a bearer token or an OAuth grant is for an MCP server.
+		const isApiKey = (credentialId: string) =>
+			Effect.gen(function* () {
+				const ref = Credential.ref(CredentialId.make(credentialId))
+				const found =
+					Option.getOrNull(yield* credentialViews.get(ref)) ??
+					(yield* credentialViews.waitFor(
+						ref,
+						{ type: "vault_credential" },
+						{ timeout: yield* VaultReadWaitTimeout },
+					))
+				if (found === null) {
+					return yield* reject(503, `Credential ${credentialId} projection is not ready.`)
+				}
+				return found.auth.type === "api_key"
+			})
+
+		/** The stored credentials one kind of server can use, among those stored for one of `urls`. */
+		const usable = <A extends { readonly credential_id: string }>(
+			candidates: ReadonlyArray<A>,
+			urlOf: (candidate: A) => string | null,
+			urls: ReadonlyArray<string>,
+			apiKeys: boolean,
+		) =>
+			Effect.filter(
+				candidates.filter((candidate) => {
+					const url = urlOf(candidate)
+					return url !== null && urls.includes(url)
+				}),
+				(candidate) => Effect.map(isApiKey(candidate.credential_id), (found) => found === apiKeys),
+			)
+
+		/** Where an active credential is stored for, when it is one a server of that kind can use. */
+		const stored = (credentialId: string, apiKeys: boolean) =>
+			Effect.gen(function* () {
+				const url = yield* storedUrlOf(credentialId)
+				return url !== null && (yield* isApiKey(credentialId)) === apiKeys ? url : null
+			})
+
+		const bindServers = (
+			declared: {
+				readonly servers: ReturnType<typeof McpServerList.decode>
+				readonly apiServers: ReturnType<typeof ApiServerList.decode>
+			},
 			environmentId: EnvironmentId,
 			payload: {
 				readonly vault_ids?: ReadonlyArray<string>
@@ -445,30 +532,46 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					readonly mcp_server_name: string
 					readonly credential_id: string
 				}>
+				readonly api_server_credentials?: ReadonlyArray<{
+					readonly api_server_name: string
+					readonly credential_id: string
+				}>
 			},
 		) =>
 			Effect.gen(function* () {
+				const { servers, apiServers } = declared
 				const offered = (yield* Effect.forEach(
 					payload.vault_ids ?? [],
 					activeVaultCredentials,
 				)).flat()
-				const explicit = yield* Effect.forEach(payload.mcp_server_credentials ?? [], (binding) =>
-					Effect.map(storedUrlOf(binding.credential_id), (mcp_server_url) => ({
-						...binding,
-						mcp_server_url,
-					})),
-				)
+				const mcpUrls = servers.map((server) => server.url)
+				const apiUrls = apiServers.map((server) => server.base_url)
 				const environment = yield* environments.get(environmentId)
 				const bound = bindSessionServers({
 					servers,
-					explicit,
-					offered,
+					explicit: yield* Effect.forEach(payload.mcp_server_credentials ?? [], (binding) =>
+						Effect.map(stored(binding.credential_id, false), (mcp_server_url) => ({
+							...binding,
+							mcp_server_url,
+						})),
+					),
+					offered: yield* usable(offered, (held) => held.mcp_server_url, mcpUrls, false),
+					apiServers,
+					explicitApis: yield* Effect.forEach(payload.api_server_credentials ?? [], (binding) =>
+						Effect.map(stored(binding.credential_id, true), (base_url) => ({
+							...binding,
+							base_url,
+						})),
+					),
+					offeredApis: (yield* usable(offered, (held) => held.mcp_server_url, apiUrls, true)).map(
+						(held) => ({ credential_id: held.credential_id, base_url: held.mcp_server_url }),
+					),
 					networking: environment.config === null ? null : environment.config.networking,
 				})
 				if (!bound.ok) {
 					return yield* reject(400, bound.message)
 				}
-				return bound.mcpServers
+				return { mcpServers: bound.mcpServers, apiServers: bound.apiServers }
 			})
 
 		const existing = (id: SessionId) =>
@@ -543,11 +646,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const committed =
 						retriedId !== undefined && (yield* sessions.get(retriedId))._tag !== "Uninitialized"
 					const declared = committed
-						? { version: agentVersion, servers: [] }
+						? { version: agentVersion, servers: [], apiServers: [] }
 						: yield* declaredMcpServers(agentId, explicitVersion)
-					const mcpServers = committed
-						? ""
-						: yield* bindMcpServers(declared.servers, environmentId, payload)
+					const { mcpServers, apiServers } = committed
+						? { mcpServers: "", apiServers: "" }
+						: yield* bindServers(declared, environmentId, payload)
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined && retriedId !== undefined) {
@@ -565,6 +668,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								...(payload.mcp_server_credentials === undefined
 									? {}
 									: { mcp_server_credentials: payload.mcp_server_credentials }),
+								...(payload.api_server_credentials === undefined
+									? {}
+									: { api_server_credentials: payload.api_server_credentials }),
 							},
 						)
 						id = retriedId
@@ -577,12 +683,18 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							new RecordMcpServers({ set_id: McpServerSetId.make(id), servers: mcpServers }),
 						)
 					}
+					if (apiServers !== "") {
+						yield* serverSets.send(
+							new RecordMcpServers({ set_id: apiServerSetId(id), servers: apiServers }),
+						)
+					}
 					const receipt = yield* admitSession.send(
 						new AdmitSession({
 							session_id: id,
 							agent_id: agentId,
 							// Servers were bound for one version, so that version is the one admitted.
-							agent_version: mcpServers === "" ? agentVersion : declared.version,
+							agent_version:
+								mcpServers === "" && apiServers === "" ? agentVersion : declared.version,
 							environment_id: environmentId,
 							title,
 						}),
@@ -615,7 +727,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						agent: { id: agentId, version: pinnedVersion },
 						environment_id: environmentId,
 						title,
-						mcp_servers: McpServerBindingList.decode(yield* boundServers(id)),
+						...boundServerFields(yield* boundServers(id), yield* boundApiServers(id)),
 						turn: 0,
 						usage: {
 							input_tokens: 0,
@@ -645,7 +757,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							`Session ${params.session_id} pinned agent version projection is not ready.`,
 						)
 					}
-					return serializeSession(snapshot, yield* boundServers(snapshot.id))
+					return serializeSession(
+						snapshot,
+						yield* boundServers(snapshot.id),
+						yield* boundApiServers(snapshot.id),
+					)
 				}).pipe(handled),
 			)
 			.handle("archive", ({ params }) =>
@@ -661,6 +777,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					return serializeSession(
 						yield* present(result, 404, `Session ${id} not found.`),
 						yield* boundServers(id),
+						yield* boundApiServers(id),
 					)
 				}).pipe(handled),
 			)

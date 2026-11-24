@@ -34,14 +34,13 @@ export class CreateCredentialDecision extends Domain.Decision(CreateCredential, 
 		if (vault.state.credentials.length >= MAX_VAULT_CREDENTIALS) {
 			return new CredentialLimitReached({ vault_id: vault.id, limit: MAX_VAULT_CREDENTIALS })
 		}
-		const holder = vault.state.credentials.find(
-			(held) => held.mcp_server_url === cmd.auth.mcp_server_url,
-		)
+		const url = cmd.auth.type === "api_key" ? cmd.auth.base_url : cmd.auth.mcp_server_url
+		const holder = vault.state.credentials.find((held) => held.mcp_server_url === url)
 		if (holder !== undefined) {
 			return new CredentialUrlConflict({
 				vault_id: vault.id,
 				credential_id: holder.credential_id,
-				mcp_server_url: cmd.auth.mcp_server_url,
+				mcp_server_url: url,
 			})
 		}
 		return [

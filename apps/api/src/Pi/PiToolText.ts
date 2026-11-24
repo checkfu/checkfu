@@ -10,7 +10,7 @@ export const MODEL_TEXT_LIMITS = { maxBytes: 50 * 1024, maxLines: 2000 } as cons
 // Room under the limits for the note that says what was left out.
 const NOTE_BYTES = 512
 
-const looksLikeJson = (text: string): boolean => /^\s*[[{]/u.test(text)
+export const looksLikeJson = (text: string): boolean => /^\s*[[{]/u.test(text)
 
 const lineCount = (text: string): number => {
 	let lines = 1
@@ -35,6 +35,10 @@ const headWithin = (text: string, maxBytes: number): string => {
 	return text.slice(0, end)
 }
 
+/** What the model gets instead of a JSON document too large to show. */
+export const jsonNote = (what: string, size: string): string =>
+	`[${what} is ${size} of JSON, more than the ${MODEL_TEXT_LIMITS.maxBytes} bytes a tool result can show, so it is left out rather than cut. Narrow the request: filter, paginate or ask for fewer fields.]`
+
 export const fitsModelText = (text: string): boolean =>
 	utf8ByteLength(text) <= MODEL_TEXT_LIMITS.maxBytes &&
 	lineCount(text) <= MODEL_TEXT_LIMITS.maxLines
@@ -44,13 +48,13 @@ export const fitsModelText = (text: string): boolean =>
  * never cut: one that does not fit is replaced by a note asking for less. Other text keeps its
  * whole first lines that fit and says how much more there was.
  */
-export const boundModelText = (text: string, what: string): string => {
+export const boundModelText = (text: string, what: string, json = looksLikeJson(text)): string => {
 	if (fitsModelText(text)) {
 		return text
 	}
 	const bytes = utf8ByteLength(text)
-	if (looksLikeJson(text)) {
-		return `[${what} is ${bytes} bytes of JSON, more than the ${MODEL_TEXT_LIMITS.maxBytes} bytes a tool result can show, so it is left out rather than cut. Narrow the request: filter, paginate or ask for fewer fields.]`
+	if (json) {
+		return jsonNote(what, `${bytes} bytes`)
 	}
 	const room = MODEL_TEXT_LIMITS.maxBytes - NOTE_BYTES
 	const lines = text.split("\n")

@@ -1,6 +1,8 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
 import { Connection } from "../Connection/Connection.do.ts"
+import { ApiCatalog } from "../OpenApi/ApiCatalog.do.ts"
+import { checkApiServer } from "../OpenApi/ApiCatalogStore.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { isCheckableInputSchema } from "./PiCustomTools.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
@@ -28,6 +30,8 @@ export default PiHarnessWorker.make(
 		const workspace = placedStub(yield* SessionWorkspace, where)
 		// A credential's secret is placed like the sessions that use it.
 		const connection = placedStub(yield* Connection, where)
+		// An API server's document is placed like the sessions that read it.
+		const catalog = placedStub(yield* ApiCatalog, where)
 		return PiHarnessWorker.of({
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
@@ -36,6 +40,10 @@ export default PiHarnessWorker.make(
 				Effect.orDie(piSession(conversation).resumeTurn(operationId, decisions)),
 			waitingCalls: (conversation) => Effect.orDie(piSession(conversation).waitingCalls()),
 			checkToolSchemas: (schemas) => Effect.sync(() => schemas.map(isCheckableInputSchema)),
+			checkApiSpec: (document, selection) => checkApiServer(document, selection),
+			storeCatalog: (catalogId, document, config) =>
+				Effect.orDie(catalog(catalogId).store(document, config)),
+			keepCatalog: (catalogId) => Effect.orDie(catalog(catalogId).keep()),
 			cancelWaiting: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).cancelWaiting(operationId)),
 			abortTurn: (conversation, operationId) =>

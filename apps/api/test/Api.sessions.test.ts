@@ -27,6 +27,8 @@ import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.comman
 import { ToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
 import {
+	AgentApiToolResult,
+	AgentApiToolUse,
 	AgentCustomToolUse,
 	AgentMcpToolResult,
 	AgentMcpToolUse,
@@ -2483,10 +2485,46 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated(),
+				event: new AgentApiToolUse({
+					tool_use_id: "call_6",
+					api_server_name: "orders",
+					name: "createOrder",
+					input: { body: { sku: "A-1" } },
+					evaluated_permission: "ask",
+				}),
 				expectedJson: {
 					id: "evt_20",
 					seq: 20,
+					type: "agent.api_tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_6",
+					api_server_name: "orders",
+					name: "createOrder",
+					input: { body: { sku: "A-1" } },
+					evaluated_permission: "ask",
+				},
+			},
+			{
+				event: new AgentApiToolResult({
+					tool_use_id: "call_6",
+					content: [{ type: "text", text: '{"id":7}' }],
+					is_error: false,
+				}),
+				expectedJson: {
+					id: "evt_21",
+					seq: 21,
+					type: "agent.api_tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_6",
+					content: [{ type: "text", text: '{"id":7}' }],
+					is_error: false,
+				},
+			},
+			{
+				event: new SessionStatusTerminated(),
+				expectedJson: {
+					id: "evt_22",
+					seq: 22,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2494,8 +2532,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_21",
-					seq: 21,
+					id: "evt_23",
+					seq: 23,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},

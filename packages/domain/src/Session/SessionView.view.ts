@@ -13,6 +13,8 @@ import { UserToolConfirmation } from "./ConfirmTool.command.ts"
 import { UserCustomToolResult } from "./ReturnCustomToolResult.command.ts"
 import { SpanModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import {
+	AgentApiToolResult,
+	AgentApiToolUse,
 	AgentCustomToolUse,
 	AgentMcpToolResult,
 	AgentMcpToolUse,
@@ -43,6 +45,8 @@ export class SessionView extends Domain.View("SessionView", {
 		AgentMcpToolUse,
 		AgentMcpToolResult,
 		AgentCustomToolUse,
+		AgentApiToolUse,
+		AgentApiToolResult,
 		AgentThinking,
 		AgentMessage,
 		SpanModelRequestEnd,
@@ -99,6 +103,10 @@ export class SessionView extends Domain.View("SessionView", {
 		"agent.mcp_tool_result": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"agent.custom_tool_use": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.api_tool_use": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.api_tool_result": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"agent.thinking": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },

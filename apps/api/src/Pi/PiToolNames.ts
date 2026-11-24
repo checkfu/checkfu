@@ -16,6 +16,7 @@ export const BUILT_IN_WORKSPACE_TOOLS = [
 /** Whether a custom tool may not take this name: it would replace, or pass for, a tool of the session's own. */
 export const isReservedToolName = (name: string): boolean =>
 	name.startsWith("mcp__") ||
+	name.startsWith("api__") ||
 	name === CODEMODE_TOOL ||
 	name === TOOL_SEARCH_TOOL ||
 	BUILT_IN_WORKSPACE_TOOLS.some((builtIn) => builtIn === name)

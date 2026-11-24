@@ -467,6 +467,100 @@
 												"additionalProperties": false
 											}
 										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["openapi"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers."
+													},
+													"base_url": {
+														"type": "string"
+													},
+													"include": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Keep only operations with one of these names or tags"
+													},
+													"exclude": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Then drop operations with one of these names or tags"
+													},
+													"spec": {
+														"type": "object",
+														"properties": {
+															"title": {
+																"type": "string"
+															},
+															"version": {
+																"type": "string"
+															},
+															"operations": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"digest": {
+																"type": "string"
+															}
+														},
+														"required": ["title", "version", "operations", "digest"],
+														"additionalProperties": false,
+														"description": "The stored document's title, version, number of operations kept and digest"
+													}
+												},
+												"required": ["type", "name", "base_url", "spec"],
+												"additionalProperties": false
+											}
+										},
 										"tools": {
 											"type": "array",
 											"items": {
@@ -540,12 +634,76 @@
 														"properties": {
 															"type": {
 																"type": "string",
+																"enum": ["api_toolset"]
+															},
+															"api_server_name": {
+																"type": "string",
+																"pattern": "^[A-Za-z0-9_-]{1,32}$",
+																"description": "The API server, by its name in api_servers, whose tools this configures"
+															},
+															"default_config": {
+																"type": "object",
+																"properties": {
+																	"permission_policy": {
+																		"type": "object",
+																		"properties": {
+																			"type": {
+																				"type": "string",
+																				"enum": ["always_allow", "always_ask"],
+																				"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																			}
+																		},
+																		"required": ["type"],
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false,
+																"description": "Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks."
+															},
+															"configs": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"properties": {
+																		"name": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256,
+																			"description": "The operation's tool name"
+																		},
+																		"permission_policy": {
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["always_allow", "always_ask"],
+																					"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																				}
+																			},
+																			"required": ["type"],
+																			"additionalProperties": false
+																		}
+																	},
+																	"required": ["name"],
+																	"additionalProperties": false
+																},
+																"maxItems": 128
+															}
+														},
+														"required": ["type", "api_server_name"],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
 																"enum": ["custom"]
 															},
 															"name": {
 																"type": "string",
 																"pattern": "^[A-Za-z0-9_-]{1,64}$",
-																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool."
+																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool."
 															},
 															"description": {
 																"type": "string",
@@ -577,6 +735,7 @@
 										"updated_at",
 										"archived_at",
 										"mcp_servers",
+										"api_servers",
 										"tools"
 									],
 									"additionalProperties": false
@@ -1100,6 +1259,87 @@
 										"maxItems": 20,
 										"description": "MCP servers this agent connects to. Names must be unique."
 									},
+									"api_servers": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["openapi"]
+												},
+												"name": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9_-]{1,32}$",
+													"description": "Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers."
+												},
+												"base_url": {
+													"type": "string",
+													"maxLength": 2048,
+													"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+													"description": "Where the API is served. Every request goes to this origin, under this path; the document's own servers are ignored."
+												},
+												"include": {
+													"type": "object",
+													"properties": {
+														"names": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														},
+														"tags": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														}
+													},
+													"additionalProperties": false,
+													"description": "Keep only operations with one of these names or tags"
+												},
+												"exclude": {
+													"type": "object",
+													"properties": {
+														"names": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														},
+														"tags": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														}
+													},
+													"additionalProperties": false,
+													"description": "Then drop operations with one of these names or tags"
+												},
+												"spec": {
+													"type": "object",
+													"description": "The API's OpenAPI 3.0 or 3.1 document, as JSON. Each operation becomes a tool. It is stored once and never returned."
+												}
+											},
+											"required": ["type", "name", "base_url", "spec"],
+											"additionalProperties": false
+										},
+										"maxItems": 4,
+										"description": "HTTP APIs this agent calls, each described by its OpenAPI document. Names must be unique."
+									},
 									"tools": {
 										"type": "array",
 										"items": {
@@ -1173,12 +1413,76 @@
 													"properties": {
 														"type": {
 															"type": "string",
+															"enum": ["api_toolset"]
+														},
+														"api_server_name": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9_-]{1,32}$",
+															"description": "The API server, by its name in api_servers, whose tools this configures"
+														},
+														"default_config": {
+															"type": "object",
+															"properties": {
+																"permission_policy": {
+																	"type": "object",
+																	"properties": {
+																		"type": {
+																			"type": "string",
+																			"enum": ["always_allow", "always_ask"],
+																			"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																		}
+																	},
+																	"required": ["type"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false,
+															"description": "Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks."
+														},
+														"configs": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"properties": {
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 256,
+																		"description": "The operation's tool name"
+																	},
+																	"permission_policy": {
+																		"type": "object",
+																		"properties": {
+																			"type": {
+																				"type": "string",
+																				"enum": ["always_allow", "always_ask"],
+																				"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																			}
+																		},
+																		"required": ["type"],
+																		"additionalProperties": false
+																	}
+																},
+																"required": ["name"],
+																"additionalProperties": false
+															},
+															"maxItems": 128
+														}
+													},
+													"required": ["type", "api_server_name"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
 															"enum": ["custom"]
 														},
 														"name": {
 															"type": "string",
 															"pattern": "^[A-Za-z0-9_-]{1,64}$",
-															"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool."
+															"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool."
 														},
 														"description": {
 															"type": "string",
@@ -1196,8 +1500,8 @@
 												}
 											]
 										},
-										"maxItems": 84,
-										"description": "Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result."
+										"maxItems": 88,
+										"description": "Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result."
 									}
 								},
 								"required": ["name", "model"],
@@ -1354,6 +1658,100 @@
 												"additionalProperties": false
 											}
 										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["openapi"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers."
+													},
+													"base_url": {
+														"type": "string"
+													},
+													"include": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Keep only operations with one of these names or tags"
+													},
+													"exclude": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Then drop operations with one of these names or tags"
+													},
+													"spec": {
+														"type": "object",
+														"properties": {
+															"title": {
+																"type": "string"
+															},
+															"version": {
+																"type": "string"
+															},
+															"operations": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"digest": {
+																"type": "string"
+															}
+														},
+														"required": ["title", "version", "operations", "digest"],
+														"additionalProperties": false,
+														"description": "The stored document's title, version, number of operations kept and digest"
+													}
+												},
+												"required": ["type", "name", "base_url", "spec"],
+												"additionalProperties": false
+											}
+										},
 										"tools": {
 											"type": "array",
 											"items": {
@@ -1427,12 +1825,76 @@
 														"properties": {
 															"type": {
 																"type": "string",
+																"enum": ["api_toolset"]
+															},
+															"api_server_name": {
+																"type": "string",
+																"pattern": "^[A-Za-z0-9_-]{1,32}$",
+																"description": "The API server, by its name in api_servers, whose tools this configures"
+															},
+															"default_config": {
+																"type": "object",
+																"properties": {
+																	"permission_policy": {
+																		"type": "object",
+																		"properties": {
+																			"type": {
+																				"type": "string",
+																				"enum": ["always_allow", "always_ask"],
+																				"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																			}
+																		},
+																		"required": ["type"],
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false,
+																"description": "Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks."
+															},
+															"configs": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"properties": {
+																		"name": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256,
+																			"description": "The operation's tool name"
+																		},
+																		"permission_policy": {
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["always_allow", "always_ask"],
+																					"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																				}
+																			},
+																			"required": ["type"],
+																			"additionalProperties": false
+																		}
+																	},
+																	"required": ["name"],
+																	"additionalProperties": false
+																},
+																"maxItems": 128
+															}
+														},
+														"required": ["type", "api_server_name"],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
 																"enum": ["custom"]
 															},
 															"name": {
 																"type": "string",
 																"pattern": "^[A-Za-z0-9_-]{1,64}$",
-																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool."
+																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool."
 															},
 															"description": {
 																"type": "string",
@@ -1464,6 +1926,7 @@
 										"updated_at",
 										"archived_at",
 										"mcp_servers",
+										"api_servers",
 										"tools"
 									],
 									"additionalProperties": false
@@ -1919,6 +2382,100 @@
 												"additionalProperties": false
 											}
 										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["openapi"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers."
+													},
+													"base_url": {
+														"type": "string"
+													},
+													"include": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Keep only operations with one of these names or tags"
+													},
+													"exclude": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Then drop operations with one of these names or tags"
+													},
+													"spec": {
+														"type": "object",
+														"properties": {
+															"title": {
+																"type": "string"
+															},
+															"version": {
+																"type": "string"
+															},
+															"operations": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"digest": {
+																"type": "string"
+															}
+														},
+														"required": ["title", "version", "operations", "digest"],
+														"additionalProperties": false,
+														"description": "The stored document's title, version, number of operations kept and digest"
+													}
+												},
+												"required": ["type", "name", "base_url", "spec"],
+												"additionalProperties": false
+											}
+										},
 										"tools": {
 											"type": "array",
 											"items": {
@@ -1992,12 +2549,76 @@
 														"properties": {
 															"type": {
 																"type": "string",
+																"enum": ["api_toolset"]
+															},
+															"api_server_name": {
+																"type": "string",
+																"pattern": "^[A-Za-z0-9_-]{1,32}$",
+																"description": "The API server, by its name in api_servers, whose tools this configures"
+															},
+															"default_config": {
+																"type": "object",
+																"properties": {
+																	"permission_policy": {
+																		"type": "object",
+																		"properties": {
+																			"type": {
+																				"type": "string",
+																				"enum": ["always_allow", "always_ask"],
+																				"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																			}
+																		},
+																		"required": ["type"],
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false,
+																"description": "Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks."
+															},
+															"configs": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"properties": {
+																		"name": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256,
+																			"description": "The operation's tool name"
+																		},
+																		"permission_policy": {
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["always_allow", "always_ask"],
+																					"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																				}
+																			},
+																			"required": ["type"],
+																			"additionalProperties": false
+																		}
+																	},
+																	"required": ["name"],
+																	"additionalProperties": false
+																},
+																"maxItems": 128
+															}
+														},
+														"required": ["type", "api_server_name"],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
 																"enum": ["custom"]
 															},
 															"name": {
 																"type": "string",
 																"pattern": "^[A-Za-z0-9_-]{1,64}$",
-																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool."
+																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool."
 															},
 															"description": {
 																"type": "string",
@@ -2029,6 +2650,7 @@
 										"updated_at",
 										"archived_at",
 										"mcp_servers",
+										"api_servers",
 										"tools"
 									],
 									"additionalProperties": false
@@ -2558,6 +3180,87 @@
 										"maxItems": 20,
 										"description": "MCP servers this agent connects to. Names must be unique."
 									},
+									"api_servers": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["openapi"]
+												},
+												"name": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9_-]{1,32}$",
+													"description": "Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers."
+												},
+												"base_url": {
+													"type": "string",
+													"maxLength": 2048,
+													"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+													"description": "Where the API is served. Every request goes to this origin, under this path; the document's own servers are ignored."
+												},
+												"include": {
+													"type": "object",
+													"properties": {
+														"names": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														},
+														"tags": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														}
+													},
+													"additionalProperties": false,
+													"description": "Keep only operations with one of these names or tags"
+												},
+												"exclude": {
+													"type": "object",
+													"properties": {
+														"names": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														},
+														"tags": {
+															"type": "array",
+															"items": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 128
+															},
+															"maxItems": 256
+														}
+													},
+													"additionalProperties": false,
+													"description": "Then drop operations with one of these names or tags"
+												},
+												"spec": {
+													"type": "object",
+													"description": "The API's OpenAPI 3.0 or 3.1 document, as JSON. Each operation becomes a tool. It is stored once and never returned."
+												}
+											},
+											"required": ["type", "name", "base_url", "spec"],
+											"additionalProperties": false
+										},
+										"maxItems": 4,
+										"description": "Replaces the agent's API servers. Each needs its document again; omit the field to keep them as they are."
+									},
 									"tools": {
 										"type": "array",
 										"items": {
@@ -2631,12 +3334,76 @@
 													"properties": {
 														"type": {
 															"type": "string",
+															"enum": ["api_toolset"]
+														},
+														"api_server_name": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9_-]{1,32}$",
+															"description": "The API server, by its name in api_servers, whose tools this configures"
+														},
+														"default_config": {
+															"type": "object",
+															"properties": {
+																"permission_policy": {
+																	"type": "object",
+																	"properties": {
+																		"type": {
+																			"type": "string",
+																			"enum": ["always_allow", "always_ask"],
+																			"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																		}
+																	},
+																	"required": ["type"],
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false,
+															"description": "Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks."
+														},
+														"configs": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"properties": {
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 256,
+																		"description": "The operation's tool name"
+																	},
+																	"permission_policy": {
+																		"type": "object",
+																		"properties": {
+																			"type": {
+																				"type": "string",
+																				"enum": ["always_allow", "always_ask"],
+																				"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																			}
+																		},
+																		"required": ["type"],
+																		"additionalProperties": false
+																	}
+																},
+																"required": ["name"],
+																"additionalProperties": false
+															},
+															"maxItems": 128
+														}
+													},
+													"required": ["type", "api_server_name"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
 															"enum": ["custom"]
 														},
 														"name": {
 															"type": "string",
 															"pattern": "^[A-Za-z0-9_-]{1,64}$",
-															"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool."
+															"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool."
 														},
 														"description": {
 															"type": "string",
@@ -2654,8 +3421,8 @@
 												}
 											]
 										},
-										"maxItems": 84,
-										"description": "Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result."
+										"maxItems": 88,
+										"description": "Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result."
 									}
 								},
 								"required": ["version"],
@@ -2801,6 +3568,100 @@
 												"additionalProperties": false
 											}
 										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["openapi"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers."
+													},
+													"base_url": {
+														"type": "string"
+													},
+													"include": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Keep only operations with one of these names or tags"
+													},
+													"exclude": {
+														"type": "object",
+														"properties": {
+															"names": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 128
+																},
+																"maxItems": 256
+															}
+														},
+														"additionalProperties": false,
+														"description": "Then drop operations with one of these names or tags"
+													},
+													"spec": {
+														"type": "object",
+														"properties": {
+															"title": {
+																"type": "string"
+															},
+															"version": {
+																"type": "string"
+															},
+															"operations": {
+																"type": "integer",
+																"minimum": 0,
+																"maximum": 9007199254740991
+															},
+															"digest": {
+																"type": "string"
+															}
+														},
+														"required": ["title", "version", "operations", "digest"],
+														"additionalProperties": false,
+														"description": "The stored document's title, version, number of operations kept and digest"
+													}
+												},
+												"required": ["type", "name", "base_url", "spec"],
+												"additionalProperties": false
+											}
+										},
 										"tools": {
 											"type": "array",
 											"items": {
@@ -2874,12 +3735,76 @@
 														"properties": {
 															"type": {
 																"type": "string",
+																"enum": ["api_toolset"]
+															},
+															"api_server_name": {
+																"type": "string",
+																"pattern": "^[A-Za-z0-9_-]{1,32}$",
+																"description": "The API server, by its name in api_servers, whose tools this configures"
+															},
+															"default_config": {
+																"type": "object",
+																"properties": {
+																	"permission_policy": {
+																		"type": "object",
+																		"properties": {
+																			"type": {
+																				"type": "string",
+																				"enum": ["always_allow", "always_ask"],
+																				"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																			}
+																		},
+																		"required": ["type"],
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false,
+																"description": "Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks."
+															},
+															"configs": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"properties": {
+																		"name": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256,
+																			"description": "The operation's tool name"
+																		},
+																		"permission_policy": {
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["always_allow", "always_ask"],
+																					"description": "always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed"
+																				}
+																			},
+																			"required": ["type"],
+																			"additionalProperties": false
+																		}
+																	},
+																	"required": ["name"],
+																	"additionalProperties": false
+																},
+																"maxItems": 128
+															}
+														},
+														"required": ["type", "api_server_name"],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
 																"enum": ["custom"]
 															},
 															"name": {
 																"type": "string",
 																"pattern": "^[A-Za-z0-9_-]{1,64}$",
-																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool."
+																"description": "Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool."
 															},
 															"description": {
 																"type": "string",
@@ -2911,6 +3836,7 @@
 										"updated_at",
 										"archived_at",
 										"mcp_servers",
+										"api_servers",
 										"tools"
 									],
 									"additionalProperties": false
@@ -6144,6 +7070,37 @@
 												"additionalProperties": false
 											},
 											"description": "The agent's MCP servers with the credential this session bound each to"
+										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$"
+													},
+													"base_url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"credential_id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": ["name", "base_url", "credential_id"],
+												"additionalProperties": false
+											},
+											"description": "The agent's API servers with the credential this session bound each to"
 										}
 									},
 									"required": [
@@ -6158,7 +7115,8 @@
 										"updated_at",
 										"archived_at",
 										"agent",
-										"mcp_servers"
+										"mcp_servers",
+										"api_servers"
 									],
 									"additionalProperties": false
 								}
@@ -6671,7 +7629,7 @@
 													"maxLength": 256
 												},
 												"maxItems": 20,
-												"description": "Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials."
+												"description": "Vaults whose credentials the session may use. An MCP or API server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials or api_server_credentials."
 											},
 											"mcp_server_credentials": {
 												"type": "array",
@@ -6693,6 +7651,27 @@
 												},
 												"maxItems": 20,
 												"description": "Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match."
+											},
+											"api_server_credentials": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"api_server_name": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9_-]{1,32}$"
+														},
+														"credential_id": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 256
+														}
+													},
+													"required": ["api_server_name", "credential_id"],
+													"additionalProperties": false
+												},
+												"maxItems": 4,
+												"description": "Binds one of the agent's API servers to an api_key credential by id, whatever vault_ids would match."
 											}
 										},
 										"required": ["agent", "environment_id"],
@@ -6766,7 +7745,7 @@
 													"maxLength": 256
 												},
 												"maxItems": 20,
-												"description": "Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials."
+												"description": "Vaults whose credentials the session may use. An MCP or API server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials or api_server_credentials."
 											},
 											"mcp_server_credentials": {
 												"type": "array",
@@ -6788,6 +7767,27 @@
 												},
 												"maxItems": 20,
 												"description": "Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match."
+											},
+											"api_server_credentials": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"api_server_name": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9_-]{1,32}$"
+														},
+														"credential_id": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 256
+														}
+													},
+													"required": ["api_server_name", "credential_id"],
+													"additionalProperties": false
+												},
+												"maxItems": 4,
+												"description": "Binds one of the agent's API servers to an api_key credential by id, whatever vault_ids would match."
 											}
 										},
 										"required": ["agent_id", "environment_id"],
@@ -6962,6 +7962,37 @@
 												"additionalProperties": false
 											},
 											"description": "The agent's MCP servers with the credential this session bound each to"
+										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$"
+													},
+													"base_url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"credential_id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": ["name", "base_url", "credential_id"],
+												"additionalProperties": false
+											},
+											"description": "The agent's API servers with the credential this session bound each to"
 										}
 									},
 									"required": [
@@ -6976,7 +8007,8 @@
 										"updated_at",
 										"archived_at",
 										"agent",
-										"mcp_servers"
+										"mcp_servers",
+										"api_servers"
 									],
 									"additionalProperties": false
 								}
@@ -7454,6 +8486,37 @@
 												"additionalProperties": false
 											},
 											"description": "The agent's MCP servers with the credential this session bound each to"
+										},
+										"api_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$"
+													},
+													"base_url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"credential_id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": ["name", "base_url", "credential_id"],
+												"additionalProperties": false
+											},
+											"description": "The agent's API servers with the credential this session bound each to"
 										}
 									},
 									"required": [
@@ -7468,7 +8531,8 @@
 										"updated_at",
 										"archived_at",
 										"agent",
-										"mcp_servers"
+										"mcp_servers",
+										"api_servers"
 									],
 									"additionalProperties": false
 								}
@@ -16627,6 +17691,68 @@
 												},
 												"required": ["type", "mcp_server_url", "access_token"],
 												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["api_key"]
+													},
+													"base_url": {
+														"type": "string",
+														"maxLength": 2048,
+														"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+														"description": "Base URL of the API this key authenticates against. The key is only ever sent to this origin, under this path."
+													},
+													"token": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 16384
+													},
+													"placement": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"in": {
+																		"type": "string",
+																		"enum": ["header"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$"
+																	},
+																	"prefix": {
+																		"type": "string",
+																		"pattern": "^[\\u0020-\\u007E]{1,64}$"
+																	}
+																},
+																"required": ["in", "name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"in": {
+																		"type": "string",
+																		"enum": ["query"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 128
+																	}
+																},
+																"required": ["in", "name"],
+																"additionalProperties": false
+															}
+														],
+														"description": "Where the key goes in each request: {in: \"header\", name, prefix?} or {in: \"query\", name}"
+													}
+												},
+												"required": ["type", "base_url", "token", "placement"],
+												"additionalProperties": false
 											}
 										],
 										"description": "What the credential authenticates against, and its secret"
@@ -17954,9 +19080,25 @@
 												},
 												"required": ["type", "access_token"],
 												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["api_key"]
+													},
+													"token": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 16384
+													}
+												},
+												"required": ["type", "token"],
+												"additionalProperties": false
 											}
 										],
-										"description": "Replacement secret. The credential's type and MCP server URL cannot change. New tokens clear a failed refresh."
+										"description": "Replacement secret. The credential's type, URL and placement cannot change. New tokens clear a failed refresh."
 									},
 									"display_name": {
 										"anyOf": [
@@ -18878,6 +20020,61 @@
 								},
 								"required": ["type", "mcp_server_url", "expires_at", "refresh"],
 								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"type": {
+										"type": "string",
+										"enum": ["api_key"]
+									},
+									"base_url": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 2048
+									},
+									"placement": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"in": {
+														"type": "string",
+														"enum": ["header"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$"
+													},
+													"prefix": {
+														"type": "string",
+														"pattern": "^[\\u0020-\\u007E]{1,64}$"
+													}
+												},
+												"required": ["in", "name"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"in": {
+														"type": "string",
+														"enum": ["query"]
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													}
+												},
+												"required": ["in", "name"],
+												"additionalProperties": false
+											}
+										]
+									}
+								},
+								"required": ["type", "base_url", "placement"],
+								"additionalProperties": false
 							}
 						]
 					},
@@ -19428,6 +20625,120 @@
 							},
 							"type": {
 								"type": "string",
+								"enum": ["agent.api_tool_use"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"api_server_name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"input": {
+								"type": "object"
+							},
+							"evaluated_permission": {
+								"type": "string",
+								"enum": ["allow", "ask"],
+								"description": "allow: the call ran without asking. ask: it waited for a confirmation."
+							},
+							"parent_tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							}
+						},
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"tool_use_id",
+							"api_server_name",
+							"name",
+							"input"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["agent.api_tool_result"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								}
+							},
+							"is_error": {
+								"type": "boolean"
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
 								"enum": ["agent.thinking"]
 							},
 							"created_at": {
@@ -19594,7 +20905,7 @@
 												"items": {
 													"type": "string"
 												},
-												"description": "The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use."
+												"description": "The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use or agent.api_tool_use and a user.custom_tool_result for each agent.custom_tool_use."
 											}
 										},
 										"required": ["type", "event_ids"],

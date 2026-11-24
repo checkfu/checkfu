@@ -46,6 +46,8 @@ import {
 	SpanModelRequestStart,
 } from "../src/Session/RecordModelRequestStart.command.ts"
 import {
+	AgentApiToolResult,
+	AgentApiToolUse,
 	AgentCustomToolUse,
 	AgentToolResult,
 	AgentToolUse,
@@ -3609,6 +3611,40 @@ describe("Sessions", () => {
 						input: { order: "A-1" },
 					}),
 				),
+				Story.when(
+					record("req_1", {
+						_tag: "pair",
+						use: {
+							type: "api_tool_use",
+							tool_use_id: "call_3",
+							api_server_name: "shop",
+							name: "createPet",
+							input: { body: { name: "Rex" } },
+							evaluated_permission: "ask",
+						},
+						result: {
+							type: "api_tool_result",
+							tool_use_id: "call_3",
+							content: [{ type: "text", text: '{"id":"7"}' }],
+							is_error: false,
+						},
+					}),
+				),
+				Story.then(
+					session,
+					new AgentApiToolUse({
+						tool_use_id: "call_3",
+						api_server_name: "shop",
+						name: "createPet",
+						input: { body: { name: "Rex" } },
+						evaluated_permission: "ask",
+					}),
+					new AgentApiToolResult({
+						tool_use_id: "call_3",
+						content: [{ type: "text", text: '{"id":"7"}' }],
+						is_error: false,
+					}),
+				),
 				Story.when(record("req_other", pair)),
 				Story.rejected(
 					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_other" }),
@@ -3834,6 +3870,46 @@ describe("Sessions", () => {
 				result(`call-${index}`, "z".repeat(MAX_TOOL_RESULT_TEXT_LENGTH)),
 			]).flat(),
 		)
+		expect(
+			clampToolCalls([
+				{
+					type: "api_tool_use",
+					tool_use_id: "c",
+					api_server_name: "shop",
+					name: "getPet",
+					input: { path: { petId: "p".repeat(MAX_TOOL_INPUT_JSON_LENGTH) } },
+					evaluated_permission: "allow",
+					parent_tool_use_id: "script",
+				},
+				{
+					type: "api_tool_result",
+					tool_use_id: "c",
+					content: [{ type: "text", text: "r".repeat(MAX_TOOL_RESULT_TEXT_LENGTH + 5) }],
+					is_error: true,
+				},
+			]),
+		).toEqual([
+			{
+				_tag: "pair",
+				use: {
+					type: "api_tool_use",
+					tool_use_id: "c",
+					api_server_name: "shop",
+					name: "getPet",
+					input: {},
+					truncated: true,
+					evaluated_permission: "allow",
+					parent_tool_use_id: "script",
+				},
+				result: {
+					type: "api_tool_result",
+					tool_use_id: "c",
+					content: [{ type: "text", text: "r".repeat(MAX_TOOL_RESULT_TEXT_LENGTH) }],
+					is_error: true,
+					truncated: true,
+				},
+			},
+		])
 		expect(many).toHaveLength(MAX_TOOL_CALLS_PER_TURN)
 		expect(many.some((call) => call.use.tool_use_id === `call-${MAX_TOOL_CALLS_PER_TURN}`)).toBe(
 			false,

@@ -380,6 +380,15 @@ const renderConnectEvent = (
 				}
 				break
 			}
+			case "agent.api_tool_use": {
+				toolUseKinds.set(event.tool_use_id, "approval")
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(
+						`[tool] ${escapeTerminalControlCharacters(`${event.api_server_name}/${event.name}`)}`,
+					)
+				}
+				break
+			}
 			case "agent.custom_tool_use": {
 				toolUseKinds.set(event.tool_use_id, "result")
 				if (!rawStructuredMode) {

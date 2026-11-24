@@ -28,9 +28,25 @@ const HeldRefresh = Schema.Struct({
 })
 export type HeldRefresh = typeof HeldRefresh.Type
 
+export const HeldPlacement = Schema.Union([
+	Schema.Struct({
+		in: Schema.Literal("header"),
+		name: Schema.String,
+		prefix: Schema.optionalKey(Schema.String),
+	}),
+	Schema.Struct({ in: Schema.Literal("query"), name: Schema.String }),
+])
+export type HeldPlacement = typeof HeldPlacement.Type
+
 /** Everything secret about one credential, as its connection holds it. */
 export const HeldSecret = Schema.Union([
 	Schema.Struct({ type: Schema.Literal("static_bearer"), token: Schema.String }),
+	// Where the key goes is no secret, but it is fixed with the key and travels with it.
+	Schema.Struct({
+		type: Schema.Literal("api_key"),
+		token: Schema.String,
+		placement: HeldPlacement,
+	}),
 	Schema.Struct({
 		type: Schema.Literal("mcp_oauth"),
 		access_token: Schema.String,
@@ -43,9 +59,11 @@ export const HeldSecret = Schema.Union([
 ])
 export type HeldSecret = typeof HeldSecret.Type
 export type HeldOAuth = Extract<HeldSecret, { readonly type: "mcp_oauth" }>
+export type HeldApiKey = Extract<HeldSecret, { readonly type: "api_key" }>
 
 export const SecretReplacement = Schema.Union([
 	Schema.Struct({ type: Schema.Literal("static_bearer"), token: Schema.String }),
+	Schema.Struct({ type: Schema.Literal("api_key"), token: Schema.String }),
 	Schema.Struct({
 		type: Schema.Literal("mcp_oauth"),
 		access_token: Schema.String,
@@ -132,6 +150,13 @@ export const makeSecretCustody = (storage: CustodyStorage, now: () => number) =>
 		}
 		if (replacement.type === "static_bearer") {
 			storage.put(SECRET, encodeHeld(replacement))
+			return bump()
+		}
+		if (replacement.type === "api_key") {
+			if (current.type !== "api_key") {
+				return null
+			}
+			storage.put(SECRET, encodeHeld({ ...current, token: replacement.token }))
 			return bump()
 		}
 		if (current.type !== "mcp_oauth") {

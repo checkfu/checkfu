@@ -314,6 +314,10 @@ export const makeOAuthRefresher = (deps: OAuthRefreshDeps) => {
 			if (held.type === "static_bearer") {
 				return { ok: true, token: held.token }
 			}
+			// An API key is for the API it was stored for, never for an MCP server.
+			if (held.type === "api_key") {
+				return { ok: false, reason: "credential_unavailable" }
+			}
 			if (held.refresh_failed) {
 				return { ok: false, reason: "reauthorization_required" }
 			}
@@ -331,7 +335,7 @@ export const makeOAuthRefresher = (deps: OAuthRefreshDeps) => {
 			if (now === null) {
 				return { ok: false, reason: "credential_unavailable" }
 			}
-			if (now.type === "static_bearer") {
+			if (now.type !== "mcp_oauth") {
 				return { ok: true, token: now.token }
 			}
 			if (now.refresh_failed) {
@@ -361,7 +365,7 @@ export const makeOAuthRefresher = (deps: OAuthRefreshDeps) => {
 			if (held === null) {
 				return []
 			}
-			if (held.type === "static_bearer") {
+			if (held.type !== "mcp_oauth") {
 				return [held.token]
 			}
 			return [
