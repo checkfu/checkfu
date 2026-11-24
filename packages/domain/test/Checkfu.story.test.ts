@@ -48,21 +48,12 @@ import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
-import { describe, expect, it } from "@effect/vitest"
-import * as Arbitrary from "effect/Arbitrary"
+import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
-import {
-	RequestFingerprint,
-	ClaimIdempotencyKey,
-	IdempotencyKeyClaimed,
-	IdempotencyKeyConflict,
-} from "../src/IdempotencyClaim/ClaimIdempotencyKey.command.ts"
-import { IdempotencyClaim } from "../src/IdempotencyClaim/IdempotencyClaim.aggregate.ts"
-import { IdempotencyClaimId } from "../src/IdempotencyClaim/IdempotencyClaim.id.ts"
 import {
 	AdmitSession,
 	AgentVersionNotFound,
@@ -103,7 +94,7 @@ describe("Checkfu unified hosted model stories", () => {
 	)
 
 	it.effect(
-		"enforces cross-domain admission eligibility, version pinning, idempotency, and turn execution on the real Checkfu model",
+		"enforces cross-domain admission eligibility, version pinning, and turn execution on the real Checkfu model",
 		() => {
 			const agent = Agent.ref(AgentId.make("agent_verify_1"))
 			const boundedAgentId = BoundedAgentId.make(agent.id)
@@ -120,20 +111,11 @@ describe("Checkfu unified hosted model stories", () => {
 			const sessionV1 = Session.ref(SessionId.make("sess_verify_v1"))
 			const sessionLatest = Session.ref(SessionId.make("sess_verify_latest"))
 			const sessionRejected = Session.ref(SessionId.make("sess_verify_rejected"))
-			const batch = IdempotencyClaim.ref(IdempotencyClaimId.make("batch_verify_1"))
 			const reqId = `${sessionV1.id}:turn:1:req:1`
 			const envConfig = { type: "cloud" as const, networking: { type: "unrestricted" as const } }
 
 			return story(
 				Story.clock(t0),
-
-				// IdempotencyClaim idempotency: initial claim, identical retry no-op, conflicting fingerprint 409.
-				Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: "fp_alpha" })),
-				Story.then(batch, new IdempotencyKeyClaimed({ fingerprint: "fp_alpha" })),
-				Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: "fp_alpha" })),
-				Story.then(batch),
-				Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: "fp_beta" })),
-				Story.rejected(new IdempotencyKeyConflict({ claim_id: batch.id })),
 
 				// Reject admission before Agent exists.
 				Story.when(
@@ -483,60 +465,4 @@ describe("Checkfu unified hosted model stories", () => {
 			)
 		},
 	)
-
-	it("allows zero-event retries only for matching fingerprints and rejects every distinct fingerprint pair with IdempotencyKeyConflict", async () => {
-		const distinctCount = await Effect.runPromise(
-			Effect.gen(function* () {
-				const fingerprintArb = Arbitrary.schema(RequestFingerprint)
-				const left = yield* Arbitrary.sampleEffect(fingerprintArb, {
-					count: 50,
-					seed: "event-batch-fp-left",
-				})
-				const right = yield* Arbitrary.sampleEffect(fingerprintArb, {
-					count: 50,
-					seed: "event-batch-fp-right",
-				})
-				const pairs: ReadonlyArray<readonly [string, string]> = [
-					["a", "b"],
-					["a", "a "],
-					["fp_prefix", "fp_prefix_extra"],
-					["x".repeat(128), `${"x".repeat(127)}y`],
-					...left.map((fp1, index): readonly [string, string] => [fp1, right[index]!]),
-				]
-				let count = 0
-				for (let index = 0; index < pairs.length; index++) {
-					const [fp1, fp2] = pairs[index]!
-					const batch = IdempotencyClaim.ref(IdempotencyClaimId.make(`batch_prop_${index}`))
-					if (fp1 === fp2) {
-						yield* story(
-							Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
-							Story.then(batch, new IdempotencyKeyClaimed({ fingerprint: fp1 })),
-							Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-							Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp2 })),
-							Story.then(batch),
-							Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						)
-						continue
-					}
-					count += 1
-					yield* story(
-						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
-						Story.then(batch, new IdempotencyKeyClaimed({ fingerprint: fp1 })),
-						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
-						Story.then(batch),
-						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp2 })),
-						Story.rejected(new IdempotencyKeyConflict({ claim_id: batch.id })),
-						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-						Story.when(new ClaimIdempotencyKey({ claim_id: batch.id, fingerprint: fp1 })),
-						Story.then(batch),
-						Story.state(batch, { _tag: "Claimed", fingerprint: fp1 }),
-					)
-				}
-				return count
-			}),
-		)
-		expect(distinctCount).toBeGreaterThanOrEqual(40)
-	})
 })

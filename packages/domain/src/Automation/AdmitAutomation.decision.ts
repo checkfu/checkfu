@@ -34,6 +34,9 @@ export class AdmitAutomationDecision extends Domain.Decision(AdmitAutomation, {
 		automation: cmd.automation_id,
 	}),
 	decide: ({ agent, environment, capacity, automation }, cmd) => {
+		if (automation.state.status !== "") {
+			return new AutomationAlreadyExists({ automation_id: automation.id })
+		}
 		if (!isUsableSchedule(cmd.schedule.expression, cmd.schedule.timezone)) {
 			return new AutomationScheduleUnusable({
 				expression: cmd.schedule.expression,
@@ -54,9 +57,6 @@ export class AdmitAutomationDecision extends Domain.Decision(AdmitAutomation, {
 		}
 		if (environment.state.status !== "active") {
 			return new EnvironmentArchivedError({ environment_id: environment.id })
-		}
-		if (automation.state.status !== "") {
-			return new AutomationAlreadyExists({ automation_id: automation.id })
 		}
 		if (capacity.state.reserved >= MAX_LIVE_AUTOMATIONS) {
 			return new AutomationLimitReached({ limit: MAX_LIVE_AUTOMATIONS })

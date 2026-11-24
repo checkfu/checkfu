@@ -45,7 +45,6 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
-import { IdempotencyClaim } from "../src/IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import {
 	AdmitSession,
 	BoundedAgentId,
@@ -108,9 +107,6 @@ const STANDING = {
 	"Session.AbandonedTurnEnds": "proved",
 	"Session.AgentMessageEndsTheTurn": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
-	"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": "proved",
-	"IdempotencyClaim.ClaimedFingerprintNeverChanges": "proved",
-	"IdempotencyClaim.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
 	"Automation.ReportedNeverExceedsRuns": "proved",
@@ -148,7 +144,6 @@ const STANDING = {
 	"Checkfu.HostedViewsMatchAggregates": "checked",
 	"Checkfu.AutomationViewsMatchAutomations": "checked",
 	"Checkfu.AutomationDirectoryListsLiveAutomations": "checked",
-	"Checkfu.AnIdempotencyKeyIsClaimed": "reached",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -259,12 +254,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			(outcome) =>
 				`${outcome.aggregate === undefined ? "" : `${outcome.aggregate}.`}${outcome.command} ${outcome.kind === "records" ? "→" : "✗"} ${outcome.tag}`,
 		)
-		expect(exploredOutcomes).toContain(
-			"IdempotencyClaim.ClaimIdempotencyKey → idempotency_key.claimed",
-		)
-		expect(exploredOutcomes).toContain(
-			"IdempotencyClaim.ClaimIdempotencyKey ✗ IdempotencyKeyConflict",
-		)
+		expect(exploredOutcomes).toContain("Session.ClaimIdempotencyKey → idempotency_key.claimed")
 	}, 600_000)
 
 	it("preserves all cross-domain Checkfu invariants after post-admission UpdateAgent, ArchiveAgent, ArchiveEnvironment, DeleteEnvironment, and ArchiveSession mutations", async () => {
@@ -445,7 +435,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							Agent: yield* readAggregate(Agent),
 							Environment: yield* readAggregate(Environment),
 							Session: yield* readAggregate(Session),
-							IdempotencyClaim: yield* readAggregate(IdempotencyClaim),
 							AgentView: yield* readView(AgentView),
 							AgentVersionByNumberView: yield* readView(AgentVersionByNumberView),
 							EnvironmentView: yield* readView(EnvironmentView),

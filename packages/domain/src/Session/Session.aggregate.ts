@@ -13,6 +13,7 @@ import {
 	SessionStatusIdle,
 	SpanModelRequestEnd,
 } from "./CommitModelReply.command.ts"
+import { ClaimIdempotencyKey, IdempotencyKeyClaimed } from "./ClaimIdempotencyKey.command.ts"
 import { CreateSession, SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { FailModelRequest } from "./FailModelRequest.command.ts"
 import { InterruptModelRequest } from "./InterruptModelRequest.command.ts"
@@ -153,6 +154,7 @@ export class Session extends Domain.Aggregate("Session", {
 		InterruptModelRequest,
 		AbandonTurn,
 		ArchiveSession,
+		ClaimIdempotencyKey,
 	],
 	keyOf: (cmd) => cmd.session_id,
 	invariants: {
@@ -438,6 +440,14 @@ export class Session extends Domain.Aggregate("Session", {
 			}
 			return [new SessionStatusTerminated(), new SessionArchived()]
 		},
+
+		ClaimIdempotencyKey: (state, cmd, ctx) => {
+			const active = requireActive(state, ctx.id)
+			if (active._tag !== "Idle" && active._tag !== "Running") {
+				return active
+			}
+			return [new IdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })]
+		},
 	},
 	evolve: {
 		"session.created": () => ({ _tag: "Idle" as const, turn: 0 }),
@@ -485,6 +495,7 @@ export class Session extends Domain.Aggregate("Session", {
 			state._tag === "Terminated" ? state : { _tag: "Terminated" as const, archived: false },
 		"session.archived": (state) =>
 			state._tag === "Terminated" ? { _tag: "Terminated" as const, archived: true } : state,
+		"idempotency_key.claimed": (state) => state,
 	},
 	reply: {
 		SendUserMessage: (state) => ({

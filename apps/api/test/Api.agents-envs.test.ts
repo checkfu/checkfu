@@ -2075,7 +2075,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(recoveredRetiredKeyRes.status).toBe(201)
 
-					const sendsBeforeConflict = sentAgentIds.length
+					const agentBeforeConflict = yield* agents.get(AgentId.make(agent1.id))
 					const conflictAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -2085,9 +2085,12 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					expect(conflictAgentRes.status).toBe(409)
 					expect(yield* Effect.promise(() => conflictAgentRes.json())).toMatchObject({
 						type: "error",
-						error: { type: "conflict_error" },
+						error: {
+							type: "conflict_error",
+							message: "Idempotency-Key was already used for a different request.",
+						},
 					})
-					expect(sentAgentIds).toHaveLength(sendsBeforeConflict)
+					expect(yield* agents.get(AgentId.make(agent1.id))).toEqual(agentBeforeConflict)
 
 					const unkeyedAgent1Res = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -2218,7 +2221,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(stillDeletedEnvRes.status).toBe(404)
 
-					const envSendsBeforeConflict = sentEnvironmentIds.length
+					const envBeforeConflict = yield* realEnvironments.get(EnvironmentId.make(env1.id))
 					const conflictEnvRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",
@@ -2228,9 +2231,14 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					expect(conflictEnvRes.status).toBe(409)
 					expect(yield* Effect.promise(() => conflictEnvRes.json())).toMatchObject({
 						type: "error",
-						error: { type: "conflict_error" },
+						error: {
+							type: "conflict_error",
+							message: "Idempotency-Key was already used for a different request.",
+						},
 					})
-					expect(sentEnvironmentIds).toHaveLength(envSendsBeforeConflict)
+					expect(yield* realEnvironments.get(EnvironmentId.make(env1.id))).toEqual(
+						envBeforeConflict,
+					)
 
 					const unkeyedEnv1Res = yield* sendRequest(apiFetch, {
 						method: "POST",

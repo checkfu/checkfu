@@ -22,7 +22,6 @@ import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
-import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -34,8 +33,9 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { CheckfuApi } from "./Api.ts"
 import {
-	claimCreate,
+	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
+	createCommandId,
 	handled,
 	idempotentId,
 	isPending,
@@ -127,7 +127,6 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
 		const directories = yield* AutomationDirectory
-		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 
 		const committed = (id: AutomationId) =>
@@ -214,20 +213,15 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						text,
 						schedule: payload.schedule,
 					}
-					const commandId = yield* claimCreate(
-						idempotencyClaims,
-						digest,
-						"automation",
-						idempotencyKey,
-						command,
-					)
+					const commandId = yield* createCommandId(digest, "automation", idempotencyKey, command)
 					const id = AutomationId.make(
 						yield* idempotentId(digest, "auto", ["create", "automation", "id", idempotencyKey]),
 					)
-					const receipt = yield* admission.send(
-						new AdmitAutomation({ automation_id: id, ...command }),
-						{ commandId },
-					)
+					const receipt = yield* admission
+						.send(new AdmitAutomation({ automation_id: id, ...command }), { commandId })
+						.pipe(
+							Effect.catchTag("AutomationAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+						)
 					const committed = commitForStream(receipt.commits, `Automation/${id}`)
 					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }

@@ -20,15 +20,12 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { resolveCatalogModel } from "../Pi/PiCatalog.ts"
-import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
-	claimIdempotency,
+	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
-	createClaimId,
 	createCommandId,
-	createFingerprint,
 	handled,
 	idempotentId,
 	isPending,
@@ -58,7 +55,6 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const updateAgent = yield* UpdateAgentDecision
 		const agentViews = yield* AgentView
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
-		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const isSupportedModel = yield* IsSupportedAgentModel
@@ -166,45 +162,35 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						versionId = AgentVersionId.make(
 							yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
 						)
-						const batchId = yield* createClaimId(digest, "agent", idempotencyKey)
-						const fingerprint = yield* createFingerprint(digest, {
-							name: payload.name,
-							model,
-							system,
-							description,
-						})
-						if (!isSupportedModel(model.id)) {
-							const claim = yield* idempotencyClaims.get(batchId)
-							if (claim._tag === "Unclaimed") {
-								return yield* unsupportedModel(model)
-							}
-							if (claim.fingerprint !== fingerprint) {
-								yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
-							}
-							const committed = yield* agents.get(id)
-							if (committed.status === "") {
-								return yield* unsupportedModel(model)
-							}
-						} else {
-							yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
+						if (!isSupportedModel(model.id) && (yield* agents.get(id)).status === "") {
+							return yield* unsupportedModel(model)
 						}
-						sendOptions = { commandId: yield* createCommandId(digest, "agent", idempotencyKey) }
+						sendOptions = {
+							commandId: yield* createCommandId(digest, "agent", idempotencyKey, {
+								name: payload.name,
+								model,
+								system,
+								description,
+							}),
+						}
 					} else {
 						yield* supported(model)
 						id = AgentId.make(yield* randomId(random, "agent"))
 						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
 					}
-					const receipt = yield* createAgent.send(
-						new CreateAgent({
-							agent_id: id,
-							version_id: versionId,
-							name: payload.name,
-							model,
-							system,
-							description,
-						}),
-						sendOptions,
-					)
+					const receipt = yield* createAgent
+						.send(
+							new CreateAgent({
+								agent_id: id,
+								version_id: versionId,
+								name: payload.name,
+								model,
+								system,
+								description,
+							}),
+							sendOptions,
+						)
+						.pipe(Effect.catchTag("AgentAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)))
 					return yield* loadCommittedAgentVersion(
 						id,
 						receipt.reply.version,
