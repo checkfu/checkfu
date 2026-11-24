@@ -9,7 +9,8 @@ export { MemoryIndexEntry }
 
 /**
  * Every memory a store holds, without its content: what a listing shows, and
- * what a workspace compares its copy against. A store holds at most 2,000.
+ * what a workspace compares its copy against. A store holds at most 1,000, so the index stays
+ * well within the one row it is stored in.
  */
 export class MemoryIndex extends Domain.View("MemoryIndex", {
 	version: 1,

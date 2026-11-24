@@ -470,9 +470,11 @@ export const MemoryId = Schema.String.check(
 ).pipe(Schema.brand("MemoryId"))
 export type MemoryId = typeof MemoryId.Type
 
-export const MAX_MEMORIES_PER_STORE = 2000
+// A store's index of its memories is kept as one stored row, which holds 2 MiB. At these limits a
+// full index of the longest paths in 3-byte characters is about 1 MiB.
+export const MAX_MEMORIES_PER_STORE = 1000
 export const MAX_MEMORY_CONTENT_BYTES = 100_000
-export const MAX_MEMORY_PATH_LENGTH = 1024
+export const MAX_MEMORY_PATH_LENGTH = 256
 export const MAX_MEMORY_STORE_NAME_LENGTH = 256
 export const MAX_MEMORY_STORE_DESCRIPTION_LENGTH = 1024
 

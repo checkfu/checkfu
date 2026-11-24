@@ -156,7 +156,7 @@ curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/memory_stores/$STORE_ID/memor
 - `GET /v1/memory_stores/{id}/memories` lists memories without their content. `path_prefix=/notes/` lists one directory's subtree, and `depth=1` only its own memories.
 - `POST /v1/memory_stores/{id}/memories/{memory_id}` replaces a memory's content. Pass `precondition: {type: "content_sha256", content_sha256}` to apply the change only if the memory is unchanged since you read it; a mismatch answers 409.
 - A memory's id is derived from its store and path, so creating at a path that holds a memory answers 409.
-- A memory holds up to 100 kB and a store up to 2,000 memories.
+- A memory holds up to 100 kB at a path of up to 256 characters, and a store up to 1,000 memories.
 - `POST /v1/memory_stores/{id}/archive` makes a store read-only. `DELETE` makes it and its memories unreachable.
 
 ## Commands

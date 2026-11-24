@@ -1093,7 +1093,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						path: {
 							type: "string",
-							maxLength: 1024,
+							maxLength: 256,
 							pattern:
 								"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 							description: "Path inside the store, such as /notes/todo.md",
