@@ -926,6 +926,46 @@ describe("saved connection", () => {
 		}),
 	)
 
+	it.live("login accepts only the API's own confirmation that the key is valid", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			for (const confirmation of [
+				Response.json({}),
+				Response.json({ type: "agent" }),
+				new Response("<html>ok</html>"),
+				errorEnvelope(404, "not_found_error"),
+			]) {
+				const files = virtualFiles()
+				const result = yield* cli.run(["--base-url", "https://proxy.example", "login"], {
+					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
+					files,
+					interceptFetch: (_next, request) =>
+						Promise.resolve(
+							request.headers.has("authorization")
+								? confirmation.clone()
+								: errorEnvelope(401, "authentication_error"),
+						),
+				})
+				expect(result.exitCode).toBe(1)
+				expect(files[CONFIG_FILE]).toBeUndefined()
+			}
+
+			const files = virtualFiles()
+			const accepted = yield* cli.run(["--base-url", "https://proxy.example", "login"], {
+				env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
+				files,
+				interceptFetch: (_next, request) =>
+					Promise.resolve(
+						request.headers.has("authorization")
+							? Response.json({ type: "authentication_verified" })
+							: errorEnvelope(401, "authentication_error"),
+					),
+			})
+			expect(accepted.errorMessage).toBeUndefined()
+			expect(JSON.parse(files[CONFIG_FILE] ?? "")).toMatchObject({ url: "https://proxy.example" })
+		}),
+	)
+
 	it.live("login rejects a mistyped path prefix even though unknown routes answer 404", () =>
 		Effect.gen(function* () {
 			const cli = yield* makeTestServer()
