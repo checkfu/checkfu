@@ -25,7 +25,8 @@
 		"./theme-script": "./src/theme-script.ts"
 	},
 	"scripts": {
-		"typecheck": "effect-tsgo tsc --noEmit"
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
 	},
 	"dependencies": {
 		"class-variance-authority": "0.7.1",
@@ -37,7 +38,8 @@
 	"devDependencies": {
 		"@types/react": "19.3.0",
 		"react": "19.3.1",
-		"tailwindcss": "4.3.5"
+		"tailwindcss": "4.3.5",
+		"vitest": "catalog:"
 	},
 	"peerDependencies": {
 		"react": "^19.3.0",

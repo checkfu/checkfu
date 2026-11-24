@@ -155,6 +155,7 @@
         "@types/react": "19.3.0",
         "react": "19.3.1",
         "tailwindcss": "4.3.5",
+        "vitest": "catalog:",
       },
       "peerDependencies": {
         "react": "^19.3.0",
