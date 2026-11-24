@@ -1943,6 +1943,45 @@ describe("turn engine", () => {
 		}
 	})
 
+	it("returns a submitted turn's reply, and stops a cancelled one, when the provider key has since gone", async () => {
+		let keyed = true
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "Saved", 1, 1)),
+			1,
+			undefined,
+			() => keyed,
+		)
+		const turn = (number: number): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text: "hello",
+		})
+		try {
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(1)))).toMatchObject({
+				ok: true,
+			})
+			await Effect.runPromise(backend.abort("turn:2"))
+			keyed = false
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(1)))).toMatchObject({
+				ok: true,
+				reply: { text: "Saved" },
+			})
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(2)))).toMatchObject({
+				ok: false,
+				error: { _tag: "TurnInterrupted" },
+			})
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(3)))).toMatchObject({
+				ok: false,
+				error: { error_type: "missing_api_key_error" },
+			})
+		} finally {
+			await backend.close()
+		}
+	})
+
 	it("answers for a provider key only when the session object is bound to one", () => {
 		const backend = makePiHarnessBackend(
 			{} as unknown as Parameters<typeof makePiHarnessBackend>[0],

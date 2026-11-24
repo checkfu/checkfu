@@ -415,7 +415,7 @@ const inFlightAdmissions = new WeakMap<PiDurableBackend, Map<string, Set<Latch.L
 const admitPiTurn = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<boolean | "history_required"> => {
+): Effect.Effect<boolean | "history_required" | "missing_key"> => {
 	const operationId = request.operationId
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
@@ -448,6 +448,9 @@ const admitPiTurn = (
 							}
 							if (backend.isCancelled(operationId)) {
 								return false
+							}
+							if (!backend.hasApiKey(request.provider)) {
+								return "missing_key" as const
 							}
 							const rooted = await backend.ensureRoot(
 								agent,
@@ -627,7 +630,8 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 	request: PiTurnRequest,
 ): Effect.fn.Return<PiTurnResult> {
 	const operationId = request.operationId
-	if (!backend.hasApiKey(request.provider)) {
+	const admitted = yield* admitPiTurn(backend, request)
+	if (admitted === "missing_key") {
 		return {
 			ok: false,
 			error: {
@@ -638,7 +642,6 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 			},
 		}
 	}
-	const admitted = yield* admitPiTurn(backend, request)
 	if (admitted === "history_required") {
 		return admitted
 	}
