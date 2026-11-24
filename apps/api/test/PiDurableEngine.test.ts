@@ -2485,4 +2485,45 @@ describe("turn engine", () => {
 			await real.close()
 		}
 	})
+	it("keeps every turn the session did not publish out of the next turn's context, even after Pi answered it", async () => {
+		const contexts: Array<string> = []
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				contexts.push(
+					context.messages
+						.map((message) =>
+							typeof message.content === "string"
+								? message.content
+								: message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+						)
+						.join(" | "),
+				)
+				return makeAssistantReply(model, null, `Echo ${extractLastUserText(context)}`, 1, 1)
+			}),
+		)
+		const turn = (
+			number: number,
+			text: string,
+			unpublished: ReadonlyArray<number> = [],
+		): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+			unpublishedOperationIds: unpublished.map((n) => `turn:${n}`),
+		})
+		try {
+			// Pi answers turns 1 and 2, but the domain had already abandoned both, so neither reply
+			// reached the session.
+			await Effect.runPromise(runPiDurableTurn(backend, turn(1, "lost")))
+			await Effect.runPromise(runPiDurableTurn(backend, turn(2, "also lost", [1])))
+			await Effect.runPromise(runPiDurableTurn(backend, turn(3, "kept", [1, 2])))
+			await Effect.runPromise(runPiDurableTurn(backend, turn(4, "next")))
+			expect(contexts).toEqual(["lost", "also lost", "kept", "kept | Echo kept | next"])
+		} finally {
+			await backend.close()
+		}
+	})
 })

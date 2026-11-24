@@ -16,11 +16,14 @@ export const TurnInputState = Schema.Struct({
 	harness_generation: NonNegativeInt,
 	input: Schema.Array(MessageText),
 	unsent: Schema.Array(MessageText),
+	// The last turn whose reply the session published. A later turn's reply never reached the
+	// session, so the model must not keep it. Absent in state written before it existed.
+	last_reply_turn: Schema.optionalKey(NonNegativeInt),
 })
 export type TurnInputState = typeof TurnInputState.Type
 
 export class TurnInput extends Domain.View("TurnInput", {
-	version: 2,
+	version: 3,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(TurnInputState),
@@ -44,6 +47,7 @@ export class TurnInput extends Domain.View("TurnInput", {
 						harness_generation: 0,
 						input: [],
 						unsent: [],
+						last_reply_turn: 0,
 					},
 		"user.message": (state, e) =>
 			state === null
@@ -65,6 +69,7 @@ export class TurnInput extends Domain.View("TurnInput", {
 						input: state.unsent,
 						unsent: [],
 					},
+		"agent.message": (state) => (state === null ? null : { ...state, last_reply_turn: state.turn }),
 		"session.status_idle": (state, e) =>
 			state === null ? null : { ...state, harness_generation: e.generation, input: [] },
 		"session.status_terminated": (state) =>

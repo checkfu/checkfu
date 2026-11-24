@@ -1736,7 +1736,12 @@ describe("Sessions", () => {
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Four" })),
 				Story.then(session, text("Four"), new SessionStatusRunning({ turn: 4, generation: 0 })),
 				Story.state(session, { _tag: "Running", turn: 4, generation: 0 }),
-				Story.view(TurnInput, session, { turn: 4, harness_generation: 0, input: ["Four"] }),
+				Story.view(TurnInput, session, {
+					turn: 4,
+					harness_generation: 0,
+					input: ["Four"],
+					last_reply_turn: 1,
+				}),
 			)
 		},
 	)
@@ -1932,6 +1937,7 @@ describe("Sessions", () => {
 					session_id: session.id,
 					turn: 1,
 					generation: 0,
+					last_reply_turn: 0,
 				}),
 				Story.advance("10 minutes"),
 				Story.then(
@@ -1956,7 +1962,12 @@ describe("Sessions", () => {
 					}),
 				),
 				Story.state(session, { _tag: "Idle", turn: 1, generation: 1 }),
-				Story.view(TurnInput, session, { turn: 1, harness_generation: 1, input: [] }),
+				Story.view(TurnInput, session, {
+					turn: 1,
+					harness_generation: 1,
+					input: [],
+					last_reply_turn: 0,
+				}),
 				Story.call(Harness.interrupt, { session_id: session.id, turn: 1, generation: 0 }),
 				Story.succeed(Harness.interrupt, undefined),
 				Story.fail("slow", Harness.runTurn, { _tag: "TurnInterrupted" }),
@@ -1974,6 +1985,7 @@ describe("Sessions", () => {
 					turn: 2,
 					generation: 1,
 					input: ["Next"],
+					last_reply_turn: 0,
 				}),
 				Story.succeed(Harness.runTurn, {
 					thinking: null,
@@ -1993,6 +2005,7 @@ describe("Sessions", () => {
 					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 2, generation: 1 }),
 				),
 				Story.state(session, { _tag: "Idle", turn: 2, generation: 1 }),
+				Story.view(TurnInput, session, { last_reply_turn: 2 }),
 			)
 		},
 	)

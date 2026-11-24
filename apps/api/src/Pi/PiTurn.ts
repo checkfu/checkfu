@@ -10,6 +10,7 @@ export const PiTurnRequest = Schema.Struct({
 	modelId: Schema.String,
 	system: Schema.NullOr(Schema.String),
 	text: Schema.String,
+	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 export type PiTurnRequest = typeof PiTurnRequest.Type
 

@@ -400,6 +400,11 @@ const admitPiTurn = (
 								}
 								break
 							}
+							// A turn the session never published a reply for (abandoned, failed or interrupted)
+							// must not reach the model, whatever Pi made of it.
+							for (const unpublished of request.unpublishedOperationIds ?? []) {
+								await backend.omitEntries(unpublished)
+							}
 							if (backend.isCancelled(operationId)) {
 								return false
 							}

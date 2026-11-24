@@ -85,6 +85,12 @@ export const HarnessTurnTimeout = Context.Reference<Duration.Input>(
 
 const turnOperationId = (turn: number) => `turn:${turn}`
 
+// Every turn after the last published reply and before this one.
+const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<string> =>
+	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
+		turnOperationId(lastReplyTurn + 1 + i),
+	)
+
 export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
@@ -170,6 +176,9 @@ export const PiDurableHarnessLive = boundedHarness(
 							modelId: resolved.model.id,
 							system: version.system,
 							text: userText,
+							...(args.last_reply_turn === undefined
+								? {}
+								: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
 						}
 						const attemptCall = Effect.gen(function* () {
 							const { attempt } = yield* Schedule.CurrentMetadata
