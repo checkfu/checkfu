@@ -58,6 +58,7 @@ const fakeAlchemy = (
 		readonly url?: string
 		/** The MCP Worker's URL, for a stack that deploys one. */
 		readonly mcp?: string
+		readonly app?: string
 		readonly deployExitCode?: number
 	} = {},
 ) => {
@@ -96,6 +97,7 @@ const fakeAlchemy = (
 						value: {
 							api: options.url ?? DEPLOYED_URL,
 							...(options.mcp === undefined ? {} : { mcp: options.mcp }),
+							...(options.app === undefined ? {} : { app: options.app }),
 						},
 					})
 			}
@@ -199,14 +201,19 @@ describe("checkfu deploy", () => {
 			expect(result.stderr).not.toContain("--base-url")
 			expect(result.stderr).not.toContain(TEST_API_KEY)
 			expect(result.stderr).not.toContain("MCP")
+			expect(result.stderr).not.toContain("Dashboard")
 
 			const withMcp = yield* cli.run(["deploy"], {
 				env: { CHECKFU_CONFIG_DIR: "/config", ANTHROPIC_API_KEY: "sk-ant-from-env" },
 				files,
-				spawn: fakeAlchemy([], { mcp: "https://checkfu-mcp.example.workers.dev/" }),
+				spawn: fakeAlchemy([], {
+					mcp: "https://checkfu-mcp.example.workers.dev/",
+					app: "https://checkfu-app.example.workers.dev/",
+				}),
 			})
 			expect(withMcp.errorMessage).toBeUndefined()
 			expect(withMcp.stderr).toContain("  MCP        https://checkfu-mcp.example.workers.dev/mcp\n")
+			expect(withMcp.stderr).toContain("  Dashboard  https://checkfu-app.example.workers.dev\n")
 		}),
 	)
 
