@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
@@ -47,6 +48,13 @@ export interface Checkout {
 	/** The Bun that runs Alchemy, and what it needs in its environment to act as Bun. */
 	readonly runtime: string
 	readonly runtimeEnv: Readonly<Record<string, string>>
+	/**
+	 * Flags for that Bun. The checkout's own bunfig switches `.env` loading off so that
+	 * `bun checkfu` cannot treat a key in it as exported. Alchemy should load the checkout's
+	 * `.env` files the way Bun does by default, so it gets the CLI's bunfig, which sets
+	 * nothing about `.env`, instead.
+	 */
+	readonly runtimeArgs: ReadonlyArray<string>
 	/** How long a fresh deployment gets to start answering before the deploy is reported as failed. */
 	readonly readyWithin: Duration.Input
 }
@@ -57,6 +65,7 @@ export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
 		// The binary runs Alchemy by starting itself as a plain Bun.
 		runtime: process.execPath,
 		runtimeEnv: isStandalone ? { BUN_BE_BUN: "1" } : {},
+		runtimeArgs: [`--config=${join(checkoutRoot, "apps", "cli", "bunfig.toml")}`],
 		readyWithin: "90 seconds",
 	}),
 })
@@ -219,6 +228,7 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 				ChildProcess.make(
 					target.checkout.runtime,
 					[
+						...target.checkout.runtimeArgs,
 						path.join(target.checkout.root, "node_modules", "alchemy", "bin", "cli.js"),
 						...args,
 						...Option.match(target.envFile, {
@@ -260,6 +270,7 @@ const ask = <A>(
 				ChildProcess.make(
 					target.checkout.runtime,
 					[
+						...target.checkout.runtimeArgs,
 						path.join(target.checkout.root, "apps", "cli", "scripts", "alchemy-query.ts"),
 						name,
 						target.profile,

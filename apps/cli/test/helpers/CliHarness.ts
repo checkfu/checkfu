@@ -321,6 +321,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						root: "/checkout",
 						runtime: "bun",
 						runtimeEnv: {},
+						runtimeArgs: [],
 						readyWithin: options?.readyWithin ?? "300 millis",
 					}),
 					FetchHttpClient.layer.pipe(
