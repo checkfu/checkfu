@@ -14,7 +14,7 @@ import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 export { AutomationSnapshot }
 
 export class AutomationView extends Domain.View("AutomationView", {
-	version: 4,
+	version: 5,
 	from: [Automation],
 	key: Automation,
 	state: Schema.NullOr(AutomationSnapshot),
@@ -45,6 +45,7 @@ export class AutomationView extends Domain.View("AutomationView", {
 						pause_reason: null,
 						runs: 0,
 						activation: 0,
+						revision: 1,
 						upcoming: upcomingOccurrences(
 							e.schedule.expression,
 							e.schedule.timezone,
@@ -89,15 +90,15 @@ export class AutomationView extends Domain.View("AutomationView", {
 						text: e.text,
 						schedule: e.schedule,
 						activation: e.activation,
-						upcoming:
-							state.status === "active"
-								? upcomingOccurrences(
-										e.schedule.expression,
-										e.schedule.timezone,
-										DateTime.toEpochMillis(ctx.at),
-										UPCOMING_FIRINGS,
-									)
-								: state.upcoming,
+						revision: e.revision,
+						upcoming: e.rescheduled
+							? upcomingOccurrences(
+									e.schedule.expression,
+									e.schedule.timezone,
+									DateTime.toEpochMillis(ctx.at),
+									UPCOMING_FIRINGS,
+								)
+							: state.upcoming,
 						updated_at: ctx.at,
 					},
 		"automation.archived": (state, _e, ctx) =>

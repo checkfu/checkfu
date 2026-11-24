@@ -180,15 +180,19 @@ const collectRequestParts = (
 						body = { ...val }
 					} else if (isPlainRecord(val) && "type" in val) {
 						body = { [repeatFlag.wireName]: [val] }
+					} else if (isPlainRecord(val) && !repeatFlag.required) {
+						body = { ...val }
 					} else {
 						return yield* usageError(
 							`Expected stdin to be { ${repeatFlag.wireName}: [...] }, an array, or a single item object.`,
 						)
 					}
-				} else {
+				} else if (repeatFlag.required) {
 					return yield* usageError(
 						`Provide at least one item via --${repeatFlag.flagName} or stdin.`,
 					)
+				} else {
+					body = {}
 				}
 			} else {
 				body = { ...(yield* readPipedStdinRecord(spec.cliLabel)) }

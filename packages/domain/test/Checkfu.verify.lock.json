@@ -298,21 +298,21 @@
 				"kind": "transition",
 				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
-			"UpdateAutomation.OnlyALiveAutomationOnAnActiveAgentAndEnvironmentIsUpdated": {
-				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t\t[before.automation.status === \"active\", before.automation.status === \"paused\"].some(\n\t\t\t\t\t(live) => live,\n\t\t\t\t),\n\t\t\t\tafter.automation.status === before.automation.status,\n\t\t\t].every((ok) => ok)"
+			"Automation.RevisedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.revision === 0].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.revision > 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
-			"UpdateAutomation.AnUpdateRestartsTheScheduleOnlyOfAnActiveAutomation": {
+			"Automation.OnlyAnUpdateOfTheCurrentRevisionRevisesIt": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tafter.automation.activation ===\n\t\t\t(before.automation.status === \"active\"\n\t\t\t\t? before.automation.activation + 1\n\t\t\t\t: before.automation.activation)"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.revision === before.revision,\n\t\t\t\t[before.status === \"\", after.revision === 1].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UpdateAutomation\",\n\t\t\t\t\t[before.status === \"active\", before.status === \"paused\"].some((live) => live),\n\t\t\t\t\tcommand._tag !== \"UpdateAutomation\" || command.expected_revision === before.revision,\n\t\t\t\t\tafter.revision === before.revision + 1,\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
-			"UpdateAutomation.AnUpdatePinsAVersionWithinTheAgentHead": {
+			"Automation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": {
 				"kind": "transition",
-				"source": "({ before, command }) =>\n\t\t\tcommand.agent_version === null || command.agent_version <= before.agent.version"
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateAutomation\" ||\n\t\t\tafter.activation ===\n\t\t\t\t([before.status === \"active\", command.reschedule, after.revision > before.revision].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t)\n\t\t\t\t\t? before.activation + 1\n\t\t\t\t\t: before.activation)"
 			},
-			"UpdateAutomation.AnUpdateLeavesRunsAgentAndEnvironmentUnchanged": {
+			"Automation.AnUpdateLeavesRunsAlone": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.automation.runs === before.automation.runs,\n\t\t\t\tafter.automation.reported === before.automation.reported,\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t].every((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateAutomation\" ||\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tafter.reported === before.reported,\n\t\t\t\tafter.last_scheduled_at === before.last_scheduled_at,\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}

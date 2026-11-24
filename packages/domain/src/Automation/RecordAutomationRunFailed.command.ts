@@ -23,6 +23,7 @@ export class RecordAutomationRunFailed extends Domain.Command("RecordAutomationR
 		run: PositiveInt,
 		trigger: AutomationTrigger,
 		scheduled_at: Schema.NullOr(NonNegativeInt),
+		revision: PositiveInt,
 		error_type: ErrorType,
 		message: ErrorMessage,
 		unrecoverable: Schema.Boolean,

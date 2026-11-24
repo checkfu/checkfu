@@ -47,7 +47,12 @@ import {
 } from "../src/Session/AdmitSession.command.ts"
 import { AutomationPaused, PauseAutomation } from "../src/Automation/PauseAutomation.command.ts"
 import { AutomationArchivedError } from "../src/Automation/AutomationArchived.rejection.ts"
-import { AutomationUpdated, UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
+import {
+	AutomationRevisionConflict,
+	AutomationUpdated,
+	UpdateAutomation,
+} from "../src/Automation/UpdateAutomation.command.ts"
+import { sameSchedule } from "../src/Automation/Schedule.ts"
 import { AutomationRunFailed } from "../src/Automation/RecordAutomationRunFailed.command.ts"
 import { AutomationRunStarted } from "../src/Automation/RecordAutomationRunStarted.command.ts"
 import { AutomationFired, RunAutomation } from "../src/Automation/RunAutomation.command.ts"
@@ -136,14 +141,19 @@ const admit = (overrides: Partial<typeof config> = {}, id = automation.id) =>
 		environment_id: BoundedEnvironmentId.make(overrides.environment_id ?? config.environment_id),
 	})
 
-const update = (overrides: Partial<typeof config> = {}) =>
+const update = (changes: Partial<typeof config>, expected_revision = 1) =>
 	new UpdateAutomation({
 		automation_id: automation.id,
+		expected_revision,
+		reschedule: !sameSchedule(changes.schedule ?? config.schedule, config.schedule),
 		...config,
-		...overrides,
-		agent_id: BoundedAgentId.make(overrides.agent_id ?? config.agent_id),
-		environment_id: BoundedEnvironmentId.make(overrides.environment_id ?? config.environment_id),
+		...changes,
 	})
+
+const updated = (
+	changes: Partial<typeof config>,
+	{ activation, rescheduled }: { readonly activation: number; readonly rescheduled: boolean },
+) => new AutomationUpdated({ ...config, ...changes, revision: 2, activation, rescheduled })
 
 const noon = {
 	name: "Noon report",
@@ -275,7 +285,7 @@ describe("Checkfu automations", () => {
 			story(
 				...created(),
 				Story.when(update(noon)),
-				Story.then(automation, new AutomationUpdated({ ...config, ...noon, activation: 1 })),
+				Story.then(automation, updated(noon, { activation: 1, rescheduled: true })),
 				Story.view(AutomationView, automation, {
 					...noon,
 					status: "active",
@@ -297,7 +307,7 @@ describe("Checkfu automations", () => {
 		story(
 			...created(),
 			Story.when(update(noon)),
-			Story.then(automation, new AutomationUpdated({ ...config, ...noon, activation: 1 })),
+			Story.then(automation, updated(noon, { activation: 1, rescheduled: true })),
 			Story.when(
 				new FireAutomation({
 					automation_id: automation.id,
@@ -309,37 +319,85 @@ describe("Checkfu automations", () => {
 		),
 	)
 
-	it.effect(
-		"updates a paused automation without starting it, and refuses an archived one or an update it could not run",
-		() =>
-			story(
-				...created(),
-				Story.when(new PauseAutomation({ automation_id: automation.id })),
-				Story.then(automation, new AutomationPaused({ reason: "manual" })),
-				Story.when(update(noon)),
-				Story.then(automation, new AutomationUpdated({ ...config, ...noon, activation: 0 })),
-				Story.view(AutomationView, automation, { ...noon, status: "paused", activation: 0 }),
-				Story.clock(at("2026-01-01T12:00:00.000Z")),
-				Story.when(
-					update({ schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } }),
+	it.effect("updates a paused automation without starting it, and refuses an archived one", () =>
+		story(
+			...created(),
+			Story.when(new PauseAutomation({ automation_id: automation.id })),
+			Story.then(automation, new AutomationPaused({ reason: "manual" })),
+			Story.when(update(noon)),
+			Story.then(automation, updated(noon, { activation: 0, rescheduled: false })),
+			Story.view(AutomationView, automation, { ...noon, status: "paused", activation: 0 }),
+			Story.clock(at("2026-01-01T12:00:00.000Z")),
+			Story.when(new ArchiveAutomation({ automation_id: automation.id })),
+			Story.then(automation, new AutomationArchived()),
+			Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
+			Story.when(update(noon)),
+			Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
+		),
+	)
+
+	it.effect("keeps the armed firing when an update leaves the schedule as it was", () =>
+		story(
+			...created(),
+			Story.when(update({ name: "Renamed", description: "Same schedule." })),
+			Story.then(
+				automation,
+				updated(
+					{ name: "Renamed", description: "Same schedule." },
+					{ activation: 0, rescheduled: false },
 				),
-				Story.rejected(
-					new AutomationScheduleUnusable({ expression: "* * * * *", timezone: "UTC" }),
-				),
-				Story.when(update({ agent_id: AgentId.make("agent_missing") })),
-				Story.rejected(new AgentNotFound({ agent_id: AgentId.make("agent_missing") })),
-				Story.when(update({ agent_version: 2 })),
-				Story.rejected(new AgentVersionNotFound({ agent_id: agent.id, version: 2 })),
-				Story.when(update({ environment_id: EnvironmentId.make("env_missing") })),
-				Story.rejected(
-					new EnvironmentNotFound({ environment_id: EnvironmentId.make("env_missing") }),
-				),
-				Story.when(new ArchiveAutomation({ automation_id: automation.id })),
-				Story.then(automation, new AutomationArchived()),
-				Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
-				Story.when(update(noon)),
-				Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
 			),
+			Story.clock(at("2026-01-01T09:00:00.000Z")),
+			Story.then(
+				automation,
+				scheduled(1, "2026-01-01T09:00:00.000Z"),
+				startedOn(1, "2026-01-01T09:00:00.000Z"),
+			),
+			...opened(1, 1, { name: "Renamed", text: config.text }),
+		),
+	)
+
+	it.effect(
+		"renames an automation whose agent is archived, and repairs it by naming another",
+		() => {
+			const other = Agent.ref(AgentId.make("agent_002"))
+			return story(
+				...created(),
+				Story.given(other, new AgentCreated({ version: 1, version_id: v2, ...agentFields })),
+				Story.when(new ArchiveAgent({ agent_id: agent.id })),
+				Story.then(agent, new AgentArchived()),
+				Story.when(update({ name: "Renamed" })),
+				Story.then(automation, updated({ name: "Renamed" }, { activation: 0, rescheduled: false })),
+				Story.when(update({ name: "Renamed", agent_id: other.id }, 2)),
+				Story.then(
+					automation,
+					new AutomationUpdated({
+						...config,
+						name: "Renamed",
+						agent_id: other.id,
+						revision: 3,
+						activation: 0,
+						rescheduled: false,
+					}),
+				),
+			)
+		},
+	)
+
+	it.effect("refuses an update built on a revision that is no longer current", () =>
+		story(
+			...created(),
+			Story.when(update({ name: "Renamed" })),
+			Story.then(automation, updated({ name: "Renamed" }, { activation: 0, rescheduled: false })),
+			Story.when(update({ schedule: noon.schedule })),
+			Story.rejected(
+				new AutomationRevisionConflict({
+					automation_id: automation.id,
+					expected_revision: 1,
+					current_revision: 2,
+				}),
+			),
+		),
 	)
 
 	it.effect("follows the agent's latest version unless a version is pinned", () => {

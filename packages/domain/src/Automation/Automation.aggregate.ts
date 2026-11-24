@@ -24,7 +24,11 @@ import {
 import { AutomationFired, RunAutomation } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused, UnpauseAutomation } from "./UnpauseAutomation.command.ts"
-import { AutomationUpdated } from "./UpdateAutomation.command.ts"
+import {
+	AutomationRevisionConflict,
+	AutomationUpdated,
+	UpdateAutomation,
+} from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
 	status: Schema.String,
@@ -32,6 +36,7 @@ export const AutomationState = Schema.Struct({
 	reported: NonNegativeInt,
 	last_scheduled_at: NonNegativeInt,
 	activation: NonNegativeInt,
+	revision: NonNegativeInt,
 })
 export type AutomationState = typeof AutomationState.Type
 
@@ -64,6 +69,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 		reported: 0,
 		last_scheduled_at: 0,
 		activation: 0,
+		revision: 0,
 	},
 	commands: [
 		CreateAutomation,
@@ -75,8 +81,8 @@ export class Automation extends Domain.Aggregate("Automation", {
 		SuspendAutomation,
 		RecordAutomationRunStarted,
 		RecordAutomationRunFailed,
+		UpdateAutomation,
 	],
-	events: [AutomationUpdated],
 	keyOf: (cmd) => cmd.automation_id,
 	invariants: {
 		StatusIsKnown: (s) =>
@@ -91,6 +97,11 @@ export class Automation extends Domain.Aggregate("Automation", {
 				),
 			].some((ok) => ok),
 		ReportedNeverExceedsRuns: (s) => s.reported <= s.runs,
+		RevisedExactlyWhenCreated: (s) =>
+			[
+				[s.status === "", s.revision === 0].every((ok) => ok),
+				[s.status !== "", s.revision > 0].every((ok) => ok),
+			].some((ok) => ok),
 	},
 	transitions: {
 		CreatedAutomationNeverReturnsToUninitialized: ({ before, after }) =>
@@ -150,6 +161,33 @@ export class Automation extends Domain.Aggregate("Automation", {
 			events.every((event) => event._tag !== "automation.fired" || event.run === after.runs),
 		RunsAreReportedInOrder: ({ before, after }) =>
 			[after.reported === before.reported, after.reported === before.reported + 1].some((ok) => ok),
+		OnlyAnUpdateOfTheCurrentRevisionRevisesIt: ({ before, after, command }) =>
+			[
+				after.revision === before.revision,
+				[before.status === "", after.revision === 1].every((ok) => ok),
+				[
+					command._tag === "UpdateAutomation",
+					[before.status === "active", before.status === "paused"].some((live) => live),
+					command._tag !== "UpdateAutomation" || command.expected_revision === before.revision,
+					after.revision === before.revision + 1,
+					after.status === before.status,
+				].every((ok) => ok),
+			].some((ok) => ok),
+		OnlyANewScheduleOnAnActiveAutomationRestartsIt: ({ before, after, command }) =>
+			command._tag !== "UpdateAutomation" ||
+			after.activation ===
+				([before.status === "active", command.reschedule, after.revision > before.revision].every(
+					(ok) => ok,
+				)
+					? before.activation + 1
+					: before.activation),
+		AnUpdateLeavesRunsAlone: ({ before, after, command }) =>
+			command._tag !== "UpdateAutomation" ||
+			[
+				after.runs === before.runs,
+				after.reported === before.reported,
+				after.last_scheduled_at === before.last_scheduled_at,
+			].every((ok) => ok),
 		AFailedRunPausesOnlyAnActiveAutomation: ({ before, after, command }) =>
 			[
 				command._tag !== "RecordAutomationRunFailed",
@@ -228,6 +266,36 @@ export class Automation extends Domain.Aggregate("Automation", {
 		},
 		SuspendAutomation: (state, cmd) =>
 			state.status === "active" ? [new AutomationPaused({ reason: cmd.reason })] : [],
+		UpdateAutomation: (state, cmd, ctx) => {
+			if (state.status === "") {
+				return new AutomationNotFound({ automation_id: ctx.id })
+			}
+			if (state.status === "archived") {
+				return new AutomationArchivedError({ automation_id: ctx.id })
+			}
+			if (cmd.expected_revision !== state.revision) {
+				return new AutomationRevisionConflict({
+					automation_id: ctx.id,
+					expected_revision: cmd.expected_revision,
+					current_revision: state.revision,
+				})
+			}
+			const rescheduled = state.status === "active" && cmd.reschedule
+			return [
+				new AutomationUpdated({
+					name: cmd.name,
+					description: cmd.description,
+					agent_id: cmd.agent_id,
+					agent_version: cmd.agent_version,
+					environment_id: cmd.environment_id,
+					text: cmd.text,
+					schedule: cmd.schedule,
+					revision: state.revision + 1,
+					activation: rescheduled ? state.activation + 1 : state.activation,
+					rescheduled,
+				}),
+			]
+		},
 		RecordAutomationRunStarted: (state, cmd, ctx) =>
 			cmd.run === state.reported + 1 && cmd.run <= state.runs
 				? [
@@ -249,7 +317,9 @@ export class Automation extends Domain.Aggregate("Automation", {
 				scheduled_at: cmd.scheduled_at,
 				error: { type: cmd.error_type, message: cmd.message },
 			})
-			return cmd.unrecoverable && state.status === "active"
+			return [cmd.unrecoverable, state.status === "active", cmd.revision === state.revision].every(
+				(ok) => ok,
+			)
 				? [failed, new AutomationPaused({ reason: cmd.error_type })]
 				: [failed]
 		},
@@ -258,13 +328,16 @@ export class Automation extends Domain.Aggregate("Automation", {
 		RunAutomation: (state) => ({ run: state.runs }),
 	},
 	evolve: {
-		"automation.created": (state) => (state.status === "" ? { ...state, status: "active" } : state),
+		"automation.created": (state) =>
+			state.status === "" ? { ...state, status: "active", revision: 1 } : state,
 		"automation.paused": (state) =>
 			state.status === "active" ? { ...state, status: "paused" } : state,
 		"automation.unpaused": (state, e) =>
 			state.status === "paused" ? { ...state, status: "active", activation: e.activation } : state,
 		"automation.updated": (state, e) =>
-			state.status === "active" ? { ...state, activation: e.activation } : state,
+			[state.status === "active", state.status === "paused"].some((live) => live)
+				? { ...state, revision: e.revision, activation: e.activation }
+				: state,
 		"automation.archived": (state) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)
 				? { ...state, status: "archived" }

@@ -8,9 +8,8 @@ import { EnvironmentArchivedError } from "../Environment/EnvironmentArchived.rej
 import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejection.ts"
 import { AgentVersionNotFound } from "./AdmitSession.command.ts"
 
-export const admissionRefusal = (
+export const agentRefusal = (
 	agent: { readonly id: AgentId; readonly state: AgentState },
-	environment: { readonly id: EnvironmentId; readonly state: EnvironmentState },
 	pinned: number,
 ) => {
 	if (agent.state.status === "") {
@@ -22,6 +21,13 @@ export const admissionRefusal = (
 	if (pinned > agent.state.version) {
 		return new AgentVersionNotFound({ agent_id: agent.id, version: pinned })
 	}
+	return undefined
+}
+
+export const environmentRefusal = (environment: {
+	readonly id: EnvironmentId
+	readonly state: EnvironmentState
+}) => {
 	if (environment.state.status === "" || environment.state.status === "deleted") {
 		return new EnvironmentNotFound({ environment_id: environment.id })
 	}
@@ -30,3 +36,9 @@ export const admissionRefusal = (
 	}
 	return undefined
 }
+
+export const admissionRefusal = (
+	agent: { readonly id: AgentId; readonly state: AgentState },
+	environment: { readonly id: EnvironmentId; readonly state: EnvironmentState },
+	pinned: number,
+) => agentRefusal(agent, pinned) ?? environmentRefusal(environment)

@@ -328,7 +328,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				wireName: field.wireName,
 				location: "body",
 				kind: "repeat-structured",
-				required: false,
+				required: field.required,
 				description: repeat.description ?? field.description ?? `Repeatable ${repeat.flag}`,
 				min: 0,
 				...(repeatMax !== undefined ? { max: repeatMax } : {}),

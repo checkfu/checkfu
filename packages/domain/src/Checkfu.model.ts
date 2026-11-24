@@ -9,7 +9,6 @@ import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.pol
 import { Automation } from "./Automation/Automation.aggregate.ts"
 import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
-import { UpdateAutomationDecision } from "./Automation/UpdateAutomation.decision.ts"
 import { OpenAutomationSessionDecision } from "./Automation/OpenAutomationSession.decision.ts"
 import {
 	FreeAutomationSlot,
@@ -48,7 +47,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AdmitSessionDecision,
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
-		UpdateAutomationDecision,
 	],
 	views: [
 		AgentView,

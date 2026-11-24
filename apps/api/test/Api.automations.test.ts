@@ -9,6 +9,8 @@ import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { AutomationReadWaitTimeout } from "../src/Http/AutomationsHandlers.ts"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import * as Domain from "@alchemy.run/domain"
 import * as Option from "effect/Option"
 import type * as Layer from "effect/Layer"
@@ -664,6 +666,12 @@ describe("Automations API", () => {
 					name: "Weekday report",
 				})
 				expect(renamed.status).toBe(200)
+				const views = yield* AutomationView
+				const activationOf = views.get(Automation.ref(AutomationId.make(id))).pipe(
+					Effect.map((found) => Option.getOrNull(found)?.activation),
+					Effect.orDie,
+				)
+				expect(yield* activationOf).toBe(0)
 				expect(renamed.body).toEqual({
 					...created.body,
 					name: "Weekday report",
@@ -696,6 +704,7 @@ describe("Automations API", () => {
 				])
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
 				expect(fetched.body).toEqual(changed.body)
+				expect(yield* activationOf).toBe(1)
 
 				yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
 				yield* settledRuns(apiFetch, id, 1)
@@ -714,6 +723,34 @@ describe("Automations API", () => {
 						.filter((event) => event.type === "user.message")
 						.map((event) => event.content?.[0]?.text),
 				).toEqual(["Write the noon report."])
+			}),
+		))
+
+	it("keeps both of two concurrent updates that change different fields", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const afternoon = { type: "cron", expression: "0 13 * * *", timezone: "UTC" }
+				const [renamed, rescheduled] = yield* Effect.all(
+					[
+						call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, { name: "Renamed" }),
+						call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+							schedule: afternoon,
+						}),
+					],
+					{ concurrency: "unbounded" },
+				)
+				expect([renamed.status, rescheduled.status]).toEqual([200, 200])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body).toMatchObject({ name: "Renamed", schedule: afternoon })
 			}),
 		))
 

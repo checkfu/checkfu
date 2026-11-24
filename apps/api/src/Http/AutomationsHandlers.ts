@@ -14,10 +14,12 @@ import { PauseAutomation } from "@checkfu/domain/Automation/PauseAutomation.comm
 import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutomationRunFailed.command"
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
-import { firingsAhead, isUsableSchedule } from "@checkfu/domain/Automation/Schedule"
+import { firingsAhead, isUsableSchedule, sameSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
 import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
-import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
+import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { agentRefusal, environmentRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
@@ -135,13 +137,16 @@ const textOf = (
 		),
 	)
 
+const UPDATE_RETRIES = 3
+
 const present = (snapshot: AutomationSnapshot) =>
 	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
 export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (handlers) =>
 	Effect.gen(function* () {
 		const admission = yield* AdmitAutomationDecision
-		const updates = yield* UpdateAutomationDecision
+		const agents = yield* Agent
+		const environments = yield* Environment
 		const automations = yield* Automation
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
@@ -240,32 +245,70 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.automation_id
-					const current = yield* currentOf(id)
-					const { agent_id, agent_version } = yield* agentOf(
-						payload.agent ?? { id: current.agent_id, version: current.agent_version ?? undefined },
-					)
-					const receipt = yield* updates.send(
-						new UpdateAutomation({
-							automation_id: id,
-							name: payload.name ?? current.name,
-							description:
-								payload.description === undefined ? current.description : payload.description,
-							agent_id,
-							agent_version,
-							environment_id: yield* environmentOf(
-								payload.environment_id ?? current.environment_id,
-							),
-							text:
-								payload.initial_events === undefined
-									? current.text
-									: yield* textOf(payload.initial_events),
-							schedule: payload.schedule ?? current.schedule,
-						}),
-					)
-					const committed = commitForStream(receipt.commits, `Automation/${id}`)
-					return committed === undefined
-						? { id, type: "automation" as const, pending: true as const }
-						: yield* after(id, committed)
+					if (
+						payload.schedule !== undefined &&
+						!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)
+					) {
+						return yield* new AutomationScheduleUnusable(payload.schedule)
+					}
+					const agent = payload.agent === undefined ? undefined : yield* agentOf(payload.agent)
+					if (agent !== undefined) {
+						const state = yield* agents.get(agent.agent_id)
+						const refused = agentRefusal(
+							{ id: agent.agent_id, state },
+							agent.agent_version ?? state.version,
+						)
+						if (refused !== undefined) {
+							return yield* refused
+						}
+					}
+					const environment_id =
+						payload.environment_id === undefined
+							? undefined
+							: yield* environmentOf(payload.environment_id)
+					if (environment_id !== undefined) {
+						const refused = environmentRefusal({
+							id: environment_id,
+							state: yield* environments.get(environment_id),
+						})
+						if (refused !== undefined) {
+							return yield* refused
+						}
+					}
+					const text =
+						payload.initial_events === undefined ? undefined : yield* textOf(payload.initial_events)
+					const ref = Automation.ref(id)
+					const timeout = yield* AutomationReadWaitTimeout
+					const send = Effect.gen(function* () {
+						const current = yield* currentOf(id)
+						const schedule = payload.schedule ?? current.schedule
+						return yield* automations.send(
+							new UpdateAutomation({
+								automation_id: id,
+								expected_revision: current.revision,
+								reschedule: !sameSchedule(schedule, current.schedule),
+								name: payload.name ?? current.name,
+								description:
+									payload.description === undefined ? current.description : payload.description,
+								agent_id: agent?.agent_id ?? current.agent_id,
+								agent_version: agent === undefined ? current.agent_version : agent.agent_version,
+								environment_id: environment_id ?? current.environment_id,
+								text: text ?? current.text,
+								schedule,
+							}),
+						)
+					})
+					const attempt = (
+						retries: number,
+					): Effect.Effect<Effect.Success<typeof send>, Effect.Error<typeof send>> =>
+						Effect.catchTag(send, "AutomationRevisionConflict", (conflict) =>
+							retries === 0
+								? Effect.fail(conflict)
+								: automationViews
+										.waitFor(ref, { revision: { gte: conflict.current_revision } }, { timeout })
+										.pipe(Effect.andThen(attempt(retries - 1))),
+						)
+					return yield* after(id, yield* attempt(UPDATE_RETRIES))
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>

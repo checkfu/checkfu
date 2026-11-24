@@ -48,6 +48,9 @@ export const ArmAutomationLive = ArmAutomation.toLayer(
 			if (event._tag === "automation.fired" && event.trigger === "manual") {
 				return
 			}
+			if (event._tag === "automation.updated" && !event.rescheduled) {
+				return
+			}
 			const next = state.upcoming[0]
 			if (next === undefined) {
 				yield* automations.send(

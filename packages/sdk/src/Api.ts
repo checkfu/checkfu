@@ -511,6 +511,7 @@ export const AutomationResource = Schema.Struct({
 		"text",
 		"runs",
 		"activation",
+		"revision",
 		"upcoming",
 	]),
 	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),

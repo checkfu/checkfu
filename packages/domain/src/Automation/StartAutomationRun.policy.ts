@@ -39,7 +39,13 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 			}
 			const fail = (error_type: string, message: string, unrecoverable: boolean) =>
 				automations.send(
-					new RecordAutomationRunFailed({ ...run, error_type, message, unrecoverable }),
+					new RecordAutomationRunFailed({
+						...run,
+						revision: state.revision,
+						error_type,
+						message,
+						unrecoverable,
+					}),
 				)
 			// A retried delivery resends the same command id and gets the first receipt back,
 			// so SessionAlreadyExists here means another caller owns that session.
