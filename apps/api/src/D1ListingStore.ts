@@ -3,15 +3,11 @@ import { ARCHIVED, LISTED, ListingStore } from "@checkfu/domain/Listing/ListingS
 import type { ListingEntry } from "@checkfu/domain/Listing/ListingStore"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
 import { placement } from "./Placement.ts"
 import type { Placement } from "./Placement.ts"
 
-const isD1LocationHint = Schema.is(Schema.Literals(["wnam", "enam", "weur", "eeur", "apac", "oc"]))
-
 export const listingDatabaseProps = ({
 	jurisdiction,
-	locationHint,
 }: Placement): Effect.Effect<Cloudflare.D1.DatabaseProps> =>
 	jurisdiction === "fedramp-high"
 		? Effect.die(
@@ -21,14 +17,12 @@ export const listingDatabaseProps = ({
 			)
 		: Effect.succeed({
 				migrations: "apps/api/migrations",
-				...(jurisdiction !== undefined
-					? {
+				...(jurisdiction === undefined
+					? {}
+					: {
 							// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Cloudflare's D1 create API takes "us"; Alchemy's Jurisdiction type predates it
 							jurisdiction: jurisdiction as Cloudflare.D1.Jurisdiction,
-						}
-					: isD1LocationHint(locationHint)
-						? { primaryLocationHint: locationHint }
-						: {}),
+						}),
 			})
 
 export const ListingDatabase = Cloudflare.D1.Database(

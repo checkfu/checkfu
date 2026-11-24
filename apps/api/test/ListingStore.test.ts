@@ -145,27 +145,21 @@ describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 })
 
 describe("listing database placement", () => {
-	it.effect(
-		"follows the Durable Objects' jurisdiction, or their location hint when D1 has it",
-		() =>
-			Effect.gen(function* () {
-				const migrations = "apps/api/migrations"
-				expect(yield* listingDatabaseProps({})).toEqual({ migrations })
-				expect(yield* listingDatabaseProps({ jurisdiction: "eu", locationHint: "weur" })).toEqual({
-					migrations,
-					jurisdiction: "eu",
-				})
-				expect(yield* listingDatabaseProps({ jurisdiction: "us" })).toEqual({
-					migrations,
-					jurisdiction: "us",
-				})
-				expect(yield* listingDatabaseProps({ locationHint: "enam" })).toEqual({
-					migrations,
-					primaryLocationHint: "enam",
-				})
-				expect(yield* listingDatabaseProps({ locationHint: "sam" })).toEqual({ migrations })
-				const refused = yield* Effect.exit(listingDatabaseProps({ jurisdiction: "fedramp-high" }))
-				expect(refused._tag).toBe("Failure")
-			}),
+	it.effect("follows the Durable Objects' jurisdiction and ignores their location hint", () =>
+		Effect.gen(function* () {
+			const migrations = "apps/api/migrations"
+			expect(yield* listingDatabaseProps({})).toEqual({ migrations })
+			expect(yield* listingDatabaseProps({ jurisdiction: "eu", locationHint: "weur" })).toEqual({
+				migrations,
+				jurisdiction: "eu",
+			})
+			expect(yield* listingDatabaseProps({ jurisdiction: "us" })).toEqual({
+				migrations,
+				jurisdiction: "us",
+			})
+			expect(yield* listingDatabaseProps({ locationHint: "enam" })).toEqual({ migrations })
+			const refused = yield* Effect.exit(listingDatabaseProps({ jurisdiction: "fedramp-high" }))
+			expect(refused._tag).toBe("Failure")
+		}),
 	)
 })
