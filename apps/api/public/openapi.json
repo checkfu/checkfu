@@ -18824,7 +18824,7 @@
 										"path": {
 											"type": "string",
 											"minLength": 1,
-											"maxLength": 1024
+											"maxLength": 256
 										},
 										"content": {
 											"type": "string",
@@ -18883,12 +18883,15 @@
 											"type": "string",
 											"enum": ["memory"]
 										},
+										"memory_store_id": {
+											"type": "string"
+										},
 										"pending": {
 											"type": "boolean",
 											"enum": [true]
 										}
 									},
-									"required": ["id", "type", "pending"],
+									"required": ["id", "type", "memory_store_id", "pending"],
 									"additionalProperties": false
 								}
 							}
@@ -19310,7 +19313,7 @@
 								"properties": {
 									"path": {
 										"type": "string",
-										"maxLength": 1024,
+										"maxLength": 256,
 										"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 										"description": "Path inside the store, such as /notes/todo.md"
 									},
@@ -19406,7 +19409,7 @@
 													"path": {
 														"type": "string",
 														"minLength": 1,
-														"maxLength": 1024
+														"maxLength": 256
 													},
 													"content_sha256": {
 														"type": "string",
@@ -19844,7 +19847,7 @@
 										"path": {
 											"type": "string",
 											"minLength": 1,
-											"maxLength": 1024
+											"maxLength": 256
 										},
 										"content": {
 											"type": "string",
@@ -20277,7 +20280,7 @@
 										"path": {
 											"type": "string",
 											"minLength": 1,
-											"maxLength": 1024
+											"maxLength": 256
 										},
 										"content": {
 											"type": "string",
@@ -20336,12 +20339,15 @@
 											"type": "string",
 											"enum": ["memory"]
 										},
+										"memory_store_id": {
+											"type": "string"
+										},
 										"pending": {
 											"type": "boolean",
 											"enum": [true]
 										}
 									},
-									"required": ["id", "type", "pending"],
+									"required": ["id", "type", "memory_store_id", "pending"],
 									"additionalProperties": false
 								}
 							}
