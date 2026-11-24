@@ -35,12 +35,18 @@ describe("bundle measurement", () => {
 			"chunks/deep/later.js": "export const later = 2",
 			"mentioned.js": "export const mentioned = 3",
 		}
-		const dir = bundle({ ...shipped, "Entry.js.map": "{}", "chunks/used.js.map": "{}" })
+		const harness = "../../node_modules/openai/index.mjs"
+		const dir = bundle({
+			...shipped,
+			"Entry.js.map": JSON.stringify({ sources: ["../../apps/api/src/ApiWorker.ts"] }),
+			"chunks/deep/later.js.map": JSON.stringify({ sources: [harness] }),
+		})
 		const measured = await measureBundle(dir, "Entry.js")
 		expect(measured.eagerFiles).toEqual(["Entry.js", join("chunks", "used.js")])
 		expect(measured.eagerBytes).toBe(shipped["Entry.js"].length + shipped["chunks/used.js"].length)
 		expect(measured.totalBytes).toBe(Object.values(shipped).join("").length)
 		expect(measured.startupCpuMs).toBeGreaterThan(0)
+		expect(measured.harnessSources).toEqual([harness])
 	})
 
 	it("measures an entry that leaves a timer running", async () => {

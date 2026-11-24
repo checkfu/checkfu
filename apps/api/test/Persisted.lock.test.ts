@@ -360,6 +360,36 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
+	it.effect("locks the arguments and the result of every harness Worker call", () =>
+		Effect.gen(function* () {
+			expect(
+				persistedShapes
+					.filter((shape) => shape.kind === "harness-call")
+					.map((shape) => shape.id)
+					.toSorted(),
+			).toEqual(
+				["abortTurn", "recoverTurn", "runTurn"].flatMap((method) => [
+					`harness-call:PiHarness.${method}/args`,
+					`harness-call:PiHarness.${method}/result`,
+				]),
+			)
+			const id = "harness-call:PiHarness.abortTurn/args"
+			const sent = lockWith({ [id]: [["sess_1", "turn:1"]] })
+			expect(yield* lockProblems(sent)).toEqual([])
+			const reshaped = yield* lockProblems(
+				sent,
+				replacing(
+					id,
+					Schema.Tuple([
+						Schema.Struct({ conversation: Schema.String, operationId: Schema.String }),
+					]),
+				),
+			)
+			expect(reshaped.length).toBe(1)
+			expect(reshaped[0]).toContain(id)
+		}),
+	)
+
 	it.effect("lets a view change shape only when its version increased", () =>
 		Effect.gen(function* () {
 			const id = "view:Checkfu.TurnInput@v2"
@@ -581,10 +611,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(registered.toSorted()).toEqual(declaredBeforeWorkerImport.toSorted())
 				expect(new Set(declaredBeforeWorkerImport).size).toBe(declaredBeforeWorkerImport.length)
 
-				// Importing the deploy entry point (ApiWorker -> PiSession -> PiDurableEngine) MUST
+				// Importing the deploy entry point (PiHarnessWorker -> PiSession -> PiDurableEngine) MUST
 				// enumerate the exact same Pi document IDs as the standalone persisted:cut / persisted:check
 				// entry point (Shapes.ts -> PiDocRegistry.ts).
-				yield* Effect.promise(() => import("../src/ApiWorker.ts"))
+				yield* Effect.promise(() => import("../src/Pi/PiHarnessWorker.ts"))
 				const declaredAfterWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
 					piDocShapeId(spec.token.definition.kind),
 				)

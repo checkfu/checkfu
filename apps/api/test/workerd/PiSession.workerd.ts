@@ -1,17 +1,25 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import {
+	API_WORKER_BUDGET,
+	EAGER_BYTES_HELP,
+	HARNESS_SOURCES_HELP,
+	PI_HARNESS_WORKER_BUDGET,
+	STARTUP_HELP,
+	measureBundle,
+} from "./BundleBudget.ts"
 import { removeStage } from "./StageCleanup.ts"
-import { API_WORKER_BUDGET, EAGER_BYTES_HELP, STARTUP_HELP, measureBundle } from "./BundleBudget.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
 const TEST_OPENAI_KEY = "sk-workerd-fake-key"
+const TEST_ANTHROPIC_KEY = "sk-ant-workerd-fake-key"
 const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
 }
@@ -114,6 +122,15 @@ const ANSI_ESCAPE_RE = new RegExp(
 
 const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
 
+const WORKERS = ["ApiWorker", "PiHarnessWorker"] as const
+
+const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyArray<string> => {
+	const saved = JSON.parse(
+		readFileSync(join(REPO_ROOT, ".alchemy", "state", "Checkfu", stage, `${worker}.json`), "utf8"),
+	) as { readonly props?: { readonly env?: object } }
+	return Object.keys(saved.props?.env ?? {})
+}
+
 const startAlchemyDev = async (openAIBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
@@ -124,7 +141,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 			[
 				`CHECKFU_API_KEY=${TEST_API_KEY}`,
 				`OPENAI_API_KEY=${TEST_OPENAI_KEY}`,
-				"ANTHROPIC_API_KEY=",
+				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
 				"",
 			].join("\n"),
@@ -172,7 +189,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 			return
 		}
 		const clean = stripAnsi(line)
-		const match = clean.match(/ready at (http:\/\/[^\s]+)/)
+		const match = clean.match(/\[ApiWorker\] ready at (http:\/\/[^\s]+)/)
 		if (match?.[1] !== undefined) {
 			readyUrl = match[1].replace(/\/+$/, "")
 			resolveReady(readyUrl)
@@ -438,21 +455,40 @@ describe("PiSession real Durable Object under workerd", () => {
 	}, 30_000)
 
 	it("keeps the code every isolate loads at start-up inside its budget", async () => {
-		const measured = await measureBundle(
-			join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-ApiWorker`),
-			"ApiWorker.js",
-		)
-		const found = JSON.stringify(measured)
-		expect(measured.eagerBytes, `${EAGER_BYTES_HELP} Measured ${found}`).toBeLessThanOrEqual(
-			API_WORKER_BUDGET.eagerBytes,
-		)
-		expect(measured.totalBytes, `Measured ${found}`).toBeLessThanOrEqual(
-			API_WORKER_BUDGET.totalBytes,
-		)
-		expect(measured.startupCpuMs, `${STARTUP_HELP} Measured ${found}`).toBeLessThanOrEqual(
-			API_WORKER_BUDGET.startupCpuMs,
-		)
+		for (const [worker, budget] of [
+			["ApiWorker", API_WORKER_BUDGET],
+			["PiHarnessWorker", PI_HARNESS_WORKER_BUDGET],
+		] as const) {
+			const measured = await measureBundle(
+				join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-${worker}`),
+				`${worker}.js`,
+			)
+			const found = `${worker} measured ${JSON.stringify(measured)}`
+			expect(measured.eagerBytes, `${EAGER_BYTES_HELP} ${found}`).toBeLessThanOrEqual(
+				budget.eagerBytes,
+			)
+			expect(measured.totalBytes, found).toBeLessThanOrEqual(budget.totalBytes)
+			expect(measured.startupCpuMs, `${STARTUP_HELP} ${found}`).toBeLessThanOrEqual(
+				budget.startupCpuMs,
+			)
+			if (worker === "ApiWorker") {
+				expect(measured.harnessSources, HARNESS_SOURCES_HELP).toEqual([])
+			} else {
+				expect(measured.harnessSources.length).toBeGreaterThan(0)
+			}
+		}
 	}, 60_000)
+
+	it("binds provider keys only to the harness Worker and the API key only to the API Worker", () => {
+		const api = boundNames(stage, "ApiWorker")
+		const harness = boundNames(stage, "PiHarnessWorker")
+		expect(api).toContain("CHECKFU_API_KEY")
+		expect(api).not.toContain("OPENAI_API_KEY")
+		expect(api).not.toContain("ANTHROPIC_API_KEY")
+		expect(harness).toContain("OPENAI_API_KEY")
+		expect(harness).toContain("ANTHROPIC_API_KEY")
+		expect(harness).not.toContain("CHECKFU_API_KEY")
+	})
 
 	it("runs a turn from message to reply and remembers the first turn on the second", async () => {
 		fakeOpenAI.setHandler((req) => {

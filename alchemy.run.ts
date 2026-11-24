@@ -2,6 +2,8 @@ import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "./apps/api/src/ApiWorker.ts"
 import { customDomains } from "./apps/api/src/CustomDomain.ts"
+import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
+import PiHarnessWorkerLive from "./apps/api/src/Pi/PiHarnessWorker.ts"
 import * as Alchemy from "alchemy"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -40,6 +42,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			),
 		},
 		Effect.gen(function* () {
+			yield* PiHarnessWorker
 			const api = yield* ApiWorker
 			const mcp = yield* Cloudflare.Worker("McpWorker", {
 				...(yield* customDomains).mcp,
@@ -53,7 +56,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				api: api.url.as<string>(),
 				mcp: mcp.url.as<string>(),
 			}
-		}),
+		}).pipe(Effect.provide(PiHarnessWorkerLive)),
 	)
 
 export default checkfuStack(requireShippedBaseline)

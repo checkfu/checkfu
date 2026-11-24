@@ -58,7 +58,7 @@ const registeredPiDocs: Array<CheckfuPiDocSpec> = []
 // Module-private factories: every Checkfu-owned Pi durable document must be
 // declared in this single file so CHECKFU_PI_DOCS is closed, immutable, and
 // identical regardless of which entry point (persisted:cut, persisted:check,
-// tests, or ApiWorker deploy) loads the module graph.
+// tests, or the harness Worker's deploy) loads the module graph.
 function registerPiDoc<T extends JsonObject>(
 	registration: PiDocRegistration,
 	definition: CommonDocDefinition<T> & { readonly scope: "session" },

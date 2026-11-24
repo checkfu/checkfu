@@ -23,7 +23,7 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../../src/Pi/PiDurableEngine.ts"
-import type { PiTurnRequest } from "../../src/Pi/PiDurableEngine.ts"
+import type { PiTurnRequest } from "../../src/Pi/PiTurn.ts"
 import {
 	HarnessCallFailed,
 	HarnessLimits,

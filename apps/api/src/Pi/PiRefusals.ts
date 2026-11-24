@@ -1,17 +1,11 @@
-import type {
-	TurnFailed,
-	HarnessReply,
-	TurnInterrupted,
-} from "@checkfu/domain/Session/Harness.external"
+import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import type { AnyModel, Api, AssistantMessage } from "@earendil-works/pi-ai"
 import type { Models } from "@earendil-works/pi-ai/models"
 import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"
 import type { EntryId } from "@earendil-works/pi-durable"
 
-export type PiTurnOutcome =
-	| { readonly ok: true; readonly reply: HarnessReply }
-	| { readonly ok: false; readonly error: TurnFailed | TurnInterrupted }
+import type { PiTurnOutcome } from "./PiTurn.ts"
 
 export interface UnansweredSubmissionInfo {
 	readonly reason: string

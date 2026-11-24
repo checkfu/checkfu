@@ -16,10 +16,10 @@ import {
 	restoreRefusalEntryInStorage,
 	runPiDurableTurn,
 } from "./PiDurableEngine.ts"
-import type { PiDurableBackend, PiTurnRequest, PiTurnResult } from "./PiDurableEngine.ts"
+import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
 import { createCheckfuRegistry, rejectRefusalCompactions } from "./PiRefusals.ts"
-import type { PiTurnOutcome } from "./PiRefusals.ts"
+import type { PiTurnOutcome, PiTurnRequest, PiTurnResult } from "./PiTurn.ts"
 import { beginTurnUsage, clearSeedRebuild, settleTurnUsage } from "./PiTurnUsage.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
@@ -145,8 +145,16 @@ export const makePiHarnessBackend = (
 	}
 }
 
-export class PiSession extends Cloudflare.DurableObject<PiSession>()(
-	"PiSession",
+export interface PiSessionShape {
+	readonly alarm: (info?: Cloudflare.AlarmInvocationInfo) => Effect.Effect<void>
+	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
+	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnResult>
+	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
+}
+
+export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShape>()("PiSession") {}
+
+export const PiSessionLive = PiSession.make(
 	Effect.map(
 		Effect.all({
 			state: Cloudflare.DurableObjectState,
@@ -187,12 +195,10 @@ export class PiSession extends Cloudflare.DurableObject<PiSession>()(
 
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
-					recoverTurn: (operationId: string): Effect.Effect<PiTurnOutcome | null> =>
-						recoverPiDurableTurn(backend, operationId),
-					runTurn: (request: PiTurnRequest): Effect.Effect<PiTurnResult> =>
-						runPiDurableTurn(backend, request),
-					abortTurn: (operationId: string): Effect.Effect<boolean> => backend.abort(operationId),
+					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
+					runTurn: (request) => runPiDurableTurn(backend, request),
+					abortTurn: (operationId) => backend.abort(operationId),
 				}
 			}),
 	),
-) {}
+)

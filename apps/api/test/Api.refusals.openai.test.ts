@@ -13,7 +13,7 @@ import * as Redacted from "effect/Redacted"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnResult } from "../src/Pi/PiDurableEngine.ts"
+import type { PiTurnResult } from "../src/Pi/PiTurn.ts"
 import {
 	AgentVersionLookupTimeout,
 	PiDurableHarnessLive,

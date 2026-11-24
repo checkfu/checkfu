@@ -16,7 +16,7 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { SEED_MESSAGE_OVERHEAD_TOKENS, seedTokenBudget } from "../src/Pi/PiContextBudget.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
-import type { PiTurnRequest } from "../src/Pi/PiDurableEngine.ts"
+import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
 import {
 	AgentVersionLookupTimeout,
 	HarnessLimits,
