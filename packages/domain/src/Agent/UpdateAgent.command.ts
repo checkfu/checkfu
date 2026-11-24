@@ -11,9 +11,7 @@ import {
 import { AgentId } from "./Agent.id.ts"
 import { AgentArchivedError } from "./AgentArchived.rejection.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
-import { AgentVersionMinted } from "./AgentVersion.aggregate.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
-import { AgentVersionAlreadyExists } from "./AgentVersionAlreadyExists.rejection.ts"
 
 export class AgentUpdated extends Domain.Event("agent.updated", {
 	version: PositiveInt,
@@ -46,8 +44,8 @@ export class UpdateAgent extends Domain.Command("UpdateAgent", {
 			description: Schema.optionalKey(Schema.NullOr(AgentDescription)),
 		}),
 	},
-	events: [AgentUpdated, AgentVersionMinted],
-	rejects: [AgentNotFound, AgentArchivedError, AgentVersionConflict, AgentVersionAlreadyExists],
+	events: [AgentUpdated],
+	rejects: [AgentNotFound, AgentArchivedError, AgentVersionConflict],
 	reply: {
 		version: PositiveInt,
 		version_id: AgentVersionId,

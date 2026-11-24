@@ -4,13 +4,11 @@ import * as Model from "@alchemy.run/domain/Model"
 import * as Verify from "@alchemy.run/domain/Verify"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
-import { AgentVersion } from "../src/Agent/AgentVersion.aggregate.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "../src/Agent/AgentVersionByNumberView.view.ts"
-import { AgentVersionView } from "../src/Agent/AgentVersionView.view.ts"
 import { AgentView } from "../src/Agent/AgentView.view.ts"
 import { ArchiveAgent } from "../src/Agent/ArchiveAgent.command.ts"
 import { CreateAgent } from "../src/Agent/CreateAgent.command.ts"
@@ -70,13 +68,7 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 		"SendUserMessage",
 		"ClaimIdempotencyKey",
 	],
-	views: [
-		"AgentView",
-		"AgentVersionView",
-		"AgentVersionByNumberView",
-		"EnvironmentView",
-		"SessionView",
-	],
+	views: ["AgentView", "AgentVersionByNumberView", "EnvironmentView", "SessionView"],
 }) {}
 
 const STANDING = {
@@ -85,8 +77,6 @@ const STANDING = {
 	"Agent.CreatedAgentNeverReturnsToUninitialized": "proved",
 	"Agent.ArchivedAgentStaysArchived": "proved",
 	"Agent.VersionGrowsByOneOrNotAtAll": "proved",
-	"AgentVersion.MintedExactlyWhenNumbered": "proved",
-	"AgentVersion.MintedVersionNeverChanges": "proved",
 	"Environment.StatusIsKnown": "proved",
 	"Environment.CreatedExactlyWhenVersioned": "proved",
 	"Environment.ConfiguredExactlyWhenCreated": "proved",
@@ -157,9 +147,6 @@ const STANDING = {
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
-	"Checkfu.AMintedVersionBelongsToItsAgent": "proved",
-	"Checkfu.AnAgentsHeadIsItsLatestVersion": "proved",
-	"Checkfu.VersionNumbersAreDistinct": "proved",
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
@@ -236,7 +223,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			CheckfuDomainApi.serves.flatMap((entry) => (entry.kind === "View" ? [entry.viewName] : [])),
 		).toEqual([
 			"AgentView",
-			"AgentVersionView",
 			"AgentVersionByNumberView",
 			"EnvironmentView",
 			"SessionView",
@@ -349,9 +335,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					const automations = yield* Automation
 
 					const agentRef = Agent.ref(AgentId.make("agent_post_1"))
-					const v1Ref = AgentVersion.ref(AgentVersionId.make("aver_post_1"))
-					const v2Ref = AgentVersion.ref(AgentVersionId.make("aver_post_2"))
-					const vNoopRef = AgentVersion.ref(AgentVersionId.make("aver_post_noop"))
+					const v1Id = AgentVersionId.make("aver_post_1")
+					const v2Id = AgentVersionId.make("aver_post_2")
+					const vNoopId = AgentVersionId.make("aver_post_noop")
 					const envRef = Environment.ref(EnvironmentId.make("env_post_1"))
 					const sessionV1Ref = Session.ref(SessionId.make("sess_post_v1"))
 					const sessionV2Ref = Session.ref(SessionId.make("sess_post_v2"))
@@ -453,12 +439,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						yield* settlePlatform
 						return {
 							Agent: yield* readAggregate(Agent),
-							AgentVersion: yield* readAggregate(AgentVersion, [vNoopRef.id]),
 							Environment: yield* readAggregate(Environment),
 							Session: yield* readAggregate(Session),
 							IdempotencyClaim: yield* readAggregate(IdempotencyClaim),
 							AgentView: yield* readView(AgentView),
-							AgentVersionView: yield* readView(AgentVersionView),
 							AgentVersionByNumberView: yield* readView(AgentVersionByNumberView),
 							EnvironmentView: yield* readView(EnvironmentView),
 							SessionView: yield* readView(SessionView),
@@ -488,7 +472,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					yield* createAgent.send(
 						new CreateAgent({
 							agent_id: agentRef.id,
-							version_id: v1Ref.id,
+							version_id: v1Id,
 							name: "Post-Admission Agent v1",
 							model: { id: "gpt-4o-mini" },
 							system: "Initial system prompt",
@@ -519,7 +503,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						new UpdateAgent({
 							agent_id: agentRef.id,
 							expected_version: 1,
-							next_version_id: v2Ref.id,
+							next_version_id: v2Id,
 							changes: {
 								name: "Post-Admission Agent v2",
 								model: { id: "gpt-5.4" },
@@ -533,7 +517,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						new UpdateAgent({
 							agent_id: agentRef.id,
 							expected_version: 2,
-							next_version_id: vNoopRef.id,
+							next_version_id: vNoopId,
 							changes: {
 								name: "Post-Admission Agent v2",
 								model: { id: "gpt-5.4" },
@@ -713,18 +697,15 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		expect(results.archivedEnvWorld.EnvironmentView[0]?.state.archived_at).not.toBeNull()
 
 		// Confirm final state actually contains both v1 & v2 sessions, archived Agent v2,
-		// unminted no-op candidate, exact enumerated lookup keys (no orphans), deleted
+		// no row for the no-op candidate, exact enumerated lookup keys (no orphans), deleted
 		// Environment with no EnvironmentView row, and terminated+archived sessionV1 retaining turn 2.
 		expect(results.finalWorld.Agent[0]?.state.status).toBe("archived")
 		expect(results.finalWorld.Agent[0]?.state.version).toBe(2)
 		expect(results.finalWorld.AgentView.map((row) => row.id)).toEqual(["agent_post_1"])
-		expect(results.finalWorld.AgentVersionView.map((row) => row.id)).toEqual([
+		expect(results.finalWorld.AgentVersionByNumberView.map((row) => row.state.id)).toEqual([
 			"aver_post_1",
 			"aver_post_2",
 		])
-		expect(
-			results.finalWorld.AgentVersion.find((row) => row.id === "aver_post_noop")?.state.minted,
-		).toBe(false)
 		expect(results.finalWorld.AgentVersionByNumberView.map((row) => row.id)).toEqual([
 			agentVersionLookupKey(AgentId.make("agent_post_1"), 1),
 			agentVersionLookupKey(AgentId.make("agent_post_1"), 2),

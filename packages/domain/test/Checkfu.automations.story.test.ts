@@ -4,7 +4,6 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
-import { AgentVersion, AgentVersionMinted } from "../src/Agent/AgentVersion.aggregate.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { AgentArchived, ArchiveAgent } from "../src/Agent/ArchiveAgent.command.ts"
 import { AgentCreated } from "../src/Agent/CreateAgent.command.ts"
@@ -85,8 +84,8 @@ const at = (iso: string) => DateTime.makeUnsafe(iso)
 const ms = (iso: string) => DateTime.toEpochMillis(at(iso))
 
 const agent = Agent.ref(AgentId.make("agent_001"))
-const v1 = AgentVersion.ref(AgentVersionId.make("aver_001"))
-const v2 = AgentVersion.ref(AgentVersionId.make("aver_002"))
+const v1 = AgentVersionId.make("aver_001")
+const v2 = AgentVersionId.make("aver_002")
 const environment = Environment.ref(EnvironmentId.make("env_001"))
 const automation = Automation.ref("auto_001")
 const capacity = AutomationCapacity.ref(AUTOMATION_CAPACITY)
@@ -110,8 +109,7 @@ const config = {
 
 const world = [
 	Story.clock(at("2026-01-01T08:00:00.000Z")),
-	Story.given(agent, new AgentCreated({ version: 1, version_id: v1.id, ...agentFields })),
-	Story.given(v1, new AgentVersionMinted({ agent_id: agent.id, version: 1, ...agentFields })),
+	Story.given(agent, new AgentCreated({ version: 1, version_id: v1, ...agentFields })),
 	Story.given(
 		environment,
 		new EnvironmentCreated({
@@ -252,16 +250,7 @@ describe("Checkfu automations", () => {
 				agent,
 				new AgentUpdated({
 					version: 2,
-					version_id: v2.id,
-					...agentFields,
-					system: "Be thorough.",
-				}),
-			),
-			Story.given(
-				v2,
-				new AgentVersionMinted({
-					agent_id: agent.id,
-					version: 2,
+					version_id: v2,
 					...agentFields,
 					system: "Be thorough.",
 				}),

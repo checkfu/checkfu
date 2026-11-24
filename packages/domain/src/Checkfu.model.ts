@@ -1,9 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { Agent } from "./Agent/Agent.aggregate.ts"
-import { AgentVersion } from "./Agent/AgentVersion.aggregate.ts"
 import { AgentVersionByNumberView } from "./Agent/AgentVersionByNumberView.view.ts"
-import { AgentVersionView } from "./Agent/AgentVersionView.view.ts"
 import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
@@ -45,15 +43,7 @@ import { SessionsHandlersLive } from "./Sessions.model.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [
-		Agent,
-		AgentVersion,
-		Environment,
-		Session,
-		IdempotencyClaim,
-		Automation,
-		AutomationCapacity,
-	],
+	aggregates: [Agent, Environment, Session, IdempotencyClaim, Automation, AutomationCapacity],
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
@@ -63,7 +53,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 	],
 	views: [
 		AgentView,
-		AgentVersionView,
 		AgentVersionByNumberView,
 		EnvironmentView,
 		SessionView,
@@ -126,47 +115,41 @@ export class Checkfu extends Domain.Model("Checkfu", {
 				m.AgentView.every((v) =>
 					m.Agent.some((a) => [a.id === v.id, a.state.status !== ""].every((ok) => ok)),
 				),
-				m.AgentVersion.every((av) => {
-					const view = m.AgentVersionView.find((v) => v.id === av.id)
-					if (!av.state.minted) {
-						return view === undefined
+				m.Agent.every((a) => {
+					if (a.state.status === "") {
+						return true
 					}
-					const byNumber = m.AgentVersionByNumberView.find(
-						(v) => v.id === `${av.state.agent_id}@${av.state.version}`,
-					)
-					if (view === undefined || byNumber === undefined) {
+					// Rows are keyed agent@version, versions start at 1, and no row is above the head
+					// (checked below), so as many rows as the head's number means none is missing.
+					if (
+						m.AgentVersionByNumberView.filter((v) => v.state.agent_id === a.id).length !==
+						a.state.version
+					) {
+						return false
+					}
+					const head = m.AgentVersionByNumberView.find((v) => v.id === `${a.id}@${a.state.version}`)
+					if (head === undefined) {
 						return false
 					}
 					return [
-						view.state.id === av.id,
-						view.state.agent_id === av.state.agent_id,
-						view.state.version === av.state.version,
-						view.state.name === av.state.name,
-						view.state.model.id === av.state.model_id,
-						(view.state.system !== null) === av.state.has_system,
-						(view.state.system ?? "") === av.state.system,
-						(view.state.description !== null) === av.state.has_description,
-						(view.state.description ?? "") === av.state.description,
-						byNumber.state.id === av.id,
-						byNumber.state.agent_id === av.state.agent_id,
-						byNumber.state.version === av.state.version,
-						byNumber.state.name === av.state.name,
-						byNumber.state.model.id === av.state.model_id,
-						(byNumber.state.system !== null) === av.state.has_system,
-						(byNumber.state.system ?? "") === av.state.system,
-						(byNumber.state.description !== null) === av.state.has_description,
-						(byNumber.state.description ?? "") === av.state.description,
+						head.state.agent_id === a.id,
+						head.state.id === a.state.current_version_id,
+						head.state.version === a.state.version,
+						head.state.name === a.state.name,
+						head.state.model.id === a.state.model_id,
+						(head.state.system !== null) === a.state.has_system,
+						(head.state.system ?? "") === a.state.system,
+						(head.state.description !== null) === a.state.has_description,
+						(head.state.description ?? "") === a.state.description,
 					].every((ok) => ok)
 				}),
-				m.AgentVersionView.every((v) =>
-					m.AgentVersion.some((av) => [av.id === v.id, av.state.minted].every((ok) => ok)),
-				),
 				m.AgentVersionByNumberView.every((v) =>
-					m.AgentVersion.some((av) =>
+					m.Agent.some((a) =>
 						[
-							av.state.minted,
-							av.id === v.state.id,
-							v.id === `${av.state.agent_id}@${av.state.version}`,
+							a.id === v.state.agent_id,
+							a.state.status !== "",
+							v.state.version <= a.state.version,
+							v.id === `${a.id}@${v.state.version}`,
 						].every((ok) => ok),
 					),
 				),
@@ -333,49 +316,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 			].every((ok) => ok)
 		},
 	},
-	relations: {
-		AMintedVersionBelongsToItsAgent: Domain.Relation({
-			over: { version: AgentVersion, agent: Agent },
-			holds: ({ version, agent }) =>
-				[
-					!version.state.minted,
-					version.state.agent_id !== agent.id,
-					[agent.state.status !== "", version.state.version <= agent.state.version].every(
-						(ok) => ok,
-					),
-				].some((ok) => ok),
-		}),
-		AnAgentsHeadIsItsLatestVersion: Domain.Relation({
-			over: { agent: Agent, version: AgentVersion },
-			holds: ({ agent, version }) =>
-				[
-					agent.state.status === "",
-					agent.state.current_version_id !== version.id,
-					[
-						version.state.minted,
-						version.state.agent_id === agent.id,
-						version.state.version === agent.state.version,
-						version.state.name === agent.state.name,
-						version.state.model_id === agent.state.model_id,
-						version.state.has_system === agent.state.has_system,
-						version.state.system === agent.state.system,
-						version.state.has_description === agent.state.has_description,
-						version.state.description === agent.state.description,
-					].every((ok) => ok),
-				].some((ok) => ok),
-		}),
-		VersionNumbersAreDistinct: Domain.Relation({
-			over: { a: AgentVersion, b: AgentVersion },
-			holds: ({ a, b }) =>
-				[
-					a.id === b.id,
-					!a.state.minted,
-					!b.state.minted,
-					a.state.agent_id !== b.state.agent_id,
-					a.state.version !== b.state.version,
-				].some((ok) => ok),
-		}),
-	},
 	sometimes: {
 		AnIdempotencyKeyIsClaimed: (m) => m.IdempotencyClaim.some((b) => b.state._tag === "Claimed"),
 		ASessionIsAdmitted: (m) => m.Session.some((s) => s.state._tag === "Idle"),
@@ -410,7 +350,6 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 	],
 	views: [
 		"AgentView",
-		"AgentVersionView",
 		"AgentVersionByNumberView",
 		"EnvironmentView",
 		"SessionView",

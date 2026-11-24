@@ -68,7 +68,6 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			id: AgentId,
 			version: number,
 			agentCommit: { readonly stream: string; readonly version: number } | undefined,
-			versionCommit: { readonly stream: string; readonly version: number } | undefined,
 			missingMessage: string,
 		) =>
 			Effect.gen(function* () {
@@ -91,13 +90,13 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 				const lookupKey = agentVersionLookupKey(id, version)
 				const versionResult = yield* agentVersionsByNumber
-					.get(lookupKey, versionCommit === undefined ? {} : { atLeast: versionCommit })
+					.get(lookupKey, agentCommit === undefined ? {} : { atLeast: agentCommit })
 					.pipe(orPending(id, "agent"))
 				if (isPending(versionResult)) {
 					return versionResult
 				}
 				let minted = Option.getOrNull(versionResult)
-				if (minted === null && versionCommit === undefined) {
+				if (minted === null && agentCommit === undefined) {
 					const waitedVersion = yield* agentVersionsByNumber
 						.waitFor(lookupKey, { version }, { timeout: waitTimeout })
 						.pipe(orPending(id, "agent"))
@@ -183,7 +182,6 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						id,
 						receipt.reply.version,
 						commitForStream(receipt.commits, `Agent/${id}`),
-						commitForStream(receipt.commits, `AgentVersion/${receipt.reply.version_id}`),
 						"Failed to load created agent.",
 					)
 				}).pipe(handled),
@@ -231,7 +229,6 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						id,
 						receipt.reply.version,
 						commitForStream(receipt.commits, `Agent/${id}`),
-						commitForStream(receipt.commits, `AgentVersion/${receipt.reply.version_id}`),
 						"Failed to load updated agent.",
 					)
 				}).pipe(handled),
