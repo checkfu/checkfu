@@ -129,6 +129,41 @@ describe("Automations", () => {
 		),
 	)
 
+	it.effect("previews the firing it has armed, also inside a daylight-saving gap", () => {
+		const schedule = {
+			type: "cron" as const,
+			expression: "15 2 * * *",
+			timezone: "America/New_York",
+		}
+		const previewed = (expected: ReadonlyArray<string>) =>
+			Story.view(AutomationView, automation, (state) => {
+				expect(
+					state === null
+						? []
+						: upcomingOccurrences(
+								state.schedule.expression,
+								state.schedule.timezone,
+								DateTime.toEpochMillis(state.scheduled_from),
+								2,
+							).map((instant) => DateTime.formatIso(DateTime.makeUnsafe(instant))),
+				).toEqual(expected)
+			})
+		return story(
+			Story.clock(at("2026-03-06T12:00:00.000Z")),
+			Story.when(new CreateAutomation({ automation_id: automation.id, ...config, schedule })),
+			Story.then(automation, new AutomationCreated({ ...config, schedule })),
+			Story.clock(at("2026-03-07T07:15:00.000Z")),
+			Story.then(automation, scheduled(1, "2026-03-07T07:15:00.000Z")),
+			previewed(["2026-03-08T07:15:00.000Z", "2026-03-09T06:15:00.000Z"]),
+			Story.clock(at("2026-03-08T07:05:00.000Z")),
+			Story.then(automation),
+			previewed(["2026-03-08T07:15:00.000Z", "2026-03-09T06:15:00.000Z"]),
+			Story.clock(at("2026-03-08T07:15:00.000Z")),
+			Story.then(automation, scheduled(2, "2026-03-08T07:15:00.000Z")),
+			previewed(["2026-03-09T06:15:00.000Z", "2026-03-10T06:15:00.000Z"]),
+		)
+	})
+
 	it.effect("fires once for occurrences missed while it could not run", () =>
 		story(
 			...created(),
@@ -166,9 +201,14 @@ describe("Automations", () => {
 	it.effect("runs on request, even while paused, without moving the schedule", () =>
 		story(
 			...created(),
+			Story.clock(at("2026-01-01T08:30:00.000Z")),
 			Story.when(new RunAutomation({ automation_id: automation.id })),
 			Story.then(automation, manual(1)),
 			Story.replied({ run: 1 }),
+			Story.view(AutomationView, automation, {
+				scheduled_from: at("2026-01-01T08:00:00.000Z"),
+				last_run_at: at("2026-01-01T08:30:00.000Z"),
+			}),
 			Story.clock(at("2026-01-01T09:00:00.000Z")),
 			Story.then(automation, scheduled(2, "2026-01-01T09:00:00.000Z")),
 			Story.when(new PauseAutomation({ automation_id: automation.id })),

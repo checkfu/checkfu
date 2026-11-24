@@ -345,7 +345,7 @@ export class EffectAutomationsRunsResource {
 		this.#runtime = runtime
 	}
 
-	/** List the runs of an automation that have started or failed, newest first by default */
+	/** List the runs of an automation that have started or failed, oldest first by default */
 	list(
 		automationId: string,
 		params: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> | undefined,
@@ -390,7 +390,7 @@ export class EffectAutomationsRunsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List the runs of an automation that have started or failed, newest first by default */
+	/** Auto-paginate pages for List the runs of an automation that have started or failed, oldest first by default */
 	listPages(
 		automationId: string,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
@@ -411,7 +411,7 @@ export class EffectAutomationsRunsResource {
 		)
 	}
 
-	/** Auto-paginate items for List the runs of an automation that have started or failed, newest first by default */
+	/** Auto-paginate items for List the runs of an automation that have started or failed, oldest first by default */
 	listStream(
 		automationId: string,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
@@ -1234,7 +1234,7 @@ export class AutomationsRunsResource {
 		this.#runtime = runtime
 	}
 
-	/** List the runs of an automation that have started or failed, newest first by default */
+	/** List the runs of an automation that have started or failed, oldest first by default */
 	list(
 		automationId: string,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,

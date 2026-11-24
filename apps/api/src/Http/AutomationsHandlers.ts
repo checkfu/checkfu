@@ -17,7 +17,6 @@ import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -46,8 +45,16 @@ export const AutomationReadWaitTimeout = Context.Reference<Duration.Input>(
 
 const UPCOMING_RUNS = 5
 
-const automationResource = (snapshot: AutomationSnapshot, now: number) => {
-	const { agent_id, agent_version, text, runs, activation: _activation, ...rest } = snapshot
+const automationResource = (snapshot: AutomationSnapshot) => {
+	const {
+		agent_id,
+		agent_version,
+		text,
+		runs,
+		activation: _activation,
+		scheduled_from,
+		...rest
+	} = snapshot
 	return {
 		...rest,
 		agent: { id: agent_id, version: agent_version },
@@ -58,7 +65,7 @@ const automationResource = (snapshot: AutomationSnapshot, now: number) => {
 				? upcomingOccurrences(
 						snapshot.schedule.expression,
 						snapshot.schedule.timezone,
-						now,
+						DateTime.toEpochMillis(scheduled_from),
 						UPCOMING_RUNS,
 					).map((at) => DateTime.makeUnsafe(at))
 				: [],
@@ -88,9 +95,6 @@ const automationRunResource = (
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,
 })
-
-const present = (snapshot: AutomationSnapshot) =>
-	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
 export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (handlers) =>
 	Effect.gen(function* () {
@@ -125,7 +129,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				const head = Option.getOrNull(result)
 				return head === null
 					? { id, type: "automation" as const, pending: true as const }
-					: yield* present(head)
+					: automationResource(head)
 			})
 
 		return handlers
@@ -198,7 +202,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const ref = Automation.ref(id)
 					const found = Option.getOrNull(yield* automationViews.get(ref))
 					if (found !== null) {
-						return yield* present(found)
+						return automationResource(found)
 					}
 					const projected = yield* automationViews.waitFor(
 						ref,
@@ -208,7 +212,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					if (projected === null) {
 						return yield* reject(503, `Automation ${id} projection is not ready.`)
 					}
-					return yield* present(projected)
+					return automationResource(projected)
 				}).pipe(handled),
 			)
 			.handle("pause", ({ params }) =>
@@ -258,7 +262,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const page = yield* automationRuns.list(Automation.ref(id), {
 						...(query.after === undefined ? {} : { after: query.after }),
 						take: query.limit ?? 50,
-						order: query.order ?? "desc",
+						order: query.order ?? "asc",
 					})
 					return {
 						data: page.entries.map((entry) => automationRunResource(id, entry)),

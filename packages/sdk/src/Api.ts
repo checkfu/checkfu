@@ -474,6 +474,7 @@ export const AutomationResource = Schema.Struct({
 		"text",
 		"runs",
 		"activation",
+		"scheduled_from",
 	]),
 	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
 	initial_events: AutomationInitialEvents,
@@ -1213,7 +1214,7 @@ const Automations = HttpApiGroup.make("automations")
 			.annotate(OpenApi.Summary, "List automation runs")
 			.annotate(
 				OpenApi.Description,
-				"List the runs of an automation that have started or failed, newest first by default",
+				"List the runs of an automation that have started or failed, oldest first by default",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "automations.runs",

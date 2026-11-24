@@ -438,7 +438,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_listRuns",
 		title: "List automation runs",
 		description:
-			"List the runs of an automation that have started or failed, newest first by default",
+			"List the runs of an automation that have started or failed, oldest first by default",
 		method: "GET",
 		path: "/v1/automations/{automation_id}/runs",
 		readOnly: true,

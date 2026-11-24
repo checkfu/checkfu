@@ -586,7 +586,7 @@ const automationsRunsListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(automationsRunsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List the runs of an automation that have started or failed, newest first by default",
+		"List the runs of an automation that have started or failed, oldest first by default",
 	),
 )
 

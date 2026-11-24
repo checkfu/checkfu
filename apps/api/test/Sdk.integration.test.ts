@@ -138,7 +138,7 @@ describe("@checkfu/sdk live API integration", () => {
 								initial_events: [
 									{ type: "user.message", content: [{ type: "text", text: "Report." }] },
 								],
-								schedule: { type: "cron", expression: "0 9 * * 1-5", timezone: "UTC" },
+								schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
 							})
 							if ("pending" in automation) {
 								return yield* Effect.die(new Error("automation create stayed pending"))
@@ -153,11 +153,13 @@ describe("@checkfu/sdk live API integration", () => {
 								status: "queued",
 								trigger: { type: "manual" },
 							})
+							yield* client.automations.run(automation.id)
+							yield* client.automations.run(automation.id)
 							const runs = yield* client.automations.runs.list(automation.id, { limit: 5 }).pipe(
 								Effect.repeat({
 									schedule: Schedule.spaced("5 millis"),
 									times: 400,
-									until: (page) => page.data.length >= 1,
+									until: (page) => page.data.length >= 3,
 								}),
 							)
 							expect(runs.data[0]).toMatchObject({
@@ -165,6 +167,14 @@ describe("@checkfu/sdk live API integration", () => {
 								status: "started",
 								session_id: `sess_${automation.id}_1`,
 							})
+							const paged = yield* Stream.runCollect(
+								client.automations.runs.listStream(automation.id, { limit: 1 }),
+							)
+							expect(Array.from(paged, (entry) => entry.run)).toEqual([1, 2, 3])
+							const pagedNewestFirst = yield* Stream.runCollect(
+								client.automations.runs.listStream(automation.id, { limit: 1, order: "desc" }),
+							)
+							expect(Array.from(pagedNewestFirst, (entry) => entry.run)).toEqual([3, 2, 1])
 							const tooFrequent = yield* Effect.flip(
 								client.automations.create({
 									name: "too-frequent",
@@ -347,6 +357,34 @@ describe("@checkfu/sdk live API integration", () => {
 									allEvents.push(event)
 								}
 								expect(allEvents.length).toBeGreaterThanOrEqual(seen.length)
+
+								// Auto-paginated for-await over an automation's runs, with and without an order
+								const automation = await client.waitForPending(
+									await client.automations.create({
+										name: "promise-automation",
+										agent: agent.id,
+										environment_id: env.id,
+										initial_events: [
+											{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+										],
+										schedule: { type: "cron", expression: "0 0 29 2 *", timezone: "UTC" },
+									}),
+								)
+								for (const expected of [1, 2, 3]) {
+									expect((await client.automations.run(automation.id)).run).toBe(expected)
+								}
+								const runNumbers = async (order?: "asc" | "desc") => {
+									const numbers: Array<number> = []
+									for await (const entry of client.automations.runs.list(automation.id, {
+										limit: 1,
+										...(order === undefined ? {} : { order }),
+									})) {
+										numbers.push(entry.run)
+									}
+									return numbers
+								}
+								await expect.poll(() => runNumbers(), { timeout: 5000 }).toEqual([1, 2, 3])
+								expect(await runNumbers("desc")).toEqual([3, 2, 1])
 
 								// 404 unwraps directly to NotFoundError
 								await expect(client.sessions.retrieve("sess_does_not_exist")).rejects.toThrow(

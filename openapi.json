@@ -12279,7 +12279,7 @@
 						}
 					}
 				},
-				"description": "List the runs of an automation that have started or failed, newest first by default",
+				"description": "List the runs of an automation that have started or failed, oldest first by default",
 				"summary": "List automation runs",
 				"x-forge-group-name": "automations.runs",
 				"x-forge-method-name": "list",

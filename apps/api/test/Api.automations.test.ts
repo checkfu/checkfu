@@ -1,6 +1,6 @@
 import { MAX_LIVE_AUTOMATIONS } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
+import * as InMemory from "@alchemy.run/domain/InMemory"
 import { describe, expect, it } from "@effect/vitest"
-import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
@@ -90,9 +90,14 @@ const prerequisites = (apiFetch: ApiFetch) =>
 		return { agentId: agent.body.id, environmentId: environment.body.id }
 	})
 
+const NOW = "2026-01-05T12:00:00.000Z"
+
 const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A> => {
-	const { layer, closeAll } = makePiDurableTestLayer(async (model, context) =>
-		makeAssistantReply(model, null, `Done: ${extractLastUserText(context)}`, 4, 2),
+	const { layer, closeAll } = makePiDurableTestLayer(
+		async (model, context) =>
+			makeAssistantReply(model, null, `Done: ${extractLastUserText(context)}`, 4, 2),
+		undefined,
+		InMemory.make({ now: () => Date.parse(NOW) }).layer,
 	)
 	try {
 		return await Effect.runPromise(
@@ -104,18 +109,6 @@ const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A
 	} finally {
 		await closeAll()
 	}
-}
-
-const newYorkWallClock = (iso: string): string => {
-	const parts = new Intl.DateTimeFormat("en-US", {
-		timeZone: "America/New_York",
-		weekday: "short",
-		hour: "2-digit",
-		minute: "2-digit",
-		hourCycle: "h23",
-	}).formatToParts(new Date(iso))
-	const part = (type: string) => parts.find((entry) => entry.type === type)?.value
-	return `${part("weekday")} ${part("hour")}:${part("minute")}`
 }
 
 const settledRuns = (apiFetch: ApiFetch, automationId: string, count: number) =>
@@ -158,12 +151,14 @@ describe("Automations API", () => {
 					archived_at: null,
 				})
 				expect(created.body.id).toMatch(/^auto_[0-9a-f]{24}$/u)
-				expect(created.body.upcoming_runs_at).toHaveLength(5)
-				const now = yield* Clock.currentTimeMillis
-				for (const at of created.body.upcoming_runs_at) {
-					expect(newYorkWallClock(at)).toMatch(/^(?:Mon|Tue|Wed|Thu|Fri) 09:00$/u)
-					expect(Date.parse(at)).toBeGreaterThan(now)
-				}
+				expect(created.body.upcoming_runs_at).toEqual([
+					"2026-01-05T14:00:00.000Z",
+					"2026-01-06T14:00:00.000Z",
+					"2026-01-07T14:00:00.000Z",
+					"2026-01-08T14:00:00.000Z",
+					"2026-01-09T14:00:00.000Z",
+				])
+				expect(created.body).toMatchObject({ created_at: NOW, updated_at: NOW })
 
 				const fetched = yield* call<AutomationBody>(
 					apiFetch,
@@ -247,9 +242,15 @@ describe("Automations API", () => {
 				yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
 				const afterSecond = yield* settledRuns(apiFetch, id, 2)
 				expect(afterSecond.body.data.map((entry) => [entry.run, entry.session_id])).toEqual([
-					[2, `sess_${id}_2`],
 					[1, `sess_${id}_1`],
+					[2, `sess_${id}_2`],
 				])
+				const newestFirst = yield* call<{ data: ReadonlyArray<RunBody> }>(
+					apiFetch,
+					"GET",
+					`/v1/automations/${id}/runs?order=desc`,
+				)
+				expect(newestFirst.body.data.map((entry) => entry.run)).toEqual([2, 1])
 				const oldestFirst = yield* call<{
 					data: ReadonlyArray<RunBody>
 					has_more: boolean
@@ -296,7 +297,7 @@ describe("Automations API", () => {
 				const settled = yield* settledRuns(apiFetch, id, 25)
 				expect(
 					settled.body.data.map((entry) => [entry.run, entry.status, entry.session_id]),
-				).toEqual(numbers.toReversed().map((number) => [number, "started", `sess_${id}_${number}`]))
+				).toEqual(numbers.map((number) => [number, "started", `sess_${id}_${number}`]))
 			}),
 		))
 

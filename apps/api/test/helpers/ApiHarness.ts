@@ -173,6 +173,7 @@ export const makePiDurableTestLayer = (
 		OPENAI_API_KEY: "sk-openai-test",
 		ANTHROPIC_API_KEY: "sk-anthropic-test",
 	},
+	platform = Domain.InMemory,
 ) => {
 	const backends = new Map<
 		string,
@@ -270,7 +271,7 @@ export const makePiDurableTestLayer = (
 				settleMargin: "50 millis",
 			}),
 		),
-		Layer.provide(Domain.InMemory),
+		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),

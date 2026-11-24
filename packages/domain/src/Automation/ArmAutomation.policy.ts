@@ -21,7 +21,7 @@ export class ArmAutomation extends Domain.Policy("ArmAutomation", {
 export const ArmAutomationLive = ArmAutomation.toLayer(
 	Effect.gen(function* () {
 		const automations = yield* Automation
-		return Effect.fn(function* ({ source, state, event, envelope }) {
+		return Effect.fn(function* ({ source, state, event }) {
 			if (state === null) {
 				return
 			}
@@ -31,7 +31,7 @@ export const ArmAutomationLive = ArmAutomation.toLayer(
 			const next = nextOccurrence(
 				state.schedule.expression,
 				state.schedule.timezone,
-				DateTime.toEpochMillis(envelope.at),
+				DateTime.toEpochMillis(state.scheduled_from),
 			)
 			if (next === null) {
 				yield* automations.send(

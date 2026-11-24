@@ -32,6 +32,7 @@ export class AutomationView extends Domain.View("AutomationView", {
 						pause_reason: null,
 						runs: 0,
 						activation: 0,
+						scheduled_from: ctx.at,
 						last_run_at: null,
 						created_at: ctx.at,
 						updated_at: ctx.at,
@@ -49,6 +50,7 @@ export class AutomationView extends Domain.View("AutomationView", {
 						status: "active" as const,
 						pause_reason: null,
 						activation: e.activation,
+						scheduled_from: ctx.at,
 						updated_at: ctx.at,
 					},
 		"automation.archived": (state, _e, ctx) =>
@@ -62,6 +64,14 @@ export class AutomationView extends Domain.View("AutomationView", {
 						updated_at: ctx.at,
 					},
 		"automation.fired": (state, e, ctx) =>
-			state === null ? null : { ...state, runs: e.run, last_run_at: ctx.at, updated_at: ctx.at },
+			state === null
+				? null
+				: {
+						...state,
+						runs: e.run,
+						scheduled_from: e.trigger === "schedule" ? ctx.at : state.scheduled_from,
+						last_run_at: ctx.at,
+						updated_at: ctx.at,
+					},
 	},
 }) {}
