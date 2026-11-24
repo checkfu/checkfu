@@ -20,6 +20,10 @@ const HYDRATE_BATCH = 10
 
 const utf8 = new TextEncoder()
 
+/** The bytes of a JSON array once it holds one more entry: its brackets, commas and entries. */
+export const pageBytesWith = (bytes: number, count: number, size: number): number =>
+	(count === 0 ? 2 : bytes + 1) + size
+
 const isNotFound = Schema.is(ERRORS[404])
 
 const decodePage = Schema.decodeUnknownEffect(
@@ -59,11 +63,16 @@ export const makeLister = Effect.gen(function* () {
 					if (resource === null || (!include_archived && resource.archived_at !== null)) {
 						continue
 					}
-					bytes += utf8.encode(JSON.stringify(resource)).length
+					const next = pageBytesWith(
+						bytes,
+						data.length,
+						utf8.encode(JSON.stringify(resource)).length,
+					)
 					const previous = page.entries[start + offset - 1]
-					if (data.length > 0 && bytes > LIST_PAGE_BYTES && previous !== undefined) {
+					if (data.length > 0 && next > LIST_PAGE_BYTES && previous !== undefined) {
 						return { data, has_more: true, next_cursor: listingCursor(previous) }
 					}
+					bytes = next
 					data.push(resource)
 				}
 			}

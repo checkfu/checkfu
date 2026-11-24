@@ -4,7 +4,7 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/sdk/Schemas"
-import { LIST_PAGE_BYTES } from "../src/Http/Listing.ts"
+import { LIST_PAGE_BYTES, pageBytesWith } from "../src/Http/Listing.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	AUTH_HEADERS,
@@ -242,6 +242,16 @@ describe("List endpoints", () => {
 				expect(seen).toEqual(ids)
 			}),
 		))
+
+	it("counts a page's brackets and commas against its byte budget", () => {
+		const half = (LIST_PAGE_BYTES - 2) / 2
+		const fill = (sizes: ReadonlyArray<number>) =>
+			sizes.reduce((bytes, size, count) => pageBytesWith(bytes, count, size), 0)
+		expect(fill([half - 1, half - 1])).toBe(LIST_PAGE_BYTES - 1)
+		expect(fill([half, half])).toBe(LIST_PAGE_BYTES + 1)
+		expect(fill([LIST_PAGE_BYTES - 2])).toBe(LIST_PAGE_BYTES)
+		expect(JSON.stringify(["ab", "cd"]).length).toBe(fill([4, 4]))
+	})
 
 	it("refuses list paging values it cannot use", () =>
 		run((apiFetch) =>
