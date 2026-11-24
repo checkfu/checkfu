@@ -1,0 +1,15 @@
+# Run by .githooks/pre-commit for fast feedback; the required CI checks verify the commit.
+# Staged files are checked as staged: lefthook sets their unstaged changes aside. Everything
+# else the tools read, such as their config and the types of other files, comes from the
+# working tree. Every command runs, so a commit lists every failure.
+no_auto_install: true
+pre-commit:
+  commands:
+    lint:
+      files: git diff --cached --name-only --diff-filter=ACMRT
+      glob: "*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+      run: bun run effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives --no-error-on-unmatched-pattern -- {files}
+    format:
+      files: git diff --cached --name-only --diff-filter=ACMRT
+      run: bun run oxfmt --check --no-error-on-unmatched-pattern -- {files}
+      fail_text: run 'bun run format' and stage the result

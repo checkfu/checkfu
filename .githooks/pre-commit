@@ -1,0 +1,12 @@
+#!/bin/sh
+# Runs the pre-commit checks in lefthook.yml with this checkout's tools.
+set -u
+git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
+modules="$(git rev-parse --show-toplevel)/node_modules"
+for package in lefthook @effect/tsgo oxlint oxfmt; do
+	if [ ! -d "$modules/$package" ]; then
+		echo "pre-commit: $package is not installed in this checkout; run 'bun install' and commit again" >&2
+		exit 1
+	fi
+done
+exec bun run lefthook run pre-commit "$@"

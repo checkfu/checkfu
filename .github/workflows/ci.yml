@@ -62,7 +62,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache: test
-      - run: bun x turbo run test --filter='!@checkfu/domain'
+      - run: bun x turbo run test --continue --filter='!@checkfu/domain'
       - if: ${{ !cancelled() }}
         run: bun run test:bun
       - if: ${{ !cancelled() }}
