@@ -148,6 +148,52 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "agents_listAgents",
+		title: "List agents",
+		description:
+			"List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true.",
+		method: "GET",
+		path: "/v1/agents",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "agents_updateAgent",
 		title: "Update an agent",
 		description: "Update an agent (creates a new agent version)",
@@ -823,6 +869,52 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "environments_listEnvironments",
+		title: "List environments",
+		description:
+			"List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear.",
+		method: "GET",
+		path: "/v1/environments",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "environments_updateEnvironment",
 		title: "Update an environment",
 		description: "Update an environment",
@@ -1209,6 +1301,58 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				},
 			},
 			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "sessions_listSessions",
+		title: "List sessions",
+		description:
+			"List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true.",
+		method: "GET",
+		path: "/v1/sessions",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+						agent_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Only sessions created with this agent",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
 			additionalProperties: false,
 		},
 	},

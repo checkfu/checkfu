@@ -136,6 +136,79 @@ const agentsCreateCommand = CommandMake(
 	]),
 )
 
+const agentsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "agents list",
+	apiGroup: "agents",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const agentsListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(agentsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true.",
+	),
+)
+
 const agentsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "agents retrieve",
 	apiGroup: "agents",
@@ -787,6 +860,79 @@ const environmentsDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(environmentsDeleteCommandSpec, flags),
 ).pipe(CommandWithDescription("Delete an environment"))
 
+const environmentsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "environments list",
+	apiGroup: "environments",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const environmentsListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(environmentsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear.",
+	),
+)
+
 const environmentsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "environments retrieve",
 	apiGroup: "environments",
@@ -1017,6 +1163,92 @@ const sessionsCreateCommand = CommandMake(
 			description: "Create a session with flags",
 		},
 	]),
+)
+
+const sessionsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions list",
+	apiGroup: "sessions",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "agentId",
+			flagName: "agent-id",
+			wireName: "agent_id",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const sessionsListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+		agentId: FlagString("agent-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Only sessions created with this agent"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true.",
+	),
 )
 
 const sessionsRetrieveCommandSpec: GeneratedOperationDescriptor = {
@@ -1264,6 +1496,7 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				agentsArchiveCommand,
 				agentsCreateCommand,
+				agentsListCommand,
 				agentsRetrieveCommand,
 				agentsUpdateCommand,
 				...(extras?.["agents"] ?? ([] as const)),
@@ -1295,6 +1528,7 @@ export const buildGeneratedResourceCommands = <
 				environmentsArchiveCommand,
 				environmentsCreateCommand,
 				environmentsDeleteCommand,
+				environmentsListCommand,
 				environmentsRetrieveCommand,
 				environmentsUpdateCommand,
 				...(extras?.["environments"] ?? ([] as const)),
@@ -1305,6 +1539,7 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				sessionsArchiveCommand,
 				sessionsCreateCommand,
+				sessionsListCommand,
 				sessionsRetrieveCommand,
 				...(extras?.["sessions"] ?? ([] as const)),
 			]),

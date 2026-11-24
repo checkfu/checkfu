@@ -44,6 +44,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
+import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { IdempotencyClaim } from "../src/IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import {
 	AdmitSession,
@@ -241,7 +242,14 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
-		expect(report.explored.aside).toEqual([])
+		expect(report.explored.aside).toEqual([
+			{
+				kind: "projection",
+				name: "Listing",
+				reason: "is not declared in a file the model's file imports",
+			},
+			{ kind: "query", name: "ListResources", reason: "what a query answers is not checked" },
+		])
 		expect(report.explored.truncated).toBe(false)
 		expect(report.explored.complete).toBe(3)
 		expect(report.explored.disagreements).toEqual([])
@@ -263,7 +271,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const platform = InMemory.make({ manual: true })
 		const observedAggregateIds = new Map<string, Set<string>>()
 		const observedViewKeys = new Map<string, Set<string>>()
-		const layer = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessStubLayer))).pipe(
+		const layer = Checkfu.layer(
+			CheckfuHandlersLive.pipe(Layer.provide([HarnessStubLayer, ListingStore.memory])),
+		).pipe(
 			Layer.updateService(Domain.Platform, (base) =>
 				Domain.Platform.of({
 					model: (hosted) =>

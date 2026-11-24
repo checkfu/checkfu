@@ -14,6 +14,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
+import { makeLister } from "./Listing.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,
 	bestEffortAfterCommit,
@@ -39,6 +40,31 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
+		const list = yield* makeLister
+
+		const retrieve = (id: EnvironmentId) =>
+			Effect.gen(function* () {
+				const checkExists = Effect.gen(function* () {
+					const committed = yield* environments.get(id)
+					if (committed.status === "" || committed.status === "deleted") {
+						return yield* reject(404, `Environment ${id} not found.`)
+					}
+				})
+				yield* checkExists
+				const ref = Environment.ref(id)
+				const found = Option.getOrNull(yield* environmentViews.get(ref))
+				if (found !== null) {
+					return found
+				}
+				const projected = yield* environmentViews
+					.waitFor(ref, { version: { gte: 1 } }, { timeout: yield* EnvironmentReadWaitTimeout })
+					.pipe(Effect.tapErrorTag("WaitTimeout", () => checkExists))
+				if (projected === null) {
+					yield* checkExists
+					return yield* reject(503, `Environment ${id} projection is not ready.`)
+				}
+				return projected
+			})
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -133,33 +159,10 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					return yield* reject(500, "Failed to load created environment.")
 				}).pipe(handled),
 			)
-			.handle("get", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.environment_id
-					const checkExists = Effect.gen(function* () {
-						const committed = yield* environments.get(id)
-						if (committed.status === "" || committed.status === "deleted") {
-							return yield* reject(404, `Environment ${id} not found.`)
-						}
-					})
-					// Verify committed existence before trusting a non-null view snapshot so a
-					// lagging EnvironmentView after DELETE cannot resurrect a deleted environment.
-					yield* checkExists
-					const ref = Environment.ref(id)
-					const found = Option.getOrNull(yield* environmentViews.get(ref))
-					if (found !== null) {
-						return found
-					}
-					const projected = yield* environmentViews
-						.waitFor(ref, { version: { gte: 1 } }, { timeout: yield* EnvironmentReadWaitTimeout })
-						.pipe(Effect.tapErrorTag("WaitTimeout", () => checkExists))
-					if (projected === null) {
-						yield* checkExists
-						return yield* reject(503, `Environment ${id} projection is not ready.`)
-					}
-					return projected
-				}).pipe(handled),
+			.handle("list", ({ query }) =>
+				list("environment", query, (id) => retrieve(EnvironmentId.make(id))).pipe(handled),
 			)
+			.handle("get", ({ params }) => retrieve(params.environment_id).pipe(handled))
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.environment_id

@@ -17,6 +17,7 @@ import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as DateTime from "effect/DateTime"
+import * as Cache from "effect/Cache"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Sse from "effect/encoding/Sse"
@@ -28,6 +29,7 @@ import * as Stream from "effect/Stream"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
+import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
@@ -49,6 +51,7 @@ import {
 	sha256Json,
 	toApiError,
 } from "./HttpHelpers.ts"
+import { makeLister } from "./Listing.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
@@ -241,6 +244,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
 		const sseMaxConnectionDuration = yield* SseMaxConnectionDuration
+		const list = yield* makeLister
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -272,6 +276,24 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					return yield* reject(503, `Session ${id} projection is not ready.`)
 				}
 				return projected
+			})
+
+		const pinnedVersionReady = (agentId: string, version: number) =>
+			Effect.gen(function* () {
+				const timeout = Duration.min(
+					Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
+					Duration.fromInputUnsafe(yield* AgentVersionWaitTimeout),
+				)
+				return yield* waitForPinnedAgentVersion(agentId, version, timeout)
+			})
+
+		const retrieve = (id: SessionId, ready: typeof pinnedVersionReady = pinnedVersionReady) =>
+			Effect.gen(function* () {
+				const snapshot = yield* existing(id)
+				if (!(yield* ready(snapshot.agent_id, snapshot.agent_version))) {
+					return yield* reject(503, `Session ${id} pinned agent version projection is not ready.`)
+				}
+				return serializeSession(snapshot)
 			})
 
 		return handlers
@@ -383,27 +405,24 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					}
 				}).pipe(handled),
 			)
-			.handle("get", ({ params }) =>
+			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
-					const snapshot = yield* existing(params.session_id)
-					const versionTimeout = Duration.min(
-						Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
-						Duration.fromInputUnsafe(yield* AgentVersionWaitTimeout),
+					const pinned = yield* Cache.make({
+						capacity: LIST_PAGE_MAX,
+						lookup: (key: string) =>
+							pinnedVersionReady(
+								key.slice(key.indexOf(":") + 1),
+								Number(key.slice(0, key.indexOf(":"))),
+							),
+					})
+					return yield* list("session", query, (id) =>
+						retrieve(SessionId.make(id), (agentId, version) =>
+							Cache.get(pinned, `${version}:${agentId}`),
+						),
 					)
-					const ready = yield* waitForPinnedAgentVersion(
-						snapshot.agent_id,
-						snapshot.agent_version,
-						versionTimeout,
-					)
-					if (!ready) {
-						return yield* reject(
-							503,
-							`Session ${params.session_id} pinned agent version projection is not ready.`,
-						)
-					}
-					return serializeSession(snapshot)
 				}).pipe(handled),
 			)
+			.handle("get", ({ params }) => retrieve(params.session_id).pipe(handled))
 			.handle("archive", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.session_id

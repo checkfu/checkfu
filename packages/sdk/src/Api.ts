@@ -33,6 +33,7 @@ import {
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
+	ResourceListCursor,
 	SessionEventFields,
 	SessionId,
 	SessionSnapshot,
@@ -654,11 +655,23 @@ export const ListAutomationRunsResponse = Schema.Struct({
 })
 export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
-export const ListAutomationsResponse = Schema.Struct({
-	data: Schema.Array(AutomationResource),
-	has_more: Schema.Boolean,
-	next_cursor: Schema.NullOr(Schema.Finite),
-})
+const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, cursor: C) =>
+	Schema.Struct({
+		data: Schema.Array(resource),
+		has_more: Schema.Boolean,
+		next_cursor: Schema.NullOr(cursor),
+	})
+
+export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
+export type ListAgentsResponse = typeof ListAgentsResponse.Type
+
+export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot, ResourceListCursor)
+export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
+
+export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
+export type ListSessionsResponse = typeof ListSessionsResponse.Type
+
+export const ListAutomationsResponse = listResponse(AutomationResource, Schema.Finite)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
@@ -694,6 +707,41 @@ const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]
 			encode: SchemaGetter.transform(String),
 		}),
 	)
+
+const ListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u))
+	.annotate({ description: "Maximum number of results to return (1-100, default 50)" })
+	.pipe(
+		Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })), {
+			decode: SchemaGetter.transform(Number),
+			encode: SchemaGetter.transform(String),
+		}),
+	)
+
+const resourceListQuery = {
+	after: Schema.optionalKey(ResourceListCursor),
+	limit: Schema.optionalKey(ListLimitFromString),
+	order: Schema.optionalKey(
+		Schema.Literals(["asc", "desc"]).annotate({
+			description: "Sort order by creation: asc (oldest first, the default) or desc",
+		}),
+	),
+	include_archived: Schema.optionalKey(
+		Schema.Literals(["true", "false"])
+			.annotate({ description: "Include archived results: true or false (default false)" })
+			.pipe(
+				Schema.decodeTo(Schema.Boolean, {
+					decode: SchemaGetter.transform((value) => value === "true"),
+					encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
+				}),
+			),
+	),
+}
+
+const resourceListCli = {
+	intQueryParams: {
+		limit: { min: 1, max: 100, metavar: "N" },
+	},
+}
 
 const agentParams = { agent_id: AgentId.annotate({ description: "Agent ID" }) }
 const environmentParams = {
@@ -775,6 +823,25 @@ const Agents = HttpApiGroup.make("agents")
 			.middleware(AgentBodyLimit),
 	)
 	.add(
+		HttpApiEndpoint.get("list", "/v1/agents", {
+			query: resourceListQuery,
+			success: ListAgentsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List agents")
+			.annotate(
+				OpenApi.Description,
+				"List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "list" },
+				"x-checkfu-mcp": { name: "agents_listAgents" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
 		HttpApiEndpoint.get("get", "/v1/agents/:agent_id", {
 			params: agentParams,
 			success: AgentResource,
@@ -854,6 +921,25 @@ const Environments = HttpApiGroup.make("environments")
 						},
 					],
 				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/environments", {
+			query: resourceListQuery,
+			success: ListEnvironmentsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List environments")
+			.annotate(
+				OpenApi.Description,
+				"List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "environments",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "environments", endpoint: "list" },
+				"x-checkfu-mcp": { name: "environments_listEnvironments" },
+				"x-checkfu-cli": resourceListCli,
 			}),
 	)
 	.add(
@@ -948,6 +1034,30 @@ const Sessions = HttpApiGroup.make("sessions")
 						},
 					],
 				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/sessions", {
+			query: {
+				...resourceListQuery,
+				agent_id: Schema.optionalKey(
+					ResourceId.annotate({ description: "Only sessions created with this agent" }),
+				),
+			},
+			success: ListSessionsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List sessions")
+			.annotate(
+				OpenApi.Description,
+				"List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "sessions",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "sessions", endpoint: "list" },
+				"x-checkfu-mcp": { name: "sessions_listSessions" },
+				"x-checkfu-cli": resourceListCli,
 			}),
 	)
 	.add(

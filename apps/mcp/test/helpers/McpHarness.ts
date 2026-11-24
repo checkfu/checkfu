@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
@@ -37,7 +38,9 @@ export const makeTestServer = Effect.gen(function* () {
 			interrupt: () => Effect.void,
 		}),
 	)
-	const ApiLayer = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive))).pipe(
+	const ApiLayer = Checkfu.layer(
+		CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
+	).pipe(
 		Layer.provide(Domain.InMemory),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),

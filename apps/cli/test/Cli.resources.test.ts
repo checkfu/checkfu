@@ -1,7 +1,26 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
+import type { CliRunResult } from "./helpers/CliHarness.ts"
+
+const listedIds = (result: CliRunResult): ReadonlyArray<string> =>
+	result.exitCode === 0
+		? (JSON.parse(result.stdout) as { data: ReadonlyArray<{ id: string }> }).data.map(
+				(entry) => entry.id,
+			)
+		: []
+
+const untilListed = <E, R>(run: Effect.Effect<CliRunResult, E, R>, id: string) =>
+	run.pipe(
+		Effect.repeat({
+			schedule: Schedule.spaced("5 millis"),
+			times: 200,
+			until: (result) => listedIds(result).includes(id),
+		}),
+		Effect.map(listedIds),
+	)
 
 describe("CLI help, errors, and resource commands", () => {
 	it("renders help without requiring credentials and omits any beta prefix", async () => {
@@ -206,6 +225,12 @@ describe("CLI help, errors, and resource commands", () => {
 					const archived = yield* cli.run(["agents", "archive", "--agent-id", agentId])
 					expect(archived.exitCode).toBe(0)
 					expect(JSON.parse(archived.stdout).archived_at).not.toBeNull()
+					expect(
+						yield* untilListed(cli.run(["agents", "list", "--include-archived", "true"]), agentId),
+					).toContain(agentId)
+					const defaultList = yield* cli.run(["agents", "list"])
+					expect(defaultList.exitCode).toBe(0)
+					expect(listedIds(defaultList)).not.toContain(agentId)
 
 					// Create from YAML stdin with flag override
 					const fromYaml = yield* cli.run(["agents", "create", "--name", "OverrideName"], {
@@ -268,6 +293,12 @@ describe("CLI help, errors, and resource commands", () => {
 					])
 					expect(updated.exitCode).toBe(0)
 					expect(JSON.parse(updated.stdout).description).toBe("Updated env")
+					expect(
+						yield* untilListed(
+							cli.run(["environments", "list", "--order", "desc", "--limit", "5"]),
+							env.id,
+						),
+					).toEqual([env.id])
 
 					const archived = yield* cli.run(["environments", "archive", "--environment-id", env.id])
 					expect(archived.exitCode).toBe(0)
@@ -478,6 +509,9 @@ describe("CLI help, errors, and resource commands", () => {
 					const retrieved = yield* cli.run(["sessions", "retrieve", "--session-id", session.id])
 					expect(retrieved.exitCode).toBe(0)
 					expect(JSON.parse(retrieved.stdout).id).toBe(session.id)
+					expect(
+						yield* untilListed(cli.run(["sessions", "list", "--agent-id", agentId]), session.id),
+					).toContain(session.id)
 
 					const archived = yield* cli.run(["sessions", "archive", "--session-id", session.id])
 					expect(archived.exitCode).toBe(0)

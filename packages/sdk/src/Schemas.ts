@@ -46,6 +46,13 @@ export const ResourceId = Schema.String.check(
 	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
 )
 
+export const ResourceListCursor = Schema.String.check(
+	Schema.isPattern(/^\d{1,15}:[^/\\]+$/u),
+).annotate({
+	description:
+		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+})
+
 // ---------------------------------------------------------------------------
 // Branded resource IDs
 // ---------------------------------------------------------------------------

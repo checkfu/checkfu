@@ -10,6 +10,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
@@ -199,7 +200,10 @@ describe("interrupted turns and turn recovery", () => {
 				}),
 		})
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
@@ -345,7 +349,10 @@ describe("interrupted turns and turn recovery", () => {
 			})),
 		)
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
@@ -534,7 +541,10 @@ describe("interrupted turns and turn recovery", () => {
 			abortTurn: () => Effect.void,
 		})
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),

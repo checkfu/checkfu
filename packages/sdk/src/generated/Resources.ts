@@ -64,6 +64,12 @@ export interface CheckfuOperations {
 		EndpointBody<"agents", "create">,
 		EndpointSuccess<"agents", "create">
 	>
+	readonly "agents.list": OperationShape<
+		EndpointParams<"agents", "list">,
+		RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		EndpointBody<"agents", "list">,
+		EndpointSuccess<"agents", "list">
+	>
 	readonly "agents.retrieve": OperationShape<
 		EndpointParams<"agents", "get">,
 		EndpointQuery<"agents", "get">,
@@ -142,6 +148,12 @@ export interface CheckfuOperations {
 		EndpointBody<"environments", "delete">,
 		EndpointSuccess<"environments", "delete">
 	>
+	readonly "environments.list": OperationShape<
+		EndpointParams<"environments", "list">,
+		RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		EndpointBody<"environments", "list">,
+		EndpointSuccess<"environments", "list">
+	>
 	readonly "environments.retrieve": OperationShape<
 		EndpointParams<"environments", "get">,
 		EndpointQuery<"environments", "get">,
@@ -165,6 +177,12 @@ export interface CheckfuOperations {
 		EndpointQuery<"sessions", "create">,
 		EndpointBody<"sessions", "create">,
 		EndpointSuccess<"sessions", "create">
+	>
+	readonly "sessions.list": OperationShape<
+		EndpointParams<"sessions", "list">,
+		RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		EndpointBody<"sessions", "list">,
+		EndpointSuccess<"sessions", "list">
 	>
 	readonly "sessions.retrieve": OperationShape<
 		EndpointParams<"sessions", "get">,
@@ -271,6 +289,78 @@ export class EffectAgentsResource {
 				),
 			),
 			options,
+		)
+	}
+
+	/** List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"agents", "list">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"agents", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"agents", "list"> | WithResponse<EndpointSuccess<"agents", "list">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.agents.list", "idempotent", options, () =>
+				this.#runtime.raw.agents.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["include_archived"] === undefined
+							? {}
+							: { include_archived: params["include_archived"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"agents", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"agents", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
 		)
 	}
 
@@ -872,6 +962,78 @@ export class EffectEnvironmentsResource {
 		)
 	}
 
+	/** List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"environments", "list">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"environments", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"environments", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"environments", "list"> | WithResponse<EndpointSuccess<"environments", "list">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.environments.list", "idempotent", options, () =>
+				this.#runtime.raw.environments.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["include_archived"] === undefined
+							? {}
+							: { include_archived: params["include_archived"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"environments", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"environments", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
 	/** Retrieve an environment by ID */
 	retrieve(
 		environmentId: string,
@@ -1194,6 +1356,79 @@ export class EffectSessionsResource {
 		)
 	}
 
+	/** List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"sessions", "list">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"sessions", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"sessions", "list"> | WithResponse<EndpointSuccess<"sessions", "list">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.sessions.list", "idempotent", options, () =>
+				this.#runtime.raw.sessions.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["include_archived"] === undefined
+							? {}
+							: { include_archived: params["include_archived"] }),
+						...(params?.["agent_id"] === undefined ? {} : { agent_id: params["agent_id"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"sessions", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"sessions", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
 	/** Retrieve a session by ID */
 	retrieve(
 		sessionId: string,
@@ -1272,6 +1507,30 @@ export class AgentsResource {
 	): APIPromise<EndpointJsonSuccess<"agents", "create">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAgentsResource(effectRuntime).create(params, { ...effectOpts, withResponse: true }),
+		)
+	}
+
+	/** List agents in creation order, oldest first by default. Archived agents are left out unless include_archived is true. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "list">>, string>,
+		ItemOf<EndpointJsonSuccess<"agents", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectAgentsResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
 		)
 	}
 
@@ -1496,6 +1755,30 @@ export class EnvironmentsResource {
 		)
 	}
 
+	/** List environments in creation order, oldest first by default. Archived environments are left out unless include_archived is true; deleted ones never appear. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"environments", "list">>, string>,
+		ItemOf<EndpointJsonSuccess<"environments", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectEnvironmentsResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
 	/** Retrieve an environment by ID */
 	retrieve(
 		environmentId: string,
@@ -1615,6 +1898,30 @@ export class SessionsResource {
 				...effectOpts,
 				withResponse: true,
 			}),
+		)
+	}
+
+	/** List sessions in creation order, oldest first by default. Archived sessions are left out unless include_archived is true. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "list">>, string>,
+		ItemOf<EndpointJsonSuccess<"sessions", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectSessionsResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
 		)
 	}
 

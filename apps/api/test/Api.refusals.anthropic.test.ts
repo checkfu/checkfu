@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
@@ -183,7 +184,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -438,7 +442,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				),
 		})
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const PiProviderLive = PiDurableHarnessLive.pipe(
 			Layer.provide(executorLayer),
@@ -1050,7 +1057,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					}),
 			})
 			const normalizedLayer = Checkfu.layer(
-				CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+				CheckfuHandlersLive.pipe(
+					Layer.provide(ListingStore.memory),
+					Layer.provide(PiDurableHarnessLive),
+				),
 			).pipe(
 				Layer.provide(normalizedExecutor),
 				Layer.provide(Domain.InMemory),
@@ -1258,7 +1268,10 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					}),
 			})
 			const unnormalizedLayer = Checkfu.layer(
-				CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+				CheckfuHandlersLive.pipe(
+					Layer.provide(ListingStore.memory),
+					Layer.provide(PiDurableHarnessLive),
+				),
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),

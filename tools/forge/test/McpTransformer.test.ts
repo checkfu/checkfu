@@ -14,12 +14,12 @@ const withOperation = (path: string, method: string, operation: Operation): stri
 	return JSON.stringify(spec)
 }
 
-const listAgents = {
-	operationId: "agents.list",
-	summary: "List agents",
-	description: "List all agents",
+const searchAgents = {
+	operationId: "agents.search",
+	summary: "Search agents",
+	description: "Search agents",
 	"x-forge-group-name": "agents",
-	"x-forge-method-name": "list",
+	"x-forge-method-name": "search",
 	parameters: [
 		{
 			name: "limit",
@@ -122,7 +122,7 @@ describe("MCP tool projection", () => {
 	})
 
 	it("refuses an operation that has not decided its MCP exposure", () => {
-		expect(() => project(withOperation("/v1/agents", "get", listAgents))).toThrow(
+		expect(() => project(withOperation("/v1/agents", "get", searchAgents))).toThrow(
 			/GET \/v1\/agents: declare "x-checkfu-mcp"/,
 		)
 	})
@@ -130,10 +130,10 @@ describe("MCP tool projection", () => {
 	it("exposes a named operation and leaves out one that opts out", () => {
 		const exposed = project(
 			withOperation("/v1/agents", "get", {
-				...listAgents,
-				"x-checkfu-mcp": { name: "agents_listAgents" },
+				...searchAgents,
+				"x-checkfu-mcp": { name: "agents_searchAgents" },
 			}),
-		).find((tool) => tool.name === "agents_listAgents")
+		).find((tool) => tool.name === "agents_searchAgents")
 		expect(exposed).toMatchObject({
 			readOnly: true,
 			inputSchema: {
@@ -145,7 +145,7 @@ describe("MCP tool projection", () => {
 		})
 
 		const hidden = project(
-			withOperation("/v1/agents", "get", { ...listAgents, "x-checkfu-mcp": false }),
+			withOperation("/v1/agents", "get", { ...searchAgents, "x-checkfu-mcp": false }),
 		)
 		expect(hidden.some((tool) => tool.path === "/v1/agents" && tool.method === "GET")).toBe(false)
 	})
@@ -154,7 +154,7 @@ describe("MCP tool projection", () => {
 		expect(() =>
 			project(
 				withOperation("/v1/agents", "get", {
-					...listAgents,
+					...searchAgents,
 					"x-checkfu-mcp": { name: "agents_getAgent" },
 				}),
 			),
@@ -163,7 +163,7 @@ describe("MCP tool projection", () => {
 		expect(() =>
 			project(
 				withOperation("/v1/agents", "get", {
-					...listAgents,
+					...searchAgents,
 					"x-checkfu-mcp": { name: "agents.list" },
 				}),
 			),
@@ -172,8 +172,8 @@ describe("MCP tool projection", () => {
 		expect(() =>
 			project(
 				withOperation("/v1/agents", "get", {
-					...listAgents,
-					"x-checkfu-mcp": { name: "agents_listAgents" },
+					...searchAgents,
+					"x-checkfu-mcp": { name: "agents_searchAgents" },
 					responses: {
 						"200": {
 							description: "Success",
@@ -205,8 +205,8 @@ describe("MCP tool projection", () => {
 			expect(() =>
 				project(
 					withOperation("/v1/agents", "get", {
-						...listAgents,
-						"x-checkfu-mcp": { name: "agents_listAgents" },
+						...searchAgents,
+						"x-checkfu-mcp": { name: "agents_searchAgents" },
 						responses,
 					}),
 				),
@@ -215,7 +215,7 @@ describe("MCP tool projection", () => {
 	})
 
 	it("refuses a parameter the runtime would not forward", () => {
-		const exposed = { ...listAgents, "x-checkfu-mcp": { name: "agents_listAgents" } }
+		const exposed = { ...searchAgents, "x-checkfu-mcp": { name: "agents_searchAgents" } }
 		const cases: ReadonlyArray<readonly [Json, RegExp]> = [
 			[
 				{ name: "x-tenant", in: "header", required: true, schema: { type: "string" } },
@@ -276,7 +276,7 @@ describe("MCP tool projection", () => {
 					{ name: "Idempotency-Key", in: "header", required: false, schema: { type: "string" } },
 				],
 			}),
-		).find((tool) => tool.name === "agents_listAgents")
+		).find((tool) => tool.name === "agents_searchAgents")
 		expect(Object.keys(retryable?.inputSchema["properties"] ?? {})).toEqual(["idempotency_key"])
 		expect(retryable?.inputSchema["required"]).toEqual([])
 
@@ -287,7 +287,7 @@ describe("MCP tool projection", () => {
 					{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string" } },
 				],
 			}),
-		).find((tool) => tool.name === "agents_listAgents")
+		).find((tool) => tool.name === "agents_searchAgents")
 		expect(mandatory?.inputSchema["required"]).toEqual(["idempotency_key"])
 	})
 
@@ -295,8 +295,8 @@ describe("MCP tool projection", () => {
 		expect(() =>
 			project(
 				withOperation("/v1/agents", "get", {
-					...listAgents,
-					"x-checkfu-mcp": { name: "agents_listAgents" },
+					...searchAgents,
+					"x-checkfu-mcp": { name: "agents_searchAgents" },
 					requestBody: {
 						required: true,
 						content: { "application/json": { schema: { type: "object" } } },
@@ -310,8 +310,8 @@ describe("MCP tool projection", () => {
 		expect(() =>
 			project(
 				withOperation("/v1/agents/search", "post", {
-					...listAgents,
-					"x-checkfu-mcp": { name: "agents_listAgents" },
+					...searchAgents,
+					"x-checkfu-mcp": { name: "agents_searchAgents" },
 					requestBody: {
 						required: true,
 						content: {
@@ -333,8 +333,8 @@ describe("MCP tool projection", () => {
 
 	it("inlines referenced component schemas as $defs", () => {
 		const openApiJson = withOperation("/v1/agents/search", "post", {
-			...listAgents,
-			"x-checkfu-mcp": { name: "agents_listAgents" },
+			...searchAgents,
+			"x-checkfu-mcp": { name: "agents_searchAgents" },
 			requestBody: {
 				required: true,
 				content: {
@@ -342,7 +342,7 @@ describe("MCP tool projection", () => {
 				},
 			},
 		})
-		const tool = project(openApiJson).find((candidate) => candidate.name === "agents_listAgents")
+		const tool = project(openApiJson).find((candidate) => candidate.name === "agents_searchAgents")
 		expect(tool?.inputSchema).toMatchObject({
 			properties: { body: { $ref: "#/$defs/SessionEvent" } },
 			required: ["body"],

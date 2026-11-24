@@ -54,6 +54,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
+import { ListingStore } from "../src/Listing/ListingStore.ts"
 import {
 	RequestFingerprint,
 	ClaimIdempotencyKey,
@@ -70,7 +71,7 @@ import {
 } from "../src/Session/AdmitSession.command.ts"
 
 const story = Story.make(Checkfu, {
-	layer: CheckfuHandlersLive,
+	layer: CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory)),
 	stub: [Harness],
 })
 
@@ -93,7 +94,11 @@ const t0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
 describe("Checkfu unified hosted model stories", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(
-			Layer.build(Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessStubLayer)))),
+			Layer.build(
+				Checkfu.layer(
+					CheckfuHandlersLive.pipe(Layer.provide([HarnessStubLayer, ListingStore.memory])),
+				),
+			),
 		).pipe(Effect.provide(Domain.InMemory)),
 	)
 

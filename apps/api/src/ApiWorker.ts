@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { customDomains } from "./CustomDomain.ts"
+import { D1ListingStore } from "./D1ListingStore.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
@@ -37,7 +38,11 @@ const PiHarnessExecutorLive = Layer.effect(
 )
 
 const CheckfuLive = Checkfu.layer(
-	CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
+	CheckfuHandlersLive.pipe(
+		Layer.provide(PiDurableHarnessLive),
+		Layer.provide(D1ListingStore),
+		Layer.provide(Cloudflare.D1.QueryDatabaseBinding),
+	),
 ).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
 
 const ApiWorkerLive = Layer.mergeAll(

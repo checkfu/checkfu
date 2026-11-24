@@ -129,6 +129,16 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(deleted).toEqual({ id: env2.id, type: "environment_deleted" })
 							const missingEnvErr = yield* Effect.flip(client.environments.retrieve(env2.id))
 							expect(missingEnvErr._tag).toBe("NotFoundError")
+							const listedEnvironments = yield* Stream.runCollect(
+								client.environments.listStream({ limit: 1, include_archived: true }),
+							).pipe(
+								Effect.repeat({
+									schedule: Schedule.spaced("5 millis"),
+									times: 400,
+									until: (entries) => entries.length === 1,
+								}),
+							)
+							expect(Array.from(listedEnvironments, (entry) => entry.id)).toEqual([env.id])
 
 							// Automation create, run on request, run list, archive
 							const automation = yield* client.automations.create(
@@ -338,6 +348,14 @@ describe("@checkfu/sdk live API integration", () => {
 									}),
 								)
 								expect(session.agent).toEqual({ id: agent.id, version: 1 })
+								const listedSessions = async () => {
+									const ids: Array<string> = []
+									for await (const entry of client.sessions.list({ agent_id: agent.id })) {
+										ids.push(entry.id)
+									}
+									return ids
+								}
+								await expect.poll(() => listedSessions(), { timeout: 5000 }).toEqual([session.id])
 
 								const receipt = await client.sessions.events.send(session.id, {
 									events: [

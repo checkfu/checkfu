@@ -58,6 +58,7 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { CheckfuApi } from "../src/Http/Api.ts"
 import {
 	AgentVersionWaitTimeout,
@@ -1532,7 +1533,10 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 		})
 
 		const CheckfuLive = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(Layer.fresh(PiDurableHarnessLive)),
+			),
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
@@ -1673,7 +1677,10 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			})
 
 			const CheckfuLive = Checkfu.layer(
-				CheckfuHandlersLive.pipe(Layer.provide(Layer.fresh(PiDurableHarnessLive))),
+				CheckfuHandlersLive.pipe(
+					Layer.provide(ListingStore.memory),
+					Layer.provide(Layer.fresh(PiDurableHarnessLive)),
+				),
 			).pipe(Layer.provide(executorLayer))
 			const layer = CheckfuLive.pipe(
 				Layer.provide(Domain.InMemory),
