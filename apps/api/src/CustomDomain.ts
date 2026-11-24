@@ -11,6 +11,9 @@ export const DETACH_ALL = "none"
 // refused, so no hostname can be mistaken for `none`. Letters are listed rather than matched
 // case-insensitively, which would also accept characters such as "ſ" that a URL turns into
 // ASCII letters; an international name is written in its xn-- form.
+// Whether an xn-- label is valid Punycode is not checked: URL parsers disagree by runtime
+// version (Bun 1.4.2 refuses xn--a.example.com, Node 24.22.3 accepts it). A hostname that
+// cannot be attached is covered by the two-step change in .env.example.
 export const Hostname = Schema.String.check(
 	Schema.isMaxLength(253),
 	Schema.isPattern(
