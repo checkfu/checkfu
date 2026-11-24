@@ -25,13 +25,7 @@ import {
 	trimTailToBudget,
 } from "./PiContextBudget.ts"
 import type { PiSeed, PiSeedMessage, PiTurnRequest, PiTurnResult } from "./PiDurableEngine.ts"
-import {
-	PROVIDER_API_KEY_ENV,
-	createPiModels,
-	providerApiKeys,
-	providerBaseUrls,
-	resolveCatalogModel,
-} from "./PiModels.ts"
+import { resolveCatalogModel } from "./PiCatalog.ts"
 import type { PiTurnOutcome } from "./PiRefusals.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -136,9 +130,6 @@ export const PiDurableHarnessLive = boundedHarness(
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const sessionViews = yield* SessionView
 		const executor = yield* PiTurnExecutor
-		const apiKeys = yield* providerApiKeys
-		const baseUrls = yield* providerBaseUrls
-		const catalog = createPiModels(apiKeys, baseUrls)
 
 		const messagesBeforeTurn = Effect.fn("PiDurableHarness.messagesBeforeTurn")(function* (
 			sessionId: string,
@@ -396,7 +387,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						return yield* Effect.fail(missingVersion)
 					}
 
-					const resolved = resolveCatalogModel(catalog, version.model.id)
+					const resolved = resolveCatalogModel(version.model.id)
 					if (resolved === null) {
 						return yield* Effect.fail<TurnFailed>({
 							_tag: "TurnFailed",
@@ -412,15 +403,6 @@ export const PiDurableHarnessLive = boundedHarness(
 							_tag: "TurnFailed",
 							error_type: "invalid_turn_input",
 							message: "Turn contained no user message to send to Pi.",
-							terminal: false,
-						})
-					}
-
-					if (apiKeys[resolved.provider] === null) {
-						return yield* Effect.fail<TurnFailed>({
-							_tag: "TurnFailed",
-							error_type: "missing_api_key_error",
-							message: `Missing ${PROVIDER_API_KEY_ENV[resolved.provider]} for provider "${resolved.provider}".`,
 							terminal: false,
 						})
 					}

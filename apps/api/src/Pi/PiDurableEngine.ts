@@ -19,7 +19,8 @@ import type {
 } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Latch from "effect/Latch"
-import type { SupportedProvider } from "./PiModels.ts"
+import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
+import type { SupportedProvider } from "./PiCatalog.ts"
 import {
 	classifyUnansweredCategory,
 	isRefusalAssistantMessage,
@@ -58,6 +59,7 @@ export type PiSeedContext = Pick<PiTurnRequest, "operationId" | "provider" | "mo
 
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+	readonly hasApiKey: (provider: SupportedProvider) => boolean
 	readonly isCancelled: (operationId: string) => boolean
 	readonly beginUsage: (
 		operationId: string,
@@ -413,7 +415,7 @@ const inFlightAdmissions = new WeakMap<PiDurableBackend, Map<string, Set<Latch.L
 const admitPiTurn = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<boolean | "history_required"> => {
+): Effect.Effect<boolean | "history_required" | "missing_key"> => {
 	const operationId = request.operationId
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
@@ -446,6 +448,9 @@ const admitPiTurn = (
 							}
 							if (backend.isCancelled(operationId)) {
 								return false
+							}
+							if (!backend.hasApiKey(request.provider)) {
+								return "missing_key" as const
 							}
 							const rooted = await backend.ensureRoot(
 								agent,
@@ -626,6 +631,17 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 ): Effect.fn.Return<PiTurnResult> {
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
+	if (admitted === "missing_key") {
+		return {
+			ok: false,
+			error: {
+				_tag: "TurnFailed",
+				error_type: "missing_api_key_error",
+				message: `Missing ${PROVIDER_API_KEY_ENV[request.provider]} for provider "${request.provider}".`,
+				terminal: false,
+			},
+		}
+	}
 	if (admitted === "history_required") {
 		return admitted
 	}

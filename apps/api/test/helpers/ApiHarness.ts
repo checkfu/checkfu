@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
+import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
 import { recoverPiDurableTurn, runPiDurableTurn } from "../../src/Pi/PiDurableEngine.ts"
 import type { PiTurnRequest } from "../../src/Pi/PiDurableEngine.ts"
 import {
@@ -181,7 +182,12 @@ export const makePiDurableTestLayer = (
 	const getBackend = (sessionId: string) => {
 		let existing = backends.get(sessionId)
 		if (existing === undefined) {
-			existing = createInMemoryPiDurableBackend(makeScriptedPiModels(handler))
+			existing = createInMemoryPiDurableBackend(
+				makeScriptedPiModels(handler),
+				undefined,
+				undefined,
+				(provider) => (envOverrides[PROVIDER_API_KEY_ENV[provider]] ?? "").length > 0,
+			)
 			backends.set(sessionId, existing)
 		}
 		return existing

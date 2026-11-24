@@ -92,6 +92,7 @@ export const createInMemoryPiDurableBackend = async (
 	models: Models,
 	retryBaseDelayMs = 1,
 	registry = createCheckfuRegistry(),
+	hasApiKey: PiDurableBackend["hasApiKey"] = () => true,
 ): Promise<InMemoryPiDurableBackend> => {
 	const storage = new InstrumentedMemoryStorage()
 	const { scanEntryCalls } = storage
@@ -118,6 +119,7 @@ export const createInMemoryPiDurableBackend = async (
 	return {
 		storage,
 		withLock,
+		hasApiKey,
 		isCancelled: (operationId) => cancelledOps.has(operationId),
 		beginUsage: (operationId, finalizedPrevious, hasSeed) =>
 			beginTurnUsage(pi, operationId, finalizedPrevious, hasSeed),

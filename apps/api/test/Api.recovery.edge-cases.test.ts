@@ -634,6 +634,7 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 
 	it("replays a settled Pi turn before checking API key or view prerequisites", async () => {
 		let modelCalls = 0
+		let apiKeyConfigured = true
 		const backends = new Map<string, ReturnType<typeof createInMemoryPiDurableBackend>>()
 		const models = makeScriptedPiModels(async (model, context) => {
 			modelCalls += 1
@@ -642,7 +643,12 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 		const getBackend = (conversation: string) => {
 			let backend = backends.get(conversation)
 			if (backend === undefined) {
-				backend = createInMemoryPiDurableBackend(models)
+				backend = createInMemoryPiDurableBackend(
+					models,
+					undefined,
+					undefined,
+					() => apiKeyConfigured,
+				)
 				backends.set(conversation, backend)
 			}
 			return backend
@@ -759,7 +765,9 @@ describe("Pi history recovery edge cases and interrupt consistency", () => {
 					})
 					expect(modelCalls).toBe(1)
 
-					// 2. Now break views and build a restarted provider with NO OPENAI_API_KEY configured.
+					// 2. Now break views, take OPENAI_API_KEY away from the harness, and build a
+					//    restarted provider.
+					apiKeyConfigured = false
 					const restartedProviderLayer = Layer.fresh(PiDurableHarnessLive).pipe(
 						Layer.provide(BrokenVersionView),
 						Layer.provide(executorLayer),

@@ -15,15 +15,8 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import { optionalSecret } from "../Secrets.ts"
+import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import { isRefusalAssistantMessage } from "./PiRefusals.ts"
-
-export const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const
-export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number]
-
-export const PROVIDER_API_KEY_ENV: Readonly<Record<SupportedProvider, string>> = {
-	openai: "OPENAI_API_KEY",
-	anthropic: "ANTHROPIC_API_KEY",
-}
 
 export const OPENAI_BASE_URL_ENV = "CHECKFU_OPENAI_BASE_URL"
 export const LOCAL_DEV_SIGNAL_ENV = "CHECKFU_LOCAL_DEV"
@@ -124,9 +117,6 @@ export const providerBaseUrls = Effect.gen(function* () {
 		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),
 	}
 }).pipe(Effect.orDie)
-
-const isSupportedProvider = (value: string): value is SupportedProvider =>
-	value === "openai" || value === "anthropic"
 
 const staticEnvApiKeyAuth = (name: string, envVar: string) => ({
 	name,
@@ -545,29 +535,4 @@ export const createPiModels = (
 	models.setProvider(createOpenAIProvider(baseUrls?.openai))
 	models.setProvider(createAnthropicProvider())
 	return models
-}
-
-export const resolveCatalogModel = (
-	catalog: MutableModels,
-	requestedModelId: string,
-): { readonly provider: SupportedProvider; readonly model: Model<Api> } | null => {
-	const slashIndex = requestedModelId.indexOf("/")
-	if (slashIndex > 0) {
-		const provider = requestedModelId.slice(0, slashIndex)
-		const modelId = requestedModelId.slice(slashIndex + 1)
-		if (isSupportedProvider(provider) && modelId.length > 0) {
-			const model = catalog.getModel(provider, modelId)
-			if (model !== undefined) {
-				return { provider, model }
-			}
-		}
-		return null
-	}
-	for (const provider of SUPPORTED_PROVIDERS) {
-		const model = catalog.getModel(provider, requestedModelId)
-		if (model !== undefined) {
-			return { provider, model }
-		}
-	}
-	return null
 }
