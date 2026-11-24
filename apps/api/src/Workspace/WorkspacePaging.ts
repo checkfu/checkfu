@@ -71,6 +71,8 @@ const encoder = new TextEncoder()
 const byteLength = (text: string): number => encoder.encode(text).byteLength
 
 const GREP_PAGE = 200
+const EARLY_END_NOTE =
+	"This page ended early to fit what one call returns; go on from nextOffset, or ask with fewer context lines."
 const GREP_BATCH = 20
 // Long enough to show a match in its line; a minified file's line is cut here.
 const GREP_LINE_CHARACTERS = 500
@@ -119,7 +121,8 @@ export const grepWithin = async (
 				? includes[0]
 				: `{${includes.join(",")}}`
 	const matches: Array<GrepMatch> = []
-	// What the page costs before its matches: its own fields and the next offset.
+	// What the page costs before its matches: its own fields, the next offset and the note a page
+	// that ends early carries.
 	let bytes = byteLength(
 		JSON.stringify({
 			path,
@@ -127,6 +130,7 @@ export const grepWithin = async (
 			count: pageSize,
 			matches: [],
 			nextOffset: start + pageSize,
+			note: EARLY_END_NOTE,
 		}),
 	)
 	let more = false
@@ -180,7 +184,7 @@ export const grepWithin = async (
 		...(more || full ? { nextOffset: start + matches.length } : {}),
 		...(full
 			? {
-					note: "This page ended early to fit what one call returns; go on from nextOffset, or ask with fewer context lines.",
+					note: EARLY_END_NOTE,
 				}
 			: {}),
 	})
