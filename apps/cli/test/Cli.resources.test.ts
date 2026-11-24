@@ -360,6 +360,14 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(runs.exitCode).toBe(0)
 					expect(JSON.parse(runs.stdout)).toHaveProperty("data")
 
+					const listed = yield* cli.run(["automations", "list", "--limit", "5"])
+					expect(listed.exitCode).toBe(0)
+					expect(
+						(JSON.parse(listed.stdout) as { data: ReadonlyArray<{ id: string }> }).data.map(
+							(entry) => entry.id,
+						),
+					).toContain(automation.id)
+
 					const unpaused = yield* cli.run(["automations", "unpause", ...id])
 					expect(JSON.parse(unpaused.stdout).status).toBe("active")
 					const retrieved = yield* cli.run(["automations", "retrieve", ...id])

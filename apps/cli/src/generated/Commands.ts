@@ -393,6 +393,69 @@ const automationsCreateCommand = CommandMake(
 	]),
 )
 
+const automationsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations list",
+	apiGroup: "automations",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 0,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const automationsListCommand = CommandMake(
+	"list",
+	{
+		after: FlagInt("after").pipe(
+			FlagWithMetavar("SEQ"),
+			FlagWithDescription(
+				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of events to return (1-100)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order: asc or desc"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost.",
+	),
+)
+
 const automationsPauseCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "automations pause",
 	apiGroup: "automations",
@@ -1211,6 +1274,7 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				automationsArchiveCommand,
 				automationsCreateCommand,
+				automationsListCommand,
 				automationsPauseCommand,
 				automationsRetrieveCommand,
 				automationsRunCommand,

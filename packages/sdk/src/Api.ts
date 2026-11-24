@@ -654,6 +654,13 @@ export const ListAutomationRunsResponse = Schema.Struct({
 })
 export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
+export const ListAutomationsResponse = Schema.Struct({
+	data: Schema.Array(AutomationResource),
+	has_more: Schema.Boolean,
+	next_cursor: Schema.NullOr(Schema.Finite),
+})
+export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
+
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
 	Schema.decodeTo(
 		Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
@@ -1115,6 +1122,36 @@ const Automations = HttpApiGroup.make("automations")
 							description: "Run an agent at 09:00 New York time on weekdays",
 						},
 					],
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/automations", {
+			query: {
+				after: Schema.optionalKey(EventListAfterFromString),
+				limit: Schema.optionalKey(EventListLimitFromString),
+				order: Schema.optionalKey(
+					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
+				),
+			},
+			success: ListAutomationsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List automations")
+			.annotate(
+				OpenApi.Description,
+				"List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "list" },
+				"x-checkfu-mcp": { name: "automations_listAutomations" },
+				"x-checkfu-cli": {
+					intQueryParams: {
+						after: { min: 0, metavar: "SEQ" },
+						limit: { min: 1, max: 100, metavar: "N" },
+					},
 				},
 			}),
 	)

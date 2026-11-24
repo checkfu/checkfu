@@ -88,6 +88,12 @@ export interface CheckfuOperations {
 		EndpointBody<"automations", "create">,
 		EndpointSuccess<"automations", "create">
 	>
+	readonly "automations.list": OperationShape<
+		EndpointParams<"automations", "list">,
+		RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		EndpointBody<"automations", "list">,
+		EndpointSuccess<"automations", "list">
+	>
 	readonly "automations.pause": OperationShape<
 		EndpointParams<"automations", "pause">,
 		EndpointQuery<"automations", "pause">,
@@ -519,6 +525,75 @@ export class EffectAutomationsResource {
 				),
 			),
 			options,
+		)
+	}
+
+	/** List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"automations", "list"> | WithResponse<EndpointSuccess<"automations", "list">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.automations.list", "idempotent", options, () =>
+				this.#runtime.raw.automations.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"automations", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"automations", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
 		)
 	}
 
@@ -1295,6 +1370,30 @@ export class AutomationsResource {
 				idempotencyKey: options?.idempotencyKey,
 				withResponse: true,
 			}),
+		)
+	}
+
+	/** List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "list">>, number>,
+		ItemOf<EndpointJsonSuccess<"automations", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectAutomationsResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
 		)
 	}
 

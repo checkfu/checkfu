@@ -131,6 +131,21 @@ const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A
 	}
 }
 
+interface ListBody {
+	readonly data: ReadonlyArray<AutomationBody>
+	readonly has_more: boolean
+	readonly next_cursor: number | null
+}
+
+const listed = (apiFetch: ApiFetch, query: string, count: number) =>
+	call<ListBody>(apiFetch, "GET", `/v1/automations${query}`).pipe(
+		Effect.repeat({
+			schedule: Schedule.spaced("5 millis"),
+			times: 400,
+			until: (page) => page.body.data.length === count,
+		}),
+	)
+
 const settledRuns = (apiFetch: ApiFetch, automationId: string, count: number) =>
 	call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
 		apiFetch,
@@ -450,6 +465,104 @@ describe("Automations API", () => {
 					`/v1/automations/${id}/archive`,
 				)
 				expect(archivedAgain.status).toBe(200)
+			}),
+		))
+
+	it("lists the automations that are not archived, a page at a time in either order", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const empty = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
+				expect(empty).toEqual({
+					status: 200,
+					body: { data: [], has_more: false, next_cursor: null },
+				})
+				const ids: Array<string> = []
+				for (const name of ["First", "Second", "Third"]) {
+					const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+						name,
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message(`Run ${name}.`),
+						schedule: weekdayMornings,
+					})
+					ids.push(created.body.id)
+				}
+				const all = yield* listed(apiFetch, "", 3)
+				expect(all.body.data.map((automation) => automation.name)).toEqual([
+					"First",
+					"Second",
+					"Third",
+				])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${ids[0]}`)
+				expect(all.body.data[0]).toEqual(fetched.body)
+				expect(all.body).toMatchObject({ has_more: false, next_cursor: null })
+
+				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?limit=2")
+				expect(first.body.data.map((automation) => automation.id)).toEqual(ids.slice(0, 2))
+				expect(first.body.has_more).toBe(true)
+				const second = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/automations?limit=2&after=${first.body.next_cursor}`,
+				)
+				expect(second.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(second.body.data.map((automation) => automation.id)).toEqual(ids.slice(2))
+
+				const newest = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?order=desc&limit=2")
+				expect(newest.body.data.map((automation) => automation.id)).toEqual([ids[2], ids[1]])
+				const oldest = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/automations?order=desc&after=${newest.body.next_cursor}`,
+				)
+				expect(oldest.body.data.map((automation) => automation.id)).toEqual([ids[0]])
+
+				yield* call(apiFetch, "POST", `/v1/automations/${ids[1]}/pause`)
+				yield* call(apiFetch, "POST", `/v1/automations/${ids[0]}/archive`)
+				const remaining = yield* listed(apiFetch, "", 2)
+				expect(remaining.body.data.map((automation) => [automation.id, automation.status])).toEqual(
+					[
+						[ids[1], "paused"],
+						[ids[2], "active"],
+					],
+				)
+				const afterArchived = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/automations?after=${first.body.next_cursor}`,
+				)
+				expect(afterArchived.body.data.map((automation) => automation.id)).toEqual([ids[2]])
+			}),
+		))
+
+	it("finds an automation by listing when the create response was lost", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const body = {
+					name: "Lost",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Report."),
+					schedule: weekdayMornings,
+				}
+				yield* call(apiFetch, "POST", "/v1/automations", body, { "idempotency-key": "lost-key" })
+				const found = yield* listed(apiFetch, "", 1)
+				const resent = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", body, {
+					"idempotency-key": "lost-key",
+				})
+				expect(found.body.data.map((automation) => automation.id)).toEqual([resent.body.id])
+			}),
+		))
+
+	it("refuses list paging values it cannot use", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				for (const query of ["limit=0", "limit=101", "after=-1", "order=newest"]) {
+					const refused = yield* call<ErrorBody>(apiFetch, "GET", `/v1/automations?${query}`)
+					expect([query, refused.status]).toEqual([query, 400])
+				}
 			}),
 		))
 

@@ -10,6 +10,7 @@ import { AgentArchived, ArchiveAgent } from "../src/Agent/ArchiveAgent.command.t
 import { AgentCreated } from "../src/Agent/CreateAgent.command.ts"
 import { AgentUpdated } from "../src/Agent/UpdateAgent.command.ts"
 import { Automation } from "../src/Automation/Automation.aggregate.ts"
+import { AutomationDirectory } from "../src/Automation/AutomationDirectory.view.ts"
 import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
 import {
@@ -417,6 +418,37 @@ describe("Checkfu automations", () => {
 				Story.rejected(new AgentArchivedError({ agent_id: agent.id })),
 				Story.then(automation),
 				Story.then(capacity),
+			)
+		},
+	)
+
+	it.effect(
+		"lists live automations in the order they were created, and drops archived ones",
+		() => {
+			const second = Automation.ref("auto_002")
+			const third = Automation.ref("auto_003")
+			return story(
+				...created(),
+				Story.view(AutomationDirectory, capacity, {
+					listed: 1,
+					live: [{ automation_id: automation.id, seq: 1 }],
+				}),
+				Story.when(admit({}, second.id)),
+				Story.then(second, new AutomationCreated(config)),
+				Story.then(capacity, new AutomationSlotReserved({ automation_id: second.id })),
+				Story.when(new ArchiveAutomation({ automation_id: automation.id })),
+				Story.then(automation, new AutomationArchived()),
+				Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
+				Story.when(admit({}, third.id)),
+				Story.then(third, new AutomationCreated(config)),
+				Story.then(capacity, new AutomationSlotReserved({ automation_id: third.id })),
+				Story.view(AutomationDirectory, capacity, {
+					listed: 3,
+					live: [
+						{ automation_id: second.id, seq: 2 },
+						{ automation_id: third.id, seq: 3 },
+					],
+				}),
 			)
 		},
 	)

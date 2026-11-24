@@ -6,7 +6,9 @@ import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomat
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import { AutomationCapacity } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
+import { AutomationDirectory } from "@checkfu/domain/Automation/AutomationDirectory.view"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
@@ -100,6 +102,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const automations = yield* Automation
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
+		const directories = yield* AutomationDirectory
 		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 
@@ -186,6 +189,40 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }
 						: yield* after(id, committed)
+				}).pipe(handled),
+			)
+			.handle("list", ({ query }) =>
+				Effect.gen(function* () {
+					const directory = Option.getOrNull(
+						yield* directories.get(AutomationCapacity.ref(AUTOMATION_CAPACITY)),
+					)
+					const order = query.order ?? "asc"
+					const live = directory?.live ?? []
+					const after = query.after
+					const remaining = (order === "asc" ? live : live.toReversed()).filter(
+						(entry) =>
+							after === undefined || (order === "asc" ? entry.seq > after : entry.seq < after),
+					)
+					const take = query.limit ?? 50
+					const page = remaining.slice(0, take)
+					const snapshots = yield* Effect.forEach(
+						page,
+						(entry) => automationViews.get(Automation.ref(entry.automation_id)),
+						{ concurrency: "unbounded" },
+					)
+					const data = yield* Effect.forEach(
+						snapshots.flatMap((snapshot) => {
+							const found = Option.getOrNull(snapshot)
+							return found === null ? [] : [found]
+						}),
+						present,
+					)
+					const has_more = remaining.length > page.length
+					return {
+						data,
+						has_more,
+						next_cursor: has_more ? (page.at(-1)?.seq ?? null) : null,
+					}
 				}).pipe(handled),
 			)
 			.handle("get", ({ params }) =>

@@ -435,6 +435,47 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "automations_listAutomations",
+		title: "List automations",
+		description:
+			"List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost.",
+		method: "GET",
+		path: "/v1/automations",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}$",
+							description:
+								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of events to return (1-100)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order: asc or desc",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "automations_listRuns",
 		title: "List automation runs",
 		description:
