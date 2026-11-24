@@ -135,8 +135,11 @@ const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyAr
 	return Object.keys(saved.props?.env ?? {})
 }
 
-const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => {
-	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
+const startAlchemyDev = async (
+	openAIBaseUrl: string,
+	gitHubBaseUrl: string,
+	stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`,
+) => {
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
 	try {
@@ -253,10 +256,14 @@ const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => 
 		}
 	}, 45_000)
 
-	const stop = async () => {
+	// Stops the Workers and keeps the stage, its state and its objects' storage, as a deploy does.
+	const halt = async () => {
 		clearTimeout(startupTimer)
 		await stopProcessByPid(child)
 		rmSync(envDir, { recursive: true, force: true })
+	}
+	const stop = async () => {
+		await halt()
 		removeStage(join(REPO_ROOT, ".alchemy"), "Checkfu", stage)
 	}
 
@@ -283,7 +290,7 @@ const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => 
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
-					return { baseUrl, logs, stage, stop }
+					return { baseUrl, logs, stage, stop, halt }
 				}
 			} catch {
 				const sleepMs = Math.min(100, healthDeadline - Date.now())
@@ -310,6 +317,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
+	let haltWorker: (() => Promise<void>) | undefined
 	let workerLogs: ReadonlyArray<string> = []
 	let agentId: string
 	let environmentId: string
@@ -469,6 +477,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
+		haltWorker = worker.halt
 		workerLogs = worker.logs
 
 		const createdAgent = await createResource<{ readonly id: string }>(
@@ -1064,6 +1073,74 @@ describe("PiSession real Durable Object under workerd", () => {
 		)
 		expect(await storedMemories(store.id)).toEqual({ "/notes": "Now the directory is a file." })
 	}, 120_000)
+
+	it("reaches memory stores in a turn Pi resumes after the Workers restart mid-turn", async () => {
+		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
+			name: "Journal",
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "memory_store", memory_store_id: store.id }],
+		})
+		const prompt = "Keep a journal across the restart."
+		let restarted = false
+		const steps: ReadonlyArray<FakeOpenAIAction> = [
+			{
+				kind: "tool_call",
+				name: "write",
+				arguments: { path: "/mnt/memory/journal/before.md", content: "Written before." },
+			},
+			{
+				kind: "tool_call",
+				name: "write",
+				arguments: { path: "/mnt/memory/journal/after.md", content: "Written after." },
+			},
+			{ kind: "tool_call", name: "read", arguments: { path: "/mnt/memory/journal/before.md" } },
+		]
+		fakeOpenAI.setHandler((req) => {
+			if (req.lastUserText !== prompt) {
+				return { kind: "reply", text: "unexpected" }
+			}
+			// The model call after the first write is held until the Workers stop under it.
+			if (req.toolOutputs.length === 1 && !restarted) {
+				return { kind: "hold" }
+			}
+			return (
+				steps[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				}
+			)
+		})
+
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: prompt }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await fakeOpenAI.waitForRequest(
+			(req) => req.lastUserText === prompt && req.toolOutputs.length === 1,
+			30_000,
+		)
+
+		await haltWorker?.()
+		restarted = true
+		const worker = await startAlchemyDev(fakeOpenAI.baseUrl, fakeGitHub.baseUrl, stage)
+		baseUrl = worker.baseUrl
+		stopWorker = worker.stop
+		haltWorker = worker.halt
+		workerLogs = worker.logs
+
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 120_000)
+		const reply = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message").at(-1)
+			?.content?.[0]?.text
+		expect(reply).toContain("Written before.")
+		expect(await storedMemories(store.id)).toEqual({
+			"/after.md": "Written after.",
+			"/before.md": "Written before.",
+		})
+	}, 240_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
