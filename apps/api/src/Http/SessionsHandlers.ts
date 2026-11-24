@@ -276,6 +276,24 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return projected
 			})
 
+		const retrieve = (id: SessionId) =>
+			Effect.gen(function* () {
+				const snapshot = yield* existing(id)
+				const versionTimeout = Duration.min(
+					Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
+					Duration.fromInputUnsafe(yield* AgentVersionWaitTimeout),
+				)
+				const ready = yield* waitForPinnedAgentVersion(
+					snapshot.agent_id,
+					snapshot.agent_version,
+					versionTimeout,
+				)
+				if (!ready) {
+					return yield* reject(503, `Session ${id} pinned agent version projection is not ready.`)
+				}
+				return serializeSession(snapshot)
+			})
+
 		return handlers
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
@@ -386,32 +404,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
-				list("session", query, (id) => sessionViews.get(Session.ref(SessionId.make(id)))).pipe(
-					Effect.map((page) => ({ ...page, data: page.data.map(serializeSession) })),
-					handled,
-				),
+				list("session", query, (id) => retrieve(SessionId.make(id))).pipe(handled),
 			)
-			.handle("get", ({ params }) =>
-				Effect.gen(function* () {
-					const snapshot = yield* existing(params.session_id)
-					const versionTimeout = Duration.min(
-						Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
-						Duration.fromInputUnsafe(yield* AgentVersionWaitTimeout),
-					)
-					const ready = yield* waitForPinnedAgentVersion(
-						snapshot.agent_id,
-						snapshot.agent_version,
-						versionTimeout,
-					)
-					if (!ready) {
-						return yield* reject(
-							503,
-							`Session ${params.session_id} pinned agent version projection is not ready.`,
-						)
-					}
-					return serializeSession(snapshot)
-				}).pipe(handled),
-			)
+			.handle("get", ({ params }) => retrieve(params.session_id).pipe(handled))
 			.handle("archive", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.session_id

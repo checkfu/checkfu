@@ -654,23 +654,30 @@ export const ListAutomationRunsResponse = Schema.Struct({
 })
 export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
-const listResponse = <A extends Schema.Top>(resource: A) =>
+const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, cursor: C) =>
 	Schema.Struct({
 		data: Schema.Array(resource),
 		has_more: Schema.Boolean,
-		next_cursor: Schema.NullOr(Schema.Finite),
+		next_cursor: Schema.NullOr(cursor),
 	})
 
-export const ListAgentsResponse = listResponse(AgentResource)
+export const ResourceListCursor = Schema.String.check(
+	Schema.isPattern(/^\d{1,15}:[A-Za-z0-9_-]{1,256}$/u),
+).annotate({
+	description:
+		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+})
+
+export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
-export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot)
+export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot, ResourceListCursor)
 export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
-export const ListSessionsResponse = listResponse(SessionResource)
+export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
-export const ListAutomationsResponse = listResponse(AutomationResource)
+export const ListAutomationsResponse = listResponse(AutomationResource, Schema.Finite)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
@@ -717,7 +724,7 @@ const ListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|1
 	)
 
 const resourceListQuery = {
-	after: Schema.optionalKey(EventListAfterFromString),
+	after: Schema.optionalKey(ResourceListCursor),
 	limit: Schema.optionalKey(ListLimitFromString),
 	order: Schema.optionalKey(
 		Schema.Literals(["asc", "desc"]).annotate({
@@ -738,7 +745,6 @@ const resourceListQuery = {
 
 const resourceListCli = {
 	intQueryParams: {
-		after: { min: 0, metavar: "SEQ" },
 		limit: { min: 1, max: 100, metavar: "N" },
 	},
 }

@@ -26,7 +26,7 @@ interface Resource {
 interface ListBody {
 	readonly data: ReadonlyArray<Resource>
 	readonly has_more: boolean
-	readonly next_cursor: number | null
+	readonly next_cursor: string | null
 }
 
 const call = <A>(apiFetch: ApiFetch, method: string, path: string, body?: unknown) =>
@@ -200,6 +200,8 @@ describe("List endpoints", () => {
 						"limit=0",
 						"limit=101",
 						"after=-1",
+						"after=3",
+						"after=3:a%2Fb",
 						"order=newest",
 						"include_archived=yes",
 					]) {

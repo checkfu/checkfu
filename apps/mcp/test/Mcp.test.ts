@@ -392,7 +392,7 @@ describe("Checkfu MCP server", () => {
 				},
 				sessions_getSession: session,
 				sessions_listEvents: { ...session, query: { limit: "5" } },
-				sessions_listSessions: { query: { agent_id: "agent_1", after: "3" } },
+				sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
 				sessions_sendSessionEvents: {
 					...session,
 					body: {

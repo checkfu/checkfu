@@ -63,6 +63,28 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const random = yield* SecureRandom.SecureRandom
 		const isSupportedModel = yield* IsSupportedAgentModel
 		const list = yield* makeLister
+
+		const retrieve = (id: AgentId) =>
+			Effect.gen(function* () {
+				const ref = Agent.ref(id)
+				const found = Option.getOrNull(yield* agentViews.get(ref))
+				if (found !== null) {
+					return found
+				}
+				const committed = yield* agents.get(id)
+				if (committed.status === "") {
+					return yield* reject(404, `Agent ${id} not found.`)
+				}
+				const projected = yield* agentViews.waitFor(
+					ref,
+					{ version: { gte: 1 } },
+					{ timeout: yield* AgentVersionWaitTimeout },
+				)
+				if (projected === null) {
+					return yield* reject(503, `Agent ${id} projection is not ready.`)
+				}
+				return projected
+			})
 		const supported = (model: AgentModel) =>
 			isSupportedModel(model.id) ? Effect.void : unsupportedModel(model)
 
@@ -192,31 +214,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
-				list("agent", query, (id) => agentViews.get(Agent.ref(AgentId.make(id)))).pipe(handled),
+				list("agent", query, (id) => retrieve(AgentId.make(id))).pipe(handled),
 			)
-			.handle("get", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.agent_id
-					const ref = Agent.ref(id)
-					const found = Option.getOrNull(yield* agentViews.get(ref))
-					if (found !== null) {
-						return found
-					}
-					const committed = yield* agents.get(id)
-					if (committed.status === "") {
-						return yield* reject(404, `Agent ${id} not found.`)
-					}
-					const projected = yield* agentViews.waitFor(
-						ref,
-						{ version: { gte: 1 } },
-						{ timeout: yield* AgentVersionWaitTimeout },
-					)
-					if (projected === null) {
-						return yield* reject(503, `Agent ${id} projection is not ready.`)
-					}
-					return projected
-				}).pipe(handled),
-			)
+			.handle("get", ({ params }) => retrieve(params.agent_id).pipe(handled))
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id

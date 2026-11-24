@@ -19,6 +19,7 @@ export type ListingStatus = typeof LISTED | typeof ARCHIVED | typeof DELETED
 export interface ListingChange {
 	readonly kind: ListingKind
 	readonly id: string
+	readonly created_at: number
 	readonly agent_id: string | null
 	readonly status: ListingStatus
 }
@@ -30,8 +31,23 @@ export interface ListingFilter {
 	readonly order: ListingOrder
 }
 
-export const ListingEntry = Schema.Struct({ id: Schema.String, position: Schema.Int })
+export const ListingEntry = Schema.Struct({ id: Schema.String })
 export type ListingEntry = typeof ListingEntry.Type
+
+export interface ListingPosition {
+	readonly created_at: number
+	readonly id: string
+}
+
+export const listingCursor = (row: ListingPosition): string => `${row.created_at}:${row.id}`
+
+export const parseListingCursor = (cursor: string): ListingPosition => {
+	const split = cursor.indexOf(":")
+	return { created_at: Number(cursor.slice(0, split)), id: cursor.slice(split + 1) }
+}
+
+const compareRows = (a: ListingPosition, b: ListingPosition): number =>
+	a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
 /** @effect-expect-leaking RuntimeContext */
 export class ListingStore extends Context.Service<
@@ -47,44 +63,39 @@ export class ListingStore extends Context.Service<
 	}
 >()("Checkfu/ListingStore") {
 	static readonly memory = Layer.sync(ListingStore, () => {
-		const rows = new Map<string, ListingChange & { readonly position: number }>()
-		let last = 0
+		const rows = new Map<string, ListingChange>()
 		return ListingStore.of({
 			record: (changes) =>
 				Effect.sync(() => {
 					for (const change of changes) {
 						const key = `${change.kind}/${change.id}`
 						const row = rows.get(key)
-						if (row === undefined) {
-							last += 1
-							rows.set(key, { ...change, position: last })
-						} else {
-							rows.set(key, {
-								...row,
-								status: change.status > row.status ? change.status : row.status,
-							})
-						}
+						rows.set(
+							key,
+							row === undefined
+								? change
+								: { ...row, status: change.status > row.status ? change.status : row.status },
+						)
 					}
 				}),
 			page: (filter, { after, take }) =>
 				Effect.sync(() => {
-					const cursor = after === undefined ? undefined : Number(after)
+					const cursor = after === undefined ? undefined : parseListingCursor(after)
+					const direction = filter.order === "asc" ? 1 : -1
 					const matching = [...rows.values()]
 						.filter(
 							(row) =>
 								row.kind === filter.kind &&
 								row.status <= (filter.include_archived ? ARCHIVED : LISTED) &&
 								(filter.agent_id === null || row.agent_id === filter.agent_id) &&
-								(cursor === undefined ||
-									(filter.order === "asc" ? row.position > cursor : row.position < cursor)),
+								(cursor === undefined || compareRows(row, cursor) * direction > 0),
 						)
-						.sort((a, b) =>
-							filter.order === "asc" ? a.position - b.position : b.position - a.position,
-						)
-					const entries = matching.slice(0, take).map(({ id, position }) => ({ id, position }))
+						.sort((a, b) => compareRows(a, b) * direction)
+					const page = matching.slice(0, take)
+					const last = page.at(-1)
 					return {
-						entries,
-						cursor: matching.length > take ? String(entries.at(-1)?.position) : null,
+						entries: page.map(({ id }) => ({ id })),
+						cursor: matching.length > take && last !== undefined ? listingCursor(last) : null,
 					}
 				}),
 		})

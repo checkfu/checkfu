@@ -1,23 +1,26 @@
 import * as Model from "@alchemy.run/domain/Model"
 import { CheckfuDomainApi } from "@checkfu/domain/Checkfu.model"
 import type { ListingKind, ListingOrder } from "@checkfu/domain/Listing/ListingStore"
+import { ERRORS } from "@checkfu/sdk/Api"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 
 export interface ListQuery {
-	readonly after?: number
+	readonly after?: string
 	readonly limit?: number
 	readonly order?: ListingOrder
 	readonly include_archived?: boolean
 	readonly agent_id?: string
 }
 
+const isNotFound = Schema.is(ERRORS[404])
+
 export const makeLister = Effect.gen(function* () {
 	const internals = yield* Model.Internals
-	return <A extends { readonly archived_at: unknown }, E>(
+	return <A extends { readonly archived_at: unknown }, E, R>(
 		kind: ListingKind,
 		query: ListQuery,
-		read: (id: string) => Effect.Effect<Option.Option<A | null>, E>,
+		retrieve: (id: string) => Effect.Effect<A, E, R>,
 	) =>
 		Effect.gen(function* () {
 			const include_archived = query.include_archived ?? false
@@ -26,21 +29,21 @@ export const makeLister = Effect.gen(function* () {
 				{ kind, include_archived, agent_id: query.agent_id ?? null, order: query.order ?? "asc" },
 				{
 					take: query.limit ?? 50,
-					...(query.after === undefined ? {} : { after: String(query.after) }),
+					...(query.after === undefined ? {} : { after: query.after }),
 				},
 			)
-			const found = yield* Effect.forEach(page.entries, (entry) => read(entry.id), {
-				concurrency: "unbounded",
-			})
+			const found = yield* Effect.forEach(
+				page.entries,
+				(entry) => retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
+				{ concurrency: "unbounded" },
+			)
 			return {
-				data: found.flatMap((result) => {
-					const resource = Option.getOrNull(result)
-					return resource === null || (!include_archived && resource.archived_at !== null)
-						? []
-						: [resource]
-				}),
+				data: found.filter(
+					(resource): resource is A =>
+						resource !== null && (include_archived || resource.archived_at === null),
+				),
 				has_more: page.cursor !== null,
-				next_cursor: page.cursor === null ? null : Number(page.cursor),
+				next_cursor: page.cursor,
 			}
 		}).pipe(Effect.scoped, Effect.provideService(Model.Internals, internals))
 })

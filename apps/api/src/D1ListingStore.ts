@@ -1,6 +1,12 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import { ARCHIVED, LISTED, ListingStore } from "@checkfu/domain/Listing/ListingStore"
-import type { ListingEntry } from "@checkfu/domain/Listing/ListingStore"
+import {
+	ARCHIVED,
+	LISTED,
+	ListingStore,
+	listingCursor,
+	parseListingCursor,
+} from "@checkfu/domain/Listing/ListingStore"
+import type { ListingOrder } from "@checkfu/domain/Listing/ListingStore"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { placement } from "./Placement.ts"
@@ -31,10 +37,17 @@ export const ListingDatabase = Cloudflare.D1.Database(
 )
 
 const UPSERT =
-	"INSERT INTO listing (kind, id, agent_id, status) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (kind, id) DO UPDATE SET status = MAX(status, excluded.status)"
+	"INSERT INTO listing (kind, id, created_at, agent_id, status) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (kind, id) DO UPDATE SET status = MAX(status, excluded.status)"
 
-const pageQuery = (order: "asc" | "desc") =>
-	`SELECT id, position FROM listing WHERE kind = ?1 AND status <= ?2 AND (?3 IS NULL OR agent_id = ?3) AND position ${order === "asc" ? ">" : "<"} ?4 ORDER BY position ${order === "asc" ? "ASC" : "DESC"} LIMIT ?5`
+export const listingPageQuery = (order: ListingOrder, byAgent: boolean, after: boolean) =>
+	[
+		"SELECT id, created_at FROM listing WHERE kind = ?1 AND status <= ?2",
+		byAgent ? "AND agent_id = ?3" : "AND ?3 IS NULL",
+		after
+			? `AND (created_at, id) ${order === "asc" ? ">" : "<"} (?4, ?5)`
+			: "AND ?4 IS NULL AND ?5 IS NULL",
+		`ORDER BY created_at ${order}, id ${order} LIMIT ?6`,
+	].join(" ")
 
 export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
 	ListingStore.of({
@@ -44,34 +57,36 @@ export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
 				: Effect.asVoid(
 						db.batch(
 							changes.map((change) =>
-								db.prepare(UPSERT).bind(change.kind, change.id, change.agent_id, change.status),
+								db
+									.prepare(UPSERT)
+									.bind(change.kind, change.id, change.created_at, change.agent_id, change.status),
 							),
 						),
 					),
-		page: (filter, { after, take }) =>
-			Effect.map(
+		page: (filter, { after, take }) => {
+			const cursor = after === undefined ? undefined : parseListingCursor(after)
+			return Effect.map(
 				db
-					.prepare(pageQuery(filter.order))
+					.prepare(listingPageQuery(filter.order, filter.agent_id !== null, cursor !== undefined))
 					.bind(
 						filter.kind,
 						filter.include_archived ? ARCHIVED : LISTED,
 						filter.agent_id,
-						after === undefined
-							? filter.order === "asc"
-								? 0
-								: Number.MAX_SAFE_INTEGER
-							: Number(after),
+						cursor?.created_at ?? null,
+						cursor?.id ?? null,
 						take + 1,
 					)
-					.all<ListingEntry>(),
+					.all<{ readonly id: string; readonly created_at: number }>(),
 				({ results }) => {
-					const entries = results.slice(0, take).map(({ id, position }) => ({ id, position }))
+					const page = results.slice(0, take)
+					const last = page.at(-1)
 					return {
-						entries,
-						cursor: results.length > take ? String(entries.at(-1)?.position) : null,
+						entries: page.map(({ id }) => ({ id })),
+						cursor: results.length > take && last !== undefined ? listingCursor(last) : null,
 					}
 				},
-			),
+			)
+		},
 	})
 
 export const D1ListingStore = Layer.effect(

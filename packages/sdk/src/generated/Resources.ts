@@ -1515,7 +1515,7 @@ export class AgentsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "list">>, number>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "list">>, string>,
 		ItemOf<EndpointJsonSuccess<"agents", "list">>
 	> {
 		return executePaginatedPromise(
@@ -1760,7 +1760,7 @@ export class EnvironmentsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"environments", "list">>, number>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"environments", "list">>, string>,
 		ItemOf<EndpointJsonSuccess<"environments", "list">>
 	> {
 		return executePaginatedPromise(
@@ -1906,7 +1906,7 @@ export class SessionsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "list">>, number>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "list">>, string>,
 		ItemOf<EndpointJsonSuccess<"sessions", "list">>
 	> {
 		return executePaginatedPromise(

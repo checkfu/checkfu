@@ -991,8 +991,8 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+							"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
 					},
@@ -1134,7 +1134,9 @@
 										"next_cursor": {
 											"anyOf": [
 												{
-													"type": "number"
+													"type": "string",
+													"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{
 													"type": "null"
@@ -1477,10 +1479,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,
@@ -3731,8 +3729,8 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+							"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
 					},
@@ -3907,7 +3905,9 @@
 										"next_cursor": {
 											"anyOf": [
 												{
-													"type": "number"
+													"type": "string",
+													"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{
 													"type": "null"
@@ -4250,10 +4250,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,
@@ -7033,8 +7029,8 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+							"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
 					},
@@ -7203,7 +7199,9 @@
 										"next_cursor": {
 											"anyOf": [
 												{
-													"type": "number"
+													"type": "string",
+													"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{
 													"type": "null"
@@ -7546,10 +7544,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,

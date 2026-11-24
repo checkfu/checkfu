@@ -165,9 +165,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						after: {
 							type: "string",
-							pattern: "^\\d{1,15}$",
+							pattern: "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
 							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
 						limit: {
 							type: "string",
@@ -886,9 +886,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						after: {
 							type: "string",
-							pattern: "^\\d{1,15}$",
+							pattern: "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
 							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
 						limit: {
 							type: "string",
@@ -1322,9 +1322,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						after: {
 							type: "string",
-							pattern: "^\\d{1,15}$",
+							pattern: "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
 							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
 						limit: {
 							type: "string",

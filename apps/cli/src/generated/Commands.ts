@@ -147,9 +147,8 @@ const agentsListCommandSpec: GeneratedOperationDescriptor = {
 			flagName: "after",
 			wireName: "after",
 			location: "query",
-			kind: "int",
+			kind: "string",
 			required: false,
-			min: 0,
 		},
 		{
 			propName: "limit",
@@ -183,10 +182,9 @@ const agentsListCommandSpec: GeneratedOperationDescriptor = {
 const agentsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
+		after: FlagString("after").pipe(
 			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 			),
 			FlagOptional,
 		),
@@ -873,9 +871,8 @@ const environmentsListCommandSpec: GeneratedOperationDescriptor = {
 			flagName: "after",
 			wireName: "after",
 			location: "query",
-			kind: "int",
+			kind: "string",
 			required: false,
-			min: 0,
 		},
 		{
 			propName: "limit",
@@ -909,10 +906,9 @@ const environmentsListCommandSpec: GeneratedOperationDescriptor = {
 const environmentsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
+		after: FlagString("after").pipe(
 			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 			),
 			FlagOptional,
 		),
@@ -1180,9 +1176,8 @@ const sessionsListCommandSpec: GeneratedOperationDescriptor = {
 			flagName: "after",
 			wireName: "after",
 			location: "query",
-			kind: "int",
+			kind: "string",
 			required: false,
-			min: 0,
 		},
 		{
 			propName: "limit",
@@ -1224,10 +1219,9 @@ const sessionsListCommandSpec: GeneratedOperationDescriptor = {
 const sessionsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
+		after: FlagString("after").pipe(
 			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 			),
 			FlagOptional,
 		),

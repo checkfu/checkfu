@@ -7,7 +7,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { listingDatabaseProps, makeD1ListingStore } from "../src/D1ListingStore.ts"
+import {
+	listingDatabaseProps,
+	listingPageQuery,
+	makeD1ListingStore,
+} from "../src/D1ListingStore.ts"
 
 const sqliteD1 = (): Cloudflare.D1.QueryDatabaseClient => {
 	const sqlite = new DatabaseSync(":memory:")
@@ -65,26 +69,34 @@ const ids = (page: { readonly entries: ReadonlyArray<{ readonly id: string }> })
 
 const first = { after: undefined, take: 10 }
 
+const row = (
+	kind: "agent" | "environment" | "session",
+	id: string,
+	created_at: number,
+	status: typeof LISTED | typeof ARCHIVED | typeof DELETED = LISTED,
+	agent_id: string | null = null,
+) => ({ kind, id, created_at, agent_id, status })
+
 describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 	const provided = <A, E>(effect: Effect.Effect<A, E, ListingStore | RuntimeContext>) =>
 		effect.pipe(Effect.provide([store, RuntimeContext.phantom]))
 
-	it.effect("keeps creation order and moves a status only forward", () =>
+	it.effect("filters by kind, status and agent, and moves a status only forward", () =>
 		provided(
 			Effect.gen(function* () {
 				const listing = yield* ListingStore
 				yield* listing.record([
-					{ kind: "session", id: "s1", agent_id: "a1", status: LISTED },
-					{ kind: "session", id: "s2", agent_id: "a2", status: LISTED },
-					{ kind: "session", id: "s3", agent_id: "a1", status: LISTED },
-					{ kind: "environment", id: "e1", agent_id: null, status: LISTED },
-					{ kind: "agent", id: "s1", agent_id: null, status: LISTED },
+					row("session", "s1", 1, LISTED, "a1"),
+					row("session", "s2", 2, LISTED, "a2"),
+					row("session", "s3", 3, LISTED, "a1"),
+					row("environment", "e1", 4),
+					row("agent", "s1", 5),
 				])
 				yield* listing.record([
-					{ kind: "session", id: "s2", agent_id: null, status: ARCHIVED },
-					{ kind: "session", id: "s2", agent_id: null, status: LISTED },
-					{ kind: "environment", id: "e1", agent_id: null, status: DELETED },
-					{ kind: "environment", id: "e1", agent_id: null, status: ARCHIVED },
+					row("session", "s2", 9, ARCHIVED),
+					row("session", "s2", 9, LISTED),
+					row("environment", "e1", 9, DELETED),
+					row("environment", "e1", 9, ARCHIVED),
 				])
 				yield* listing.record([])
 				expect(ids(yield* listing.page(filter(), first))).toEqual(["s1", "s3"])
@@ -108,21 +120,38 @@ describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 		),
 	)
 
-	it.effect("pages by position in either order and ends with no cursor", () =>
+	it.effect("orders by creation time, then id, whatever order the rows were recorded in", () =>
 		provided(
 			Effect.gen(function* () {
 				const listing = yield* ListingStore
-				yield* listing.record(
-					["s1", "s2", "s3"].map((id) => ({
-						kind: "session" as const,
-						id,
-						agent_id: null,
-						status: LISTED,
-					})),
-				)
+				yield* listing.record([row("session", "s3", 30), row("session", "s2b", 20)])
+				yield* listing.record([row("session", "s1", 10), row("session", "s2a", 20)])
+				yield* listing.record([row("session", "s1", 99, ARCHIVED)])
+				expect(ids(yield* listing.page(filter({ include_archived: true }), first))).toEqual([
+					"s1",
+					"s2a",
+					"s2b",
+					"s3",
+				])
+				expect(
+					ids(yield* listing.page(filter({ include_archived: true, order: "desc" }), first)),
+				).toEqual(["s3", "s2b", "s2a", "s1"])
+			}),
+		),
+	)
+
+	it.effect("pages by creation time in either order, through ties, and ends with no cursor", () =>
+		provided(
+			Effect.gen(function* () {
+				const listing = yield* ListingStore
+				yield* listing.record([
+					row("session", "s1", 10),
+					row("session", "s2", 20),
+					row("session", "s3", 20),
+				])
 				const head = yield* listing.page(filter(), { after: undefined, take: 2 })
 				expect(ids(head)).toEqual(["s1", "s2"])
-				expect(head.cursor).toEqual(String(head.entries[1]?.position))
+				expect(head.cursor).toEqual("20:s2")
 				const tail = yield* listing.page(filter(), { after: head.cursor ?? undefined, take: 2 })
 				expect(tail).toMatchObject({ cursor: null })
 				expect(ids(tail)).toEqual(["s3"])
@@ -142,6 +171,27 @@ describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 			}),
 		),
 	)
+})
+
+describe("D1 listing queries", () => {
+	it("seek through an index, the agent index when filtering by agent", () => {
+		const sqlite = new DatabaseSync(":memory:")
+		sqlite.exec(readFileSync(new URL("../migrations/0001_listing.sql", import.meta.url), "utf8"))
+		const plan = (order: "asc" | "desc", byAgent: boolean, after: boolean) =>
+			sqlite
+				.prepare(`EXPLAIN QUERY PLAN ${listingPageQuery(order, byAgent, after)}`)
+				.all("session", 0, byAgent ? "a1" : null, after ? 1 : null, after ? "s1" : null, 2)
+				.map((step) => String(step["detail"]))
+				.join(" | ")
+		for (const order of ["asc", "desc"] as const) {
+			for (const after of [false, true]) {
+				expect(plan(order, true, after)).toContain("USING INDEX listing_by_agent")
+				expect(plan(order, false, after)).toContain("USING INDEX listing_by_kind")
+				expect(plan(order, true, after)).not.toContain("TEMP B-TREE")
+				expect(plan(order, false, after)).not.toContain("TEMP B-TREE")
+			}
+		}
+	})
 })
 
 describe("listing database placement", () => {
