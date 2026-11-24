@@ -15,7 +15,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import { ApiBinding } from "../../src/GeneratedRuntime.ts"
-import { CREDENTIAL_PROBE_PATH, MCP_PATH, makeMcpWebHandler } from "../../src/Server.ts"
+import { CREDENTIAL_CHECK_PATH, MCP_PATH, makeMcpWebHandler } from "../../src/Server.ts"
 
 export const TEST_API_KEY = "ck_mcp_test_secret"
 export const MCP_ORIGIN = "http://mcp.test"
@@ -54,7 +54,7 @@ export const makeTestServer = Effect.gen(function* () {
 	const apiFetch: typeof globalThis.fetch = (input, init) => {
 		const request = toWebRequest(input, init)
 		// Operation requests only: the credential check that precedes every MCP request is not one.
-		if (new URL(request.url).pathname !== CREDENTIAL_PROBE_PATH) {
+		if (new URL(request.url).pathname !== CREDENTIAL_CHECK_PATH) {
 			apiRequests.push(request.clone())
 		}
 		return runWithApi(

@@ -21,7 +21,7 @@ import {
 	importInputSchema,
 	makeToolHandler,
 } from "../src/GeneratedRuntime.ts"
-import { CREDENTIAL_PROBE_PATH, MAX_MCP_BODY_BYTES } from "../src/Server.ts"
+import { CREDENTIAL_CHECK_PATH, MAX_MCP_BODY_BYTES } from "../src/Server.ts"
 import { MCP_ORIGIN, MCP_URL, TEST_API_KEY, makeTestServer } from "./helpers/McpHarness.ts"
 
 type ToolArguments = NonNullable<Parameters<McpClient.McpClient["callTool"]>[0]["arguments"]>
@@ -110,18 +110,13 @@ const ErrorEnvelope = Schema.fromJsonString(
 
 const isCredentialCheck = (input: RequestInfo | URL) =>
 	new URL(typeof input === "string" ? input : "href" in input ? input.href : input.url).pathname ===
-	CREDENTIAL_PROBE_PATH
+	CREDENTIAL_CHECK_PATH
 
 // A stand-in API that accepts the caller's credential and then answers every operation with `reply`.
 const afterCredentialCheck = (reply: () => Promise<Response>) => ({
 	fetch: ((input) =>
 		isCredentialCheck(input)
-			? Promise.resolve(
-					Response.json(
-						{ type: "error", error: { type: "not_found_error", message: "Not found." } },
-						{ status: 404 },
-					),
-				)
+			? Promise.resolve(Response.json({ type: "authentication_verified" }))
 			: reply()) satisfies typeof globalThis.fetch,
 })
 
@@ -561,12 +556,15 @@ describe("Checkfu MCP server", () => {
 			expect(accepted.status).toBe(200)
 			expect(accepted.headers.get("www-authenticate")).toBeNull()
 
-			// Only the API's own "no such agent" admits a request. An API that cannot be asked, or
-			// that answers anything else, has not accepted the credential.
-			const notFound = { type: "error", error: { type: "not_found_error", message: "Not found." } }
+			// Only the API's own confirmation admits a request. An API that cannot be asked, or that
+			// answers anything else, has not accepted the credential.
 			const unconfigured = {
 				type: "error",
 				error: { type: "service_unavailable", message: "API authentication is not configured." },
+			}
+			const routeMissing = {
+				type: "error",
+				error: { type: "not_found_error", message: "Route GET /v1/auth/verify not found." },
 			}
 			const answers: ReadonlyArray<readonly [string, () => Promise<Response>]> = [
 				["unreachable", () => Promise.reject(new Error("unreachable"))],
@@ -576,14 +574,13 @@ describe("Checkfu MCP server", () => {
 				],
 				["500", () => Promise.resolve(Response.json({}, { status: 500 }))],
 				["429", () => Promise.resolve(Response.json({}, { status: 429 }))],
-				["200", () => Promise.resolve(Response.json(notFound, { status: 200 }))],
-				["404 that is not JSON", () => Promise.resolve(new Response("<html>", { status: 404 }))],
-				["404 that is not the API's", () => Promise.resolve(Response.json({}, { status: 404 }))],
 				[
-					"404 with another error",
-					() =>
-						Promise.resolve(Response.json({ error: { type: "route_missing" } }, { status: 404 })),
+					"404 from an API without the check",
+					() => Promise.resolve(Response.json(routeMissing, { status: 404 })),
 				],
+				["200 that is not JSON", () => Promise.resolve(new Response("<html>"))],
+				["200 that is not the API's", () => Promise.resolve(Response.json({}))],
+				["200 with another type", () => Promise.resolve(Response.json({ type: "agent" }))],
 			]
 			for (const [label, answer] of answers) {
 				const unverified = yield* server.fetch(
