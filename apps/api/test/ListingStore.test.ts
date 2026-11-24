@@ -182,7 +182,7 @@ describe("list cursors", () => {
 		([, store]) =>
 			Effect.gen(function* () {
 				const listing = yield* ListingStore
-				const odd = ["agent.v2", "a:b", "x y", "\u00fc", "a%2F"]
+				const odd = ["agent.v2", "a:b", "x y", "\u00fc", "a%2F", "\u{10000}", "\uE000"]
 				expect(odd.every(Schema.is(AgentId))).toBe(true)
 				yield* listing.record(odd.map((id) => row("agent", id, 7)))
 				const seen: Array<string> = []
@@ -196,7 +196,7 @@ describe("list cursors", () => {
 					expect(Schema.is(ResourceListCursor)(next.cursor)).toBe(true)
 					after = next.cursor
 				}
-				expect(seen).toEqual([...odd].toSorted())
+				expect(seen).toEqual(["a%2F", "a:b", "agent.v2", "x y", "\u00fc", "\uE000", "\u{10000}"])
 			}).pipe(Effect.provide([store, RuntimeContext.phantom])),
 	)
 })

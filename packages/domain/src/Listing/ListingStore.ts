@@ -46,8 +46,23 @@ export const parseListingCursor = (cursor: string): ListingPosition => {
 	return { created_at: Number(cursor.slice(0, split)), id: cursor.slice(split + 1) }
 }
 
+const compareIds = (a: string, b: string): number => {
+	let left = 0
+	let right = 0
+	while (left < a.length && right < b.length) {
+		const x = a.codePointAt(left) ?? 0
+		const y = b.codePointAt(right) ?? 0
+		if (x !== y) {
+			return x - y
+		}
+		left += x > 0xff_ff ? 2 : 1
+		right += y > 0xff_ff ? 2 : 1
+	}
+	return Number(left < a.length) - Number(right < b.length)
+}
+
 const compareRows = (a: ListingPosition, b: ListingPosition): number =>
-	a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+	a.created_at - b.created_at || compareIds(a.id, b.id)
 
 /** @effect-expect-leaking RuntimeContext */
 export class ListingStore extends Context.Service<

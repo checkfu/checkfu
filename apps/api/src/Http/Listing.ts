@@ -4,6 +4,7 @@ import type { ListingKind, ListingOrder } from "@checkfu/domain/Listing/ListingS
 import { ERRORS } from "@checkfu/sdk/Api"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 
 export interface ListQuery {
 	readonly after?: string
@@ -17,6 +18,13 @@ const isNotFound = Schema.is(ERRORS[404])
 
 export const makeLister = Effect.gen(function* () {
 	const internals = yield* Model.Internals
+	const scope = yield* Scope.Scope
+	const client = yield* Effect.cached(
+		CheckfuDomainApi.clientInProcess.pipe(
+			Scope.provide(scope),
+			Effect.provideService(Model.Internals, internals),
+		),
+	)
 	return <A extends { readonly archived_at: unknown }, E, R>(
 		kind: ListingKind,
 		query: ListQuery,
@@ -24,7 +32,7 @@ export const makeLister = Effect.gen(function* () {
 	) =>
 		Effect.gen(function* () {
 			const include_archived = query.include_archived ?? false
-			const domain = yield* CheckfuDomainApi.clientInProcess
+			const domain = yield* client
 			const page = yield* domain.ListResources(
 				{ kind, include_archived, agent_id: query.agent_id ?? null, order: query.order ?? "asc" },
 				{
@@ -45,5 +53,5 @@ export const makeLister = Effect.gen(function* () {
 				has_more: page.cursor !== null,
 				next_cursor: page.cursor,
 			}
-		}).pipe(Effect.scoped, Effect.provideService(Model.Internals, internals))
+		})
 })
