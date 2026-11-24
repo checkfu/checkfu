@@ -21,6 +21,9 @@ export interface BundleMeasurement {
 	readonly totalBytes: number
 	readonly startupCpuMs: number
 	readonly harnessSources: ReadonlyArray<string>
+	// The largest sources of the eager code, by bytes, read from the source maps: a package for
+	// a dependency, a file for the repository's own code.
+	readonly eagerContributors: ReadonlyArray<{ readonly source: string; readonly bytes: number }>
 }
 
 // Every sample is a cold import in plain Node, whatever the caller's environment: no compile
@@ -52,6 +55,81 @@ const harnessSources = (root: string): ReadonlyArray<string> =>
 		})
 		.filter((source) => HARNESS_SOURCE.test(source) && !MODEL_TABLE.test(source))
 		.toSorted()
+
+const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+// Source map "mappings": per generated line, segments of base64 VLQ fields. Only the first two
+// are needed, the generated column (relative within a line) and the source (relative overall);
+// a segment with a column alone starts an unmapped range.
+const decodeMappings = (
+	mappings: string,
+): ReadonlyArray<ReadonlyArray<readonly [number, number | undefined]>> => {
+	let source = 0
+	return mappings.split(";").map((line) => {
+		let column = 0
+		const segments: Array<readonly [number, number | undefined]> = []
+		for (const segment of line.split(",")) {
+			const fields: Array<number> = []
+			let value = 0
+			let shift = 0
+			for (const char of segment) {
+				const digit = BASE64.indexOf(char)
+				value += (digit & 31) << shift
+				if (digit & 32) {
+					shift += 5
+				} else {
+					fields.push(value & 1 ? -(value >>> 1) : value >>> 1)
+					value = 0
+					shift = 0
+				}
+			}
+			if (fields.length === 0) {
+				continue
+			}
+			column += fields[0] ?? 0
+			if (fields.length >= 2) {
+				source += fields[1] ?? 0
+			}
+			segments.push([column, fields.length >= 2 ? source : undefined])
+		}
+		return segments
+	})
+}
+
+const contributorOf = (source: string): string => {
+	const dependency = source.match(
+		/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?((?:@[^/]+\/)?[^/]+)/,
+	)
+	return dependency?.[1] ?? source.replace(/^(?:\.\.\/)+/, "")
+}
+
+const eagerContributors = (files: ReadonlyArray<string>, top = 12) => {
+	const bytesBySource = new Map<string, number>()
+	for (const file of files) {
+		let map: { readonly sources?: ReadonlyArray<string>; readonly mappings?: string }
+		try {
+			map = JSON.parse(readFileSync(`${file}.map`, "utf8")) as typeof map
+		} catch {
+			continue
+		}
+		const lines = readFileSync(file, "utf8").split("\n")
+		decodeMappings(map.mappings ?? "").forEach((segments, index) => {
+			segments.forEach(([column, source], at) => {
+				if (source === undefined) {
+					return
+				}
+				// Columns count UTF-16 code units; the budget counts UTF-8 bytes.
+				const span = lines[index]?.slice(column, segments[at + 1]?.[0]) ?? ""
+				const key = contributorOf(map.sources?.[source] ?? "unknown")
+				bytesBySource.set(key, (bytesBySource.get(key) ?? 0) + Buffer.byteLength(span, "utf8"))
+			})
+		})
+	}
+	return [...bytesBySource]
+		.toSorted((a, b) => b[1] - a[1])
+		.slice(0, top)
+		.map(([source, bytes]) => ({ source, bytes }))
+}
 
 const probe = async (entry: string, resultFile: string, timeout: number) => {
 	const child = spawn(process.execPath, [PROBE, pathToFileURL(entry).href, resultFile], {
@@ -102,6 +180,7 @@ export const measureBundle = async (
 			totalBytes: bytes(bundleFiles(root).filter((file) => !file.endsWith(".map"))),
 			startupCpuMs: Math.min(...samples.map((sample) => sample.cpuMs)),
 			harnessSources: harnessSources(root),
+			eagerContributors: eagerContributors(eager),
 		}
 	} finally {
 		rmSync(scratch, { recursive: true, force: true })
@@ -123,8 +202,16 @@ export const PI_HARNESS_WORKER_BUDGET = {
 export const HARNESS_SOURCES_HELP =
 	"The API Worker bundled code that belongs to the harness Worker. Import the harness through apps/api/src/Pi/PiHarness.ts, PiCatalog.ts or a type-only import, so the public Worker never loads provider SDKs or Pi."
 
+export const describeEager = (worker: string, measured: BundleMeasurement): string =>
+	[
+		`${worker}: ${measured.eagerBytes} bytes of eager code in ${measured.eagerFiles.join(", ")}. Largest sources:`,
+		...measured.eagerContributors.map(
+			({ source, bytes }) => `  ${String(bytes).padStart(9)}  ${source}`,
+		),
+	].join("\n")
+
 export const EAGER_BYTES_HELP =
-	"Every isolate, each Durable Object's included, parses and runs this code before its first event. Import what only one path needs from that path, or lower the budget if the bundle shrank."
+	"Every isolate, each Durable Object's included, parses and runs this code before its first event. Before raising the budget, look at the largest sources below: data belongs in a static asset or storage, and code only one path needs belongs behind that path or in its own Worker. Lower the budget if the bundle shrank."
 
 export const STARTUP_HELP =
 	"Cloudflare rejects a Worker whose global scope needs more than one second of CPU (error 10021). Keep schema and layer construction out of module scope."
