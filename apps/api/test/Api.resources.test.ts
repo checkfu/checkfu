@@ -330,6 +330,55 @@ describe("Session resources", () => {
 		}
 	})
 
+	it("gives the workspace to a turn before it clones, and stops a turn the workspace refuses", async () => {
+		let modelCalls = 0
+		const { layer, closeAll, workspaceCalls, refusedWorkspaces, preparedWorkspaces } =
+			makePiDurableTestLayer(async (model) => {
+				modelCalls += 1
+				return makeAssistantReply(model, null, "ok", 1, 1)
+			})
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const ids = yield* createAgentAndEnvironment(apiFetch)
+					const create = () =>
+						Effect.flatMap(
+							request(apiFetch, "POST", "/v1/sessions", {
+								...ids,
+								resources: [{ type: "github_repository", url: "https://github.com/acme/api" }],
+							}),
+							(res) => json<SessionBody>(res),
+						)
+					const first = yield* create()
+					yield* sendAndSettle(apiFetch, first.id, ["Look around."], 1)
+					expect(workspaceCalls).toEqual([`enter ${first.id} 0:1`, `prepare ${first.id} 0:1`])
+					expect(modelCalls).toBe(1)
+
+					// A later turn already has the workspace, or the session has ended.
+					const second = yield* create()
+					refusedWorkspaces.add(second.id)
+					const sent = yield* request(apiFetch, "POST", `/v1/sessions/${second.id}/events`, {
+						events: [{ type: "user.message", content: [{ type: "text", text: "Too late." }] }],
+					})
+					expect(sent.status).toBe(200)
+					yield* waitForSession(apiFetch, second.id, (s) => s.status === "idle" && s.turn === 1)
+					const events = yield* json<{
+						data: ReadonlyArray<{ type: string; stop_reason?: unknown }>
+					}>(yield* request(apiFetch, "GET", `/v1/sessions/${second.id}/events`))
+					expect(events.data.at(-1)?.stop_reason).toEqual({ type: "interrupted" })
+					expect(workspaceCalls.filter((call) => call.includes(second.id))).toEqual([
+						`enter ${second.id} 0:1`,
+					])
+					expect(preparedWorkspaces.map(({ sessionId }) => sessionId)).toEqual([first.id])
+					expect(modelCalls).toBe(1)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("rotates a repository's token while the session lives, and not after it ends", async () => {
 		const { layer, closeAll, repositoryTokens } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),

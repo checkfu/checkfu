@@ -276,6 +276,9 @@ export const makePiDurableTestLayer = (
 		readonly sessionId: string
 		readonly repositories: ReadonlyArray<RepositoryMount>
 	}> = []
+	// Every workspace call of the harness, in order, with the turn it was made for.
+	const workspaceCalls: Array<string> = []
+	const refusedWorkspaces = new Set<string>()
 	const repositoryTokens = new Map<string, string>()
 	const preparations: Array<WorkspacePreparation> = []
 	const executorLayer = makePiTurnExecutorLayer(
@@ -307,8 +310,14 @@ export const makePiDurableTestLayer = (
 				),
 		},
 		{
-			prepareWorkspace: (sessionId, repositories) =>
+			enterWorkspace: (sessionId, token) =>
 				Effect.sync(() => {
+					workspaceCalls.push(`enter ${sessionId} ${token.generation}:${token.turn}`)
+					return !refusedWorkspaces.has(sessionId)
+				}),
+			prepareWorkspace: (sessionId, token, repositories) =>
+				Effect.sync(() => {
+					workspaceCalls.push(`prepare ${sessionId} ${token.generation}:${token.turn}`)
 					preparedWorkspaces.push({ sessionId, repositories })
 					return preparations.shift() ?? { ok: true }
 				}),
@@ -376,6 +385,8 @@ export const makePiDurableTestLayer = (
 		resets,
 		discardedWorkspaces,
 		preparedWorkspaces,
+		workspaceCalls,
+		refusedWorkspaces,
 		repositoryTokens,
 		preparations,
 	}

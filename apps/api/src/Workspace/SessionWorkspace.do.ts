@@ -16,6 +16,12 @@ const WORKING_DIRECTORY = "/workspace"
 const REPOSITORIES = "repositories"
 const tokenKey = (resourceId: string) => `token:${resourceId}`
 
+const refusedPreparation = (resourceId: string, message: string): WorkspacePreparation => ({
+	ok: false,
+	resource_id: resourceId,
+	message,
+})
+
 const failed = (text: string): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],
 	isError: true,
@@ -161,20 +167,28 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 							)
 						}),
 					prepare: (
+						token: TurnToken,
 						repositories: ReadonlyArray<RepositoryMount>,
 					): Effect.Effect<WorkspacePreparation> =>
-						Effect.promise(() => {
+						Effect.promise(async () => {
+							const resourceId = repositories[0]?.id ?? ""
 							if (storage.kv.get(DISCARDED) === true) {
-								return Promise.resolve({
-									ok: false,
-									resource_id: repositories[0]?.id ?? "",
-									message: "The session has ended and its workspace was discarded.",
-								})
+								return refusedPreparation(
+									resourceId,
+									"The session has ended and its workspace was discarded.",
+								)
 							}
-							// Held by the fence, so a discard waits for a clone under way before it purges.
-							const next = fence.hold(() => preparing.then(() => prepare(repositories)))
+							// Run for the turn that asked, so a later turn refuses it, and held by the fence,
+							// so a discard waits for a clone under way before it purges.
+							const next = fence.run(token, () => preparing.then(() => prepare(repositories)))
 							preparing = next.catch(() => undefined)
-							return next
+							return (
+								(await next) ??
+								refusedPreparation(
+									resourceId,
+									"This turn has ended; the workspace no longer accepts its calls.",
+								)
+							)
 						}),
 					storeRepositoryToken: (resourceId: string, token: string): Effect.Effect<void> =>
 						Effect.sync(() => {

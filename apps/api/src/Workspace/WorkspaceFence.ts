@@ -1,7 +1,6 @@
-/** A turn of the session. Turn numbers only grow, so they order the session's turns. */
-export interface TurnToken {
-	readonly turn: number
-}
+import type { TurnToken } from "./WorkspaceShapes.ts"
+
+export type { TurnToken } from "./WorkspaceShapes.ts"
 
 /** Where a workspace keeps the newest turn it has admitted. */
 export interface FenceStore {

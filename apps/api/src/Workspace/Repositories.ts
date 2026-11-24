@@ -1,21 +1,12 @@
-import type { RepositoryCheckout } from "@checkfu/domain/Session/SessionResource"
+import type { RepositoryMount } from "./WorkspaceShapes.ts"
 import { localDevBaseUrl } from "../Pi/PiModels.ts"
 
 export const GITHUB_ORIGIN = "https://github.com"
 export const GITHUB_BASE_URL_ENV = "CHECKFU_GITHUB_BASE_URL"
 
+export type { RepositoryMount, WorkspacePreparation } from "./WorkspaceShapes.ts"
+
 export const githubBaseUrl = localDevBaseUrl(GITHUB_BASE_URL_ENV)
-
-export interface RepositoryMount {
-	readonly id: string
-	readonly url: string
-	readonly mount_path: string
-	readonly checkout: RepositoryCheckout | null
-}
-
-export type WorkspacePreparation =
-	| { readonly ok: true }
-	| { readonly ok: false; readonly resource_id: string; readonly message: string }
 
 const NOT_MOUNTED = "Only the repositories mounted in this session can be reached."
 

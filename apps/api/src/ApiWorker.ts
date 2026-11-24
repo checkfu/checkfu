@@ -35,14 +35,18 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
-			prepareWorkspace: (sessionId, repositories) =>
-				harnessCall(Effect.suspend(() => workspace(sessionId).prepare(repositories))).pipe(
-					Effect.withSpan("SessionWorkspace.prepare"),
+			enterWorkspace: (sessionId, token) =>
+				harnessCall(Effect.suspend(() => harness.enterWorkspace(sessionId, token))).pipe(
+					Effect.withSpan("PiHarness.enterWorkspace"),
 				),
+			prepareWorkspace: (sessionId, token, repositories) =>
+				harnessCall(
+					Effect.suspend(() => harness.prepareWorkspace(sessionId, token, repositories)),
+				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
 			storeRepositoryToken: (sessionId, resourceId, token) =>
 				harnessCall(
-					Effect.suspend(() => workspace(sessionId).storeRepositoryToken(resourceId, token)),
-				).pipe(Effect.withSpan("SessionWorkspace.storeRepositoryToken")),
+					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token)),
+				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),
@@ -61,7 +65,7 @@ const CheckfuLive = Checkfu.layer(
 
 // The HTTP layer hands repository tokens to the same harness the session policies use.
 const HarnessLive = PiDurableHarnessLive.pipe(
-	Layer.provide(PiSessionExecutorLive),
+	Layer.provide(PiHarnessExecutorLive),
 	Layer.provide(CheckfuLive),
 )
 

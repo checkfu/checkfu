@@ -31,6 +31,11 @@ export default PiHarnessWorker.make(
 			runTurn: (conversation, request) => Effect.orDie(piSession(conversation).runTurn(request)),
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),
+			enterWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).enter(token)),
+			prepareWorkspace: (sessionId, token, repositories) =>
+				Effect.orDie(workspace(sessionId).prepare(token, repositories)),
+			storeRepositoryToken: (sessionId, resourceId, token) =>
+				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
 		})
 	}).pipe(
