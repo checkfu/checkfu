@@ -7,3 +7,4 @@ apps/cli/dist/
 .env
 .env.*
 !.env.example
+apps/app/dist/
