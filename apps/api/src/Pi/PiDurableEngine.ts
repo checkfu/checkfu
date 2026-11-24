@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import {
 	AssistantEntry,
+	CompactionEntry,
 	ROOT_CONVERSATION_ID,
 	ResetEntry,
 	ToolResultEntry,
@@ -70,7 +71,8 @@ const readAssistantMessage = async (
 const TURN_ENTRY_PAGE_SIZE = 8
 
 // A turn's entries: its user entry and everything after it up to the next turn, the tool rounds
-// of a turn that used tools included.
+// of a turn that used tools included, and the summary of any compaction made during it, which can
+// hold the turn's own work.
 const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array<EntryId>> => {
 	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
 	if (conversation === undefined) {
@@ -92,7 +94,7 @@ const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array
 			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
 				return ids
 			}
-			if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
+			if (AssistantEntry.is(entry) || ToolResultEntry.is(entry) || CompactionEntry.is(entry)) {
 				ids.push(entry.id)
 			}
 		}
@@ -103,8 +105,10 @@ const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array
 
 /**
  * Omits everything a non-committed turn placed in Pi's live model context: its user entry, every
- * tool round and any answer, so the model does not see a turn the session records as interrupted
- * or failed, whether the interrupt or failure landed before or after Pi placed the user entry.
+ * tool round, any answer and the summary of a compaction made during it, so the model does not see
+ * a turn the session records as interrupted or failed, whether the interrupt or failure landed
+ * before or after Pi placed the user entry. An omitted summary keeps its place as the start of the
+ * context, so the history it summarised is lost with it: the model is never shown unpublished work.
  */
 const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> => {
 	const record = await submissionOf(pi, operationId)

@@ -70,9 +70,20 @@ const KEPT_FIELD_BYTES = 1024
 const headOf = (text: string, bytes: number): string =>
 	new TextDecoder().decode(encoder.encode(text).subarray(0, bytes), { stream: true })
 
+type OutputLimits = ReturnType<typeof workspaceOutputLimits>
+
+const fits = (text: string, { maxBytes, maxLines }: OutputLimits): boolean =>
+	byteLength(text) <= maxBytes && text.split("\n").length <= maxLines
+
+const succeeded = (text: string): WorkspaceToolResult => ({
+	content: [{ type: "text", text }],
+	isError: false,
+})
+
 // A change was made, so its result stays a success: what is too large to return is left out, and
-// the model is told so rather than told the change failed.
-const acknowledge = (tool: string, text: string, maxBytes: number): WorkspaceToolResult => {
+// the model is told so rather than told the change failed. Whatever is built is measured against
+// both limits before it is returned.
+const acknowledge = (tool: string, text: string, limits: OutputLimits): WorkspaceToolResult => {
 	const fields = Option.getOrUndefined(Schema.decodeOption(JsonObject)(text))
 	if (fields !== undefined) {
 		const small = ([, value]: readonly [string, unknown]) =>
@@ -81,21 +92,17 @@ const acknowledge = (tool: string, text: string, maxBytes: number): WorkspaceToo
 		const kept = Object.fromEntries(entries.filter(small))
 		const omitted = entries.filter((entry) => !small(entry)).map(([key]) => key)
 		const note = `${tool} succeeded. Left out as too large to return: ${omitted.join(", ")}.`
-		return {
-			content: [{ type: "text", text: JSON.stringify({ ...kept, note }) }],
-			isError: false,
+		const shortened = JSON.stringify({ ...kept, note })
+		if (fits(shortened, limits)) {
+			return succeeded(shortened)
 		}
 	}
-	const shown = headOf(text, maxBytes - 256)
-	return {
-		content: [
-			{
-				type: "text",
-				text: `${shown}\n[${tool} succeeded. ${byteLength(text) - byteLength(shown)} more bytes of its output are not shown.]`,
-			},
-		],
-		isError: false,
-	}
+	// The notice takes one line and well under 256 bytes.
+	const lines = text.split("\n")
+	const shown = headOf(lines.slice(0, limits.maxLines - 1).join("\n"), limits.maxBytes - 256)
+	return succeeded(
+		`${shown}\n[${tool} succeeded. ${byteLength(text) - byteLength(shown)} more bytes of its output are not shown.]`,
+	)
 }
 
 /**
@@ -107,15 +114,16 @@ export const boundWorkspaceResult = (
 	tool: string,
 	result: WorkspaceToolResult,
 ): WorkspaceToolResult => {
-	const { maxBytes, maxLines } = workspaceOutputLimits(tool)
+	const limits = workspaceOutputLimits(tool)
+	const { maxBytes, maxLines } = limits
 	const text = textOf(result)
-	const bytes = byteLength(text)
-	const lines = text.split("\n").length
-	if (bytes <= maxBytes && lines <= maxLines) {
+	if (fits(text, limits)) {
 		return result
 	}
+	const bytes = byteLength(text)
+	const lines = text.split("\n").length
 	if (!result.isError && !REPLAY_SAFE.has(tool)) {
-		return acknowledge(tool, text, maxBytes)
+		return acknowledge(tool, text, limits)
 	}
 	return {
 		content: [

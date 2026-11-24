@@ -466,6 +466,75 @@ describe("turn engine", () => {
 		}
 	})
 
+	it("drops the summary of a compaction made during a turn that is then interrupted", async () => {
+		const contexts: Array<TranscriptContext> = []
+		const texts = (context: TranscriptContext | undefined) =>
+			JSON.stringify(context?.messages ?? [])
+		let markSecondCall: () => void = () => undefined
+		const secondCall = new Promise<void>((resolve) => {
+			markSecondCall = resolve
+		})
+		const registry = createCheckfuRegistry()
+		registry.install({
+			name: "probe",
+			tools: [
+				{
+					name: "probe",
+					description: "Probe.",
+					parameters: { type: "object", properties: {} },
+					replay: "safe",
+					execute: () => Promise.resolve({ output: [{ type: "text", text: "b".repeat(84_000) }] }),
+				},
+			],
+		})
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context, signal) => {
+				const prompt = extractLastUserText(context)
+				if (prompt.startsWith("<conversation>")) {
+					return makeAssistantReply(model, null, "SUMMARY-OF-UNPUBLISHED-WORK", 12, 3)
+				}
+				contexts.push(context)
+				if (prompt === "History") {
+					return makeAssistantReply(model, null, "a".repeat(84_000), 3, 1)
+				}
+				if (prompt !== "use the tool") {
+					return makeAssistantReply(model, null, "fresh start", 3, 2)
+				}
+				if (!context.messages.some((message) => message.role === "toolResult")) {
+					// Enough context that Pi compacts before the turn's next model call.
+					return {
+						...makeAssistantReply(model, null, "", 120_000, 2),
+						content: [{ type: "toolCall", id: "call-1", name: "probe", arguments: {} }],
+						stopReason: "toolUse",
+					}
+				}
+				markSecondCall()
+				await new Promise<void>((resolve) => {
+					signal?.addEventListener("abort", () => resolve(), { once: true })
+				})
+				return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" }
+			}),
+			1,
+			registry,
+		)
+		try {
+			await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "History")))
+			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "use the tool")))
+			await secondCall
+			expect(texts(contexts.at(-1))).toContain("SUMMARY-OF-UNPUBLISHED-WORK")
+			await Effect.runPromise(backend.abort("turn:2"))
+			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(3, "start over"))),
+			).toMatchObject({ ok: true, reply: { text: "fresh start" } })
+			expect(texts(contexts.at(-1))).not.toContain("SUMMARY-OF-UNPUBLISHED-WORK")
+			expect(texts(contexts.at(-1))).not.toContain("use the tool")
+		} finally {
+			await backend.close()
+		}
+	})
+
 	it("makes recovery wait while a turn enters its workspace, then returns that turn's reply", async () => {
 		const { backend, release } = await blockingBackend()
 		let enter: () => void = () => undefined

@@ -182,6 +182,67 @@ describe("workspace tool output", () => {
 		)
 	})
 
+	it("keeps a shortened change within both limits, however its output is shaped", () => {
+		const limits = workspaceOutputLimits("git")
+		const within = (result: WorkspaceToolResult) => {
+			const text = textOf(result)
+			return [
+				result.isError,
+				new TextEncoder().encode(text).byteLength <= limits.maxBytes,
+				text.split("\n").length <= limits.maxLines,
+				text.includes("succeeded"),
+			]
+		}
+		// Many small fields: none is left out on its own, so the whole object is too large.
+		const fields = Object.fromEntries(
+			Array.from({ length: 20_000 }, (_, index) => [`k${index}`, index]),
+		)
+		expect(
+			within(
+				boundWorkspaceResult("git", {
+					content: [{ type: "text", text: JSON.stringify(fields) }],
+					isError: false,
+				}),
+			),
+		).toEqual([false, true, true, true])
+		// A short line many times: under the byte limit, over the line limit.
+		expect(
+			within(
+				boundWorkspaceResult("git", {
+					content: [{ type: "text", text: "ok\n".repeat(3000) }],
+					isError: false,
+				}),
+			),
+		).toEqual([false, true, true, true])
+	})
+
+	it("moves a grep page on when its first match does not fit with its context", async () => {
+		const { maxBytes } = workspaceOutputLimits("grep")
+		const escaped = '"\\'.repeat(400)
+		const files: PagingFiles = {
+			grep: (_query, path, options) =>
+				Promise.resolve(
+					Array.from({ length: options.limit }, (_, index) => ({
+						path,
+						line: options.offset + index + 100,
+						text: `match ${escaped}`,
+						context: Array.from({ length: 20 }, (_, at) => ({
+							line: at,
+							text: escaped,
+							isMatch: false,
+						})),
+					})),
+				),
+			stat: () => Promise.reject(new Error("not used")),
+			readFile: () => Promise.reject(new Error("not used")),
+		}
+		const page = JSON.parse(
+			textOf(await grepWithin(files, { query: "match", context: 10, offset: 7 }, maxBytes / 8)),
+		) as { count: number; nextOffset?: number; matches: ReadonlyArray<{ context?: unknown }> }
+		expect(page.count).toBeGreaterThanOrEqual(1)
+		expect(page.nextOffset).toBe(7 + page.count)
+	})
+
 	it("collects grep matches a batch at a time and ends a page at its byte budget", async () => {
 		const line = "match ".repeat(20_000)
 		const asked: Array<number> = []

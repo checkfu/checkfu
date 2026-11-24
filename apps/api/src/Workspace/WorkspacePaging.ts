@@ -166,6 +166,12 @@ export const grepWithin = async (
 			}
 			const cost = byteLength(JSON.stringify(match)) + 1
 			if (bytes + cost > maxBytes) {
+				// A page always moves on: its first match goes in without its context if it must.
+				if (matches.length === 0) {
+					const bare: GrepMatch = { path: match.path, line: match.line, text: match.text }
+					matches.push(bare)
+					bytes += byteLength(JSON.stringify(bare)) + 1
+				}
 				full = true
 				break
 			}
