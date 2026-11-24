@@ -5,7 +5,6 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -17,7 +16,7 @@ import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import { startupRefusal } from "../src/Standalone.ts"
+import { dropCheckoutDotenv, startupRefusal } from "../src/Standalone.ts"
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 
@@ -190,46 +189,88 @@ describe("which ways of starting the CLI are accepted", () => {
 			])
 		}
 	})
+})
 
-	it("refuses the checkout itself unless its bunfig switches .env loading off", () => {
-		const checkout = mkdtempSync(join(tmpdir(), "checkfu-bunfig-"))
+describe("dropping what Bun loaded from the checkout's .env files", () => {
+	const inDir = (files: Record<string, string>, run: (dir: string) => void) => {
+		const dir = mkdtempSync(join(tmpdir(), "checkfu-dotenv-"))
 		try {
-			const withBunfig = (content: string | undefined) => {
-				rmSync(join(checkout, "bunfig.toml"), { force: true })
-				if (content !== undefined) {
-					writeFileSync(join(checkout, "bunfig.toml"), content)
-				}
-				return refusal([], checkout, checkout)
+			for (const [name, content] of Object.entries(files)) {
+				writeFileSync(join(dir, name), content)
 			}
-			expect(withBunfig(readFileSync(join(repoRoot, "bunfig.toml"), "utf8"))).toBeUndefined()
-			expect(withBunfig("env = false\n")).toBeUndefined()
-			for (const unsafe of [
-				undefined,
-				"",
-				"[install]\nminimumReleaseAge = 86400\n",
-				"env = true\n",
-				'env = "false"\n',
-				"[run]\nenv = false\n",
-				"[env]\nfile = false\n",
-				"env = \n",
-			]) {
-				expect([unsafe, withBunfig(unsafe)]).toEqual([
-					unsafe,
-					expect.stringContaining("must contain `env = false`"),
-				])
-			}
+			run(dir)
 		} finally {
-			rmSync(checkout, { recursive: true, force: true })
+			rmSync(dir, { recursive: true, force: true })
 		}
+	}
+
+	it("removes a variable whose value a .env file defines, and keeps every other", () => {
+		inDir(
+			{
+				".env": "CHECKFU_API_KEY=from-file\nSHARED=file\nUNSET_HERE=x\n",
+				".env.local": "CHECKFU_URL=https://local.example\n",
+				".env.production": "CHECKFU_API_URL=https://prod.example\n",
+				".env.example": "OPENAI_API_KEY=\n",
+			},
+			(dir) => {
+				const env = {
+					CHECKFU_API_KEY: "from-file",
+					CHECKFU_URL: "https://local.example",
+					CHECKFU_API_URL: "https://prod.example",
+					SHARED: "exported-different",
+					OPENAI_API_KEY: "sk-exported",
+					PATH: "/usr/bin",
+				}
+				expect([...dropCheckoutDotenv(dir, env)].sort()).toEqual([
+					"CHECKFU_API_KEY",
+					"CHECKFU_API_URL",
+					"CHECKFU_URL",
+				])
+				expect(env).toStrictEqual({
+					SHARED: "exported-different",
+					OPENAI_API_KEY: "sk-exported",
+					PATH: "/usr/bin",
+				})
+			},
+		)
+	})
+
+	it("follows the file that won when two define the same name", () => {
+		inDir({ ".env": "CHECKFU_API_KEY=base\n", ".env.local": "CHECKFU_API_KEY=local\n" }, (dir) => {
+			const env = { CHECKFU_API_KEY: "local" }
+			dropCheckoutDotenv(dir, env)
+			expect(env).toStrictEqual({})
+		})
+	})
+
+	it("removes a variable whose file value Bun would expand, since it cannot be compared", () => {
+		inDir({ ".env": "BASE=k\nCHECKFU_API_KEY=${BASE}-suffix\n" }, (dir) => {
+			const env = {
+				BASE: "k",
+				CHECKFU_API_KEY: "k-suffix",
+			}
+			dropCheckoutDotenv(dir, env)
+			expect(env).toStrictEqual({})
+		})
+	})
+
+	it("ignores files that are not .env files and ones it cannot read", () => {
+		inDir({ "env.txt": "CHECKFU_API_KEY=x\n", ".envrc": "CHECKFU_API_KEY=x\n" }, (dir) => {
+			mkdirSync(join(dir, ".env.d"))
+			const env = { CHECKFU_API_KEY: "x" }
+			expect(dropCheckoutDotenv(dir, env)).toEqual([])
+			expect(env).toStrictEqual({ CHECKFU_API_KEY: "x" })
+		})
 	})
 })
 
 describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () => {
-	// A copy of the entry point and the CLI's source, so the checkout's own files can be
-	// planted and removed without touching the real one.
+	// A copy of the entry point, the CLI's source and the root bunfig, so .env files can be
+	// planted without touching the real checkout.
 	const copyCheckout = (): string => {
 		const copy = mkdtempSync(join(tmpdir(), "checkfu-checkout-"))
 		cpSync(join(repoRoot, "checkfu.ts"), join(copy, "checkfu.ts"))
+		cpSync(join(repoRoot, "bunfig.toml"), join(copy, "bunfig.toml"))
 		mkdirSync(join(copy, "apps", "cli"), { recursive: true })
 		cpSync(join(repoRoot, "apps", "cli", "src"), join(copy, "apps", "cli", "src"), {
 			recursive: true,
@@ -246,55 +287,88 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 		return copy
 	}
 
-	it("never uses a key from the checkout's .env, and stops when its bunfig would let Bun load one", async () => {
-		let requests = 0
-		const server = createServer((_request, response) => {
-			requests += 1
-			response.writeHead(200, { "content-type": "application/json" })
-			response.end("{}")
+	const listen = async (handle: (authorization: string | undefined) => void) => {
+		const server = createServer((request, response) => {
+			handle(request.headers.authorization)
+			response.writeHead(404, { "content-type": "application/json" })
+			response.end(
+				JSON.stringify({
+					type: "error",
+					error: { type: "not_found_error", message: "not found" },
+					request_id: "req_test",
+				}),
+			)
 		})
 		server.listen(0, "127.0.0.1")
 		await once(server, "listening")
 		const address = server.address()
-		const planted = `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`
+		const port = typeof address === "object" && address !== null ? address.port : 0
+		return { server, url: `http://127.0.0.1:${port}` }
+	}
+
+	// Asynchronous, so the servers above can see a request while the CLI is running.
+	const run = (cwd: string, env: ProcessEnv) =>
+		new Promise<{ readonly status: number | null; readonly stderr: string }>((resolve, reject) => {
+			const child = spawn("bun", ["checkfu", "sessions", "retrieve", "--session-id", "s"], {
+				cwd,
+				env,
+				stdio: ["ignore", "ignore", "pipe"],
+			})
+			let stderr = ""
+			child.stderr.setEncoding("utf8")
+			child.stderr.on("data", (chunk: string) => {
+				stderr += chunk
+			})
+			child.on("error", reject)
+			child.on("close", (status) => resolve({ status, stderr }))
+		})
+
+	it("never uses a key or URL from the checkout's .env files, and still uses exported ones", async () => {
+		const planted: Array<string | undefined> = []
+		const exported: Array<string | undefined> = []
+		const plantedServer = await listen((authorization) => planted.push(authorization))
+		const exportedServer = await listen((authorization) => exported.push(authorization))
 		const checkout = copyCheckout()
 		try {
-			writeFileSync(join(checkout, ".env"), `CHECKFU_API_KEY=planted\nCHECKFU_API_URL=${planted}\n`)
-			writeFileSync(join(checkout, ".env.local"), `CHECKFU_URL=${planted}\n`)
-			writeFileSync(
-				join(checkout, ".env.production"),
-				`CHECKFU_API_KEY=planted\nCHECKFU_API_URL=${planted}\n`,
-			)
-			const retrieve = (nodeEnv: string) =>
-				spawnSync("bun", ["checkfu", "sessions", "retrieve", "--session-id", "s"], {
-					cwd: checkout,
-					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(checkout, "config"), NODE_ENV: nodeEnv }),
-					encoding: "utf8",
-					timeout: 20_000,
-				})
-
-			const realBunfig = readFileSync(join(repoRoot, "bunfig.toml"), "utf8")
+			const dotenv = `CHECKFU_API_KEY=planted\nCHECKFU_API_URL=${plantedServer.url}\nCHECKFU_URL=${plantedServer.url}\n`
+			for (const file of [".env", ".env.local", ".env.development", ".env.production"]) {
+				writeFileSync(join(checkout, file), dotenv)
+			}
 			for (const nodeEnv of ["development", "production"]) {
-				writeFileSync(join(checkout, "bunfig.toml"), realBunfig)
-				const safe = retrieve(nodeEnv)
-				expect(safe.status).toBe(1)
-				expect(safe.stderr).toContain("Missing CHECKFU_API_KEY")
-			}
+				const base = cleanEnv({ CHECKFU_CONFIG_DIR: join(checkout, "config"), NODE_ENV: nodeEnv })
 
-			for (const unsafe of [undefined, "[install]\nminimumReleaseAge = 86400\n", "env = true\n"]) {
-				rmSync(join(checkout, "bunfig.toml"), { force: true })
-				if (unsafe !== undefined) {
-					writeFileSync(join(checkout, "bunfig.toml"), unsafe)
-				}
-				const refused = retrieve("development")
-				expect(refused.status).toBe(1)
-				expect(refused.stderr).toContain("must contain `env = false`")
+				const nothingExported = await run(checkout, base)
+				expect(nothingExported.status).toBe(1)
+				expect(nothingExported.stderr).toContain("Missing CHECKFU_API_KEY")
+
+				const sameAsTheFile = await run(checkout, { ...base, CHECKFU_API_KEY: "planted" })
+				expect(sameAsTheFile.status).toBe(1)
+				expect(sameAsTheFile.stderr).toContain("with the same value as one there")
+
+				const ownKey = await run(checkout, {
+					...base,
+					CHECKFU_API_KEY: "exported",
+					CHECKFU_API_URL: exportedServer.url,
+				})
+				expect(ownKey.stderr).toContain("not_found_error")
 			}
-			expect(requests).toBe(0)
+			expect(planted).toEqual([])
+			expect(exported).toEqual(["Bearer exported", "Bearer exported"])
+
+			// Bun itself still loads these files for everything else started in the checkout.
+			const tool = spawnSync("bun", ["-e", "console.log(process.env.CHECKFU_API_KEY ?? 'unset')"], {
+				cwd: checkout,
+				env: cleanEnv(),
+				encoding: "utf8",
+				timeout: 20_000,
+			})
+			expect(tool.stdout.trim()).toBe("planted")
 		} finally {
 			rmSync(checkout, { recursive: true, force: true })
-			server.closeAllConnections()
-			server.close()
+			for (const { server } of [plantedServer, exportedServer]) {
+				server.closeAllConnections()
+				server.close()
+			}
 		}
 	}, 120_000)
 })

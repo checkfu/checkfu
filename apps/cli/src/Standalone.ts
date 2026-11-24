@@ -1,8 +1,7 @@
-import { readFileSync, realpathSync } from "node:fs"
+import { readFileSync, readdirSync, realpathSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import * as Toml from "effect/encoding/Toml"
-import * as Result from "effect/Result"
+import { parseEnv } from "node:util"
 
 declare const CHECKFU_STANDALONE: boolean | undefined
 
@@ -31,23 +30,14 @@ const physicalPath = (path: string): string | undefined => {
 	}
 }
 
-const disablesDotenv = (bunfigPath: string): boolean => {
-	try {
-		const bunfig = Toml.parse(readFileSync(bunfigPath, "utf8"))
-		return Result.isSuccess(bunfig) && bunfig.success["env"] === false
-	} catch {
-		return false
-	}
-}
-
 /**
  * Why this start is refused, or `undefined` when it is accepted.
  *
- * Bun loads `.env` and `bunfig.toml` from the directory it starts in. Two exact shapes
- * cannot have loaded a key that was never exported: no Bun flags at all in the checkout,
- * whose own bunfig must switch `.env` loading off, or exactly `--no-env-file` with the
- * CLI's bunfig from anywhere. Every Bun flag, including one injected through
- * `BUN_OPTIONS`, appears in `execArgv`, so anything else is refused.
+ * Two shapes are accepted: no Bun flags at all in the checkout, after which
+ * {@link dropCheckoutDotenv} removes what Bun loaded from the checkout's `.env` files,
+ * or exactly `--no-env-file` with the CLI's bunfig from anywhere. Every Bun flag,
+ * including one injected through `BUN_OPTIONS`, appears in `execArgv`, so anything
+ * else, which could load another config or `.env` file, is refused.
  *
  * This guards against mistakes. It cannot guard against a hostile directory: Bun runs
  * that directory's preloads before this code. The standalone binary is for that.
@@ -77,8 +67,44 @@ export const startupRefusal = (
 	if (execArgv.length > 0 || physicalPath(cwd) !== physicalPath(checkout)) {
 		return "Run `bun checkfu` from the Checkfu checkout, with no Bun flags. From any other directory, build the standalone binary with `bun run checkfu:build` and call it by its path."
 	}
-	if (!disablesDotenv(join(checkout, "bunfig.toml"))) {
-		return "The checkout's bunfig.toml must contain `env = false`, so that keys in the checkout's .env are not loaded as if they had been exported. Restore that line and run again."
-	}
 	return undefined
+}
+
+/**
+ * Removes from `env` every variable that Bun loaded from a `.env` file in `dir`, and
+ * returns their names.
+ *
+ * `bun checkfu` runs in the checkout as one Bun process, so Bun has loaded the
+ * checkout's `.env` files before any of this code. A key there belongs to the
+ * checkout's deployment and must not count as exported. Bun keeps every variable that
+ * was exported, so a variable whose value equals what one of those files defines came
+ * from that file. One exported with the very same value is removed too, which is the
+ * safe way to be wrong. Bun expands `$NAME` in these files and `parseEnv` does not, so a
+ * variable whose file value contains `$` cannot be compared and is removed.
+ */
+export const dropCheckoutDotenv = (
+	dir: string,
+	env: Record<string, string | undefined>,
+): ReadonlyArray<string> => {
+	const dropped: Array<string> = []
+	for (const file of readdirSync(dir).filter((name) => /^\.env(\..+)?$/.test(name))) {
+		let defined: Readonly<Record<string, string | undefined>>
+		try {
+			defined = parseEnv(readFileSync(join(dir, file), "utf8"))
+		} catch {
+			continue
+		}
+		for (const [name, value] of Object.entries(defined)) {
+			const current = env[name]
+			if (
+				value !== undefined &&
+				current !== undefined &&
+				(value.includes("$") || current === value)
+			) {
+				Reflect.deleteProperty(env, name)
+				dropped.push(name)
+			}
+		}
+	}
+	return dropped
 }

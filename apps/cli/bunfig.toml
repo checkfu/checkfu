@@ -1,11 +1,7 @@
-# Bun configuration for two starts that do not go through the checkout's bunfig:
+# Bun configuration for the CLI when it is started explicitly, from any directory:
 #
-# - `bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts`, the CLI
-#   started explicitly. `--no-env-file` is what keeps .env out there; this file only
-#   pins the config so the directory's bunfig and its preloads are not read.
-# - The Bun that the CLI starts to run Alchemy. It sets nothing about .env, so Alchemy
-#   loads the checkout's .env files as Bun does by default.
+#   bun --no-env-file --config=<checkout>/apps/cli/bunfig.toml <checkout>/apps/cli/src/main.ts
 #
-# The default `bun checkfu` does not use this file. It runs under the checkout's
-# bunfig.toml, which switches .env loading off.
+# `--no-env-file` keeps that directory's .env out; this file pins the config so its
+# bunfig.toml and preloads are not read. The default `bun checkfu` does not use this file.
 preload = []

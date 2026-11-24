@@ -1,6 +1,2 @@
-# `bun checkfu` runs in this directory. A key in the checkout's .env belongs to one
-# deployment and must not reach the CLI as if it had been exported.
-env = false
-
 [install]
 minimumReleaseAge = 86400

@@ -1,17 +1,7 @@
-import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import {
-	Checkout,
-	providerForKey,
-	readDotEnvValue,
-	setDotEnvValue,
-} from "../src/Commands/Deploy.ts"
+import { providerForKey, readDotEnvValue, setDotEnvValue } from "../src/Commands/Deploy.ts"
 import { COMMAND, invocation } from "../src/Invocation.ts"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 
@@ -120,55 +110,6 @@ const fakeAlchemy = (
 
 const errorEnvelope = (status: number, type: string) =>
 	Response.json({ type: "error", error: { type, message: "simulated" } }, { status })
-
-describe.skipIf(process.platform === "win32")("the Bun that runs Alchemy", () => {
-	it("loads the checkout's .env files as Bun does by default, although the checkout's bunfig switches that off", () => {
-		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
-		const checkout = mkdtempSync(join(tmpdir(), "checkfu-alchemy-env-"))
-		try {
-			mkdirSync(join(checkout, "probe"))
-			writeFileSync(
-				join(checkout, "probe", "alchemy.ts"),
-				"console.log(['FROM_ENV','FROM_LOCAL','FROM_MODE','FROM_MODE_LOCAL'].filter((name) => process.env[name] !== undefined).join(','))\n",
-			)
-			writeFileSync(join(checkout, ".env"), "FROM_ENV=1\n")
-			writeFileSync(join(checkout, ".env.local"), "FROM_LOCAL=1\n")
-			for (const mode of ["development", "production"]) {
-				writeFileSync(join(checkout, `.env.${mode}`), "FROM_MODE=1\n")
-				writeFileSync(join(checkout, `.env.${mode}.local`), "FROM_MODE_LOCAL=1\n")
-			}
-			const env: Record<string, string> = {}
-			for (const [name, value] of Object.entries(process.env)) {
-				if (value !== undefined && !name.startsWith("FROM_") && name !== "BUN_OPTIONS") {
-					env[name] = value
-				}
-			}
-			const seen = (args: ReadonlyArray<string>, nodeEnv: string) =>
-				spawnSync("bun", [...args, "probe/alchemy.ts"], {
-					cwd: checkout,
-					env: { ...env, NODE_ENV: nodeEnv },
-					encoding: "utf8",
-					timeout: 20_000,
-				}).stdout.trim()
-			const { runtimeArgs } = Checkout.defaultValue()
-
-			for (const nodeEnv of ["development", "production"]) {
-				rmSync(join(checkout, "bunfig.toml"), { force: true })
-				const asBunDoesByDefault = seen([], nodeEnv)
-				expect(asBunDoesByDefault).toBe("FROM_ENV,FROM_LOCAL,FROM_MODE,FROM_MODE_LOCAL")
-
-				writeFileSync(
-					join(checkout, "bunfig.toml"),
-					readFileSync(join(repoRoot, "bunfig.toml"), "utf8"),
-				)
-				expect(seen([], nodeEnv)).toBe("")
-				expect(seen(runtimeArgs, nodeEnv)).toBe(asBunDoesByDefault)
-			}
-		} finally {
-			rmSync(checkout, { recursive: true, force: true })
-		}
-	})
-})
 
 describe("dotenv helpers", () => {
 	it.live("reads values and treats missing or empty entries as unset", () =>
