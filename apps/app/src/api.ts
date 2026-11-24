@@ -124,19 +124,6 @@ const resource = <T, Create, Update extends { readonly version: number } = never
 			"GET",
 			`${collection}?limit=100&order=desc${after === undefined ? "" : `&after=${encodeURIComponent(after)}`}`,
 		),
-	all: async () => {
-		const items: Array<T> = []
-		let after: string | undefined
-		do {
-			const page: Page<T> = await call<Page<T>>(
-				"GET",
-				`${collection}?limit=100${after === undefined ? "" : `&after=${encodeURIComponent(after)}`}`,
-			)
-			items.push(...page.data)
-			after = page.next_cursor ?? undefined
-		} while (after !== undefined)
-		return items
-	},
 	retrieve: (id: string) => call<T>("GET", `${collection}/${encodeURIComponent(id)}`),
 	create: async (body: Create, idempotencyKey: string) =>
 		settled(collection, await call<T | Pending>("POST", collection, body, idempotencyKey)),
@@ -171,18 +158,12 @@ export const errorMessage = (error: unknown): string =>
 export const isSignedOut = (error: unknown): boolean =>
 	error instanceof ApiError && error.status === 401
 
-let verified = false
-
 export const signedIn = async (): Promise<boolean> => {
-	if (verified) {
-		return true
-	}
 	const response = await fetch("/auth/session")
 	if (response.status !== 401 && !response.ok) {
-		throw new Error(`Could not reach the API (${response.status}).`)
+		throw new Error(`Could not reach the dashboard (${response.status}).`)
 	}
-	verified = response.ok
-	return verified
+	return response.ok
 }
 
 export const signIn = async (key: string): Promise<"ok" | "rejected" | "failed"> => {
@@ -190,9 +171,6 @@ export const signIn = async (key: string): Promise<"ok" | "rejected" | "failed">
 		method: "POST",
 		body: new URLSearchParams({ key }),
 	})
-	if (response.ok) {
-		verified = true
-	}
 	return response.ok ? "ok" : response.status === 401 ? "rejected" : "failed"
 }
 
@@ -201,5 +179,4 @@ export const signOut = async (): Promise<void> => {
 	if (!response.ok) {
 		throw new Error(`Could not sign out (${response.status}). Try again.`)
 	}
-	verified = false
 }

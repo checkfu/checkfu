@@ -184,7 +184,7 @@ export function NewAgentPage(): React.JSX.Element {
 export function AgentPage(): React.JSX.Element {
 	const agent = detail.useLoaderData()
 	const router = useRouter()
-	const [editing, setEditing] = useState(false)
+	const [editingFrom, setEditingFrom] = useState<JsonAgent | null>(null)
 	const archive = useAction(async () => {
 		await checkfu.agents.archive(agent.id)
 		await router.invalidate()
@@ -199,9 +199,9 @@ export function AgentPage(): React.JSX.Element {
 				accessory={<LifecycleStatus resource={agent} />}
 				description={agent.description ?? undefined}
 				actions={
-					archived || editing ? undefined : (
+					archived || editingFrom !== null ? undefined : (
 						<>
-							<Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+							<Button variant="outline" size="sm" onClick={() => setEditingFrom(agent)}>
 								Edit
 							</Button>
 							<Button
@@ -217,18 +217,7 @@ export function AgentPage(): React.JSX.Element {
 				}
 			/>
 			{archive.error === undefined ? null : <Callout tone="error">{archive.error}</Callout>}
-			{editing ? (
-				<AgentForm
-					initial={draftOf(agent)}
-					submitLabel="Save new version"
-					onCancel={() => setEditing(false)}
-					onSubmit={async (draft) => {
-						await checkfu.agents.update(agent.id, { version: agent.version, ...bodyOf(draft) })
-						setEditing(false)
-						await router.invalidate()
-					}}
-				/>
-			) : (
+			{editingFrom === null ? (
 				<>
 					<DescriptionList>
 						<Description label="Model">
@@ -245,6 +234,20 @@ export function AgentPage(): React.JSX.Element {
 						</pre>
 					</section>
 				</>
+			) : (
+				<AgentForm
+					initial={draftOf(editingFrom)}
+					submitLabel="Save new version"
+					onCancel={() => setEditingFrom(null)}
+					onSubmit={async (draft) => {
+						await checkfu.agents.update(editingFrom.id, {
+							version: editingFrom.version,
+							...bodyOf(draft),
+						})
+						setEditingFrom(null)
+						await router.invalidate()
+					}}
+				/>
 			)}
 		</>
 	)

@@ -11,7 +11,8 @@ import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
-import { checkfu, newIdempotencyKey } from "../api.ts"
+import { checkfu } from "../api.ts"
+import { useMorePages } from "../use-more-pages.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { Transcript } from "./transcript.tsx"
@@ -95,10 +96,22 @@ export function SessionsPage(): React.JSX.Element {
 }
 
 export function NewSessionPage(): React.JSX.Element {
-	const { agents, environments } = create.useLoaderData()
+	const first = create.useLoaderData()
 	const navigate = useNavigate()
-	const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
-	const [environmentId, setEnvironmentId] = useState(environments[0]?.id ?? "")
+	const agentOptions = useMorePages(first.agents, (after) => checkfu.agents.list(after))
+	const environmentOptions = useMorePages(first.environments, (after) =>
+		checkfu.environments.list(after),
+	)
+	const agents = agentOptions.items
+	const environments = environmentOptions.items
+	const [chosenAgent, setAgentId] = useState<string>()
+	const [chosenEnvironment, setEnvironmentId] = useState<string>()
+	const agentId = agents.some((agent) => agent.id === chosenAgent)
+		? (chosenAgent ?? "")
+		: (agents[0]?.id ?? "")
+	const environmentId = environments.some((environment) => environment.id === chosenEnvironment)
+		? (chosenEnvironment ?? "")
+		: (environments[0]?.id ?? "")
 	const [title, setTitle] = useState("")
 	const startKey = useSubmissionKey()
 	const start = useAction(async () => {
@@ -143,6 +156,16 @@ export function NewSessionPage(): React.JSX.Element {
 							))}
 						</Select>
 					</Field>
+					{agentOptions.more === null ? null : (
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={agentOptions.pending}
+							onClick={agentOptions.more}
+						>
+							Load more agents
+						</Button>
+					)}
 					<Field label="Environment">
 						<Select
 							value={environmentId}
@@ -155,6 +178,16 @@ export function NewSessionPage(): React.JSX.Element {
 							))}
 						</Select>
 					</Field>
+					{environmentOptions.more === null ? null : (
+						<Button
+							variant="ghost"
+							size="sm"
+							disabled={environmentOptions.pending}
+							onClick={environmentOptions.more}
+						>
+							Load more environments
+						</Button>
+					)}
 					<Field label="Title">
 						<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 					</Field>
@@ -175,8 +208,9 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const router = useRouter()
-	const { events, status, error } = useSessionEvents(session.id, session.status, {
-		since: session.updated_at,
+	const { events, status, turn, error } = useSessionEvents({
+		sessionId: session.id,
+		snapshot: session,
 		onTransition: () => void router.invalidate(),
 	})
 	const [text, setText] = useState("")
@@ -191,12 +225,11 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 		sendKey.settle()
 		setText((current) => (current === message ? "" : current))
 	})
+	const interruptKey = useSubmissionKey()
 	const interrupt = useAction(async () => {
-		await checkfu.sessions.send(
-			session.id,
-			{ events: [{ type: "user.interrupt" }] },
-			newIdempotencyKey(),
-		)
+		const body = { events: [{ type: "user.interrupt" as const }] }
+		await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
+		interruptKey.settle()
 	})
 	const archive = useAction(async () => {
 		await checkfu.sessions.archive(session.id)

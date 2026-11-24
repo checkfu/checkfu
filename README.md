@@ -89,7 +89,7 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 ## Dashboard
 
-`deploy` prints the dashboard URL as `Dashboard`, and `bun run dev` prints it as `app`. Open it and sign in with the same `CHECKFU_API_KEY` to list, create and archive agents, environments and sessions, and to talk to a session as it runs.
+`deploy` prints the dashboard URL as `Dashboard`. Open it and sign in with the same `CHECKFU_API_KEY` to list, create and archive agents, environments and sessions, and to talk to a session as it runs. The dashboard Worker holds the key itself; the browser only gets a signed session cookie that expires after seven days and stops working when the key changes. Locally, `bun run dev` serves it at `http://app.localhost:1340`; plain `localhost` redirects there, so the session cookie is never set on the hostname other local servers share.
 
 ## MCP
 

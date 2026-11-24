@@ -7,6 +7,7 @@ import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
 import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection.ts"
 import PiHarnessWorkerLive from "./apps/api/src/Pi/PiHarnessWorker.ts"
 import * as Alchemy from "alchemy"
+import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
@@ -59,7 +60,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				main: "worker.ts",
 				compatibility: { date: COMPATIBILITY_DATE },
 				observability: { enabled: true },
-				env: { API: api },
+				env: { API: api, CHECKFU_API_KEY: Config.Redacted("CHECKFU_API_KEY") },
 				assets: {
 					notFoundHandling: "single-page-application",
 					runWorkerFirst: ["/*", "!/assets/*"],

@@ -37,13 +37,19 @@ const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
 
 const BATCH_MS = 50
 
-export function useSessionEvents(
-	sessionId: string,
-	initialStatus: Status,
-	{ since, onTransition }: { readonly since: string; readonly onTransition: () => void },
-) {
+export function useSessionEvents({
+	sessionId,
+	snapshot,
+	onTransition,
+}: {
+	readonly sessionId: string
+	readonly snapshot: { readonly status: Status; readonly turn: number; readonly updated_at: string }
+	readonly onTransition: () => void
+}) {
+	const since = snapshot.updated_at
 	const [events, setEvents] = useState<ReadonlyArray<JsonSessionEvent>>([])
-	const [status, setStatus] = useState(initialStatus)
+	const [status, setStatus] = useState(snapshot.status)
+	const [turn, setTurn] = useState(snapshot.turn)
 	const [error, setError] = useState<string>()
 	useMountEffect(() => {
 		const source = new EventSource(checkfu.sessions.streamUrl(sessionId))
@@ -60,7 +66,12 @@ export function useSessionEvents(
 			pending = []
 			flushTimer = undefined
 			setEvents((seen) => seen.concat(batch))
-			setStatus((current) => batch.reduce(statusAfter, current))
+			const live = batch.filter((event) => event.created_at > since)
+			setStatus((current) => live.reduce(statusAfter, current))
+			const running = live.findLast((event) => event.type === "session.status_running")
+			if (running !== undefined && "turn" in running && typeof running.turn === "number") {
+				setTurn(running.turn)
+			}
 		}
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
@@ -106,5 +117,5 @@ export function useSessionEvents(
 			source.close()
 		}
 	})
-	return { events, status, error }
+	return { events, status, turn, error }
 }

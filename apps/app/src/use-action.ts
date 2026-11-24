@@ -1,9 +1,11 @@
+import { useNavigate } from "@tanstack/react-router"
 import { useRef, useState } from "react"
-import { errorMessage, newIdempotencyKey } from "./api.ts"
+import { errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
 
 export function useAction<Args extends ReadonlyArray<unknown>>(
 	action: (...args: Args) => Promise<void>,
 ) {
+	const navigate = useNavigate()
 	const [pending, setPending] = useState(false)
 	const [error, setError] = useState<string>()
 	const run = (...args: Args): void => {
@@ -13,7 +15,11 @@ export function useAction<Args extends ReadonlyArray<unknown>>(
 			() => setPending(false),
 			(error_: unknown) => {
 				setPending(false)
-				setError(errorMessage(error_))
+				if (isSignedOut(error_)) {
+					void navigate({ to: "/sign-in", replace: true })
+				} else {
+					setError(errorMessage(error_))
+				}
 			},
 		)
 	}

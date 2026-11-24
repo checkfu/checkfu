@@ -22,7 +22,7 @@ function Bubble({
 	)
 }
 
-function Entry({ event }: { readonly event: JsonSessionEvent }): React.JSX.Element | null {
+const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 	switch (event.type) {
 		case "user.message":
 			return (
@@ -65,16 +65,17 @@ export function Transcript({
 }: {
 	readonly events: ReadonlyArray<JsonSessionEvent>
 }): React.JSX.Element {
+	const rows = events.flatMap((event) => {
+		const entry = entryOf(event)
+		return entry === null ? [] : [<li key={event.seq}>{entry}</li>]
+	})
 	return (
 		<ol className="space-y-5">
-			{events.map((event) => (
-				<li key={event.seq}>
-					<Entry event={event} />
-				</li>
-			))}
-			{events.length === 0 ? (
+			{rows.length === 0 ? (
 				<li className="text-sm text-muted-foreground">No messages yet.</li>
-			) : null}
+			) : (
+				rows
+			)}
 		</ol>
 	)
 }
