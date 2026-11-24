@@ -1,6 +1,8 @@
-import { realpathSync } from "node:fs"
+import { readFileSync, realpathSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import * as Toml from "effect/encoding/Toml"
+import * as Result from "effect/Result"
 
 declare const CHECKFU_STANDALONE: boolean | undefined
 
@@ -29,26 +31,38 @@ const physicalPath = (path: string): string | undefined => {
 	}
 }
 
+const disablesDotenv = (bunfigPath: string): boolean => {
+	try {
+		const bunfig = Toml.parse(readFileSync(bunfigPath, "utf8"))
+		return Result.isSuccess(bunfig) && bunfig.success["env"] === false
+	} catch {
+		return false
+	}
+}
+
 /**
- * Whether Bun started in a way that cannot have loaded a directory's `.env` or run its
- * `bunfig.toml` preloads. Every Bun flag, including one injected through `BUN_OPTIONS`,
- * appears in `execArgv`, so two exact shapes are accepted and nothing else:
- * no flags at all in the checkout, whose own bunfig switches `.env` loading off, or
- * exactly `--no-env-file` with the CLI's bunfig from anywhere.
+ * Why this start is refused, or `undefined` when it is accepted.
+ *
+ * Bun loads `.env` and `bunfig.toml` from the directory it starts in. Two exact shapes
+ * cannot have loaded a key that was never exported: no Bun flags at all in the checkout,
+ * whose own bunfig must switch `.env` loading off, or exactly `--no-env-file` with the
+ * CLI's bunfig from anywhere. Every Bun flag, including one injected through
+ * `BUN_OPTIONS`, appears in `execArgv`, so anything else is refused.
+ *
+ * This guards against mistakes. It cannot guard against a hostile directory: Bun runs
+ * that directory's preloads before this code. The standalone binary is for that.
  */
-export const startedSafely = (
+export const startupRefusal = (
 	execArgv: ReadonlyArray<string>,
 	cwd: string,
-	standalone: boolean = isStandalone,
-): boolean => {
-	if (standalone) {
-		return true
+	options?: { readonly standalone?: boolean; readonly checkout?: string },
+): string | undefined => {
+	if (options?.standalone ?? isStandalone) {
+		return undefined
 	}
-	if (execArgv.length === 0) {
-		return physicalPath(cwd) === physicalPath(checkoutRoot)
-	}
-	const pinnedBunfig = physicalPath(join(checkoutRoot, "apps", "cli", "bunfig.toml"))
-	return (
+	const checkout = options?.checkout ?? checkoutRoot
+	const pinnedBunfig = physicalPath(join(checkout, "apps", "cli", "bunfig.toml"))
+	if (
 		execArgv.length === 2 &&
 		pinnedBunfig !== undefined &&
 		execArgv.includes("--no-env-file") &&
@@ -57,5 +71,14 @@ export const startedSafely = (
 				arg.startsWith("--config=") &&
 				physicalPath(resolve(cwd, arg.slice("--config=".length))) === pinnedBunfig,
 		)
-	)
+	) {
+		return undefined
+	}
+	if (execArgv.length > 0 || physicalPath(cwd) !== physicalPath(checkout)) {
+		return "Run `bun checkfu` from the Checkfu checkout, with no Bun flags. From any other directory, build the standalone binary with `bun run checkfu:build` and call it by its path."
+	}
+	if (!disablesDotenv(join(checkout, "bunfig.toml"))) {
+		return "The checkout's bunfig.toml must contain `env = false`, so that keys in the checkout's .env are not loaded as if they had been exported. Restore that line and run again."
+	}
+	return undefined
 }

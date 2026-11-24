@@ -8,13 +8,12 @@ import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
 import { isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
-import { startedSafely } from "./Standalone.ts"
+import { startupRefusal } from "./Standalone.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
-if (!startedSafely(process.execArgv, process.cwd())) {
-	process.stderr.write(
-		"Error: Run `bun checkfu` from the Checkfu checkout, with no Bun flags. To use the CLI from another directory, build the standalone binary with `bun run checkfu:build` and call it by its path.\n",
-	)
+const refusal = startupRefusal(process.execArgv, process.cwd())
+if (refusal !== undefined) {
+	process.stderr.write(`Error: ${refusal}\n`)
 	process.exit(1)
 }
 

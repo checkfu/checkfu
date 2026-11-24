@@ -106,9 +106,10 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 
 ## Commands
 
-- `bun checkfu --help` — run the Checkfu CLI from this checkout (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
-  - It runs as one Bun process in the checkout. The checkout's `bunfig.toml` turns off `.env` loading, so a key in the checkout's `.env` is never picked up as if you had exported it. Started from any other directory, or with Bun flags that could select another config or load `.env` again (`--config`, `--env-file`, `BUN_OPTIONS`), the CLI refuses to start.
-  - To run the CLI from another directory, or without Bun on `PATH`, build the binary below and call it by its path.
+- `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
+  - **Never start it in a directory you do not trust.** It is one Bun process, and Bun loads the `bunfig.toml` of the directory it starts in, including any `preload`, before the CLI's own code runs. A preload in a hostile directory can read every credential you have exported, and nothing the CLI checks afterwards can undo that.
+  - In the checkout, `bunfig.toml` sets `env = false`, so a key in the checkout's `.env` is not picked up as if you had exported it. The CLI checks that line and how it was started, and stops if either is off: from another directory, with Bun flags that could select another config or load `.env` again (`--config`, `--env-file`, `BUN_OPTIONS`), or with that line missing. This catches mistakes. It is not a defence against a hostile directory, for the reason above.
+  - Anywhere else, or without Bun on `PATH`, use the standalone binary below and call it by its full path. It is compiled never to load a `.env` or a `bunfig.toml` from the directory it runs in.
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI, SDK, and MCP artifacts from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, typecheck, and test all packages

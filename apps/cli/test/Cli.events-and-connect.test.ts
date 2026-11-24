@@ -2848,7 +2848,7 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("runs `bun checkfu` as one process that does not load the checkout's .env", async () => {
+	it("runs `bun checkfu` as one process and refuses Bun flags", async () => {
 		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 		const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
 			readonly scripts?: Record<string, string>
@@ -2886,35 +2886,6 @@ describe("CLI sessions:events and sessions connect", () => {
 		]) {
 			expect(refused.status).toBe(1)
 			expect(refused.stderr).toContain("with no Bun flags")
-		}
-
-		// The checkout's bunfig is what keeps its .env out; check Bun honours that file.
-		const checkoutLike = mkdtempSync(join(tmpdir(), "checkfu-bunfig-"))
-		try {
-			writeFileSync(
-				join(checkoutLike, "bunfig.toml"),
-				readFileSync(join(repoRoot, "bunfig.toml"), "utf8"),
-			)
-			writeFileSync(join(checkoutLike, ".env"), "CHECKFU_API_KEY=planted\n")
-			writeFileSync(join(checkoutLike, ".env.local"), "CHECKFU_URL=https://planted.example\n")
-			writeFileSync(
-				join(checkoutLike, ".env.production"),
-				"CHECKFU_API_URL=https://planted.example\n",
-			)
-			const present =
-				"console.log(['CHECKFU_API_KEY','CHECKFU_URL','CHECKFU_API_URL'].filter((name) => process.env[name] !== undefined).join(','))"
-			for (const nodeEnv of ["development", "production"]) {
-				const seen = spawnSync("bun", ["-e", present], {
-					cwd: checkoutLike,
-					env: { ...env, NODE_ENV: nodeEnv },
-					encoding: "utf8",
-					timeout: 20_000,
-				})
-				expect(seen.status).toBe(0)
-				expect(seen.stdout.trim()).toBe("")
-			}
-		} finally {
-			rmSync(checkoutLike, { recursive: true, force: true })
 		}
 
 		// Killing the command's PID must stop a long-lived stream and close its output.

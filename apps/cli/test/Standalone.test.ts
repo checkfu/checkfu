@@ -1,6 +1,15 @@
 import { spawn, spawnSync } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs"
 import { once } from "node:events"
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
@@ -8,7 +17,7 @@ import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import { startedSafely } from "../src/Standalone.ts"
+import { startupRefusal } from "../src/Standalone.ts"
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 
@@ -147,15 +156,15 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 describe("which ways of starting the CLI are accepted", () => {
 	const elsewhere = tmpdir()
 	const pinned = ["--no-env-file", `--config=${join(repoRoot, "apps", "cli", "bunfig.toml")}`]
+	const refusal = (execArgv: ReadonlyArray<string>, cwd: string, checkout = repoRoot) =>
+		startupRefusal(execArgv, cwd, { standalone: false, checkout })
 
 	it("accepts no Bun flags in the checkout, and exactly the two pinned flags anywhere", () => {
-		expect(startedSafely([], repoRoot, false)).toBe(true)
-		expect(startedSafely(pinned, elsewhere, false)).toBe(true)
-		expect(startedSafely([...pinned].reverse(), elsewhere, false)).toBe(true)
-		expect(startedSafely(["--no-env-file", "--config=apps/cli/bunfig.toml"], repoRoot, false)).toBe(
-			true,
-		)
-		expect(startedSafely(["--config=anything"], elsewhere, true)).toBe(true)
+		expect(refusal([], repoRoot)).toBeUndefined()
+		expect(refusal(pinned, elsewhere)).toBeUndefined()
+		expect(refusal([...pinned].reverse(), elsewhere)).toBeUndefined()
+		expect(refusal(["--no-env-file", "--config=apps/cli/bunfig.toml"], repoRoot)).toBeUndefined()
+		expect(startupRefusal(["--config=anything"], elsewhere, { standalone: true })).toBeUndefined()
 	})
 
 	it("refuses every other start, because any Bun flag can bring .env or a preload back", () => {
@@ -174,7 +183,118 @@ describe("which ways of starting the CLI are accepted", () => {
 			[["--no-env-file", "--config=bunfig.toml"], repoRoot],
 			[["--no-env-file", "--config=apps/cli/bunfig.toml"], elsewhere],
 		] as const) {
-			expect([execArgv, cwd, startedSafely(execArgv, cwd, false)]).toEqual([execArgv, cwd, false])
+			expect([execArgv, cwd, refusal(execArgv, cwd)]).toEqual([
+				execArgv,
+				cwd,
+				expect.stringContaining("with no Bun flags"),
+			])
 		}
 	})
+
+	it("refuses the checkout itself unless its bunfig switches .env loading off", () => {
+		const checkout = mkdtempSync(join(tmpdir(), "checkfu-bunfig-"))
+		try {
+			const withBunfig = (content: string | undefined) => {
+				rmSync(join(checkout, "bunfig.toml"), { force: true })
+				if (content !== undefined) {
+					writeFileSync(join(checkout, "bunfig.toml"), content)
+				}
+				return refusal([], checkout, checkout)
+			}
+			expect(withBunfig(readFileSync(join(repoRoot, "bunfig.toml"), "utf8"))).toBeUndefined()
+			expect(withBunfig("env = false\n")).toBeUndefined()
+			for (const unsafe of [
+				undefined,
+				"",
+				"[install]\nminimumReleaseAge = 86400\n",
+				"env = true\n",
+				'env = "false"\n',
+				"[run]\nenv = false\n",
+				"[env]\nfile = false\n",
+				"env = \n",
+			]) {
+				expect([unsafe, withBunfig(unsafe)]).toEqual([
+					unsafe,
+					expect.stringContaining("must contain `env = false`"),
+				])
+			}
+		} finally {
+			rmSync(checkout, { recursive: true, force: true })
+		}
+	})
+})
+
+describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () => {
+	// A copy of the entry point and the CLI's source, so the checkout's own files can be
+	// planted and removed without touching the real one.
+	const copyCheckout = (): string => {
+		const copy = mkdtempSync(join(tmpdir(), "checkfu-checkout-"))
+		cpSync(join(repoRoot, "checkfu.ts"), join(copy, "checkfu.ts"))
+		mkdirSync(join(copy, "apps", "cli"), { recursive: true })
+		cpSync(join(repoRoot, "apps", "cli", "src"), join(copy, "apps", "cli", "src"), {
+			recursive: true,
+		})
+		for (const file of ["package.json", "bunfig.toml"]) {
+			cpSync(join(repoRoot, "apps", "cli", file), join(copy, "apps", "cli", file))
+		}
+		symlinkSync(join(repoRoot, "node_modules"), join(copy, "node_modules"), "dir")
+		symlinkSync(
+			join(repoRoot, "apps", "cli", "node_modules"),
+			join(copy, "apps", "cli", "node_modules"),
+			"dir",
+		)
+		return copy
+	}
+
+	it("never uses a key from the checkout's .env, and stops when its bunfig would let Bun load one", async () => {
+		let requests = 0
+		const server = createServer((_request, response) => {
+			requests += 1
+			response.writeHead(200, { "content-type": "application/json" })
+			response.end("{}")
+		})
+		server.listen(0, "127.0.0.1")
+		await once(server, "listening")
+		const address = server.address()
+		const planted = `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : 0}`
+		const checkout = copyCheckout()
+		try {
+			writeFileSync(join(checkout, ".env"), `CHECKFU_API_KEY=planted\nCHECKFU_API_URL=${planted}\n`)
+			writeFileSync(join(checkout, ".env.local"), `CHECKFU_URL=${planted}\n`)
+			writeFileSync(
+				join(checkout, ".env.production"),
+				`CHECKFU_API_KEY=planted\nCHECKFU_API_URL=${planted}\n`,
+			)
+			const retrieve = (nodeEnv: string) =>
+				spawnSync("bun", ["checkfu", "sessions", "retrieve", "--session-id", "s"], {
+					cwd: checkout,
+					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(checkout, "config"), NODE_ENV: nodeEnv }),
+					encoding: "utf8",
+					timeout: 20_000,
+				})
+
+			const realBunfig = readFileSync(join(repoRoot, "bunfig.toml"), "utf8")
+			for (const nodeEnv of ["development", "production"]) {
+				writeFileSync(join(checkout, "bunfig.toml"), realBunfig)
+				const safe = retrieve(nodeEnv)
+				expect(safe.status).toBe(1)
+				expect(safe.stderr).toContain("Missing CHECKFU_API_KEY")
+			}
+
+			for (const unsafe of [undefined, "[install]\nminimumReleaseAge = 86400\n", "env = true\n"]) {
+				rmSync(join(checkout, "bunfig.toml"), { force: true })
+				if (unsafe !== undefined) {
+					writeFileSync(join(checkout, "bunfig.toml"), unsafe)
+				}
+				const refused = retrieve("development")
+				expect(refused.status).toBe(1)
+				expect(refused.stderr).toContain("must contain `env = false`")
+			}
+			expect(requests).toBe(0)
+		} finally {
+			rmSync(checkout, { recursive: true, force: true })
+			server.closeAllConnections()
+			server.close()
+		}
+	}, 120_000)
 })
