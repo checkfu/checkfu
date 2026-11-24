@@ -159,6 +159,11 @@ export const checkfu = {
 				"GET",
 				`/v1/sessions/${encodeURIComponent(id)}/events?order=desc&limit=100${before === undefined ? "" : `&after=${before}`}`,
 			),
+		eventsAfter: (id: string, after: number) =>
+			call<EventPage>(
+				"GET",
+				`/v1/sessions/${encodeURIComponent(id)}/events?order=asc&limit=100&after=${after}`,
+			),
 		streamUrl: (id: string, after: number) =>
 			`/v1/sessions/${encodeURIComponent(id)}/events/stream?after=${after}`,
 	},

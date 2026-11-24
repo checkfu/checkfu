@@ -1,10 +1,11 @@
 import type { JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
 import { useMountEffect } from "@checkfu/ui/use-mount-effect"
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query"
 import { checkfu, errorMessage, isSignedOut } from "../api.ts"
-import { eventsOf, isFinal, sessionQuery, transcriptQuery, withStreamed } from "../queries.ts"
+import { EventTail, progressOf, transcriptEvents } from "../event-tail.ts"
+import { eventsOf, isFinal, sessionQuery, transcriptQuery } from "../queries.ts"
 
 const QUIET_RECONNECT_MS = 5000
 
@@ -22,26 +23,17 @@ const EVENT_TYPES: Record<SessionEventType, true> = {
 	"session.archived": true,
 }
 
-const statusAfter = (
-	status: JsonSession["status"],
-	event: JsonSessionEvent,
-): JsonSession["status"] => {
-	switch (event.type) {
-		case "session.status_running":
-			return "running"
-		case "session.status_idle":
-			return "idle"
-		case "session.status_terminated":
-			return "terminated"
-		default:
-			return status
+const readAfter = async (sessionId: string, from: number, tail: EventTail): Promise<void> => {
+	let after = from
+	let more = true
+	while (more) {
+		const page = await checkfu.sessions.eventsAfter(sessionId, after)
+		tail.add(page.data)
+		after = page.data.at(-1)?.seq ?? after
+		more = page.has_more
 	}
+	tail.flush()
 }
-
-const turnAfter = (turn: number, event: JsonSessionEvent): number =>
-	event.type === "session.status_running" && "turn" in event && typeof event.turn === "number"
-		? event.turn
-		: turn
 
 export function useSessionEvents({
 	session,
@@ -53,14 +45,24 @@ export function useSessionEvents({
 	const queryClient = useQueryClient()
 	const transcript = transcriptQuery(session.id)
 	const history = useSuspenseInfiniteQuery(transcript)
+	const [tail] = useState(() => new EventTail())
+	const live = useSyncExternalStore(tail.subscribe, tail.snapshot)
 	const [error, setError] = useState<string>()
-	const events = eventsOf(history.data)
+	const events = transcriptEvents(eventsOf(history.data), live)
+	const newestSeq = () => Math.max(events.at(-1)?.seq ?? 0, tail.newestSeq())
+	const readNewer = () => readAfter(session.id, newestSeq(), tail)
+	const catchUp = (): void => {
+		readNewer().catch((error_: unknown) => {
+			if (!isSignedOut(error_)) {
+				setError(errorMessage(error_))
+			}
+		})
+	}
 	useMountEffect(() => {
-		if (isFinal(session, events)) {
-			return
+		if (isFinal(events)) {
+			return () => tail.dispose()
 		}
-		let lastSeq = events.at(-1)?.seq ?? 0
-		const source = new EventSource(checkfu.sessions.streamUrl(session.id, lastSeq))
+		const source = new EventSource(checkfu.sessions.streamUrl(session.id, newestSeq()))
 		let slowReconnect: ReturnType<typeof setTimeout> | undefined
 		const settle = () => {
 			clearTimeout(slowReconnect)
@@ -69,13 +71,7 @@ export function useSessionEvents({
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
 			const event = JSON.parse(message.data) as JsonSessionEvent
-			if (event.seq <= lastSeq) {
-				return
-			}
-			lastSeq = event.seq
-			queryClient.setQueryData(transcript.queryKey, (current) =>
-				current === undefined ? current : withStreamed(current, event),
-			)
+			tail.add([event])
 			if (event.type === "session.status_idle" || event.type === "session.archived") {
 				onTransition()
 			}
@@ -85,11 +81,11 @@ export function useSessionEvents({
 			}
 		}
 		const ended = async () => {
-			const latest = await queryClient.fetchQuery({ ...sessionQuery(session.id), staleTime: 0 })
-			if (latest.archived_at === null) {
+			const current = await queryClient.fetchQuery({ ...sessionQuery(session.id), staleTime: 0 })
+			if (current.archived_at === null) {
 				setError("Live updates stopped. Reload the page to try again.")
 			} else {
-				await queryClient.invalidateQueries({ queryKey: transcript.queryKey })
+				await readNewer()
 			}
 		}
 		for (const type of Object.keys(EVENT_TYPES)) {
@@ -113,13 +109,14 @@ export function useSessionEvents({
 		return () => {
 			settle()
 			source.close()
+			tail.dispose()
 		}
 	})
 	return {
 		events,
-		status: events.reduce(statusAfter, session.status),
-		turn: events.reduce(turnAfter, session.turn),
+		...progressOf(events, session),
 		error,
+		catchUp,
 		earlier: history.hasNextPage
 			? {
 					run: () => void history.fetchNextPage(),

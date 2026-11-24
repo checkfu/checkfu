@@ -7,7 +7,12 @@ interface Env {
 const COOKIE = "__Host-checkfu_session"
 const SESSION_SECONDS = 60 * 60 * 24 * 7
 const MAX_SIGN_IN_BYTES = 4096
-const SHARED_LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"])
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"])
+
+const localHost = (url: URL): string | undefined =>
+	LOOPBACK.has(url.hostname) || url.hostname.endsWith(".localhost")
+		? `app-${url.port === "" ? "local" : url.port}.localhost`
+		: undefined
 const NO_STORE = { "cache-control": "no-store" }
 const utf8 = new TextEncoder()
 
@@ -147,11 +152,12 @@ export default {
 		const url = new URL(request.url)
 		const now = Date.now()
 		const unsafe = request.method !== "GET" && request.method !== "HEAD"
-		if (SHARED_LOOPBACK.has(url.hostname)) {
+		const local = localHost(url)
+		if (local !== undefined && url.hostname !== local) {
 			if (unsafe) {
 				return new Response(null, { status: 421 })
 			}
-			url.hostname = "app.localhost"
+			url.hostname = local
 			return Response.redirect(url.href, 307)
 		}
 		if (unsafe && request.headers.get("origin") !== url.origin) {

@@ -168,16 +168,22 @@ describe("app worker", () => {
 		expect(await response.text()).toBe("index")
 	})
 
-	it("moves the shared localhost hostname to app.localhost and never signs in there", async () => {
+	it("gives each local instance its own hostname, by port, and never signs in elsewhere", async () => {
 		const { env, seen } = makeEnv()
-		for (const host of ["localhost", "127.0.0.1"]) {
-			const moved = await worker.fetch(new Request(`http://${host}:1340/sessions?x=1`), env)
+		for (const [from, to] of [
+			["http://localhost:1340/sessions?x=1", "http://app-1340.localhost:1340/sessions?x=1"],
+			["http://127.0.0.1:1340/", "http://app-1340.localhost:1340/"],
+			["http://app.localhost:1341/agents", "http://app-1341.localhost:1341/agents"],
+			["http://app-1340.localhost:1341/", "http://app-1341.localhost:1341/"],
+		] as const) {
+			const moved = await worker.fetch(new Request(from), env)
 			expect(moved.status).toBe(307)
-			expect(moved.headers.get("location")).toBe("http://app.localhost:1340/sessions?x=1")
+			expect(moved.headers.get("location")).toBe(to)
+			const origin = new URL(from).origin
 			const refused = await worker.fetch(
-				new Request(`http://${host}:1340/auth/sign-in`, {
+				new Request(`${origin}/auth/sign-in`, {
 					method: "POST",
-					headers: { origin: `http://${host}:1340` },
+					headers: { origin },
 					body: new URLSearchParams({ key: KEY }),
 				}),
 				env,
@@ -185,6 +191,8 @@ describe("app worker", () => {
 			expect(refused.status).toBe(421)
 			expect(refused.headers.get("set-cookie")).toBeNull()
 		}
+		const home = await worker.fetch(new Request("http://app-1340.localhost:1340/sessions"), env)
+		expect(await home.text()).toBe("index")
 		expect(seen).toHaveLength(0)
 	})
 

@@ -10,7 +10,7 @@ export function useAction<Args extends ReadonlyArray<unknown>>(
 	const queryClient = useQueryClient()
 	const mutation = useMutation({
 		mutationFn: (args: Args) => action(...args),
-		onSuccess: () =>
+		onSettled: () =>
 			invalidates === undefined
 				? undefined
 				: queryClient.invalidateQueries({ queryKey: invalidates }),

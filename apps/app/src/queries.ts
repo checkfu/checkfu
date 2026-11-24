@@ -62,16 +62,5 @@ export type Transcript = InfiniteData<EventPage, unknown>
 export const eventsOf = (transcript: Transcript): ReadonlyArray<JsonSessionEvent> =>
 	transcript.pages.toReversed().flatMap((page) => page.data.toReversed())
 
-export const withStreamed = (transcript: Transcript, event: JsonSessionEvent): Transcript => {
-	const [newest, ...older] = transcript.pages
-	if (newest === undefined || (newest.data[0]?.seq ?? 0) >= event.seq) {
-		return transcript
-	}
-	return { ...transcript, pages: [{ ...newest, data: [event, ...newest.data] }, ...older] }
-}
-
-export const isFinal = (
-	session: { readonly archived_at: string | null },
-	events: ReadonlyArray<JsonSessionEvent>,
-): boolean =>
-	session.archived_at !== null || events.some((event) => event.type === "session.archived")
+export const isFinal = (events: ReadonlyArray<JsonSessionEvent>): boolean =>
+	events.some((event) => event.type === "session.archived")

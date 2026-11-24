@@ -244,7 +244,7 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, status, turn, error, earlier } = useSessionEvents({
+	const { events, status, turn, error, earlier, catchUp } = useSessionEvents({
 		session,
 		onTransition: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
@@ -259,6 +259,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 			}
 			await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
 			sendKey.settle()
+			catchUp()
 			setText((current) => (current === message ? "" : current))
 		},
 		["sessions", "one", session.id],
@@ -268,6 +269,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 		const body = { events: [{ type: "user.interrupt" as const }] }
 		await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
 		interruptKey.settle()
+		catchUp()
 	}, ["sessions", "one", session.id])
 	const archive = useAction(async () => {
 		await checkfu.sessions.archive(session.id)
