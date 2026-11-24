@@ -17,7 +17,7 @@ import { SCHEDULE_EXHAUSTED } from "../src/Automation/AutomationTypes.ts"
 import {
 	isUsableSchedule,
 	nextOccurrence,
-	previewOccurrences,
+	firingsAhead,
 	upcomingOccurrences,
 } from "../src/Automation/Schedule.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
@@ -141,13 +141,9 @@ describe("Automations", () => {
 				expect(
 					state === null
 						? []
-						: previewOccurrences(
-								state.schedule.expression,
-								state.schedule.timezone,
-								DateTime.toEpochMillis(state.scheduled_from),
-								ms(now),
-								2,
-							).map((instant) => DateTime.formatIso(DateTime.makeUnsafe(instant))),
+						: firingsAhead(state.upcoming, ms(now))
+								.slice(0, 2)
+								.map((instant) => DateTime.formatIso(DateTime.makeUnsafe(instant))),
 				).toEqual(expected)
 			})
 		return story(
@@ -216,10 +212,14 @@ describe("Automations", () => {
 			Story.when(new RunAutomation({ automation_id: automation.id })),
 			Story.then(automation, manual(1)),
 			Story.replied({ run: 1 }),
-			Story.view(AutomationView, automation, {
-				scheduled_from: at("2026-01-01T08:00:00.000Z"),
-				last_run_at: at("2026-01-01T08:30:00.000Z"),
-			}),
+			Story.view(
+				AutomationView,
+				automation,
+				(state) =>
+					state?.upcoming[0] === ms("2026-01-01T09:00:00.000Z") &&
+					state.last_run_at !== null &&
+					DateTime.toEpochMillis(state.last_run_at) === ms("2026-01-01T08:30:00.000Z"),
+			),
 			Story.clock(at("2026-01-01T09:00:00.000Z")),
 			Story.then(automation, scheduled(2, "2026-01-01T09:00:00.000Z")),
 			Story.when(new PauseAutomation({ automation_id: automation.id })),
@@ -453,6 +453,9 @@ describe("Automations", () => {
 			["45 * * * *", "UTC"],
 			["0 0 9 * * *", "UTC"],
 			["0 9 * * *", "EST"],
+			["0 9 * * *", "GMT+0"],
+			["0 9 * * *", "GMT-0"],
+			["0 9 * * *", "Etc/GMT+5"],
 			["0 0 29 2 *", "UTC"],
 		] as const
 		const unusable = [
@@ -475,25 +478,48 @@ describe("Automations", () => {
 		expect(nextOccurrence("0 0 31 2 *", "UTC", ms("2026-01-01T00:00:00.000Z"))).toBeNull()
 	})
 
-	it("previews an overdue firing once, then only firings after now", () => {
-		const preview = (now: string) =>
-			previewOccurrences("0 * * * *", "UTC", ms("2026-01-01T08:30:00.000Z"), ms(now), 4).map(
-				(instant) => DateTime.formatIso(DateTime.makeUnsafe(instant)),
+	it("shows an overdue firing once, then only the stored firings after now", () => {
+		const stored = upcomingOccurrences("0 * * * *", "UTC", ms("2026-01-01T08:30:00.000Z"), 5)
+		const ahead = (now: string) =>
+			firingsAhead(stored, ms(now)).map((instant) =>
+				DateTime.formatIso(DateTime.makeUnsafe(instant)),
 			)
-		expect(preview("2026-01-01T08:40:00.000Z")).toEqual([
+		expect(ahead("2026-01-01T08:40:00.000Z")).toEqual([
 			"2026-01-01T09:00:00.000Z",
 			"2026-01-01T10:00:00.000Z",
 			"2026-01-01T11:00:00.000Z",
 			"2026-01-01T12:00:00.000Z",
+			"2026-01-01T13:00:00.000Z",
 		])
-		expect(preview("2026-01-01T12:30:00.000Z")).toEqual([
+		expect(ahead("2026-01-01T12:30:00.000Z")).toEqual([
 			"2026-01-01T09:00:00.000Z",
 			"2026-01-01T13:00:00.000Z",
-			"2026-01-01T14:00:00.000Z",
-			"2026-01-01T15:00:00.000Z",
 		])
-		expect(previewOccurrences("0 0 31 2 *", "UTC", 0, 0, 4)).toEqual([])
+		expect(firingsAhead([], 0)).toEqual([])
 	})
+
+	it.effect(
+		"computes a sparse schedule's firings once, when the schedule moves, not on every read",
+		() =>
+			story(
+				Story.clock(at("2026-01-01T00:00:00.000Z")),
+				Story.when(
+					new CreateAutomation({
+						automation_id: automation.id,
+						...config,
+						schedule: { type: "cron", expression: "59 23 29 2 */7", timezone: "America/New_York" },
+					}),
+				),
+				Story.then(
+					automation,
+					new AutomationCreated({
+						...config,
+						schedule: { type: "cron", expression: "59 23 29 2 */7", timezone: "America/New_York" },
+					}),
+				),
+				Story.view(AutomationView, automation, (state) => state?.upcoming.length === 5),
+			),
+	)
 
 	it("limits a schedule to one firing per clock hour, which a half-hour clock change can halve", () => {
 		const around = (timezone: string, from: string) =>

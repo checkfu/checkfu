@@ -26,7 +26,7 @@ import { AutomationId, sessionIdOfNextRun } from "../src/Automation/Automation.i
 import { AutomationCapacity } from "../src/Automation/AutomationCapacity.aggregate.ts"
 import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
-import { isUsableSchedule } from "../src/Automation/Schedule.ts"
+import { isUsableSchedule, upcomingOccurrences } from "../src/Automation/Schedule.ts"
 import { ArchiveEnvironment } from "../src/Environment/ArchiveEnvironment.command.ts"
 import { CreateEnvironment } from "../src/Environment/CreateEnvironment.command.ts"
 import { DeleteEnvironment } from "../src/Environment/DeleteEnvironment.command.ts"
@@ -249,7 +249,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 120, length: 8 },
-				opaque: [sessionIdOfNextRun, isUsableSchedule],
+				opaque: [sessionIdOfNextRun, isUsableSchedule, upcomingOccurrences],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
 			}).pipe(Effect.provide(NodeServices.layer)),

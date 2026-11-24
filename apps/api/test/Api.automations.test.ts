@@ -321,6 +321,36 @@ describe("Automations API", () => {
 			}),
 		))
 
+	it("accepts named GMT aliases and serves a sparse schedule's next firings without recomputing them", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const create = (expression: string, timezone: string) =>
+					call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+						name: "Morning report",
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message("Write the morning report."),
+						schedule: { type: "cron", expression, timezone },
+					})
+				for (const timezone of ["GMT+0", "GMT-0"]) {
+					const created = yield* create("0 9 * * *", timezone)
+					expect([timezone, created.status]).toEqual([timezone, 201])
+				}
+				const sparse = yield* create("59 23 29 2 */7", "America/New_York")
+				expect(sparse.status).toBe(201)
+				expect(sparse.body.upcoming_runs_at).toHaveLength(5)
+				for (let read = 0; read < 20; read++) {
+					const fetched = yield* call<AutomationBody>(
+						apiFetch,
+						"GET",
+						`/v1/automations/${sparse.body.id}`,
+					)
+					expect(fetched.body.upcoming_runs_at).toEqual(sparse.body.upcoming_runs_at)
+				}
+			}),
+		))
+
 	it("answers a lifecycle request that changes nothing at once, after a run has been recorded", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {

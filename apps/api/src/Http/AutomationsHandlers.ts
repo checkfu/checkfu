@@ -14,7 +14,7 @@ import { PauseAutomation } from "@checkfu/domain/Automation/PauseAutomation.comm
 import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutomationRunFailed.command"
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
-import { isUsableSchedule, previewOccurrences } from "@checkfu/domain/Automation/Schedule"
+import { firingsAhead, isUsableSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
@@ -45,8 +45,6 @@ export const AutomationReadWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
-const UPCOMING_RUNS = 5
-
 const automationResource = (snapshot: AutomationSnapshot, now: number) => {
 	const {
 		agent_id,
@@ -54,7 +52,7 @@ const automationResource = (snapshot: AutomationSnapshot, now: number) => {
 		text,
 		runs,
 		activation: _activation,
-		scheduled_from,
+		upcoming,
 		...rest
 	} = snapshot
 	return {
@@ -64,13 +62,7 @@ const automationResource = (snapshot: AutomationSnapshot, now: number) => {
 		run_count: runs,
 		upcoming_runs_at:
 			snapshot.status === "active"
-				? previewOccurrences(
-						snapshot.schedule.expression,
-						snapshot.schedule.timezone,
-						DateTime.toEpochMillis(scheduled_from),
-						now,
-						UPCOMING_RUNS,
-					).map((at) => DateTime.makeUnsafe(at))
+				? firingsAhead(upcoming, now).map((at) => DateTime.makeUnsafe(at))
 				: [],
 	}
 }

@@ -1,17 +1,19 @@
 import * as Domain from "@alchemy.run/domain"
 import { AutomationSnapshot } from "@checkfu/sdk/Schemas"
+import * as DateTime from "effect/DateTime"
 import * as Schema from "effect/Schema"
 import { AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { AutomationCreated } from "./CreateAutomation.command.ts"
 import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
+import { UPCOMING_FIRINGS, upcomingOccurrences } from "./Schedule.ts"
 import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
 
 export { AutomationSnapshot }
 
 export class AutomationView extends Domain.View("AutomationView", {
-	version: 2,
+	version: 3,
 	from: [Automation],
 	key: Automation,
 	state: Schema.NullOr(AutomationSnapshot),
@@ -40,7 +42,12 @@ export class AutomationView extends Domain.View("AutomationView", {
 						pause_reason: null,
 						runs: 0,
 						activation: 0,
-						scheduled_from: ctx.at,
+						upcoming: upcomingOccurrences(
+							e.schedule.expression,
+							e.schedule.timezone,
+							DateTime.toEpochMillis(ctx.at),
+							UPCOMING_FIRINGS,
+						),
 						last_run_at: null,
 						created_at: ctx.at,
 						updated_at: ctx.at,
@@ -58,7 +65,12 @@ export class AutomationView extends Domain.View("AutomationView", {
 						status: "active" as const,
 						pause_reason: null,
 						activation: e.activation,
-						scheduled_from: ctx.at,
+						upcoming: upcomingOccurrences(
+							state.schedule.expression,
+							state.schedule.timezone,
+							DateTime.toEpochMillis(ctx.at),
+							UPCOMING_FIRINGS,
+						),
 						updated_at: ctx.at,
 					},
 		"automation.archived": (state, _e, ctx) =>
@@ -77,7 +89,15 @@ export class AutomationView extends Domain.View("AutomationView", {
 				: {
 						...state,
 						runs: e.run,
-						scheduled_from: e.trigger === "schedule" ? ctx.at : state.scheduled_from,
+						upcoming:
+							e.trigger === "schedule"
+								? upcomingOccurrences(
+										state.schedule.expression,
+										state.schedule.timezone,
+										DateTime.toEpochMillis(ctx.at),
+										UPCOMING_FIRINGS,
+									)
+								: state.upcoming,
 						last_run_at: ctx.at,
 						updated_at: ctx.at,
 					},

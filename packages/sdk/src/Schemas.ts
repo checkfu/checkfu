@@ -324,7 +324,7 @@ export const AutomationSnapshot = Schema.Struct({
 	pause_reason: Schema.NullOr(Schema.String),
 	runs: NonNegativeInt,
 	activation: NonNegativeInt,
-	scheduled_from: Schema.DateTimeUtc,
+	upcoming: Schema.Array(NonNegativeInt),
 	last_run_at: Schema.NullOr(Schema.DateTimeUtc),
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,

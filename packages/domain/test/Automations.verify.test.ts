@@ -6,6 +6,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { ArmAutomation } from "../src/Automation/ArmAutomation.policy.ts"
 import { sessionIdOfNextRun } from "../src/Automation/Automation.id.ts"
+import { upcomingOccurrences } from "../src/Automation/Schedule.ts"
 import { Automations } from "../src/Automations.model.ts"
 
 // The explorer cannot follow a firing armed for a computed instant, so it leaves
@@ -69,7 +70,7 @@ describe("Automations Z3 formal verification", () => {
 					instances: 1,
 					walks: { count: 50 },
 					allow: { skipped: ["ArmAutomation"] },
-					opaque: [sessionIdOfNextRun],
+					opaque: [sessionIdOfNextRun, upcomingOccurrences],
 					lock: "./Automations.verify.lock.json",
 					require: { proved: PROVED },
 				})

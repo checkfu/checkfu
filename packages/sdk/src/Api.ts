@@ -474,7 +474,7 @@ export const AutomationResource = Schema.Struct({
 		"text",
 		"runs",
 		"activation",
-		"scheduled_from",
+		"upcoming",
 	]),
 	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
 	initial_events: AutomationInitialEvents,

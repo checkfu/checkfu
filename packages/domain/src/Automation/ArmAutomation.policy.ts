@@ -9,7 +9,6 @@ import { AutomationCreated } from "./CreateAutomation.command.ts"
 import { FireAutomation } from "./FireAutomation.command.ts"
 import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
-import { nextOccurrence } from "./Schedule.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
 
@@ -47,12 +46,8 @@ export const ArmAutomationLive = ArmAutomation.toLayer(
 			if (event._tag === "automation.fired" && event.trigger === "manual") {
 				return
 			}
-			const next = nextOccurrence(
-				state.schedule.expression,
-				state.schedule.timezone,
-				DateTime.toEpochMillis(state.scheduled_from),
-			)
-			if (next === null) {
+			const next = state.upcoming[0]
+			if (next === undefined) {
 				yield* automations.send(
 					new SuspendAutomation({ automation_id: source.id, reason: SCHEDULE_EXHAUSTED }),
 				)
