@@ -596,7 +596,6 @@ describe("interrupted turns and turn recovery", () => {
 						agent_version: 1,
 						environment_id: env.id,
 						turn: 1,
-						generation: 0,
 						input: ["do not start model work"],
 					}),
 				)
@@ -613,7 +612,6 @@ describe("interrupted turns and turn recovery", () => {
 					agent_version: 1,
 					environment_id: env.id,
 					turn: 1,
-					generation: 0,
 					input: ["recover without starting model work"],
 				})
 				expect(reply).toEqual(recoveredReply)
