@@ -9,14 +9,9 @@ import type { Id, Storage } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
-import {
-	finalizeSettledTurnFromStorage,
-	omitTurnEntriesFromStorage,
-	readAssistantMessageFromStorage,
-} from "../../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
-import { CHECKFU_PI_DOCS, beginTurnUsage, settleTurnUsage } from "../../src/Pi/PiTurnUsage.ts"
+import { CHECKFU_PI_DOCS } from "../../src/Pi/PiTurnUsage.ts"
 
 export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly storage: InMemoryStorage
@@ -186,12 +181,7 @@ export const createInMemoryPiDurableBackend = async (
 		hasApiKey,
 		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
 		isCancelled: (operationId) => cancelledOps.has(operationId),
-		beginUsage: (operationId, turn, finalizedPrevious) =>
-			beginTurnUsage(pi, operationId, turn, finalizedPrevious),
-		settleUsage: (operationId) => settleTurnUsage(pi, operationId),
-		hasSubmission: async (operationId) =>
-			(await storage.submissionByRequest(ROOT_CONVERSATION_ID, operationId, BACKGROUND_CONTEXT)) !==
-			undefined,
+		pi: () => Promise.resolve(pi),
 		ensureRoot: async (agent) => {
 			const existing = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
 			if (existing === undefined) {
@@ -266,9 +256,6 @@ export const createInMemoryPiDurableBackend = async (
 					)
 				}),
 			),
-		readAnswerEntry: (operationId) => readAssistantMessageFromStorage(pi, storage, operationId),
-		omitEntries: (operationId) => omitTurnEntriesFromStorage(pi, storage, operationId),
-		finalizePrevious: (operationId) => finalizeSettledTurnFromStorage(pi, storage, operationId),
 		close: () => pi.close(BACKGROUND_CONTEXT),
 		retire: () => {
 			storage.retire()

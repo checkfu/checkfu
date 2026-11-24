@@ -7,6 +7,8 @@ import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai"
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
+import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import { AlchemyContext } from "alchemy/AlchemyContext"
 import { RuntimeContext } from "alchemy/RuntimeContext"
@@ -625,7 +627,15 @@ describe("turn engine", () => {
 						error: { _tag: "TurnInterrupted" },
 					})
 					yield* Fiber.join(aborting)
-					expect(yield* Effect.promise(() => backend.hasSubmission("turn:1"))).toBe(false)
+					expect(
+						yield* Effect.promise(() =>
+							backend.storage.submissionByRequest(
+								ROOT_CONVERSATION_ID,
+								"turn:1",
+								BACKGROUND_CONTEXT,
+							),
+						),
+					).toBeUndefined()
 					expect(calls()).toBe(0)
 				}),
 			)
@@ -1538,7 +1548,6 @@ describe("turn engine", () => {
 		const backend = makePiHarnessBackend(
 			{} as unknown as Parameters<typeof makePiHarnessBackend>[0],
 			{} as unknown as Parameters<typeof makePiHarnessBackend>[1],
-			{} as unknown as Parameters<typeof makePiHarnessBackend>[2],
 			{ openai: Redacted.make("sk-test"), anthropic: null },
 			() => undefined,
 		)
@@ -1551,18 +1560,17 @@ describe("turn engine", () => {
 		const cancelled = new Set<string>()
 		const harnessAborts: Array<string> = []
 		const harnessBackend = makePiHarnessBackend(
-			{ start: async () => undefined } as unknown as Parameters<typeof makePiHarnessBackend>[0],
 			{
 				abort: async ({ operationId }: { readonly operationId: string }) => {
 					harnessAborts.push(operationId)
 				},
-			} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+			} as unknown as Parameters<typeof makePiHarnessBackend>[0],
 			{
 				markCancelled: (operationId: string) => {
 					cancelled.add(operationId)
 				},
 				isCancelled: (operationId: string) => cancelled.has(operationId),
-			} as unknown as Parameters<typeof makePiHarnessBackend>[2],
+			} as unknown as Parameters<typeof makePiHarnessBackend>[1],
 			{ openai: null, anthropic: null },
 			() => undefined,
 		)
@@ -1992,10 +2000,12 @@ describe("turn engine", () => {
 		})
 		try {
 			await expect(first.submit("late", "turn:9")).rejects.toThrow()
-			await expect(first.hasSubmission("turn:1")).rejects.toThrow("This session object was reset")
+			await expect(first.wait("turn:1")).rejects.toThrow("This session object was reset")
 			expect(() => first.isCancelled("turn:1")).toThrow("This session object was reset")
-			expect(await second.hasSubmission("turn:1")).toBe(true)
-			expect(await second.hasSubmission("turn:9")).toBe(false)
+			const stored = (operationId: string) =>
+				second.storage.submissionByRequest(ROOT_CONVERSATION_ID, operationId, BACKGROUND_CONTEXT)
+			expect(await stored("turn:1")).toBeDefined()
+			expect(await stored("turn:9")).toBeUndefined()
 			expect(await Effect.runPromise(runPiDurableTurn(second, turn(2, "after")))).toMatchObject({
 				ok: true,
 				reply: { text: "Echo after" },
