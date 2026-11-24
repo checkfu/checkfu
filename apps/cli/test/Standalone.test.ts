@@ -142,6 +142,33 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 	}, 120_000)
 })
 
+describe("the environment CLI subprocesses start with", () => {
+	const caller = {
+		PATH: "/usr/bin",
+		BUN_OPTIONS: "--smol",
+		Bun_Options: "--smol",
+		CHECKFU_API_KEY: "exported",
+		Checkfu_Api_Key: "exported",
+		CHECKFUL_UNRELATED: "x",
+		HOME: undefined,
+	}
+
+	it("drops BUN_OPTIONS and the caller's CHECKFU_ variables, matching names as the platform does", () => {
+		expect(cliProcessEnv({ CHECKFU_CONFIG_DIR: "/config" }, "darwin", caller)).toStrictEqual({
+			PATH: "/usr/bin",
+			Bun_Options: "--smol",
+			Checkfu_Api_Key: "exported",
+			CHECKFUL_UNRELATED: "x",
+			CHECKFU_CONFIG_DIR: "/config",
+		})
+		expect(cliProcessEnv({ CHECKFU_CONFIG_DIR: "/config" }, "win32", caller)).toStrictEqual({
+			PATH: "/usr/bin",
+			CHECKFUL_UNRELATED: "x",
+			CHECKFU_CONFIG_DIR: "/config",
+		})
+	})
+})
+
 describe("which ways of starting the CLI are accepted", () => {
 	const elsewhere = tmpdir()
 	const pinned = ["--no-env-file", `--config=${join(repoRoot, "apps", "cli", "bunfig.toml")}`]
