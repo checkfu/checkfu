@@ -16,27 +16,25 @@ import { Session } from "./Session.aggregate.ts"
 
 export { SessionSnapshot }
 
-export const SessionViewEvents = [
-	UserMessage,
-	UserInterrupt,
-	SessionStatusRunning,
-	SpanModelRequestStart,
-	AgentThinking,
-	AgentMessage,
-	SpanModelRequestEnd,
-	SessionStatusIdle,
-	SessionErrorEvent,
-	SessionStatusTerminated,
-	SessionArchived,
-] as const
-
 export class SessionView extends Domain.View("SessionView", {
 	version: 2,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(SessionSnapshot),
 	initial: null,
-	events: SessionViewEvents,
+	events: [
+		UserMessage,
+		UserInterrupt,
+		SessionStatusRunning,
+		SpanModelRequestStart,
+		AgentThinking,
+		AgentMessage,
+		SpanModelRequestEnd,
+		SessionStatusIdle,
+		SessionErrorEvent,
+		SessionStatusTerminated,
+		SessionArchived,
+	],
 	evolve: {
 		"session.created": (state, e, ctx) =>
 			state !== null

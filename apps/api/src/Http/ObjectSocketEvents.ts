@@ -1,4 +1,3 @@
-import * as Domain from "@alchemy.run/domain"
 import type { ViewStore } from "@alchemy.run/domain/Platform"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -20,14 +19,15 @@ type AcceptedSocket = Socket.WebSocketLike & { accept(): void }
 const isAcceptedSocket = (u: unknown): u is AcceptedSocket =>
 	Predicate.hasProperty(u, "accept") && Predicate.hasProperty(u, "addEventListener")
 
-const accepted = (connect: Connect, key: string, after: number) =>
+const accepted = (connect: Connect, key: string) =>
 	Effect.acquireRelease(
 		Effect.gen(function* () {
 			const response = yield* connect(key, {
 				requestId: 0,
-				mode: "events",
+				// Watching from version 0 sends the current state at once, then one per commit.
+				mode: "watch",
 				context: {},
-				cursor: after,
+				cursor: 0,
 			}).pipe(
 				Effect.provideService(
 					HttpServerRequest.HttpServerRequest,
@@ -57,39 +57,32 @@ const accepted = (connect: Connect, key: string, after: number) =>
 export const SOCKET_BUFFER_BYTES = 1024 * 1024
 
 /**
- * A view key's events after `after`, pushed by the Durable Object that owns the key over a
- * hibernatable WebSocket, decoded with `entry`. Ends when the object closes the socket or the
- * caller falls `SOCKET_BUFFER_BYTES` behind; the caller resumes from the last `seq` it saw.
+ * A tick each time the view key changes, from the Durable Object that owns it over a
+ * hibernatable WebSocket. The socket watches the key's state rather than replaying its entries,
+ * so each frame holds one state however long the upgrade took; the first comes as soon as it
+ * opens. The caller reads what changed in bounded pages. Ends when the object closes the socket
+ * or the caller falls `SOCKET_BUFFER_BYTES` behind.
  */
-export const objectSocketEvents = <A extends object, I>(
-	connect: Connect,
-	entry: Schema.Codec<A, I>,
-	key: string,
-	after: number,
-): Stream.Stream<A> => {
+export const objectSocketChanges = (connect: Connect, key: string): Stream.Stream<void> => {
 	const decodeFrame = Schema.decodeUnknownEffect(
 		Schema.fromJsonString(
-			Schema.toCodecJson(
-				Schema.Union([
-					Schema.TaggedStruct("Chunk", {
-						values: Schema.NonEmptyArray(Schema.Union([Domain.Read.CaughtUp, entry])),
-					}),
-					Schema.TaggedStruct("Exit", {}),
-				]),
-			),
+			Schema.Union([
+				Schema.TaggedStruct("Chunk", { values: Schema.NonEmptyArray(Schema.Json) }),
+				Schema.TaggedStruct("Exit", {}),
+			]),
 		),
 	)
 	const text = new TextDecoder()
 	return Stream.unwrap(
 		Effect.map(
-			Socket.fromWebSocket(accepted(connect, key, after), {
+			Socket.fromWebSocket(accepted(connect, key), {
 				disableReconnects: true,
 				highWaterMark: SOCKET_BUFFER_BYTES,
 			}),
 			Socket.toStream,
 		),
 	).pipe(
-		// A closed or overflowed socket ends the stream after the frames it delivered.
+		// A closed or overflowed socket ends the stream.
 		Stream.catchIf(
 			(error) =>
 				error.reason._tag === "SocketCloseError" || error.reason._tag === "SocketReadError",
@@ -97,10 +90,7 @@ export const objectSocketEvents = <A extends object, I>(
 		),
 		Stream.mapEffect((bytes) => decodeFrame(text.decode(bytes))),
 		Stream.takeWhile((frame) => frame._tag === "Chunk"),
-		Stream.flatMap((frame) =>
-			frame._tag === "Chunk" ? Stream.fromIterable(frame.values) : Stream.empty,
-		),
-		Stream.filter((value): value is A => !Domain.Read.isCaughtUp(value)),
+		Stream.as(undefined),
 		Stream.orDie,
 	)
 }

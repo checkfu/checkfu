@@ -1,5 +1,4 @@
 import type * as Domain from "@alchemy.run/domain"
-import { Envelope } from "@alchemy.run/domain/Aggregate"
 import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import {
@@ -13,7 +12,7 @@ import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
-import { SessionView, SessionViewEvents } from "@checkfu/domain/Session/SessionView.view"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -54,7 +53,7 @@ import {
 	toApiError,
 } from "./HttpHelpers.ts"
 import { makeLister } from "./Listing.ts"
-import { ViewEventsOverObjectSockets, objectSocketEvents } from "./ObjectSocketEvents.ts"
+import { ViewEventsOverObjectSockets, objectSocketChanges } from "./ObjectSocketEvents.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
@@ -154,11 +153,6 @@ export interface SessionEventEntry {
 	readonly envelope: { readonly seq: number; readonly at: DateTime.Utc }
 	readonly event: DomainSessionEvent
 }
-
-const SessionViewEntry = Schema.Struct({
-	event: Schema.Union(SessionViewEvents),
-	envelope: Envelope,
-})
 
 const encodeSessionEventJson = Schema.encodeSync(
 	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
@@ -635,33 +629,40 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return HttpServerResponse.empty({ status: 204 })
 					}
 					let cursor = Math.min(from, head.cursor)
-					// Bounded pages until one comes back empty. A client still reading the last page lets
-					// events pile up; reading again before the live read starts keeps its first delivery
-					// to what arrived during that one read. A cursor at the head needs no page: the
-					// snapshot just read is that read.
-					const pages = Stream.paginate(cursor, (seq: number) =>
-						Effect.map(
-							sessionViews.list(ref, {
-								after: seq,
-								take: SSE_CATCHUP_PAGE_SIZE,
-								order: "asc",
-							}),
-							(page) =>
-								[
-									page.entries,
-									Option.map(
-										Option.fromUndefinedOr(page.entries.at(-1)),
-										(last) => last.envelope.seq,
-									),
-								] as const,
+					// Every read of the log is a bounded page, read until one comes back empty. A client
+					// still reading the last page lets events pile up; reading again before the live read
+					// starts keeps its first delivery to what arrived during that one read. A cursor at
+					// the head needs no page: the snapshot just read is that read.
+					const pagesAfterCursor = Stream.suspend(() =>
+						Stream.paginate(cursor, (seq: number) =>
+							Effect.map(
+								sessionViews.list(ref, {
+									after: seq,
+									take: SSE_CATCHUP_PAGE_SIZE,
+									order: "asc",
+								}),
+								(page) =>
+									[
+										page.entries,
+										Option.map(
+											Option.fromUndefinedOr(page.entries.at(-1)),
+											(last) => last.envelope.seq,
+										),
+									] as const,
+							),
 						),
 					).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
-					const catchUp = cursor < head.cursor ? pages : Stream.empty
-					const live: Stream.Stream<SessionEventEntry> = Stream.suspend(() =>
+					const catchUp = cursor < head.cursor ? pagesAfterCursor : Stream.empty
+					// On Cloudflare the view object only says that the session changed, once on connect and
+					// once per commit, and the change is read in pages: no read is ever larger than a page,
+					// however late the socket opened. Ticks that arrive during a read fold into one.
+					const live: Stream.Stream<SessionEventEntry> =
 						connectSessionView === undefined
-							? sessionViews.events(ref, { after: cursor })
-							: objectSocketEvents(connectSessionView, SessionViewEntry, id, cursor),
-					)
+							? Stream.suspend(() => sessionViews.events(ref, { after: cursor }))
+							: objectSocketChanges(connectSessionView, id).pipe(
+									Stream.buffer({ capacity: 1, strategy: "sliding" }),
+									Stream.flatMap(() => pagesAfterCursor),
+								)
 					const frames = Stream.concat(catchUp, live).pipe(
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
 						Stream.filter((entry) => entry.envelope.seq > from),

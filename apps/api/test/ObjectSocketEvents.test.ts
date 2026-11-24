@@ -1,26 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
+import type { Subscription } from "@alchemy.run/domain/Platform"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-import * as Schema from "effect/Schema"
 import type * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
-import { SOCKET_BUFFER_BYTES, objectSocketEvents } from "../src/Http/ObjectSocketEvents.ts"
-
-const Entry = Schema.Struct({ seq: Schema.Finite, text: Schema.String })
+import { SOCKET_BUFFER_BYTES, objectSocketChanges } from "../src/Http/ObjectSocketEvents.ts"
 
 type Listener = (event: Socket.WebSocketEvent) => void
 
 /** An accepted Durable Object socket that sends `frames` the moment the reader listens. */
 const pushingSocket = (frames: ReadonlyArray<string>) => {
-	const listeners = new Map<string, Array<Listener>>()
 	const socket = {
 		readyState: 1,
 		closes: [] as Array<number | undefined>,
 		accept: () => {},
 		addEventListener: (type: string, listener: Listener) => {
-			listeners.set(type, [...(listeners.get(type) ?? []), listener])
 			if (type === "message") {
 				for (const data of frames) {
 					listener({ data })
@@ -36,37 +32,51 @@ const pushingSocket = (frames: ReadonlyArray<string>) => {
 	return socket
 }
 
-const answering = (socket: ReturnType<typeof pushingSocket>) => () =>
-	Effect.succeed(HttpServerResponse.raw({ webSocket: socket }, { status: 101 }))
+const answering =
+	(socket: ReturnType<typeof pushingSocket>, subscriptions: Array<Subscription> = []) =>
+	(_key: string, subscription: Subscription) =>
+		Effect.sync(() => {
+			subscriptions.push(subscription)
+			return HttpServerResponse.raw({ webSocket: socket }, { status: 101 })
+		})
 
-const chunk = (seq: number, bytes: number) =>
-	JSON.stringify({ _tag: "Chunk", values: [{ seq, text: "x".repeat(bytes) }] })
+const stateFrame = (bytes: number) =>
+	JSON.stringify({ _tag: "Chunk", values: [{ cursor: 1, state: { pad: "x".repeat(bytes) } }] })
 
-describe("objectSocketEvents", () => {
-	it.effect(
-		"ends the stream when a reader falls a whole buffer behind, after what it received",
-		() =>
-			Effect.gen(function* () {
-				const frameBytes = 100 * 1024
-				const frames = Array.from({ length: 20 }, (_, seq) => chunk(seq + 1, frameBytes))
-				const socket = pushingSocket(frames)
-				const received = yield* objectSocketEvents(answering(socket), Entry, "session", 0).pipe(
-					Stream.runCollect,
-				)
-				// Every frame up to the one that crossed the limit is delivered; the rest stay in the log.
-				const delivered = Math.floor(SOCKET_BUFFER_BYTES / (frames[0]?.length ?? 1)) + 1
-				expect(received.map((entry) => entry.seq)).toEqual(
-					Array.from({ length: delivered }, (_, i) => i + 1),
-				)
-				expect(delivered).toBeLessThan(frames.length)
-				// Effect closes it as over the limit, before the stream's own release closes it again.
-				expect(socket.closes[0]).toBe(1008)
-			}),
+describe("objectSocketChanges", () => {
+	it.effect("watches the key's state, so no frame replays a backlog", () =>
+		Effect.gen(function* () {
+			const subscriptions: Array<Subscription> = []
+			const socket = pushingSocket([
+				stateFrame(10),
+				stateFrame(10),
+				JSON.stringify({ _tag: "Exit" }),
+			])
+			const ticks = yield* objectSocketChanges(answering(socket, subscriptions), "session").pipe(
+				Stream.runCollect,
+			)
+			expect(ticks).toHaveLength(2)
+			expect(subscriptions).toEqual([expect.objectContaining({ mode: "watch", cursor: 0 })])
+		}),
+	)
+
+	it.effect("ends the stream when a reader falls a whole buffer behind", () =>
+		Effect.gen(function* () {
+			const frames = Array.from({ length: 20 }, () => stateFrame(100 * 1024))
+			const socket = pushingSocket(frames)
+			const ticks = yield* objectSocketChanges(answering(socket), "session").pipe(Stream.runCollect)
+			// Every frame up to the one that crossed the limit is delivered; the stream then ends.
+			const delivered = Math.floor(SOCKET_BUFFER_BYTES / (frames[0]?.length ?? 1)) + 1
+			expect(ticks).toHaveLength(delivered)
+			expect(delivered).toBeLessThan(frames.length)
+			// Effect closes it as over the limit, before the stream's own release closes it again.
+			expect(socket.closes[0]).toBe(1008)
+		}),
 	)
 
 	it.live("stops waiting for the socket upgrade when the reader goes away", () =>
 		Effect.gen(function* () {
-			const fiber = yield* objectSocketEvents(() => Effect.never, Entry, "session", 0).pipe(
+			const fiber = yield* objectSocketChanges(() => Effect.never, "session").pipe(
 				Stream.runDrain,
 				// Detached, so a fiber that ignores interrupts fails this test instead of hanging it.
 				Effect.forkDetach,
