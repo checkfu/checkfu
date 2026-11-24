@@ -1,14 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { checkfu } from "../../../api.ts"
 import { SessionPage } from "../../../pages/sessions.tsx"
+import { sessionHistory, sessionQuery } from "../../../queries.ts"
 
 export const Route = createFileRoute("/_app/sessions/$sessionId")({
-	loader: async ({ params }) => {
-		const [session, history] = await Promise.all([
-			checkfu.sessions.retrieve(params.sessionId),
-			checkfu.sessions.events(params.sessionId),
-		])
-		return { session, history }
-	},
+	loader: ({ context, params }) =>
+		Promise.all([
+			context.queryClient.ensureQueryData(sessionQuery(params.sessionId)),
+			context.queryClient.ensureInfiniteQueryData(sessionHistory(params.sessionId)),
+		]),
 	component: SessionPage,
 })

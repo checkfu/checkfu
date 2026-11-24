@@ -5,12 +5,14 @@ import { shortId, timeAgo } from "@checkfu/ui/format"
 import { Input } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
-import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
+import { environmentQuery, environmentsPage } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
@@ -18,8 +20,8 @@ const list = getRouteApi("/_app/environments/")
 const detail = getRouteApi("/_app/environments/$environmentId")
 
 export function EnvironmentsPage(): React.JSX.Element {
-	const page = list.useLoaderData()
 	const search = list.useSearch()
+	const page = useSuspenseQuery(environmentsPage(search.after)).data
 	return (
 		<>
 			<PageHeader
@@ -93,7 +95,7 @@ export function NewEnvironmentPage(): React.JSX.Element {
 			to: "/environments/$environmentId",
 			params: { environmentId: environment.id },
 		})
-	})
+	}, ["environments"])
 	return (
 		<>
 			<PageHeader
@@ -123,12 +125,11 @@ export function NewEnvironmentPage(): React.JSX.Element {
 }
 
 export function EnvironmentPage(): React.JSX.Element {
-	const environment = detail.useLoaderData()
-	const router = useRouter()
+	const { environmentId } = detail.useParams()
+	const environment = useSuspenseQuery(environmentQuery(environmentId)).data
 	const archive = useAction(async () => {
 		await checkfu.environments.archive(environment.id)
-		await router.invalidate()
-	})
+	}, ["environments"])
 	const networking = environment.config.networking
 	return (
 		<>

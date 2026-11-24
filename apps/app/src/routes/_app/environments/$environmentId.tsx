@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { checkfu } from "../../../api.ts"
 import { EnvironmentPage } from "../../../pages/environments.tsx"
+import { environmentQuery } from "../../../queries.ts"
 
 export const Route = createFileRoute("/_app/environments/$environmentId")({
-	loader: ({ params }) => checkfu.environments.retrieve(params.environmentId),
+	loader: ({ context, params }) =>
+		context.queryClient.ensureQueryData(environmentQuery(params.environmentId)),
 	component: EnvironmentPage,
 })

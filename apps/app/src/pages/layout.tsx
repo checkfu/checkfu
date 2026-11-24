@@ -15,7 +15,7 @@ export function Layout(): React.JSX.Element {
 	const signOutAction = useAction(async () => {
 		await signOut()
 		await navigate({ to: "/sign-in" })
-	})
+	}, [])
 	return (
 		<AppShell
 			brand={

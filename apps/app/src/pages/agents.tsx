@@ -6,12 +6,14 @@ import { Input, Textarea } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonAgent } from "@checkfu/sdk/client"
-import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
+import { agentQuery, agentsPage } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
@@ -19,8 +21,8 @@ const list = getRouteApi("/_app/agents/")
 const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
-	const page = list.useLoaderData()
 	const search = list.useSearch()
+	const page = useSuspenseQuery(agentsPage(search.after)).data
 	return (
 		<>
 			<PageHeader
@@ -132,7 +134,7 @@ function AgentForm({
 	readonly onCancel?: () => void
 }): React.JSX.Element {
 	const [draft, setDraft] = useState(initial)
-	const action = useAction(onSubmit)
+	const action = useAction(onSubmit, ["agents"])
 	const set =
 		(field: keyof AgentDraft) =>
 		(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -193,17 +195,16 @@ export function NewAgentPage(): React.JSX.Element {
 }
 
 export function AgentPage(): React.JSX.Element {
-	const agent = detail.useLoaderData()
+	const { agentId } = detail.useParams()
+	const agent = useSuspenseQuery(agentQuery(agentId)).data
 	return <AgentView key={agent.id} agent={agent} />
 }
 
 function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
-	const router = useRouter()
 	const [editingFrom, setEditingFrom] = useState<JsonAgent | null>(null)
 	const archive = useAction(async () => {
 		await checkfu.agents.archive(agent.id)
-		await router.invalidate()
-	})
+	}, ["agents"])
 	const archived = agent.archived_at !== null
 	return (
 		<>
@@ -263,7 +264,6 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 							})
 						}
 						setEditingFrom(null)
-						await router.invalidate()
 					}}
 				/>
 			)}

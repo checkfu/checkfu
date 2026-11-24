@@ -1,29 +1,25 @@
-import { useNavigate } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import type { QueryKey } from "@tanstack/react-query"
+import { useRef } from "react"
 import { errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
 
 export function useAction<Args extends ReadonlyArray<unknown>>(
 	action: (...args: Args) => Promise<void>,
+	invalidates: QueryKey,
 ) {
-	const navigate = useNavigate()
-	const [pending, setPending] = useState(false)
-	const [error, setError] = useState<string>()
-	const run = (...args: Args): void => {
-		setPending(true)
-		setError(undefined)
-		action(...args).then(
-			() => setPending(false),
-			(error_: unknown) => {
-				setPending(false)
-				if (isSignedOut(error_)) {
-					void navigate({ to: "/sign-in", replace: true })
-				} else {
-					setError(errorMessage(error_))
-				}
-			},
-		)
+	const queryClient = useQueryClient()
+	const mutation = useMutation({
+		mutationFn: (args: Args) => action(...args),
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: invalidates }),
+	})
+	return {
+		run: (...args: Args): void => mutation.mutate(args),
+		pending: mutation.isPending,
+		error:
+			mutation.error === null || isSignedOut(mutation.error)
+				? undefined
+				: errorMessage(mutation.error),
 	}
-	return { run, pending, error }
 }
 
 export function useSubmissionKey() {

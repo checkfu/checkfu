@@ -6,26 +6,25 @@ import { Input, Select, Textarea } from "@checkfu/ui/input"
 import { PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
-import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
-import { checkfu } from "../api.ts"
-import type { EventPage } from "../api.ts"
-import { useMorePages } from "../use-more-pages.ts"
+import { checkfu, errorMessage, isSignedOut } from "../api.ts"
+import { agentChoices, environmentChoices, sessionQuery, sessionsPage } from "../queries.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { Transcript } from "./transcript.tsx"
 import { useSessionEvents } from "./use-session-events.ts"
 
 const list = getRouteApi("/_app/sessions/")
-const create = getRouteApi("/_app/sessions/new")
 const detail = getRouteApi("/_app/sessions/$sessionId")
 
 export function SessionsPage(): React.JSX.Element {
-	const page = list.useLoaderData()
 	const search = list.useSearch()
+	const page = useSuspenseQuery(sessionsPage(search.after)).data
 	return (
 		<>
 			<PageHeader
@@ -96,6 +95,26 @@ export function SessionsPage(): React.JSX.Element {
 	)
 }
 
+interface Choices<T> {
+	readonly items: ReadonlyArray<T>
+	readonly pending: boolean
+	readonly error: string | undefined
+	readonly more: (() => void) | null
+}
+
+const choicesOf = <T,>(query: {
+	readonly data: { readonly pages: ReadonlyArray<{ readonly data: ReadonlyArray<T> }> }
+	readonly isFetchingNextPage: boolean
+	readonly error: unknown
+	readonly hasNextPage: boolean
+	readonly fetchNextPage: () => Promise<{ readonly isError: boolean }>
+}): Choices<T> => ({
+	items: query.data.pages.flatMap((page) => page.data),
+	pending: query.isFetchingNextPage,
+	error: query.error === null || isSignedOut(query.error) ? undefined : errorMessage(query.error),
+	more: query.hasNextPage ? () => void query.fetchNextPage() : null,
+})
+
 const selectedOrFirst = (
 	options: ReadonlyArray<{ readonly id: string }>,
 	chosen: string | undefined,
@@ -112,7 +131,7 @@ function OptionPicker<T extends { readonly id: string }>({
 }: {
 	readonly label: string
 	readonly noun: string
-	readonly options: ReturnType<typeof useMorePages<T>>
+	readonly options: Choices<T>
 	readonly value: string
 	readonly onChange: (id: string) => void
 	readonly describe: (option: T) => string
@@ -139,12 +158,9 @@ function OptionPicker<T extends { readonly id: string }>({
 }
 
 export function NewSessionPage(): React.JSX.Element {
-	const first = create.useLoaderData()
 	const navigate = useNavigate()
-	const agentOptions = useMorePages(first.agents, (after) => checkfu.agents.list(after))
-	const environmentOptions = useMorePages(first.environments, (after) =>
-		checkfu.environments.list(after),
-	)
+	const agentOptions = choicesOf(useSuspenseInfiniteQuery(agentChoices))
+	const environmentOptions = choicesOf(useSuspenseInfiniteQuery(environmentChoices))
 	const agents = agentOptions.items
 	const environments = environmentOptions.items
 	const [chosenAgent, setAgentId] = useState<string>()
@@ -162,7 +178,7 @@ export function NewSessionPage(): React.JSX.Element {
 		const session = await checkfu.sessions.create(body, startKey.keyFor(body))
 		startKey.settle()
 		await navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
-	})
+	}, ["sessions"])
 	return (
 		<>
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />
@@ -217,46 +233,42 @@ export function NewSessionPage(): React.JSX.Element {
 }
 
 export function SessionPage(): React.JSX.Element {
-	const { session, history } = detail.useLoaderData()
-	return <SessionView key={session.id} session={session} history={history} />
+	const { sessionId } = detail.useParams()
+	const session = useSuspenseQuery(sessionQuery(sessionId)).data
+	return <SessionView key={session.id} session={session} />
 }
 
-function SessionView({
-	session,
-	history,
-}: {
-	readonly session: JsonSession
-	readonly history: EventPage
-}): React.JSX.Element {
-	const router = useRouter()
+function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
+	const queryClient = useQueryClient()
 	const { events, status, turn, error, earlier } = useSessionEvents({
 		sessionId: session.id,
 		snapshot: session,
-		history,
-		onTransition: () => void router.invalidate(),
+		onTransition: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
 	const [text, setText] = useState("")
 	const sendKey = useSubmissionKey()
-	const send = useAction(async (message: string) => {
-		const body = {
-			events: [
-				{ type: "user.message" as const, content: [{ type: "text" as const, text: message }] },
-			],
-		}
-		await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
-		sendKey.settle()
-		setText((current) => (current === message ? "" : current))
-	})
+	const send = useAction(
+		async (message: string) => {
+			const body = {
+				events: [
+					{ type: "user.message" as const, content: [{ type: "text" as const, text: message }] },
+				],
+			}
+			await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
+			sendKey.settle()
+			setText((current) => (current === message ? "" : current))
+		},
+		["sessions", "one", session.id],
+	)
 	const interruptKey = useSubmissionKey()
 	const interrupt = useAction(async () => {
 		const body = { events: [{ type: "user.interrupt" as const }] }
 		await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
 		interruptKey.settle()
-	})
+	}, ["sessions", "one", session.id])
 	const archive = useAction(async () => {
 		await checkfu.sessions.archive(session.id)
-		await router.invalidate()
-	})
+	}, ["sessions"])
 	const open = session.archived_at === null && status !== "terminated"
 	return (
 		<>

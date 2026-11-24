@@ -2,9 +2,9 @@ import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
 import { useMountEffect } from "@checkfu/ui/use-mount-effect"
 import { useState } from "react"
-import { checkfu } from "../api.ts"
-import type { EventPage } from "../api.ts"
-import { useAction } from "../use-action.ts"
+import { useQuery, useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query"
+import { checkfu, errorMessage, isSignedOut } from "../api.ts"
+import { sessionHistory, sessionLive } from "../queries.ts"
 
 type Status = "idle" | "running" | "terminated"
 
@@ -37,11 +37,6 @@ const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
 	}
 }
 
-const BATCH_MS = 50
-
-const ascending = (page: EventPage) => page.data.toReversed()
-const olderThan = (page: EventPage) => (page.has_more ? page.next_cursor : null)
-
 const turnAfter = (turn: number, event: JsonSessionEvent): number =>
 	event.type === "session.status_running" && "turn" in event && typeof event.turn === "number"
 		? event.turn
@@ -50,46 +45,26 @@ const turnAfter = (turn: number, event: JsonSessionEvent): number =>
 export function useSessionEvents({
 	sessionId,
 	snapshot,
-	history,
 	onTransition,
 }: {
 	readonly sessionId: string
 	readonly snapshot: { readonly status: Status; readonly turn: number }
-	readonly history: EventPage
 	readonly onTransition: () => void
 }) {
-	const [events, setEvents] = useState(() => ascending(history))
-	const [older, setOlder] = useState(() => olderThan(history))
-	const [status, setStatus] = useState(() =>
-		ascending(history).reduce(statusAfter, snapshot.status),
-	)
-	const [turn, setTurn] = useState(() => ascending(history).reduce(turnAfter, snapshot.turn))
+	const queryClient = useQueryClient()
+	const history = useSuspenseInfiniteQuery(sessionHistory(sessionId))
+	const live = useQuery(sessionLive(sessionId)).data ?? []
 	const [error, setError] = useState<string>()
-	const earlier = useAction(async () => {
-		if (older === null) {
-			return
-		}
-		const page = await checkfu.sessions.events(sessionId, older)
-		setEvents((loaded) => ascending(page).concat(loaded))
-		setOlder(olderThan(page))
-	})
+	const loaded = history.data.pages.toReversed().flatMap((page) => page.data.toReversed())
+	const newest = loaded.at(-1)?.seq ?? 0
+	const events = loaded.concat(live.filter((event) => event.seq > newest))
 	useMountEffect(() => {
-		let lastSeq = history.data[0]?.seq ?? 0
+		let lastSeq = Math.max(newest, live.at(-1)?.seq ?? 0)
 		const source = new EventSource(checkfu.sessions.streamUrl(sessionId, lastSeq))
 		let slowReconnect: ReturnType<typeof setTimeout> | undefined
-		let pending: Array<JsonSessionEvent> = []
-		let flushTimer: ReturnType<typeof setTimeout> | undefined
 		const settle = () => {
 			clearTimeout(slowReconnect)
 			slowReconnect = undefined
-		}
-		const flush = () => {
-			const batch = pending
-			pending = []
-			flushTimer = undefined
-			setEvents((seen) => seen.concat(batch))
-			setStatus((current) => batch.reduce(statusAfter, current))
-			setTurn((current) => batch.reduce(turnAfter, current))
 		}
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
@@ -98,10 +73,7 @@ export function useSessionEvents({
 				return
 			}
 			lastSeq = event.seq
-			pending.push(event)
-			if (flushTimer === undefined) {
-				flushTimer = setTimeout(flush, BATCH_MS)
-			}
+			queryClient.setQueryData(sessionLive(sessionId).queryKey, (seen = []) => [...seen, event])
 			if (event.type === "session.status_idle" || event.type === "session.archived") {
 				onTransition()
 			}
@@ -129,10 +101,24 @@ export function useSessionEvents({
 			}
 		})
 		return () => {
-			clearTimeout(flushTimer)
 			settle()
 			source.close()
 		}
 	})
-	return { events, status, turn, error, earlier: older === null ? null : earlier }
+	return {
+		events,
+		status: events.reduce(statusAfter, snapshot.status),
+		turn: events.reduce(turnAfter, snapshot.turn),
+		error,
+		earlier: history.hasNextPage
+			? {
+					run: () => void history.fetchNextPage(),
+					pending: history.isFetchingNextPage,
+					error:
+						history.error === null || isSignedOut(history.error)
+							? undefined
+							: errorMessage(history.error),
+				}
+			: null,
+	}
 }

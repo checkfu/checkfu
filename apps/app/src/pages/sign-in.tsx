@@ -2,6 +2,7 @@ import { Button } from "@checkfu/ui/button"
 import { Field } from "@checkfu/ui/field"
 import { Input } from "@checkfu/ui/input"
 import { Logo } from "@checkfu/ui/logo"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import type * as React from "react"
@@ -15,22 +16,22 @@ const MESSAGES = {
 export function SignInPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const [key, setKey] = useState("")
-	const [pending, setPending] = useState(false)
-	const [error, setError] = useState<string>()
+	const queryClient = useQueryClient()
+	const attempt = useMutation({
+		mutationFn: (submitted: string) => signIn(submitted).catch(() => "failed" as const),
+		onSuccess: async (result) => {
+			await queryClient.invalidateQueries()
+			if (result === "ok") {
+				void navigate({ to: "/sessions" })
+			}
+		},
+	})
+	const pending = attempt.isPending
+	const error =
+		attempt.data === undefined || attempt.data === "ok" ? undefined : MESSAGES[attempt.data]
 	const submit = (event: React.FormEvent): void => {
 		event.preventDefault()
-		setPending(true)
-		setError(undefined)
-		void signIn(key)
-			.catch(() => "failed" as const)
-			.then((result) => {
-				setPending(false)
-				if (result === "ok") {
-					void navigate({ to: "/sessions" })
-				} else {
-					setError(MESSAGES[result])
-				}
-			})
+		attempt.mutate(key)
 	}
 	return (
 		<main className="flex min-h-svh items-center justify-center px-5">

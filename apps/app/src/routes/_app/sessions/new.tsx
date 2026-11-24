@@ -1,14 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { checkfu } from "../../../api.ts"
 import { NewSessionPage } from "../../../pages/sessions.tsx"
+import { agentChoices, environmentChoices } from "../../../queries.ts"
 
 export const Route = createFileRoute("/_app/sessions/new")({
-	loader: async () => {
-		const [agents, environments] = await Promise.all([
-			checkfu.agents.list(),
-			checkfu.environments.list(),
-		])
-		return { agents, environments }
-	},
+	loader: ({ context }) =>
+		Promise.all([
+			context.queryClient.ensureInfiniteQueryData(agentChoices),
+			context.queryClient.ensureInfiniteQueryData(environmentChoices),
+		]),
 	component: NewSessionPage,
 })
