@@ -4,20 +4,21 @@ import * as DateTime from "effect/DateTime"
 import * as Iterable from "effect/Iterable"
 import * as Option from "effect/Option"
 
+const firings = Option.liftThrowable(
+	(cron: Cron.Cron, after: number, count: number): ReadonlyArray<number> =>
+		Arr.fromIterable(Iterable.take(Cron.sequence(cron, after), count)).map((at) => at.getTime()),
+)
+
 export const parseSchedule = (expression: string, timezone: string): Option.Option<Cron.Cron> =>
 	DateTime.zoneFromString(timezone).pipe(
 		Option.filter((zone) => zone._tag === "Named"),
 		Option.flatMap((zone) => Option.getSuccess(Cron.parse(expression, zone))),
 		Option.filter((cron) => cron.minutes.size === 1 && cron.seconds.size === 1),
+		Option.filter((cron) => Option.isSome(firings(cron, 0, 1))),
 	)
 
 export const isUsableSchedule = (expression: string, timezone: string): boolean =>
 	Option.isSome(parseSchedule(expression, timezone))
-
-const firings = Option.liftThrowable(
-	(cron: Cron.Cron, after: number, count: number): ReadonlyArray<number> =>
-		Arr.fromIterable(Iterable.take(Cron.sequence(cron, after), count)).map((at) => at.getTime()),
-)
 
 export const upcomingOccurrences = (
 	expression: string,

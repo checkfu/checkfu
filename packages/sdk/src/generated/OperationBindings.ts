@@ -133,7 +133,7 @@ export const SDK_OPERATION_BINDINGS: ReadonlyArray<SdkOperationBinding> = [
 		kind: "unary",
 		retrySafety: "pre-commit-only",
 		supportsIdempotencyKey: false,
-		supportsPending: true,
+		supportsPending: false,
 	},
 	{
 		operationId: "automations.unpause",

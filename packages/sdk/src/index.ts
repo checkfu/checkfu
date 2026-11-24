@@ -13,6 +13,7 @@ export type {
 	EventPagePromise,
 	EventsPage,
 	JsonAgent,
+	JsonAutomation,
 	JsonEnvironment,
 	JsonListSessionEventsResponse,
 	JsonSession,

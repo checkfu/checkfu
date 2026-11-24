@@ -503,7 +503,7 @@ export const AutomationRunQueued = Schema.Struct({
 	run: PositiveInt,
 	status: Schema.Literal("queued"),
 	trigger: Schema.Struct({ type: Schema.Literal("manual") }),
-}).pipe(HttpApiSchema.status(202))
+}).pipe(HttpApiSchema.status(201))
 export type AutomationRunQueued = typeof AutomationRunQueued.Type
 
 export type PendingResourceType = "agent" | "environment" | "session" | "automation"

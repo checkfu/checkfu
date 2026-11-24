@@ -11,13 +11,10 @@ import { PauseAutomation } from "@checkfu/domain/Automation/PauseAutomation.comm
 import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutomationRunFailed.command"
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
-import {
-	isUsableSchedule,
-	nextOccurrence,
-	upcomingOccurrences,
-} from "@checkfu/domain/Automation/Schedule"
+import { upcomingOccurrences } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
-import { BoundedAgentId, BoundedEnvironmentId } from "@checkfu/domain/Session/AdmitSession.command"
+import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import * as Clock from "effect/Clock"
@@ -135,13 +132,14 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 			.handle("create", ({ payload, request }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = request.headers["idempotency-key"]
-					const { schedule } = payload
-					const now = yield* Clock.currentTimeMillis
-					if (
-						isUsableSchedule(schedule.expression, schedule.timezone) &&
-						nextOccurrence(schedule.expression, schedule.timezone, now) === null
-					) {
-						return yield* reject(400, "schedule.expression never fires.")
+					const rawAgentId = typeof payload.agent === "string" ? payload.agent : payload.agent.id
+					const agentId = Schema.decodeOption(AgentId)(rawAgentId)
+					if (Option.isNone(agentId)) {
+						return yield* reject(404, `Agent ${rawAgentId} not found.`)
+					}
+					const environmentId = Schema.decodeOption(EnvironmentId)(payload.environment_id)
+					if (Option.isNone(environmentId)) {
+						return yield* reject(404, `Environment ${payload.environment_id} not found.`)
 					}
 					const text = yield* Schema.decodeEffect(MessageText)(
 						payload.initial_events
@@ -159,14 +157,12 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const command = {
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
-						agent_id: BoundedAgentId.make(
-							typeof payload.agent === "string" ? payload.agent : payload.agent.id,
-						),
+						agent_id: agentId.value,
 						agent_version:
 							typeof payload.agent === "string" ? null : (payload.agent.version ?? null),
-						environment_id: BoundedEnvironmentId.make(payload.environment_id),
+						environment_id: environmentId.value,
 						text,
-						schedule,
+						schedule: payload.schedule,
 					}
 					let id: AutomationId
 					let sendOptions: { readonly commandId: string } | undefined

@@ -11393,7 +11393,7 @@
 					}
 				],
 				"responses": {
-					"202": {
+					"201": {
 						"description": "Success",
 						"content": {
 							"application/json": {

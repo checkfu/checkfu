@@ -199,7 +199,7 @@ describe("Automations API", () => {
 				const id = created.body.id
 
 				const first = yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
-				expect(first.status).toBe(202)
+				expect(first.status).toBe(201)
 				expect(first.body).toEqual({
 					type: "automation_run",
 					automation_id: id,
@@ -288,7 +288,7 @@ describe("Automations API", () => {
 					{ concurrency: 25 },
 				)
 				expect(requested.map((entry) => entry.status)).toEqual(
-					Array.from({ length: 25 }, () => 202),
+					Array.from({ length: 25 }, () => 201),
 				)
 				const numbers = requested.map((entry) => entry.body.run).toSorted((a, b) => a - b)
 				expect(numbers).toEqual(Array.from({ length: 25 }, (_, index) => index + 1))
@@ -328,7 +328,7 @@ describe("Automations API", () => {
 				expect(pausedAgain.body.status).toBe("paused")
 
 				const whilePaused = yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
-				expect(whilePaused.status).toBe(202)
+				expect(whilePaused.status).toBe(201)
 				expect(whilePaused.body.run).toBe(1)
 
 				const unpaused = yield* call<AutomationBody>(
@@ -433,6 +433,9 @@ describe("Automations API", () => {
 					["two messages", { initial_events: [...message("a"), ...message("b")] }, 400],
 					["no message", { initial_events: [] }, 400],
 					["unknown agent", { agent: "agent_missing" }, 404],
+					["agent reference that is not an id", { agent: "team/agent" }, 404],
+					["pinned agent reference that is not an id", { agent: { id: "..", version: 1 } }, 404],
+					["environment reference that is not an id", { environment_id: "team/env" }, 404],
 					["unknown agent version", { agent: { id: agentId, version: 9 } }, 404],
 					["unknown environment", { environment_id: "env_missing" }, 404],
 				] as const

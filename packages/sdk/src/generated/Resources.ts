@@ -616,19 +616,16 @@ export class EffectAutomationsResource {
 			EffectFlatMap(
 				decodeEndpointParams("automations", "run", { automation_id: automationId }),
 				(pathParams) =>
-					withPendingReadiness(
-						executeWithRetries(
-							this.#runtime,
-							"checkfu.automations.run",
-							"pre-commit-only",
-							options,
-							() =>
-								this.#runtime.raw.automations.run({
-									params: pathParams,
-									responseMode: "decoded-and-response",
-								}),
-						),
-						{ kind: "requires-until", operation: "automations.run" },
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.run",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.automations.run({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
 					),
 			),
 			options,
