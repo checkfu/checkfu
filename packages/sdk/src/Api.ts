@@ -662,7 +662,7 @@ const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, c
 	})
 
 export const ResourceListCursor = Schema.String.check(
-	Schema.isPattern(/^\d{1,15}:[A-Za-z0-9_-]{1,256}$/u),
+	Schema.isPattern(/^\d{1,15}:[^/\\]+$/u),
 ).annotate({
 	description:
 		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",

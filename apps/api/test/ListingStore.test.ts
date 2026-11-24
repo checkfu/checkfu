@@ -7,6 +7,9 @@ import { describe, expect, it } from "@effect/vitest"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+import { ResourceListCursor } from "@checkfu/sdk/Api"
+import { AgentId } from "@checkfu/sdk/Schemas"
 import {
 	listingDatabaseProps,
 	listingPageQuery,
@@ -173,22 +176,56 @@ describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 	)
 })
 
+describe("list cursors", () => {
+	it.effect.each(Object.entries(stores))(
+		"page through every id a resource id may hold (%s)",
+		([, store]) =>
+			Effect.gen(function* () {
+				const listing = yield* ListingStore
+				const odd = ["agent.v2", "a:b", "x y", "\u00fc", "a%2F"]
+				expect(odd.every(Schema.is(AgentId))).toBe(true)
+				yield* listing.record(odd.map((id) => row("agent", id, 7)))
+				const seen: Array<string> = []
+				let after: string | undefined
+				for (let page = 0; page < odd.length; page++) {
+					const next = yield* listing.page(filter({ kind: "agent" }), { after, take: 1 })
+					seen.push(...ids(next))
+					if (next.cursor === null) {
+						break
+					}
+					expect(Schema.is(ResourceListCursor)(next.cursor)).toBe(true)
+					after = next.cursor
+				}
+				expect(seen).toEqual([...odd].toSorted())
+			}).pipe(Effect.provide([store, RuntimeContext.phantom])),
+	)
+})
+
 describe("D1 listing queries", () => {
-	it("seek through an index, the agent index when filtering by agent", () => {
+	it("seek through the partial index that holds only the rows the page may return", () => {
 		const sqlite = new DatabaseSync(":memory:")
 		sqlite.exec(readFileSync(new URL("../migrations/0001_listing.sql", import.meta.url), "utf8"))
-		const plan = (order: "asc" | "desc", byAgent: boolean, after: boolean) =>
+		const plan = (order: "asc" | "desc", archived: boolean, byAgent: boolean, after: boolean) =>
 			sqlite
-				.prepare(`EXPLAIN QUERY PLAN ${listingPageQuery(order, byAgent, after)}`)
-				.all("session", 0, byAgent ? "a1" : null, after ? 1 : null, after ? "s1" : null, 2)
+				.prepare(`EXPLAIN QUERY PLAN ${listingPageQuery(order, archived, byAgent, after)}`)
+				.all("session", byAgent ? "a1" : null, after ? 1 : null, after ? "s1" : null, 2)
 				.map((step) => String(step["detail"]))
 				.join(" | ")
 		for (const order of ["asc", "desc"] as const) {
 			for (const after of [false, true]) {
-				expect(plan(order, true, after)).toContain("USING INDEX listing_by_agent")
-				expect(plan(order, false, after)).toContain("USING INDEX listing_by_kind")
-				expect(plan(order, true, after)).not.toContain("TEMP B-TREE")
-				expect(plan(order, false, after)).not.toContain("TEMP B-TREE")
+				for (const [archived, prefix] of [
+					[false, "listing_live"],
+					[true, "listing_kept"],
+				] as const) {
+					expect(plan(order, archived, true, after)).toMatch(
+						new RegExp(`USING (COVERING )?INDEX ${prefix}_by_agent \\(`),
+					)
+					expect(plan(order, archived, false, after)).toMatch(
+						new RegExp(`USING (COVERING )?INDEX ${prefix} \\(`),
+					)
+					expect(plan(order, archived, true, after)).not.toContain("TEMP B-TREE")
+					expect(plan(order, archived, false, after)).not.toContain("TEMP B-TREE")
+				}
 			}
 		}
 	})

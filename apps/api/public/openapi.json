@@ -991,7 +991,7 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
 							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
@@ -1135,7 +1135,7 @@
 											"anyOf": [
 												{
 													"type": "string",
-													"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{
@@ -3729,7 +3729,7 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
 							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
@@ -3906,7 +3906,7 @@
 											"anyOf": [
 												{
 													"type": "string",
-													"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{
@@ -7029,7 +7029,7 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
 							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
@@ -7200,7 +7200,7 @@
 											"anyOf": [
 												{
 													"type": "string",
-													"pattern": "^\\d{1,15}:[A-Za-z0-9_-]{1,256}$",
+													"pattern": "^\\d{1,15}:[^/\\\\]+$",
 													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{

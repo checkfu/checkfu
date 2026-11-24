@@ -39,14 +39,20 @@ export const ListingDatabase = Cloudflare.D1.Database(
 const UPSERT =
 	"INSERT INTO listing (kind, id, created_at, agent_id, status) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (kind, id) DO UPDATE SET status = MAX(status, excluded.status)"
 
-export const listingPageQuery = (order: ListingOrder, byAgent: boolean, after: boolean) =>
+export const listingPageQuery = (
+	order: ListingOrder,
+	includeArchived: boolean,
+	byAgent: boolean,
+	after: boolean,
+) =>
 	[
-		"SELECT id, created_at FROM listing WHERE kind = ?1 AND status <= ?2",
-		byAgent ? "AND agent_id = ?3" : "AND ?3 IS NULL",
+		"SELECT id, created_at FROM listing WHERE kind = ?1",
+		includeArchived ? `AND status <= ${ARCHIVED}` : `AND status = ${LISTED}`,
+		byAgent ? "AND agent_id = ?2" : "AND ?2 IS NULL",
 		after
-			? `AND (created_at, id) ${order === "asc" ? ">" : "<"} (?4, ?5)`
-			: "AND ?4 IS NULL AND ?5 IS NULL",
-		`ORDER BY created_at ${order}, id ${order} LIMIT ?6`,
+			? `AND (created_at, id) ${order === "asc" ? ">" : "<"} (?3, ?4)`
+			: "AND ?3 IS NULL AND ?4 IS NULL",
+		`ORDER BY created_at ${order}, id ${order} LIMIT ?5`,
 	].join(" ")
 
 export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
@@ -67,10 +73,16 @@ export const makeD1ListingStore = (db: Cloudflare.D1.QueryDatabaseClient) =>
 			const cursor = after === undefined ? undefined : parseListingCursor(after)
 			return Effect.map(
 				db
-					.prepare(listingPageQuery(filter.order, filter.agent_id !== null, cursor !== undefined))
+					.prepare(
+						listingPageQuery(
+							filter.order,
+							filter.include_archived,
+							filter.agent_id !== null,
+							cursor !== undefined,
+						),
+					)
 					.bind(
 						filter.kind,
-						filter.include_archived ? ARCHIVED : LISTED,
 						filter.agent_id,
 						cursor?.created_at ?? null,
 						cursor?.id ?? null,
