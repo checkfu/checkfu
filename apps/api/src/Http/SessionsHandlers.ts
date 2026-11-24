@@ -1,3 +1,4 @@
+import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
@@ -32,6 +33,8 @@ import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
+import { artifactReads } from "./ArtifactsHandlers.ts"
+import { outputsArtifactId } from "../OutputsIdentity.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
 import {
@@ -229,6 +232,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		if (overObjectSockets && connectSessionView === undefined) {
 			return yield* Effect.die(new Error("SessionView is not pushed over object sockets."))
 		}
+		const { readArtifact } = yield* artifactReads
+		const artifacts = yield* Artifact
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -417,6 +422,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return result
 					}
 					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
+				}).pipe(handled),
+			)
+			.handle("getOutputs", ({ params }) =>
+				Effect.gen(function* () {
+					const session = yield* existing(params.session_id)
+					const id = yield* outputsArtifactId(digest, session.id)
+					const artifact = yield* artifacts.get(id)
+					if (artifact.status !== "active") {
+						return yield* reject(404, `Session ${session.id} has published no outputs.`)
+					}
+					return yield* readArtifact(id, artifact)
 				}).pipe(handled),
 			)
 			.handle("sendEvents", ({ params, headers, payload }) =>

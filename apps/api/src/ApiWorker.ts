@@ -43,6 +43,14 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
+			listOutputs: (sessionId) =>
+				harnessCall(Effect.suspend(() => harness.listOutputs(sessionId))).pipe(
+					Effect.withSpan("PiHarness.listOutputs"),
+				),
+			readOutputs: (sessionId, paths) =>
+				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, paths))).pipe(
+					Effect.withSpan("PiHarness.readOutputs"),
+				),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),
@@ -76,8 +84,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
-	Digest.layerWebCrypto,
-).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
+).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,

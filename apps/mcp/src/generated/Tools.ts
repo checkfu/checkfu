@@ -1963,6 +1963,38 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "sessions_getOutputs",
+		title: "Retrieve a session's outputs",
+		description:
+			"Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version",
+		method: "GET",
+		path: "/v1/sessions/{session_id}/outputs",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						session_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Session ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["session_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "sessions_getSession",
 		title: "Retrieve a session",
 		description: "Retrieve a session by ID",

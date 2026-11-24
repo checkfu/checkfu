@@ -2187,6 +2187,38 @@ const sessionsEventsStreamCommand = CommandMake(
 	]),
 )
 
+const sessionsOutputsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:outputs retrieve",
+	apiGroup: "sessions",
+	apiEndpoint: "getOutputs",
+	hasBody: false,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const sessionsOutputsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsOutputsRetrieveCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Retrieve the artifact a session publishes from its outputs directory, with the files of its latest version",
+	),
+)
+
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -2196,6 +2228,7 @@ export const buildGeneratedResourceCommands = <
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const SessionsOutputsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
 	readonly artifacts?: ArtifactsExtras
@@ -2205,6 +2238,7 @@ export const buildGeneratedResourceCommands = <
 	readonly environments?: EnvironmentsExtras
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
+	readonly "sessions:outputs"?: SessionsOutputsExtras
 }) =>
 	[
 		CommandMake("agents").pipe(
@@ -2291,6 +2325,13 @@ export const buildGeneratedResourceCommands = <
 				sessionsEventsSendCommand,
 				sessionsEventsStreamCommand,
 				...(extras?.["sessions:events"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("sessions:outputs").pipe(
+			CommandWithDescription("Retrieve what a session published from its outputs directory"),
+			CommandWithSubcommands([
+				sessionsOutputsRetrieveCommand,
+				...(extras?.["sessions:outputs"] ?? ([] as const)),
 			]),
 		),
 	] as const

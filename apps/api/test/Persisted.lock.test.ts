@@ -374,7 +374,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.map((shape) => shape.id)
 					.toSorted(),
 			).toEqual(
-				["abortTurn", "discardWorkspace", "recoverTurn", "runTurn"].flatMap((method) => [
+				[
+					"abortTurn",
+					"discardWorkspace",
+					"listOutputs",
+					"readOutputs",
+					"recoverTurn",
+					"runTurn",
+				].flatMap((method) => [
 					`harness-call:PiHarness.${method}/args`,
 					`harness-call:PiHarness.${method}/result`,
 				]),

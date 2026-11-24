@@ -2,6 +2,8 @@ import * as Cloudflare from "@alchemy.run/cloudflare"
 import type { DurableObjectStorageLike } from "@cloudflare/computer"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import { makeSessionOutputs } from "./SessionOutputs.ts"
+import type { OutputBytes, OutputsListing } from "./SessionOutputs.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
@@ -57,6 +59,20 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 					throw error
 				})
 			}
+			const outputs = async () => {
+				const { fs } = await workspace()
+				return makeSessionOutputs({
+					list: (directory, limit) => fs.find(directory, undefined, { limit }).catch(() => []),
+					size: async (file) => (await fs.stat(file)).size,
+					read: async (file) => {
+						try {
+							return new Uint8Array(await new Response(await fs.readFile(file)).arrayBuffer())
+						} catch {
+							return null
+						}
+					},
+				})
+			}
 
 			return {
 				enter: (token: TurnToken): Effect.Effect<boolean> =>
@@ -81,6 +97,18 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 							result ?? failed("This turn has ended; the workspace no longer accepts its calls.")
 						)
 					}),
+				listOutputs: (): Effect.Effect<OutputsListing> =>
+					Effect.promise(() =>
+						storage.kv.get(DISCARDED) === true
+							? Promise.resolve<OutputsListing>({ ok: true, files: [] })
+							: outputs().then((found) => found.list()),
+					),
+				readOutputs: (paths: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<OutputBytes>> =>
+					Effect.promise(() =>
+						storage.kv.get(DISCARDED) === true
+							? Promise.resolve([])
+							: outputs().then((found) => found.read(paths)),
+					),
 				discard: (): Effect.Effect<void> =>
 					Effect.promise(async () => {
 						storage.kv.put(DISCARDED, true)

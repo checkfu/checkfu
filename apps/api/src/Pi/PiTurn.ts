@@ -1,6 +1,7 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
+import { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
 
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
@@ -43,5 +44,10 @@ export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	listOutputs: { args: Schema.Tuple([Schema.String]), result: OutputsListing },
+	readOutputs: {
+		args: Schema.Tuple([Schema.String, Schema.Array(Schema.String)]),
+		result: Schema.Array(OutputBytes),
+	},
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 } as const

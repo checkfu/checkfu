@@ -699,6 +699,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/sessions/{session_id}/archive",
 						"/v1/sessions/{session_id}/events",
 						"/v1/sessions/{session_id}/events/stream",
+						"/v1/sessions/{session_id}/outputs",
 					])
 					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(

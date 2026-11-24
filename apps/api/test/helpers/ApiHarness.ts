@@ -45,6 +45,7 @@ import {
 	harnessCall,
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
+import { makeSessionOutputs } from "../../src/Workspace/SessionOutputs.ts"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -255,6 +256,61 @@ export const makePiDurableTestLayer = (
 	const unreachable = new Set<string>()
 	const conversations: Array<string> = []
 	const discardedWorkspaces: Array<string> = []
+	const workspaces = new Map<string, Map<string, string>>()
+	const workspaceFiles = (sessionId: string) => {
+		const existing = workspaces.get(sessionId)
+		if (existing !== undefined) {
+			return existing
+		}
+		const files = new Map<string, string>()
+		workspaces.set(sessionId, files)
+		return files
+	}
+	const encoder = new TextEncoder()
+	const outputWalks: Array<{ readonly limit: number; readonly found: number }> = []
+	const sessionOutputs = (sessionId: string, onRead?: (file: string) => void) => {
+		const files = workspaceFiles(sessionId)
+		const bytesOf = (file: string) => {
+			const content = files.get(file)
+			return content === undefined ? null : encoder.encode(content)
+		}
+		return makeSessionOutputs({
+			list: (directory, limit) => {
+				const found = new Map<string, "file" | "dir">()
+				for (const file of files.keys()) {
+					if (file.startsWith(`${directory}/`)) {
+						found.set(file, "file")
+						for (
+							let parent = file.slice(0, file.lastIndexOf("/"));
+							parent !== directory;
+							parent = parent.slice(0, parent.lastIndexOf("/"))
+						) {
+							if (!found.has(parent)) {
+								found.set(parent, "dir")
+							}
+						}
+					}
+				}
+				const entries = [...found]
+					.toSorted(([a], [b]) => (a < b ? -1 : 1))
+					.slice(0, limit)
+					.map(([path, type]) => ({ path, type }))
+				outputWalks.push({ limit, found: entries.length })
+				return Promise.resolve(entries)
+			},
+			size: (file) => Promise.resolve(bytesOf(file)?.byteLength ?? 0),
+			read: (file) => {
+				onRead?.(file)
+				return Promise.resolve(bytesOf(file))
+			},
+		})
+	}
+	const outputListReads: Array<string> = []
+	const outputReads: Array<{
+		readonly sessionId: string
+		readonly paths: ReadonlyArray<string>
+	}> = []
+	let beforeOutputsRead: ((sessionId: string) => void) | undefined
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -288,6 +344,16 @@ export const makePiDurableTestLayer = (
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
 				}),
+			listOutputs: (sessionId) =>
+				Effect.promise(() =>
+					sessionOutputs(sessionId, (file) => outputListReads.push(file)).list(),
+				),
+			readOutputs: (sessionId, paths) =>
+				Effect.promise(() => {
+					outputReads.push({ sessionId, paths })
+					beforeOutputsRead?.(sessionId)
+					return sessionOutputs(sessionId).read(paths)
+				}),
 		},
 	)
 
@@ -320,12 +386,8 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
-	const layer = Layer.mergeAll(
-		CheckfuLive,
-		PiProviderLive,
-		artifactStore.layer,
-		ArtifactLinksTest,
-	).pipe(
+	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive, ArtifactLinksTest).pipe(
+		Layer.provideMerge(artifactStore.layer),
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
@@ -351,6 +413,13 @@ export const makePiDurableTestLayer = (
 		resets,
 		artifactStore,
 		discardedWorkspaces,
+		workspaceFiles,
+		outputReads,
+		outputListReads,
+		outputWalks,
+		setBeforeOutputsRead: (run: (sessionId: string) => void) => {
+			beforeOutputsRead = run
+		},
 	}
 }
 

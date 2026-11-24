@@ -157,6 +157,59 @@ const versionResource = (id: ArtifactId, found: LocatedVersion, manifest: Artifa
 
 const interrupted = reject(503, "The create took too long; retry the request.")
 
+export const artifactReads = Effect.gen(function* () {
+	const artifacts = yield* Artifact
+	const store = yield* ArtifactStore
+	const links = yield* ArtifactLinks
+
+	const requireActive = (id: ArtifactId) =>
+		artifacts.get(id).pipe(
+			Effect.filterOrElse(
+				(state) => state.status === "active",
+				() => reject(404, `Artifact ${id} not found.`),
+			),
+		)
+
+	const missingBytes = (id: ArtifactId, detail: Record<string, string>) =>
+		Effect.gen(function* () {
+			yield* requireActive(id)
+			yield* Effect.logError("Artifact bytes are missing", { artifact_id: id, ...detail })
+			return yield* reject(500, "Failed to load artifact files.")
+		})
+
+	const loadManifest = (id: ArtifactId, manifestHash: string) =>
+		Effect.gen(function* () {
+			const manifest = yield* stored(store.getManifest(id, manifestHash))
+			return manifest ?? (yield* missingBytes(id, { manifest: manifestHash }))
+		})
+
+	const publicationOf = (id: ArtifactId, state: ArtifactState) =>
+		Effect.gen(function* () {
+			if (state.publication_token === "") {
+				return null
+			}
+			const address = PublicationAddress.make(publicationAddress(id, state.publication_token))
+			const publication: Publication = {
+				address,
+				url: yield* links.publicationUrl(address),
+				version: state.pinned_version === 0 ? null : state.pinned_version,
+				published_at: DateTime.makeUnsafe(state.published_at),
+			}
+			return publication
+		})
+
+	const readArtifact = (id: ArtifactId, state: ArtifactState) =>
+		Effect.gen(function* () {
+			const manifest = yield* loadManifest(id, state.manifest)
+			return artifactResource(id, state, manifest, yield* publicationOf(id, state))
+		})
+
+	const retrieve = (id: ArtifactId) =>
+		Effect.flatMap(requireActive(id), (state) => readArtifact(id, state))
+
+	return { requireActive, missingBytes, loadManifest, publicationOf, readArtifact, retrieve }
+})
+
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
 	Effect.gen(function* () {
 		const artifacts = yield* Artifact
@@ -166,6 +219,8 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
+		const { requireActive, missingBytes, loadManifest, publicationOf, readArtifact, retrieve } =
+			yield* artifactReads
 
 		const build = (
 			files: ReadonlyArray<ArtifactVersionFileInput>,
@@ -173,14 +228,6 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		) =>
 			buildArtifactVersion(digest, files, kept).pipe(
 				Effect.catchTag("InvalidArtifactFiles", (error) => reject(400, error.message)),
-			)
-
-		const requireActive = (id: ArtifactId) =>
-			artifacts.get(id).pipe(
-				Effect.filterOrElse(
-					(state) => state.status === "active",
-					() => reject(404, `Artifact ${id} not found.`),
-				),
 			)
 
 		const stage = (id: ArtifactId, built: BuiltArtifactVersion, reservation: number | null) =>
@@ -191,44 +238,10 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				}),
 			)
 
-		const missingBytes = (id: ArtifactId, detail: Record<string, string>) =>
-			Effect.gen(function* () {
-				yield* requireActive(id)
-				yield* Effect.logError("Artifact bytes are missing", { artifact_id: id, ...detail })
-				return yield* reject(500, "Failed to load artifact files.")
-			})
-
-		const loadManifest = (id: ArtifactId, manifestHash: string) =>
-			Effect.gen(function* () {
-				const manifest = yield* stored(store.getManifest(id, manifestHash))
-				return manifest ?? (yield* missingBytes(id, { manifest: manifestHash }))
-			})
-
 		const manifestOf = (id: ArtifactId, hash: string, built?: BuiltArtifactVersion) =>
 			built !== undefined && built.manifest_hash === hash
 				? Effect.succeed(built.manifest)
 				: loadManifest(id, hash)
-
-		const publicationOf = (id: ArtifactId, state: ArtifactState) =>
-			Effect.gen(function* () {
-				if (state.publication_token === "") {
-					return null
-				}
-				const address = PublicationAddress.make(publicationAddress(id, state.publication_token))
-				const publication: Publication = {
-					address,
-					url: yield* links.publicationUrl(address),
-					version: state.pinned_version === 0 ? null : state.pinned_version,
-					published_at: DateTime.makeUnsafe(state.published_at),
-				}
-				return publication
-			})
-
-		const readArtifact = (id: ArtifactId, state: ArtifactState) =>
-			Effect.gen(function* () {
-				const manifest = yield* loadManifest(id, state.manifest)
-				return artifactResource(id, state, manifest, yield* publicationOf(id, state))
-			})
 
 		const sentWith = (
 			id: ArtifactId,
@@ -263,9 +276,6 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				])
 				return { commandId }
 			})
-
-		const retrieve = (id: ArtifactId) =>
-			Effect.flatMap(requireActive(id), (state) => readArtifact(id, state))
 
 		const locateVersion = (id: ArtifactId, state: ArtifactState, version: number) =>
 			Effect.gen(function* () {

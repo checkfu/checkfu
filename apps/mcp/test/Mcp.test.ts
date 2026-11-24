@@ -198,6 +198,7 @@ describe("Checkfu MCP server", () => {
 				"environments_updateEnvironment",
 				"sessions_archiveSession",
 				"sessions_createSession",
+				"sessions_getOutputs",
 				"sessions_getSession",
 				"sessions_listEvents",
 				"sessions_listSessions",
@@ -251,6 +252,7 @@ describe("Checkfu MCP server", () => {
 				environments_updateEnvironment: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
+				sessions_getOutputs: "read-only, additive, repeatable",
 				sessions_getSession: "read-only, additive, repeatable",
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
@@ -444,6 +446,7 @@ describe("Checkfu MCP server", () => {
 				sessions_createSession: {
 					body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
 				},
+				sessions_getOutputs: session,
 				sessions_getSession: session,
 				sessions_listEvents: { ...session, query: { limit: "5" } },
 				sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
