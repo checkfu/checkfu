@@ -1434,71 +1434,6 @@ describe("turn engine", () => {
 		},
 	)
 
-	it("synchronizes recoverPiDurableTurn with an in-progress admission before submit", async () => {
-		let markEnteredEnsureRoot!: () => void
-		const enteredEnsureRoot = new Promise<void>((resolve) => {
-			markEnteredEnsureRoot = resolve
-		})
-		let releaseLockStep!: () => void
-		const holdLockStep = new Promise<void>((resolve) => {
-			releaseLockStep = resolve
-		})
-
-		const rawBackend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(async (model) =>
-				makeAssistantReply(model, null, "Committed after disconnect", 8, 4),
-			),
-		)
-		const backend = {
-			...rawBackend,
-			ensureRoot: async (agent: Parameters<typeof rawBackend.ensureRoot>[0]) => {
-				markEnteredEnsureRoot()
-				await holdLockStep
-				return rawBackend.ensureRoot(agent)
-			},
-		}
-
-		try {
-			// Original runTurn enters admitPiTurn, acquires withLock, and pauses before submit().
-			const originalTurn = Effect.runPromise(
-				runPiDurableTurn(backend, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "openai",
-					modelId: "gpt-4o-mini",
-					system: null,
-					text: "hello",
-				}),
-			)
-			await enteredEnsureRoot
-
-			// Retry's recovery probe starts while admitPiTurn still holds the lock before submit().
-			// It MUST wait for admission to finish instead of returning null.
-			let recoverySettled = false
-			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:1")).then(
-				(outcome) => {
-					recoverySettled = true
-					return outcome
-				},
-			)
-			await new Promise<void>((resolve) => {
-				setTimeout(resolve, 15)
-			})
-			expect(recoverySettled).toBe(false)
-
-			releaseLockStep()
-			const [originalResult, recoveredResult] = await Promise.all([originalTurn, recovery])
-			expect(originalResult).toMatchObject({ ok: true })
-			expect(recoveredResult).not.toBeNull()
-			expect(recoveredResult?.ok ? recoveredResult.reply.text : null).toBe(
-				"Committed after disconnect",
-			)
-		} finally {
-			releaseLockStep()
-			await rawBackend.close()
-		}
-	})
-
 	it("keeps withLock mutually exclusive even when the lock holder fiber is interrupted mid-critical-section", async () => {
 		const backend = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "unused", 1, 1)),
@@ -2069,6 +2004,71 @@ describe("turn engine", () => {
 			await second.close()
 		}
 	})
+
+	it("synchronizes recoverPiDurableTurn with an in-progress admission before submit", async () => {
+		let markEnteredEnsureRoot!: () => void
+		const enteredEnsureRoot = new Promise<void>((resolve) => {
+			markEnteredEnsureRoot = resolve
+		})
+		let releaseLockStep!: () => void
+		const holdLockStep = new Promise<void>((resolve) => {
+			releaseLockStep = resolve
+		})
+
+		const rawBackend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model) =>
+				makeAssistantReply(model, null, "Committed after disconnect", 8, 4),
+			),
+		)
+		const backend = {
+			...rawBackend,
+			ensureRoot: async (agent: Parameters<typeof rawBackend.ensureRoot>[0]) => {
+				markEnteredEnsureRoot()
+				await holdLockStep
+				return rawBackend.ensureRoot(agent)
+			},
+		}
+
+		try {
+			// Original runTurn enters admitPiTurn, acquires withLock, and pauses before submit().
+			const originalTurn = Effect.runPromise(
+				runPiDurableTurn(backend, {
+					operationId: "turn:1",
+					turn: 1,
+					provider: "openai",
+					modelId: "gpt-4o-mini",
+					system: null,
+					text: "hello",
+				}),
+			)
+			await enteredEnsureRoot
+
+			// Retry's recovery probe starts while admitPiTurn still holds the lock before submit().
+			// It MUST wait for admission to finish instead of returning null.
+			let recoverySettled = false
+			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:1")).then(
+				(outcome) => {
+					recoverySettled = true
+					return outcome
+				},
+			)
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 15)
+			})
+			expect(recoverySettled).toBe(false)
+
+			releaseLockStep()
+			const [originalResult, recoveredResult] = await Promise.all([originalTurn, recovery])
+			expect(originalResult).toMatchObject({ ok: true })
+			expect(recoveredResult).not.toBeNull()
+			expect(recoveredResult?.ok ? recoveredResult.reply.text : null).toBe(
+				"Committed after disconnect",
+			)
+		} finally {
+			releaseLockStep()
+			await rawBackend.close()
+		}
+	})
 	it("resets a stuck session object even when the caller stops waiting for the abort", async () => {
 		const real = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "unused", 1, 1)),
@@ -2137,6 +2137,159 @@ describe("turn engine", () => {
 			expect(contexts).toEqual(["lost", "also lost", "kept", "kept | Echo kept | next"])
 		} finally {
 			await backend.close()
+		}
+	})
+	it("makes a recovery probe wait while the same turn's admission waits for a predecessor to drain", async () => {
+		let releaseFirst: () => void = () => undefined
+		const firstHeld = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		const prompts: Array<string> = []
+		const real = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				prompts.push(prompt)
+				if (prompt === "first") {
+					await firstHeld
+				}
+				return makeAssistantReply(model, null, `Echo ${prompt}`, 1, 1)
+			}),
+		)
+		let releaseDrain: () => void = () => undefined
+		const drainHeld = new Promise<void>((resolve) => {
+			releaseDrain = resolve
+		})
+		let draining = false
+		// Admission of turn 2 lets go of the lock to wait for turn 1; this holds it in that gap.
+		const backend: PiDurableBackend = {
+			...real,
+			abort: () => Effect.succeed(true),
+			wait: async (operationId, signal) => {
+				if (operationId === "turn:1") {
+					draining = true
+					await drainHeld
+				}
+				return real.wait(operationId, signal)
+			},
+		}
+		const turn = (number: number, text: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+		})
+		const until = async (condition: () => boolean) => {
+			while (!condition()) {
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 5)
+				})
+			}
+		}
+		try {
+			const first = Effect.runPromise(runPiDurableTurn(real, turn(1, "first")))
+			await until(() => prompts.length === 1)
+			const second = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second")))
+			await until(() => draining)
+			let probed = false
+			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:2")).then(
+				(outcome) => {
+					probed = true
+					return outcome
+				},
+			)
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 30)
+			})
+			expect(probed).toBe(false)
+			releaseFirst()
+			releaseDrain()
+			await first
+			expect(await second).toMatchObject({ ok: true, reply: { text: "Echo second" } })
+			expect(await recovery).toMatchObject({ ok: true, reply: { text: "Echo second" } })
+		} finally {
+			releaseFirst()
+			releaseDrain()
+			await real.close()
+		}
+	})
+	it("keeps a recovery probe waiting while any of a turn's overlapping admissions is still under way", async () => {
+		let releaseFirst: () => void = () => undefined
+		const firstHeld = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		const prompts: Array<string> = []
+		const real = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				prompts.push(prompt)
+				if (prompt === "first") {
+					await firstHeld
+				}
+				return makeAssistantReply(model, null, `Echo ${prompt}`, 1, 1)
+			}),
+		)
+		let releaseDrain: () => void = () => undefined
+		const drainHeld = new Promise<void>((resolve) => {
+			releaseDrain = resolve
+		})
+		let draining = 0
+		const backend: PiDurableBackend = {
+			...real,
+			abort: () => Effect.succeed(true),
+			wait: async (operationId, signal) => {
+				if (operationId === "turn:1") {
+					draining += 1
+					await drainHeld
+				}
+				return real.wait(operationId, signal)
+			},
+		}
+		const turn = (number: number, text: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+		})
+		const until = async (condition: () => boolean) => {
+			while (!condition()) {
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 5)
+				})
+			}
+		}
+		try {
+			const first = Effect.runPromise(runPiDurableTurn(real, turn(1, "first")))
+			await until(() => prompts.length === 1)
+			// The original call and a retry of it both wait for turn 1 to drain; the retry then gives up.
+			const original = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second")))
+			await until(() => draining === 1)
+			const retry = Effect.runFork(runPiDurableTurn(backend, turn(2, "second")))
+			await until(() => draining === 2)
+			await Effect.runPromise(Fiber.interrupt(retry))
+			let probed = false
+			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:2")).then(
+				(outcome) => {
+					probed = true
+					return outcome
+				},
+			)
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 30)
+			})
+			expect(probed).toBe(false)
+			releaseFirst()
+			releaseDrain()
+			await first
+			expect(await original).toMatchObject({ ok: true, reply: { text: "Echo second" } })
+			expect(await recovery).toMatchObject({ ok: true, reply: { text: "Echo second" } })
+		} finally {
+			releaseFirst()
+			releaseDrain()
+			await real.close()
 		}
 	})
 })

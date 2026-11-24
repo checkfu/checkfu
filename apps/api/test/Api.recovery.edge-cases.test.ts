@@ -510,7 +510,7 @@ describe("interrupted turns and turn recovery", () => {
 		}
 	})
 
-	it("skips runTurn and runs only the final read-only recovery probe when HarnessLimits.attempts is 0", async () => {
+	it("never submits with no attempts allowed, and returns a reply the final read-only probe finds", async () => {
 		let runTurnCalls = 0
 		let recoverCalls = 0
 		let recoverOnFinalProbe = false

@@ -4,10 +4,10 @@ import type { AssistantMessage } from "@earendil-works/pi-ai"
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { AgentChange, EntryId, Harness, Storage } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
+import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
-import * as Latch from "effect/Latch"
 import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import type { SupportedProvider } from "./PiCatalog.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
@@ -180,9 +180,50 @@ export const abortPiDurableTurn = (
 		return yield* Fiber.join(watched)
 	})
 
-const inFlightAdmissions = new WeakMap<PiDurableBackend, Map<string, Set<Latch.Latch>>>()
+// Admissions in progress in this session object, by operation; a retry can overlap the call it
+// retries. Admission lets go of the lock while a predecessor drains, so a recovery probe for the
+// same operation waits until none is left instead of reporting the operation absent in that gap.
+const admitting = new WeakMap<PiDurableBackend, Map<string, Set<Deferred.Deferred<void>>>>()
+
+const admissionsOf = (backend: PiDurableBackend) => {
+	const existing = admitting.get(backend)
+	if (existing !== undefined) {
+		return existing
+	}
+	const created = new Map<string, Set<Deferred.Deferred<void>>>()
+	admitting.set(backend, created)
+	return created
+}
 
 const admitPiTurn = (
+	backend: PiDurableBackend,
+	request: PiTurnRequest,
+): Effect.Effect<boolean | "missing_key"> =>
+	Effect.acquireUseRelease(
+		Effect.sync(() => {
+			const done = Deferred.makeUnsafe<void>()
+			const admissions = admissionsOf(backend)
+			const active = admissions.get(request.operationId) ?? new Set()
+			active.add(done)
+			admissions.set(request.operationId, active)
+			return done
+		}),
+		() => admitPiTurnUnderWay(backend, request),
+		(done) =>
+			Effect.andThen(
+				Effect.sync(() => {
+					const admissions = admissionsOf(backend)
+					const active = admissions.get(request.operationId)
+					active?.delete(done)
+					if (active?.size === 0) {
+						admissions.delete(request.operationId)
+					}
+				}),
+				Deferred.succeed(done, undefined),
+			),
+	)
+
+const admitPiTurnUnderWay = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
 ): Effect.Effect<boolean | "missing_key"> => {
@@ -191,90 +232,60 @@ const admitPiTurn = (
 		model: { provider: request.provider, modelId: request.modelId },
 		instructions: request.system !== null && request.system.length > 0 ? request.system : null,
 	}
-	return Effect.acquireUseRelease(
-		Effect.sync(() => {
-			const barrier = Latch.makeUnsafe(false)
-			let byOperation = inFlightAdmissions.get(backend)
-			if (byOperation === undefined) {
-				byOperation = new Map()
-				inFlightAdmissions.set(backend, byOperation)
-			}
-			let active = byOperation.get(operationId)
-			if (active === undefined) {
-				active = new Set()
-				byOperation.set(operationId, active)
-			}
-			active.add(barrier)
-			return { byOperation, active, barrier }
-		}),
-		() =>
-			Effect.gen(function* () {
-				let finalizedPrevious: string | undefined
-				while (true) {
-					const admitted = yield* backend.withLock(
-						Effect.promise(async () => {
-							if (await backend.hasSubmission(operationId)) {
-								return true
-							}
-							if (backend.isCancelled(operationId)) {
-								return false
-							}
-							if (!backend.hasApiKey(request.provider)) {
-								return "missing_key" as const
-							}
-							await backend.ensureRoot(agent)
-							if (backend.isCancelled(operationId)) {
-								return false
-							}
-							while (true) {
-								const turnState = await backend.beginUsage(
-									operationId,
-									request.turn,
-									finalizedPrevious,
-								)
-								if (turnState.status === "stale") {
-									return false
-								}
-								if (turnState.status === "waiting") {
-									return { waitingFor: turnState.operationId }
-								}
-								if (turnState.status === "finalize") {
-									await backend.finalizePrevious(turnState.operationId)
-									finalizedPrevious = turnState.operationId
-									continue
-								}
-								break
-							}
-							// A turn the session never published a reply for (abandoned, failed or interrupted)
-							// must not reach the model, whatever Pi made of it.
-							for (const unpublished of request.unpublishedOperationIds ?? []) {
-								await backend.omitEntries(unpublished)
-							}
-							if (backend.isCancelled(operationId)) {
-								return false
-							}
-							await backend.submit(request.text, operationId)
-							return true
-						}),
-					)
-					if (typeof admitted !== "object") {
-						return admitted
+	return Effect.gen(function* () {
+		let finalizedPrevious: string | undefined
+		while (true) {
+			const admitted = yield* backend.withLock(
+				Effect.promise(async () => {
+					if (await backend.hasSubmission(operationId)) {
+						return true
 					}
-					// The domain starts a turn only once it has ended the one before, so an
-					// operation still running here is one the domain gave up on.
-					yield* abortPiDurableTurn(backend, admitted.waitingFor)
-					yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
-				}
-			}),
-		({ byOperation, active, barrier }) =>
-			Effect.suspend(() => {
-				active.delete(barrier)
-				if (active.size === 0) {
-					byOperation.delete(operationId)
-				}
-				return barrier.open
-			}),
-	)
+					if (backend.isCancelled(operationId)) {
+						return false
+					}
+					if (!backend.hasApiKey(request.provider)) {
+						return "missing_key"
+					}
+					await backend.ensureRoot(agent)
+					if (backend.isCancelled(operationId)) {
+						return false
+					}
+					while (true) {
+						const turnState = await backend.beginUsage(operationId, request.turn, finalizedPrevious)
+						if (turnState.status === "stale") {
+							return false
+						}
+						if (turnState.status === "waiting") {
+							return { waitingFor: turnState.operationId }
+						}
+						if (turnState.status === "finalize") {
+							await backend.finalizePrevious(turnState.operationId)
+							finalizedPrevious = turnState.operationId
+							continue
+						}
+						break
+					}
+					// A turn the session never published a reply for (abandoned, failed or interrupted)
+					// must not reach the model, whatever Pi made of it.
+					for (const unpublished of request.unpublishedOperationIds ?? []) {
+						await backend.omitEntries(unpublished)
+					}
+					if (backend.isCancelled(operationId)) {
+						return false
+					}
+					await backend.submit(request.text, operationId)
+					return true
+				}),
+			)
+			if (typeof admitted !== "object") {
+				return admitted
+			}
+			// The domain starts a turn only once it has ended the one before, so an
+			// operation still running here is one the domain gave up on.
+			yield* abortPiDurableTurn(backend, admitted.waitingFor)
+			yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
+		}
+	})
 }
 
 const resolveSettledPiTurn = (
@@ -340,18 +351,11 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	backend: PiDurableBackend,
 	operationId: string,
 ): Effect.fn.Return<PiTurnOutcome | null> {
-	// Synchronize with any in-progress admission for this operation before
-	// probing storage so an RPC disconnect mid-admission cannot observe a false
-	// `null` while the original turn proceeds to submit and reply.
-	while (true) {
-		const pending = inFlightAdmissions.get(backend)?.get(operationId)
-		if (pending === undefined || pending.size === 0) {
-			break
-		}
-		yield* Effect.forEach(Array.from(pending), (barrier) => barrier.await, {
-			concurrency: "unbounded",
-			discard: true,
-		})
+	// Another admission may start while this one waits, so look again until none is left.
+	let underWay = admissionsOf(backend).get(operationId)
+	while (underWay !== undefined && underWay.size > 0) {
+		yield* Effect.forEach([...underWay], Deferred.await, { discard: true })
+		underWay = admissionsOf(backend).get(operationId)
 	}
 	const probe = yield* backend.withLock(
 		Effect.promise(async () => {
