@@ -81,12 +81,10 @@ export function NewEnvironmentPage(): React.JSX.Element {
 	const [name, setName] = React.useState("")
 	const [description, setDescription] = React.useState("")
 	const create = useAction(async () => {
-		const environment = await checkfu.waitForPending(
-			await checkfu.environments.create({
-				name: name.trim(),
-				description: description === "" ? null : description,
-			}),
-		)
+		const environment = await checkfu.environments.create({
+			name: name.trim(),
+			description: description === "" ? null : description,
+		})
 		await navigate({
 			to: "/environments/$environmentId",
 			params: { environmentId: environment.id },

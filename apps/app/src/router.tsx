@@ -12,8 +12,6 @@ import { Layout, RouteError } from "./pages/layout.tsx"
 import { NewSessionPage, SessionPage, SessionsPage } from "./pages/sessions.tsx"
 import { SignInPage } from "./pages/sign-in.tsx"
 
-const PAGE = { limit: 100, order: "desc" } as const
-
 const root = createRootRoute({
 	component: Outlet,
 	errorComponent: (props) => (
@@ -48,7 +46,7 @@ const home = createRoute({
 const sessions = createRoute({
 	getParentRoute: () => app,
 	path: "/sessions",
-	loader: () => checkfu.sessions.list(PAGE),
+	loader: () => checkfu.sessions.list(),
 	component: SessionsPage,
 })
 
@@ -57,8 +55,8 @@ const newSession = createRoute({
 	path: "/sessions/new",
 	loader: async () => {
 		const [agents, environments] = await Promise.all([
-			checkfu.agents.list(PAGE),
-			checkfu.environments.list(PAGE),
+			checkfu.agents.list(),
+			checkfu.environments.list(),
 		])
 		return { agents: agents.data, environments: environments.data }
 	},
@@ -75,7 +73,7 @@ const session = createRoute({
 const agents = createRoute({
 	getParentRoute: () => app,
 	path: "/agents",
-	loader: () => checkfu.agents.list(PAGE),
+	loader: () => checkfu.agents.list(),
 	component: AgentsPage,
 })
 
@@ -95,7 +93,7 @@ const agent = createRoute({
 const environments = createRoute({
 	getParentRoute: () => app,
 	path: "/environments",
-	loader: () => checkfu.environments.list(PAGE),
+	loader: () => checkfu.environments.list(),
 	component: EnvironmentsPage,
 })
 

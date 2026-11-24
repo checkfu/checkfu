@@ -1,11 +1,24 @@
 import { cn } from "@checkfu/ui/cn"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
+import type { SessionEventType } from "@checkfu/sdk/Schemas"
 import * as React from "react"
-import { checkfu, errorMessage } from "../api.ts"
+import { checkfu } from "../api.ts"
 
 type Status = "idle" | "running" | "terminated"
 
-const RECONNECT_MS = 5000
+const EVENT_TYPES: Record<SessionEventType, true> = {
+	"user.message": true,
+	"user.interrupt": true,
+	"session.status_running": true,
+	"span.model_request_start": true,
+	"agent.thinking": true,
+	"agent.message": true,
+	"span.model_request_end": true,
+	"session.status_idle": true,
+	"session.error": true,
+	"session.status_terminated": true,
+	"session.archived": true,
+}
 
 const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
 	switch (event.type) {
@@ -25,38 +38,27 @@ export function useSessionEvents(sessionId: string, initialStatus: Status) {
 	const [status, setStatus] = React.useState(initialStatus)
 	const [error, setError] = React.useState<string>()
 	React.useEffect(() => {
-		const controller = new AbortController()
-		let after: number | undefined
-		const follow = async (): Promise<void> => {
-			while (!controller.signal.aborted) {
-				try {
-					const stream = await checkfu.sessions.events.stream(
-						sessionId,
-						after === undefined ? undefined : { after },
-						{ signal: controller.signal },
-					)
-					setError(undefined)
-					for await (const event of stream) {
-						after = event.seq
-						setEvents((seen) =>
-							seen.some((known) => known.seq === event.seq) ? seen : [...seen, event],
-						)
-						setStatus((current) => statusAfter(current, event))
-					}
-					return
-				} catch (error_) {
-					if (controller.signal.aborted) {
-						return
-					}
-					setError(`${errorMessage(error_)} Reconnecting…`)
-					await new Promise((resolve) => {
-						setTimeout(resolve, RECONNECT_MS)
-					})
-				}
-			}
+		const source = new EventSource(checkfu.sessions.streamUrl(sessionId))
+		let archived = false
+		const receive = (message: MessageEvent<string>) => {
+			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
+			const event = JSON.parse(message.data) as JsonSessionEvent
+			archived ||= event.type === "session.archived"
+			setEvents((seen) => (seen.some((known) => known.seq === event.seq) ? seen : [...seen, event]))
+			setStatus((current) => statusAfter(current, event))
 		}
-		void follow()
-		return () => controller.abort()
+		for (const type of Object.keys(EVENT_TYPES)) {
+			source.addEventListener(type, receive)
+		}
+		source.addEventListener("open", () => setError(undefined))
+		source.addEventListener("error", () => {
+			if (source.readyState === EventSource.CONNECTING) {
+				setError("Live updates were interrupted. Reconnecting…")
+			} else if (!archived) {
+				setError("Live updates stopped. Reload the page to try again.")
+			}
+		})
+		return () => source.close()
 	}, [sessionId])
 	return { events, status, error }
 }
