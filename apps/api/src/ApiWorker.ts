@@ -9,7 +9,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
-import { API_DOMAIN_ENV, customDomain } from "./CustomDomain.ts"
+import { customDomains } from "./CustomDomain.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
 import { PiSession } from "./Pi/PiSession.do.ts"
@@ -81,10 +81,7 @@ export const API_WORKER_PROPS = {
 
 export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 	"ApiWorker",
-	Effect.map(customDomain(API_DOMAIN_ENV), (domain) => ({
-		...API_WORKER_PROPS,
-		...domain,
-	})),
+	Effect.map(customDomains, ({ api }) => ({ ...API_WORKER_PROPS, ...api })),
 	Effect.gen(function* () {
 		// Platform pins the owning instance/build Scope onto the Worker init context.
 		// Building both the domain/telemetry layers and the HTTP router in that scope

@@ -1,7 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "@checkfu/api/ApiWorker"
-import { MCP_DOMAIN_ENV, customDomain } from "@checkfu/api/CustomDomain"
+import { customDomains } from "@checkfu/api/CustomDomain"
 import * as Alchemy from "alchemy"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -42,7 +42,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 		Effect.gen(function* () {
 			const api = yield* ApiWorker
 			const mcp = yield* Cloudflare.Worker("McpWorker", {
-				...(yield* customDomain(MCP_DOMAIN_ENV)),
+				...(yield* customDomains).mcp,
 				main: import.meta.resolve("@checkfu/mcp/Worker"),
 				compatibility: { date: "2026-11-17" },
 				observability: { enabled: true },
