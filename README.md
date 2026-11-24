@@ -106,7 +106,7 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 
 ## Session workspace
 
-Every session has a durable workspace: a filesystem that lasts for the whole session and survives restarts. The agent works in it with `read`, `ls`, `find`, `grep`, `write`, `edit` and `delete` tools, starting from `/workspace`. The workspace is discarded when the session terminates.
+Every session has a durable workspace: a filesystem that lasts for the whole session and survives restarts. The agent works in it with `read`, `ls`, `find`, `grep`, `write`, `edit` and `delete` tools, starting from `/workspace`. The workspace runs in the harness Worker, beside the session object whose tools use it, and the API reaches it only through that Worker. It is discarded when the session terminates.
 
 ## Commands
 
