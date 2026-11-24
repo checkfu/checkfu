@@ -220,7 +220,9 @@ export class PiApprovalStore {
 	}
 }
 
-interface GatedTool {
+export interface GatedTool {
+	/** What kind of server the tool belongs to; an MCP server unless said otherwise. */
+	readonly source?: "mcp" | "api"
 	readonly server: string
 	readonly tool: string
 	readonly ask: boolean
@@ -310,6 +312,7 @@ export const makeToolGate = ({
 					}
 					ledger.began({
 						call_id: call.id,
+						...(target.source === undefined ? {} : { source: target.source }),
 						server: target.server,
 						tool: target.tool,
 						input: isJsonObject(call.arguments) ? call.arguments : {},

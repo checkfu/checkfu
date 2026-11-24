@@ -474,6 +474,124 @@ describe("@checkfu/sdk live API integration", () => {
 	)
 
 	it.live(
+		"declares an API server, stores its key and binds the two in a session",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const { layer } = makePiDurableTestLayer(async (model) =>
+						makeAssistantReply(model, null, "ok", 2, 2),
+					)
+					const key = "key_sdk_SECRET_do_not_leak"
+					const bodies: Array<string> = []
+
+					yield* Effect.gen(function* () {
+						const { fetch: apiFetch } = yield* makeApiHandler
+						const services = yield* Effect.context<never>()
+						const bridgeFetch = makeFetchBridge(Effect.runPromiseWith(services), apiFetch)
+						const recordingFetch: typeof globalThis.fetch = async (input, init) => {
+							const response = await bridgeFetch(input, init)
+							bodies.push(await response.clone().text())
+							return response
+						}
+						const sdkLayer = CheckfuClient.layerFetch({
+							apiKey: TEST_API_KEY,
+							baseUrl: "http://localhost:1337",
+							fetch: recordingFetch,
+							maxRetries: 0,
+						})
+
+						yield* Effect.gen(function* () {
+							const client = yield* CheckfuClient
+							const agent = yield* client.agents.create({
+								name: "Shopper",
+								model: "gpt-4o-mini",
+								api_servers: [
+									{
+										type: "openapi",
+										name: "shop",
+										base_url: "https://api.shop.example/v1",
+										spec: {
+											openapi: "3.0.3",
+											info: { title: "Shop", version: "1" },
+											paths: {
+												"/pets": {
+													get: {
+														operationId: "listPets",
+														summary: "SPEC_MARKER",
+														responses: { "200": { description: "ok" } },
+													},
+												},
+											},
+										},
+									},
+								],
+								tools: [
+									{
+										type: "api_toolset",
+										api_server_name: "shop",
+										default_config: { permission_policy: { type: "always_ask" } },
+									},
+								],
+							})
+							if (isPendingResource(agent)) {
+								return yield* Effect.die("agent creation stayed pending")
+							}
+							expect(
+								agent.api_servers.map((server) => [server.name, server.spec.operations]),
+							).toEqual([["shop", 1]])
+							expect(agent.tools.map((tool) => tool.type)).toEqual(["api_toolset"])
+
+							const vault = yield* client.vaults.create({ display_name: "Keys" })
+							if (isPendingResource(vault)) {
+								return yield* Effect.die("vault creation stayed pending")
+							}
+							const credential = yield* client.vaults.credentials.create(vault.id, {
+								auth: {
+									type: "api_key",
+									base_url: "https://api.shop.example/v1/",
+									token: Redacted.make(key),
+									placement: { in: "header", name: "X-Api-Key" },
+								},
+							})
+							if (isPendingResource(credential)) {
+								return yield* Effect.die("credential creation stayed pending")
+							}
+							expect(credential.auth).toEqual({
+								type: "api_key",
+								base_url: "https://api.shop.example/v1",
+								placement: { in: "header", name: "X-Api-Key" },
+							})
+
+							const environment = yield* client.environments.create({ name: "Env" })
+							if (isPendingResource(environment)) {
+								return yield* Effect.die("environment creation stayed pending")
+							}
+							const session = yield* client.sessions.create({
+								agent: agent.id,
+								environment_id: environment.id,
+								vault_ids: [vault.id],
+							})
+							if (isPendingResource(session)) {
+								return yield* Effect.die("session creation stayed pending")
+							}
+							expect(session.api_servers).toEqual([
+								{
+									name: "shop",
+									base_url: "https://api.shop.example/v1",
+									credential_id: credential.id,
+								},
+							])
+						}).pipe(Effect.provide(sdkLayer))
+					}).pipe(Effect.provide(layer))
+
+					expect(bodies.join("\n")).not.toContain(key)
+					expect(bodies.join("\n")).not.toContain("SPEC_MARKER")
+				}),
+			),
+		{ timeout: 15_000 },
+	)
+
+	it.live(
 		"stores a credential in a vault and never gets its token back",
 		() =>
 			Effect.scoped(

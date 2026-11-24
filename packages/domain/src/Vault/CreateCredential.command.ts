@@ -34,7 +34,7 @@ export class CredentialUrlConflict extends Domain.Rejection(
 	{ vault_id: VaultId, credential_id: CredentialId, mcp_server_url: McpServerUrl },
 	{
 		httpApiStatus: 409,
-		description: "The vault already holds an active credential for this MCP server URL.",
+		description: "The vault already holds an active credential for this URL.",
 	},
 ) {}
 

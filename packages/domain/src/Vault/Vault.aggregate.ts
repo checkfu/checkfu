@@ -141,7 +141,10 @@ export class Vault extends Domain.Aggregate("Vault", {
 						...state,
 						credentials: [
 							...state.credentials,
-							{ credential_id: e.credential_id, mcp_server_url: e.auth.mcp_server_url },
+							{
+								credential_id: e.credential_id,
+								mcp_server_url: e.auth.type === "api_key" ? e.auth.base_url : e.auth.mcp_server_url,
+							},
 						],
 					}
 				: state,

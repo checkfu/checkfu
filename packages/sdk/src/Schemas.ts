@@ -205,7 +205,7 @@ export const RequiresActionStopReason = Schema.Struct({
 	type: Schema.Literal("requires_action"),
 	event_ids: Schema.Array(Schema.String).annotate({
 		description:
-			"The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use.",
+			"The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use or agent.api_tool_use and a user.custom_tool_result for each agent.custom_tool_use.",
 	}),
 })
 export type RequiresActionStopReason = typeof RequiresActionStopReason.Type
@@ -303,6 +303,25 @@ export const SessionEventFields = {
 		tool_use_id: ResourceId,
 		name: ResourceId,
 		input: Schema.JsonObject,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.api_tool_use": {
+		tool_use_id: ResourceId,
+		api_server_name: ResourceId,
+		name: ResourceId,
+		input: Schema.JsonObject,
+		evaluated_permission: Schema.optionalKey(
+			EvaluatedPermission.annotate({
+				description: "allow: the call ran without asking. ask: it waited for a confirmation.",
+			}),
+		),
+		parent_tool_use_id: Schema.optionalKey(ResourceId),
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.api_tool_result": {
+		tool_use_id: ResourceId,
+		content: Schema.Array(TextBlock),
+		is_error: Schema.Boolean,
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 	},
 	"agent.thinking": {
@@ -477,8 +496,44 @@ export const McpOAuthAuth = Schema.Struct({
 	refresh: Schema.NullOr(McpOAuthRefresh),
 })
 
+export const MAX_API_KEY_PLACEMENT_NAME_LENGTH = 128
+export const MAX_API_KEY_PREFIX_LENGTH = 64
+
+/** Where an API key goes in a request: a header, optionally after a prefix, or a query parameter. */
+export const ApiKeyPlacement = Schema.Union([
+	Schema.Struct({
+		in: Schema.Literal("header"),
+		name: Schema.String.check(
+			Schema.isPattern(/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/u, {
+				expected: "an HTTP header name",
+			}),
+		),
+		prefix: Schema.optionalKey(
+			Schema.String.check(
+				Schema.isPattern(/^[\u0020-\u007E]{1,64}$/u, {
+					expected: "1-64 printable ASCII characters",
+				}),
+			),
+		),
+	}),
+	Schema.Struct({
+		in: Schema.Literal("query"),
+		name: Schema.String.check(
+			Schema.isMinLength(1),
+			Schema.isMaxLength(MAX_API_KEY_PLACEMENT_NAME_LENGTH),
+		),
+	}),
+])
+export type ApiKeyPlacement = typeof ApiKeyPlacement.Type
+
+export const ApiKeyAuth = Schema.Struct({
+	type: Schema.Literal("api_key"),
+	base_url: McpServerUrl,
+	placement: ApiKeyPlacement,
+})
+
 // What a credential authenticates against. The secret is never part of it.
-export const CredentialAuth = Schema.Union([StaticBearerAuth, McpOAuthAuth])
+export const CredentialAuth = Schema.Union([StaticBearerAuth, McpOAuthAuth, ApiKeyAuth])
 export type CredentialAuth = typeof CredentialAuth.Type
 
 // Held only by the credential's connection object: no command, event or view carries it.
@@ -510,6 +565,11 @@ export const CredentialSecretMaterial = Schema.Union([
 			}),
 		),
 	}),
+	Schema.Struct({
+		type: Schema.Literal("api_key"),
+		token: CredentialSecret,
+		placement: ApiKeyPlacement,
+	}),
 ])
 export type CredentialSecretMaterial = typeof CredentialSecretMaterial.Type
 
@@ -522,6 +582,7 @@ export const CredentialSecretReplacement = Schema.Union([
 		expires_at: Schema.NullOr(Schema.DateTimeUtc),
 		refresh_token: Schema.NullOr(CredentialSecret),
 	}),
+	Schema.Struct({ type: Schema.Literal("api_key"), token: CredentialSecret }),
 ])
 export type CredentialSecretReplacement = typeof CredentialSecretReplacement.Type
 
@@ -592,3 +653,44 @@ export const McpServerBinding = Schema.Struct({
 	credential_id: Schema.NullOr(Schema.String.check(Schema.isMinLength(1))),
 })
 export type McpServerBinding = typeof McpServerBinding.Type
+
+// ---------------------------------------------------------------------------
+// API server schemas
+// ---------------------------------------------------------------------------
+
+export const MAX_API_SERVERS = 4
+export const MAX_API_SPEC_JSON_BYTES = 2 * 1024 * 1024
+export const MAX_API_SERVER_OPERATIONS = 256
+// One server's tools are cached by a session as one row, which holds 2 MB.
+export const MAX_API_SERVER_DESCRIPTORS_JSON_BYTES = 1024 * 1024
+export const MAX_API_SELECTION_ENTRIES = 256
+
+export const ApiServerName = McpServerName
+
+const ApiSelectionEntries = Schema.Array(
+	Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+).check(Schema.isMaxLength(MAX_API_SELECTION_ENTRIES))
+
+/** Operations of an OpenAPI document, picked by operation name or by tag. */
+export const ApiSelection = Schema.Struct({
+	names: Schema.optionalKey(ApiSelectionEntries),
+	tags: Schema.optionalKey(ApiSelectionEntries),
+})
+export type ApiSelection = typeof ApiSelection.Type
+
+/** What is kept of a server's OpenAPI document in answers: enough to tell which document it was. */
+export const ApiSpecSummary = Schema.Struct({
+	title: Schema.String,
+	version: Schema.String,
+	operations: NonNegativeInt,
+	digest: Schema.String,
+})
+export type ApiSpecSummary = typeof ApiSpecSummary.Type
+
+/** An agent's API server, as one session uses it: with the credential it was bound to, or none. */
+export const ApiServerBinding = Schema.Struct({
+	name: ApiServerName,
+	base_url: McpServerUrl,
+	credential_id: Schema.NullOr(Schema.String.check(Schema.isMinLength(1))),
+})
+export type ApiServerBinding = typeof ApiServerBinding.Type

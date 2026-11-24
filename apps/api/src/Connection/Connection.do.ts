@@ -1,5 +1,8 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
+import type { HttpRequestDescription } from "../OpenApi/OpenApiTypes.ts"
+import { makeApiUpstream } from "./ApiUpstream.ts"
+import type { ApiCallOutcome } from "./ApiUpstream.ts"
 import type { ConnectionProxy } from "./ConnectionProxy.ts"
 import type { ForwardOutcome, ForwardRequest, McpTarget } from "./McpTools.ts"
 import { makeSecretCustody } from "./SecretCustody.ts"
@@ -15,11 +18,11 @@ export const connectionName = (binding: {
 
 /**
  * One object per credential, named by the credential's id: the only place the
- * credential's secret exists, the only sender of requests to the MCP server
- * it was stored for, and the only one that refreshes its token. Sessions keep
- * their own MCP clients and send through it, so they never share protocol
+ * credential's secret exists, the only sender of requests to the MCP server or
+ * API it was stored for, and the only one that refreshes its token. Sessions
+ * keep their own MCP clients and send through it, so they never share protocol
  * state and never hold the secret. A server used without a credential has an
- * object too, named by its URL, so every MCP request takes the same path.
+ * object too, named by its URL, so every request takes the same path.
  */
 export class Connection extends Cloudflare.DurableObject<Connection>()(
 	"Connection",
@@ -81,10 +84,22 @@ export class Connection extends Cloudflare.DurableObject<Connection>()(
 			}
 			return proxy
 		}
+		const api = makeApiUpstream(() => {
+			const name = state.raw.id.name ?? ""
+			if (name.startsWith(UNAUTHENTICATED)) {
+				return { baseUrl: name.slice(UNAUTHENTICATED.length), key: null }
+			}
+			const baseUrl = custody.target()
+			const held = custody.read()
+			// Only an API key is ever sent to an API.
+			return baseUrl === null || held === null || held.type !== "api_key"
+				? null
+				: { baseUrl, key: { token: held.token, placement: held.placement } }
+		})
 		return Effect.succeed({
 			alarm: () => Effect.promise(() => custody.expire()),
-			storeSecret: (secret: HeldSecret, mcpServerUrl: string): Effect.Effect<boolean> =>
-				Effect.promise(() => custody.store(secret, mcpServerUrl)),
+			storeSecret: (secret: HeldSecret, target: string): Effect.Effect<boolean> =>
+				Effect.promise(() => custody.store(secret, target)),
 			replaceSecret: (secret: SecretReplacement): Effect.Effect<number | null> =>
 				Effect.promise(() => custody.replace(secret)),
 			keepSecret: (): Effect.Effect<void> => Effect.promise(() => custody.keep()),
@@ -97,6 +112,8 @@ export class Connection extends Cloudflare.DurableObject<Connection>()(
 				Effect.sync(() => (custody.unreported() ? custody.report() : null)),
 			acknowledgeRefresh: (refreshes: number): Effect.Effect<void> =>
 				Effect.sync(() => custody.reported(refreshes)),
+			callApi: (baseUrl: string, request: HttpRequestDescription) =>
+				Effect.promise((): Promise<ApiCallOutcome> => api.call(baseUrl, request)),
 		})
 	}),
 ) {}

@@ -4,13 +4,14 @@ import { isJsonValue } from "@earendil-works/chord/json"
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable"
 import * as Schema from "effect/Schema"
 import type { McpCallOutcome, McpToolDescriptor } from "../Connection/McpTools.ts"
+import type { GatedTool } from "./PiApprovals.ts"
 import type { McpCall, McpCallResult } from "./PiMcpStore.ts"
 import { MODEL_TEXT_LIMITS, boundModelOutput } from "./PiToolText.ts"
 
 export const MCP_EXTENSION_PREFIX = "checkfu.mcp."
 
 // What every model provider accepts as a tool name.
-const MODEL_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u
+export const MODEL_TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u
 
 export const mcpToolName = (server: string, tool: string): string =>
 	`mcp__${server}__${tool.replaceAll(/[^A-Za-z0-9_-]/gu, "_")}`
@@ -70,7 +71,7 @@ export interface McpCalls {
 	readonly ended: (callId: string, result: McpCallResult) => void
 }
 
-const INTERRUPTED = {
+export const INTERRUPTED = {
 	output: [{ type: "text" as const, text: "The turn was interrupted before this call ran." }],
 	isError: true,
 }
@@ -82,11 +83,8 @@ const INTERRUPTED = {
  */
 export const mcpToolPermissions = (
 	servers: ReadonlyArray<McpServerTools>,
-): Map<string, { readonly server: string; readonly tool: string; readonly ask: boolean }> => {
-	const permissions = new Map<
-		string,
-		{ readonly server: string; readonly tool: string; readonly ask: boolean }
-	>()
+): Map<string, GatedTool> => {
+	const permissions = new Map<string, GatedTool>()
 	for (const { binding, tools } of servers) {
 		for (const tool of tools ?? []) {
 			const name = mcpToolName(binding.name, tool.name)

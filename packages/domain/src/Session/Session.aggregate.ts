@@ -26,6 +26,8 @@ import {
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
 import {
+	AgentApiToolResult,
+	AgentApiToolUse,
 	AgentCustomToolUse,
 	AgentMcpToolResult,
 	AgentMcpToolUse,
@@ -409,7 +411,9 @@ export class Session extends Domain.Aggregate("Session", {
 				return [
 					result.type === "tool_result"
 						? new AgentToolResult(recorded)
-						: new AgentMcpToolResult(recorded),
+						: result.type === "mcp_tool_result"
+							? new AgentMcpToolResult(recorded)
+							: new AgentApiToolResult(recorded),
 				]
 			}
 			const { use } = call
@@ -429,19 +433,33 @@ export class Session extends Domain.Aggregate("Session", {
 								input: use.input,
 								...useTruncated,
 							})
-						: new AgentMcpToolUse({
-								tool_use_id: use.tool_use_id,
-								mcp_server_name: use.mcp_server_name,
-								name: use.name,
-								input: use.input,
-								...(use.evaluated_permission === undefined
-									? {}
-									: { evaluated_permission: use.evaluated_permission }),
-								...(use.parent_tool_use_id === undefined
-									? {}
-									: { parent_tool_use_id: use.parent_tool_use_id }),
-								...useTruncated,
-							})
+						: use.type === "mcp_tool_use"
+							? new AgentMcpToolUse({
+									tool_use_id: use.tool_use_id,
+									mcp_server_name: use.mcp_server_name,
+									name: use.name,
+									input: use.input,
+									...(use.evaluated_permission === undefined
+										? {}
+										: { evaluated_permission: use.evaluated_permission }),
+									...(use.parent_tool_use_id === undefined
+										? {}
+										: { parent_tool_use_id: use.parent_tool_use_id }),
+									...useTruncated,
+								})
+							: new AgentApiToolUse({
+									tool_use_id: use.tool_use_id,
+									api_server_name: use.api_server_name,
+									name: use.name,
+									input: use.input,
+									...(use.evaluated_permission === undefined
+										? {}
+										: { evaluated_permission: use.evaluated_permission }),
+									...(use.parent_tool_use_id === undefined
+										? {}
+										: { parent_tool_use_id: use.parent_tool_use_id }),
+									...useTruncated,
+								})
 			if (call._tag === "use") {
 				return [used]
 			}
@@ -456,7 +474,9 @@ export class Session extends Domain.Aggregate("Session", {
 				used,
 				result.type === "tool_result"
 					? new AgentToolResult(recorded)
-					: new AgentMcpToolResult(recorded),
+					: result.type === "mcp_tool_result"
+						? new AgentMcpToolResult(recorded)
+						: new AgentApiToolResult(recorded),
 			]
 		},
 
@@ -649,6 +669,8 @@ export class Session extends Domain.Aggregate("Session", {
 		"agent.mcp_tool_use": (state) => state,
 		"agent.mcp_tool_result": (state) => state,
 		"agent.custom_tool_use": (state) => state,
+		"agent.api_tool_use": (state) => state,
+		"agent.api_tool_result": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>

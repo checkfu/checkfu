@@ -22,7 +22,7 @@ export interface ConnectionExecutorService {
 	readonly storeSecret: (
 		credentialId: string,
 		secret: HeldSecret,
-		mcpServerUrl: string,
+		target: string,
 	) => Effect.Effect<boolean, ConnectionCallFailed>
 	/** The secret's new revision, or null when it held nothing to replace. */
 	readonly replaceSecret: (
@@ -54,6 +54,9 @@ const held = (secret: CredentialSecretMaterial): HeldSecret => {
 	if (secret.type === "static_bearer") {
 		return { type: "static_bearer", token: Redacted.value(secret.token) }
 	}
+	if (secret.type === "api_key") {
+		return { type: "api_key", token: Redacted.value(secret.token), placement: secret.placement }
+	}
 	const { refresh } = secret
 	return {
 		type: "mcp_oauth",
@@ -80,8 +83,8 @@ const held = (secret: CredentialSecretMaterial): HeldSecret => {
 }
 
 const replacement = (secret: CredentialSecretReplacement): SecretReplacement =>
-	secret.type === "static_bearer"
-		? { type: "static_bearer", token: Redacted.value(secret.token) }
+	secret.type !== "mcp_oauth"
+		? { type: secret.type, token: Redacted.value(secret.token) }
 		: {
 				type: "mcp_oauth",
 				access_token: Redacted.value(secret.access_token),

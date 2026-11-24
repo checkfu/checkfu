@@ -129,6 +129,92 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							maxItems: 20,
 							description: "MCP servers this agent connects to. Names must be unique.",
 						},
+						api_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["openapi"],
+									},
+									name: {
+										type: "string",
+										pattern: "^[A-Za-z0-9_-]{1,32}$",
+										description:
+											"Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers.",
+									},
+									base_url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+										description:
+											"Where the API is served. Every request goes to this origin, under this path; the document's own servers are ignored.",
+									},
+									include: {
+										type: "object",
+										properties: {
+											names: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+											tags: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+										},
+										additionalProperties: false,
+										description: "Keep only operations with one of these names or tags",
+									},
+									exclude: {
+										type: "object",
+										properties: {
+											names: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+											tags: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+										},
+										additionalProperties: false,
+										description: "Then drop operations with one of these names or tags",
+									},
+									spec: {
+										type: "object",
+										description:
+											"The API's OpenAPI 3.0 or 3.1 document, as JSON. Each operation becomes a tool. It is stored once and never returned.",
+									},
+								},
+								required: ["type", "name", "base_url", "spec"],
+								additionalProperties: false,
+							},
+							maxItems: 4,
+							description:
+								"HTTP APIs this agent calls, each described by its OpenAPI document. Names must be unique.",
+						},
 						tools: {
 							type: "array",
 							items: {
@@ -206,13 +292,81 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										properties: {
 											type: {
 												type: "string",
+												enum: ["api_toolset"],
+											},
+											api_server_name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,32}$",
+												description:
+													"The API server, by its name in api_servers, whose tools this configures",
+											},
+											default_config: {
+												type: "object",
+												properties: {
+													permission_policy: {
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["always_allow", "always_ask"],
+																description:
+																	"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+															},
+														},
+														required: ["type"],
+														additionalProperties: false,
+													},
+												},
+												additionalProperties: false,
+												description:
+													"Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks.",
+											},
+											configs: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														name: {
+															type: "string",
+															minLength: 1,
+															maxLength: 256,
+															description: "The operation's tool name",
+														},
+														permission_policy: {
+															type: "object",
+															properties: {
+																type: {
+																	type: "string",
+																	enum: ["always_allow", "always_ask"],
+																	description:
+																		"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+																},
+															},
+															required: ["type"],
+															additionalProperties: false,
+														},
+													},
+													required: ["name"],
+													additionalProperties: false,
+												},
+												maxItems: 128,
+											},
+										},
+										required: ["type", "api_server_name"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
 												enum: ["custom"],
 											},
 											name: {
 												type: "string",
 												pattern: "^[A-Za-z0-9_-]{1,64}$",
 												description:
-													"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool.",
+													"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool.",
 											},
 											description: {
 												type: "string",
@@ -230,9 +384,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									},
 								],
 							},
-							maxItems: 84,
+							maxItems: 88,
 							description:
-								"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
+								"Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
 						},
 					},
 					required: ["name", "model"],
@@ -394,6 +548,92 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							maxItems: 20,
 							description: "MCP servers this agent connects to. Names must be unique.",
 						},
+						api_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["openapi"],
+									},
+									name: {
+										type: "string",
+										pattern: "^[A-Za-z0-9_-]{1,32}$",
+										description:
+											"Name the agent's tools and a session's credential binding refer to. Unique among the agent's API and MCP servers.",
+									},
+									base_url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+										description:
+											"Where the API is served. Every request goes to this origin, under this path; the document's own servers are ignored.",
+									},
+									include: {
+										type: "object",
+										properties: {
+											names: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+											tags: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+										},
+										additionalProperties: false,
+										description: "Keep only operations with one of these names or tags",
+									},
+									exclude: {
+										type: "object",
+										properties: {
+											names: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+											tags: {
+												type: "array",
+												items: {
+													type: "string",
+													minLength: 1,
+													maxLength: 128,
+												},
+												maxItems: 256,
+											},
+										},
+										additionalProperties: false,
+										description: "Then drop operations with one of these names or tags",
+									},
+									spec: {
+										type: "object",
+										description:
+											"The API's OpenAPI 3.0 or 3.1 document, as JSON. Each operation becomes a tool. It is stored once and never returned.",
+									},
+								},
+								required: ["type", "name", "base_url", "spec"],
+								additionalProperties: false,
+							},
+							maxItems: 4,
+							description:
+								"Replaces the agent's API servers. Each needs its document again; omit the field to keep them as they are.",
+						},
 						tools: {
 							type: "array",
 							items: {
@@ -471,13 +711,81 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										properties: {
 											type: {
 												type: "string",
+												enum: ["api_toolset"],
+											},
+											api_server_name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,32}$",
+												description:
+													"The API server, by its name in api_servers, whose tools this configures",
+											},
+											default_config: {
+												type: "object",
+												properties: {
+													permission_policy: {
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["always_allow", "always_ask"],
+																description:
+																	"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+															},
+														},
+														required: ["type"],
+														additionalProperties: false,
+													},
+												},
+												additionalProperties: false,
+												description:
+													"Applies to every operation of the API without an entry in configs. When no policy is given, an operation whose HTTP method only reads (GET, HEAD, OPTIONS) runs without asking and every other operation asks.",
+											},
+											configs: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														name: {
+															type: "string",
+															minLength: 1,
+															maxLength: 256,
+															description: "The operation's tool name",
+														},
+														permission_policy: {
+															type: "object",
+															properties: {
+																type: {
+																	type: "string",
+																	enum: ["always_allow", "always_ask"],
+																	description:
+																		"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+																},
+															},
+															required: ["type"],
+															additionalProperties: false,
+														},
+													},
+													required: ["name"],
+													additionalProperties: false,
+												},
+												maxItems: 128,
+											},
+										},
+										required: ["type", "api_server_name"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
 												enum: ["custom"],
 											},
 											name: {
 												type: "string",
 												pattern: "^[A-Za-z0-9_-]{1,64}$",
 												description:
-													"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool.",
+													"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or api__, or be the name of a built-in tool.",
 											},
 											description: {
 												type: "string",
@@ -495,9 +803,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									},
 								],
 							},
-							maxItems: 84,
+							maxItems: 88,
 							description:
-								"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
+								"Tools and tool configuration. An mcp_toolset or api_toolset sets when the tools of one of the agent's MCP or API servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
 						},
 					},
 					required: ["version"],
@@ -1321,7 +1629,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									},
 									maxItems: 20,
 									description:
-										"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials.",
+										"Vaults whose credentials the session may use. An MCP or API server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials or api_server_credentials.",
 								},
 								mcp_server_credentials: {
 									type: "array",
@@ -1344,6 +1652,28 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									maxItems: 20,
 									description:
 										"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match.",
+								},
+								api_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											api_server_name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,32}$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+											},
+										},
+										required: ["api_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 4,
+									description:
+										"Binds one of the agent's API servers to an api_key credential by id, whatever vault_ids would match.",
 								},
 							},
 							required: ["agent", "environment_id"],
@@ -1418,7 +1748,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									},
 									maxItems: 20,
 									description:
-										"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials.",
+										"Vaults whose credentials the session may use. An MCP or API server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials or api_server_credentials.",
 								},
 								mcp_server_credentials: {
 									type: "array",
@@ -1441,6 +1771,28 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									maxItems: 20,
 									description:
 										"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match.",
+								},
+								api_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											api_server_name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,32}$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+											},
+										},
+										required: ["api_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 4,
+									description:
+										"Binds one of the agent's API servers to an api_key credential by id, whatever vault_ids would match.",
 								},
 							},
 							required: ["agent_id", "environment_id"],

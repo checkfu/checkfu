@@ -1,10 +1,13 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
+import { ApiServerBinding } from "@checkfu/domain/Mcp/ApiServers"
 import { CustomTool } from "@checkfu/domain/Mcp/CustomTools"
 import { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { ModelUsage, TextBlock, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 import { CustodyReport, HeldSecret, SecretReplacement } from "../Connection/SecretCustody.ts"
+import { CatalogConfig } from "../OpenApi/ApiCatalogStore.ts"
+import { ApiSpecSelection, ApiSpecSummary } from "../OpenApi/ApiSpecCheck.ts"
 
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
@@ -16,6 +19,8 @@ export const PiTurnRequest = Schema.Struct({
 	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
 	/** The agent's MCP servers, as this session bound them. */
 	mcp_servers: Schema.optionalKey(Schema.Array(McpServerBinding)),
+	/** The agent's API servers, as this session bound them. */
+	api_servers: Schema.optionalKey(Schema.Array(ApiServerBinding)),
 	/** The tools the caller's application runs, as the agent version declares them. */
 	custom_tools: Schema.optionalKey(Schema.Array(CustomTool)),
 })
@@ -102,6 +107,17 @@ export const PiHarnessCalls = {
 	waitingCalls: { args: Schema.Tuple([Schema.String]), result: Schema.Array(Schema.String) },
 	// Whether Pi can check calls against each custom tool's input schema; the API asks before
 	// it accepts an agent's tools.
+	// The importer runs here, beside the catalogs, so the API Worker asks it whether a document
+	// can be an API server, stores the document in its catalog object, and confirms it there.
+	checkApiSpec: {
+		args: Schema.Tuple([Schema.String, ApiSpecSelection]),
+		result: ApiSpecSummary,
+	},
+	storeCatalog: {
+		args: Schema.Tuple([Schema.String, Schema.String, CatalogConfig]),
+		result: Schema.Boolean,
+	},
+	keepCatalog: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 	checkToolSchemas: {
 		args: Schema.Tuple([Schema.Array(Schema.JsonObject)]),
 		result: Schema.Array(Schema.Boolean),

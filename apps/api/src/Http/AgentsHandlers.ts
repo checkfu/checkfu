@@ -15,6 +15,12 @@ import { RepublishAgent } from "@checkfu/domain/Agent/RepublishAgent.command"
 import { RepublishAgentDecision } from "@checkfu/domain/Agent/RepublishAgent.decision"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import {
+	ApiServerList,
+	MAX_API_SPEC_JSON_BYTES,
+	apiServerSetId,
+} from "@checkfu/domain/Mcp/ApiServers"
+import type { ApiSelection, ApiServer } from "@checkfu/domain/Mcp/ApiServers"
+import {
 	CustomToolList,
 	MAX_CUSTOM_TOOLS,
 	MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH,
@@ -35,6 +41,10 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import type * as Schema from "effect/Schema"
+import { ApiCatalogExecutor } from "../OpenApi/ApiCatalogExecutor.ts"
+import type { CatalogConfig } from "../OpenApi/ApiCatalogStore.ts"
+import { ApiSpecCheck } from "../OpenApi/ApiSpecCheck.ts"
 import { isReservedToolName } from "../Pi/PiToolNames.ts"
 import { ToolSchemaCheck, externalReference } from "../Pi/PiToolSchemaCheck.ts"
 import { resolveCatalogModel } from "../Pi/PiCatalog.ts"
@@ -49,6 +59,7 @@ import {
 	handled,
 	idempotentId,
 	isPending,
+	normalizeApiBaseUrl,
 	normalizeModel,
 	orPending,
 	normalizeMcpServerUrl,
@@ -69,19 +80,25 @@ export const IsSupportedAgentModel = Context.Reference<(modelId: string) => bool
 
 const unsupportedModel = (model: AgentModel) => reject(400, `Unsupported model "${model.id}".`)
 
-interface McpToolset {
-	readonly type: "mcp_toolset"
-	readonly mcp_server_name: string
+interface ToolsetConfig {
 	readonly default_config?: { readonly permission_policy?: { readonly type: McpPolicy } }
 	readonly configs?: ReadonlyArray<{
 		readonly name: string
 		readonly permission_policy?: { readonly type: McpPolicy }
 	}>
 }
+interface McpToolset extends ToolsetConfig {
+	readonly type: "mcp_toolset"
+	readonly mcp_server_name: string
+}
+interface ApiToolset extends ToolsetConfig {
+	readonly type: "api_toolset"
+	readonly api_server_name: string
+}
 type McpPolicy = NonNullable<McpToolPermissions["default"]>
 
 // A toolset that sets nothing is the same as none.
-const permissionsOf = (toolset: McpToolset): McpToolPermissions | undefined => {
+const permissionsOf = (toolset: ToolsetConfig): McpToolPermissions | undefined => {
 	const policy = toolset.default_config?.permission_policy?.type
 	const tools = (toolset.configs ?? []).flatMap((config) =>
 		config.permission_policy === undefined
@@ -96,6 +113,20 @@ const permissionsOf = (toolset: McpToolset): McpToolPermissions | undefined => {
 			}
 }
 
+const toolsetConfigOf = (permissions: McpToolPermissions): ToolsetConfig => ({
+	...(permissions.default === undefined
+		? {}
+		: { default_config: { permission_policy: { type: permissions.default } } }),
+	...(permissions.tools === undefined
+		? {}
+		: {
+				configs: permissions.tools.map((tool) => ({
+					name: tool.name,
+					permission_policy: { type: tool.permission_policy },
+				})),
+			}),
+})
+
 const toolsetsOf = (servers: ReadonlyArray<McpServer>): Array<McpToolset> =>
 	servers.flatMap((server) =>
 		server.permissions === undefined
@@ -104,20 +135,157 @@ const toolsetsOf = (servers: ReadonlyArray<McpServer>): Array<McpToolset> =>
 					{
 						type: "mcp_toolset" as const,
 						mcp_server_name: server.name,
-						...(server.permissions.default === undefined
-							? {}
-							: { default_config: { permission_policy: { type: server.permissions.default } } }),
-						...(server.permissions.tools === undefined
-							? {}
-							: {
-									configs: server.permissions.tools.map((tool) => ({
-										name: tool.name,
-										permission_policy: { type: tool.permission_policy },
-									})),
-								}),
+						...toolsetConfigOf(server.permissions),
 					},
 				],
 	)
+
+const apiToolsetsOf = (servers: ReadonlyArray<ApiServer>): Array<ApiToolset> =>
+	servers.flatMap((server) =>
+		server.permissions === undefined
+			? []
+			: [
+					{
+						type: "api_toolset" as const,
+						api_server_name: server.name,
+						...toolsetConfigOf(server.permissions),
+					},
+				],
+	)
+
+interface ApiServerDeclaration {
+	readonly name: string
+	readonly base_url: string
+	readonly spec: Schema.JsonObject
+	readonly include?: ApiSelection
+	readonly exclude?: ApiSelection
+}
+
+export interface ApiCatalogUpload {
+	readonly catalog_id: string
+	readonly document: string
+	readonly config: CatalogConfig
+}
+
+const checkApiToolsets = (names: ReadonlyArray<string>, toolsets: ReadonlyArray<ApiToolset>) =>
+	Effect.gen(function* () {
+		for (const [index, toolset] of toolsets.entries()) {
+			if (!names.includes(toolset.api_server_name)) {
+				return yield* reject(
+					400,
+					`tools names API server "${toolset.api_server_name}", which is not in api_servers.`,
+				)
+			}
+			if (
+				toolsets.findIndex((other) => other.api_server_name === toolset.api_server_name) !== index
+			) {
+				return yield* reject(
+					400,
+					`API server "${toolset.api_server_name}" has more than one api_toolset.`,
+				)
+			}
+			const configured = (toolset.configs ?? []).map((config) => config.name)
+			if (new Set(configured).size !== configured.length) {
+				return yield* reject(
+					400,
+					`The api_toolset of "${toolset.api_server_name}" configures a tool more than once.`,
+				)
+			}
+		}
+	})
+
+const withApiPermissions = (
+	servers: ReadonlyArray<ApiServer>,
+	toolsets: ReadonlyArray<ApiToolset>,
+): Array<ApiServer> =>
+	servers.map(({ permissions: _replaced, ...server }) => {
+		const toolset = toolsets.find((entry) => entry.api_server_name === server.name)
+		const permissions = toolset === undefined ? undefined : permissionsOf(toolset)
+		return permissions === undefined ? server : { ...server, permissions }
+	})
+
+const apiServersText = (servers: ReadonlyArray<ApiServer>) =>
+	Effect.try({
+		try: () => ApiServerList.encode(servers),
+		catch: () => undefined,
+	}).pipe(
+		Effect.filterOrFail(
+			(text) => text.length <= MAX_MCP_SERVERS_TEXT_LENGTH,
+			() => undefined,
+		),
+		Effect.catch(() => reject(400, "api_servers and tools are too large together.")),
+	)
+
+/**
+ * Reads each declared API server's document and says what to store for it.
+ * The document itself goes to the server's catalog; what is recorded with the
+ * agent version only names it.
+ */
+const declaredApiServers = (
+	digest: Digest.Digest["Service"],
+	versionId: string,
+	declared: ReadonlyArray<ApiServerDeclaration>,
+	mcpServerNames: ReadonlyArray<string>,
+) =>
+	Effect.gen(function* () {
+		const servers: Array<ApiServer> = []
+		const uploads: Array<ApiCatalogUpload> = []
+		for (const server of declared) {
+			if (servers.some((other) => other.name === server.name)) {
+				return yield* reject(400, `API server name "${server.name}" is used more than once.`)
+			}
+			if (mcpServerNames.includes(server.name)) {
+				return yield* reject(
+					400,
+					`"${server.name}" names both an API server and an MCP server. Names must be unique across both.`,
+				)
+			}
+			const base_url = normalizeApiBaseUrl(server.base_url)
+			if (base_url === undefined) {
+				return yield* reject(
+					400,
+					`API server "${server.name}" has an invalid base_url: it must be a URL without a query string.`,
+				)
+			}
+			const document = JSON.stringify(server.spec)
+			const bytes = new TextEncoder().encode(document)
+			if (bytes.length > MAX_API_SPEC_JSON_BYTES) {
+				return yield* reject(
+					400,
+					`The spec of API server "${server.name}" is larger than ${MAX_API_SPEC_JSON_BYTES} bytes of JSON.`,
+				)
+			}
+			const selection = {
+				...(server.include === undefined ? {} : { include: server.include }),
+				...(server.exclude === undefined ? {} : { exclude: server.exclude }),
+			}
+			const imported = yield* (yield* ApiSpecCheck).check(document, selection)
+			if (!imported.ok) {
+				return yield* reject(400, `The spec of API server "${server.name}": ${imported.message}`)
+			}
+			const fingerprint = `sha256:${yield* digest.digestHex(Digest.sha256, bytes)}`
+			const catalog_id = `${versionId}/${server.name}`
+			servers.push({
+				type: "openapi",
+				name: server.name,
+				base_url,
+				catalog_id,
+				...selection,
+				spec: {
+					title: imported.title,
+					version: imported.version,
+					operations: imported.operations,
+					digest: fingerprint,
+				},
+			})
+			uploads.push({
+				catalog_id,
+				document,
+				config: { base_url, digest: fingerprint, ...selection },
+			})
+		}
+		return { servers, uploads }
+	})
 
 const mcpServersText = (
 	servers: ReadonlyArray<Pick<McpServer, "type" | "name" | "url">>,
@@ -212,10 +380,12 @@ const changesConfiguration = (
 				: head.has_description && changes.description === head.description),
 	].every(Boolean)
 
-type AgentTool = McpToolset | CustomTool
+type AgentTool = McpToolset | ApiToolset | CustomTool
 
 const toolsetsIn = (tools: ReadonlyArray<AgentTool>) =>
 	tools.filter((tool): tool is McpToolset => tool.type === "mcp_toolset")
+const apiToolsetsIn = (tools: ReadonlyArray<AgentTool>) =>
+	tools.filter((tool): tool is ApiToolset => tool.type === "api_toolset")
 const customToolsIn = (tools: ReadonlyArray<AgentTool>) =>
 	tools.filter((tool): tool is CustomTool => tool.type === "custom")
 
@@ -231,7 +401,7 @@ const customToolsText = (tools: ReadonlyArray<CustomTool>) =>
 			if (isReservedToolName(tool.name)) {
 				return yield* reject(
 					400,
-					`Custom tool name "${tool.name}" is reserved: it starts with mcp__ or names a built-in tool.`,
+					`Custom tool name "${tool.name}" is reserved: it starts with mcp__ or api__, or names a built-in tool.`,
 				)
 			}
 			if (tool.input_schema["type"] !== "object") {
@@ -280,15 +450,24 @@ const customToolsText = (tools: ReadonlyArray<CustomTool>) =>
 			: text
 	})
 
-const toolFields = (servers: string, customTools: string) => {
+const toolFields = (servers: string, apiServers: string, customTools: string) => {
 	const decoded = McpServerList.decode(servers)
+	const apis = ApiServerList.decode(apiServers)
 	return {
 		mcp_servers: decoded.map((server) => ({
 			type: server.type,
 			name: server.name,
 			url: server.url,
 		})),
-		tools: [...toolsetsOf(decoded), ...CustomToolList.decode(customTools)],
+		api_servers: apis.map((server) => ({
+			type: server.type,
+			name: server.name,
+			base_url: server.base_url,
+			...(server.include === undefined ? {} : { include: server.include }),
+			...(server.exclude === undefined ? {} : { exclude: server.exclude }),
+			spec: server.spec,
+		})),
+		tools: [...toolsetsOf(decoded), ...apiToolsetsOf(apis), ...CustomToolList.decode(customTools)],
 	}
 }
 
@@ -301,6 +480,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const agentViews = yield* AgentView
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const serverSets = yield* McpServerSet
+		const catalogs = yield* ApiCatalogExecutor
 		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
@@ -314,16 +494,43 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const record = (set_id: McpServerSetId, servers: string) =>
 			servers === "" ? Effect.void : serverSets.send(new RecordMcpServers({ set_id, servers }))
 		const serversOf = (versionId: string) => recorded(McpServerSetId.make(versionId))
+		const apiServersOf = (versionId: string) => recorded(apiServerSetId(versionId))
 		const customToolsOf = (versionId: string) => recorded(customToolSetId(versionId))
-		const recordTools = (versionId: string, servers: string, customTools: string) =>
-			Effect.andThen(
-				record(McpServerSetId.make(versionId), servers),
-				record(customToolSetId(versionId), customTools),
+		const recordTools = (
+			versionId: string,
+			servers: string,
+			apiServers: string,
+			customTools: string,
+		) =>
+			Effect.all(
+				[
+					record(McpServerSetId.make(versionId), servers),
+					record(apiServerSetId(versionId), apiServers),
+					record(customToolSetId(versionId), customTools),
+				],
+				{ discard: true },
+			)
+		// A document is stored before the version that names it is recorded, and confirmed after.
+		const storeCatalogs = (uploads: ReadonlyArray<ApiCatalogUpload>) =>
+			Effect.forEach(
+				uploads,
+				(upload) =>
+					catalogs.store(upload.catalog_id, upload.document, upload.config).pipe(
+						Effect.catchTag("ApiCatalogCallFailed", () =>
+							reject(503, "API document storage is unavailable. Try again."),
+						),
+						Effect.flatMap((stored) =>
+							stored
+								? Effect.void
+								: reject(409, "A different document is already stored for this API server."),
+						),
+					),
+				{ discard: true },
 			)
 		const toolFieldsOf = (versionId: string) =>
 			Effect.map(
-				Effect.all([serversOf(versionId), customToolsOf(versionId)]),
-				([servers, customTools]) => toolFields(servers, customTools),
+				Effect.all([serversOf(versionId), apiServersOf(versionId), customToolsOf(versionId)]),
+				([servers, apiServers, customTools]) => toolFields(servers, apiServers, customTools),
 			)
 		const serializeAgent = <A extends { readonly current_version_id: string }>(agent: A) =>
 			Effect.map(toolFieldsOf(agent.current_version_id), (fields) => ({ ...agent, ...fields }))
@@ -400,8 +607,28 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const tools = payload.tools ?? []
 					const mcpServers = yield* mcpServersText(payload.mcp_servers ?? [], toolsetsIn(tools))
 					const customTools = yield* customToolsText(customToolsIn(tools))
+					const declaredApis = payload.api_servers ?? []
+					const apiToolsets = apiToolsetsIn(tools)
+					yield* checkApiToolsets(
+						declaredApis.map((server) => server.name),
+						apiToolsets,
+					)
+					const apiPlan = (forVersion: string) =>
+						Effect.gen(function* () {
+							const plan = yield* declaredApiServers(
+								digest,
+								forVersion,
+								declaredApis,
+								(payload.mcp_servers ?? []).map((server) => server.name),
+							)
+							return {
+								uploads: plan.uploads,
+								text: yield* apiServersText(withApiPermissions(plan.servers, apiToolsets)),
+							}
+						})
 					let id: AgentId
 					let versionId: AgentVersionId
+					let apis: Effect.Success<ReturnType<typeof apiPlan>>
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
 						id = AgentId.make(
@@ -410,6 +637,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						versionId = AgentVersionId.make(
 							yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
 						)
+						apis = yield* apiPlan(versionId)
 						const batchId = yield* createClaimId(digest, "agent", idempotencyKey)
 						const fingerprint = yield* createFingerprint(digest, {
 							name: payload.name,
@@ -417,6 +645,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 							system,
 							description,
 							...(mcpServers === "" ? {} : { mcp_servers: mcpServers }),
+							...(apis.text === "" ? {} : { api_servers: apis.text }),
 							...(customTools === "" ? {} : { custom_tools: customTools }),
 						})
 						if (!isSupportedModel(model.id)) {
@@ -439,8 +668,10 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						yield* supported(model)
 						id = AgentId.make(yield* randomId(random, "agent"))
 						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
+						apis = yield* apiPlan(versionId)
 					}
-					yield* recordTools(versionId, mcpServers, customTools)
+					yield* storeCatalogs(apis.uploads)
+					yield* recordTools(versionId, mcpServers, apis.text, customTools)
 					const receipt = yield* createAgent.send(
 						new CreateAgent({
 							agent_id: id,
@@ -486,7 +717,14 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
-					const { version, model: modelInput, mcp_servers: servers, tools, ...fields } = payload
+					const {
+						version,
+						model: modelInput,
+						mcp_servers: servers,
+						api_servers: declaredApis,
+						tools,
+						...fields
+					} = payload
 					const toolsets = tools === undefined ? undefined : toolsetsIn(tools)
 					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
 					if (model !== undefined) {
@@ -515,16 +753,49 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const nextCustomTools =
 						tools === undefined ? currentCustomTools : yield* customToolsText(customToolsIn(tools))
 					const nextVersionId = AgentVersionId.make(yield* randomId(random, "aver"))
+					// Replaced API servers bring their documents again; kept ones keep the documents they have.
+					const currentApis = isHead ? yield* apiServersOf(head.current_version_id) : ""
+					const keptApis = ApiServerList.decode(currentApis)
+					const nextMcpNames = McpServerList.decode(next).map((server) => server.name)
+					const replacedApis =
+						declaredApis === undefined
+							? undefined
+							: yield* declaredApiServers(digest, nextVersionId, declaredApis, nextMcpNames)
+					const nextApiServers = replacedApis?.servers ?? keptApis
+					const collision = nextApiServers.find((server) => nextMcpNames.includes(server.name))
+					if (collision !== undefined) {
+						return yield* reject(
+							400,
+							`"${collision.name}" names both an API server and an MCP server. Names must be unique across both.`,
+						)
+					}
+					const nextApiToolsets =
+						tools === undefined
+							? apiToolsetsOf(keptApis).filter((toolset) =>
+									nextApiServers.some((server) => server.name === toolset.api_server_name),
+								)
+							: apiToolsetsIn(tools)
+					yield* checkApiToolsets(
+						nextApiServers.map((server) => server.name),
+						nextApiToolsets,
+					)
+					const nextApis =
+						declaredApis === undefined && tools === undefined
+							? currentApis
+							: yield* apiServersText(withApiPermissions(nextApiServers, nextApiToolsets))
+					const uploads = replacedApis?.uploads ?? []
 					const changes = model === undefined ? fields : { ...fields, model }
 					// Servers and tools are staged only for a version that will be minted, so an update
 					// that changes nothing leaves nothing behind.
 					const staged =
 						isHead &&
 						(next !== current ||
+							nextApis !== currentApis ||
 							nextCustomTools !== currentCustomTools ||
 							changesConfiguration(head, changes))
 					if (staged) {
-						yield* recordTools(nextVersionId, next, nextCustomTools)
+						yield* storeCatalogs(uploads)
+						yield* recordTools(nextVersionId, next, nextApis, nextCustomTools)
 					}
 					const updated = yield* updateAgent.send(
 						new UpdateAgent({
@@ -535,11 +806,13 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						}),
 					)
 					if (!staged && updated.reply.version !== version) {
-						yield* recordTools(updated.reply.version_id, next, nextCustomTools)
+						yield* recordTools(updated.reply.version_id, next, nextApis, nextCustomTools)
 					}
 					// An update that changed nothing else mints no version, so new servers or tools get their own.
 					const receipt =
-						(next !== current || nextCustomTools !== currentCustomTools) &&
+						(next !== current ||
+							nextApis !== currentApis ||
+							nextCustomTools !== currentCustomTools) &&
 						updated.reply.version === version
 							? yield* republishAgent.send(
 									new RepublishAgent({

@@ -3,12 +3,13 @@ import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import { ApiCatalogs } from "../src/Mcp/ApiCatalogs.external.ts"
 import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
 import { Vaults, VaultsApi, VaultsHandlersLive } from "../src/Vaults.model.ts"
 
 const story = Story.make(Vaults, {
 	layer: VaultsHandlersLive,
-	stub: [CredentialSecrets],
+	stub: [CredentialSecrets, ApiCatalogs],
 })
 
 // A vault keeps its active credentials as a list, and the prover bounds every rule

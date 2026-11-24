@@ -4,6 +4,7 @@ import {
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { ApiServerBindingList, ApiServerList, apiServerSetId } from "@checkfu/domain/Mcp/ApiServers"
 import { CustomToolList, customToolSetId } from "@checkfu/domain/Mcp/CustomTools"
 import {
 	McpServerSet,
@@ -177,36 +178,61 @@ export const PiDurableHarnessLive = boundedHarness(
 		// A session admitted without a recorded binding (an automation's, for one) is bound here,
 		// at its first turn, by the same step as one created over HTTP: without credentials, under
 		// its environment's network rules. What is recorded then holds for the session's life.
-		const sessionMcpServers = (sessionId: string, versionId: string, environmentId: string) =>
+		const sessionServers = (sessionId: string, versionId: string, environmentId: string) =>
 			Effect.gen(function* () {
-				const setId = McpServerSetId.make(sessionId)
-				const recorded = yield* serverSets.get(setId)
-				if (recorded.recorded) {
-					return McpServerBindingList.decode(recorded.servers)
+				const mcpSetId = McpServerSetId.make(sessionId)
+				const apiSetId = apiServerSetId(sessionId)
+				const read = Effect.gen(function* () {
+					const mcp = yield* serverSets.get(mcpSetId)
+					const api = yield* serverSets.get(apiSetId)
+					return {
+						recorded: mcp.recorded || api.recorded,
+						mcpServers: McpServerBindingList.decode(mcp.servers),
+						apiServers: ApiServerBindingList.decode(api.servers),
+					}
+				})
+				const found = yield* read
+				if (found.recorded) {
+					return found
 				}
 				const servers = McpServerList.decode(
 					(yield* serverSets.get(McpServerSetId.make(versionId))).servers,
 				)
-				if (servers.length === 0) {
-					return []
+				const apiServers = ApiServerList.decode(
+					(yield* serverSets.get(apiServerSetId(versionId))).servers,
+				)
+				if (servers.length === 0 && apiServers.length === 0) {
+					return found
 				}
 				const environment = yield* environments.get(EnvironmentId.make(environmentId))
 				const bound = bindSessionServers({
 					servers,
 					explicit: [],
 					offered: [],
+					apiServers,
+					explicitApis: [],
+					offeredApis: [],
 					networking: environment.config === null ? null : environment.config.networking,
 				})
 				if (!bound.ok) {
 					return yield* Effect.fail<TurnFailed>({
 						_tag: "TurnFailed",
-						error_type: "mcp_servers_unavailable",
+						error_type: "servers_unavailable",
 						message: bound.message,
 						terminal: true,
 					})
 				}
-				yield* serverSets.send(new RecordMcpServers({ set_id: setId, servers: bound.mcpServers }))
-				return McpServerBindingList.decode((yield* serverSets.get(setId)).servers)
+				if (bound.mcpServers !== "") {
+					yield* serverSets.send(
+						new RecordMcpServers({ set_id: mcpSetId, servers: bound.mcpServers }),
+					)
+				}
+				if (bound.apiServers !== "") {
+					yield* serverSets.send(
+						new RecordMcpServers({ set_id: apiSetId, servers: bound.apiServers }),
+					)
+				}
+				return yield* read
 			})
 		const recordCredentialRefresh = yield* makeCredentialRefreshRecorder
 		// The connections a session's turn used may have refreshed their tokens; their outcomes
@@ -482,7 +508,7 @@ export const PiDurableHarnessLive = boundedHarness(
 					}
 
 					// What the session bound when it was created; it never changes afterwards.
-					const mcpServers = yield* sessionMcpServers(
+					const { mcpServers, apiServers } = yield* sessionServers(
 						args.session_id,
 						version.id,
 						args.environment_id,
@@ -512,6 +538,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
 						...(mcpServers.length === 0 ? {} : { mcp_servers: mcpServers }),
 						...(customTools.length === 0 ? {} : { custom_tools: customTools }),
+						...(apiServers.length === 0 ? {} : { api_servers: apiServers }),
 					}
 					// A turn is submitted under its operation id, so sending it again after a
 					// lost reply joins the turn already there instead of starting another. The

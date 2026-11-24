@@ -14,6 +14,8 @@ import {
 	measureBundle,
 } from "./BundleBudget.ts"
 import { removeStage } from "./StageCleanup.ts"
+import { BIG_BODY_BYTES, startFakeHttpApi } from "./FakeHttpApi.ts"
+import type { FakeApiAuth, FakeHttpApi } from "./FakeHttpApi.ts"
 import { startFakeMcpServer } from "./FakeMcpServer.ts"
 import { startFakeOAuthServer } from "./FakeOAuthServer.ts"
 import type { FakeMcpServer } from "./FakeMcpServer.ts"
@@ -44,6 +46,7 @@ interface SessionEventItem {
 	readonly tool_use_id?: string
 	readonly parent_tool_use_id?: string
 	readonly mcp_server_name?: string
+	readonly api_server_name?: string
 	readonly name?: string
 	readonly input?: Schema.JsonObject
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
@@ -330,6 +333,13 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		throw error
 	}
 }
+
+const apiCalls = (events: ReadonlyArray<SessionEventItem>) =>
+	events.filter((event) => event.type === "agent.api_tool_use")
+const apiResults = (events: ReadonlyArray<SessionEventItem>) =>
+	events.filter((event) => event.type === "agent.api_tool_result")
+const replyOf = (events: ReadonlyArray<SessionEventItem>) =>
+	events.findLast((event) => event.type === "agent.message")?.content?.[0]?.text ?? ""
 
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
@@ -2022,6 +2032,464 @@ describe("PiSession real Durable Object under workerd", () => {
 			])
 			expect(events[1]).toMatchObject({ is_error: true })
 			expect(await replyText(session.id)).toContain("tools.lookup_order does not exist")
+		}, 60_000)
+	})
+
+	const apiKeyFor = async (api: FakeHttpApi, token: string, placement: Schema.JsonObject) => {
+		const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
+			display_name: "api",
+		})
+		const credential = await createResource<{ readonly id: string }>(
+			`/v1/vaults/${vault.id}/credentials`,
+			{ auth: { type: "api_key", base_url: api.baseUrl, token, placement } },
+		)
+		return { vault: vault.id, credential: credential.id }
+	}
+
+	// Every turn: run the user's message as a script, then say what it returned.
+	const scriptFromMessage = () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			return output === undefined
+				? { kind: "tool_call", name: "codemode", arguments: { code: req.lastUserText } }
+				: { kind: "reply", text: `Done: ${output}` }
+		})
+	}
+
+	describe("API servers", () => {
+		const apis: Array<FakeHttpApi> = []
+		const httpApi = async (auth: FakeApiAuth | null, accepted: ReadonlyArray<string> | null) => {
+			const api = await startFakeHttpApi(auth, accepted)
+			apis.push(api)
+			return api
+		}
+		afterAll(async () => {
+			await Promise.all(apis.map((api) => api.close()))
+		})
+
+		const HEADER = { in: "header", name: "X-Api-Key" } as const
+		type ApiAgent = {
+			readonly id: string
+			readonly api_servers: ReadonlyArray<{ readonly spec: { readonly digest: string } }>
+			readonly tools: unknown
+		}
+		type ApiSession = SessionResource & { readonly api_servers: unknown }
+
+		const agentWithApi = (api: FakeHttpApi, tools?: ReadonlyArray<Schema.JsonObject>) =>
+			createResource<ApiAgent>("/v1/agents", {
+				name: "API shop",
+				model: "gpt-4o-mini",
+				api_servers: [{ type: "openapi", name: "shop", base_url: api.baseUrl, spec: api.spec }],
+				...(tools === undefined ? {} : { tools }),
+			})
+
+		it("calls an API from a script with the session's key, keeps the key out of everything, and logs each call", async () => {
+			const key = "key_api_SCRIPT_do_not_leak"
+			const api = await httpApi(HEADER, [key])
+			const { vault, credential } = await apiKeyFor(api, key, HEADER)
+			const agent = await agentWithApi(api)
+			const [declared] = agent.api_servers
+			expect(agent.api_servers).toEqual([
+				{
+					type: "openapi",
+					name: "shop",
+					base_url: api.baseUrl,
+					spec: {
+						title: "Pet shop",
+						version: "1.2.3",
+						operations: 5,
+						digest: declared?.spec.digest,
+					},
+				},
+			])
+			expect(declared?.spec.digest).toMatch(/^sha256:[0-9a-f]{64}$/u)
+			expect(JSON.stringify(agent)).not.toContain("Look a pet up")
+			scriptFromMessage()
+
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [vault],
+			})
+			expect(session.api_servers).toEqual([
+				{ name: "shop", base_url: api.baseUrl, credential_id: credential },
+			])
+			const petId = "a/b/../c?x=1#y"
+			const script = [
+				`const pet = await tools.api__shop__getPet({ path: { petId: ${JSON.stringify(petId)} }, query: { verbose: true } });`,
+				"const seen = await tools.api__shop__echoRequest({});",
+				'let dots = "sent";',
+				'try { await tools.api__shop__getPet({ path: { petId: ".." } }); } catch { dots = "refused"; }',
+				"return `pet=${pet.body.name} id=${pet.body.id} status=${pet.status} dots=${dots} seen=${JSON.stringify(seen.body.headers)}`;",
+			].join("\n")
+			expect((await sender(session.id)(script)).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			// The path argument is one segment however it reads, and `..` is never sent at all.
+			expect(api.requests.map((request) => [request.method, request.target])).toEqual([
+				["GET", "/v1/pets/a%2Fb%2F..%2Fc%3Fx%3D1%23y?verbose=true"],
+				["GET", "/v1/echo"],
+			])
+			expect(api.requests.map((request) => request.headers["x-api-key"])).toEqual([key, key])
+
+			const events = await agentEvents(session.id)
+			// The script call is published whole, then the calls it made.
+			expect(events.map((event) => event.type)).toEqual([
+				"agent.tool_use",
+				"agent.tool_result",
+				"agent.api_tool_use",
+				"agent.api_tool_result",
+				"agent.api_tool_use",
+				"agent.api_tool_result",
+				"agent.api_tool_use",
+				"agent.api_tool_result",
+				"agent.message",
+			])
+			const [scriptCall] = events
+			const [getPet, echoed, dots] = apiCalls(events)
+			const [petResult, echoResult, dotsResult] = apiResults(events)
+			expect(getPet).toMatchObject({
+				tool_use_id: `${scriptCall?.tool_use_id}/c1`,
+				parent_tool_use_id: scriptCall?.tool_use_id,
+				api_server_name: "shop",
+				name: "getPet",
+				input: { path: { petId }, query: { verbose: true } },
+				evaluated_permission: "allow",
+			})
+			expect(petResult).toMatchObject({ tool_use_id: getPet?.tool_use_id, is_error: false })
+			expect(petResult?.content?.[0]?.text).toContain(JSON.stringify(petId))
+			expect(echoed).toMatchObject({
+				name: "echoRequest",
+				parent_tool_use_id: scriptCall?.tool_use_id,
+			})
+			expect(echoResult?.content?.[0]?.text).toContain("[redacted]")
+			expect(dots).toMatchObject({ name: "getPet", input: { path: { petId: ".." } } })
+			expect(dotsResult).toMatchObject({ tool_use_id: dots?.tool_use_id, is_error: true })
+			const reply = replyOf(events)
+			expect(reply).toContain("pet=Rex")
+			expect(reply).toContain(`id=${petId}`)
+			expect(reply).toContain("status=200")
+			expect(reply).toContain("dots=refused")
+			expect(reply).toContain("[redacted]")
+
+			const everything = JSON.stringify([
+				await listAllEvents(session.id),
+				(await apiJson(`/v1/sessions/${session.id}`)).body,
+				(await apiJson(`/v1/agents/${agent.id}`)).body,
+				(await apiJson(`/v1/vaults/${vault}/credentials/${credential}`)).body,
+			])
+			expect(everything).not.toContain(key)
+			expect(stripAnsi(workerLogs.join(""))).not.toContain(key)
+		}, 60_000)
+
+		it("puts a key in the query string when its credential says so, and keeps it out of what comes back", async () => {
+			const key = "key_api_QUERY_do_not_leak"
+			const placement = { in: "query", name: "api_key" } as const
+			const api = await httpApi(placement, [key])
+			const { vault } = await apiKeyFor(api, key, placement)
+			const agent = await agentWithApi(api)
+			scriptFromMessage()
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [vault],
+			})
+			expect(
+				(
+					await sender(session.id)(
+						"const seen = await tools.api__shop__echoRequest({}); return `url=${seen.body.url}`;",
+					)
+				).status,
+			).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			expect(api.requests.map((request) => request.target)).toEqual([`/v1/echo?api_key=${key}`])
+			const events = await listAllEvents(session.id)
+			expect(replyOf(events)).toContain("url=/v1/echo?api_key=[redacted]")
+			expect(JSON.stringify(events)).not.toContain(key)
+			expect(stripAnsi(workerLogs.join(""))).not.toContain(key)
+		}, 60_000)
+
+		it("asks before an operation that writes, refuses it from a script, and runs it when the agent allows it", async () => {
+			const api = await httpApi(null, null)
+			const agent = await agentWithApi(api)
+			const writes = () => api.requests.filter((request) => request.method === "POST")
+			fakeOpenAI.setHandler((req) => {
+				switch (req.toolOutputs.length) {
+					case 0:
+						return { kind: "tool_call", name: "tool_search", arguments: { query: "createPet" } }
+					case 1:
+						return {
+							kind: "tool_call",
+							name: "api__shop__createPet",
+							arguments: { body: { name: req.lastUserText } },
+						}
+					default:
+						return { kind: "reply", text: `Done: ${req.toolOutputs.at(-1)}` }
+				}
+			})
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+
+			expect((await sender(session.id)("Milo")).status).toBe(200)
+			const paused = await idle(session.id, 1)
+			expect(paused?.type).toBe("requires_action")
+			const [waiting] = paused?.event_ids ?? []
+			expect(writes()).toEqual([])
+			expect(apiCalls(await listAllEvents(session.id))).toEqual([
+				expect.objectContaining({
+					tool_use_id: waiting,
+					api_server_name: "shop",
+					name: "createPet",
+					input: { body: { name: "Milo" } },
+					evaluated_permission: "ask",
+				}),
+			])
+
+			expect((await confirm(session.id, waiting ?? "", "allow")).status).toBe(200)
+			expect((await idle(session.id, 2))?.type).toBe("end_turn")
+			expect(writes().map((request) => request.body)).toEqual([JSON.stringify({ name: "Milo" })])
+			const allowed = await listAllEvents(session.id)
+			expect(apiCalls(allowed)).toHaveLength(1)
+			expect(apiResults(allowed)).toEqual([
+				expect.objectContaining({ tool_use_id: waiting, is_error: false }),
+			])
+			expect(replyOf(allowed)).toContain("Milo")
+
+			scriptFromMessage()
+			expect(
+				(
+					await sender(session.id)(
+						'return await tools.api__shop__createPet({ body: { name: "Scripted" } });',
+					)
+				).status,
+			).toBe(200)
+			expect((await idle(session.id, 3))?.type).toBe("end_turn")
+			expect(writes()).toHaveLength(1)
+			const blocked = apiResults(await listAllEvents(session.id)).at(-1)
+			expect(blocked).toMatchObject({ is_error: true })
+			expect(blocked?.content?.[0]?.text).toContain("Call api__shop__createPet directly")
+
+			const trusting = await agentWithApi(api, [
+				{
+					type: "api_toolset",
+					api_server_name: "shop",
+					configs: [{ name: "createPet", permission_policy: { type: "always_allow" } }],
+				},
+			])
+			expect(trusting.tools).toEqual([
+				{
+					type: "api_toolset",
+					api_server_name: "shop",
+					configs: [{ name: "createPet", permission_policy: { type: "always_allow" } }],
+				},
+			])
+			const trusted = await createResource<ApiSession>("/v1/sessions", {
+				agent: trusting.id,
+				environment_id: environmentId,
+			})
+			expect(
+				(
+					await sender(trusted.id)(
+						'const made = await tools.api__shop__createPet({ body: { name: "Trusted" } }); return `made=${made.body.name} status=${made.status}`;',
+					)
+				).status,
+			).toBe(200)
+			expect((await idle(trusted.id, 1))?.type).toBe("end_turn")
+			expect(writes().map((request) => request.body)).toEqual([
+				JSON.stringify({ name: "Milo" }),
+				JSON.stringify({ name: "Trusted" }),
+			])
+			const ran = await listAllEvents(trusted.id)
+			expect(apiCalls(ran)).toEqual([
+				expect.objectContaining({ name: "createPet", evaluated_permission: "allow" }),
+			])
+			expect(replyOf(ran)).toContain("made=Trusted status=201")
+		}, 120_000)
+
+		it("refuses to choose between two keys for one API and uses the one a session binds", async () => {
+			const first = "key_api_FIRST_do_not_leak"
+			const second = "key_api_SECOND_do_not_leak"
+			const api = await httpApi(HEADER, [first, second])
+			const one = await apiKeyFor(api, first, HEADER)
+			const two = await apiKeyFor(api, second, HEADER)
+			const agent = await agentWithApi(api)
+			scriptFromMessage()
+
+			const body = {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [one.vault, two.vault],
+			}
+			const ambiguous = await apiJson<{ readonly error?: { readonly message: string } }>(
+				"/v1/sessions",
+				{ method: "POST", body },
+			)
+			expect(ambiguous.status).toBe(400)
+			expect(ambiguous.body.error?.message).toContain(
+				'API server "shop" matches more than one credential',
+			)
+
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				...body,
+				api_server_credentials: [{ api_server_name: "shop", credential_id: two.credential }],
+			})
+			expect(session.api_servers).toEqual([
+				{ name: "shop", base_url: api.baseUrl, credential_id: two.credential },
+			])
+			expect(
+				(await sender(session.id)("return (await tools.api__shop__echoRequest({})).status;"))
+					.status,
+			).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+			expect(api.requests.map((request) => request.headers["x-api-key"])).toEqual([second])
+		}, 60_000)
+
+		it("uses a replaced key at once and fails closed once the credential is archived", async () => {
+			const original = "key_api_ORIGINAL_do_not_leak"
+			const rotated = "key_api_ROTATED_do_not_leak"
+			const api = await httpApi(HEADER, [original])
+			const { vault, credential } = await apiKeyFor(api, original, HEADER)
+			const agent = await agentWithApi(api)
+			scriptFromMessage()
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+				vault_ids: [vault],
+			})
+			const send = sender(session.id)
+			const path = `/v1/vaults/${vault}/credentials/${credential}`
+			const script =
+				'const pet = await tools.api__shop__getPet({ path: { petId: "7" } }); return `status=${pet.status}`;'
+
+			expect((await send(script)).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			api.accept([rotated])
+			expect(
+				(
+					await apiJson(path, {
+						method: "POST",
+						body: { auth: { type: "api_key", token: rotated } },
+					})
+				).status,
+			).toBe(200)
+			expect((await send(script)).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+			expect(api.requests.map((request) => request.headers["x-api-key"])).toEqual([
+				original,
+				rotated,
+			])
+			expect(replyOf(await listAllEvents(session.id))).toContain("status=200")
+
+			expect((await apiJson(`${path}/archive`, { method: "POST" })).status).toBe(200)
+			expect((await send(script)).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 3)
+			expect(api.requests).toHaveLength(2)
+			const refused = apiResults(await listAllEvents(session.id)).at(-1)
+			expect(refused).toMatchObject({ is_error: true })
+			expect(refused?.content?.[0]?.text).toContain("no longer available")
+
+			const logged = stripAnsi(workerLogs.join(""))
+			expect(logged).not.toContain(original)
+			expect(logged).not.toContain(rotated)
+		}, 90_000)
+
+		it("uses an API without a credential, and offers an operation to the model only once it is found", async () => {
+			const api = await httpApi(null, null)
+			const agent = await agentWithApi(api)
+			const offered: Array<ReadonlyArray<string>> = []
+			fakeOpenAI.setHandler((req) => {
+				offered.push(req.toolNames)
+				switch (req.toolOutputs.length) {
+					case 0:
+						return {
+							kind: "tool_call",
+							name: "api__shop__getPet",
+							arguments: { path: { petId: "early" } },
+						}
+					case 1:
+						return { kind: "tool_call", name: "tool_search", arguments: { query: "getPet" } }
+					case 2:
+						return {
+							kind: "tool_call",
+							name: "api__shop__getPet",
+							arguments: { path: { petId: "7" } },
+						}
+					default:
+						return { kind: "reply", text: `Done: ${req.toolOutputs.at(-1)}` }
+				}
+			})
+
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+			expect(session.api_servers).toEqual([
+				{ name: "shop", base_url: api.baseUrl, credential_id: null },
+			])
+			expect((await sender(session.id)("go")).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			expect(offered[0]).toEqual(expect.arrayContaining(["codemode", "tool_search"]))
+			expect(offered[0]).not.toContain("api__shop__getPet")
+			expect(offered[1]).not.toContain("api__shop__getPet")
+			expect(offered[2]).toContain("api__shop__getPet")
+			expect(api.requests.map((request) => request.target)).toEqual(["/v1/pets/7"])
+			expect(api.requests[0]?.headers["authorization"]).toBeUndefined()
+
+			const events = await agentEvents(session.id)
+			const calls = apiCalls(events)
+			expect(calls).toEqual([
+				expect.objectContaining({
+					api_server_name: "shop",
+					name: "getPet",
+					input: { path: { petId: "7" } },
+					evaluated_permission: "allow",
+				}),
+			])
+			expect(calls[0]).not.toHaveProperty("parent_tool_use_id")
+			const results = apiResults(events)
+			expect(results).toEqual([
+				expect.objectContaining({ tool_use_id: calls[0]?.tool_use_id, is_error: false }),
+			])
+			expect(events.indexOf(calls[0] as SessionEventItem)).toBeLessThan(
+				events.indexOf(results[0] as SessionEventItem),
+			)
+			expect(replyOf(events)).toContain("Rex")
+		}, 60_000)
+
+		it("reports a refusal with its status and cuts a response that is too long", async () => {
+			const api = await httpApi(null, null)
+			const agent = await agentWithApi(api)
+			scriptFromMessage()
+			const session = await createResource<ApiSession>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+			const script = [
+				"const missing = await tools.api__shop__getMissing({});",
+				"const big = await tools.api__shop__getBig({});",
+				"return `missing=${missing.status} said=${missing.body.error} big=${big.status} length=${big.text.length} cut=${big.text.endsWith('been cut.]')}`;",
+			].join("\n")
+			expect((await sender(session.id)(script)).status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+			const events = await listAllEvents(session.id)
+			const [missing, big] = apiResults(events)
+			expect(missing).toMatchObject({ is_error: true })
+			expect(missing?.content?.[0]?.text).toContain("HTTP 404")
+			expect(big).toMatchObject({ is_error: false })
+			const reply = replyOf(events)
+			expect(reply).toContain("missing=404")
+			expect(reply).toContain("not found")
+			expect(reply).toContain("big=200")
+			expect(reply).toContain("cut=true")
+			const length = Number(/length=(\d+)/u.exec(reply)?.[1])
+			expect(length).toBeGreaterThanOrEqual(100_000)
+			expect(length).toBeLessThan(BIG_BODY_BYTES)
 		}, 60_000)
 	})
 

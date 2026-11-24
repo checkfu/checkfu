@@ -27,6 +27,8 @@ import { CreateVault, VaultAlreadyExists, VaultCreated } from "../src/Vault/Crea
 import { Credential } from "../src/Vault/Credential.aggregate.ts"
 import { CredentialArchivedError } from "../src/Vault/CredentialArchived.rejection.ts"
 import { CredentialNotFound } from "../src/Vault/CredentialNotFound.rejection.ts"
+import { ApiCatalogs } from "../src/Mcp/ApiCatalogs.external.ts"
+import { KeepApiCatalogsLive } from "../src/Mcp/KeepApiCatalogs.policy.ts"
 import { CredentialSecrets } from "../src/Vault/CredentialSecrets.external.ts"
 import { CredentialView } from "../src/Vault/CredentialView.view.ts"
 import { CredentialDeleted, DeleteCredential } from "../src/Vault/DeleteCredential.command.ts"
@@ -63,7 +65,7 @@ import { Vaults, VaultsHandlersLive } from "../src/Vaults.model.ts"
 
 const story = Story.make(Vaults, {
 	layer: VaultsHandlersLive,
-	stub: [CredentialSecrets],
+	stub: [CredentialSecrets, ApiCatalogs],
 })
 
 // The hosted inbox delivers a failed row again. Story's in-memory host surfaces a
@@ -74,8 +76,9 @@ const redeliveryStory = Story.make(Vaults, {
 		SettleCredentialSecret.toLayer(SettleCredentialSecret, { retry: Schedule.recurs(1) }).pipe(
 			Layer.provide(SettleCredentialSecretLive),
 		),
+		KeepApiCatalogsLive,
 	),
-	stub: [CredentialSecrets],
+	stub: [CredentialSecrets, ApiCatalogs],
 })
 
 const t0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")
@@ -122,6 +125,7 @@ describe("Vaults", () => {
 								}),
 							),
 						),
+						Layer.provide(ApiCatalogs.toLayer(Effect.succeed({ keep: () => Effect.void }))),
 					),
 				),
 			),
@@ -141,8 +145,13 @@ describe("Vaults", () => {
 			Story.state(version, { recorded: false, servers: "" }),
 			Story.when(new RecordMcpServers({ set_id: version.id, servers: declared })),
 			Story.then(version, new McpServersRecorded({ servers: declared })),
+			// Whatever a recorded set names is confirmed with the stores that hold it.
+			Story.call(ApiCatalogs.keep, { set_id: version.id, servers: declared }),
+			Story.succeed(ApiCatalogs.keep, undefined),
 			Story.when(new RecordMcpServers({ set_id: session.id, servers: bound })),
 			Story.then(session, new McpServersRecorded({ servers: bound })),
+			Story.call(ApiCatalogs.keep, { set_id: session.id, servers: bound }),
+			Story.succeed(ApiCatalogs.keep, undefined),
 			// What was recorded stands: a later write for the same owner changes nothing.
 			Story.when(new RecordMcpServers({ set_id: session.id, servers: declared })),
 			Story.then(session),

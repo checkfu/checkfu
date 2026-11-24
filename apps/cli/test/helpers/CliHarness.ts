@@ -4,6 +4,8 @@ import {
 	makeConnectionExecutorLayer,
 } from "@checkfu/api/Connection/CredentialCustody"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
+import { makeApiCatalogExecutorLayer } from "@checkfu/api/OpenApi/ApiCatalogExecutor"
+import { ApiCatalogsLive } from "@checkfu/api/OpenApi/ApiCatalogKeeper"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type {
@@ -178,8 +180,13 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		)
 		const CheckfuLive = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive)))
 		// These tests keep no secrets: the connection objects accept and forget.
+		const catalogExecutor = makeApiCatalogExecutorLayer({
+			store: () => Effect.succeed(true),
+			keep: () => Effect.void,
+		})
 		const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 			Layer.provideMerge(CredentialSecretsLive),
+			Layer.provideMerge(Layer.provide(ApiCatalogsLive, catalogExecutor)),
 			Layer.provideMerge(
 				makeConnectionExecutorLayer({
 					storeSecret: () => Effect.succeed(true),
@@ -191,7 +198,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				}),
 			),
 		)
-		const ServerLayer = Layer.mergeAll(CheckfuLive, VaultsLive).pipe(
+		const ServerLayer = Layer.mergeAll(CheckfuLive, VaultsLive, catalogExecutor).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
