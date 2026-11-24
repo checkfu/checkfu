@@ -8,16 +8,13 @@ import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
 import { isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
-import { dropCheckoutDotenv, isStandalone, startupRefusal } from "./Standalone.ts"
+import { startupRefusal } from "./Standalone.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
 const refusal = startupRefusal(process.execArgv, process.cwd())
 if (refusal !== undefined) {
 	process.stderr.write(`Error: ${refusal}\n`)
 	process.exit(1)
-}
-if (!isStandalone && process.execArgv.length === 0) {
-	dropCheckoutDotenv(process.cwd(), process.env)
 }
 
 const sigintController = makeSigintController()
@@ -76,6 +73,21 @@ const runMain = Runtime.makeRunMain(({ fiber, teardown }) => {
 
 	process.on("SIGINT", onSigint)
 	process.on("SIGTERM", onSigterm)
+
+	// `bun checkfu` runs this as a child of Bun's script runner. If the runner is killed,
+	// this process is handed to another parent; stop then, as the old launcher did when
+	// its IPC channel closed, so a long-lived stream does not outlive the command.
+	if (process.env["npm_lifecycle_event"] === "checkfu") {
+		const runner = process.ppid
+		const watch = setInterval(() => {
+			if (process.ppid !== runner) {
+				exitSignalCode ??= 129
+				fiber.interruptUnsafe(fiber.id)
+			}
+		}, 200)
+		watch.unref()
+		fiber.addObserver(() => clearInterval(watch))
+	}
 })
 
 runMain(runCli().pipe(Effect.provide(MainLive)), {

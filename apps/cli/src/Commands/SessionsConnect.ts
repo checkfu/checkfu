@@ -3,6 +3,7 @@ import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Deferred from "effect/Deferred"
+import type * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -963,14 +964,31 @@ export const sessionsConnectCommand = Command.make(
 
 				if (isInteractiveTty) {
 					let interruptedLiveTurn: number | undefined
-					const interruptQueue = yield* Queue.unbounded<void>()
+					let disconnecting = false
+					const interruptQueue = yield* Queue.unbounded<void, Cause.Done>()
 
 					const interruptWorker = yield* Effect.forever(
 						Queue.take(interruptQueue).pipe(
 							Effect.andThen(dispatchUserLine(client, sessionId, "/interrupt", stateRef)),
-							Effect.andThen(writeStderrLine("Press Ctrl-C again to disconnect.")),
+							Effect.andThen(
+								Effect.suspend(() =>
+									disconnecting
+										? Effect.void
+										: writeStderrLine("Press Ctrl-C again to disconnect."),
+								),
+							),
 						),
 					).pipe(Effect.forkChild)
+
+					// A disconnect can follow the interrupt that asked for it within a millisecond,
+					// for example when Bun's script runner forwards the same Ctrl-C. An interrupt
+					// already requested is still delivered before the connection closes.
+					const deliverRequestedInterrupts = Effect.gen(function* () {
+						disconnecting = true
+						yield* Queue.end(interruptQueue)
+						yield* Fiber.await(interruptWorker).pipe(Effect.timeout("10 seconds"), Effect.ignore)
+						yield* Fiber.interrupt(interruptWorker)
+					})
 
 					const ttyLoop = Effect.gen(function* () {
 						while (true) {
@@ -1011,7 +1029,7 @@ export const sessionsConnectCommand = Command.make(
 							return true
 						}
 						return false
-					}, ttyLoop).pipe(Effect.ensuring(Fiber.interrupt(interruptWorker)))
+					}, ttyLoop).pipe(Effect.ensuring(deliverRequestedInterrupts))
 					return
 				}
 

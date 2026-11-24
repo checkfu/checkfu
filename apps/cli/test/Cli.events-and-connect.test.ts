@@ -326,6 +326,56 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 	})
 
+	it("delivers an interrupt that Ctrl-C requested even when a disconnect follows at once", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const started = yield* Deferred.make<void>()
+					const interrupted = yield* Deferred.make<void>()
+					const sigintController = makeSigintController()
+					const cli = yield* makeTestServer({
+						generate: () =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(started, undefined)
+								yield* Deferred.await(interrupted)
+								return yield* Effect.fail({
+									_tag: "TurnInterrupted" as const,
+									model_usage: { input_tokens: 1, output_tokens: 0 },
+								})
+							}),
+						interrupt: () => Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid),
+					})
+					const sessionId = yield* createReadySession(cli)
+
+					const connect = yield* cli
+						.run(["sessions", "connect", "--session-id", sessionId], {
+							stdinIsTerminal: true,
+							sigintController,
+							terminalReads: [Effect.succeed("long running task"), Effect.never],
+						})
+						.pipe(Effect.forkChild)
+					yield* Deferred.await(started)
+
+					// The first SIGINT asks for an interrupt. Under `bun checkfu` the same Ctrl-C
+					// arrives again a millisecond later, which main.ts treats as a disconnect and
+					// answers by interrupting the whole command.
+					expect(sigintController.handleSigint()).toBe(true)
+					yield* Fiber.interrupt(connect)
+
+					const events = yield* cli.run([
+						"sessions:events",
+						"list",
+						"--session-id",
+						sessionId,
+						"--transform",
+						"data.#.type",
+					])
+					expect(JSON.parse(events.stdout)).toContain("user.interrupt")
+				}),
+			),
+		)
+	})
+
 	it("handles Ctrl-C (SIGINT) during an active TTY turn by sending user.interrupt", async () => {
 		await Effect.runPromise(
 			Effect.scoped(
@@ -2848,15 +2898,14 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("runs `bun checkfu` as one process and refuses Bun flags", async () => {
+	it("starts `bun checkfu` with .env loading off, refuses anything extra, and stops when its runner dies", async () => {
 		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 		const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
 			readonly scripts?: Record<string, string>
 		}
-		// A package script would put Bun's script runner between the caller and the CLI: it
-		// forwards each Ctrl-C a second time and leaves the CLI running when it is killed.
-		expect(rootPkg.scripts?.["checkfu"]).toBeUndefined()
-		expect(readFileSync(join(repoRoot, "checkfu.ts"), "utf8")).toContain("apps/cli/src/main.ts")
+		expect(rootPkg.scripts?.["checkfu"]).toBe(
+			"bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts",
+		)
 
 		// Children must not see a key the developer has exported, and must never print one.
 		const env: Record<string, string> = {}
@@ -2865,30 +2914,30 @@ describe("CLI sessions:events and sessions connect", () => {
 				env[name] = value
 			}
 		}
-		const start = (bunFlags: ReadonlyArray<string>, extraEnv: Record<string, string> = {}) =>
-			spawnSync("bun", [...bunFlags, "checkfu", "--help"], {
+		const start = (args: ReadonlyArray<string>, extraEnv: Record<string, string> = {}) =>
+			spawnSync("bun", [...args, "--help"], {
 				cwd: repoRoot,
 				env: { ...env, ...extraEnv },
 				encoding: "utf8",
 				timeout: 20_000,
 			})
-		const help = start([])
+		const help = start(["checkfu"])
 		expect(help.status).toBe(0)
 		expect(help.stdout).toContain("sessions")
 
-		// In the checkout, any Bun flag could select another config or load .env again.
+		// Any flag besides the script's two could load a .env file or select another config.
 		for (const refused of [
-			start(["--config=apps/cli/bunfig.toml"]),
-			start(["--env-file=.env.example"]),
-			start(["--env-file", ".env.example"]),
-			start([], { BUN_OPTIONS: "--config=apps/cli/bunfig.toml" }),
-			start([], { BUN_OPTIONS: "--env-file=.env.example" }),
+			start(["checkfu"], { BUN_OPTIONS: "--env-file=.env.example" }),
+			start(["checkfu"], { BUN_OPTIONS: "--config=bunfig.toml" }),
+			start(["apps/cli/src/main.ts"]),
+			start(["--env-file=.env.example", "apps/cli/src/main.ts"]),
 		]) {
 			expect(refused.status).toBe(1)
-			expect(refused.stderr).toContain("with no Bun flags")
+			expect(refused.stderr).toContain("--no-env-file")
 		}
 
-		// Killing the command's PID must stop a long-lived stream and close its output.
+		// Killing `bun checkfu`'s PID kills Bun's script runner. The CLI must notice and stop,
+		// closing the caller's output and the stream connection.
 		let streamClosed = false
 		const server = Http.createServer((req, res) => {
 			res.writeHead(200, {
@@ -2971,7 +3020,7 @@ describe("CLI sessions:events and sessions connect", () => {
 	})
 
 	it.runIf(ptySupported)(
-		"delivers one interrupt per Ctrl-C through `bun checkfu` in a real PTY",
+		"delivers one interrupt per Ctrl-C to a single-process start in a real PTY",
 		async () => {
 			const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 
@@ -3047,7 +3096,7 @@ def setup_ctty():
     os.setsid()
     fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-cmd = ["bun", "checkfu", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
+cmd = ["bun", "--no-env-file", "--config=apps/cli/bunfig.toml", "apps/cli/src/main.ts", "sessions", "connect", "--session-id", "sess_pty", "--base-url", f"http://127.0.0.1:{sys.argv[1]}"]
 p = subprocess.Popen(cmd, cwd=sys.argv[2], stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup_ctty, close_fds=True)
 os.close(slave)
 

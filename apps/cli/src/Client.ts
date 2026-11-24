@@ -103,7 +103,7 @@ export const resolveBaseUrl = <R = never>(
 		return Option.isSome(saved) ? yield* savedApiUrl(saved.value) : DEFAULT_API_URL
 	})
 
-const MISSING_API_KEY = `Missing CHECKFU_API_KEY. Run \`${COMMAND} deploy\` or \`${COMMAND} login\` to save one, or export CHECKFU_API_KEY. A key in the checkout's .env files is never used, and neither is an exported key with the same value as one there.`
+const MISSING_API_KEY = `Missing CHECKFU_API_KEY. Run \`${COMMAND} deploy\` or \`${COMMAND} login\` to save one, or export CHECKFU_API_KEY.`
 
 export const resolveApiKey = <R = never>(
 	baseUrl: string,
