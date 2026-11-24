@@ -441,7 +441,7 @@ const runAnthropicMessagesRefusalGuard = (
 						// compaction's record and match it against its retryable errors, so the refusal
 						// carries the codec's own text for a refusal without an explanation.
 						outer.push(
-							expectedRefusalErrorMessage === ANTHROPIC_SENSITIVE_ERROR
+							event.error.rawStopReason === "sensitive"
 								? event
 								: {
 										...event,

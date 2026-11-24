@@ -909,51 +909,58 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		}
 	})
 
-	it("hands Pi a refusal without Anthropic's explanation, so a compaction neither stores nor retries it", async () => {
-		const explanation = "Request blocked: timeout policy"
-		const originalFetch = globalThis.fetch
-		globalThis.fetch = async () =>
-			new Response(
-				[
-					`event: message_start\ndata: ${JSON.stringify({
-						type: "message_start",
-						message: {
-							id: "msg_compaction_refusal",
-							type: "message",
-							role: "assistant",
-							model: "claude-sonnet-4-6",
-							content: [],
-							stop_reason: null,
-							stop_sequence: null,
-							usage: { input_tokens: 10, output_tokens: 0 },
-						},
-					})}\n\n`,
-					`event: message_delta\ndata: ${JSON.stringify({
-						type: "message_delta",
-						delta: { stop_reason: "refusal", stop_sequence: null, stop_details: { explanation } },
-						usage: { input_tokens: 10, output_tokens: 2 },
-					})}\n\n`,
-					`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
-				].join(""),
-				{ status: 200, headers: { "content-type": "text/event-stream" } },
-			)
-		try {
-			const models = createPiModels({ openai: null, anthropic: Redacted.make("sk-ant-test") })
-			const model = models.getModel("anthropic", "claude-sonnet-4-6")
-			if (model === undefined) {
-				throw new Error("expected claude-sonnet-4-6")
+	it.each([
+		"Request blocked: timeout policy",
+		// The codec's own text for a sensitive stop, sent as a refusal's explanation.
+		"Provider stopped with: sensitive",
+	])(
+		"hands Pi a refusal without Anthropic's explanation %j, so a compaction neither stores nor retries it",
+		async (explanation) => {
+			const originalFetch = globalThis.fetch
+			globalThis.fetch = async () =>
+				new Response(
+					[
+						`event: message_start\ndata: ${JSON.stringify({
+							type: "message_start",
+							message: {
+								id: "msg_compaction_refusal",
+								type: "message",
+								role: "assistant",
+								model: "claude-sonnet-4-6",
+								content: [],
+								stop_reason: null,
+								stop_sequence: null,
+								usage: { input_tokens: 10, output_tokens: 0 },
+							},
+						})}\n\n`,
+						`event: message_delta\ndata: ${JSON.stringify({
+							type: "message_delta",
+							delta: { stop_reason: "refusal", stop_sequence: null, stop_details: { explanation } },
+							usage: { input_tokens: 10, output_tokens: 2 },
+						})}\n\n`,
+						`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+					].join(""),
+					{ status: 200, headers: { "content-type": "text/event-stream" } },
+				)
+			try {
+				const models = createPiModels({ openai: null, anthropic: Redacted.make("sk-ant-test") })
+				const model = models.getModel("anthropic", "claude-sonnet-4-6")
+				if (model === undefined) {
+					throw new Error("expected claude-sonnet-4-6")
+				}
+				// Pi's compaction asks for its summary this way, outside the generation hooks.
+				const summary = await models.completeSimple(model, {
+					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
+				})
+				expect(summary).toMatchObject({ stopReason: "error", rawStopReason: "refusal" })
+				expect(summary.errorMessage).toBe("The model refused to complete the request")
+				expect(JSON.stringify(summary)).not.toContain(explanation)
+				expect(isRetryableAssistantError(summary)).toBe(false)
+			} finally {
+				globalThis.fetch = originalFetch
 			}
-			// Pi's compaction asks for its summary this way, outside the generation hooks.
-			const summary = await models.completeSimple(model, {
-				messages: [{ role: "user", content: "summarize", timestamp: 0 }],
-			})
-			expect(summary).toMatchObject({ stopReason: "error", rawStopReason: "refusal" })
-			expect(JSON.stringify(summary)).not.toContain(explanation)
-			expect(isRetryableAssistantError(summary)).toBe(false)
-		} finally {
-			globalThis.fetch = originalFetch
-		}
-	})
+		},
+	)
 
 	it("keeps provider errorMessage out of session events for all three Anthropic refusal fallback paths", async () => {
 		const secretDetail = "secret upstream detail"
