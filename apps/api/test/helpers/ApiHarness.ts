@@ -211,6 +211,7 @@ export const makePiDurableTestLayer = (
 						const serving = await objects.get(sessionId)
 						if (serving?.gone === gone) {
 							resets.push(sessionId)
+							serving.backend.retire()
 							objects.set(sessionId, open(sessionId, serving.backend.storage))
 						}
 					}),

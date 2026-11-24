@@ -2417,4 +2417,38 @@ describe("turn engine", () => {
 			await backend.close()
 		}
 	})
+	it("lets a reset session object neither read nor write the storage the next one owns", async () => {
+		const models = makeScriptedPiModels(async (model, context) =>
+			makeAssistantReply(model, null, `Echo ${extractLastUserText(context)}`, 1, 1),
+		)
+		const turn = (number: number, text: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+		})
+		const first = await createInMemoryPiDurableBackend(models)
+		expect(await Effect.runPromise(runPiDurableTurn(first, turn(1, "before")))).toMatchObject({
+			ok: true,
+		})
+		first.retire()
+		const second = await createInMemoryPiDurableBackend(models, 1, undefined, undefined, {
+			storage: first.storage,
+		})
+		try {
+			await expect(first.submit("late", "turn:9")).rejects.toThrow()
+			await expect(first.hasSubmission("turn:1")).rejects.toThrow("This session object was reset")
+			expect(() => first.isCancelled("turn:1")).toThrow("This session object was reset")
+			expect(await second.hasSubmission("turn:1")).toBe(true)
+			expect(await second.hasSubmission("turn:9")).toBe(false)
+			expect(await Effect.runPromise(runPiDurableTurn(second, turn(2, "after")))).toMatchObject({
+				ok: true,
+				reply: { text: "Echo after" },
+			})
+		} finally {
+			await second.close()
+		}
+	})
 })

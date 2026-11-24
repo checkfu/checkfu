@@ -5,7 +5,7 @@ import {
 	MemoryStorage,
 	ROOT_CONVERSATION_ID,
 } from "@earendil-works/pi-durable"
-import type { Cursor, Storage } from "@earendil-works/pi-durable"
+import type { Cursor, Id, Storage } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { createPiHarnessSettings } from "../../src/Pi/PiContextBudget.ts"
@@ -33,6 +33,8 @@ export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly getScanEntryCalls: () => ReadonlyArray<InMemoryEntryScanCall>
 	readonly clearScanEntryCalls: () => void
 	readonly close: () => Promise<void>
+	/** Ends this object as a reset does: nothing it does afterwards reaches the storage. */
+	readonly retire: () => void
 }
 
 export type InMemoryStorage = InstrumentedMemoryStorage
@@ -80,6 +82,91 @@ class InstrumentedMemoryStorage extends MemoryStorage {
 	}
 }
 
+// The overload that names the conversation; the other takes the entry id and the context.
+type EntryLookup = Parameters<Storage["entry"]>
+type EntryResult = ReturnType<Storage["entry"]>
+
+/**
+ * One session object's view of the storage. A reset object's isolate is gone, so a call it
+ * was still running can neither read nor write what the next object owns.
+ */
+class ObjectStorage implements Storage {
+	readonly #shared: InstrumentedMemoryStorage
+	#retired = false
+
+	constructor(shared: InstrumentedMemoryStorage) {
+		this.#shared = shared
+	}
+
+	retire(): void {
+		this.#retired = true
+	}
+
+	/** The session object's fence table, which survives a reset with the rest of its storage. */
+	fence(): Set<string> {
+		return this.#live().cancelledOps
+	}
+
+	#live(): InstrumentedMemoryStorage {
+		if (this.#retired) {
+			throw new Error("This session object was reset")
+		}
+		return this.#shared
+	}
+
+	commit(...args: Parameters<Storage["commit"]>) {
+		return this.#live().commit(...args)
+	}
+	mintId<I extends Id<string>>(): Promise<I> {
+		return this.#live().mintId<I>()
+	}
+	conversation(...args: Parameters<Storage["conversation"]>) {
+		return this.#live().conversation(...args)
+	}
+	scanConversations(...args: Parameters<Storage["scanConversations"]>) {
+		return this.#live().scanConversations(...args)
+	}
+	entry(id: EntryLookup[1], context: EntryLookup[2]): EntryResult
+	entry(conversationId: EntryLookup[0], id: EntryLookup[1], context: EntryLookup[2]): EntryResult
+	entry(...args: [EntryLookup[1], EntryLookup[2]] | EntryLookup): EntryResult {
+		const live = this.#live()
+		return args.length === 2 ? live.entry(args[0], args[1]) : live.entry(args[0], args[1], args[2])
+	}
+	findLatestHeadMarker(...args: Parameters<Storage["findLatestHeadMarker"]>) {
+		return this.#live().findLatestHeadMarker(...args)
+	}
+	scanEntries(...args: Parameters<Storage["scanEntries"]>) {
+		return this.#live().scanEntries(...args)
+	}
+	task(...args: Parameters<Storage["task"]>) {
+		return this.#live().task(...args)
+	}
+	scanTasks(...args: Parameters<Storage["scanTasks"]>) {
+		return this.#live().scanTasks(...args)
+	}
+	submission(...args: Parameters<Storage["submission"]>) {
+		return this.#live().submission(...args)
+	}
+	scanSubmissions(...args: Parameters<Storage["scanSubmissions"]>) {
+		return this.#live().scanSubmissions(...args)
+	}
+	submissionByRequest(...args: Parameters<Storage["submissionByRequest"]>) {
+		return this.#live().submissionByRequest(...args)
+	}
+	findDocument(...args: Parameters<Storage["findDocument"]>) {
+		return this.#live().findDocument(...args)
+	}
+	document(...args: Parameters<Storage["document"]>) {
+		return this.#live().document(...args)
+	}
+	scanDocuments(...args: Parameters<Storage["scanDocuments"]>) {
+		return this.#live().scanDocuments(...args)
+	}
+	close(...args: Parameters<Storage["close"]>) {
+		return this.#live().close(...args)
+	}
+}
+
 /**
  * In-process `pi-durable` backend backed by `MemoryStorage`.
  * Runs the real `@earendil-works/pi-durable` `Harness.open` loop (conversations,
@@ -96,10 +183,14 @@ export const createInMemoryPiDurableBackend = async (
 		readonly reset?: PiDurableBackend["reset"]
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
-	const storage = object.storage ?? new InstrumentedMemoryStorage()
-	const { scanEntryCalls } = storage
+	const shared = object.storage ?? new InstrumentedMemoryStorage()
+	const { scanEntryCalls } = shared
+	const storage = new ObjectStorage(shared)
 	// Kept with the storage, as the session object's fence table is, so it survives a reset.
-	const { cancelledOps } = storage
+	const cancelledOps = {
+		has: (operationId: string) => storage.fence().has(operationId),
+		add: (operationId: string) => storage.fence().add(operationId),
+	}
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
@@ -120,7 +211,7 @@ export const createInMemoryPiDurableBackend = async (
 	pi.resume()
 
 	return {
-		storage,
+		storage: shared,
 		withLock,
 		hasApiKey,
 		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
@@ -232,5 +323,8 @@ export const createInMemoryPiDurableBackend = async (
 			scanEntryCalls.length = 0
 		},
 		close: () => pi.close(BACKGROUND_CONTEXT),
+		retire: () => {
+			storage.retire()
+		},
 	}
 }
