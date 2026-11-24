@@ -27,7 +27,7 @@ Use `gpt-6.2-sol` if you deployed with an OpenAI key. A coding agent can drive t
 
 After that:
 
-- **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. It stops before changing anything if your credentials now act on a different Cloudflare account than the one this checkout deployed that stage to; delete `.checkfu/deployment.json` if you mean to move it.
+- **Upgrade** — `git pull && bun install && bun checkfu deploy`. It reuses the recorded stage and the secrets in `.env`, and shows the changes before applying them. It stops before changing anything if your credentials now act on a different Cloudflare account than the one this checkout deployed that stage to; delete `.checkfu/deployment.json` if you mean to move it. It also stops if `CHECKFU_JURISDICTION` differs from the one the stage was deployed with, since data in one jurisdiction is not visible from another; pass `--change-jurisdiction` if you mean it.
 - **Use it over MCP** — `deploy` prints the MCP URL; add it to your client with the same key (see [MCP](#mcp)).
 - **Call the API from your own code** — the URL and key are in `~/.config/checkfu/config.json`; `/v1/*` routes accept `Authorization: Bearer <key>` or `x-api-key: <key>`. `GET /v1/auth/verify` tells you whether a key is accepted.
 - **Use it from another machine** — `bun checkfu --base-url https://<your-worker>.workers.dev login`.

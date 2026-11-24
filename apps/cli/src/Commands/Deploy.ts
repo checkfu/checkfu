@@ -25,6 +25,7 @@ import {
 	writeSavedConnection,
 } from "../SavedConnection.ts"
 import { readIfPresent, removeIfPresent, restrictToOwner, writePrivate } from "../PrivateFile.ts"
+import { JURISDICTION_ENV } from "@checkfu/api/Placement"
 import { COMMAND } from "../Invocation.ts"
 import { checkoutRoot, isStandalone } from "../Standalone.ts"
 import { writeStderrLine } from "../TerminalOutput.ts"
@@ -129,6 +130,13 @@ const stageFlag = Flag.String("stage").pipe(
 	Flag.optional,
 )
 
+const changeJurisdictionFlag = Flag.Boolean("change-jurisdiction").pipe(
+	Flag.withDefault(false),
+	Flag.withDescription(
+		`Deploy even though ${JURISDICTION_ENV} differs from the one this stage was deployed with`,
+	),
+)
+
 const yesFlag = Flag.Boolean("yes").pipe(
 	Flag.withAlias("y"),
 	Flag.withDefault(false),
@@ -147,6 +155,9 @@ const DeploymentRecord = Schema.fromJsonString(
 		stage: Schema.String.check(Schema.isPattern(STAGE_NAME)),
 		profile: Schema.String,
 		account_id: Schema.String,
+		// CHECKFU_JURISDICTION the stage was deployed with, or null for none. Absent in records
+		// written before it was recorded, when it is unknown.
+		jurisdiction: Schema.optional(Schema.NullOr(Schema.String)),
 		// Absent between a successful deploy and reading its URL back.
 		url: Schema.optional(Schema.String),
 	}),
@@ -463,6 +474,53 @@ const requireRecordedAccount = (
 			)
 		: Effect.void
 
+/**
+ * The jurisdiction the stack will read: the `.env` entry, or the shell's value when that
+ * entry is empty, which is how Alchemy reads `--env-file`.
+ */
+const deployedJurisdiction = (envFile: string) =>
+	Effect.gen(function* () {
+		const dotenv = Option.getOrElse(yield* readIfPresent(envFile), () => "")
+		const fromFile = (yield* readDotEnvValue(dotenv, JURISDICTION_ENV)).trim()
+		if (fromFile !== "") {
+			return fromFile
+		}
+		const fromShell = yield* envValue(JURISDICTION_ENV)
+		if (fromShell !== "") {
+			yield* writeStderrLine(`Using ${JURISDICTION_ENV}=${fromShell} from your environment.`)
+		}
+		return fromShell
+	})
+
+const describeJurisdiction = (value: string | null) =>
+	value === null || value === "" ? "no jurisdiction" : `jurisdiction ${value}`
+
+/**
+ * Durable Objects in one jurisdiction are different objects from those with the same names
+ * in another, so a stage redeployed under a different jurisdiction looks empty. A record
+ * written before the jurisdiction was recorded cannot be checked.
+ */
+const requireRecordedJurisdiction = (
+	known: Option.Option<DeploymentRecord>,
+	jurisdiction: string,
+	allowChange: boolean,
+) => {
+	if (Option.isNone(known) || allowChange) {
+		return Effect.void
+	}
+	const previous = known.value.jurisdiction
+	if (previous === undefined || previous === (jurisdiction === "" ? null : jurisdiction)) {
+		return Effect.void
+	}
+	return usageError(
+		[
+			`This checkout deployed "${known.value.stage}" with ${describeJurisdiction(previous)}, and this deploy would use ${describeJurisdiction(jurisdiction)}.`,
+			"Data kept in one jurisdiction is not visible from another, so the deployment would look empty until it is switched back. Nothing was changed.",
+			`Set ${JURISDICTION_ENV} back to ${previous === null ? "empty, in .env and in your shell" : previous}, or run again with --change-jurisdiction to start this stage in the new jurisdiction.`,
+		].join(" "),
+	)
+}
+
 const writeDeploymentRecord = (checkout: Checkout, record: DeploymentRecord) =>
 	Effect.gen(function* () {
 		const contents = yield* Schema.encodeEffect(DeploymentRecord)(record).pipe(Effect.orDie)
@@ -510,94 +568,104 @@ const waitUntilReady = (url: string, apiKey: string, within: Duration.Input, ret
 		)
 	})
 
-export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yesFlag }, (input) =>
-	Effect.gen(function* () {
-		const path = yield* Path.Path
-		const checkout = yield* requireCheckout
-		const envFile = path.join(checkout.root, ".env")
-		const record = yield* readDeploymentRecord(checkout)
-		const stage = Option.getOrElse(input.stage, () =>
-			Option.match(record, { onNone: () => DEFAULT_STAGE, onSome: (known) => known.stage }),
-		)
+export const deployCommand = Command.make(
+	"deploy",
+	{ stage: stageFlag, yes: yesFlag, changeJurisdiction: changeJurisdictionFlag },
+	(input) =>
+		Effect.gen(function* () {
+			const path = yield* Path.Path
+			const checkout = yield* requireCheckout
+			const envFile = path.join(checkout.root, ".env")
+			const record = yield* readDeploymentRecord(checkout)
+			const stage = Option.getOrElse(input.stage, () =>
+				Option.match(record, { onNone: () => DEFAULT_STAGE, onSome: (known) => known.stage }),
+			)
 
-		// What to type to run this same deploy again; a bare retry could pick another stage.
-		const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
+			// What to type to run this same deploy again; a bare retry could pick another stage.
+			const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
 
-		// The account is settled before any secret is written, so a refusal leaves the
-		// checkout exactly as it was. The profile it was checked under is the one the
-		// deploy then uses; the env file is not consulted again for it.
-		const checked = yield* resolveTarget(checkout, envFile, record)
-		const accountId = yield* requireAccount(checked, Option.some({ retry }))
-		yield* requireRecordedAccount(record, stage, accountId)
-		const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
-		const target = { ...checked, envFile: Option.some(envFile) } satisfies Target
+			// The account is settled before any secret is written, so a refusal leaves the
+			// checkout exactly as it was. The profile it was checked under is the one the
+			// deploy then uses; the env file is not consulted again for it.
+			const checked = yield* resolveTarget(checkout, envFile, record)
+			const accountId = yield* requireAccount(checked, Option.some({ retry }))
+			yield* requireRecordedAccount(record, stage, accountId)
+			const known = Option.filter(
+				record,
+				(previous) => previous.stage === stage && previous.account_id === accountId,
+			)
+			const jurisdiction = yield* deployedJurisdiction(envFile)
+			yield* requireRecordedJurisdiction(known, jurisdiction, input.changeJurisdiction)
+			const { apiKey, provider } = yield* prepareEnvFile(envFile, retry)
+			const target = { ...checked, envFile: Option.some(envFile) } satisfies Target
 
-		const exitCode = yield* run(target, [
-			"deploy",
-			"--stage",
-			stage,
-			...(input.yes ? ["--yes"] : []),
-		])
-		if (exitCode !== 0) {
-			return yield* new CliFailure({
-				message: `Deploy did not finish. Run \`${retry}\` again when you are ready.`,
-				exitCode,
+			const exitCode = yield* run(target, [
+				"deploy",
+				"--stage",
+				stage,
+				...(input.yes ? ["--yes"] : []),
+			])
+			if (exitCode !== 0) {
+				return yield* new CliFailure({
+					message: `Deploy did not finish. Run \`${retry}\` again when you are ready.`,
+					exitCode,
+				})
+			}
+
+			// Recorded before anything else can fail, so the record always names what was
+			// last deployed; its URL follows once Alchemy has been asked for it.
+			// A redeploy of the same target keeps the URL it already had, so `destroy` can
+			// still clear the saved login if this run never gets as far as reading it again.
+			const deployed = {
+				stage,
+				profile: target.profile,
+				account_id: accountId,
+				jurisdiction: jurisdiction === "" ? null : jurisdiction,
+			}
+			yield* writeDeploymentRecord(checkout, {
+				...deployed,
+				...Option.match(known, {
+					onNone: () => ({}),
+					onSome: (previous) => (previous.url === undefined ? {} : { url: previous.url }),
+				}),
 			})
-		}
+			const { url, mcp } = yield* readDeployedUrl(target, stage, retry)
+			yield* writeDeploymentRecord(checkout, { ...deployed, url })
+			yield* writeStderrLine(`Waiting for ${url} to come up…`)
+			yield* waitUntilReady(url, apiKey, checkout.readyWithin, retry)
+			const file = yield* writeSavedConnection({ url, api_key: apiKey })
 
-		// Recorded before anything else can fail, so the record always names what was
-		// last deployed; its URL follows once Alchemy has been asked for it.
-		// A redeploy of the same target keeps the URL it already had, so `destroy` can
-		// still clear the saved login if this run never gets as far as reading it again.
-		const known = Option.filter(
-			record,
-			(previous) => previous.stage === stage && previous.account_id === accountId,
-		)
-		const deployed = { stage, profile: target.profile, account_id: accountId }
-		yield* writeDeploymentRecord(checkout, {
-			...deployed,
-			...Option.match(known, {
-				onNone: () => ({}),
-				onSome: (previous) => (previous.url === undefined ? {} : { url: previous.url }),
-			}),
-		})
-		const { url, mcp } = yield* readDeployedUrl(target, stage, retry)
-		yield* writeDeploymentRecord(checkout, { ...deployed, url })
-		yield* writeStderrLine(`Waiting for ${url} to come up…`)
-		yield* waitUntilReady(url, apiKey, checkout.readyWithin, retry)
-		const file = yield* writeSavedConnection({ url, api_key: apiKey })
-
-		// These commands go wherever CHECKFU_API_URL or CHECKFU_URL points, so say so when
-		// one of them names another deployment.
-		const exported = yield* explicitBaseUrl(Option.none())
-		const elsewhere =
-			Option.isSome(exported) &&
-			!Option.contains(yield* Effect.option(normalizeApiUrl(exported.value)), url)
-		yield* writeStderrLine(
-			[
-				"",
-				`Checkfu is live at ${url}`,
-				"",
-				`  API key    saved to ${file}`,
-				`  API docs   ${url}/openapi.json`,
-				...(mcp === undefined ? [] : [`  MCP        ${mcp.replace(/\/+$/, "")}/mcp`]),
-				"",
-				"Next, create an agent, an environment, and a session, then connect to it:",
-				"",
-				`  ${COMMAND} agents create --name Assistant --model ${provider.model}`,
-				`  ${COMMAND} environments create --name default`,
-				`  ${COMMAND} sessions create --agent-id <agent-id> --environment-id <environment-id>`,
-				`  ${COMMAND} sessions connect <session-id>`,
-				"",
-				...(elsewhere
-					? [
-							`This shell exports a different Checkfu URL. Unset it, or add \`--base-url ${url}\` after \`${COMMAND}\`.`,
-							"",
-						]
-					: []),
-			].join("\n"),
-		)
-	}),
+			// These commands go wherever CHECKFU_API_URL or CHECKFU_URL points, so say so when
+			// one of them names another deployment.
+			const exported = yield* explicitBaseUrl(Option.none())
+			const elsewhere =
+				Option.isSome(exported) &&
+				!Option.contains(yield* Effect.option(normalizeApiUrl(exported.value)), url)
+			yield* writeStderrLine(
+				[
+					"",
+					`Checkfu is live at ${url}`,
+					"",
+					`  API key    saved to ${file}`,
+					`  API docs   ${url}/openapi.json`,
+					...(mcp === undefined ? [] : [`  MCP        ${mcp.replace(/\/+$/, "")}/mcp`]),
+					"",
+					"Next, create an agent, an environment, and a session, then connect to it:",
+					"",
+					`  ${COMMAND} agents create --name Assistant --model ${provider.model}`,
+					`  ${COMMAND} environments create --name default`,
+					`  ${COMMAND} sessions create --agent-id <agent-id> --environment-id <environment-id>`,
+					`  ${COMMAND} sessions connect <session-id>`,
+					"",
+					...(elsewhere
+						? [
+								`This shell exports a different Checkfu URL. Unset it, or add \`--base-url ${url}\` after \`${COMMAND}\`.`,
+								"",
+							]
+						: []),
+				].join("\n"),
+			)
+		}),
 ).pipe(
 	Command.withDescription("Deploy Checkfu to your Cloudflare account and connect this CLI to it"),
 )

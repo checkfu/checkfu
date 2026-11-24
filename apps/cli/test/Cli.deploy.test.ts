@@ -16,8 +16,17 @@ const record = (
 	profile = "default",
 	account = ACCOUNT,
 	url: string | null = DEPLOYED_URL,
+	jurisdiction: string | null = null,
 ) =>
-	`${JSON.stringify({ stage, profile, account_id: account, ...(url === null ? {} : { url }) }, null, "\t")}\n`
+	`${JSON.stringify(
+		{ stage, profile, account_id: account, jurisdiction, ...(url === null ? {} : { url }) },
+		null,
+		"\t",
+	)}\n`
+
+// A record written before the jurisdiction was recorded.
+const recordWithoutJurisdiction = (stage: string) =>
+	`${JSON.stringify({ stage, profile: "default", account_id: ACCOUNT, url: DEPLOYED_URL }, null, "\t")}\n`
 
 interface VirtualFiles {
 	[path: string]: string
@@ -486,6 +495,118 @@ describe("checkfu deploy", () => {
 			})
 			expect(other.errorMessage).toBeUndefined()
 			expect(files[RECORD_FILE]).toBe(record("staging", "default", OTHER_ACCOUNT, elsewhere.url))
+		}),
+	)
+
+	it.live("refuses to redeploy a stage under a different jurisdiction unless asked to", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+			const env = (dotenv: string) =>
+				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n${dotenv}`
+			const deploy = (
+				files: VirtualFiles,
+				shell: Record<string, string> = {},
+				args: ReadonlyArray<string> = [],
+			) => {
+				const calls: Array<ReadonlyArray<string>> = []
+				return Effect.map(
+					cli.run(["deploy", "--yes", ...args], {
+						env: { CHECKFU_CONFIG_DIR: "/config", ...shell },
+						files,
+						spawn: fakeAlchemy(calls),
+					}),
+					(result) => ({ ...result, deployed: calls.some((call) => call[0] === "deploy") }),
+				)
+			}
+
+			// Each way the value can change: set, cleared, changed, or supplied by the shell.
+			for (const [was, dotenv, shell, now] of [
+				[null, "CHECKFU_JURISDICTION=eu\n", {}, "eu"],
+				["eu", "CHECKFU_JURISDICTION=\n", {}, null],
+				["eu", "CHECKFU_JURISDICTION=us\n", {}, "us"],
+				[null, "CHECKFU_JURISDICTION=\n", { CHECKFU_JURISDICTION: "eu" }, "eu"],
+			] as const) {
+				const seeded = record("live", "default", ACCOUNT, DEPLOYED_URL, was)
+				const files = virtualFiles({ ...checkout, [RECORD_FILE]: seeded, [ENV_FILE]: env(dotenv) })
+				const refused = yield* deploy(files, shell)
+				expect([was, now, refused.exitCode, refused.deployed]).toEqual([was, now, 1, false])
+				const describe = (value: string | null) =>
+					value === null ? "no jurisdiction" : `jurisdiction ${value}`
+				expect(refused.errorMessage).toContain(
+					`with ${describe(was)}, and this deploy would use ${describe(now)}.`,
+				)
+				expect(refused.errorMessage).toContain("Nothing was changed")
+				expect(files[RECORD_FILE]).toBe(seeded)
+				expect(files[ENV_FILE]).toBe(env(dotenv))
+
+				const allowed = yield* deploy(files, shell, ["--change-jurisdiction"])
+				expect(allowed.errorMessage).toBeUndefined()
+				expect(files[RECORD_FILE]).toBe(record("live", "default", ACCOUNT, DEPLOYED_URL, now))
+			}
+
+			// Refused before the deploy writes anything to .env, such as a key from the shell.
+			const untouched = "CHECKFU_JURISDICTION=us\n"
+			const unwritten = virtualFiles({
+				...checkout,
+				[RECORD_FILE]: record("live", "default", ACCOUNT, DEPLOYED_URL, "eu"),
+				[ENV_FILE]: untouched,
+			})
+			const early = yield* deploy(unwritten, {
+				CHECKFU_API_KEY: TEST_API_KEY,
+				OPENAI_API_KEY: "sk-proj-x",
+			})
+			expect(early.errorMessage).toContain("Nothing was changed")
+			expect(unwritten[ENV_FILE]).toBe(untouched)
+
+			// The same jurisdiction, from the file or the shell, deploys without a flag.
+			for (const [dotenv, shell] of [
+				["CHECKFU_JURISDICTION=eu\n", {}],
+				["CHECKFU_JURISDICTION=\n", { CHECKFU_JURISDICTION: "eu" }],
+				["CHECKFU_JURISDICTION=eu\n", { CHECKFU_JURISDICTION: "us" }],
+			] as const) {
+				const files = virtualFiles({
+					...checkout,
+					[RECORD_FILE]: record("live", "default", ACCOUNT, DEPLOYED_URL, "eu"),
+					[ENV_FILE]: env(dotenv),
+				})
+				const same = yield* deploy(files, shell)
+				expect([dotenv, same.errorMessage]).toEqual([dotenv, undefined])
+				expect(same.deployed).toBe(true)
+			}
+
+			// A shell-supplied value is announced; a value from the file is not.
+			const announced = yield* deploy(
+				virtualFiles({ ...checkout, [ENV_FILE]: env("CHECKFU_JURISDICTION=\n") }),
+				{ CHECKFU_JURISDICTION: "eu" },
+			)
+			expect(announced.stderr).toContain("Using CHECKFU_JURISDICTION=eu from your environment.")
+			const quiet = yield* deploy(
+				virtualFiles({ ...checkout, [ENV_FILE]: env("CHECKFU_JURISDICTION=eu\n") }),
+			)
+			expect(quiet.stderr).not.toContain("CHECKFU_JURISDICTION")
+
+			// A record from before the jurisdiction was recorded cannot be checked, so the first
+			// deploy after upgrading records whatever is in use.
+			const files = virtualFiles({
+				...checkout,
+				[RECORD_FILE]: recordWithoutJurisdiction("live"),
+				[ENV_FILE]: env("CHECKFU_JURISDICTION=eu\n"),
+			})
+			const upgraded = yield* deploy(files)
+			expect(upgraded.errorMessage).toBeUndefined()
+			expect(files[RECORD_FILE]).toBe(record("live", "default", ACCOUNT, DEPLOYED_URL, "eu"))
+
+			// Another stage, or the same stage in another account, is a new deployment.
+			const other = yield* deploy(
+				virtualFiles({
+					...checkout,
+					[RECORD_FILE]: record("live", "default", ACCOUNT, DEPLOYED_URL, "eu"),
+					[ENV_FILE]: env("CHECKFU_JURISDICTION=\n"),
+				}),
+				{},
+				["--stage", "staging"],
+			)
+			expect(other.errorMessage).toBeUndefined()
 		}),
 	)
 
