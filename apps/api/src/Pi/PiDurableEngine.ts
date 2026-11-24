@@ -180,17 +180,17 @@ export const abortPiDurableTurn = (
 		return yield* Fiber.join(watched)
 	})
 
-// Admissions in progress in this session object, by operation. Admission lets go of the lock
-// while a predecessor drains, so a recovery probe for the same operation waits for it to end
-// instead of reporting the operation absent in that gap.
-const admitting = new WeakMap<PiDurableBackend, Map<string, Deferred.Deferred<void>>>()
+// Admissions in progress in this session object, by operation; a retry can overlap the call it
+// retries. Admission lets go of the lock while a predecessor drains, so a recovery probe for the
+// same operation waits until none is left instead of reporting the operation absent in that gap.
+const admitting = new WeakMap<PiDurableBackend, Map<string, Set<Deferred.Deferred<void>>>>()
 
 const admissionsOf = (backend: PiDurableBackend) => {
 	const existing = admitting.get(backend)
 	if (existing !== undefined) {
 		return existing
 	}
-	const created = new Map<string, Deferred.Deferred<void>>()
+	const created = new Map<string, Set<Deferred.Deferred<void>>>()
 	admitting.set(backend, created)
 	return created
 }
@@ -202,7 +202,10 @@ const admitPiTurn = (
 	Effect.acquireUseRelease(
 		Effect.sync(() => {
 			const done = Deferred.makeUnsafe<void>()
-			admissionsOf(backend).set(request.operationId, done)
+			const admissions = admissionsOf(backend)
+			const active = admissions.get(request.operationId) ?? new Set()
+			active.add(done)
+			admissions.set(request.operationId, active)
 			return done
 		}),
 		() => admitPiTurnUnderWay(backend, request),
@@ -210,7 +213,9 @@ const admitPiTurn = (
 			Effect.andThen(
 				Effect.sync(() => {
 					const admissions = admissionsOf(backend)
-					if (admissions.get(request.operationId) === done) {
+					const active = admissions.get(request.operationId)
+					active?.delete(done)
+					if (active?.size === 0) {
 						admissions.delete(request.operationId)
 					}
 				}),
@@ -346,9 +351,11 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	backend: PiDurableBackend,
 	operationId: string,
 ): Effect.fn.Return<PiTurnOutcome | null> {
-	const underWay = admissionsOf(backend).get(operationId)
-	if (underWay !== undefined) {
-		yield* Deferred.await(underWay)
+	// Another admission may start while this one waits, so look again until none is left.
+	let underWay = admissionsOf(backend).get(operationId)
+	while (underWay !== undefined && underWay.size > 0) {
+		yield* Effect.forEach([...underWay], Deferred.await, { discard: true })
+		underWay = admissionsOf(backend).get(operationId)
 	}
 	const probe = yield* backend.withLock(
 		Effect.promise(async () => {
