@@ -45,12 +45,24 @@ export class Connection extends Cloudflare.DurableObject<Connection>()(
 			const url = custody.target()
 			return url === null ? null : { url, token: custody.read }
 		}
-		// The proxy loads with the first request, so isolates that never send one skip it.
+		// The proxy loads with the first request, so isolates that never send one skip it. A load
+		// that failed is forgotten, so the next request tries again instead of failing for the
+		// isolate's whole life.
 		let proxy: Promise<ConnectionProxy> | undefined
-		const outbound = () =>
-			(proxy ??= import("./ConnectionProxy.ts").then(({ makeConnectionProxy }) =>
-				makeConnectionProxy(target),
-			))
+		const outbound = () => {
+			if (proxy === undefined) {
+				const loading = import("./ConnectionProxy.ts").then(({ makeConnectionProxy }) =>
+					makeConnectionProxy(target),
+				)
+				proxy = loading
+				loading.catch(() => {
+					if (proxy === loading) {
+						proxy = undefined
+					}
+				})
+			}
+			return proxy
+		}
 		return Effect.succeed({
 			alarm: () => Effect.promise(() => custody.expire()),
 			storeSecret: (secret: string, mcpServerUrl: string): Effect.Effect<boolean> =>
