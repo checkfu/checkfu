@@ -7,14 +7,21 @@ import {
 	isPendingResource,
 } from "@checkfu/sdk"
 import type { JsonSessionEvent, SessionEvent } from "@checkfu/sdk"
+import { CodemodeSandbox } from "@earendil-works/pi-codemode"
+import type { Extension } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
+import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
 import { AgentVersionWaitTimeout, makeApiHandler } from "../src/Http/Router.ts"
+import { loadToolSurface, withScriptDeadline } from "../src/Pi/PiCodemode.ts"
+import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import { TEST_API_KEY, makeAssistantReply, makePiDurableTestLayer } from "./helpers/ApiHarness.ts"
+
+const withToolSurface = await loadToolSurface()
 
 const makeFetchBridge =
 	(
@@ -464,5 +471,261 @@ describe("@checkfu/sdk live API integration", () => {
 				}),
 			),
 		{ timeout: 15_000 },
+	)
+
+	it.live(
+		"stores a credential in a vault and never gets its token back",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const { layer } = makePiDurableTestLayer(async (model) =>
+						makeAssistantReply(model, null, "ok", 2, 2),
+					)
+					const token = "tok_sdk_SECRET_do_not_leak"
+					const rotated = "tok_sdk_ROTATED_do_not_leak"
+					const bodies: Array<string> = []
+
+					yield* Effect.gen(function* () {
+						const { fetch: apiFetch } = yield* makeApiHandler
+						const services = yield* Effect.context<never>()
+						const bridgeFetch = makeFetchBridge(Effect.runPromiseWith(services), apiFetch)
+						const recordingFetch: typeof globalThis.fetch = async (input, init) => {
+							const response = await bridgeFetch(input, init)
+							bodies.push(await response.clone().text())
+							return response
+						}
+						const sdkLayer = CheckfuClient.layerFetch({
+							apiKey: TEST_API_KEY,
+							baseUrl: "http://localhost:1337",
+							fetch: recordingFetch,
+							maxRetries: 0,
+						})
+
+						yield* Effect.gen(function* () {
+							const client = yield* CheckfuClient
+							const vault = yield* client.vaults.create({ display_name: "Alice" })
+							if (isPendingResource(vault)) {
+								return yield* Effect.die("vault creation stayed pending")
+							}
+							expect(vault.type).toBe("vault")
+
+							const credential = yield* client.vaults.credentials.create(vault.id, {
+								auth: {
+									type: "static_bearer",
+									token: Redacted.make(token),
+									mcp_server_url: "https://mcp.example.com/mcp",
+								},
+								display_name: "Alice's token",
+							})
+							if (isPendingResource(credential)) {
+								return yield* Effect.die("credential creation stayed pending")
+							}
+							expect(credential.auth).toEqual({
+								type: "static_bearer",
+								mcp_server_url: "https://mcp.example.com/mcp",
+							})
+
+							const fetched = yield* client.vaults.credentials.retrieve(vault.id, credential.id)
+							expect(fetched.id).toBe(credential.id)
+							const listed = yield* client.vaults.credentials.list(vault.id)
+							expect(listed.data.map((item) => item.id)).toEqual([credential.id])
+
+							yield* client.vaults.credentials.update(vault.id, credential.id, {
+								auth: { type: "static_bearer", token: Redacted.make(rotated) },
+							})
+							const duplicate = yield* Effect.flip(
+								client.vaults.credentials.create(vault.id, {
+									auth: {
+										type: "static_bearer",
+										token: Redacted.make(token),
+										mcp_server_url: "https://mcp.example.com/mcp",
+									},
+								}),
+							)
+							expect(duplicate).toBeInstanceOf(ConflictError)
+
+							yield* client.vaults.credentials.archive(vault.id, credential.id)
+							expect((yield* client.vaults.credentials.list(vault.id)).data).toEqual([])
+							expect((yield* client.vaults.delete(vault.id)).type).toBe("vault_deleted")
+							expect(yield* Effect.flip(client.vaults.retrieve(vault.id))).toBeInstanceOf(
+								NotFoundError,
+							)
+						}).pipe(Effect.provide(sdkLayer))
+					}).pipe(Effect.provide(layer))
+
+					expect(bodies.length).toBeGreaterThan(6)
+					expect(bodies.join("\n")).not.toContain(token)
+					expect(bodies.join("\n")).not.toContain(rotated)
+				}),
+			),
+		{ timeout: 15_000 },
+	)
+
+	it.live(
+		"reads a tool call and an approval pause through the event stream, and answers it",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const posted: Array<string> = []
+					const desk: Extension = {
+						name: "desk",
+						tools: [
+							{
+								name: "post",
+								description: "Post a message.",
+								parameters: { type: "object", properties: { text: { type: "string" } } },
+								execute: (args: { readonly text?: string }) => {
+									posted.push(args.text ?? "")
+									return Promise.resolve({ output: [{ type: "text", text: "posted" }] })
+								},
+							},
+							{
+								name: "peek",
+								description: "Read the board.",
+								parameters: { type: "object", properties: {} },
+								execute: () => Promise.resolve({ output: [{ type: "text", text: "board" }] }),
+							},
+						],
+					}
+					const sandboxes: Array<CodemodeSandbox> = []
+					const base = makePiDurableTestLayer(
+						(model, context) =>
+							Promise.resolve(
+								context.messages.some((message) => message.role === "toolResult")
+									? makeAssistantReply(model, null, "done", 2, 2)
+									: {
+											...makeAssistantReply(model, null, "", 3, 2),
+											content: [
+												{ type: "toolCall" as const, id: "call_peek", name: "peek", arguments: {} },
+												{
+													type: "toolCall" as const,
+													id: "call_post",
+													name: "post",
+													arguments: { text: "hi" },
+												},
+											],
+											stopReason: "toolUse" as const,
+										},
+							),
+						undefined,
+						undefined,
+						() => {
+							const sandbox = withScriptDeadline(new CodemodeSandbox(), {
+								defaultMs: 2000,
+								maxMs: 2000,
+							})
+							sandboxes.push(sandbox)
+							const registry = createCheckfuRegistry()
+							for (const extension of withToolSurface(sandbox, [desk])) {
+								registry.install(extension)
+							}
+							return registry
+						},
+						undefined,
+						(tool) => (tool === "post" ? { server: "desk", tool: "post", ask: true } : undefined),
+					)
+					yield* Effect.addFinalizer(() =>
+						Effect.promise(() => base.closeAll()).pipe(
+							Effect.andThen(
+								Effect.forEach(sandboxes, (sandbox) => Effect.promise(() => sandbox.close()), {
+									discard: true,
+								}),
+							),
+						),
+					)
+
+					yield* Effect.gen(function* () {
+						const { fetch: apiFetch } = yield* makeApiHandler
+						const services = yield* Effect.context<never>()
+						const sdkLayer = CheckfuClient.layerFetch({
+							apiKey: TEST_API_KEY,
+							baseUrl: "http://localhost:1337",
+							fetch: makeFetchBridge(Effect.runPromiseWith(services), apiFetch),
+							maxRetries: 0,
+						})
+
+						yield* Effect.gen(function* () {
+							const client = yield* CheckfuClient
+							const agent = yield* client.waitForPending(
+								yield* client.agents.create({ name: "Desk", model: "gpt-4o-mini" }),
+							)
+							const environment = yield* client.waitForPending(
+								yield* client.environments.create({
+									name: "default",
+									config: { type: "cloud", networking: { type: "unrestricted" } },
+								}),
+							)
+							const session = yield* client.waitForPending(
+								yield* client.sessions.create({
+									agent: { id: agent.id, version: agent.version },
+									environment_id: environment.id,
+								}),
+							)
+							yield* client.sessions.events.send(session.id, {
+								events: [{ type: "user.message", content: [{ type: "text", text: "go" }] }],
+							})
+
+							const untilIdle = (after?: number) =>
+								client.sessions.events
+									.stream(session.id, after === undefined ? {} : { after })
+									.pipe(
+										Stream.takeUntil((event: SessionEvent) => event.type === "session.status_idle"),
+										Stream.runCollect,
+										Effect.map((events) => Array.from(events)),
+									)
+
+							const paused = yield* untilIdle()
+							const waiting = paused.filter((event) => event.type === "agent.tool_use")
+							expect(
+								waiting.map((event) =>
+									event.type === "agent.tool_use"
+										? [event.tool_use_id, event.name, event.input]
+										: event,
+								),
+							).toEqual([
+								["call_peek", "peek", {}],
+								["call_post", "post", { text: "hi" }],
+							])
+							const pause = paused.at(-1)
+							expect(
+								pause?.type === "session.status_idle" &&
+									pause.stop_reason.type === "requires_action"
+									? pause.stop_reason.event_ids
+									: pause,
+							).toEqual(["call_post"])
+							expect(posted).toEqual([])
+
+							const receipt = yield* client.sessions.events.send(session.id, {
+								events: [
+									{ type: "user.tool_confirmation", tool_use_id: "call_post", result: "allow" },
+								],
+							})
+							expect(receipt.data).toEqual([
+								{ type: "user.tool_confirmation", tool_use_id: "call_post", result: "allow" },
+							])
+
+							const resumed = yield* untilIdle(pause?.seq)
+							const confirmation = resumed.find((event) => event.type === "user.tool_confirmation")
+							expect(
+								confirmation?.type === "user.tool_confirmation"
+									? confirmation.result
+									: confirmation,
+							).toBe("allow")
+							const result = resumed.find((event) => event.type === "agent.tool_result")
+							expect(
+								result?.type === "agent.tool_result"
+									? [result.tool_use_id, result.content, result.is_error]
+									: result,
+							).toEqual(["call_post", [{ type: "text", text: "posted" }], false])
+							const end = resumed.at(-1)
+							expect(end?.type === "session.status_idle" ? end.stop_reason : end).toEqual({
+								type: "end_turn",
+							})
+							expect(posted).toEqual(["hi"])
+						}).pipe(Effect.provide(sdkLayer))
+					}).pipe(Effect.provide(base.layer))
+				}),
+			),
+		{ timeout: 20_000 },
 	)
 })

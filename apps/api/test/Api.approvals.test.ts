@@ -138,6 +138,7 @@ const client = (apiFetch: Fetch, sessionId: string) => {
 		all.filter((event) => event["type"] === "session.status_idle"),
 	)
 	return {
+		send,
 		say: (text: string) => send([{ type: "user.message", content: [{ type: "text", text }] }]),
 		confirm: (tool_use_id: string, result: "allow" | "deny", deny_message?: string) =>
 			send([
@@ -445,6 +446,11 @@ describe("tool calls that ask a person first", () => {
 				const unknown = yield* api.confirm("call-nope", "allow")
 				expect(unknown.status).toBe(409)
 				expect(JSON.stringify(unknown.body)).toContain("waiting")
+				// A misspelled field is refused, not dropped.
+				const misspelled = yield* api.send([
+					{ type: "user.tool_confirmation", tool_use_id: "call-1", result: "deny", message: "No." },
+				])
+				expect(misspelled.status).toBe(400)
 				// The session is still paused on the real call.
 				expect((yield* api.confirm("call-1", "allow")).status).toBe(200)
 				expect(yield* api.idle(2)).toEqual({ type: "end_turn" })
