@@ -27,8 +27,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-        with:
-          cache: static
       # Each check runs even when one before it fails, so a run lists every failure.
       - run: bun run generate:check
       - if: ${{ !cancelled() }}
@@ -48,8 +46,11 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          cache: typecheck
+          turbo-cache: typecheck
       - run: bun run typecheck
+      - if: ${{ !cancelled() }}
+        name: Fail if the typecheck changed any tracked file
+        run: git diff --exit-code
 
   test:
     runs-on: ubuntu-latest
@@ -60,7 +61,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          cache: test
+          turbo-cache: test
       - run: bun x turbo run test --filter='!@checkfu/domain'
       - if: ${{ !cancelled() }}
         run: bun run test:bun
@@ -78,7 +79,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         with:
-          cache: domain
+          turbo-cache: domain
       - run: bun x turbo run test --filter=@checkfu/domain
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
@@ -92,8 +93,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-        with:
-          cache: workerd
       - run: bun run test:workerd
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file

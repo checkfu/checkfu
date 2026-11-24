@@ -2,9 +2,13 @@ name: Set up
 description: Install Bun, Node and dependencies, and restore the turbo cache for one job.
 
 inputs:
-  cache:
-    description: The turbo cache this job reads, and saves on main.
-    required: true
+  turbo-cache:
+    description: >-
+      The turbo cache this job restores and saves, for a job that runs turbo. A pull request
+      restores its own latest entry first, so a restacked or re-pushed PR replays every task
+      whose inputs did not change; otherwise it restores main's.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -28,8 +32,9 @@ runs:
     - run: bun install --frozen-lockfile
       shell: bash
 
-    - uses: actions/cache@v4
+    - if: ${{ inputs.turbo-cache != '' }}
+      uses: actions/cache@v4
       with:
         path: .turbo/cache
-        key: turbo-${{ inputs.cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-${{ github.sha }}
-        restore-keys: turbo-${{ inputs.cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-
+        key: turbo-${{ inputs.turbo-cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-${{ github.sha }}
+        restore-keys: turbo-${{ inputs.turbo-cache }}-${{ runner.os }}-node-${{ steps.node.outputs.node-version }}-bun-${{ steps.bun.outputs.bun-version }}-
