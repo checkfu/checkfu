@@ -3,6 +3,7 @@ import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "./apps/api/src/ApiWorker.ts"
 import { customDomains } from "./apps/api/src/CustomDomain.ts"
 import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
+import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection.ts"
 import PiHarnessWorkerLive from "./apps/api/src/Pi/PiHarnessWorker.ts"
 import * as Alchemy from "alchemy"
 import * as Effect from "effect/Effect"
@@ -16,7 +17,7 @@ export const CLOUDFLARE_STATE_OBSERVABILITY = {
 export const inProduction = <E, R>(check: Effect.Effect<void, E, R>) =>
 	Effect.gen(function* () {
 		const ctx = yield* Alchemy.AlchemyContext
-		if (!ctx.dev && (yield* Alchemy.Stage) === "production") {
+		if (!ctx.dev && (yield* Alchemy.Stage) === PRODUCTION_STAGE) {
 			yield* check
 		}
 	})
@@ -56,7 +57,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				api: api.url.as<string>(),
 				mcp: mcp.url.as<string>(),
 			}
-		}).pipe(Effect.provide(PiHarnessWorkerLive)),
+		}).pipe(Effect.provide(PiHarnessWorkerLive), protectInProduction),
 	)
 
 export default checkfuStack(requireShippedBaseline)
