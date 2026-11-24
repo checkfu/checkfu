@@ -16298,10 +16298,7 @@
 					"group": "vaults",
 					"endpoint": "createCredential"
 				},
-				"x-checkfu-mcp": {
-					"name": "vaults_createCredential",
-					"destructive": false
-				}
+				"x-checkfu-mcp": false
 			},
 			"get": {
 				"tags": ["vaults"],
@@ -17587,9 +17584,7 @@
 					"group": "vaults",
 					"endpoint": "updateCredential"
 				},
-				"x-checkfu-mcp": {
-					"name": "vaults_updateCredential"
-				}
+				"x-checkfu-mcp": false
 			},
 			"delete": {
 				"tags": ["vaults"],
