@@ -239,6 +239,30 @@ describe("workspace tool output", () => {
 		expect(last).not.toHaveProperty("nextOffset")
 	})
 
+	it("keeps a grep page that ends early within its budget, note included", async () => {
+		const { maxBytes } = workspaceOutputLimits("grep")
+		// Lines of every length, so that some page fills its budget to within a note's length.
+		for (let length = 50; length <= 500; length += 7) {
+			const files: PagingFiles = {
+				grep: (_query, path, options) =>
+					Promise.resolve(
+						Array.from({ length: options.limit }, (_, index) => ({
+							path,
+							line: options.offset + index + 1,
+							text: "m".repeat(length),
+						})),
+					),
+				stat: () => Promise.reject(new Error("not used")),
+				readFile: () => Promise.reject(new Error("not used")),
+			}
+			const page = await grepWithin(files, { query: "m", limit: 1000 }, maxBytes)
+			expect([length, new TextEncoder().encode(textOf(page)).byteLength <= maxBytes]).toEqual([
+				length,
+				true,
+			])
+		}
+	})
+
 	it("reads a line longer than a page in byte slices that join back into the line", async () => {
 		const line = `${'{"k":"välue"},'.repeat(12_000)}`
 		const bytes = new TextEncoder().encode(`short first line\n${line}\nlast\n`)
