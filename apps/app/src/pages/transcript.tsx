@@ -35,9 +35,9 @@ export function useSessionEvents(sessionId: string, initialStatus: Status) {
 						after === undefined ? undefined : { after },
 						{ signal: controller.signal },
 					)
+					setError(undefined)
 					for await (const event of stream) {
 						after = event.seq
-						setError(undefined)
 						setEvents((seen) =>
 							seen.some((known) => known.seq === event.seq) ? seen : [...seen, event],
 						)

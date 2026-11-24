@@ -130,6 +130,7 @@ export const router = createRouter({
 	]),
 	defaultPreload: "intent",
 	defaultPreloadStaleTime: 0,
+	defaultErrorComponent: RouteError,
 	scrollRestoration: true,
 })
 
