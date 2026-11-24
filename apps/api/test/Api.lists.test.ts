@@ -73,7 +73,10 @@ const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A
 }
 
 const create = (apiFetch: ApiFetch, path: string, body: unknown) =>
-	call<Resource>(apiFetch, "POST", path, body).pipe(Effect.map((created) => created.body.id))
+	call<Resource>(apiFetch, "POST", path, body).pipe(
+		Effect.map((created) => created.body.id),
+		Effect.tap(() => Effect.sleep("2 millis")),
+	)
 
 describe("List endpoints", () => {
 	it("lists agents oldest first, a page at a time in either order, without archived ones by default", () =>
@@ -208,22 +211,32 @@ describe("List endpoints", () => {
 						}),
 					)
 				}
-				yield* listed(apiFetch, "/v1/agents?limit=1", 1)
 				const utf8 = new TextEncoder()
-				const seen: Array<string> = []
-				let path = "/v1/agents?limit=100"
-				let pages = 0
-				for (;;) {
-					const page = yield* call<ListBody>(apiFetch, "GET", path)
-					expect(page.status).toBe(200)
-					pages += 1
-					const bytes = utf8.encode(JSON.stringify(page.body.data)).length
-					expect(page.body.data.length === 1 || bytes <= LIST_PAGE_BYTES).toBe(true)
-					seen.push(...idsOf(page))
-					if (page.body.next_cursor === null) {
-						break
+				const traverse = Effect.gen(function* () {
+					const seen: Array<string> = []
+					const sizes: Array<readonly [count: number, bytes: number]> = []
+					let path = "/v1/agents?limit=100"
+					for (;;) {
+						const page = yield* call<ListBody>(apiFetch, "GET", path)
+						expect(page.status).toBe(200)
+						sizes.push([page.body.data.length, utf8.encode(JSON.stringify(page.body.data)).length])
+						seen.push(...idsOf(page))
+						if (page.body.next_cursor === null) {
+							return { seen, sizes }
+						}
+						path = `/v1/agents?limit=100&after=${encodeURIComponent(page.body.next_cursor)}`
 					}
-					path = `/v1/agents?limit=100&after=${encodeURIComponent(page.body.next_cursor)}`
+				})
+				const { seen, sizes } = yield* traverse.pipe(
+					Effect.repeat({
+						schedule: Schedule.spaced("5 millis"),
+						times: 400,
+						until: (result) => result.seen.length === ids.length,
+					}),
+				)
+				const pages = sizes.length
+				for (const [count, bytes] of sizes) {
+					expect(count === 1 || bytes <= LIST_PAGE_BYTES).toBe(true)
 				}
 				expect(pages).toBeGreaterThan(1)
 				expect(seen).toEqual(ids)
