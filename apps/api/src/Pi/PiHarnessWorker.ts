@@ -1,12 +1,13 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
+import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "../Compatibility.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
 
 export const PI_HARNESS_WORKER_PROPS = {
 	main: import.meta.url,
-	compatibility: { date: "2026-11-17" },
+	compatibility: { date: COMPATIBILITY_DATE },
 	workersDev: false,
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	observability: {
@@ -27,5 +28,10 @@ export default PiHarnessWorker.make(
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),
 		})
-	}).pipe(Effect.provide([PiSessionLive, Cloudflare.Telemetry({ headSamplingRate: 0.1 })])),
+	}).pipe(
+		Effect.provide([
+			PiSessionLive,
+			Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
+		]),
+	),
 )
