@@ -94,7 +94,7 @@ const automationRunResource = (
 	created_at: entry.envelope.at,
 })
 
-export const listPage = <E, R>(
+const listPage = <E, R>(
 	live: ReadonlyArray<AutomationDirectoryEntry>,
 	query: { readonly after?: number; readonly limit?: number; readonly order?: "asc" | "desc" },
 	snapshotOf: (id: AutomationId) => Effect.Effect<AutomationSnapshot, E, R>,
