@@ -360,6 +360,36 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
+	it.effect("locks the arguments and the result of every harness Worker call", () =>
+		Effect.gen(function* () {
+			expect(
+				persistedShapes
+					.filter((shape) => shape.kind === "harness-call")
+					.map((shape) => shape.id)
+					.toSorted(),
+			).toEqual(
+				["abortTurn", "recoverTurn", "runTurn"].flatMap((method) => [
+					`harness-call:PiHarness.${method}/args`,
+					`harness-call:PiHarness.${method}/result`,
+				]),
+			)
+			const id = "harness-call:PiHarness.abortTurn/args"
+			const sent = lockWith({ [id]: [["sess_1", "turn:1"]] })
+			expect(yield* lockProblems(sent)).toEqual([])
+			const reshaped = yield* lockProblems(
+				sent,
+				replacing(
+					id,
+					Schema.Tuple([
+						Schema.Struct({ conversation: Schema.String, operationId: Schema.String }),
+					]),
+				),
+			)
+			expect(reshaped.length).toBe(1)
+			expect(reshaped[0]).toContain(id)
+		}),
+	)
+
 	it.effect("lets a view change shape only when its version increased", () =>
 		Effect.gen(function* () {
 			const id = "view:Checkfu.TurnInput@v2"

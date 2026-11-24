@@ -56,3 +56,11 @@ export const PiTurnResult = Schema.Union([PiTurnOutcome, Schema.Literal("history
 export type PiTurnResult = typeof PiTurnResult.Type
 
 export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
+
+// Every method the harness Worker serves, as its argument tuple and its result. The RPC type
+// and the persisted lock are both derived from this, so neither can describe a different call.
+export const PiHarnessCalls = {
+	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
+	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnResult },
+	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+} as const

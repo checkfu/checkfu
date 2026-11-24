@@ -8,7 +8,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
-import { PiRecoveredTurn, PiTurnRequest, PiTurnResult } from "../../src/Pi/PiTurn.ts"
+import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
 
 export type PersistedSchema = Schema.Codec<unknown, unknown, never, never>
 
@@ -426,15 +426,12 @@ const PI_DOCS: ReadonlyArray<PersistedShape> = CHECKFU_PI_DOCS.map((spec): Persi
 	schema: piDocPersistedSchema(spec),
 }))
 
-const HARNESS_CALLS: ReadonlyArray<PersistedShape> = [
-	{ id: "harness-call:PiHarness.runTurn/request", kind: "harness-call", schema: PiTurnRequest },
-	{ id: "harness-call:PiHarness.runTurn/result", kind: "harness-call", schema: PiTurnResult },
-	{
-		id: "harness-call:PiHarness.recoverTurn/result",
-		kind: "harness-call",
-		schema: PiRecoveredTurn,
-	},
-]
+const HARNESS_CALLS: ReadonlyArray<PersistedShape> = Object.entries(PiHarnessCalls).flatMap(
+	([method, { args, result }]): ReadonlyArray<PersistedShape> => [
+		{ id: `harness-call:PiHarness.${method}/args`, kind: "harness-call", schema: args },
+		{ id: `harness-call:PiHarness.${method}/result`, kind: "harness-call", schema: result },
+	],
+)
 
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
