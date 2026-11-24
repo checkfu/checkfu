@@ -1,6 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai"
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
+import { PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW } from "./PiContextBudget.ts"
 
 export const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number]
@@ -13,9 +14,15 @@ export const PROVIDER_API_KEY_ENV: Readonly<Record<SupportedProvider, string>> =
 export const isSupportedProvider = (value: string): value is SupportedProvider =>
 	value === "openai" || value === "anthropic"
 
+// A model too small for Pi's compaction defaults (legacy gpt-4, 8,192 tokens) is not offered.
+const offered = (models: Readonly<Record<string, Model<Api>>>): ReadonlyArray<Model<Api>> =>
+	Object.values(models).filter(
+		(model) => model.contextWindow >= PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
+	)
+
 const MODELS: Readonly<Record<SupportedProvider, ReadonlyArray<Model<Api>>>> = {
-	openai: Object.values(OPENAI_MODELS),
-	anthropic: Object.values(ANTHROPIC_MODELS),
+	openai: offered(OPENAI_MODELS),
+	anthropic: offered(ANTHROPIC_MODELS),
 }
 
 const findModel = (provider: SupportedProvider, modelId: string) =>
