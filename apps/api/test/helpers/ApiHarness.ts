@@ -5,7 +5,7 @@ import { createModels, createProvider } from "@earendil-works/pi-ai/models"
 import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
-import type { JsonObject } from "@earendil-works/pi-durable"
+import type { JsonObject, Registry } from "@earendil-works/pi-durable"
 import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -183,6 +183,7 @@ export const makePiDurableTestLayer = (
 		ANTHROPIC_API_KEY: "sk-anthropic-test",
 	},
 	platform = Domain.InMemory,
+	registry?: () => Registry,
 ) => {
 	interface SessionObject {
 		readonly backend: InMemoryPiDurableBackend
@@ -199,7 +200,7 @@ export const makePiDurableTestLayer = (
 		const backend = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(handler),
 			undefined,
-			undefined,
+			registry?.(),
 			(provider) => (envOverrides[PROVIDER_API_KEY_ENV[provider]] ?? "").length > 0,
 			{
 				...(storage === undefined ? {} : { storage }),

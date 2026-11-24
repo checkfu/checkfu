@@ -362,6 +362,12 @@ const renderConnectEvent = (
 				}
 				break
 			}
+			case "agent.tool_use": {
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(`[tool] ${escapeTerminalControlCharacters(event.name)}`)
+				}
+				break
+			}
 			case "agent.thinking": {
 				if (!rawStructuredMode && event.thinking.length > 0) {
 					yield* writeStderrLine(`[thinking] ${event.thinking}`)

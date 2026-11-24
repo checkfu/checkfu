@@ -236,6 +236,18 @@ export const SessionEventFields = {
 	"span.model_request_start": {
 		model_request_start_id: NonEmptyString,
 	},
+	"agent.tool_use": {
+		tool_use_id: ResourceId,
+		name: ResourceId,
+		input: Schema.JsonObject,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.tool_result": {
+		tool_use_id: ResourceId,
+		content: Schema.Array(TextBlock),
+		is_error: Schema.Boolean,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
 	"agent.thinking": {
 		thinking: Schema.String,
 	},

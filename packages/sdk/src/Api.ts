@@ -595,6 +595,14 @@ export const SpanModelRequestStartEvent = wireSessionEvent(
 	"span.model_request_start",
 	SessionEventFields["span.model_request_start"],
 )
+export const AgentToolUseSessionEvent = wireSessionEvent(
+	"agent.tool_use",
+	SessionEventFields["agent.tool_use"],
+)
+export const AgentToolResultSessionEvent = wireSessionEvent(
+	"agent.tool_result",
+	SessionEventFields["agent.tool_result"],
+)
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
@@ -629,6 +637,8 @@ export const SessionEvent = Schema.Union([
 	UserInterruptSessionEvent,
 	SessionStatusRunningEvent,
 	SpanModelRequestStartEvent,
+	AgentToolUseSessionEvent,
+	AgentToolResultSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,

@@ -1,5 +1,5 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
-import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
+import { ModelUsage, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
@@ -31,7 +31,12 @@ export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
 })
 
 export const PiTurnOutcome = Schema.Union([
-	Schema.Struct({ ok: Schema.Literal(true), reply: PiTurnReply }),
+	Schema.Struct({
+		ok: Schema.Literal(true),
+		reply: PiTurnReply,
+		// The turn's tool calls, already bounded by the session object.
+		tool_calls: Schema.optionalKey(Schema.Array(ToolCall)),
+	}),
 	Schema.Struct({
 		ok: Schema.Literal(false),
 		error: Schema.Union([PiTurnFailed, TurnInterrupted]),

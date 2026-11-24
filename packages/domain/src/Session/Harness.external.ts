@@ -18,6 +18,7 @@ import {
 	ResourceId,
 	ThinkingText,
 } from "./SessionTypes.ts"
+import { truncateText } from "./TextBounds.ts"
 
 export const DEFAULT_TURN_TIMEOUT_MS = 600_000
 
@@ -87,7 +88,7 @@ const clampText = (value: string, maxLength: number, fallback: string): string =
 	if (value.length === 0) {
 		return fallback
 	}
-	return value.length > maxLength ? value.slice(0, maxLength) : value
+	return truncateText(value, maxLength)
 }
 
 export interface HarnessReply {
@@ -122,9 +123,9 @@ export const clampHarnessReply = (
 			reply.thinking === null || reply.thinking.length === 0
 				? null
 				: reply.thinking.length > MAX_THINKING_TEXT_LENGTH
-					? reply.thinking.slice(0, MAX_THINKING_TEXT_LENGTH)
+					? truncateText(reply.thinking, MAX_THINKING_TEXT_LENGTH)
 					: reply.thinking,
-		text: truncated ? reply.text.slice(0, MAX_MESSAGE_TEXT_LENGTH) : reply.text,
+		text: truncated ? truncateText(reply.text, MAX_MESSAGE_TEXT_LENGTH) : reply.text,
 		stop_reason:
 			truncated && reply.stop_reason.type === "end_turn"
 				? { type: "budget_reached" as const }

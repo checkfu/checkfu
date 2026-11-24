@@ -8,7 +8,10 @@ import type {
 	TurnFailed,
 	TurnInterrupted,
 } from "@checkfu/domain/Session/Harness.external"
+import { clampToolCalls, recordToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -70,6 +73,7 @@ export interface ModelHandler {
 		readonly session_id: SessionId
 		readonly turn: number
 	}) => Effect.Effect<void, HarnessUnavailable>
+	readonly toolEvents?: (args: ModelTurnInput) => ReadonlyArray<ToolEvent>
 }
 
 export interface CliRunOptions {
@@ -112,6 +116,7 @@ const defaultModelHandler: Required<ModelHandler> = {
 			stop_reason: { type: "end_turn" as const },
 		}),
 	interrupt: () => Effect.void,
+	toolEvents: () => [],
 }
 
 export const makeTestServer = (handler?: ModelHandler) =>
@@ -119,13 +124,22 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		const effective: Required<ModelHandler> = {
 			generate: handler?.generate ?? defaultModelHandler.generate,
 			interrupt: handler?.interrupt ?? defaultModelHandler.interrupt,
+			toolEvents: handler?.toolEvents ?? defaultModelHandler.toolEvents,
 		}
 		const HarnessLive = boundedHarness(
-			Effect.succeed({
-				runTurn: effective.generate,
+			Effect.map(Session, (sessions) => ({
+				runTurn: (args: ModelTurnInput) =>
+					Effect.andThen(
+						recordToolCalls({
+							session_id: args.session_id,
+							turn: args.turn,
+							calls: clampToolCalls(effective.toolEvents(args)),
+						}).pipe(Effect.provideService(Session, sessions)),
+						effective.generate(args),
+					),
 				interrupt: effective.interrupt,
 				discardWorkspace: () => Effect.void,
-			}),
+			})),
 		)
 		const CheckfuLive = Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide(HarnessLive)))
 		const ServerLayer = CheckfuLive.pipe(

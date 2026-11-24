@@ -4,6 +4,7 @@ import type { Api, AssistantMessage } from "@earendil-works/pi-ai"
 import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"
 
 import type { PiTurnOutcome } from "./PiTurn.ts"
+import { resultBoundsExtension } from "./PiResultBounds.ts"
 
 export const PROVIDER_FAILURE_MESSAGE = "The model provider returned an error."
 export const DEFAULT_REFUSAL_TEXT = "The model refused to complete the request."
@@ -97,6 +98,7 @@ export const normalizeRefusalAssistantMessage = (message: AssistantMessage): Ass
  */
 export const createCheckfuRegistry = () => {
 	const registry = createRegistry()
+	registry.install(resultBoundsExtension)
 	registry.install(
 		defineExtension({
 			name: "checkfu-refusal-normalization",

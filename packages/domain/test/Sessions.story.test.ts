@@ -45,6 +45,17 @@ import {
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "../src/Session/RecordModelRequestStart.command.ts"
+import {
+	AgentToolResult,
+	AgentToolUse,
+	RecordToolCall,
+} from "../src/Session/RecordToolCall.command.ts"
+import {
+	boundToolCalls,
+	clampToolCalls,
+	publicToolUseId,
+	recordToolCalls,
+} from "../src/Session/RecordToolCalls.ts"
 import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
 import { SendUserInterrupt, UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import {
@@ -67,7 +78,12 @@ import {
 	MAX_IDENTIFIER_LENGTH,
 	MAX_MESSAGE_TEXT_LENGTH,
 	MAX_THINKING_TEXT_LENGTH,
+	MAX_TOOL_CALLS_PER_TURN,
+	MAX_TOOL_INPUT_JSON_LENGTH,
+	MAX_TOOL_RESULT_TEXT_LENGTH,
+	MAX_TURN_TOOL_TEXT_LENGTH,
 } from "../src/Session/SessionTypes.ts"
+import type { ToolCall, ToolEvent } from "../src/Session/SessionTypes.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { StaleTurn } from "../src/Session/StaleTurn.rejection.ts"
 import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModelRequest.policy.ts"
@@ -3513,6 +3529,420 @@ describe("Sessions", () => {
 		expect(turnInputRowBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
 		expect(successCheckpointBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
 		expect(failureCheckpointBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
+	})
+
+	it.effect(
+		"records a tool call with its result, only while the turn's model request is open",
+		() => {
+			const session = Session.ref("sess_tools_1")
+			const use = {
+				type: "tool_use" as const,
+				tool_use_id: "call_1",
+				name: "read",
+				input: { path: "/workspace/a.md" },
+			}
+			const pair: ToolCall = {
+				_tag: "pair",
+				use,
+				result: {
+					type: "tool_result",
+					tool_use_id: "call_1",
+					content: [{ type: "text", text: "# A" }],
+					is_error: false,
+					truncated: true,
+				},
+			}
+			const record = (model_request_start_id: string, call: ToolCall) =>
+				new RecordToolCall({ session_id: session.id, turn: 1, model_request_start_id, call })
+			return story(
+				Story.given(
+					session,
+					createdEvent,
+					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+					new SessionStatusRunning({ turn: 1 }),
+				),
+				Story.when(record("req_1", pair)),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_1" }),
+				),
+				Story.when(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+					}),
+				),
+				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_1" })),
+				Story.when(record("req_1", pair)),
+				Story.then(
+					session,
+					new AgentToolUse({
+						tool_use_id: "call_1",
+						name: "read",
+						input: { path: "/workspace/a.md" },
+					}),
+					new AgentToolResult({
+						tool_use_id: "call_1",
+						content: [{ type: "text", text: "# A" }],
+						is_error: false,
+						truncated: true,
+					}),
+				),
+				Story.when(record("req_1", { _tag: "use", use: { ...use, tool_use_id: "call_2" } })),
+				Story.then(
+					session,
+					new AgentToolUse({
+						tool_use_id: "call_2",
+						name: "read",
+						input: { path: "/workspace/a.md" },
+					}),
+				),
+				Story.when(record("req_other", pair)),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_other" }),
+				),
+				Story.when(
+					new CommitModelReply({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+						thinking: null,
+						text: "Done",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						stop_reason: { type: "end_turn" },
+					}),
+				),
+				Story.then(
+					session,
+					new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
+					new SpanModelRequestEnd({
+						model_request_start_id: "req_1",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						is_error: false,
+					}),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				),
+				Story.when(record("req_1", pair)),
+				Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
+			)
+		},
+	)
+
+	it.effect("leaves only whole calls on the log when the session is archived between two", () => {
+		const session = Session.ref("sess_tools_archived")
+		const pair = (id: string): ToolCall => ({
+			_tag: "pair",
+			use: { type: "tool_use", tool_use_id: id, name: "read", input: {} },
+			result: {
+				type: "tool_result",
+				tool_use_id: id,
+				content: [{ type: "text", text: id }],
+				is_error: false,
+			},
+		})
+		const record = (call: ToolCall) =>
+			new RecordToolCall({
+				session_id: session.id,
+				turn: 1,
+				model_request_start_id: "req_1",
+				call,
+			})
+		return story(
+			Story.given(
+				session,
+				createdEvent,
+				new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+				new SessionStatusRunning({ turn: 1 }),
+				new SpanModelRequestStart({ model_request_start_id: "req_1" }),
+			),
+			Story.when(record(pair("call_1"))),
+			Story.then(
+				session,
+				new AgentToolUse({ tool_use_id: "call_1", name: "read", input: {} }),
+				new AgentToolResult({
+					tool_use_id: "call_1",
+					content: [{ type: "text", text: "call_1" }],
+					is_error: false,
+				}),
+			),
+			Story.when(new ArchiveSession({ session_id: session.id })),
+			Story.then(
+				session,
+				new SpanModelRequestEnd({
+					model_request_start_id: "req_1",
+					model_usage: { input_tokens: 0, output_tokens: 0 },
+					is_error: true,
+				}),
+				new SessionStatusTerminated(),
+				new SessionArchived(),
+			),
+			Story.when(record(pair("call_2"))),
+			Story.rejected(new SessionNotRunning({ session_id: session.id, status: "terminated" })),
+		)
+	})
+
+	it("publishes a turn's tool calls once, ahead of its reply, and nothing after the turn has ended", async () => {
+		const memory = InMemory.make({ manual: true })
+		const handlers = Layer.mergeAll(
+			StartTurnNoopLayer,
+			RunTurn.toLayer(Effect.succeed(() => Effect.succeed({ status: "completed" as const }))),
+		)
+		const session = Session.ref("sess_tools_2")
+		const calls = clampToolCalls([
+			{ type: "tool_use", tool_use_id: "call_1", name: "read", input: { path: "/a" } },
+			{ type: "tool_use", tool_use_id: "call_2", name: "read", input: { path: "/b" } },
+			{
+				type: "tool_result",
+				tool_use_id: "call_2",
+				content: [{ type: "text", text: "B" }],
+				is_error: false,
+			},
+			{
+				type: "tool_result",
+				tool_use_id: "call_1",
+				content: [{ type: "text", text: "A" }],
+				is_error: false,
+			},
+		])
+		const logged = await Effect.runPromise(
+			Effect.gen(function* () {
+				const sessions = yield* Session
+				const views = yield* SessionView
+				yield* sessions.send(
+					new CreateSession({
+						session_id: session.id,
+						agent_id: "agent_001",
+						agent_version: 1,
+						environment_id: "env_001",
+						title: null,
+					}),
+				)
+				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Go" }))
+				const requestId = `${turnKey(session.id, 1)}:req:1`
+				yield* sessions.send(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: requestId,
+					}),
+				)
+				yield* recordToolCalls({ session_id: session.id, turn: 1, calls })
+				yield* recordToolCalls({ session_id: session.id, turn: 1, calls })
+				yield* sessions.send(
+					new CommitModelReply({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: requestId,
+						thinking: null,
+						text: "Done",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						stop_reason: { type: "end_turn" },
+					}),
+				)
+				yield* recordToolCalls({
+					session_id: session.id,
+					turn: 1,
+					calls: clampToolCalls([
+						{ type: "tool_use", tool_use_id: "late", name: "read", input: {} },
+					]),
+				})
+				yield* memory.control.drain
+				const page = yield* views.list(session)
+				return page.entries.map(({ event }) =>
+					"tool_use_id" in event ? `${event._tag}:${event.tool_use_id}` : event._tag,
+				)
+			}).pipe(
+				Effect.provide(
+					Sessions.layer(handlers).pipe(
+						Layer.provide(Layer.mergeAll(memory.layer, HarnessNoopLayer)),
+					),
+				),
+			),
+		)
+		expect(logged).toEqual([
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.tool_use:call_1",
+			"agent.tool_result:call_1",
+			"agent.tool_use:call_2",
+			"agent.tool_result:call_2",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+		])
+	})
+
+	it("cuts and marks oversized tool inputs and results, and leaves out calls past the per-turn limits", () => {
+		const use = (id: string, input: Schema.JsonObject = {}): ToolEvent => ({
+			type: "tool_use",
+			tool_use_id: id,
+			name: "probe",
+			input,
+		})
+		const result = (id: string, text: string): ToolEvent => ({
+			type: "tool_result",
+			tool_use_id: id,
+			content: [{ type: "text", text }],
+			is_error: false,
+		})
+
+		expect(
+			clampToolCalls([
+				use("a", { text: "x".repeat(MAX_TOOL_INPUT_JSON_LENGTH) }),
+				result("a", "y".repeat(MAX_TOOL_RESULT_TEXT_LENGTH + 1)),
+				result("a", "a second result for the same call"),
+				result("never-called", "orphan"),
+				use("b", { ok: true }),
+				result("b", "fits"),
+				use("c"),
+			]),
+		).toEqual([
+			{
+				_tag: "pair",
+				use: { type: "tool_use", tool_use_id: "a", name: "probe", input: {}, truncated: true },
+				result: {
+					type: "tool_result",
+					tool_use_id: "a",
+					content: [{ type: "text", text: "y".repeat(MAX_TOOL_RESULT_TEXT_LENGTH) }],
+					is_error: false,
+					truncated: true,
+				},
+			},
+			{ _tag: "pair", use: use("b", { ok: true }), result: result("b", "fits") },
+			{ _tag: "use", use: use("c") },
+		])
+
+		const many = clampToolCalls(
+			Array.from({ length: MAX_TOOL_CALLS_PER_TURN + 3 }, (_, index) => [
+				use(`call-${index}`),
+				result(`call-${index}`, "z".repeat(MAX_TOOL_RESULT_TEXT_LENGTH)),
+			]).flat(),
+		)
+		expect(many).toHaveLength(MAX_TOOL_CALLS_PER_TURN)
+		expect(many.some((call) => call.use.tool_use_id === `call-${MAX_TOOL_CALLS_PER_TURN}`)).toBe(
+			false,
+		)
+		const recordedText = many.reduce(
+			(total, call) =>
+				total +
+				(call.use.truncated === true ? 0 : JSON.stringify(call.use.input).length) +
+				(call._tag === "pair"
+					? call.result.content.reduce((sum, block) => sum + block.text.length, 0)
+					: 0),
+			0,
+		)
+		expect(recordedText).toBeLessThanOrEqual(MAX_TURN_TOOL_TEXT_LENGTH)
+		expect(many.at(-1)).toEqual({
+			_tag: "pair",
+			use: { ...use(`call-${MAX_TOOL_CALLS_PER_TURN - 1}`), truncated: true },
+			result: {
+				type: "tool_result",
+				tool_use_id: `call-${MAX_TOOL_CALLS_PER_TURN - 1}`,
+				content: [],
+				is_error: false,
+				truncated: true,
+			},
+		})
+	})
+
+	it("never holds more tool text than the turn's budget while it reads, and says when it is done", () => {
+		const bounds = boundToolCalls()
+		const held = () =>
+			bounds
+				.calls()
+				.reduce(
+					(total, call) =>
+						total +
+						JSON.stringify(call.use.input).length +
+						(call._tag === "pair"
+							? call.result.content.reduce((sum, block) => sum + block.text.length, 0)
+							: 0),
+					0,
+				)
+		let most = 0
+		for (let index = 0; index < MAX_TOOL_CALLS_PER_TURN * 4; index++) {
+			bounds.add({
+				type: "tool_use",
+				tool_use_id: `call-${index}`,
+				name: "read",
+				input: { path: "p".repeat(1000) },
+			})
+			bounds.add({
+				type: "tool_result",
+				tool_use_id: `call-${index}`,
+				content: [{ type: "text", text: "r".repeat(MAX_TOOL_RESULT_TEXT_LENGTH * 4) }],
+				is_error: false,
+			})
+			most = Math.max(most, held())
+			if (index === MAX_TOOL_CALLS_PER_TURN - 2) {
+				expect(bounds.complete()).toBe(false)
+			}
+		}
+		expect(most).toBeLessThanOrEqual(MAX_TURN_TOOL_TEXT_LENGTH + MAX_TOOL_CALLS_PER_TURN * 2)
+		expect(bounds.complete()).toBe(true)
+	})
+
+	it("keeps two long tool-use ids that share their first characters apart, and pairs each result with its own call", () => {
+		const prefix = "x".repeat(MAX_IDENTIFIER_LENGTH)
+		const first = `${prefix}-first`
+		const second = `${prefix}-second`
+		const calls = clampToolCalls([
+			{ type: "tool_use", tool_use_id: first, name: "read", input: {} },
+			{ type: "tool_use", tool_use_id: second, name: "read", input: {} },
+			{
+				type: "tool_result",
+				tool_use_id: second,
+				content: [{ type: "text", text: "two" }],
+				is_error: false,
+			},
+			{
+				type: "tool_result",
+				tool_use_id: first,
+				content: [{ type: "text", text: "one" }],
+				is_error: false,
+			},
+		])
+		expect(calls.map((call) => call._tag)).toEqual(["pair", "pair"])
+		const [one, two] = calls
+		expect(one?.use.tool_use_id).toBe(publicToolUseId(first))
+		expect(two?.use.tool_use_id).toBe(publicToolUseId(second))
+		expect(publicToolUseId(first)).not.toBe(publicToolUseId(second))
+		for (const call of calls) {
+			expect(call.use.tool_use_id.length).toBeLessThanOrEqual(MAX_IDENTIFIER_LENGTH)
+			if (call._tag === "pair") {
+				expect(call.result.tool_use_id).toBe(call.use.tool_use_id)
+			}
+		}
+		expect(one?._tag === "pair" && one.result.content).toEqual([{ type: "text", text: "one" }])
+		expect(two?._tag === "pair" && two.result.content).toEqual([{ type: "text", text: "two" }])
+		expect(
+			clampToolCalls([
+				{ type: "tool_use", tool_use_id: "again", name: "read", input: { round: 1 } },
+				{
+					type: "tool_result",
+					tool_use_id: "again",
+					content: [{ type: "text", text: "first" }],
+					is_error: false,
+				},
+				{ type: "tool_use", tool_use_id: "again", name: "read", input: { round: 2 } },
+				{
+					type: "tool_result",
+					tool_use_id: "again",
+					content: [{ type: "text", text: "second" }],
+					is_error: false,
+				},
+			]).map((call) => [call.use.input, call._tag === "pair" ? call.result.content : undefined]),
+		).toEqual([
+			[{ round: 1 }, [{ type: "text", text: "first" }]],
+			[{ round: 2 }, [{ type: "text", text: "second" }]],
+		])
+		expect(publicToolUseId("short")).toBe("short")
+		expect(publicToolUseId(first)).toBe(publicToolUseId(first))
 	})
 
 	it("reports a reply cut to the message limit as budget_reached, never as a clean end_turn", async () => {

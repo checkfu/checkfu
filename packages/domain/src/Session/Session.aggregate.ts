@@ -22,6 +22,7 @@ import {
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
+import { AgentToolResult, AgentToolUse, RecordToolCall } from "./RecordToolCall.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -148,6 +149,7 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserMessage,
 		SendUserInterrupt,
 		RecordModelRequestStart,
+		RecordToolCall,
 		CommitModelReply,
 		FailModelRequest,
 		InterruptModelRequest,
@@ -324,6 +326,39 @@ export class Session extends Domain.Aggregate("Session", {
 			return [new SpanModelRequestStart({ model_request_start_id: cmd.model_request_start_id })]
 		},
 
+		RecordToolCall: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") {
+				return running
+			}
+			if (running.open_model_request_id !== cmd.model_request_start_id) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			const { use } = cmd.call
+			const used = new AgentToolUse({
+				tool_use_id: use.tool_use_id,
+				name: use.name,
+				input: use.input,
+				...(use.truncated === true ? { truncated: true as const } : {}),
+			})
+			if (cmd.call._tag === "use") {
+				return [used]
+			}
+			const { result } = cmd.call
+			return [
+				used,
+				new AgentToolResult({
+					tool_use_id: result.tool_use_id,
+					content: result.content,
+					is_error: result.is_error,
+					...(result.truncated === true ? { truncated: true as const } : {}),
+				}),
+			]
+		},
+
 		CommitModelReply: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
 			if (running._tag !== "Running") {
@@ -468,6 +503,8 @@ export class Session extends Domain.Aggregate("Session", {
 						model_requests_started: state.model_requests_started + 1,
 					}
 				: state,
+		"agent.tool_use": (state) => state,
+		"agent.tool_result": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>

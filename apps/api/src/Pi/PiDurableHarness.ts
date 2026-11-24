@@ -4,6 +4,9 @@ import {
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import { recordToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -95,6 +98,32 @@ export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const executor = yield* PiTurnExecutor
+		const sessions = yield* Session
+
+		const settled = (
+			args: { readonly session_id: SessionId; readonly turn: number },
+			outcome: PiTurnOutcome,
+		) =>
+			outcome.ok
+				? Effect.as(
+						recordToolCalls({
+							session_id: args.session_id,
+							turn: args.turn,
+							calls: outcome.tool_calls ?? [],
+						}).pipe(
+							Effect.provideService(Session, sessions),
+							// Pi kept this reply. Failing the turn any other way would leave it in a
+							// conversation the session log says never answered.
+							Effect.catchDefect((defect) =>
+								Effect.andThen(
+									Effect.logError("Tool calls not recorded", args.session_id, defect),
+									Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
+								),
+							),
+						),
+						outcome.reply,
+					)
+				: Effect.fail(outcome.error)
 
 		return {
 			runTurn: (args) =>
@@ -126,10 +155,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						}),
 					)
 					if (recovered !== null) {
-						if (!recovered.ok) {
-							return yield* Effect.fail(recovered.error)
-						}
-						return recovered.reply
+						return yield* settled(args, recovered)
 					}
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
@@ -211,10 +237,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						}),
 					)
 
-					if (!outcome.ok) {
-						return yield* Effect.fail(outcome.error)
-					}
-					return outcome.reply
+					return yield* settled(args, outcome)
 				}),
 			interrupt: (args) =>
 				Effect.gen(function* () {

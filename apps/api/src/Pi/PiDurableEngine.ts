@@ -1,4 +1,5 @@
-import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
+import { boundToolCalls } from "@checkfu/domain/Session/RecordToolCalls"
+import type { ModelUsage, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
 import {
@@ -8,7 +9,7 @@ import {
 	ToolResultEntry,
 	UserEntry,
 } from "@earendil-works/pi-durable"
-import type { AgentChange, Cursor, EntryId, Harness } from "@earendil-works/pi-durable"
+import type { AgentChange, Cursor, EntryId, EntryRecord, Harness } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -99,6 +100,77 @@ const readTurnEntries = async (pi: Harness, userEntryId: EntryId): Promise<Array
 		cursor = page.next
 	} while (cursor !== undefined)
 	return ids
+}
+
+/**
+ * The tool calls of a settled turn, bounded as the session log records them while the
+ * transcript is read in small pages, so a long turn never has to fit in memory or in one RPC.
+ * Images in a result are named, not copied.
+ */
+export const readTurnToolCalls = async (
+	pi: Harness,
+	operationId: string,
+): Promise<Array<ToolCall>> => {
+	const record = await submissionOf(pi, operationId)
+	if (record?.type !== "input" || record.entry === undefined) {
+		return []
+	}
+	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
+	if (conversation === undefined) {
+		return []
+	}
+	const bounds = boundToolCalls()
+	const visit = (entry: EntryRecord) => {
+		for (const message of entry.model ?? []) {
+			if (message.role === "assistant") {
+				for (const block of message.content) {
+					if (block.type === "toolCall") {
+						bounds.add({
+							type: "tool_use",
+							tool_use_id: block.id,
+							name: block.name,
+							input: block.arguments,
+						})
+					}
+				}
+			} else if (message.role === "toolResult") {
+				bounds.add({
+					type: "tool_result",
+					tool_use_id: message.toolCallId,
+					content: message.content.map((block) => ({
+						type: "text",
+						text: block.type === "text" ? block.text : `[${block.mimeType} image]`,
+					})),
+					is_error: message.isError,
+				})
+			}
+		}
+	}
+	let cursor: Cursor | undefined
+	do {
+		const page = await conversation.entries(
+			{ minEntryId: record.entry, order: "ascending" },
+			TURN_ENTRY_PAGE_SIZE,
+			cursor,
+			BACKGROUND_CONTEXT,
+		)
+		for (const entry of page.items) {
+			if (entry.id <= record.entry) {
+				continue
+			}
+			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
+				return bounds.calls()
+			}
+			if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
+				visit(entry)
+				if (bounds.complete()) {
+					return bounds.calls()
+				}
+			}
+		}
+		cursor = page.next
+	} while (cursor !== undefined)
+	return bounds.calls()
 }
 
 /**
@@ -357,7 +429,12 @@ const resolveSettledPiTurn = (
 				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
 			}
 			const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
-			return mapAssistantMessageToOutcome(assistantMessage, usage)
+			const outcome = mapAssistantMessageToOutcome(assistantMessage, usage)
+			if (!outcome.ok) {
+				return outcome
+			}
+			const tool_calls = yield* Effect.promise(() => readTurnToolCalls(pi, operationId))
+			return tool_calls.length === 0 ? outcome : { ...outcome, tool_calls }
 		}),
 	)
 
