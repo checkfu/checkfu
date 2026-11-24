@@ -544,6 +544,79 @@ describe("turn engine", () => {
 		}
 	})
 
+	it("keeps the rebuild a discarded compacted turn asked for when an older turn is recovered", async () => {
+		const contexts: Array<TranscriptContext> = []
+		let markSecondRequest: () => void = () => undefined
+		const secondRequest = new Promise<void>((resolve) => {
+			markSecondRequest = resolve
+		})
+		const registry = createCheckfuRegistry()
+		registry.install({
+			name: "probe",
+			tools: [
+				{
+					name: "probe",
+					description: "Probe.",
+					parameters: { type: "object", properties: {} },
+					replay: "safe",
+					execute: () => Promise.resolve({ output: [{ type: "text", text: "probed" }] }),
+				},
+			],
+		})
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context, signal) => {
+				const prompt = extractLastUserText(context)
+				if (prompt.startsWith("<conversation>")) {
+					return makeAssistantReply(model, null, "SUMMARY-OF-DISCARDED-TURN", 12, 3)
+				}
+				contexts.push(context)
+				if (prompt === "hello") {
+					return makeAssistantReply(model, null, "hi", 3, 2)
+				}
+				if (prompt === "use the tool" && contexts.length === 2) {
+					return {
+						...makeAssistantReply(model, null, "a".repeat(84_000), 120_000, 1),
+						content: [
+							{ type: "text", text: "a".repeat(84_000) },
+							{ type: "toolCall", id: "call-1", name: "probe", arguments: {} },
+						],
+						stopReason: "toolUse",
+					}
+				}
+				if (contexts.length === 3) {
+					markSecondRequest()
+					await new Promise<void>((resolve) => {
+						signal?.addEventListener("abort", () => resolve(), { once: true })
+					})
+					return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" }
+				}
+				return makeAssistantReply(model, null, "fresh start", 3, 2)
+			}),
+			1,
+			registry,
+		)
+		try {
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "hello"))),
+			).toMatchObject({ ok: true, reply: { text: "hi" } })
+			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "use the tool")))
+			await secondRequest
+			await Effect.runPromise(backend.abort("turn:2"))
+			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+
+			// Turn 1 is recovered late, after turn 2 asked for a rebuild.
+			expect(await Effect.runPromise(recoverPiDurableTurn(backend, "turn:1"))).toMatchObject({
+				ok: true,
+				reply: { text: "hi" },
+			})
+			expect(await Effect.runPromise(runPiDurableTurn(backend, turnRequest(3, "next")))).toBe(
+				"history_required",
+			)
+		} finally {
+			await backend.close()
+		}
+	})
+
 	it("replays a saved reply when a late abort arrives", async () => {
 		const { backend, release } = await blockingBackend()
 		try {

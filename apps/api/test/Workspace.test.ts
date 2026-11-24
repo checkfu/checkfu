@@ -1,37 +1,60 @@
 import { describe, expect, it } from "@effect/vitest"
 import { conversationName, parseConversation } from "../src/Pi/PiConversation.ts"
-import { admitGeneration } from "../src/Workspace/WorkspaceFence.ts"
+import { makeTurnFence } from "../src/Workspace/WorkspaceFence.ts"
+import type { TurnToken } from "../src/Workspace/WorkspaceFence.ts"
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
 import { workspaceExtension, workspaceToolDeclarations } from "../src/Workspace/WorkspaceTools.ts"
 import type { WorkspaceTool } from "../src/Workspace/WorkspaceTools.ts"
 
 const store = () => {
-	let newest: number | undefined
+	let newest: TurnToken | undefined
 	return {
 		get: () => newest,
-		put: (generation: number) => {
-			newest = generation
+		put: (token: TurnToken) => {
+			newest = token
 		},
 	}
 }
 
+const turn = (generation: number, number: number): TurnToken => ({ generation, turn: number })
+
 describe("session workspace", () => {
-	it("serves the newest harness generation and refuses every older one", () => {
-		const fence = store()
-		expect(admitGeneration(fence, 1)).toBe(true)
-		expect(admitGeneration(fence, 1)).toBe(true)
-		// The next generation opens while the abandoned turn's harness is still running.
-		expect(admitGeneration(fence, 2)).toBe(true)
-		expect(admitGeneration(fence, 1)).toBe(false)
-		expect(admitGeneration(fence, 2)).toBe(true)
-		expect(admitGeneration(fence, 5)).toBe(true)
-		expect([1, 2, 3, 4].map((generation) => admitGeneration(fence, generation))).toEqual([
-			false,
-			false,
-			false,
-			false,
-		])
-		expect(fence.get()).toBe(5)
+	it("admits the newest turn and refuses every older one, by generation and then turn", async () => {
+		const fence = makeTurnFence(store())
+		expect(await fence.enter(turn(0, 1))).toBe(true)
+		expect(await fence.enter(turn(0, 1))).toBe(true)
+		// An interrupted turn keeps its generation; the turn after it is still newer.
+		expect(await fence.enter(turn(0, 2))).toBe(true)
+		expect(await fence.enter(turn(0, 1))).toBe(false)
+		expect(await fence.run(turn(0, 1), () => Promise.resolve("written"))).toBeUndefined()
+		expect(await fence.run(turn(0, 2), () => Promise.resolve("written"))).toBe("written")
+		// An abandoned turn moves the generation on, whatever the turn number.
+		expect(await fence.enter(turn(1, 2))).toBe(true)
+		expect(await fence.run(turn(0, 9), () => Promise.resolve("written"))).toBeUndefined()
+	})
+
+	it("admits a turn only after the calls of the turn before it have finished", async () => {
+		const fence = makeTurnFence(store())
+		await fence.enter(turn(0, 1))
+		const order: Array<string> = []
+		let finishWrite: () => void = () => undefined
+		const write = fence.run(turn(0, 1), async () => {
+			order.push("old write started")
+			await new Promise<void>((resolve) => {
+				finishWrite = resolve
+			})
+			order.push("old write finished")
+		})
+		const entering = fence.enter(turn(0, 2)).then((entered) => {
+			order.push(`new turn entered: ${entered}`)
+		})
+		// A call of the old turn that arrives now is refused, though one of its calls still runs.
+		expect(await fence.run(turn(0, 1), () => Promise.resolve("late"))).toBeUndefined()
+		await Promise.resolve()
+		expect(order).toEqual(["old write started"])
+		finishWrite()
+		await Promise.all([write, entering])
+		expect(order).toEqual(["old write started", "old write finished", "new turn entered: true"])
 	})
 
 	it("reads the session and the generation back from a conversation name", () => {
