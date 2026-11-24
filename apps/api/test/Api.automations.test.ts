@@ -540,26 +540,6 @@ describe("Automations API", () => {
 			}),
 		))
 
-	it("finds an automation by listing when the create response was lost", () =>
-		run((apiFetch) =>
-			Effect.gen(function* () {
-				const { agentId, environmentId } = yield* prerequisites(apiFetch)
-				const body = {
-					name: "Lost",
-					agent: agentId,
-					environment_id: environmentId,
-					initial_events: message("Report."),
-					schedule: weekdayMornings,
-				}
-				yield* call(apiFetch, "POST", "/v1/automations", body, { "idempotency-key": "lost-key" })
-				const found = yield* listed(apiFetch, "", 1)
-				const resent = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", body, {
-					"idempotency-key": "lost-key",
-				})
-				expect(found.body.data.map((automation) => automation.id)).toEqual([resent.body.id])
-			}),
-		))
-
 	it("refuses list paging values it cannot use", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {

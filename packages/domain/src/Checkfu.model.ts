@@ -326,8 +326,8 @@ export class Checkfu extends Domain.Model("Checkfu", {
 				),
 				m.Automation.every(
 					(a) =>
-						live.some((entry) => entry.automation_id === a.id) ===
-						[a.state.status !== "", a.state.status !== "archived"].every((ok) => ok),
+						live.filter((entry) => entry.automation_id === a.id).length ===
+						([a.state.status !== "", a.state.status !== "archived"].every((ok) => ok) ? 1 : 0),
 				),
 				live.every((entry) => m.Automation.some((a) => a.id === entry.automation_id)),
 			].every((ok) => ok)

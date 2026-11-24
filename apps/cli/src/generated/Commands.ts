@@ -452,7 +452,7 @@ const automationsListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(automationsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost.",
+		"List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
 	),
 )
 

@@ -9733,7 +9733,7 @@
 						}
 					}
 				},
-				"description": "List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost.",
+				"description": "List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
 				"summary": "List automations",
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "list",

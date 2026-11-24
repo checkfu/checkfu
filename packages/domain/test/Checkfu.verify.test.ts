@@ -665,6 +665,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				{ automation_id: automationRef.id, seq: 1 },
 				{ automation_id: "auto_gone", seq: 2 },
 			],
+			[
+				{ automation_id: automationRef.id, seq: 1 },
+				{ automation_id: automationRef.id, seq: 2 },
+			],
 		]) {
 			expect(
 				evaluateCheckfuInvariants({

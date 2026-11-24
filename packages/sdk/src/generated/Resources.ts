@@ -528,7 +528,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	/** List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
 		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> | undefined,
 		options: WithResponseRequestOptions,
@@ -559,7 +559,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	/** Auto-paginate pages for List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: RequestOptions,
@@ -578,7 +578,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Auto-paginate items for List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	/** Auto-paginate items for List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: RequestOptions,
@@ -1373,7 +1373,7 @@ export class AutomationsResource {
 		)
 	}
 
-	/** List the automations that are not archived, oldest first by default. Use it to find an automation whose create response was lost. */
+	/** List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: PromiseRequestOptions,

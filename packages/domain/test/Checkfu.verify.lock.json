@@ -360,7 +360,7 @@
 			},
 			"Checkfu.AutomationDirectoryListsLiveAutomations": {
 				"kind": "model invariant",
-				"source": "(m) => {\n\t\t\tconst live = m.AutomationDirectory.flatMap((d) => d.state.live)\n\t\t\treturn [\n\t\t\t\tlive.length <= MAX_LIVE_AUTOMATIONS,\n\t\t\t\tlive.every((entry, index) => index === 0 || entry.seq > (live[index - 1]?.seq ?? 0)),\n\t\t\t\tm.AutomationDirectory.every((d) =>\n\t\t\t\t\td.state.live.every((entry) => entry.seq <= d.state.listed),\n\t\t\t\t),\n\t\t\t\tm.Automation.every(\n\t\t\t\t\t(a) =>\n\t\t\t\t\t\tlive.some((entry) => entry.automation_id === a.id) ===\n\t\t\t\t\t\t[a.state.status !== \"\", a.state.status !== \"archived\"].every((ok) => ok),\n\t\t\t\t),\n\t\t\t\tlive.every((entry) => m.Automation.some((a) => a.id === entry.automation_id)),\n\t\t\t].every((ok) => ok)\n\t\t}"
+				"source": "(m) => {\n\t\t\tconst live = m.AutomationDirectory.flatMap((d) => d.state.live)\n\t\t\treturn [\n\t\t\t\tlive.length <= MAX_LIVE_AUTOMATIONS,\n\t\t\t\tlive.every((entry, index) => index === 0 || entry.seq > (live[index - 1]?.seq ?? 0)),\n\t\t\t\tm.AutomationDirectory.every((d) =>\n\t\t\t\t\td.state.live.every((entry) => entry.seq <= d.state.listed),\n\t\t\t\t),\n\t\t\t\tm.Automation.every(\n\t\t\t\t\t(a) =>\n\t\t\t\t\t\tlive.filter((entry) => entry.automation_id === a.id).length ===\n\t\t\t\t\t\t([a.state.status !== \"\", a.state.status !== \"archived\"].every((ok) => ok) ? 1 : 0),\n\t\t\t\t),\n\t\t\t\tlive.every((entry) => m.Automation.some((a) => a.id === entry.automation_id)),\n\t\t\t].every((ok) => ok)\n\t\t}"
 			}
 		}
 	}
