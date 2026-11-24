@@ -7,7 +7,6 @@ import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
 import {
 	UNCONFIRMED_CATALOG_TTL_MS,
-	documentChunks,
 	importApiServer,
 	makeApiCatalog,
 } from "../src/OpenApi/ApiCatalogStore.ts"
@@ -61,32 +60,29 @@ const refusal = async (...args: Parameters<typeof read>) => {
 	return imported.ok ? "accepted" : imported.message
 }
 
-interface MemoryState {
-	document: string | null
-	alarm: number | null
-	now: number
-}
-
 const memory = () => {
 	const kv = new Map<string, string>()
-	const state: MemoryState = { document: null, alarm: null, now: 1000 }
+	const state = {
+		get document() {
+			return kv.get("document") ?? null
+		},
+		alarm: null as number | null,
+		now: 1000,
+	}
 	const reads = { document: 0 }
 	const catalog = makeApiCatalog(
 		{
-			get: (key) => kv.get(key),
+			get: (key) => {
+				if (key === "document") {
+					reads.document += 1
+				}
+				return kv.get(key)
+			},
 			put: (key, value) => {
 				kv.set(key, value)
 			},
-			document: () => {
-				reads.document += 1
-				return state.document
-			},
-			writeDocument: (text) => {
-				state.document = text
-			},
 			clear: () => {
 				kv.clear()
-				state.document = null
 				return Promise.resolve()
 			},
 			setAlarm: (at) => {
@@ -255,13 +251,5 @@ describe("custody of an API server's document", () => {
 		await catalog.tools()
 		await catalog.request("getPet", { path: { petId: "1" } })
 		expect(reads.document).toBe(first)
-	})
-
-	it("cuts a stored document only between whole characters", () => {
-		const text = `${"a".repeat(9)}😀${"b".repeat(9)}😀`
-		const chunks = documentChunks(text, 10)
-		expect(chunks.join("")).toBe(text)
-		expect(chunks.every((chunk) => chunk.isWellFormed() && chunk.length <= 10)).toBe(true)
-		expect(new TextDecoder().decode(new TextEncoder().encode(chunks.join("")))).toBe(text)
 	})
 })

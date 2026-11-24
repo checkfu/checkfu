@@ -31,7 +31,6 @@ interface InMemoryConnection {
 interface InMemoryCatalog {
 	readonly custody: ApiCatalogCustody
 	readonly kv: Map<string, string>
-	document: string | null
 	alarm: number | null
 }
 
@@ -90,7 +89,6 @@ export const makeVaultsTestLayer = (platform: typeof Domain.InMemory = Domain.In
 		const kv = new Map<string, string>()
 		const catalog: InMemoryCatalog = {
 			kv,
-			document: null,
 			alarm: null,
 			custody: makeApiCatalog(
 				{
@@ -98,13 +96,8 @@ export const makeVaultsTestLayer = (platform: typeof Domain.InMemory = Domain.In
 					put: (key, value) => {
 						kv.set(key, value)
 					},
-					document: () => catalog.document,
-					writeDocument: (text) => {
-						catalog.document = text
-					},
 					clear: () => {
 						kv.clear()
-						catalog.document = null
 						return Promise.resolve()
 					},
 					setAlarm: (at) => {
@@ -222,7 +215,8 @@ export const makeVaultsTestLayer = (platform: typeof Domain.InMemory = Domain.In
 		catalogKeepFailures,
 		catalogIds: (): ReadonlyArray<string> => [...catalogs.keys()],
 		catalogOf: (catalogId: string): ApiCatalogCustody => openCatalog(catalogId).custody,
-		catalogDocumentOf: (catalogId: string): string | null => openCatalog(catalogId).document,
+		catalogDocumentOf: (catalogId: string): string | null =>
+			openCatalog(catalogId).kv.get("document") ?? null,
 		catalogStatusOf: (catalogId: string): string | undefined =>
 			openCatalog(catalogId).kv.get("status"),
 		alarmOf: (credentialId: string): number | null => open(credentialId).alarm,

@@ -4,10 +4,12 @@ import {
 	MAX_API_SPEC_JSON_BYTES,
 	apiServerSetId,
 } from "@checkfu/domain/Mcp/ApiServers"
+import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import type * as Layer from "effect/Layer"
 import type * as Schema from "effect/Schema"
+import { idempotentId } from "../src/Http/HttpHelpers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	AUTH_HEADERS,
@@ -168,6 +170,7 @@ describe("API servers on agents", () => {
 							},
 						],
 					}),
+					{ "idempotency-key": "shop-agent" },
 				)
 				expect(made.status, message(made)).toBe(201)
 				expect(made.body["api_servers"]).toEqual([
@@ -201,7 +204,12 @@ describe("API servers on agents", () => {
 				expect(tools.ok && tools.tools.map((tool) => tool.name)).toEqual(["listPets", "createPet"])
 
 				// What the model records names the document; it never holds it.
-				const versionId = (catalogId ?? "").split("/")[0] ?? ""
+				const versionId = yield* idempotentId(yield* Digest.Digest, "aver", [
+					"create",
+					"agent",
+					"version",
+					"shop-agent",
+				])
 				const recorded = yield* vaults.storedEvents("McpServerSet", apiServerSetId(versionId))
 				expect(recorded).toHaveLength(1)
 				expect(JSON.stringify(recorded)).toContain(catalogId)
@@ -254,6 +262,23 @@ describe("API servers on agents", () => {
 
 				const cleared = yield* call("POST", `/v1/agents/${id}`, { version: 4, api_servers: [] })
 				expect(cleared.body).toMatchObject({ version: 5, api_servers: [], tools: [] })
+			}),
+		)
+	})
+
+	it("stores one document for every declaration of the same server", async () => {
+		const { run, vaults } = world()
+		await run((call) =>
+			Effect.gen(function* () {
+				yield* created(call, "/v1/agents", agentBody({ api_servers: [shop()] }))
+				yield* created(call, "/v1/agents", agentBody({ api_servers: [shop()] }))
+				expect(vaults.catalogIds()).toHaveLength(1)
+				yield* created(
+					call,
+					"/v1/agents",
+					agentBody({ api_servers: [shop({ base_url: `${SHOP}/v2` })] }),
+				)
+				expect(vaults.catalogIds()).toHaveLength(2)
 			}),
 		)
 	})

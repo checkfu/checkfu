@@ -1,56 +1,20 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
-import { documentChunks, makeApiCatalog } from "./ApiCatalogStore.ts"
+import { makeApiCatalog } from "./ApiCatalogStore.ts"
 import { ApiCatalog } from "./ApiCatalog.ts"
 import type { ApiCatalogShape } from "./ApiCatalog.ts"
-
-// A row holds 2 MB; a character is at most four bytes.
-const CHUNK_LENGTH = 256 * 1024
 
 export const ApiCatalogLive = ApiCatalog.make(
 	Effect.map(Cloudflare.DurableObjectState, (state) => {
 		const { storage } = state.raw
-		let created = false
-		const chunks = () => {
-			if (!created) {
-				storage.sql.exec(
-					"CREATE TABLE IF NOT EXISTS checkfu_api_document (seq INTEGER PRIMARY KEY, text TEXT NOT NULL)",
-				)
-				created = true
-			}
-		}
 		const catalog = makeApiCatalog(
 			{
 				get: (key) => storage.kv.get<string>(key),
+				// A key and its value hold up to 8 MB together; a document is at most 2 MiB of UTF-8.
 				put: (key, value) => {
 					storage.kv.put(key, value)
 				},
-				document: () => {
-					chunks()
-					const rows = [
-						...storage.sql.exec<{ text: string }>(
-							"SELECT text FROM checkfu_api_document ORDER BY seq",
-						),
-					]
-					return rows.length === 0 ? null : rows.map((row) => row.text).join("")
-				},
-				writeDocument: (text) => {
-					chunks()
-					storage.transactionSync(() => {
-						storage.sql.exec("DELETE FROM checkfu_api_document")
-						for (const [seq, chunk] of documentChunks(text, CHUNK_LENGTH).entries()) {
-							storage.sql.exec(
-								"INSERT INTO checkfu_api_document (seq, text) VALUES (?, ?)",
-								seq,
-								chunk,
-							)
-						}
-					})
-				},
-				clear: async () => {
-					created = false
-					await storage.deleteAll()
-				},
+				clear: () => storage.deleteAll(),
 				setAlarm: (at) => storage.setAlarm(at),
 				deleteAlarm: () => storage.deleteAlarm(),
 			},

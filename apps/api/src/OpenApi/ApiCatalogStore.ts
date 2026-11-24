@@ -1,5 +1,4 @@
 import type { ApiSelection } from "@checkfu/domain/Mcp/ApiServers"
-import { truncateText } from "@checkfu/domain/Session/TextBounds"
 import {
 	MAX_API_SERVER_DESCRIPTORS_JSON_BYTES,
 	MAX_API_SERVER_OPERATIONS,
@@ -17,6 +16,7 @@ export const UNCONFIRMED_CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 
 const STATUS = "status"
 const CONFIG = "config"
+const DOCUMENT = "document"
 
 /** What a stored document is served with: where its API is, and which operations are kept. */
 export const CatalogConfig = Schema.Struct({
@@ -163,8 +163,6 @@ export const importApiServer = (
 export interface CatalogStorage {
 	readonly get: (key: string) => string | undefined
 	readonly put: (key: string, value: string) => void
-	readonly document: () => string | null
-	readonly writeDocument: (text: string) => void
 	readonly clear: () => Promise<void>
 	readonly setAlarm: (at: number) => Promise<void>
 	readonly deleteAlarm: () => Promise<void>
@@ -178,21 +176,6 @@ const GONE = "This API's document is no longer stored."
  * unless that version, or a session using it, confirms it. What it serves is
  * read from the document each time the object wakes, never stored beside it.
  */
-/**
- * The document cut into pieces of at most `length` UTF-16 code units, never between the two
- * halves of a surrogate pair: SQLite stores each piece as UTF-8 text, where half a pair is lost.
- */
-export const documentChunks = (text: string, length: number): Array<string> => {
-	const chunks: Array<string> = []
-	for (let offset = 0; offset < text.length;) {
-		// One unit past the piece, so a pair split by the cut is seen and kept whole in the next piece.
-		const chunk = truncateText(text.slice(offset, offset + length + 1), length)
-		chunks.push(chunk)
-		offset += chunk.length
-	}
-	return chunks
-}
-
 export const makeApiCatalog = (storage: CatalogStorage, now: () => number) => {
 	let imported: ImportedApi | undefined
 
@@ -214,8 +197,8 @@ export const makeApiCatalog = (storage: CatalogStorage, now: () => number) => {
 			return refuse(GONE)
 		}
 		if (imported === undefined) {
-			const document = storage.document()
-			if (document === null) {
+			const document = storage.get(DOCUMENT)
+			if (document === undefined) {
 				return refuse(GONE)
 			}
 			const read = await Effect.runPromise(importApiServer(document, held))
@@ -234,7 +217,7 @@ export const makeApiCatalog = (storage: CatalogStorage, now: () => number) => {
 			if (current !== null) {
 				return current.digest === held.digest && current.base_url === held.base_url
 			}
-			storage.writeDocument(document)
+			storage.put(DOCUMENT, document)
 			storage.put(CONFIG, encodeConfig(held))
 			storage.put(STATUS, "unconfirmed")
 			await storage.setAlarm(now() + UNCONFIRMED_CATALOG_TTL_MS)

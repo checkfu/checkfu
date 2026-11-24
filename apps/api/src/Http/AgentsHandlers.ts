@@ -223,7 +223,6 @@ const apiServersText = (servers: ReadonlyArray<ApiServer>) =>
  */
 const declaredApiServers = (
 	digest: Digest.Digest["Service"],
-	versionId: string,
 	declared: ReadonlyArray<ApiServerDeclaration>,
 	mcpServerNames: ReadonlyArray<string>,
 ) =>
@@ -264,7 +263,12 @@ const declaredApiServers = (
 				return yield* reject(400, `The spec of API server "${server.name}": ${imported.message}`)
 			}
 			const fingerprint = `sha256:${yield* digest.digestHex(Digest.sha256, bytes)}`
-			const catalog_id = `${versionId}/${server.name}`
+			const config = { base_url, digest: fingerprint, ...selection }
+			// Named by what it holds, so declaring the same server again shares the stored document.
+			const catalog_id = `sha256:${yield* digest.digestHex(
+				Digest.sha256,
+				new TextEncoder().encode(JSON.stringify(config)),
+			)}`
 			servers.push({
 				type: "openapi",
 				name: server.name,
@@ -278,11 +282,7 @@ const declaredApiServers = (
 					digest: fingerprint,
 				},
 			})
-			uploads.push({
-				catalog_id,
-				document,
-				config: { base_url, digest: fingerprint, ...selection },
-			})
+			uploads.push({ catalog_id, document, config })
 		}
 		return { servers, uploads }
 	})
@@ -613,22 +613,20 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						declaredApis.map((server) => server.name),
 						apiToolsets,
 					)
-					const apiPlan = (forVersion: string) =>
-						Effect.gen(function* () {
-							const plan = yield* declaredApiServers(
-								digest,
-								forVersion,
-								declaredApis,
-								(payload.mcp_servers ?? []).map((server) => server.name),
-							)
-							return {
-								uploads: plan.uploads,
-								text: yield* apiServersText(withApiPermissions(plan.servers, apiToolsets)),
-							}
-						})
+					const apiPlan = Effect.gen(function* () {
+						const plan = yield* declaredApiServers(
+							digest,
+							declaredApis,
+							(payload.mcp_servers ?? []).map((server) => server.name),
+						)
+						return {
+							uploads: plan.uploads,
+							text: yield* apiServersText(withApiPermissions(plan.servers, apiToolsets)),
+						}
+					})
 					let id: AgentId
 					let versionId: AgentVersionId
-					let apis: Effect.Success<ReturnType<typeof apiPlan>>
+					let apis: Effect.Success<typeof apiPlan>
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
 						id = AgentId.make(
@@ -637,7 +635,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						versionId = AgentVersionId.make(
 							yield* idempotentId(digest, "aver", ["create", "agent", "version", idempotencyKey]),
 						)
-						apis = yield* apiPlan(versionId)
+						apis = yield* apiPlan
 						const batchId = yield* createClaimId(digest, "agent", idempotencyKey)
 						const fingerprint = yield* createFingerprint(digest, {
 							name: payload.name,
@@ -668,7 +666,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						yield* supported(model)
 						id = AgentId.make(yield* randomId(random, "agent"))
 						versionId = AgentVersionId.make(yield* randomId(random, "aver"))
-						apis = yield* apiPlan(versionId)
+						apis = yield* apiPlan
 					}
 					yield* storeCatalogs(apis.uploads)
 					yield* recordTools(versionId, mcpServers, apis.text, customTools)
@@ -760,7 +758,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const replacedApis =
 						declaredApis === undefined
 							? undefined
-							: yield* declaredApiServers(digest, nextVersionId, declaredApis, nextMcpNames)
+							: yield* declaredApiServers(digest, declaredApis, nextMcpNames)
 					const nextApiServers = replacedApis?.servers ?? keptApis
 					const collision = nextApiServers.find((server) => nextMcpNames.includes(server.name))
 					if (collision !== undefined) {
