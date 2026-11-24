@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
-import { WORKSPACE_TOOL_OPTIONS } from "./WorkspaceTools.ts"
+import { WORKSPACE_TOOL_OPTIONS, boundWorkspaceResult } from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 
 const DISCARDED = "discarded"
@@ -61,7 +61,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						const result = await fence.run(token, async () => {
 							await initialize()
 							const { content, isError } = await execute(call, { abortSignal })
-							return { content, isError }
+							return boundWorkspaceResult(call.name, { content, isError })
 						})
 						return (
 							result ?? failed("This turn has ended; the workspace no longer accepts its calls.")
