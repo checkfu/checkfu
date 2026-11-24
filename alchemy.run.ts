@@ -1,5 +1,5 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
+import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "@checkfu/api/ApiWorker"
 import * as Alchemy from "alchemy"
 import * as Effect from "effect/Effect"
@@ -27,7 +27,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 	Alchemy.Stack(
 		"Checkfu",
 		{
-			providers: Layer.mergeAll(Cloudflare.providers(), DomainCloudflare.providers()),
+			providers: Layer.mergeAll(Cloudflare.providers(), domainProviders()),
 			state: Layer.unwrap(
 				Effect.gen(function* () {
 					yield* inProduction(baseline)

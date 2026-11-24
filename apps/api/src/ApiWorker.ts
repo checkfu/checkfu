@@ -1,5 +1,4 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import * as DomainCloudflare from "@alchemy.run/domain/Cloudflare"
 import { SessionsHandlersLive } from "@checkfu/domain/Sessions.model"
 import * as Alchemy from "alchemy"
 import * as Cause from "effect/Cause"
@@ -13,6 +12,8 @@ import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
 import { PiSession } from "./Pi/PiSession.do.ts"
+import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { placedStub, placement } from "./Placement.ts"
 
 const harnessCall = <A, E, R>(
 	call: Effect.Effect<A, E, R>,
@@ -26,27 +27,28 @@ const harnessCall = <A, E, R>(
 const PiSessionExecutorLive = Layer.effect(
 	PiTurnExecutor,
 	Effect.gen(function* () {
-		const piSessions = yield* PiSession
+		const piSession = placedStub(yield* PiSession, yield* placement)
 		return {
 			recoverTurn: (conversation, operationId) =>
-				harnessCall(
-					Effect.suspend(() => piSessions.getByName(conversation).recoverTurn(operationId)),
-				).pipe(Effect.withSpan("PiSession.recoverTurn")),
+				harnessCall(Effect.suspend(() => piSession(conversation).recoverTurn(operationId))).pipe(
+					Effect.withSpan("PiSession.recoverTurn"),
+				),
 			runTurn: (conversation, request) =>
-				harnessCall(Effect.suspend(() => piSessions.getByName(conversation).runTurn(request))).pipe(
+				harnessCall(Effect.suspend(() => piSession(conversation).runTurn(request))).pipe(
 					Effect.withSpan("PiSession.runTurn"),
 				),
 			abortTurn: (conversation, operationId) =>
-				harnessCall(
-					Effect.suspend(() => piSessions.getByName(conversation).abortTurn(operationId)),
-				).pipe(Effect.asVoid, Effect.withSpan("PiSession.abortTurn")),
+				harnessCall(Effect.suspend(() => piSession(conversation).abortTurn(operationId))).pipe(
+					Effect.asVoid,
+					Effect.withSpan("PiSession.abortTurn"),
+				),
 		}
 	}),
 )
 
 const CheckfuLive = Checkfu.layer(
 	SessionsHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
-).pipe(Layer.provide(PiSessionExecutorLive), Layer.provide(DomainCloudflare.layerDurableObjects()))
+).pipe(Layer.provide(PiSessionExecutorLive), Layer.provide(PlacedDurableObjects))
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
