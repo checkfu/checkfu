@@ -61,7 +61,7 @@ export function Layout(): React.JSX.Element {
 export function RouteError({ error }: ErrorComponentProps): React.JSX.Element {
 	const router = useRouter()
 	if (isSignedOut(error)) {
-		return <Navigate to="/sign-in" />
+		return <Navigate to="/sign-in" replace />
 	}
 	return (
 		<div className="space-y-3">
