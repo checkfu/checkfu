@@ -4,6 +4,7 @@
 # failure. The tools read the working tree, so a file with unstaged changes is
 # refused: what they checked would not be what is committed.
 set -u
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
 staged() {
 	git diff --cached --name-only --diff-filter=ACMRT -z -- "$@"
@@ -15,11 +16,17 @@ if [ -n "$partial" ]; then
 	echo "Stage them in full, or set the unstaged part aside, and commit again." >&2
 	exit 1
 fi
+modules="$(git rev-parse --show-toplevel)/node_modules"
+for package in @effect/tsgo oxlint oxfmt; do
+	if [ ! -d "$modules/$package" ]; then
+		echo "pre-commit: $package is not installed in this checkout; run 'bun install' and commit again" >&2
+		exit 1
+	fi
+done
 failed=0
 staged '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs' |
 	xargs -0 -r bun run effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings \
 		--report-unused-disable-directives --no-error-on-unmatched-pattern -- || failed=1
 staged | xargs -0 -r bun run oxfmt --check --no-error-on-unmatched-pattern -- ||
 	{ echo "pre-commit: run 'bun run format' and stage the result" >&2; failed=1; }
-[ $failed -eq 0 ] || echo "pre-commit: if a tool was not found, run 'bun install'" >&2
 exit $failed
