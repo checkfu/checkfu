@@ -1,6 +1,7 @@
 export const UNCONFIRMED_SECRET_TTL_MS = 24 * 60 * 60 * 1000
 
 const SECRET = "secret"
+const TARGET = "target"
 const STATUS = "status"
 
 type CustodyStatus = "unconfirmed" | "kept" | "erased"
@@ -33,12 +34,13 @@ export const makeSecretCustody = (storage: CustodyStorage, now: () => number) =>
 		}
 	}
 	return {
-		store: async (secret: string): Promise<boolean> => {
+		store: async (secret: string, target: string): Promise<boolean> => {
 			const current = status()
 			if (current === "kept" || current === "erased") {
 				return false
 			}
 			storage.put(SECRET, secret)
+			storage.put(TARGET, target)
 			storage.put(STATUS, "unconfirmed")
 			await storage.setAlarm(now() + UNCONFIRMED_SECRET_TTL_MS)
 			return true
@@ -61,6 +63,11 @@ export const makeSecretCustody = (storage: CustodyStorage, now: () => number) =>
 		read: (): string | null => {
 			const current = status()
 			return current === "kept" || current === "unconfirmed" ? (storage.get(SECRET) ?? null) : null
+		},
+		/** The one URL the held secret may be sent to; null once nothing is held. */
+		target: (): string | null => {
+			const current = status()
+			return current === "kept" || current === "unconfirmed" ? (storage.get(TARGET) ?? null) : null
 		},
 		expire: async (): Promise<void> => {
 			if (status() === "unconfirmed") {

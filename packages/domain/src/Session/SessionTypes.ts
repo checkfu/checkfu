@@ -57,13 +57,37 @@ export const ToolResult = Schema.Struct({
 })
 export type ToolResult = typeof ToolResult.Type
 
-export const ToolEvent = Schema.Union([ToolUse, ToolResult])
+export const McpToolUse = Schema.Struct({
+	type: Schema.Literal("mcp_tool_use"),
+	tool_use_id: ResourceId,
+	mcp_server_name: ResourceId,
+	name: ResourceId,
+	input: ToolInput,
+	// The script call that made this one, when a script did.
+	parent_tool_use_id: Schema.optionalKey(ResourceId),
+	truncated: Schema.optionalKey(Schema.Literal(true)),
+})
+export type McpToolUse = typeof McpToolUse.Type
+
+export const McpToolResult = Schema.Struct({
+	type: Schema.Literal("mcp_tool_result"),
+	tool_use_id: ResourceId,
+	content: Schema.Array(TextBlock),
+	is_error: Schema.Boolean,
+	truncated: Schema.optionalKey(Schema.Literal(true)),
+})
+export type McpToolResult = typeof McpToolResult.Type
+
+export const ToolEvent = Schema.Union([ToolUse, ToolResult, McpToolUse, McpToolResult])
 export type ToolEvent = typeof ToolEvent.Type
 
 // One call as the session log records it: its use and result together, or the use alone when the
 // transcript holds no result for it.
 export const ToolCall = Schema.Union([
-	Schema.TaggedStruct("pair", { use: ToolUse, result: ToolResult }),
-	Schema.TaggedStruct("use", { use: ToolUse }),
+	Schema.TaggedStruct("pair", {
+		use: Schema.Union([ToolUse, McpToolUse]),
+		result: Schema.Union([ToolResult, McpToolResult]),
+	}),
+	Schema.TaggedStruct("use", { use: Schema.Union([ToolUse, McpToolUse]) }),
 ])
 export type ToolCall = typeof ToolCall.Type

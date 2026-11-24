@@ -441,6 +441,31 @@
 													"type": "null"
 												}
 											]
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to"
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 2048,
+														"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+														"description": "Endpoint URL of the MCP server"
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -453,7 +478,8 @@
 										"description",
 										"created_at",
 										"updated_at",
-										"archived_at"
+										"archived_at",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -948,6 +974,33 @@
 											}
 										],
 										"description": "Agent description"
+									},
+									"mcp_servers": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["url"]
+												},
+												"name": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9_-]{1,32}$",
+													"description": "Name the agent's tools and a session's credential binding refer to"
+												},
+												"url": {
+													"type": "string",
+													"maxLength": 2048,
+													"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+													"description": "Endpoint URL of the MCP server"
+												}
+											},
+											"required": ["type", "name", "url"],
+											"additionalProperties": false
+										},
+										"maxItems": 20,
+										"description": "MCP servers this agent connects to. Names must be unique."
 									}
 								},
 								"required": ["name", "model"],
@@ -1078,6 +1131,31 @@
 													"type": "null"
 												}
 											]
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to"
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 2048,
+														"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+														"description": "Endpoint URL of the MCP server"
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -1090,7 +1168,8 @@
 										"description",
 										"created_at",
 										"updated_at",
-										"archived_at"
+										"archived_at",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -1519,6 +1598,31 @@
 													"type": "null"
 												}
 											]
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to"
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 2048,
+														"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+														"description": "Endpoint URL of the MCP server"
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -1531,7 +1635,8 @@
 										"description",
 										"created_at",
 										"updated_at",
-										"archived_at"
+										"archived_at",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -2032,6 +2137,33 @@
 											}
 										],
 										"description": "Updated agent description"
+									},
+									"mcp_servers": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["url"]
+												},
+												"name": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9_-]{1,32}$",
+													"description": "Name the agent's tools and a session's credential binding refer to"
+												},
+												"url": {
+													"type": "string",
+													"maxLength": 2048,
+													"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+													"description": "Endpoint URL of the MCP server"
+												}
+											},
+											"required": ["type", "name", "url"],
+											"additionalProperties": false
+										},
+										"maxItems": 20,
+										"description": "MCP servers this agent connects to. Names must be unique."
 									}
 								},
 								"required": ["version"],
@@ -2151,6 +2283,31 @@
 													"type": "null"
 												}
 											]
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["url"]
+													},
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$",
+														"description": "Name the agent's tools and a session's credential binding refer to"
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 2048,
+														"pattern": "^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+														"description": "Endpoint URL of the MCP server"
+													}
+												},
+												"required": ["type", "name", "url"],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -2163,7 +2320,8 @@
 										"description",
 										"created_at",
 										"updated_at",
-										"archived_at"
+										"archived_at",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -5365,6 +5523,37 @@
 											},
 											"required": ["id", "version"],
 											"additionalProperties": false
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"credential_id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": ["name", "url", "credential_id"],
+												"additionalProperties": false
+											},
+											"description": "The agent's MCP servers with the credential this session bound each to"
 										}
 									},
 									"required": [
@@ -5378,7 +5567,8 @@
 										"created_at",
 										"updated_at",
 										"archived_at",
-										"agent"
+										"agent",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -5882,6 +6072,37 @@
 													}
 												],
 												"description": "Optional session title"
+											},
+											"vault_ids": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"maxItems": 20,
+												"description": "Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials."
+											},
+											"mcp_server_credentials": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"mcp_server_name": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9_-]{1,32}$"
+														},
+														"credential_id": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 256
+														}
+													},
+													"required": ["mcp_server_name", "credential_id"],
+													"additionalProperties": false
+												},
+												"maxItems": 20,
+												"description": "Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match."
 											}
 										},
 										"required": ["agent", "environment_id"],
@@ -5946,6 +6167,37 @@
 													}
 												],
 												"description": "Optional session title"
+											},
+											"vault_ids": {
+												"type": "array",
+												"items": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"maxItems": 20,
+												"description": "Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials."
+											},
+											"mcp_server_credentials": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"properties": {
+														"mcp_server_name": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9_-]{1,32}$"
+														},
+														"credential_id": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 256
+														}
+													},
+													"required": ["mcp_server_name", "credential_id"],
+													"additionalProperties": false
+												},
+												"maxItems": 20,
+												"description": "Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match."
 											}
 										},
 										"required": ["agent_id", "environment_id"],
@@ -6089,6 +6341,37 @@
 											},
 											"required": ["id", "version"],
 											"additionalProperties": false
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"credential_id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": ["name", "url", "credential_id"],
+												"additionalProperties": false
+											},
+											"description": "The agent's MCP servers with the credential this session bound each to"
 										}
 									},
 									"required": [
@@ -6102,7 +6385,8 @@
 										"created_at",
 										"updated_at",
 										"archived_at",
-										"agent"
+										"agent",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -6549,6 +6833,37 @@
 											},
 											"required": ["id", "version"],
 											"additionalProperties": false
+										},
+										"mcp_servers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9_-]{1,32}$"
+													},
+													"url": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 2048
+													},
+													"credential_id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"minLength": 1
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": ["name", "url", "credential_id"],
+												"additionalProperties": false
+											},
+											"description": "The agent's MCP servers with the credential this session bound each to"
 										}
 									},
 									"required": [
@@ -6562,7 +6877,8 @@
 										"created_at",
 										"updated_at",
 										"archived_at",
-										"agent"
+										"agent",
+										"mcp_servers"
 									],
 									"additionalProperties": false
 								}
@@ -17902,6 +18218,115 @@
 							"type": {
 								"type": "string",
 								"enum": ["agent.tool_result"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								}
+							},
+							"is_error": {
+								"type": "boolean"
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["agent.mcp_tool_use"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"mcp_server_name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"input": {
+								"type": "object"
+							},
+							"parent_tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							}
+						},
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"tool_use_id",
+							"mcp_server_name",
+							"name",
+							"input"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["agent.mcp_tool_result"]
 							},
 							"created_at": {
 								"type": "string"

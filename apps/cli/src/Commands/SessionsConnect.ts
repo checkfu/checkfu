@@ -368,6 +368,14 @@ const renderConnectEvent = (
 				}
 				break
 			}
+			case "agent.mcp_tool_use": {
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(
+						`[tool] ${escapeTerminalControlCharacters(`${event.mcp_server_name}/${event.name}`)}`,
+					)
+				}
+				break
+			}
 			case "agent.thinking": {
 				if (!rawStructuredMode && event.thinking.length > 0) {
 					yield* writeStderrLine(`[thinking] ${event.thinking}`)

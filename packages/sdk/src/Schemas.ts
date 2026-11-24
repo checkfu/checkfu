@@ -248,6 +248,20 @@ export const SessionEventFields = {
 		is_error: Schema.Boolean,
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 	},
+	"agent.mcp_tool_use": {
+		tool_use_id: ResourceId,
+		mcp_server_name: ResourceId,
+		name: ResourceId,
+		input: Schema.JsonObject,
+		parent_tool_use_id: Schema.optionalKey(ResourceId),
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.mcp_tool_result": {
+		tool_use_id: ResourceId,
+		content: Schema.Array(TextBlock),
+		is_error: Schema.Boolean,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
 	"agent.thinking": {
 		thinking: Schema.String,
 	},
@@ -413,3 +427,30 @@ export const CredentialSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type CredentialSnapshot = typeof CredentialSnapshot.Type
+
+// ---------------------------------------------------------------------------
+// MCP server schemas
+// ---------------------------------------------------------------------------
+
+export const MAX_MCP_SERVERS = 20
+
+export const McpServerName = Schema.String.check(
+	Schema.isPattern(/^[A-Za-z0-9_-]{1,32}$/u, {
+		expected: "1-32 letters, digits, underscores or hyphens",
+	}),
+)
+
+export const McpServer = Schema.Struct({
+	type: Schema.Literal("url"),
+	name: McpServerName,
+	url: McpServerUrl,
+})
+export type McpServer = typeof McpServer.Type
+
+/** An agent's server, as one session uses it: with the credential it was bound to, or none. */
+export const McpServerBinding = Schema.Struct({
+	name: McpServerName,
+	url: McpServerUrl,
+	credential_id: Schema.NullOr(Schema.String.check(Schema.isMinLength(1))),
+})
+export type McpServerBinding = typeof McpServerBinding.Type

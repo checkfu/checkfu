@@ -114,7 +114,13 @@ The agent can also write a JavaScript script that calls its tools (`await tools.
 
 ## Vaults
 
-A vault holds credentials for agents to use. Create one with `POST /v1/vaults`, then store a bearer token for an MCP server with `POST /v1/vaults/{vault_id}/credentials`. A vault holds up to 20 active credentials, one per MCP server URL. A credential's secret is kept only by that credential's own Durable Object: it is never returned, and it is erased when the credential or its vault is archived or deleted. Sessions do not use vaults yet.
+A vault holds credentials for agents to use. Create one with `POST /v1/vaults`, then store a bearer token for an MCP server with `POST /v1/vaults/{vault_id}/credentials`. A vault holds up to 20 active credentials, one per MCP server URL. A credential's secret is kept only by that credential's own Durable Object: it is never returned, and it is erased when the credential or its vault is archived or deleted.
+
+## MCP servers
+
+An agent lists the MCP servers it uses in `mcp_servers` (`{ "type": "url", "name": "tracker", "url": "https://..." }`). A session decides which credential each server gets when it is created: pass `vault_ids`, and a server is bound to the one credential those vaults store for its URL; when more than one matches, the request is refused until `mcp_server_credentials` names the credential (`{ "mcp_server_name": "tracker", "credential_id": "vcrd_..." }`). A server with no credential is used without one. The binding is fixed for the session and shown on it as `mcp_servers`; the secret is read at each call, so a rotated token applies at once and an archived credential stops working.
+
+The agent reaches a server's tools from scripts as `tools.mcp__<server>__<tool>(...)`, or calls one directly after `tool_search` has loaded it. Every request to the server is made by the credential's own Durable Object, which sends the secret only to the URL it was stored for. Each call is on the session's event log as `agent.mcp_tool_use` and `agent.mcp_tool_result`, with `parent_tool_use_id` naming the script call when a script made it.
 
 ## Commands
 

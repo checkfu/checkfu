@@ -34,7 +34,10 @@ import {
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
+	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
+	McpServerBinding,
+	McpServerName,
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
@@ -294,6 +297,28 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 	"@checkfu/api/EventBatchBodyLimit",
 ) {}
 
+// HTTPS, or plain HTTP to this machine only, and never with credentials in the URL.
+const MCP_SERVER_URL =
+	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
+
+const McpServerUrlInput = Schema.String.check(
+	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
+	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
+)
+
+export const McpServerInput = Schema.Struct({
+	type: Schema.Literal("url"),
+	name: McpServerName.annotate({
+		description: "Name the agent's tools and a session's credential binding refer to",
+	}),
+	url: McpServerUrlInput.annotate({ description: "Endpoint URL of the MCP server" }),
+})
+export type McpServerInput = typeof McpServerInput.Type
+
+const McpServersInput = Schema.Array(McpServerInput)
+	.check(Schema.isMaxLength(MAX_MCP_SERVERS))
+	.annotate({ description: "MCP servers this agent connects to. Names must be unique." })
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -307,6 +332,7 @@ export const CreateAgentBody = Schema.Struct({
 	description: Schema.optionalKey(
 		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
 	),
+	mcp_servers: Schema.optionalKey(McpServersInput),
 })
 export type CreateAgentBody = typeof CreateAgentBody.Type
 
@@ -328,6 +354,7 @@ export const UpdateAgentBody = Schema.Struct({
 			description: "Updated agent description",
 		}),
 	),
+	mcp_servers: Schema.optionalKey(McpServersInput),
 })
 export type UpdateAgentBody = typeof UpdateAgentBody.Type
 
@@ -376,6 +403,25 @@ const CreateSessionCommonFields = {
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
 		Schema.NullOr(SessionTitle).annotate({ description: "Optional session title" }),
+	),
+	vault_ids: Schema.optionalKey(
+		Schema.Array(ResourceId).check(Schema.isMaxLength(MAX_MCP_SERVERS)).annotate({
+			description:
+				"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials.",
+		}),
+	),
+	mcp_server_credentials: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				mcp_server_name: McpServerName,
+				credential_id: ResourceId,
+			}),
+		)
+			.check(Schema.isMaxLength(MAX_MCP_SERVERS))
+			.annotate({
+				description:
+					"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match.",
+			}),
 	),
 }
 
@@ -456,9 +502,10 @@ export const SendSessionEventsBody = Schema.Struct({
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 
-export const AgentResource = Schema.Struct(
-	Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
-)
+export const AgentResource = Schema.Struct({
+	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
+	mcp_servers: Schema.Array(McpServerInput),
+})
 export type Agent = typeof AgentResource.Type
 
 export type Environment = EnvironmentSnapshot
@@ -480,15 +527,6 @@ export const UpdateVaultBody = Schema.Struct({
 	),
 })
 export type UpdateVaultBody = typeof UpdateVaultBody.Type
-
-// HTTPS, or plain HTTP to this machine only, and never with credentials in the URL.
-const MCP_SERVER_URL =
-	/^(?:https:\/\/[^\s/?#@]+|http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?)(?:[/?#]\S*)?$/u
-
-const McpServerUrlInput = Schema.String.check(
-	Schema.isMaxLength(MAX_MCP_SERVER_URL_LENGTH),
-	Schema.isPattern(MCP_SERVER_URL, { expected: "an https:// URL of an MCP server" }),
-)
 
 export const CreateCredentialBody = Schema.Struct({
 	auth: Schema.Union([
@@ -555,6 +593,9 @@ export type ListCredentialsResponse = typeof ListCredentialsResponse.Type
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
+	mcp_servers: Schema.Array(McpServerBinding).annotate({
+		description: "The agent's MCP servers with the credential this session bound each to",
+	}),
 })
 export type Session = typeof SessionResource.Type
 
@@ -709,6 +750,14 @@ export const AgentToolResultSessionEvent = wireSessionEvent(
 	"agent.tool_result",
 	SessionEventFields["agent.tool_result"],
 )
+export const AgentMcpToolUseSessionEvent = wireSessionEvent(
+	"agent.mcp_tool_use",
+	SessionEventFields["agent.mcp_tool_use"],
+)
+export const AgentMcpToolResultSessionEvent = wireSessionEvent(
+	"agent.mcp_tool_result",
+	SessionEventFields["agent.mcp_tool_result"],
+)
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
@@ -745,6 +794,8 @@ export const SessionEvent = Schema.Union([
 	SpanModelRequestStartEvent,
 	AgentToolUseSessionEvent,
 	AgentToolResultSessionEvent,
+	AgentMcpToolUseSessionEvent,
+	AgentMcpToolResultSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,

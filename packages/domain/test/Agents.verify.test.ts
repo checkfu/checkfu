@@ -16,6 +16,7 @@ const STANDING = {
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
+	"RepublishAgent.RepublishingMintsTheNextVersionUnchanged": "proved",
 	"Agents.AgentViewMatchesAgent": "checked",
 	"Agents.EveryVersionIsRecordedByNumber": "checked",
 	"Agents.EveryRecordedVersionBelongsToItsAgent": "checked",

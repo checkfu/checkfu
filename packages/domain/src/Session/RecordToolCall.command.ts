@@ -22,6 +22,16 @@ export class AgentToolResult extends Domain.Event(
 	SessionEventFields["agent.tool_result"],
 ) {}
 
+export class AgentMcpToolUse extends Domain.Event("agent.mcp_tool_use", {
+	...SessionEventFields["agent.mcp_tool_use"],
+	input: ToolInput,
+}) {}
+
+export class AgentMcpToolResult extends Domain.Event(
+	"agent.mcp_tool_result",
+	SessionEventFields["agent.mcp_tool_result"],
+) {}
+
 export class RecordToolCall extends Domain.Command("RecordToolCall", {
 	input: {
 		session_id: SessionId,
@@ -29,6 +39,6 @@ export class RecordToolCall extends Domain.Command("RecordToolCall", {
 		model_request_start_id: NonEmptyString,
 		call: ToolCall,
 	},
-	events: [AgentToolUse, AgentToolResult],
+	events: [AgentToolUse, AgentToolResult, AgentMcpToolUse, AgentMcpToolResult],
 	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, UnknownModelRequest],
 }) {}

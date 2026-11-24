@@ -100,6 +100,35 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							],
 							description: "Agent description",
 						},
+						mcp_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["url"],
+									},
+									name: {
+										type: "string",
+										pattern: "^[A-Za-z0-9_-]{1,32}$",
+										description:
+											"Name the agent's tools and a session's credential binding refer to",
+									},
+									url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+										description: "Endpoint URL of the MCP server",
+									},
+								},
+								required: ["type", "name", "url"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description: "MCP servers this agent connects to. Names must be unique.",
+						},
 					},
 					required: ["name", "model"],
 					additionalProperties: false,
@@ -230,6 +259,35 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description: "Updated agent description",
+						},
+						mcp_servers: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["url"],
+									},
+									name: {
+										type: "string",
+										pattern: "^[A-Za-z0-9_-]{1,32}$",
+										description:
+											"Name the agent's tools and a session's credential binding refer to",
+									},
+									url: {
+										type: "string",
+										maxLength: 2048,
+										pattern:
+											"^(?:https:\\/\\/[^\\s/?#@]+|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::\\d{1,5})?)(?:[/?#]\\S*)?$",
+										description: "Endpoint URL of the MCP server",
+									},
+								},
+								required: ["type", "name", "url"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description: "MCP servers this agent connects to. Names must be unique.",
 						},
 					},
 					required: ["version"],
@@ -1044,6 +1102,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									],
 									description: "Optional session title",
 								},
+								vault_ids: {
+									type: "array",
+									items: {
+										type: "string",
+										minLength: 1,
+										maxLength: 256,
+									},
+									maxItems: 20,
+									description:
+										"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials.",
+								},
+								mcp_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											mcp_server_name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,32}$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+											},
+										},
+										required: ["mcp_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 20,
+									description:
+										"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match.",
+								},
 							},
 							required: ["agent", "environment_id"],
 							additionalProperties: false,
@@ -1107,6 +1198,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										},
 									],
 									description: "Optional session title",
+								},
+								vault_ids: {
+									type: "array",
+									items: {
+										type: "string",
+										minLength: 1,
+										maxLength: 256,
+									},
+									maxItems: 20,
+									description:
+										"Vaults whose credentials the session may use. A server is bound to the one credential stored for its URL; when several match, bind it in mcp_server_credentials.",
+								},
+								mcp_server_credentials: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											mcp_server_name: {
+												type: "string",
+												pattern: "^[A-Za-z0-9_-]{1,32}$",
+											},
+											credential_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+											},
+										},
+										required: ["mcp_server_name", "credential_id"],
+										additionalProperties: false,
+									},
+									maxItems: 20,
+									description:
+										"Binds one of the agent's MCP servers to a credential by id, whatever vault_ids would match.",
 								},
 							},
 							required: ["agent_id", "environment_id"],

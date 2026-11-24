@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
+import { McpServerSet } from "./Mcp/McpServerSet.aggregate.ts"
 import { ArchiveCredentialDecision } from "./Vault/ArchiveCredential.decision.ts"
 import { CreateCredentialDecision } from "./Vault/CreateCredential.decision.ts"
 import { Credential } from "./Vault/Credential.aggregate.ts"
@@ -18,7 +19,7 @@ import { Vault } from "./Vault/Vault.aggregate.ts"
 import { VaultView } from "./Vault/VaultView.view.ts"
 
 export class Vaults extends Domain.Model("Vaults", {
-	aggregates: [Vault, Credential],
+	aggregates: [Vault, Credential, McpServerSet],
 	decisions: [
 		CreateCredentialDecision,
 		ArchiveCredentialDecision,
@@ -138,6 +139,7 @@ export class VaultsApi extends Domain.Api("VaultsApi", {
 		"RotateCredential",
 		"ArchiveCredential",
 		"DeleteCredential",
+		"RecordMcpServers",
 	],
 	views: ["VaultView", "CredentialView"],
 }) {}

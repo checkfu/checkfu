@@ -53,6 +53,10 @@
 			"Agents.EveryVersionIsRecordedByNumber": {
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Agent.every((a) => {\n\t\t\t\tif (a.state.status === \"\") {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\t// Rows are keyed agent@version, versions start at 1, and no row is above the head\n\t\t\t\t// (checked below), so as many rows as the head's number means none is missing.\n\t\t\t\tif (\n\t\t\t\t\tm.AgentVersionByNumberView.filter((v) => v.state.agent_id === a.id).length !==\n\t\t\t\t\ta.state.version\n\t\t\t\t) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\tconst view = m.AgentVersionByNumberView.find((v) => v.id === `${a.id}@${a.state.version}`)\n\t\t\t\tif (view === undefined) {\n\t\t\t\t\treturn false\n\t\t\t\t}\n\t\t\t\treturn [\n\t\t\t\t\tview.state.agent_id === a.id,\n\t\t\t\t\tview.state.id === a.state.current_version_id,\n\t\t\t\t\tview.state.version === a.state.version,\n\t\t\t\t\tview.state.name === a.state.name,\n\t\t\t\t\tview.state.model.id === a.state.model_id,\n\t\t\t\t\t(view.state.system !== null) === a.state.has_system,\n\t\t\t\t\t(view.state.system ?? \"\") === a.state.system,\n\t\t\t\t\t(view.state.description !== null) === a.state.has_description,\n\t\t\t\t\t(view.state.description ?? \"\") === a.state.description,\n\t\t\t\t].every((ok) => ok)\n\t\t\t})"
+			},
+			"RepublishAgent.RepublishingMintsTheNextVersionUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tafter.agent.status === \"active\",\n\t\t\t\tafter.agent.version === before.agent.version + 1,\n\t\t\t\tafter.agent.current_version_id === command.next_version_id,\n\t\t\t\tafter.agent.name === before.agent.name,\n\t\t\t\tafter.agent.model_id === before.agent.model_id,\n\t\t\t\tafter.agent.has_system === before.agent.has_system,\n\t\t\t\tafter.agent.system === before.agent.system,\n\t\t\t\tafter.agent.has_description === before.agent.has_description,\n\t\t\t\tafter.agent.description === before.agent.description,\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}

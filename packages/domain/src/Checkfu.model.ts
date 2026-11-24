@@ -4,6 +4,7 @@ import { Agent } from "./Agent/Agent.aggregate.ts"
 import { AgentVersionByNumberView } from "./Agent/AgentVersionByNumberView.view.ts"
 import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
+import { RepublishAgentDecision } from "./Agent/RepublishAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.policy.ts"
 import { Automation } from "./Automation/Automation.aggregate.ts"
@@ -48,6 +49,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
+		RepublishAgentDecision,
 		AdmitSessionDecision,
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
@@ -342,6 +344,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 	commands: [
 		"CreateAgent",
 		"UpdateAgent",
+		"RepublishAgent",
 		"ArchiveAgent",
 		"CreateEnvironment",
 		"UpdateEnvironment",

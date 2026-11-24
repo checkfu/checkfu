@@ -3,11 +3,12 @@ import { Agent } from "./Agent/Agent.aggregate.ts"
 import { AgentVersionByNumberView } from "./Agent/AgentVersionByNumberView.view.ts"
 import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
+import { RepublishAgentDecision } from "./Agent/RepublishAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 
 export class Agents extends Domain.Model("Agents", {
 	aggregates: [Agent],
-	decisions: [CreateAgentDecision, UpdateAgentDecision],
+	decisions: [CreateAgentDecision, UpdateAgentDecision, RepublishAgentDecision],
 	views: [AgentView, AgentVersionByNumberView],
 	invariants: {
 		AgentViewMatchesAgent: (m) =>
@@ -100,6 +101,6 @@ export class Agents extends Domain.Model("Agents", {
 
 export class AgentsApi extends Domain.Api("AgentsApi", {
 	model: Agents,
-	commands: ["CreateAgent", "UpdateAgent", "ArchiveAgent"],
+	commands: ["CreateAgent", "UpdateAgent", "RepublishAgent", "ArchiveAgent"],
 	views: ["AgentView", "AgentVersionByNumberView"],
 }) {}

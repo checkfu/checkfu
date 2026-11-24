@@ -29,6 +29,7 @@ import {
 	commitForStream,
 	handled,
 	isPending,
+	normalizeMcpServerUrl,
 	orPending,
 	present,
 	randomId,
@@ -39,16 +40,6 @@ export const VaultReadWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/VaultReadWaitTimeout",
 	{ defaultValue: () => "5 seconds" },
 )
-
-/** One spelling per MCP server, so the same server cannot hold two credentials in a vault. */
-const normalizeMcpServerUrl = (input: string): string | undefined => {
-	if (!URL.canParse(input)) {
-		return undefined
-	}
-	const url = new URL(input)
-	url.hash = ""
-	return url.href
-}
 
 export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) =>
 	Effect.gen(function* () {
@@ -198,7 +189,7 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 					const id = CredentialId.make(yield* randomId(random, "vcrd"))
 					// The secret goes straight to the credential's connection: no command carries it.
 					const { stored } = yield* secrets
-						.store({ credential_id: id, secret: payload.auth.token })
+						.store({ credential_id: id, secret: payload.auth.token, mcp_server_url: mcpServerUrl })
 						.pipe(
 							Effect.catchTag("CredentialSecretsUnavailable", () =>
 								reject(503, "Credential storage is unavailable. Try again."),
