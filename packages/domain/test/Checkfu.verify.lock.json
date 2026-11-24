@@ -210,10 +210,6 @@
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"FireAutomation\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\tcommand.activation === before.activation,\n\t\t\t\tcommand.scheduled_at > before.last_scheduled_at,\n\t\t\t\tafter.runs === before.runs + 1,\n\t\t\t\tafter.last_scheduled_at === command.scheduled_at,\n\t\t\t].every((ok) => ok)\n\t\t}"
 			},
-			"Automation.OnlyAResumeStartsANewActivation": {
-				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
-			},
 			"Automation.EveryResumeStartsANewActivation": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"automation.unpaused\" || after.activation === before.activation + 1,\n\t\t\t)"
@@ -297,6 +293,26 @@
 			"Session.AgentMessageEndsTheTurn": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"Automation.OnlyAResumeOrAnUpdateStartsANewActivation": {
+				"kind": "transition",
+				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"UpdateAutomation.OnlyALiveAutomationOnAnActiveAgentAndEnvironmentIsUpdated": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.agent.status === \"active\",\n\t\t\t\tbefore.environment.status === \"active\",\n\t\t\t\t[before.automation.status === \"active\", before.automation.status === \"paused\"].some(\n\t\t\t\t\t(live) => live,\n\t\t\t\t),\n\t\t\t\tafter.automation.status === before.automation.status,\n\t\t\t].every((ok) => ok)"
+			},
+			"UpdateAutomation.AnUpdateRestartsTheScheduleOnlyOfAnActiveAutomation": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tafter.automation.activation ===\n\t\t\t(before.automation.status === \"active\"\n\t\t\t\t? before.automation.activation + 1\n\t\t\t\t: before.automation.activation)"
+			},
+			"UpdateAutomation.AnUpdatePinsAVersionWithinTheAgentHead": {
+				"kind": "transition",
+				"source": "({ before, command }) =>\n\t\t\tcommand.agent_version === null || command.agent_version <= before.agent.version"
+			},
+			"UpdateAutomation.AnUpdateLeavesRunsAgentAndEnvironmentUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.automation.runs === before.automation.runs,\n\t\t\t\tafter.automation.reported === before.automation.reported,\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}

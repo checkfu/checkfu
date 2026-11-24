@@ -45,10 +45,13 @@ import {
 	BoundedAgentId,
 	BoundedEnvironmentId,
 } from "../src/Session/AdmitSession.command.ts"
-import { AutomationPaused } from "../src/Automation/PauseAutomation.command.ts"
+import { AutomationPaused, PauseAutomation } from "../src/Automation/PauseAutomation.command.ts"
+import { AutomationArchivedError } from "../src/Automation/AutomationArchived.rejection.ts"
+import { AutomationUpdated, UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
 import { AutomationRunFailed } from "../src/Automation/RecordAutomationRunFailed.command.ts"
 import { AutomationRunStarted } from "../src/Automation/RecordAutomationRunStarted.command.ts"
 import { AutomationFired, RunAutomation } from "../src/Automation/RunAutomation.command.ts"
+import { FireAutomation } from "../src/Automation/FireAutomation.command.ts"
 import {
 	AGENT_UNAVAILABLE,
 	ENVIRONMENT_UNAVAILABLE,
@@ -101,6 +104,7 @@ const agentFields = {
 
 const config = {
 	name: "Morning report",
+	description: null as string | null,
 	agent_id: agent.id,
 	agent_version: null as number | null,
 	environment_id: environment.id,
@@ -131,6 +135,22 @@ const admit = (overrides: Partial<typeof config> = {}, id = automation.id) =>
 		agent_id: BoundedAgentId.make(overrides.agent_id ?? config.agent_id),
 		environment_id: BoundedEnvironmentId.make(overrides.environment_id ?? config.environment_id),
 	})
+
+const update = (overrides: Partial<typeof config> = {}) =>
+	new UpdateAutomation({
+		automation_id: automation.id,
+		...config,
+		...overrides,
+		agent_id: BoundedAgentId.make(overrides.agent_id ?? config.agent_id),
+		environment_id: BoundedEnvironmentId.make(overrides.environment_id ?? config.environment_id),
+	})
+
+const noon = {
+	name: "Noon report",
+	description: "Runs at noon instead.",
+	text: "Write the noon report.",
+	schedule: { type: "cron" as const, expression: "0 12 * * *", timezone: "UTC" },
+}
 
 const created = (agent_version: number | null = null) => [
 	...world,
@@ -171,16 +191,20 @@ const failedOn = (run: number, iso: string | null, type: string, message: string
 		error: { type, message },
 	})
 
-const opened = (run: number, agent_version: number) => [
+const opened = (
+	run: number,
+	agent_version: number,
+	{ name, text }: { readonly name: string; readonly text: string } = config,
+) => [
 	Story.then(
 		sessionOf(run),
 		new SessionCreated({
 			agent_id: agent.id,
 			agent_version,
 			environment_id: environment.id,
-			title: config.name,
+			title: name,
 		}),
-		new UserMessage({ content: [{ type: "text", text: config.text }] }),
+		new UserMessage({ content: [{ type: "text", text }] }),
 		new SessionStatusRunning({ turn: 1 }),
 		new SpanModelRequestStart({ model_request_start_id: `${sessionOf(run).id}:turn:1:req:1` }),
 	),
@@ -243,6 +267,79 @@ describe("Checkfu automations", () => {
 				startedOn(2, "2026-01-02T09:00:00.000Z"),
 			]),
 		),
+	)
+
+	it.effect(
+		"moves the next firing to an updated schedule and opens later sessions with the updated message",
+		() =>
+			story(
+				...created(),
+				Story.when(update(noon)),
+				Story.then(automation, new AutomationUpdated({ ...config, ...noon, activation: 1 })),
+				Story.view(AutomationView, automation, {
+					...noon,
+					status: "active",
+					activation: 1,
+					upcoming: [1, 2, 3, 4, 5].map((day) => ms(`2026-01-0${day}T12:00:00.000Z`)),
+				}),
+				Story.clock(at("2026-01-01T09:00:00.000Z")),
+				Story.clock(at("2026-01-01T12:00:00.000Z")),
+				Story.then(
+					automation,
+					scheduled(1, "2026-01-01T12:00:00.000Z"),
+					startedOn(1, "2026-01-01T12:00:00.000Z"),
+				),
+				...opened(1, 1, noon),
+			),
+	)
+
+	it.effect("ignores a firing queued before an update", () =>
+		story(
+			...created(),
+			Story.when(update(noon)),
+			Story.then(automation, new AutomationUpdated({ ...config, ...noon, activation: 1 })),
+			Story.when(
+				new FireAutomation({
+					automation_id: automation.id,
+					activation: 0,
+					scheduled_at: ms("2026-01-01T09:00:00.000Z"),
+				}),
+			),
+			Story.then(automation),
+		),
+	)
+
+	it.effect(
+		"updates a paused automation without starting it, and refuses an archived one or an update it could not run",
+		() =>
+			story(
+				...created(),
+				Story.when(new PauseAutomation({ automation_id: automation.id })),
+				Story.then(automation, new AutomationPaused({ reason: "manual" })),
+				Story.when(update(noon)),
+				Story.then(automation, new AutomationUpdated({ ...config, ...noon, activation: 0 })),
+				Story.view(AutomationView, automation, { ...noon, status: "paused", activation: 0 }),
+				Story.clock(at("2026-01-01T12:00:00.000Z")),
+				Story.when(
+					update({ schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } }),
+				),
+				Story.rejected(
+					new AutomationScheduleUnusable({ expression: "* * * * *", timezone: "UTC" }),
+				),
+				Story.when(update({ agent_id: AgentId.make("agent_missing") })),
+				Story.rejected(new AgentNotFound({ agent_id: AgentId.make("agent_missing") })),
+				Story.when(update({ agent_version: 2 })),
+				Story.rejected(new AgentVersionNotFound({ agent_id: agent.id, version: 2 })),
+				Story.when(update({ environment_id: EnvironmentId.make("env_missing") })),
+				Story.rejected(
+					new EnvironmentNotFound({ environment_id: EnvironmentId.make("env_missing") }),
+				),
+				Story.when(new ArchiveAutomation({ automation_id: automation.id })),
+				Story.then(automation, new AutomationArchived()),
+				Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
+				Story.when(update(noon)),
+				Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
+			),
 	)
 
 	it.effect("follows the agent's latest version unless a version is pinned", () => {

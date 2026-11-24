@@ -16,6 +16,8 @@ import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAuto
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
 import { firingsAhead, isUsableSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
+import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
+import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
@@ -92,12 +94,54 @@ const automationRunResource = (
 	created_at: entry.envelope.at,
 })
 
+const agentOf = (agent: string | { readonly id: string; readonly version?: number | undefined }) =>
+	Effect.gen(function* () {
+		const raw = typeof agent === "string" ? agent : agent.id
+		const agent_id = Schema.decodeOption(AgentId)(raw)
+		if (Option.isNone(agent_id)) {
+			return yield* reject(404, `Agent ${raw} not found.`)
+		}
+		return {
+			agent_id: agent_id.value,
+			agent_version: typeof agent === "string" ? null : (agent.version ?? null),
+		}
+	})
+
+const environmentOf = (raw: string) =>
+	Effect.gen(function* () {
+		const environment_id = Schema.decodeOption(EnvironmentId)(raw)
+		if (Option.isNone(environment_id)) {
+			return yield* reject(404, `Environment ${raw} not found.`)
+		}
+		return environment_id.value
+	})
+
+const textOf = (
+	events: ReadonlyArray<{
+		readonly content: ReadonlyArray<{ readonly text: string }>
+	}>,
+) =>
+	Schema.decodeEffect(MessageText)(
+		events
+			.flatMap((event) => event.content)
+			.map((block) => block.text)
+			.join("\n"),
+	).pipe(
+		Effect.catch(() =>
+			reject(
+				400,
+				`initial_events combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
+			),
+		),
+	)
+
 const present = (snapshot: AutomationSnapshot) =>
 	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
 export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (handlers) =>
 	Effect.gen(function* () {
 		const admission = yield* AdmitAutomationDecision
+		const updates = yield* UpdateAutomationDecision
 		const automations = yield* Automation
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
@@ -149,43 +193,33 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				return snapshot === null ? projected(id) : Effect.succeed(snapshot)
 			})
 
+		const currentOf = (id: AutomationId) =>
+			Effect.gen(function* () {
+				const found = Option.getOrNull(yield* automationViews.get(Automation.ref(id)))
+				if (found !== null) {
+					return found
+				}
+				yield* committed(id)
+				return yield* projected(id)
+			})
+
 		return handlers
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
-					const rawAgentId = typeof payload.agent === "string" ? payload.agent : payload.agent.id
-					const agentId = Schema.decodeOption(AgentId)(rawAgentId)
-					if (Option.isNone(agentId)) {
-						return yield* reject(404, `Agent ${rawAgentId} not found.`)
-					}
-					const environmentId = Schema.decodeOption(EnvironmentId)(payload.environment_id)
-					if (Option.isNone(environmentId)) {
-						return yield* reject(404, `Environment ${payload.environment_id} not found.`)
-					}
+					const { agent_id, agent_version } = yield* agentOf(payload.agent)
+					const environment_id = yield* environmentOf(payload.environment_id)
 					if (!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)) {
 						return yield* new AutomationScheduleUnusable(payload.schedule)
 					}
-					const text = yield* Schema.decodeEffect(MessageText)(
-						payload.initial_events
-							.flatMap((event) => event.content)
-							.map((block) => block.text)
-							.join("\n"),
-					).pipe(
-						Effect.catch(() =>
-							reject(
-								400,
-								`initial_events combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
-							),
-						),
-					)
 					const command = {
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
-						agent_id: agentId.value,
-						agent_version:
-							typeof payload.agent === "string" ? null : (payload.agent.version ?? null),
-						environment_id: environmentId.value,
-						text,
+						description: payload.description ?? null,
+						agent_id,
+						agent_version,
+						environment_id,
+						text: yield* textOf(payload.initial_events),
 						schedule: payload.schedule,
 					}
 					const commandId = yield* createCommandId(digest, "automation", idempotencyKey, command)
@@ -203,22 +237,44 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						: yield* after(id, committed)
 				}).pipe(handled),
 			)
+			.handle("update", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const id = params.automation_id
+					const current = yield* currentOf(id)
+					const { agent_id, agent_version } = yield* agentOf(
+						payload.agent ?? { id: current.agent_id, version: current.agent_version ?? undefined },
+					)
+					const receipt = yield* updates.send(
+						new UpdateAutomation({
+							automation_id: id,
+							name: payload.name ?? current.name,
+							description:
+								payload.description === undefined ? current.description : payload.description,
+							agent_id,
+							agent_version,
+							environment_id: yield* environmentOf(
+								payload.environment_id ?? current.environment_id,
+							),
+							text:
+								payload.initial_events === undefined
+									? current.text
+									: yield* textOf(payload.initial_events),
+							schedule: payload.schedule ?? current.schedule,
+						}),
+					)
+					const committed = commitForStream(receipt.commits, `Automation/${id}`)
+					return committed === undefined
+						? { id, type: "automation" as const, pending: true as const }
+						: yield* after(id, committed)
+				}).pipe(handled),
+			)
 			.handle("list", ({ query }) =>
 				list("automation", query, (id) =>
 					Effect.flatMap(snapshotOf(AutomationId.make(id)), present),
 				).pipe(handled),
 			)
 			.handle("get", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.automation_id
-					const ref = Automation.ref(id)
-					const found = Option.getOrNull(yield* automationViews.get(ref))
-					if (found !== null) {
-						return yield* present(found)
-					}
-					yield* committed(id)
-					return yield* present(yield* projected(id))
-				}).pipe(handled),
+				Effect.flatMap(currentOf(params.automation_id), present).pipe(handled),
 			)
 			.handle("pause", ({ params }) =>
 				Effect.gen(function* () {

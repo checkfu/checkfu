@@ -65,6 +65,7 @@ export class AdmitAutomationDecision extends Domain.Decision(AdmitAutomation, {
 			automation.record(
 				new AutomationCreated({
 					name: cmd.name,
+					description: cmd.description,
 					agent_id: agent.id,
 					agent_version: cmd.agent_version,
 					environment_id: environment.id,

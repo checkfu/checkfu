@@ -82,6 +82,7 @@ describe("ListResources", () => {
 					automation_id: AutomationId.make(automation),
 					capacity_id: AUTOMATION_CAPACITY,
 					name: automation,
+					description: null,
 					agent_id: BoundedAgentId.make(agent),
 					agent_version: null,
 					environment_id: BoundedEnvironmentId.make("env_list_1"),

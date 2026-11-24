@@ -28,6 +28,7 @@ describe("Automation alarms", () => {
 				new CreateAutomation({
 					automation_id: id,
 					name: "Morning report",
+					description: null,
 					agent_id: "agent_001",
 					agent_version: null,
 					environment_id: "env_001",

@@ -13,6 +13,7 @@ export const MAX_ENVIRONMENT_DESCRIPTION_LENGTH = 1024
 
 export const MAX_AUTOMATION_ID_LENGTH = 128
 export const MAX_AUTOMATION_NAME_LENGTH = 256
+export const MAX_AUTOMATION_DESCRIPTION_LENGTH = 2048
 export const MAX_CRON_EXPRESSION_LENGTH = 256
 export const MAX_TIMEZONE_LENGTH = 64
 
@@ -293,6 +294,10 @@ export const AutomationName = Schema.String.check(
 	Schema.isMaxCodePoints(MAX_AUTOMATION_NAME_LENGTH),
 )
 
+export const AutomationDescription = Schema.String.check(
+	Schema.isMaxCodePoints(MAX_AUTOMATION_DESCRIPTION_LENGTH),
+)
+
 export const CronExpression = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_CRON_EXPRESSION_LENGTH),
@@ -322,6 +327,7 @@ export const AutomationSnapshot = Schema.Struct({
 	id: AutomationId,
 	type: Schema.Literal("automation"),
 	name: AutomationName,
+	description: Schema.NullOr(AutomationDescription),
 	agent_id: ResourceId,
 	agent_version: Schema.NullOr(PositiveInt),
 	environment_id: ResourceId,

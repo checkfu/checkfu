@@ -24,6 +24,7 @@ import {
 import { AutomationFired, RunAutomation } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused, UnpauseAutomation } from "./UnpauseAutomation.command.ts"
+import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
 	status: Schema.String,
@@ -75,6 +76,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 		RecordAutomationRunStarted,
 		RecordAutomationRunFailed,
 	],
+	events: [AutomationUpdated],
 	keyOf: (cmd) => cmd.automation_id,
 	invariants: {
 		StatusIsKnown: (s) =>
@@ -123,12 +125,17 @@ export class Automation extends Domain.Aggregate("Automation", {
 				after.last_scheduled_at === command.scheduled_at,
 			].every((ok) => ok)
 		},
-		OnlyAResumeStartsANewActivation: ({ before, after, command }) =>
+		OnlyAResumeOrAnUpdateStartsANewActivation: ({ before, after, command, events }) =>
 			[
 				after.activation === before.activation,
 				[
 					command._tag === "UnpauseAutomation",
 					before.status === "paused",
+					after.activation === before.activation + 1,
+				].every((ok) => ok),
+				[
+					events.some((event) => event._tag === "automation.updated"),
+					before.status === "active",
 					after.activation === before.activation + 1,
 				].every((ok) => ok),
 			].some((ok) => ok),
@@ -158,6 +165,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 			return [
 				new AutomationCreated({
 					name: cmd.name,
+					description: cmd.description,
 					agent_id: cmd.agent_id,
 					agent_version: cmd.agent_version,
 					environment_id: cmd.environment_id,
@@ -255,6 +263,8 @@ export class Automation extends Domain.Aggregate("Automation", {
 			state.status === "active" ? { ...state, status: "paused" } : state,
 		"automation.unpaused": (state, e) =>
 			state.status === "paused" ? { ...state, status: "active", activation: e.activation } : state,
+		"automation.updated": (state, e) =>
+			state.status === "active" ? { ...state, activation: e.activation } : state,
 		"automation.archived": (state) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)
 				? { ...state, status: "archived" }

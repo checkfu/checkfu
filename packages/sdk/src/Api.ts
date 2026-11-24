@@ -21,6 +21,7 @@ import {
 	AgentSnapshot,
 	AgentSystem,
 	AutomationId,
+	AutomationDescription,
 	AutomationName,
 	AutomationRunError,
 	AutomationSchedule,
@@ -408,6 +409,11 @@ const AutomationInitialEvents = Schema.Array(AutomationInitialEvent).check(
 
 export const CreateAutomationBody = Schema.Struct({
 	name: AutomationName.annotate({ description: "Human-readable automation name" }),
+	description: Schema.optionalKey(
+		Schema.NullOr(AutomationDescription).annotate({
+			description: "What the automation is for, up to 2048 characters",
+		}),
+	),
 	agent: AgentReference.annotate({
 		description:
 			"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
@@ -422,6 +428,36 @@ export const CreateAutomationBody = Schema.Struct({
 	}),
 })
 export type CreateAutomationBody = typeof CreateAutomationBody.Type
+
+export const UpdateAutomationBody = Schema.Struct({
+	name: Schema.optionalKey(AutomationName.annotate({ description: "New automation name" })),
+	description: Schema.optionalKey(
+		Schema.NullOr(AutomationDescription).annotate({
+			description: "New description, or null to clear it",
+		}),
+	),
+	agent: Schema.optionalKey(
+		AgentReference.annotate({
+			description:
+				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+		}),
+	),
+	environment_id: Schema.optionalKey(
+		ResourceId.annotate({ description: "Environment ID later runs' sessions use" }),
+	),
+	initial_events: Schema.optionalKey(
+		AutomationInitialEvents.annotate({
+			description: "The one user message later runs' sessions start with",
+		}),
+	),
+	schedule: Schema.optionalKey(
+		AutomationSchedule.annotate({
+			description:
+				"New schedule, with the same rules as on create. On an active automation the next firing moves to it.",
+		}),
+	),
+})
+export type UpdateAutomationBody = typeof UpdateAutomationBody.Type
 
 export const ClientEventId = Schema.String.check(
 	Schema.isTrimmed(),
@@ -1272,6 +1308,33 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "get" },
 				"x-checkfu-mcp": { name: "automations_getAutomation" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("update", "/v1/automations/:automation_id", {
+			params: automationParams,
+			payload: UpdateAutomationBody,
+			success: [AutomationResource, PendingAutomation],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update an automation")
+			.annotate(
+				OpenApi.Description,
+				"Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "update" },
+				"x-checkfu-mcp": { name: "automations_updateAutomation" },
+				"x-checkfu-cli": {
+					textOrObjectFields: ["agent"],
+					repeatArrayField: {
+						field: "initial_events",
+						flag: "initial-event",
+						description: "The user message later runs start with, as JSON, YAML, or @file",
+					},
+				},
 			}),
 	)
 	.add(

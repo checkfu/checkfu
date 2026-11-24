@@ -42,7 +42,7 @@ const STANDING = {
 	"Automation.RunsGrowByOneOrNotAtAll": "proved",
 	"Automation.OnlyRunAndFireStartRuns": "proved",
 	"Automation.ScheduledFiringNeedsAnActiveAutomationAndALaterInstant": "proved",
-	"Automation.OnlyAResumeStartsANewActivation": "proved",
+	"Automation.OnlyAResumeOrAnUpdateStartsANewActivation": "proved",
 	"Automation.EveryResumeStartsANewActivation": "proved",
 	"Automation.ScheduledInstantNeverGoesBack": "proved",
 	"Automation.FiredCarriesTheNewRun": "proved",

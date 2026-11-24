@@ -124,6 +124,12 @@ export interface CheckfuOperations {
 		EndpointBody<"automations", "unpause">,
 		EndpointSuccess<"automations", "unpause">
 	>
+	readonly "automations.update": OperationShape<
+		EndpointParams<"automations", "update">,
+		EndpointQuery<"automations", "update">,
+		EndpointBody<"automations", "update">,
+		EndpointSuccess<"automations", "update">
+	>
 	readonly "automations.runs.list": OperationShape<
 		EndpointParams<"automations", "listRuns">,
 		RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
@@ -836,6 +842,50 @@ export class EffectAutomationsResource {
 								}),
 						),
 						{ kind: "requires-until", operation: "automations.unpause" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated. */
+	update(
+		automationId: string,
+		params: EndpointBody<"automations", "update">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "update">>, CheckfuSdkError>
+	update(
+		automationId: string,
+		params: EndpointBody<"automations", "update">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "update">, CheckfuSdkError>
+	update(
+		automationId: string,
+		params: EndpointBody<"automations", "update">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "update">
+		| WithResponse<EndpointSuccess<"automations", "update">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "update", { automation_id: automationId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.automations.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.automations.update({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						pendingUpdateReadiness(params, "automations.update"),
 					),
 			),
 			options,
@@ -1706,6 +1756,20 @@ export class AutomationsResource {
 	): APIPromise<EndpointJsonSuccess<"automations", "unpause">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAutomationsResource(effectRuntime).unpause(automationId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated. */
+	update(
+		automationId: string,
+		params: EndpointBody<"automations", "update">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "update">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).update(automationId, params, {
 				...effectOpts,
 				withResponse: true,
 			}),

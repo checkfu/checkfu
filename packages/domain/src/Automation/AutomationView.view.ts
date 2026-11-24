@@ -9,11 +9,12 @@ import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
 import { UPCOMING_FIRINGS, upcomingOccurrences } from "./Schedule.ts"
 import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
+import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export { AutomationSnapshot }
 
 export class AutomationView extends Domain.View("AutomationView", {
-	version: 3,
+	version: 4,
 	from: [Automation],
 	key: Automation,
 	state: Schema.NullOr(AutomationSnapshot),
@@ -21,6 +22,7 @@ export class AutomationView extends Domain.View("AutomationView", {
 	events: [
 		AutomationCreated,
 		AutomationUnpaused,
+		AutomationUpdated,
 		AutomationFired,
 		AutomationPaused,
 		AutomationArchived,
@@ -33,6 +35,7 @@ export class AutomationView extends Domain.View("AutomationView", {
 						id: ctx.key.id,
 						type: "automation" as const,
 						name: e.name,
+						description: e.description,
 						agent_id: e.agent_id,
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,
@@ -71,6 +74,30 @@ export class AutomationView extends Domain.View("AutomationView", {
 							DateTime.toEpochMillis(ctx.at),
 							UPCOMING_FIRINGS,
 						),
+						updated_at: ctx.at,
+					},
+		"automation.updated": (state, e, ctx) =>
+			state === null || state.status === "archived"
+				? state
+				: {
+						...state,
+						name: e.name,
+						description: e.description,
+						agent_id: e.agent_id,
+						agent_version: e.agent_version,
+						environment_id: e.environment_id,
+						text: e.text,
+						schedule: e.schedule,
+						activation: e.activation,
+						upcoming:
+							state.status === "active"
+								? upcomingOccurrences(
+										e.schedule.expression,
+										e.schedule.timezone,
+										DateTime.toEpochMillis(ctx.at),
+										UPCOMING_FIRINGS,
+									)
+								: state.upcoming,
 						updated_at: ctx.at,
 					},
 		"automation.archived": (state, _e, ctx) =>
