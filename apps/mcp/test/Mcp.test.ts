@@ -5,7 +5,7 @@ import {
 } from "@checkfu/api/Http/HttpHelpers"
 import { ClientEventId } from "@checkfu/api/Http/Api"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/domain/Agent/AgentTypes"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import type * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as Effect from "effect/Effect"
@@ -240,6 +240,65 @@ describe("Checkfu MCP server", () => {
 				vaults_updateCredential: "writes, destructive, not repeatable",
 				vaults_updateVault: "writes, destructive, not repeatable",
 			})
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("passes a credential's token to the API and puts it nowhere else", () =>
+		Effect.gen(function* () {
+			const token = "tok_mcp_SECRET_do_not_leak"
+			const written: Array<string> = []
+			const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+				vi.spyOn(console, level).mockImplementation((...parts: ReadonlyArray<unknown>) => {
+					written.push(parts.map(String).join(" "))
+				}),
+			)
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => {
+					for (const spy of spies) {
+						spy.mockRestore()
+					}
+				}),
+			)
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+
+			const vault = yield* callOk(client, "vaults_createVault", { body: { display_name: "Team" } })
+			const path = { vault_id: String(vault["id"]) }
+			const auth = {
+				type: "static_bearer",
+				token,
+				mcp_server_url: "https://mcp.example.com/mcp",
+			}
+			const created = yield* callTool(client, "vaults_createCredential", { path, body: { auth } })
+			expect(created.isError).toBe(false)
+			const credential = yield* Schema.decodeUnknownEffect(Structured)(created.structuredContent)
+			const sent = yield* Effect.promise(() => server.apiRequests.at(-1)!.text())
+			expect(sent).toContain(token)
+
+			// Refused before the API: the message names the place, never the value beside it.
+			const refusals = [
+				yield* callError(client, "vaults_createCredential", {
+					path,
+					body: { auth: { ...auth, tokn: token } },
+				}),
+				yield* callError(client, "vaults_createCredential", {
+					path,
+					body: { auth: { ...auth, token: `${token}${"x".repeat(20_000)}` } },
+				}),
+				yield* callError(client, "vaults_createCredential", {
+					path,
+					body: { auth: { ...auth, mcp_server_url: "ftp://mcp.example.com" } },
+				}),
+			]
+			const rotated = yield* callTool(client, "vaults_updateCredential", {
+				path: { ...path, credential_id: String(credential["id"]) },
+				body: { auth: { type: "static_bearer", token: `${token}_next` } },
+			})
+			expect(rotated.isError).toBe(false)
+
+			const answered = JSON.stringify([created, rotated, refusals])
+			expect(answered).not.toContain(token)
+			expect(written.join("\n")).not.toContain(token)
 		}).pipe(Effect.scoped),
 	)
 

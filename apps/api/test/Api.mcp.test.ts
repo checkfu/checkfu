@@ -160,6 +160,58 @@ describe("MCP servers on agents", () => {
 			}),
 		)
 	})
+
+	it("refuses a misspelled field anywhere in what configures servers, tools and bindings", async () => {
+		await world().run(({ call }) =>
+			Effect.gen(function* () {
+				const server = { type: "url", name: "tracker", url: TRACKER }
+				const toolset = { type: "mcp_toolset", mcp_server_name: "tracker" }
+				const always = { permission_policy: { type: "always_ask" } }
+				const agent = { name: "Agent", model: "gpt-4o-mini", mcp_servers: [server] }
+				const id = yield* created(call, "/v1/agents", agent)
+				const environment = yield* created(call, "/v1/environments", {
+					name: "default",
+					config: { type: "cloud", networking: { type: "unrestricted" } },
+				})
+				const session = { agent: id, environment_id: environment }
+				for (const [path, body] of [
+					["/v1/agents", { ...agent, mcp_server: [server] }],
+					["/v1/agents", { ...agent, mcp_servers: [{ ...server, headers: {} }] }],
+					["/v1/agents", { ...agent, tools: [{ ...toolset, enabled: true }] }],
+					["/v1/agents", { ...agent, tools: [{ ...toolset, default_config: { enabled: true } }] }],
+					[
+						"/v1/agents",
+						{
+							...agent,
+							tools: [
+								{ ...toolset, default_config: { permission_policy: { type: "always_ask", x: 1 } } },
+							],
+						},
+					],
+					[
+						"/v1/agents",
+						{ ...agent, tools: [{ ...toolset, configs: [{ name: "close", ...always, on: 1 }] }] },
+					],
+					[`/v1/agents/${id}`, { version: 1, mcp_servers: [{ ...server, credential_id: "c" }] }],
+					["/v1/sessions", { ...session, vault_id: "vault_1" }],
+					[
+						"/v1/sessions",
+						{
+							...session,
+							mcp_server_credentials: [
+								{ mcp_server_name: "tracker", credential_id: "cred_1", vault_id: "vault_1" },
+							],
+						},
+					],
+				] as const) {
+					const answer = yield* call("POST", path, body)
+					expect(`${JSON.stringify(body)} -> ${answer.status}`).toBe(
+						`${JSON.stringify(body)} -> 400`,
+					)
+				}
+			}),
+		)
+	})
 })
 
 describe("Binding an agent's MCP servers when a session is created", () => {

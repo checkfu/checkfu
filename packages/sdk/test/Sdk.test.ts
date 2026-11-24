@@ -1641,6 +1641,83 @@ describe("@checkfu/sdk", () => {
 				}),
 		)
 
+		it("decodes tool, MCP tool and approval events from the stream", async () => {
+			const event = <F extends object>(seq: number, type: string, fields: F) => ({
+				id: `evt_${seq}`,
+				seq,
+				type,
+				created_at: ISO_NOW,
+				...fields,
+			})
+			const sent = [
+				event(1, "agent.tool_use", {
+					tool_use_id: "call_1",
+					name: "codemode",
+					input: { code: "1" },
+				}),
+				event(2, "agent.mcp_tool_use", {
+					tool_use_id: "call_1/c1",
+					mcp_server_name: "tracker",
+					name: "search",
+					input: { q: "open" },
+					evaluated_permission: "allow",
+					parent_tool_use_id: "call_1",
+				}),
+				event(3, "agent.mcp_tool_result", {
+					tool_use_id: "call_1/c1",
+					content: [{ type: "text", text: "2 issues" }],
+					is_error: false,
+				}),
+				event(4, "agent.tool_result", {
+					tool_use_id: "call_1",
+					content: [{ type: "text", text: "done" }],
+					is_error: false,
+					truncated: true,
+				}),
+				event(5, "agent.mcp_tool_use", {
+					tool_use_id: "call_2",
+					mcp_server_name: "tracker",
+					name: "close",
+					input: { id: 7 },
+					evaluated_permission: "ask",
+				}),
+				event(6, "session.status_idle", {
+					stop_reason: { type: "requires_action", event_ids: ["call_2"] },
+					turn: 1,
+				}),
+				event(7, "user.tool_confirmation", {
+					tool_use_id: "call_2",
+					result: "deny",
+					deny_message: "Not today.",
+				}),
+				sampleArchivedEvent(8),
+			]
+			const client = new Checkfu({
+				apiKey: "ck_test_key",
+				baseUrl: "http://localhost:1337",
+				fetch: async () =>
+					new Response(sent.map(sseFrame).join(""), {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					}),
+			})
+			try {
+				const seen: Array<JsonSessionEvent> = []
+				for await (const ev of await client.sessions.events.stream("sess_tools")) {
+					seen.push(ev)
+				}
+				expect(seen).toEqual(sent)
+				const waiting = seen[5]
+				expect(
+					waiting?.type === "session.status_idle" && waiting.stop_reason.type === "requires_action"
+						? waiting.stop_reason.event_ids
+						: waiting,
+				).toEqual(["call_2"])
+			} finally {
+				await client.close()
+			}
+		})
+
 		it("settles Promise stream open and iteration cleanly when the producer fiber defects", async () => {
 			const mockFetch = async () =>
 				new Response(sseFrame(sampleUserMessageEvent(1)), {
