@@ -466,152 +466,78 @@ describe("turn engine", () => {
 		}
 	})
 
-	it("rebuilds the next turn from the session log when a discarded turn was compacted while it ran", async () => {
-		const contexts: Array<TranscriptContext> = []
-		let summaries = 0
-		let markSecondRequest: () => void = () => undefined
-		const secondRequest = new Promise<void>((resolve) => {
-			markSecondRequest = resolve
+	it("makes recovery wait while a turn enters its workspace, then returns that turn's reply", async () => {
+		const { backend, release } = await blockingBackend()
+		let enter: () => void = () => undefined
+		let entering: () => void = () => undefined
+		const entered = new Promise<void>((resolve) => {
+			entering = resolve
 		})
-		const registry = createCheckfuRegistry()
-		registry.install({
-			name: "probe",
-			tools: [
-				{
-					name: "probe",
-					description: "Probe.",
-					parameters: { type: "object", properties: {} },
-					replay: "safe",
-					execute: () => Promise.resolve({ output: [{ type: "text", text: "SECRET-FROM-TOOL" }] }),
-				},
-			],
-		})
-		const backend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(async (model, context, signal) => {
-				const prompt = extractLastUserText(context)
-				if (prompt.startsWith("<conversation>")) {
-					summaries++
-					return makeAssistantReply(model, null, "SUMMARY-OF-DISCARDED-TURN", 12, 3)
-				}
-				contexts.push(context)
-				if (contexts.length === 1) {
-					// Enough context for Pi to compact before the turn's next model request.
-					return {
-						...makeAssistantReply(model, null, "a".repeat(84_000), 120_000, 1),
-						content: [
-							{ type: "text", text: "a".repeat(84_000) },
-							{ type: "toolCall", id: "call-1", name: "probe", arguments: {} },
-						],
-						stopReason: "toolUse",
-					}
-				}
-				if (contexts.length > 2) {
-					return makeAssistantReply(model, null, "fresh start", 3, 2)
-				}
-				// The turn's own message is already inside the summary here.
-				markSecondRequest()
-				await new Promise<void>((resolve) => {
-					signal?.addEventListener("abort", () => resolve(), { once: true })
-				})
-				return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" }
-			}),
-			1,
-			registry,
-		)
+		const slowEntry: PiDurableBackend = {
+			...backend,
+			enterWorkspace: () =>
+				new Promise<boolean>((resolve) => {
+					entering()
+					enter = () => resolve(true)
+				}),
+		}
 		try {
-			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "use the tool")))
-			await secondRequest
-			expect(summaries).toBe(1)
-			expect(JSON.stringify(contexts[1])).toContain("SUMMARY-OF-DISCARDED-TURN")
-			await Effect.runPromise(backend.abort("turn:1"))
-			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
-
-			const next = turnRequest(2, "start over")
-			expect(await Effect.runPromise(runPiDurableTurn(backend, next))).toBe("history_required")
-			expect(
-				await Effect.runPromise(
-					runPiDurableTurn(backend, { ...next, seed: { api: "openai-responses", messages: [] } }),
-				),
-			).toMatchObject({ ok: true, reply: { text: "fresh start" } })
-			const seen = JSON.stringify(contexts.at(-1))
-			expect(seen).not.toContain("SUMMARY-OF-DISCARDED-TURN")
-			expect(seen).not.toContain("SECRET-FROM-TOOL")
-			expect(contexts.at(-1)?.messages.filter((message) => message.role !== "system")).toHaveLength(
-				1,
+			const running = Effect.runPromise(runPiDurableTurn(slowEntry, turnRequest(1, "hello")))
+			await entered
+			let recovered: PiTurnOutcome | null | "pending" = "pending"
+			const recovering = Effect.runPromise(recoverPiDurableTurn(slowEntry, "turn:1")).then(
+				(result) => {
+					recovered = result
+				},
 			)
+			await Effect.runPromise(Effect.sleep("20 millis"))
+			// The turn has not submitted yet; recovery must not answer "not here".
+			expect(recovered).toBe("pending")
+			enter()
+			release()
+			expect(await running).toMatchObject({ ok: true, reply: { text: "re: hello" } })
+			await recovering
+			expect(recovered).toMatchObject({ ok: true, reply: { text: "re: hello" } })
 		} finally {
 			await backend.close()
 		}
 	})
 
-	it("keeps the rebuild a discarded compacted turn asked for when an older turn is recovered", async () => {
-		const contexts: Array<TranscriptContext> = []
-		let markSecondRequest: () => void = () => undefined
-		const secondRequest = new Promise<void>((resolve) => {
-			markSecondRequest = resolve
-		})
-		const registry = createCheckfuRegistry()
-		registry.install({
-			name: "probe",
-			tools: [
-				{
-					name: "probe",
-					description: "Probe.",
-					parameters: { type: "object", properties: {} },
-					replay: "safe",
-					execute: () => Promise.resolve({ output: [{ type: "text", text: "probed" }] }),
-				},
-			],
-		})
-		const backend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(async (model, context, signal) => {
-				const prompt = extractLastUserText(context)
-				if (prompt.startsWith("<conversation>")) {
-					return makeAssistantReply(model, null, "SUMMARY-OF-DISCARDED-TURN", 12, 3)
-				}
-				contexts.push(context)
-				if (prompt === "hello") {
-					return makeAssistantReply(model, null, "hi", 3, 2)
-				}
-				if (prompt === "use the tool" && contexts.length === 2) {
-					return {
-						...makeAssistantReply(model, null, "a".repeat(84_000), 120_000, 1),
-						content: [
-							{ type: "text", text: "a".repeat(84_000) },
-							{ type: "toolCall", id: "call-1", name: "probe", arguments: {} },
-						],
-						stopReason: "toolUse",
-					}
-				}
-				if (contexts.length === 3) {
-					markSecondRequest()
-					await new Promise<void>((resolve) => {
-						signal?.addEventListener("abort", () => resolve(), { once: true })
-					})
-					return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" }
-				}
-				return makeAssistantReply(model, null, "fresh start", 3, 2)
-			}),
-			1,
-			registry,
-		)
+	it("ends a turn whose workspace refuses it before asking the model anything", async () => {
+		const { backend, release, calls } = await blockingBackend()
+		const refusing: PiDurableBackend = { ...backend, enterWorkspace: () => Promise.resolve(false) }
 		try {
 			expect(
-				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "hello"))),
-			).toMatchObject({ ok: true, reply: { text: "hi" } })
-			const running = Effect.runPromise(runPiDurableTurn(backend, turnRequest(2, "use the tool")))
-			await secondRequest
-			await Effect.runPromise(backend.abort("turn:2"))
-			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+				await Effect.runPromise(runPiDurableTurn(refusing, turnRequest(1, "too late"))),
+			).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+			expect(calls()).toBe(0)
+			// Nothing was recorded for the refused turn, so the next one starts normally.
+			release()
+			expect(
+				await Effect.runPromise(runPiDurableTurn(backend, turnRequest(1, "on time"))),
+			).toMatchObject({ ok: true, reply: { text: "re: on time" } })
+		} finally {
+			await backend.close()
+		}
+	})
 
-			// Turn 1 is recovered late, after turn 2 asked for a rebuild.
-			expect(await Effect.runPromise(recoverPiDurableTurn(backend, "turn:1"))).toMatchObject({
-				ok: true,
-				reply: { text: "hi" },
-			})
-			expect(await Effect.runPromise(runPiDurableTurn(backend, turnRequest(3, "next")))).toBe(
-				"history_required",
-			)
+	it("omits a discarded turn's entries once, however many cleanups run for it", async () => {
+		const { backend, started } = await blockingBackend()
+		// The turn ends without the engine's own cleanup, so the cleanups below are the first.
+		const noCleanup: PiDurableBackend = { ...backend, omitEntries: () => Promise.resolve() }
+		try {
+			const running = Effect.runPromise(runPiDurableTurn(noCleanup, turnRequest(1, "stop me")))
+			await started
+			await Effect.runPromise(backend.abort("turn:1"))
+			expect(await running).toMatchObject({ ok: false, error: { _tag: "TurnInterrupted" } })
+			const before = await backend.countEntries()
+			await Promise.all([
+				backend.omitEntries("turn:1"),
+				backend.omitEntries("turn:1"),
+				backend.omitEntries("turn:1"),
+			])
+			await backend.omitEntries("turn:1")
+			expect((await backend.countEntries()) - before).toBe(1)
 		} finally {
 			await backend.close()
 		}
@@ -1759,6 +1685,7 @@ describe("turn engine", () => {
 			{} as unknown as Parameters<typeof makePiHarnessBackend>[1],
 			{ openai: Redacted.make("sk-test"), anthropic: null },
 			() => undefined,
+			() => Promise.resolve(true),
 		)
 		expect(backend.hasApiKey("openai")).toBe(true)
 		expect(backend.hasApiKey("anthropic")).toBe(false)
@@ -1782,6 +1709,7 @@ describe("turn engine", () => {
 			} as unknown as Parameters<typeof makePiHarnessBackend>[1],
 			{ openai: null, anthropic: null },
 			() => undefined,
+			() => Promise.resolve(true),
 		)
 		let markSubmitHeld!: () => void
 		const submitHeld = new Promise<void>((resolve) => {

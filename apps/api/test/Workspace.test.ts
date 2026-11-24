@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@effect/vitest"
-import { conversationName, parseConversation } from "../src/Pi/PiConversation.ts"
 import { makeTurnFence } from "../src/Workspace/WorkspaceFence.ts"
 import type { TurnToken } from "../src/Workspace/WorkspaceFence.ts"
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
@@ -21,40 +20,36 @@ const store = () => {
 	}
 }
 
-const turn = (generation: number, number: number): TurnToken => ({ generation, turn: number })
+const turn = (number: number): TurnToken => ({ turn: number })
 
 describe("session workspace", () => {
-	it("admits the newest turn and refuses every older one, by generation and then turn", async () => {
+	it("admits the newest turn and refuses every older one", async () => {
 		const fence = makeTurnFence(store())
-		expect(await fence.enter(turn(0, 1))).toBe(true)
-		expect(await fence.enter(turn(0, 1))).toBe(true)
-		// An interrupted turn keeps its generation; the turn after it is still newer.
-		expect(await fence.enter(turn(0, 2))).toBe(true)
-		expect(await fence.enter(turn(0, 1))).toBe(false)
-		expect(await fence.run(turn(0, 1), () => Promise.resolve("written"))).toBeUndefined()
-		expect(await fence.run(turn(0, 2), () => Promise.resolve("written"))).toBe("written")
-		// An abandoned turn moves the generation on, whatever the turn number.
-		expect(await fence.enter(turn(1, 2))).toBe(true)
-		expect(await fence.run(turn(0, 9), () => Promise.resolve("written"))).toBeUndefined()
+		expect(await fence.enter(turn(1))).toBe(true)
+		expect(await fence.enter(turn(1))).toBe(true)
+		expect(await fence.enter(turn(2))).toBe(true)
+		expect(await fence.enter(turn(1))).toBe(false)
+		expect(await fence.run(turn(1), () => Promise.resolve("written"))).toBeUndefined()
+		expect(await fence.run(turn(2), () => Promise.resolve("written"))).toBe("written")
 	})
 
 	it("admits a turn only after the calls of the turn before it have finished", async () => {
 		const fence = makeTurnFence(store())
-		await fence.enter(turn(0, 1))
+		await fence.enter(turn(1))
 		const order: Array<string> = []
 		let finishWrite: () => void = () => undefined
-		const write = fence.run(turn(0, 1), async () => {
+		const write = fence.run(turn(1), async () => {
 			order.push("old write started")
 			await new Promise<void>((resolve) => {
 				finishWrite = resolve
 			})
 			order.push("old write finished")
 		})
-		const entering = fence.enter(turn(0, 2)).then((entered) => {
+		const entering = fence.enter(turn(2)).then((entered) => {
 			order.push(`new turn entered: ${entered}`)
 		})
 		// A call of the old turn that arrives now is refused, though one of its calls still runs.
-		expect(await fence.run(turn(0, 1), () => Promise.resolve("late"))).toBeUndefined()
+		expect(await fence.run(turn(1), () => Promise.resolve("late"))).toBeUndefined()
 		await Promise.resolve()
 		expect(order).toEqual(["old write started"])
 		finishWrite()
@@ -64,17 +59,17 @@ describe("session workspace", () => {
 
 	it("refuses a turn that a later one overtook while it waited for running calls", async () => {
 		const fence = makeTurnFence(store())
-		await fence.enter(turn(0, 1))
+		await fence.enter(turn(1))
 		let finish: () => void = () => undefined
 		const write = fence.run(
-			turn(0, 1),
+			turn(1),
 			() =>
 				new Promise<void>((resolve) => {
 					finish = resolve
 				}),
 		)
-		const second = fence.enter(turn(0, 2))
-		const third = fence.enter(turn(0, 3))
+		const second = fence.enter(turn(2))
+		const third = fence.enter(turn(3))
 		finish()
 		await write
 		expect(await second).toBe(false)
@@ -83,10 +78,10 @@ describe("session workspace", () => {
 
 	it("drains the calls already running, and not one that starts later", async () => {
 		const fence = makeTurnFence(store())
-		await fence.enter(turn(0, 1))
+		await fence.enter(turn(1))
 		const order: Array<string> = []
 		let finish: () => void = () => undefined
-		const write = fence.run(turn(0, 1), async () => {
+		const write = fence.run(turn(1), async () => {
 			await new Promise<void>((resolve) => {
 				finish = resolve
 			})
@@ -96,29 +91,6 @@ describe("session workspace", () => {
 		finish()
 		await Promise.all([write, drained])
 		expect(order).toEqual(["write finished", "drained"])
-	})
-
-	it("reads the session and the generation back from a conversation name", () => {
-		expect(parseConversation(conversationName("sess_1", 3))).toEqual({
-			sessionId: "sess_1",
-			generation: 3,
-		})
-		expect(parseConversation("0:sess:with:colons")).toEqual({
-			sessionId: "sess:with:colons",
-			generation: 0,
-		})
-		for (const name of [
-			undefined,
-			"",
-			"sess_1",
-			":sess_1",
-			"1:",
-			"x:sess_1",
-			"-1:sess_1",
-			"1.5:s",
-		]) {
-			expect(() => parseConversation(name)).toThrow("conversation name")
-		}
 	})
 
 	it("lets Pi run again only the tools that change nothing", () => {
