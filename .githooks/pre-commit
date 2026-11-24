@@ -6,9 +6,9 @@
 set -u
 git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
 staged() {
-	git diff --cached --name-only --diff-filter=ACMR -z -- "$@"
+	git diff --cached --name-only --diff-filter=ACMRT -z -- "$@"
 }
-partial=$(staged | xargs -0 -r git diff --name-only --)
+partial=$(staged | xargs -0 -r git --literal-pathspecs diff --name-only --)
 if [ -n "$partial" ]; then
 	echo "pre-commit: these staged files also have unstaged changes:" >&2
 	echo "$partial" | sed 's/^/  /' >&2
@@ -18,7 +18,7 @@ fi
 failed=0
 staged '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs' |
 	xargs -0 -r bun x effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings \
-		--report-unused-disable-directives --no-error-on-unmatched-pattern || failed=1
-staged | xargs -0 -r bun x oxfmt --check --no-error-on-unmatched-pattern ||
+		--report-unused-disable-directives --no-error-on-unmatched-pattern -- || failed=1
+staged | xargs -0 -r bun x oxfmt --check --no-error-on-unmatched-pattern -- ||
 	{ echo "pre-commit: run 'bun run format' and stage the result" >&2; failed=1; }
 exit $failed

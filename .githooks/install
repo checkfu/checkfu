@@ -12,7 +12,7 @@ if [ -n "$(git config --get core.hooksPath)" ]; then
 fi
 hook="$(git rev-parse --git-path hooks)/pre-commit"
 marker="checkfu .githooks shim"
-if [ -e "$hook" ] && ! grep -q "$marker" "$hook"; then
+if { [ -e "$hook" ] || [ -L "$hook" ]; } && ! grep -qs "$marker" "$hook"; then
 	echo "githooks: $hook already exists, so .githooks/pre-commit is not installed" >&2
 	exit 0
 fi
