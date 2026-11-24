@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import * as Domain from "@alchemy.run/domain"
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { Api, AssistantMessage, Model, TranscriptContext } from "@earendil-works/pi-ai"
@@ -323,6 +324,12 @@ export const makePiDurableTestLayer = (
 
 	return { layer, closeAll, requests, forgetPiState, unreachable, conversations, resets }
 }
+
+// The OpenAPI document the API Worker serves as a static asset, as Forge generated it.
+export const openApiDocument = <Document>(): Document =>
+	JSON.parse(
+		readFileSync(new URL("../../public/openapi.json", import.meta.url), "utf8"),
+	) as Document
 
 export const sendRequest = (
 	fetchEffect: Effect.Effect<

@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from "node:path"
 import { parse } from "@cloudflare/forge"
 import { generateCliFiles } from "./CliTransformer.ts"
 import { generateMcpFiles } from "./McpTransformer.ts"
-import { exportDeterministicOpenApiJson, renderOpenApiModule } from "./OpenApiExport.ts"
+import { exportDeterministicOpenApiJson } from "./OpenApiExport.ts"
 import { generateSdkFiles } from "./SdkTransformer.ts"
 
 const THIS_DIR = import.meta.dirname
@@ -28,8 +28,10 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 			content: openApiJson,
 		},
 		{
-			relativePath: "apps/api/src/Http/OpenApiDocument.generated.ts",
-			content: renderOpenApiModule(openApiJson),
+			// Served by the API Worker as a static asset, so it is not part of the code every
+			// isolate loads.
+			relativePath: "apps/api/public/openapi.json",
+			content: openApiJson,
 		},
 		...cliFiles.map((file) => ({
 			relativePath: `apps/cli/src/generated/${file.path}`,

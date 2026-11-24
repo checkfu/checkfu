@@ -454,6 +454,17 @@ describe("PiSession real Durable Object under workerd", () => {
 		await fakeOpenAI?.close()
 	}, 30_000)
 
+	it("serves the OpenAPI document as a static asset, without running the Worker", async () => {
+		const res = await fetch(`${baseUrl}/openapi.json`)
+		expect(res.status).toBe(200)
+		expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8")
+		expect(await res.json()).toEqual(
+			JSON.parse(readFileSync(join(REPO_ROOT, "apps", "api", "public", "openapi.json"), "utf8")),
+		)
+		// The Worker stamps every response it handles with a request id.
+		expect(res.headers.get("request-id")).toBeNull()
+	})
+
 	it("keeps the code every isolate loads at start-up inside its budget", async () => {
 		for (const [worker, budget] of [
 			["ApiWorker", API_WORKER_BUDGET],

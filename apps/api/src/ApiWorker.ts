@@ -54,6 +54,9 @@ export const API_WORKER_PROPS = {
 		date: "2026-11-17",
 	},
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
+	// The generated OpenAPI document is a static asset: GET /openapi.json is served without
+	// running the Worker, and the document is not part of the code every isolate loads.
+	assets: "./apps/api/public",
 	observability: {
 		// Keep top-level Workers Observability enabled when adding `issues`, since
 		// providing `observability` bypasses Alchemy's DEFAULT_OBSERVABILITY fallback.
