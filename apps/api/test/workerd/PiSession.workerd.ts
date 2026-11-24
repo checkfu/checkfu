@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
 	API_WORKER_BUDGET,
 	EAGER_BYTES_HELP,
+	describeEager,
 	HARNESS_SOURCES_HELP,
 	PI_HARNESS_WORKER_BUDGET,
 	STARTUP_HELP,
@@ -475,9 +476,10 @@ describe("PiSession real Durable Object under workerd", () => {
 				`${worker}.js`,
 			)
 			const found = `${worker} measured ${JSON.stringify(measured)}`
-			expect(measured.eagerBytes, `${EAGER_BYTES_HELP} ${found}`).toBeLessThanOrEqual(
-				budget.eagerBytes,
-			)
+			expect(
+				measured.eagerBytes,
+				`${EAGER_BYTES_HELP}\n${describeEager(worker, measured)}`,
+			).toBeLessThanOrEqual(budget.eagerBytes)
 			expect(measured.totalBytes, found).toBeLessThanOrEqual(budget.totalBytes)
 			expect(measured.startupCpuMs, `${STARTUP_HELP} ${found}`).toBeLessThanOrEqual(
 				budget.startupCpuMs,
