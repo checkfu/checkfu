@@ -6,7 +6,12 @@ import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
-import { GIT_TOOL, WORKSPACE_TOOL_OPTIONS, decodeGitToolArguments } from "./WorkspaceTools.ts"
+import {
+	GIT_TOOL,
+	WORKSPACE_TOOL_OPTIONS,
+	boundWorkspaceResult,
+	decodeGitToolArguments,
+} from "./WorkspaceTools.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 
 const DISCARDED = "discarded"
@@ -157,10 +162,10 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 							const result = await fence.run(token, async (): Promise<WorkspaceToolResult> => {
 								await initialize()
 								if (call.name === GIT_TOOL.name) {
-									return runGit(call.arguments)
+									return boundWorkspaceResult(call.name, await runGit(call.arguments))
 								}
 								const { content, isError } = await files.execute(call, { abortSignal })
-								return { content, isError }
+								return boundWorkspaceResult(call.name, { content, isError })
 							})
 							return (
 								result ?? failed("This turn has ended; the workspace no longer accepts its calls.")
