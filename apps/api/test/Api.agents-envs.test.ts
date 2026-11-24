@@ -277,7 +277,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							agent_version,
 							environment_id: "env_1",
 							turn: number,
-							generation: 0,
 							input: [text],
 							last_reply_turn,
 						})
