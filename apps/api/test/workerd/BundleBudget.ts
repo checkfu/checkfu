@@ -35,11 +35,17 @@ const HARNESS_SOURCE =
 const MODEL_TABLE =
 	/@earendil-works\/pi-ai\/dist\/(?:model-catalog\.js|providers\/(?:data\/[^/]+\.json|[^/]+\.models\.js))$/
 
-const harnessSources = (dir: string): ReadonlyArray<string> =>
-	readdirSync(dir)
-		.filter((name) => name.endsWith(".js.map"))
-		.flatMap((name) => {
-			const map = JSON.parse(readFileSync(join(dir, name), "utf8")) as {
+// Every file under the bundle, at any depth, so no check sees less than what ships.
+const bundleFiles = (root: string): ReadonlyArray<string> =>
+	readdirSync(root, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => join(entry.parentPath, entry.name))
+
+const harnessSources = (root: string): ReadonlyArray<string> =>
+	bundleFiles(root)
+		.filter((file) => file.endsWith(".js.map"))
+		.flatMap((file) => {
+			const map = JSON.parse(readFileSync(file, "utf8")) as {
 				readonly sources?: ReadonlyArray<string>
 			}
 			return map.sources ?? []
@@ -63,12 +69,6 @@ const probe = async (entry: string, resultFile: string, timeout: number) => {
 	}
 	return Schema.decodeSync(ProbeResult)(readFileSync(resultFile, "utf8"))
 }
-
-// Every file under the bundle, at any depth, so no check sees less than what ships.
-const bundleFiles = (root: string): ReadonlyArray<string> =>
-	readdirSync(root, { recursive: true, withFileTypes: true })
-		.filter((entry) => entry.isFile())
-		.map((entry) => join(entry.parentPath, entry.name))
 
 const bytes = (files: ReadonlyArray<string>) =>
 	files.reduce((sum, file) => sum + statSync(file).size, 0)
