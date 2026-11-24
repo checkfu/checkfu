@@ -33,7 +33,7 @@
 	"scripts": {
 		"generate": "bun tools/forge/src/Generate.ts",
 		"generate:check": "bun tools/forge/src/Generate.ts --check",
-		"checkfu": "node apps/cli/bin/checkfu.mjs",
+		"checkfu": "bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts",
 		"checkfu:build": "bun run --cwd apps/cli build",
 		"dev": "alchemy dev",
 		"deploy": "alchemy deploy",

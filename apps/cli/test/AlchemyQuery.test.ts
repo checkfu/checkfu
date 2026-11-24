@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
-import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
 
 // These run the real query script against the installed Alchemy, with an empty
 // Alchemy home and no network, so the answers `checkfu deploy` relies on are the
@@ -32,7 +31,7 @@ const askAccount = (home: string, extra: ProcessEnv): typeof Answer.Type => {
 	}
 	// Run from the empty home, not the checkout, so a developer's own `.env` (which
 	// Alchemy reads from the working directory) cannot supply credentials.
-	const result = spawnSync(resolveBunExecutable() ?? "bun", [script, "account", "default", ""], {
+	const result = spawnSync("bun", [script, "account", "default", ""], {
 		cwd: home,
 		env: { ...env, ALCHEMY_HOME: home, ...extra },
 		encoding: "utf8",

@@ -53,9 +53,6 @@
     "apps/cli": {
       "name": "@checkfu/cli",
       "version": "0.0.0",
-      "bin": {
-        "checkfu": "./bin/checkfu.mjs",
-      },
       "dependencies": {
         "@alchemy.run/cloudflare": "catalog:",
         "@checkfu/sdk": "workspace:*",

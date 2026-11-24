@@ -8,7 +8,6 @@ import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 
@@ -36,11 +35,11 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			const checkout = join(scratch, "checkout")
 			const binary = join(checkout, "apps", "cli", "dist", "checkfu")
 			mkdirSync(join(checkout, "apps", "cli", "dist"), { recursive: true })
-			const build = spawnSync(
-				resolveBunExecutable() ?? "bun",
-				["run", "checkfu:build", "--outfile", binary],
-				{ cwd: repoRoot, encoding: "utf8", timeout: 60_000 },
-			)
+			const build = spawnSync("bun", ["run", "checkfu:build", "--outfile", binary], {
+				cwd: repoRoot,
+				encoding: "utf8",
+				timeout: 60_000,
+			})
 			expect(build.status, build.stderr).toBe(0)
 			expect(existsSync(binary)).toBe(true)
 
@@ -106,11 +105,11 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 		// Everything started here is stopped in `finally`, whichever step fails.
 		try {
 			const binary = join(scratch, "checkfu")
-			const build = spawnSync(
-				resolveBunExecutable() ?? "bun",
-				["run", "checkfu:build", "--outfile", binary],
-				{ cwd: repoRoot, encoding: "utf8", timeout: 60_000 },
-			)
+			const build = spawnSync("bun", ["run", "checkfu:build", "--outfile", binary], {
+				cwd: repoRoot,
+				encoding: "utf8",
+				timeout: 60_000,
+			})
 			expect(build.status, build.stderr).toBe(0)
 
 			server.listen(0, "127.0.0.1")

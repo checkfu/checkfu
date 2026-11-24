@@ -4,7 +4,7 @@ declare const CHECKFU_STANDALONE: boolean | undefined
 
 /**
  * True in the binary produced by `bun run checkfu:build`. It is compiled with Bun's
- * `.env` and `bunfig.toml` autoloading switched off, so it needs no launcher to keep
+ * `.env` and `bunfig.toml` autoloading switched off, so it needs no flags to keep
  * the current directory from injecting configuration or code.
  */
 export const isStandalone: boolean =

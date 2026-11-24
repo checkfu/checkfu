@@ -4,7 +4,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
 
 const cliRoot = fileURLToPath(new URL("..", import.meta.url))
 
@@ -33,7 +32,9 @@ describe.skipIf(process.platform === "win32")("the documented `bun checkfu` entr
 				join(project, "package.json"),
 				JSON.stringify({
 					name: "checkout",
-					scripts: { checkfu: `node ${JSON.stringify(join(cliRoot, "bin", "checkfu.mjs"))}` },
+					scripts: {
+						checkfu: `bun --no-env-file --config=${JSON.stringify(join(cliRoot, "bunfig.toml"))} ${JSON.stringify(join(cliRoot, "src", "main.ts"))}`,
+					},
 				}),
 			)
 			writeFileSync(
@@ -41,7 +42,7 @@ describe.skipIf(process.platform === "win32")("the documented `bun checkfu` entr
 				"CHECKFU_API_KEY=planted\nCHECKFU_URL=https://planted.example\n",
 			)
 			const call = spawnSync(
-				resolveBunExecutable() ?? "bun",
+				"bun",
 				[
 					"checkfu",
 					"--base-url",

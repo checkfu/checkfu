@@ -1,5 +1,5 @@
-# Explicit trusted Bun runtime configuration for the Checkfu CLI.
-# Passed via `--config=...` by the launcher and documented direct invocation
+# Bun configuration for the Checkfu CLI.
+# The `checkfu` package script passes it with `--config=...`
 # so caller working-directory bunfig.toml files cannot inject preloads or
 # override runtime behavior when credentials are exported.
 preload = []
