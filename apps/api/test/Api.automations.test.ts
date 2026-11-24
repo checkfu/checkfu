@@ -1,6 +1,7 @@
 import { MAX_LIVE_AUTOMATIONS } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import { describe, expect, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
@@ -92,6 +93,19 @@ const prerequisites = (apiFetch: ApiFetch) =>
 
 const NOW = "2026-01-05T12:00:00.000Z"
 
+const atNow = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+	Effect.clockWith((clock) =>
+		Effect.provideService(effect, Clock.Clock, {
+			currentTimeMillisUnsafe: () => Date.parse(NOW),
+			currentTimeMillis: Effect.succeed(Date.parse(NOW)),
+			currentTimeNanosUnsafe: () => BigInt(Date.parse(NOW)) * 1_000_000n,
+			currentTimeNanos: Effect.succeed(BigInt(Date.parse(NOW)) * 1_000_000n),
+			monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+			monotonicTimeNanos: clock.monotonicTimeNanos,
+			sleep: (duration) => clock.sleep(duration),
+		}),
+	)
+
 const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A> => {
 	const { layer, closeAll } = makePiDurableTestLayer(
 		async (model, context) =>
@@ -104,7 +118,7 @@ const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A
 			Effect.gen(function* () {
 				const { fetch: apiFetch } = yield* makeApiHandler
 				return yield* body(apiFetch)
-			}).pipe(Effect.scoped, Effect.provide(layer)),
+			}).pipe(atNow, Effect.scoped, Effect.provide(layer)),
 		)
 	} finally {
 		await closeAll()
@@ -494,6 +508,24 @@ describe("Automations API", () => {
 					initial_events: message("Write the morning report."),
 					schedule: weekdayMornings,
 				}
+				const corrected = { "idempotency-key": "create-after-a-bad-schedule" }
+				const unusable = yield* call<ErrorBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					{ ...body, schedule: { type: "cron", expression: "0 0 31 2 *", timezone: "UTC" } },
+					corrected,
+				)
+				expect(unusable.status).toBe(400)
+				const afterCorrection = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					body,
+					corrected,
+				)
+				expect(afterCorrection.status).toBe(201)
+
 				const key = { "idempotency-key": "create-morning-report" }
 				const first = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", body, key)
 				expect(first.status).toBe(201)

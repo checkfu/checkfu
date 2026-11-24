@@ -545,7 +545,7 @@ export class EffectAutomationsResource {
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.automations.pause",
-							"idempotent",
+							"pre-commit-only",
 							options,
 							() =>
 								this.#runtime.raw.automations.pause({
@@ -657,7 +657,7 @@ export class EffectAutomationsResource {
 						executeWithRetries(
 							this.#runtime,
 							"checkfu.automations.unpause",
-							"idempotent",
+							"pre-commit-only",
 							options,
 							() =>
 								this.#runtime.raw.automations.unpause({

@@ -17,6 +17,7 @@ import { SCHEDULE_EXHAUSTED } from "../src/Automation/AutomationTypes.ts"
 import {
 	isUsableSchedule,
 	nextOccurrence,
+	previewOccurrences,
 	upcomingOccurrences,
 } from "../src/Automation/Schedule.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
@@ -135,15 +136,16 @@ describe("Automations", () => {
 			expression: "15 2 * * *",
 			timezone: "America/New_York",
 		}
-		const previewed = (expected: ReadonlyArray<string>) =>
+		const previewed = (now: string, expected: ReadonlyArray<string>) =>
 			Story.view(AutomationView, automation, (state) => {
 				expect(
 					state === null
 						? []
-						: upcomingOccurrences(
+						: previewOccurrences(
 								state.schedule.expression,
 								state.schedule.timezone,
 								DateTime.toEpochMillis(state.scheduled_from),
+								ms(now),
 								2,
 							).map((instant) => DateTime.formatIso(DateTime.makeUnsafe(instant))),
 				).toEqual(expected)
@@ -154,13 +156,22 @@ describe("Automations", () => {
 			Story.then(automation, new AutomationCreated({ ...config, schedule })),
 			Story.clock(at("2026-03-07T07:15:00.000Z")),
 			Story.then(automation, scheduled(1, "2026-03-07T07:15:00.000Z")),
-			previewed(["2026-03-08T07:15:00.000Z", "2026-03-09T06:15:00.000Z"]),
+			previewed("2026-03-07T07:15:00.000Z", [
+				"2026-03-08T07:15:00.000Z",
+				"2026-03-09T06:15:00.000Z",
+			]),
 			Story.clock(at("2026-03-08T07:05:00.000Z")),
 			Story.then(automation),
-			previewed(["2026-03-08T07:15:00.000Z", "2026-03-09T06:15:00.000Z"]),
+			previewed("2026-03-08T07:05:00.000Z", [
+				"2026-03-08T07:15:00.000Z",
+				"2026-03-09T06:15:00.000Z",
+			]),
 			Story.clock(at("2026-03-08T07:15:00.000Z")),
 			Story.then(automation, scheduled(2, "2026-03-08T07:15:00.000Z")),
-			previewed(["2026-03-09T06:15:00.000Z", "2026-03-10T06:15:00.000Z"]),
+			previewed("2026-03-08T07:15:00.000Z", [
+				"2026-03-09T06:15:00.000Z",
+				"2026-03-10T06:15:00.000Z",
+			]),
 		)
 	})
 
@@ -462,6 +473,26 @@ describe("Automations", () => {
 		expect(usable.filter(([expression, zone]) => !isUsableSchedule(expression, zone))).toEqual([])
 		expect(unusable.filter(([expression, zone]) => isUsableSchedule(expression, zone))).toEqual([])
 		expect(nextOccurrence("0 0 31 2 *", "UTC", ms("2026-01-01T00:00:00.000Z"))).toBeNull()
+	})
+
+	it("previews an overdue firing once, then only firings after now", () => {
+		const preview = (now: string) =>
+			previewOccurrences("0 * * * *", "UTC", ms("2026-01-01T08:30:00.000Z"), ms(now), 4).map(
+				(instant) => DateTime.formatIso(DateTime.makeUnsafe(instant)),
+			)
+		expect(preview("2026-01-01T08:40:00.000Z")).toEqual([
+			"2026-01-01T09:00:00.000Z",
+			"2026-01-01T10:00:00.000Z",
+			"2026-01-01T11:00:00.000Z",
+			"2026-01-01T12:00:00.000Z",
+		])
+		expect(preview("2026-01-01T12:30:00.000Z")).toEqual([
+			"2026-01-01T09:00:00.000Z",
+			"2026-01-01T13:00:00.000Z",
+			"2026-01-01T14:00:00.000Z",
+			"2026-01-01T15:00:00.000Z",
+		])
+		expect(previewOccurrences("0 0 31 2 *", "UTC", 0, 0, 4)).toEqual([])
 	})
 
 	it("limits a schedule to one firing per clock hour, which a half-hour clock change can halve", () => {

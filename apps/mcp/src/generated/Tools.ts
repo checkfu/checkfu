@@ -497,7 +497,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/automations/{automation_id}/pause",
 		readOnly: false,
-		idempotent: true,
+		idempotent: false,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -561,7 +561,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "POST",
 		path: "/v1/automations/{automation_id}/unpause",
 		readOnly: false,
-		idempotent: true,
+		idempotent: false,
 		destructive: true,
 		inputSchema: {
 			type: "object",

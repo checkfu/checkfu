@@ -1,4 +1,7 @@
-import { AdmitAutomation } from "@checkfu/domain/Automation/AdmitAutomation.command"
+import {
+	AdmitAutomation,
+	AutomationScheduleUnusable,
+} from "@checkfu/domain/Automation/AdmitAutomation.command"
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
@@ -11,12 +14,13 @@ import { PauseAutomation } from "@checkfu/domain/Automation/PauseAutomation.comm
 import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutomationRunFailed.command"
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
-import { upcomingOccurrences } from "@checkfu/domain/Automation/Schedule"
+import { isUsableSchedule, previewOccurrences } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -45,7 +49,7 @@ export const AutomationReadWaitTimeout = Context.Reference<Duration.Input>(
 
 const UPCOMING_RUNS = 5
 
-const automationResource = (snapshot: AutomationSnapshot) => {
+const automationResource = (snapshot: AutomationSnapshot, now: number) => {
 	const {
 		agent_id,
 		agent_version,
@@ -62,10 +66,11 @@ const automationResource = (snapshot: AutomationSnapshot) => {
 		run_count: runs,
 		upcoming_runs_at:
 			snapshot.status === "active"
-				? upcomingOccurrences(
+				? previewOccurrences(
 						snapshot.schedule.expression,
 						snapshot.schedule.timezone,
 						DateTime.toEpochMillis(scheduled_from),
+						now,
 						UPCOMING_RUNS,
 					).map((at) => DateTime.makeUnsafe(at))
 				: [],
@@ -95,6 +100,9 @@ const automationRunResource = (
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,
 })
+
+const present = (snapshot: AutomationSnapshot) =>
+	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
 export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (handlers) =>
 	Effect.gen(function* () {
@@ -129,7 +137,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				const head = Option.getOrNull(result)
 				return head === null
 					? { id, type: "automation" as const, pending: true as const }
-					: automationResource(head)
+					: yield* present(head)
 			})
 
 		return handlers
@@ -144,6 +152,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const environmentId = Schema.decodeOption(EnvironmentId)(payload.environment_id)
 					if (Option.isNone(environmentId)) {
 						return yield* reject(404, `Environment ${payload.environment_id} not found.`)
+					}
+					if (!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)) {
+						return yield* new AutomationScheduleUnusable(payload.schedule)
 					}
 					const text = yield* Schema.decodeEffect(MessageText)(
 						payload.initial_events
@@ -198,12 +209,12 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 			.handle("get", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.automation_id
-					yield* committed(id)
 					const ref = Automation.ref(id)
 					const found = Option.getOrNull(yield* automationViews.get(ref))
 					if (found !== null) {
-						return automationResource(found)
+						return yield* present(found)
 					}
+					yield* committed(id)
 					const projected = yield* automationViews.waitFor(
 						ref,
 						{ id },
@@ -212,7 +223,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					if (projected === null) {
 						return yield* reject(503, `Automation ${id} projection is not ready.`)
 					}
-					return automationResource(projected)
+					return yield* present(projected)
 				}).pipe(handled),
 			)
 			.handle("pause", ({ params }) =>

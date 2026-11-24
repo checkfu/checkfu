@@ -1142,7 +1142,6 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-method-name": "pause",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "pause" },
 				"x-checkfu-mcp": { name: "automations_pauseAutomation" },
-				"x-checkfu-idempotent": true,
 			}),
 	)
 	.add(
@@ -1161,7 +1160,6 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-method-name": "unpause",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "unpause" },
 				"x-checkfu-mcp": { name: "automations_unpauseAutomation" },
-				"x-checkfu-idempotent": true,
 			}),
 	)
 	.add(

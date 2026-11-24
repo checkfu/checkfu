@@ -37,6 +37,18 @@ export const upcomingOccurrences = (
 		Option.getOrElse((): ReadonlyArray<number> => []),
 	)
 
+export const previewOccurrences = (
+	expression: string,
+	timezone: string,
+	scheduledFrom: number,
+	now: number,
+	count: number,
+): ReadonlyArray<number> =>
+	upcomingOccurrences(expression, timezone, scheduledFrom, 1).flatMap((armed) => [
+		armed,
+		...upcomingOccurrences(expression, timezone, Math.max(armed, now), count - 1),
+	])
+
 export const nextOccurrence = (
 	expression: string,
 	timezone: string,

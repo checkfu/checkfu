@@ -10261,8 +10261,7 @@
 				},
 				"x-checkfu-mcp": {
 					"name": "automations_pauseAutomation"
-				},
-				"x-checkfu-idempotent": true
+				}
 			}
 		},
 		"/v1/automations/{automation_id}/unpause": {
@@ -10820,8 +10819,7 @@
 				},
 				"x-checkfu-mcp": {
 					"name": "automations_unpauseAutomation"
-				},
-				"x-checkfu-idempotent": true
+				}
 			}
 		},
 		"/v1/automations/{automation_id}/archive": {
