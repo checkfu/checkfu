@@ -205,7 +205,7 @@ export const RequiresActionStopReason = Schema.Struct({
 	type: Schema.Literal("requires_action"),
 	event_ids: Schema.Array(Schema.String).annotate({
 		description:
-			"The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each.",
+			"The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use.",
 	}),
 })
 export type RequiresActionStopReason = typeof RequiresActionStopReason.Type
@@ -257,6 +257,11 @@ export const SessionEventFields = {
 		result: ToolConfirmationResult,
 		deny_message: Schema.optionalKey(DenyMessage),
 	},
+	"user.custom_tool_result": {
+		custom_tool_use_id: ResourceId,
+		content: Schema.Array(TextBlock),
+		is_error: Schema.optionalKey(Schema.Boolean),
+	},
 	"session.status_running": {
 		turn: PositiveInt,
 	},
@@ -292,6 +297,12 @@ export const SessionEventFields = {
 		tool_use_id: ResourceId,
 		content: Schema.Array(TextBlock),
 		is_error: Schema.Boolean,
+		truncated: Schema.optionalKey(Schema.Literal(true)),
+	},
+	"agent.custom_tool_use": {
+		tool_use_id: ResourceId,
+		name: ResourceId,
+		input: Schema.JsonObject,
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 	},
 	"agent.thinking": {
@@ -469,6 +480,26 @@ export const MAX_MCP_TOOL_POLICIES = 128
 
 export const PermissionPolicy = Schema.Literals(["always_allow", "always_ask"])
 export type PermissionPolicy = typeof PermissionPolicy.Type
+
+export const MAX_CUSTOM_TOOLS = 64
+export const MAX_CUSTOM_TOOL_DESCRIPTION_LENGTH = 4096
+export const MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH = 16_384
+
+/** A name every model provider accepts for a tool. */
+export const CustomToolName = Schema.String.check(
+	Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/u, {
+		expected: "1-64 letters, digits, underscores or hyphens",
+	}),
+)
+
+/** A tool the caller's own application runs: the agent asks, the application answers. */
+export const CustomTool = Schema.Struct({
+	type: Schema.Literal("custom"),
+	name: CustomToolName,
+	description: NonEmptyString.check(Schema.isMaxLength(MAX_CUSTOM_TOOL_DESCRIPTION_LENGTH)),
+	input_schema: Schema.JsonObject,
+})
+export type CustomTool = typeof CustomTool.Type
 
 export const McpServerName = Schema.String.check(
 	Schema.isPattern(/^[A-Za-z0-9_-]{1,32}$/u, {

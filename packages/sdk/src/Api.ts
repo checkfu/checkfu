@@ -29,12 +29,14 @@ import {
 	CredentialId,
 	CredentialSecret,
 	CredentialSnapshot,
+	CustomTool,
 	DenyMessage,
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
+	MAX_CUSTOM_TOOLS,
 	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
 	MAX_MCP_TOOL_POLICIES,
@@ -48,6 +50,7 @@ import {
 	SessionId,
 	SessionSnapshot,
 	SessionTitle,
+	TextBlock,
 	TextBlocks,
 	ToolConfirmationResult,
 	VaultDisplayName,
@@ -354,11 +357,28 @@ export const McpToolsetInput = Schema.Struct({
 })
 export type McpToolsetInput = typeof McpToolsetInput.Type
 
-const AgentToolsInput = Schema.Array(McpToolsetInput)
-	.check(Schema.isMaxLength(MAX_MCP_SERVERS))
+export const CustomToolInput = Schema.Struct({
+	type: Schema.Literal("custom"),
+	name: CustomTool.fields.name.annotate({
+		description:
+			"Name the agent calls the tool by. Unique among the agent's tools; it cannot start with mcp__ or be the name of a built-in tool.",
+	}),
+	description: CustomTool.fields.description.annotate({
+		description: "What the tool does, as the agent is told",
+	}),
+	input_schema: CustomTool.fields.input_schema.annotate({
+		description: 'JSON Schema of the tool\'s input. Its type must be "object".',
+	}),
+})
+export type CustomToolInput = typeof CustomToolInput.Type
+
+const AgentToolInput = Schema.Union([McpToolsetInput, CustomToolInput])
+
+const AgentToolsInput = Schema.Array(AgentToolInput)
+	.check(Schema.isMaxLength(MAX_MCP_SERVERS + MAX_CUSTOM_TOOLS))
 	.annotate({
 		description:
-			"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server.",
+			"Tools and tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run, at most one per server. A custom tool is run by your application: the session pauses on agent.custom_tool_use until you send its user.custom_tool_result.",
 	})
 
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
@@ -553,6 +573,21 @@ export const SendSessionEventsBody = Schema.Struct({
 					DenyMessage.annotate({ description: "Why the call was denied, as the agent is told" }),
 				),
 			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("user.custom_tool_result"),
+				custom_tool_use_id: ResourceId.annotate({
+					description:
+						"The waiting custom tool call: the tool_use_id of its agent.custom_tool_use event, as listed in stop_reason.event_ids",
+				}),
+				content: Schema.Array(TextBlock).annotate({
+					description:
+						"The tool's result, as the agent is told. Text blocks are joined with newlines and recorded as one.",
+				}),
+				is_error: Schema.optionalKey(
+					Schema.Boolean.annotate({ description: "Whether the tool failed" }),
+				),
+			}),
 		]),
 	).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
 })
@@ -561,7 +596,7 @@ export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 export const AgentResource = Schema.Struct({
 	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
 	mcp_servers: Schema.Array(McpServerInput),
-	tools: Schema.Array(McpToolsetInput),
+	tools: Schema.Array(AgentToolInput),
 })
 export type Agent = typeof AgentResource.Type
 
@@ -768,10 +803,18 @@ export const UserToolConfirmationEventReceipt = Schema.Struct({
 })
 export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventReceipt.Type
 
+export const UserCustomToolResultEventReceipt = Schema.Struct({
+	type: Schema.Literal("user.custom_tool_result"),
+	id: Schema.optionalKey(ClientEventId),
+	custom_tool_use_id: ResourceId,
+})
+export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
+
 export const SendSessionEventReceipt = Schema.Union([
 	UserMessageEventReceipt,
 	UserInterruptEventReceipt,
 	UserToolConfirmationEventReceipt,
+	UserCustomToolResultEventReceipt,
 ]).annotate({ identifier: "SendSessionEventReceipt" })
 export type SendSessionEventReceipt = typeof SendSessionEventReceipt.Type
 
@@ -804,6 +847,10 @@ export const UserToolConfirmationSessionEvent = wireSessionEvent(
 	"user.tool_confirmation",
 	SessionEventFields["user.tool_confirmation"],
 )
+export const UserCustomToolResultSessionEvent = wireSessionEvent(
+	"user.custom_tool_result",
+	SessionEventFields["user.custom_tool_result"],
+)
 export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
 	...SessionEventFields["session.status_running"],
 	turn: Schema.optionalKey(PositiveInt),
@@ -827,6 +874,10 @@ export const AgentMcpToolUseSessionEvent = wireSessionEvent(
 export const AgentMcpToolResultSessionEvent = wireSessionEvent(
 	"agent.mcp_tool_result",
 	SessionEventFields["agent.mcp_tool_result"],
+)
+export const AgentCustomToolUseSessionEvent = wireSessionEvent(
+	"agent.custom_tool_use",
+	SessionEventFields["agent.custom_tool_use"],
 )
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
@@ -861,12 +912,14 @@ export const SessionEvent = Schema.Union([
 	UserMessageSessionEvent,
 	UserInterruptSessionEvent,
 	UserToolConfirmationSessionEvent,
+	UserCustomToolResultSessionEvent,
 	SessionStatusRunningEvent,
 	SpanModelRequestStartEvent,
 	AgentToolUseSessionEvent,
 	AgentToolResultSessionEvent,
 	AgentMcpToolUseSessionEvent,
 	AgentMcpToolResultSessionEvent,
+	AgentCustomToolUseSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,
@@ -1261,6 +1314,11 @@ const Sessions = HttpApiGroup.make("sessions")
 							command:
 								'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.tool_confirmation","tool_use_id":"call_1","result":"allow"}\'',
 							description: "Allow a tool call the session is waiting on",
+						},
+						{
+							command:
+								'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.custom_tool_result","custom_tool_use_id":"call_1","content":[{"type":"text","text":"42"}]}\'',
+							description: "Answer a custom tool call the session is waiting on",
 						},
 					],
 				},

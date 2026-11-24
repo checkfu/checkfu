@@ -12,9 +12,11 @@ import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
 import { PiApprovalStore, TOOL_DECISION_KEY, ToolDecision, makeToolGate } from "./PiApprovals.ts"
-import type { ToolDecisionValue, ToolGate } from "./PiApprovals.ts"
+import type { ToolAnswer, ToolGate } from "./PiApprovals.ts"
 import { codemodeSandboxes, loadToolSurface, withScriptDeadline } from "./PiCodemode.ts"
+import { CUSTOM_TOOL_RESULT_KEY, CustomToolResult, PiCustomToolStore } from "./PiCustomTools.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
+import { servedFrom } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { fencedMcpCall, mcpExtension, mcpToolPermissions } from "./PiMcp.ts"
 import { PiMcpStore } from "./PiMcpStore.ts"
@@ -28,7 +30,7 @@ import { SqliteTurnFence } from "./TurnFence.ts"
 const MAX_MCP_SERVER_TOOLS = 512
 
 // Until Pi is open there is no call an answer could reach.
-const NOT_OPEN: Parameters<typeof makeToolGate>[0]["signal"] = () => Promise.resolve("not_found")
+const NOT_OPEN = () => Promise.resolve("not_found" as const)
 
 type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
 
@@ -49,6 +51,7 @@ export const makePiHarnessBackend = (
 	enterWorkspace: (turn: number) => Promise<boolean>,
 	mcp?: Pick<PiMcpStore, "served">,
 	gate?: Pick<ToolGate, "settleOrPause">,
+	custom?: Pick<PiCustomToolStore, "served">,
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
@@ -69,7 +72,9 @@ export const makePiHarnessBackend = (
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
 		enterWorkspace,
-		...(mcp === undefined ? {} : { servedToolCalls: () => mcp.served() }),
+		...(mcp === undefined && custom === undefined
+			? {}
+			: { servedToolCalls: () => servedFrom(custom?.served(), mcp?.served()) }),
 		pi: () => harness.pi(),
 		ensureRoot: async (agent) => {
 			const pi = await harness.pi()
@@ -114,7 +119,7 @@ export interface PiSessionShape {
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
 	readonly resumeTurn: (
 		operationId: string,
-		decisions: ReadonlyArray<ToolDecisionValue>,
+		answers: ReadonlyArray<ToolAnswer>,
 	) => Effect.Effect<PiTurnOutcome | null>
 	// A Durable Object RPC method: the stub calls it, so it cannot be a plain Effect value.
 	// oxlint-disable-next-line effecttsgo/lazy-effect
@@ -205,8 +210,10 @@ export const PiSessionLive = PiSession.make(
 					return created
 				}
 				const approvals = new PiApprovalStore(sql)
+				const customTools = new PiCustomToolStore(sql)
 				let permissions = mcpToolPermissions([])
-				let signalTool = NOT_OPEN
+				let signalTool: Parameters<typeof makeToolGate>[0]["signal"] = NOT_OPEN
+				let signalToolResult: Parameters<typeof makeToolGate>[0]["signalResult"] = NOT_OPEN
 				const gate = makeToolGate({
 					store: approvals,
 					permission: (toolName) => permissions.get(toolName),
@@ -215,6 +222,7 @@ export const PiSessionLive = PiSession.make(
 						ended: (callId, result) => mcp.ended(callId, result),
 					},
 					signal: (taskId, value) => signalTool(taskId, value),
+					signalResult: (taskId, value) => signalToolResult(taskId, value),
 				})
 				let registry: Registry | undefined
 				// Installing a name that is installed replaces it, so this also refreshes.
@@ -230,6 +238,7 @@ export const PiSessionLive = PiSession.make(
 								signal === undefined ? undefined : { signal },
 							),
 						),
+						customTools.extension(gate.park),
 						...servers.map((server) =>
 							mcpExtension(server, {
 								call: fencedMcpCall(
@@ -246,12 +255,13 @@ export const PiSessionLive = PiSession.make(
 					}
 				}
 				/**
-				 * A turn names the session's servers. Each one's tools are listed once
+				 * A turn names the session's servers and custom tools. Each server's tools are listed once
 				 * per conversation, so what the model is offered does not shift under
 				 * it; a server that could not be reached is asked again next turn.
 				 */
-				const bindMcpServers = async (servers: ReadonlyArray<McpServerBinding>) => {
-					let changed = mcp.bind(servers)
+				const bindTools = async (request: PiTurnRequest) => {
+					const customToolsChanged = customTools.bind(request.custom_tools ?? [])
+					let changed = mcp.bind(request.mcp_servers ?? []) || customToolsChanged
 					for (const { binding, tools } of mcp.servers()) {
 						if (tools !== null) {
 							continue
@@ -294,6 +304,13 @@ export const PiSessionLive = PiSession.make(
 					await lifecycle.start()
 					return harness.signal(taskId, ToolDecision, TOOL_DECISION_KEY, value)
 				}
+				signalToolResult = async (taskId, value) => {
+					await lifecycle.start()
+					return harness.signal(taskId, CustomToolResult, CUSTOM_TOOL_RESULT_KEY, {
+						content: value.content.map((block) => ({ type: "text" as const, text: block.text })),
+						is_error: value.is_error,
+					})
+				}
 				const backend = makePiHarnessBackend(
 					harness,
 					fence,
@@ -310,14 +327,18 @@ export const PiSessionLive = PiSession.make(
 					},
 					mcp,
 					gate,
+					customTools,
 				)
 				const turns = makePiTurns({
 					backend,
 					approvals,
 					gate,
-					prepare: (request) => bindMcpServers(request.mcp_servers ?? []),
+					prepare: bindTools,
 					// A turn Pi has not seen yet starts after the last one's calls were published.
-					begin: () => mcp.forgetCalls(),
+					begin: () => {
+						mcp.forgetCalls()
+						customTools.forgetRequests()
+					},
 				})
 
 				return {
@@ -327,8 +348,8 @@ export const PiSessionLive = PiSession.make(
 					runTurn: (request: PiTurnRequest): Effect.Effect<PiTurnOutcome> => turns.runTurn(request),
 					resumeTurn: (
 						operationId: string,
-						decisions: ReadonlyArray<ToolDecisionValue>,
-					): Effect.Effect<PiTurnOutcome | null> => turns.resumeTurn(operationId, decisions),
+						answers: ReadonlyArray<ToolAnswer>,
+					): Effect.Effect<PiTurnOutcome | null> => turns.resumeTurn(operationId, answers),
 					abortTurn: (operationId: string): Effect.Effect<boolean> => turns.abortTurn(operationId),
 					waitingCalls: (): Effect.Effect<ReadonlyArray<string>> => turns.waitingCalls(),
 					cancelWaiting: (operationId: string): Effect.Effect<void> =>

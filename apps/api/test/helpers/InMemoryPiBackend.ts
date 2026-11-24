@@ -9,9 +9,10 @@ import type { Id, SignalResult, Storage, TaskId } from "@earendil-works/pi-durab
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { TOOL_DECISION_KEY, ToolDecision } from "../../src/Pi/PiApprovals.ts"
-import type { ToolGate } from "../../src/Pi/PiApprovals.ts"
+import type { ToolGate, ToolGateOptions } from "../../src/Pi/PiApprovals.ts"
+import { CUSTOM_TOOL_RESULT_KEY, CustomToolResult } from "../../src/Pi/PiCustomTools.ts"
 import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
-import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
+import type { PiDurableBackend, ServedToolCalls } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiTurnUsage.ts"
 
@@ -22,6 +23,8 @@ export interface InMemoryPiDurableBackend extends PiDurableBackend {
 		taskId: TaskId,
 		value: { readonly allow: boolean; readonly message: string },
 	) => Promise<SignalResult>
+	/** Delivers a result to a tool call that parked itself to wait for one. */
+	readonly signalToolResult: ToolGateOptions["signalResult"]
 	readonly close: () => Promise<void>
 	/** Ends this object as a reset does: nothing it does afterwards reaches the storage. */
 	readonly retire: () => void
@@ -156,9 +159,11 @@ export const createInMemoryPiDurableBackend = async (
 		readonly storage?: InMemoryStorage
 		readonly reset?: PiDurableBackend["reset"]
 		readonly gate?: Pick<ToolGate, "settleOrPause">
+		/** Names a turn's tool events as the session object does. */
+		readonly served?: () => ServedToolCalls
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
-	const { gate } = object
+	const { gate, served } = object
 	const shared = object.storage ?? new InstrumentedMemoryStorage()
 	const storage = new ObjectStorage(shared)
 	// Kept with the storage, as the session object's fence table is, so it survives a reset.
@@ -272,8 +277,20 @@ export const createInMemoryPiDurableBackend = async (
 					)
 				}),
 			),
+		...(served === undefined ? {} : { servedToolCalls: served }),
 		signalTool: (taskId, value) =>
 			pi.signal(taskId, ToolDecision, TOOL_DECISION_KEY, value, BACKGROUND_CONTEXT),
+		signalToolResult: (taskId, value) =>
+			pi.signal(
+				taskId,
+				CustomToolResult,
+				CUSTOM_TOOL_RESULT_KEY,
+				{
+					content: value.content.map((block) => ({ type: "text" as const, text: block.text })),
+					is_error: value.is_error,
+				},
+				BACKGROUND_CONTEXT,
+			),
 		close: () => pi.close(BACKGROUND_CONTEXT),
 		retire: () => {
 			storage.retire()

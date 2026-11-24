@@ -728,4 +728,146 @@ describe("@checkfu/sdk live API integration", () => {
 			),
 		{ timeout: 20_000 },
 	)
+
+	it.live(
+		"declares a custom tool, reads its call from the event stream, and returns its result",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const lookup = {
+						type: "custom" as const,
+						name: "lookup_order",
+						description: "Look an order up in the shop's own system.",
+						input_schema: { type: "object", properties: { order: { type: "string" } } },
+					}
+					const base = makePiDurableTestLayer(
+						(model, context) => {
+							const result = context.messages.find((message) => message.role === "toolResult")
+							return Promise.resolve(
+								result === undefined
+									? {
+											...makeAssistantReply(model, null, "", 3, 2),
+											content: [
+												{
+													type: "toolCall" as const,
+													id: "call_lookup",
+													name: "lookup_order",
+													arguments: { order: "A-1" },
+												},
+											],
+											stopReason: "toolUse" as const,
+										}
+									: makeAssistantReply(
+											model,
+											null,
+											result.content
+												.map((block) => (block.type === "text" ? block.text : ""))
+												.join(""),
+											2,
+											2,
+										),
+							)
+						},
+						undefined,
+						undefined,
+						undefined,
+						undefined,
+						() => undefined,
+					)
+					yield* Effect.addFinalizer(() => Effect.promise(() => base.closeAll()))
+
+					yield* Effect.gen(function* () {
+						const { fetch: apiFetch } = yield* makeApiHandler
+						const services = yield* Effect.context<never>()
+						const sdkLayer = CheckfuClient.layerFetch({
+							apiKey: TEST_API_KEY,
+							baseUrl: "http://localhost:1337",
+							fetch: makeFetchBridge(Effect.runPromiseWith(services), apiFetch),
+							maxRetries: 0,
+						})
+
+						yield* Effect.gen(function* () {
+							const client = yield* CheckfuClient
+							const agent = yield* client.waitForPending(
+								yield* client.agents.create({
+									name: "Shop",
+									model: "gpt-4o-mini",
+									tools: [lookup],
+								}),
+							)
+							expect(agent.tools).toEqual([lookup])
+							const environment = yield* client.waitForPending(
+								yield* client.environments.create({
+									name: "default",
+									config: { type: "cloud", networking: { type: "unrestricted" } },
+								}),
+							)
+							const session = yield* client.waitForPending(
+								yield* client.sessions.create({
+									agent: { id: agent.id, version: agent.version },
+									environment_id: environment.id,
+								}),
+							)
+							yield* client.sessions.events.send(session.id, {
+								events: [{ type: "user.message", content: [{ type: "text", text: "go" }] }],
+							})
+
+							const untilIdle = (after?: number) =>
+								client.sessions.events
+									.stream(session.id, after === undefined ? {} : { after })
+									.pipe(
+										Stream.takeUntil((event: SessionEvent) => event.type === "session.status_idle"),
+										Stream.runCollect,
+										Effect.map((events) => Array.from(events)),
+									)
+
+							const paused = yield* untilIdle()
+							const call = paused.find((event) => event.type === "agent.custom_tool_use")
+							expect(
+								call?.type === "agent.custom_tool_use"
+									? [call.tool_use_id, call.name, call.input]
+									: call,
+							).toEqual(["call_lookup", "lookup_order", { order: "A-1" }])
+							const pause = paused.at(-1)
+							expect(
+								pause?.type === "session.status_idle" &&
+									pause.stop_reason.type === "requires_action"
+									? pause.stop_reason.event_ids
+									: pause,
+							).toEqual(["call_lookup"])
+
+							const receipt = yield* client.sessions.events.send(session.id, {
+								events: [
+									{
+										type: "user.custom_tool_result",
+										custom_tool_use_id: "call_lookup",
+										content: [{ type: "text", text: "shipped" }],
+									},
+								],
+							})
+							expect(receipt.data).toEqual([
+								{ type: "user.custom_tool_result", custom_tool_use_id: "call_lookup" },
+							])
+
+							const resumed = yield* untilIdle(pause?.seq)
+							const returned = resumed.find((event) => event.type === "user.custom_tool_result")
+							expect(
+								returned?.type === "user.custom_tool_result"
+									? [returned.custom_tool_use_id, returned.content]
+									: returned,
+							).toEqual(["call_lookup", [{ type: "text", text: "shipped" }]])
+							const reply = resumed.find((event) => event.type === "agent.message")
+							expect(reply?.type === "agent.message" ? reply.content : reply).toEqual([
+								{ type: "text", text: "shipped" },
+							])
+							const end = resumed.at(-1)
+							expect(end?.type === "session.status_idle" ? end.stop_reason : end).toEqual({
+								type: "end_turn",
+							})
+						}).pipe(Effect.provide(sdkLayer))
+					}).pipe(Effect.provide(base.layer))
+				}),
+			),
+		{ timeout: 20_000 },
+	)
 })

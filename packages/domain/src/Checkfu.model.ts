@@ -31,6 +31,7 @@ import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
 import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
 import { DiscardWorkspace } from "./Session/DiscardWorkspace.policy.ts"
+import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
@@ -64,6 +65,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
 		ConfirmToolDecision,
+		ReturnCustomToolResultDecision,
 	],
 	views: [
 		AgentView,
@@ -365,6 +367,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"SendUserMessage",
 		"SendUserInterrupt",
 		"ConfirmTool",
+		"ReturnCustomToolResult",
 		"ArchiveSession",
 		"ClaimIdempotencyKey",
 		"AdmitAutomation",

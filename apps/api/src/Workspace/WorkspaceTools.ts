@@ -9,6 +9,16 @@ export type WorkspaceToolResult = Pick<PiToolResult, "content" | "isError">
 
 export const WORKSPACE_EXTENSION = "checkfu.workspace"
 
+export const WORKSPACE_TOOL_NAMES = [
+	"read",
+	"ls",
+	"find",
+	"grep",
+	"write",
+	"edit",
+	"delete",
+] as const
+
 // Only a call that changes nothing may run again after it was cut off. Pi runs the calls of one
 // round in parallel, so a write or a delete run a second time can undo what a sibling call did
 // after it; the model is told such a call was interrupted instead.

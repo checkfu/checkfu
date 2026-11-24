@@ -7,6 +7,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import {
@@ -19,6 +20,7 @@ import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { ToolSchemaCheck } from "./Pi/PiToolSchemaCheck.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -94,6 +96,21 @@ const ConnectionExecutorLive = Layer.effect(
 	}),
 )
 
+const ToolSchemaCheckLive = Layer.effect(
+	ToolSchemaCheck,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			checkable: (schemas: ReadonlyArray<Schema.JsonObject>) =>
+				harnessCall(Effect.suspend(() => harness.checkToolSchemas(schemas))).pipe(
+					Effect.withSpan("PiHarness.checkToolSchemas"),
+					// An unreachable harness can say nothing about a schema; the write fails and is sent again.
+					Effect.orDie,
+				),
+		}
+	}),
+)
+
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(Layer.provide(PiDurableHarnessLive)),
 ).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
@@ -107,6 +124,7 @@ const VaultsLive = Vaults.layer(VaultsHandlersLive).pipe(
 // A session's turn reads the servers it bound, which the vault model records.
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive.pipe(Layer.provideMerge(VaultsLive)),
+	ToolSchemaCheckLive,
 	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,

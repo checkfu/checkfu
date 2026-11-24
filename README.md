@@ -130,6 +130,14 @@ When the agent calls a tool that asks, the tool does not run. The session goes i
 
 A script cannot wait for a person. A call from a script to a tool that asks is refused at once with a message telling the agent to make the call directly.
 
+## Custom tools
+
+A custom tool is one your own application runs. Declare it on the agent in `tools`: `{ "type": "custom", "name": "lookup_order", "description": "Look an order up.", "input_schema": { "type": "object", "properties": { "order": { "type": "string" } } } }`. A name is 1 to 64 letters, digits, underscores or hyphens, and cannot start with `mcp__` or be the name of a built-in tool; an agent has at most 64 custom tools.
+
+When the agent calls one, the session records `agent.custom_tool_use` with the call's `tool_use_id`, `name` and `input`, and goes idle with `stop_reason: { "type": "requires_action", "event_ids": [...] }`, holding no compute while it waits. Run the tool and send its result: `{ "type": "user.custom_tool_result", "custom_tool_use_id": "<tool_use_id>", "content": [{ "type": "text", "text": "shipped" }] }`, with `"is_error": true` if it failed. The result is text, at most 16,384 characters; several text blocks are joined with newlines and recorded as one. A result for a call that is not waiting is refused (409), as is a `user.tool_confirmation` for a custom tool call. Custom tool calls and calls that wait for approval can share one pause; each takes its own answer, and the session resumes on the first.
+
+Only the agent calls a custom tool. It is not available inside scripts, which cannot wait for an answer from outside.
+
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`, `vaults`, `vaults:credentials`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.

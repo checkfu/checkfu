@@ -39,7 +39,7 @@ export const withoutRemoteReferences = (schema: Schema.Json): Schema.Json => {
 	)
 }
 
-const withoutRemoteReferencesIn = (schema: Schema.JsonObject): Schema.JsonObject => {
+export const withoutRemoteReferencesIn = (schema: Schema.JsonObject): Schema.JsonObject => {
 	const open = withoutRemoteReferences(schema)
 	return isJsonObject(open) ? open : {}
 }

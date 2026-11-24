@@ -1,6 +1,7 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
+import { CustomTool } from "@checkfu/domain/Mcp/CustomTools"
 import { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
-import { ModelUsage, ToolCall } from "@checkfu/domain/Session/SessionTypes"
+import { ModelUsage, TextBlock, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
@@ -14,6 +15,8 @@ export const PiTurnRequest = Schema.Struct({
 	unpublishedOperationIds: Schema.optionalKey(Schema.Array(Schema.String)),
 	/** The agent's MCP servers, as this session bound them. */
 	mcp_servers: Schema.optionalKey(Schema.Array(McpServerBinding)),
+	/** The tools the caller's application runs, as the agent version declares them. */
+	custom_tools: Schema.optionalKey(Schema.Array(CustomTool)),
 })
 export type PiTurnRequest = typeof PiTurnRequest.Type
 
@@ -40,6 +43,8 @@ export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
 export const PiTurnPaused = Schema.Struct({
 	ok: Schema.Literal(false),
 	waiting: Schema.Array(Schema.String),
+	/** Those of `waiting` that wait for a result from the caller's application, not for a person's allow or deny. */
+	waiting_results: Schema.optionalKey(Schema.Array(Schema.String)),
 	tool_calls: Schema.optionalKey(Schema.Array(ToolCall)),
 	/** The turn that asked carries on an operation an earlier turn started. */
 	carried: Schema.optionalKey(Schema.Literal(true)),
@@ -71,6 +76,16 @@ export const PiToolDecision = Schema.Struct({
 	message: Schema.String,
 })
 
+/** The result of one waiting custom tool call, as its caller's application returned it. */
+export const PiToolResult = Schema.Struct({
+	tool_use_id: Schema.String,
+	content: Schema.Array(TextBlock),
+	is_error: Schema.Boolean,
+})
+
+/** What ends a tool call's wait. A denial of a call that waits for a result ends it as a failed result. */
+export const PiToolAnswer = Schema.Union([PiToolDecision, PiToolResult])
+
 export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
 
 // Every method the harness Worker serves, as its argument tuple and its result. The RPC type
@@ -80,10 +95,16 @@ export const PiHarnessCalls = {
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	// A paused turn carries on once the answers to its waiting calls arrive.
 	resumeTurn: {
-		args: Schema.Tuple([Schema.String, Schema.String, Schema.Array(PiToolDecision)]),
+		args: Schema.Tuple([Schema.String, Schema.String, Schema.Array(PiToolAnswer)]),
 		result: PiRecoveredTurn,
 	},
 	waitingCalls: { args: Schema.Tuple([Schema.String]), result: Schema.Array(Schema.String) },
+	// Whether Pi can check calls against each custom tool's input schema; the API asks before
+	// it accepts an agent's tools.
+	checkToolSchemas: {
+		args: Schema.Tuple([Schema.Array(Schema.JsonObject)]),
+		result: Schema.Array(Schema.Boolean),
+	},
 	cancelWaiting: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Void },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	// The workspace is the harness's: its tools run next to the session object that calls them.

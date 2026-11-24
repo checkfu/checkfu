@@ -33,6 +33,8 @@ export {
 } from "@checkfu/sdk/Schemas"
 
 export const MAX_TOOL_INPUT_JSON_LENGTH = 16_384
+// A custom tool's request is what the application runs, so it is published whole, up to this.
+export const MAX_CUSTOM_TOOL_INPUT_JSON_LENGTH = 65_536
 export const MAX_TOOL_RESULT_TEXT_LENGTH = 16_384
 export const MAX_TOOL_CALLS_PER_TURN = 64
 export const MAX_TURN_TOOL_TEXT_LENGTH = 131_072
@@ -41,6 +43,13 @@ export const MAX_TOOL_USE_IDS_TEXT_LENGTH = 32_768
 
 // Stored as bounded JSON text; read as the object.
 export const ToolInput = Schema.String.check(Schema.isMaxLength(MAX_TOOL_INPUT_JSON_LENGTH)).pipe(
+	Schema.decodeTo(Schema.Unknown, SchemaTransformation.fromJsonString()),
+	Schema.decodeTo(Schema.JsonObject),
+)
+
+export const CustomToolInput = Schema.String.check(
+	Schema.isMaxLength(MAX_CUSTOM_TOOL_INPUT_JSON_LENGTH),
+).pipe(
 	Schema.decodeTo(Schema.Unknown, SchemaTransformation.fromJsonString()),
 	Schema.decodeTo(Schema.JsonObject),
 )
@@ -85,7 +94,23 @@ export const McpToolResult = Schema.Struct({
 })
 export type McpToolResult = typeof McpToolResult.Type
 
-export const ToolEvent = Schema.Union([ToolUse, ToolResult, McpToolUse, McpToolResult])
+/** A call to a tool the caller's application runs. Its result is the application's own event. */
+export const CustomToolUse = Schema.Struct({
+	type: Schema.Literal("custom_tool_use"),
+	tool_use_id: ResourceId,
+	name: ResourceId,
+	input: CustomToolInput,
+	truncated: Schema.optionalKey(Schema.Literal(true)),
+})
+export type CustomToolUse = typeof CustomToolUse.Type
+
+export const ToolEvent = Schema.Union([
+	ToolUse,
+	ToolResult,
+	McpToolUse,
+	McpToolResult,
+	CustomToolUse,
+])
 export type ToolEvent = typeof ToolEvent.Type
 
 // One call as the session log records it: its use and result together; the use alone when the
@@ -93,10 +118,10 @@ export type ToolEvent = typeof ToolEvent.Type
 // on the call, published its use.
 export const ToolCall = Schema.Union([
 	Schema.TaggedStruct("pair", {
-		use: Schema.Union([ToolUse, McpToolUse]),
+		use: Schema.Union([ToolUse, McpToolUse, CustomToolUse]),
 		result: Schema.Union([ToolResult, McpToolResult]),
 	}),
-	Schema.TaggedStruct("use", { use: Schema.Union([ToolUse, McpToolUse]) }),
+	Schema.TaggedStruct("use", { use: Schema.Union([ToolUse, McpToolUse, CustomToolUse]) }),
 	Schema.TaggedStruct("result", { result: Schema.Union([ToolResult, McpToolResult]) }),
 ])
 export type ToolCall = typeof ToolCall.Type
@@ -122,6 +147,9 @@ export const ToolUseIds = {
 	encode: Schema.encodeSync(toolUseIdsCodec),
 	decode: Schema.decodeUnknownSync(toolUseIdsCodec),
 }
+
+/** A custom tool's result as its application returned it: its text blocks, joined. */
+export const ToolResultText = Schema.String.check(Schema.isMaxLength(MAX_TOOL_RESULT_TEXT_LENGTH))
 
 /** Why a session went idle. Only a pause names the calls it waits on. */
 export const IdleStopReason = Schema.Struct({

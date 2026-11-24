@@ -2,6 +2,7 @@ import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
 import { Connection } from "../Connection/Connection.do.ts"
 import { placedStub, placement } from "../Placement.ts"
+import { isCheckableInputSchema } from "./PiCustomTools.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
@@ -34,6 +35,7 @@ export default PiHarnessWorker.make(
 			resumeTurn: (conversation, operationId, decisions) =>
 				Effect.orDie(piSession(conversation).resumeTurn(operationId, decisions)),
 			waitingCalls: (conversation) => Effect.orDie(piSession(conversation).waitingCalls()),
+			checkToolSchemas: (schemas) => Effect.sync(() => schemas.map(isCheckableInputSchema)),
 			cancelWaiting: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).cancelWaiting(operationId)),
 			abortTurn: (conversation, operationId) =>

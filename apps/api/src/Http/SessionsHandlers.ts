@@ -20,6 +20,7 @@ import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import {
 	MAX_MESSAGE_TEXT_LENGTH,
+	MAX_TOOL_RESULT_TEXT_LENGTH,
 	MessageText,
 	ToolUseIds,
 } from "@checkfu/domain/Session/SessionTypes"
@@ -46,6 +47,8 @@ import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { ConfirmTool } from "@checkfu/domain/Session/ConfirmTool.command"
 import { ConfirmToolDecision } from "@checkfu/domain/Session/ConfirmTool.decision"
+import { ReturnCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
+import { ReturnCustomToolResultDecision } from "@checkfu/domain/Session/ReturnCustomToolResult.decision"
 import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { bindSessionServers } from "../Connection/McpBindings.ts"
@@ -131,10 +134,24 @@ type PreparedEvent =
 			readonly result: "allow" | "deny"
 			readonly deny_message: string
 	  }
+	| {
+			readonly type: "user.custom_tool_result"
+			readonly custom_tool_use_id: string
+			readonly text: string
+			readonly is_error: boolean
+	  }
 
 const eventContent = (item: PreparedEvent) => {
 	if (item.type === "user.interrupt") {
 		return { type: item.type }
+	}
+	if (item.type === "user.custom_tool_result") {
+		return {
+			type: item.type,
+			custom_tool_use_id: item.custom_tool_use_id,
+			text: item.text,
+			is_error: item.is_error,
+		}
 	}
 	return item.type === "user.message"
 		? { type: item.type, text: item.text }
@@ -212,6 +229,13 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				result: event.result,
 				...(event.deny_message === undefined ? {} : { deny_message: event.deny_message }),
 			}
+		case "user.custom_tool_result":
+			return {
+				...sessionEventEnvelope(entry, "user.custom_tool_result"),
+				custom_tool_use_id: event.custom_tool_use_id,
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				...(event.is_error === undefined ? {} : { is_error: event.is_error }),
+			}
 		case "session.status_running":
 			return {
 				...sessionEventEnvelope(entry, "session.status_running"),
@@ -251,6 +275,14 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				...(event.parent_tool_use_id === undefined
 					? {}
 					: { parent_tool_use_id: event.parent_tool_use_id }),
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
+		case "agent.custom_tool_use":
+			return {
+				...sessionEventEnvelope(entry, "agent.custom_tool_use"),
+				tool_use_id: event.tool_use_id,
+				name: event.name,
+				input: event.input,
 				...(event.truncated === true ? { truncated: true as const } : {}),
 			}
 		case "agent.mcp_tool_result":
@@ -319,6 +351,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
 		const confirmTool = yield* ConfirmToolDecision
+		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
 		const agents = yield* Agent
 		const environments = yield* Environment
 		const vaults = yield* Vault
@@ -674,6 +707,25 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							})
 							continue
 						}
+						if (event.type === "user.custom_tool_result") {
+							// A result's text blocks are joined, as a user message's are.
+							const text = event.content.map((block) => block.text).join("\n")
+							if (text.length > MAX_TOOL_RESULT_TEXT_LENGTH) {
+								return yield* reject(
+									400,
+									`events[${index}] content must be at most ${MAX_TOOL_RESULT_TEXT_LENGTH} characters of text.`,
+								)
+							}
+							prepared.push({
+								type: "user.custom_tool_result",
+								eventId: event.id,
+								commandId,
+								custom_tool_use_id: event.custom_tool_use_id,
+								text,
+								is_error: event.is_error === true,
+							})
+							continue
+						}
 						const joined = event.content.map((block) => block.text).join("\n")
 						const text = yield* Schema.decodeEffect(MessageText)(joined).pipe(
 							Effect.catch(() =>
@@ -738,58 +790,80 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 											}),
 										),
 									)
-								: item.type === "user.interrupt"
+								: item.type === "user.custom_tool_result"
 									? yield* settled(
 											claimEventId.pipe(
 												Effect.andThen(
-													sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions),
-												),
-												Effect.flatMap((receipt) =>
-													receipt.events.some((event) => event._tag === "user.interrupt")
-														? Effect.succeed({
-																type: "user.interrupt" as const,
-																...(item.eventId === undefined ? {} : { id: item.eventId }),
-															})
-														: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
-												),
-											),
-										)
-									: yield* settled(
-											claimEventId.pipe(
-												Effect.andThen(
-													sessions.send(
-														new SendUserMessage({ session_id: id, text: item.text }),
+													returnCustomToolResult.send(
+														new ReturnCustomToolResult({
+															session_id: id,
+															confirmation_id: toolConfirmationId(id, item.custom_tool_use_id),
+															custom_tool_use_id: item.custom_tool_use_id,
+															text: item.text,
+															is_error: item.is_error,
+														}),
 														sendOptions,
 													),
 												),
-												Effect.flatMap((receipt) => {
-													const committed = receipt.events.find(
-														(event) => event._tag === "user.message",
-													)
-													if (
-														committed?._tag !== "user.message" ||
-														committed.content[0]?.text !== item.text
-													) {
-														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-													}
-													if (receipt.reply === undefined) {
-														return Effect.die(
-															new Error("SendUserMessage receipt is missing reply."),
-														)
-													}
-													const queued = !receipt.events.some(
-														(event) => event._tag === "session.status_running",
-													)
-													return Effect.succeed({
-														type: "user.message" as const,
-														...(item.eventId === undefined ? {} : { id: item.eventId }),
-														turn: receipt.reply.turn,
-														queued,
-														content: [{ type: "text" as const, text: item.text }],
-													})
+												Effect.as({
+													type: "user.custom_tool_result" as const,
+													...(item.eventId === undefined ? {} : { id: item.eventId }),
+													custom_tool_use_id: item.custom_tool_use_id,
 												}),
 											),
 										)
+									: item.type === "user.interrupt"
+										? yield* settled(
+												claimEventId.pipe(
+													Effect.andThen(
+														sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions),
+													),
+													Effect.flatMap((receipt) =>
+														receipt.events.some((event) => event._tag === "user.interrupt")
+															? Effect.succeed({
+																	type: "user.interrupt" as const,
+																	...(item.eventId === undefined ? {} : { id: item.eventId }),
+																})
+															: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+													),
+												),
+											)
+										: yield* settled(
+												claimEventId.pipe(
+													Effect.andThen(
+														sessions.send(
+															new SendUserMessage({ session_id: id, text: item.text }),
+															sendOptions,
+														),
+													),
+													Effect.flatMap((receipt) => {
+														const committed = receipt.events.find(
+															(event) => event._tag === "user.message",
+														)
+														if (
+															committed?._tag !== "user.message" ||
+															committed.content[0]?.text !== item.text
+														) {
+															return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+														}
+														if (receipt.reply === undefined) {
+															return Effect.die(
+																new Error("SendUserMessage receipt is missing reply."),
+															)
+														}
+														const queued = !receipt.events.some(
+															(event) => event._tag === "session.status_running",
+														)
+														return Effect.succeed({
+															type: "user.message" as const,
+															...(item.eventId === undefined ? {} : { id: item.eventId }),
+															turn: receipt.reply.turn,
+															queued,
+															content: [{ type: "text" as const, text: item.text }],
+														})
+													}),
+												),
+											)
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure
 							const mapped = toApiError(error, yield* currentRequestId)
