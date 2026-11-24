@@ -1,5 +1,3 @@
-import { realpathSync } from "node:fs"
-import { resolve } from "node:path"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Cause from "effect/Cause"
@@ -10,43 +8,12 @@ import * as Runtime from "effect/Runtime"
 import { runCli } from "./Cli.ts"
 import { isCliFailure } from "./Errors.ts"
 import { SigintCoordinator, makeSigintController } from "./Signals.ts"
-import { checkoutRoot, isStandalone } from "./Standalone.ts"
+import { startedSafely } from "./Standalone.ts"
 import { escapeTerminalControlCharacters } from "./TerminalOutput.ts"
 
-const resolvePhysicalPath = (path: string): string | undefined => {
-	try {
-		return realpathSync(path)
-	} catch {
-		return undefined
-	}
-}
-
-const trustedBunfigPath = resolvePhysicalPath(resolve(import.meta.dirname, "../bunfig.toml"))
-
-const launchedWithPinnedCliConfig = (execArgv: ReadonlyArray<string>): boolean => {
-	if (!execArgv.includes("--no-env-file") || trustedBunfigPath === undefined) {
-		return false
-	}
-	return execArgv.some((arg) => {
-		if (!arg.startsWith("--config=")) {
-			return false
-		}
-		const rawPath = arg.slice("--config=".length)
-		if (rawPath.length === 0) {
-			return false
-		}
-		return resolvePhysicalPath(rawPath) === trustedBunfigPath
-	})
-}
-
-// Bun loads `bunfig.toml` preloads and `.env` from the directory it starts in. In the
-// checkout that is the checkout's own bunfig, which switches `.env` loading off. Anywhere
-// else both flags must have switched the directory's files off before Bun started.
-const startedInCheckout = resolvePhysicalPath(process.cwd()) === resolvePhysicalPath(checkoutRoot)
-
-if (!isStandalone && !startedInCheckout && !launchedWithPinnedCliConfig(process.execArgv)) {
+if (!startedSafely(process.execArgv, process.cwd())) {
 	process.stderr.write(
-		"Error: Run `bun checkfu` from the Checkfu checkout. To use the CLI from another directory, build the standalone binary with `bun run checkfu:build` and call it by its path.\n",
+		"Error: Run `bun checkfu` from the Checkfu checkout, with no Bun flags. To use the CLI from another directory, build the standalone binary with `bun run checkfu:build` and call it by its path.\n",
 	)
 	process.exit(1)
 }

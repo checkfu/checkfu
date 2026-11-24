@@ -107,7 +107,7 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 ## Commands
 
 - `bun checkfu --help` — run the Checkfu CLI from this checkout (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
-  - It runs as one Bun process in the checkout. The checkout's `bunfig.toml` turns off `.env` loading, so a key in the checkout's `.env` is never picked up as if you had exported it. From any other directory the CLI refuses to start.
+  - It runs as one Bun process in the checkout. The checkout's `bunfig.toml` turns off `.env` loading, so a key in the checkout's `.env` is never picked up as if you had exported it. Started from any other directory, or with Bun flags that could select another config or load `.env` again (`--config`, `--env-file`, `BUN_OPTIONS`), the CLI refuses to start.
   - To run the CLI from another directory, or without Bun on `PATH`, build the binary below and call it by its path.
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI, SDK, and MCP artifacts from `CheckfuApi`

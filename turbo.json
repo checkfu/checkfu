@@ -21,7 +21,12 @@
 		},
 		"@checkfu/cli#test": {
 			"dependsOn": ["^typecheck"],
-			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json"]
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/package.json",
+				"$TURBO_ROOT$/checkfu.ts",
+				"$TURBO_ROOT$/bunfig.toml"
+			]
 		}
 	}
 }

@@ -2858,13 +2858,35 @@ describe("CLI sessions:events and sessions connect", () => {
 		expect(rootPkg.scripts?.["checkfu"]).toBeUndefined()
 		expect(readFileSync(join(repoRoot, "checkfu.ts"), "utf8")).toContain("apps/cli/src/main.ts")
 
-		const help = spawnSync("bun", ["checkfu", "--help"], {
-			cwd: repoRoot,
-			encoding: "utf8",
-			timeout: 20_000,
-		})
+		// Children must not see a key the developer has exported, and must never print one.
+		const env: Record<string, string> = {}
+		for (const [name, value] of Object.entries(process.env)) {
+			if (value !== undefined && !name.startsWith("CHECKFU_") && name !== "BUN_OPTIONS") {
+				env[name] = value
+			}
+		}
+		const start = (bunFlags: ReadonlyArray<string>, extraEnv: Record<string, string> = {}) =>
+			spawnSync("bun", [...bunFlags, "checkfu", "--help"], {
+				cwd: repoRoot,
+				env: { ...env, ...extraEnv },
+				encoding: "utf8",
+				timeout: 20_000,
+			})
+		const help = start([])
 		expect(help.status).toBe(0)
 		expect(help.stdout).toContain("sessions")
+
+		// In the checkout, any Bun flag could select another config or load .env again.
+		for (const refused of [
+			start(["--config=apps/cli/bunfig.toml"]),
+			start(["--env-file=.env.example"]),
+			start(["--env-file", ".env.example"]),
+			start([], { BUN_OPTIONS: "--config=apps/cli/bunfig.toml" }),
+			start([], { BUN_OPTIONS: "--env-file=.env.example" }),
+		]) {
+			expect(refused.status).toBe(1)
+			expect(refused.stderr).toContain("with no Bun flags")
+		}
 
 		// The checkout's bunfig is what keeps its .env out; check Bun honours that file.
 		const checkoutLike = mkdtempSync(join(tmpdir(), "checkfu-bunfig-"))
@@ -2875,13 +2897,22 @@ describe("CLI sessions:events and sessions connect", () => {
 			)
 			writeFileSync(join(checkoutLike, ".env"), "CHECKFU_API_KEY=planted\n")
 			writeFileSync(join(checkoutLike, ".env.local"), "CHECKFU_URL=https://planted.example\n")
-			const seen = spawnSync(
-				"bun",
-				["-e", "console.log(process.env.CHECKFU_API_KEY ?? '', process.env.CHECKFU_URL ?? '')"],
-				{ cwd: checkoutLike, encoding: "utf8", timeout: 20_000 },
+			writeFileSync(
+				join(checkoutLike, ".env.production"),
+				"CHECKFU_API_URL=https://planted.example\n",
 			)
-			expect(seen.status).toBe(0)
-			expect(seen.stdout.trim()).toBe("")
+			const present =
+				"console.log(['CHECKFU_API_KEY','CHECKFU_URL','CHECKFU_API_URL'].filter((name) => process.env[name] !== undefined).join(','))"
+			for (const nodeEnv of ["development", "production"]) {
+				const seen = spawnSync("bun", ["-e", present], {
+					cwd: checkoutLike,
+					env: { ...env, NODE_ENV: nodeEnv },
+					encoding: "utf8",
+					timeout: 20_000,
+				})
+				expect(seen.status).toBe(0)
+				expect(seen.stdout.trim()).toBe("")
+			}
 		} finally {
 			rmSync(checkoutLike, { recursive: true, force: true })
 		}
@@ -2922,7 +2953,7 @@ describe("CLI sessions:events and sessions connect", () => {
 					],
 					{
 						cwd: repoRoot,
-						env: { ...process.env, CHECKFU_API_KEY: "ck_kill" },
+						env: { ...env, CHECKFU_API_KEY: "ck_kill" },
 						stdio: ["ignore", "pipe", "pipe"],
 					},
 				)

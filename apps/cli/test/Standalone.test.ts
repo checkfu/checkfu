@@ -8,6 +8,7 @@ import { join } from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
+import { startedSafely } from "../src/Standalone.ts"
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 
@@ -141,4 +142,39 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			rmSync(scratch, { recursive: true, force: true })
 		}
 	}, 120_000)
+})
+
+describe("which ways of starting the CLI are accepted", () => {
+	const elsewhere = tmpdir()
+	const pinned = ["--no-env-file", `--config=${join(repoRoot, "apps", "cli", "bunfig.toml")}`]
+
+	it("accepts no Bun flags in the checkout, and exactly the two pinned flags anywhere", () => {
+		expect(startedSafely([], repoRoot, false)).toBe(true)
+		expect(startedSafely(pinned, elsewhere, false)).toBe(true)
+		expect(startedSafely([...pinned].reverse(), elsewhere, false)).toBe(true)
+		expect(startedSafely(["--no-env-file", "--config=apps/cli/bunfig.toml"], repoRoot, false)).toBe(
+			true,
+		)
+		expect(startedSafely(["--config=anything"], elsewhere, true)).toBe(true)
+	})
+
+	it("refuses every other start, because any Bun flag can bring .env or a preload back", () => {
+		for (const [execArgv, cwd] of [
+			[[], elsewhere],
+			[[], join(repoRoot, "apps", "cli")],
+			[["--config=apps/cli/bunfig.toml"], repoRoot],
+			[["--env-file=.env"], repoRoot],
+			[["--env-file", ".env"], repoRoot],
+			[["--preload", "./anything.ts"], repoRoot],
+			[["--no-env-file"], repoRoot],
+			[["--no-env-file"], elsewhere],
+			[[pinned[1] ?? ""], elsewhere],
+			[[...pinned, "--env-file=.env"], elsewhere],
+			[[...pinned, "--preload", "./anything.ts"], elsewhere],
+			[["--no-env-file", "--config=bunfig.toml"], repoRoot],
+			[["--no-env-file", "--config=apps/cli/bunfig.toml"], elsewhere],
+		] as const) {
+			expect([execArgv, cwd, startedSafely(execArgv, cwd, false)]).toEqual([execArgv, cwd, false])
+		}
+	})
 })
