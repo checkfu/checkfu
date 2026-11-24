@@ -31,7 +31,6 @@ describe("Sessions Z3 formal verification, replayed", () => {
 					budget: 2000,
 					faults: { redeliver: true, reorder: true, rerun: false },
 					walks: { count: 0 },
-					lock: "./Sessions.verify.lock.json",
 					require: { proved: PROVED },
 				})
 				expect(Object.fromEntries(report.rules.map((rule) => [rule.name, rule.standing]))).toEqual(
