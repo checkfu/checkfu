@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
 import { admitGeneration } from "./WorkspaceFence.ts"
+import { purgeTables } from "./WorkspaceStorage.ts"
 import type { FenceStore } from "./WorkspaceFence.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 
@@ -41,11 +42,12 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 			}
 
 			return {
-				// A new turn retires the harness generations before it.
-				enter: (generation: number): Effect.Effect<void> =>
-					Effect.sync(() => {
-						admitGeneration(fence, generation)
-					}),
+				// A new turn retires the harness generations before it. A turn of a retired
+				// generation, or of an ended session, is refused before it asks a model anything.
+				enter: (generation: number): Effect.Effect<boolean> =>
+					Effect.sync(
+						() => storage.kv.get(DISCARDED) !== true && admitGeneration(fence, generation),
+					),
 				runTool: (
 					call: WorkspaceToolCall,
 					generation: number,
@@ -66,14 +68,16 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 				discard: (): Effect.Effect<void> =>
 					Effect.promise(async () => {
 						storage.kv.put(DISCARDED, true)
-						for (const entry of await fs.readdir("/")) {
-							await fs.rm(`/${entry.name}`, { recursive: true, force: true })
-						}
-						for (const [key] of storage.kv.list()) {
-							if (key !== DISCARDED) {
-								storage.kv.delete(key)
+						// Removing files through the filesystem would leave their paths in its change
+						// history, so its tables are emptied instead, with every other key, at once.
+						storage.transactionSync(() => {
+							purgeTables({ exec: (query) => storage.sql.exec(query) })
+							for (const [key] of storage.kv.list()) {
+								if (key !== DISCARDED) {
+									storage.kv.delete(key)
+								}
 							}
-						}
+						})
 					}),
 			}
 		}),
