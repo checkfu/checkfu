@@ -187,16 +187,18 @@ export const measureBundle = async (
 	}
 }
 
+// Each byte budget is what the Worker measured when it was last set, plus about 25 KB. The
+// start-up budget is half of Cloudflare's one second, so the trend is caught with room to act.
 export const API_WORKER_BUDGET = {
-	eagerBytes: 1_350_000,
-	totalBytes: 1_350_000,
-	startupCpuMs: 1000,
+	eagerBytes: 1_195_000,
+	totalBytes: 1_195_000,
+	startupCpuMs: 500,
 } as const
 
 export const PI_HARNESS_WORKER_BUDGET = {
-	eagerBytes: 2_000_000,
-	totalBytes: 2_150_000,
-	startupCpuMs: 1000,
+	eagerBytes: 1_855_000,
+	totalBytes: 1_985_000,
+	startupCpuMs: 500,
 } as const
 
 export const HARNESS_SOURCES_HELP =
@@ -214,4 +216,4 @@ export const EAGER_BYTES_HELP =
 	"Every isolate, each Durable Object's included, parses and runs this code before its first event. Before raising the budget, look at the largest sources below: data belongs in a static asset or storage, and code only one path needs belongs behind that path or in its own Worker. Lower the budget if the bundle shrank."
 
 export const STARTUP_HELP =
-	"Cloudflare rejects a Worker whose global scope needs more than one second of CPU (error 10021). Keep schema and layer construction out of module scope."
+	"Cloudflare rejects a Worker whose global scope needs more than one second of CPU (error 10021); the budget is half that. Keep schema and layer construction out of module scope."

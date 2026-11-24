@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "./apps/api/src/ApiWorker.ts"
+import { COMPATIBILITY_DATE } from "./apps/api/src/Compatibility.ts"
 import { customDomains } from "./apps/api/src/CustomDomain.ts"
 import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
 import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection.ts"
@@ -48,8 +49,8 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			const mcp = yield* Cloudflare.Worker("McpWorker", {
 				...(yield* customDomains).mcp,
 				main: import.meta.resolve("./apps/mcp/src/Worker.ts"),
-				compatibility: { date: "2026-11-17" },
-				observability: { enabled: true },
+				compatibility: { date: COMPATIBILITY_DATE },
+				observability: { enabled: true, issues: { enabled: true } },
 				env: { API: api },
 				dev: { port: 1338 },
 			})

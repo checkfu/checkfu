@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
@@ -47,18 +48,14 @@ const CheckfuLive = Checkfu.layer(
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
-	Cloudflare.Telemetry({ headSamplingRate: 0.1 }),
+	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,
 ).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,
-	compatibility: {
-		// >= 2026-11-17 enables request.signal by default so Effect fetch handlers
-		// and SSE polling streams interrupt cleanly when clients disconnect.
-		date: "2026-11-17",
-	},
+	compatibility: { date: COMPATIBILITY_DATE },
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
 	// The generated OpenAPI document is a static asset: GET /openapi.json is served without
 	// running the Worker, and the document is not part of the code every isolate loads.
