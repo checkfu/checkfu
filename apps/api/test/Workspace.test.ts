@@ -57,6 +57,42 @@ describe("session workspace", () => {
 		expect(order).toEqual(["old write started", "old write finished", "new turn entered: true"])
 	})
 
+	it("refuses a turn that a later one overtook while it waited for running calls", async () => {
+		const fence = makeTurnFence(store())
+		await fence.enter(turn(0, 1))
+		let finish: () => void = () => undefined
+		const write = fence.run(
+			turn(0, 1),
+			() =>
+				new Promise<void>((resolve) => {
+					finish = resolve
+				}),
+		)
+		const second = fence.enter(turn(0, 2))
+		const third = fence.enter(turn(0, 3))
+		finish()
+		await write
+		expect(await second).toBe(false)
+		expect(await third).toBe(true)
+	})
+
+	it("drains the calls already running, and not one that starts later", async () => {
+		const fence = makeTurnFence(store())
+		await fence.enter(turn(0, 1))
+		const order: Array<string> = []
+		let finish: () => void = () => undefined
+		const write = fence.run(turn(0, 1), async () => {
+			await new Promise<void>((resolve) => {
+				finish = resolve
+			})
+			order.push("write finished")
+		})
+		const drained = fence.drain().then(() => order.push("drained"))
+		finish()
+		await Promise.all([write, drained])
+		expect(order).toEqual(["write finished", "drained"])
+	})
+
 	it("reads the session and the generation back from a conversation name", () => {
 		expect(parseConversation(conversationName("sess_1", 3))).toEqual({
 			sessionId: "sess_1",
