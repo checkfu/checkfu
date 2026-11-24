@@ -200,6 +200,28 @@ export const StopReason = Schema.Struct({
 })
 export type StopReason = typeof StopReason.Type
 
+/** Why a paused session waits: the tool calls a person must allow or deny first. */
+export const RequiresActionStopReason = Schema.Struct({
+	type: Schema.Literal("requires_action"),
+	event_ids: Schema.Array(Schema.String).annotate({
+		description:
+			"The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each.",
+	}),
+})
+export type RequiresActionStopReason = typeof RequiresActionStopReason.Type
+
+export const MAX_DENY_MESSAGE_LENGTH = 4096
+
+/** How a tool call was let through: on its own, or only after a person was asked. */
+export const EvaluatedPermission = Schema.Literals(["allow", "ask"])
+export type EvaluatedPermission = typeof EvaluatedPermission.Type
+
+export const ToolConfirmationResult = Schema.Literals(["allow", "deny"])
+export type ToolConfirmationResult = typeof ToolConfirmationResult.Type
+
+/** Why a call was denied, as the model is told; empty when no reason was given. */
+export const DenyMessage = Schema.String.check(Schema.isMaxLength(MAX_DENY_MESSAGE_LENGTH))
+
 export const RetryStatus = Schema.Struct({
 	type: Schema.Literals(["retrying", "exhausted", "terminal"]),
 })
@@ -230,6 +252,11 @@ export const SessionEventFields = {
 		content: TextBlocks,
 	},
 	"user.interrupt": {},
+	"user.tool_confirmation": {
+		tool_use_id: ResourceId,
+		result: ToolConfirmationResult,
+		deny_message: Schema.optionalKey(DenyMessage),
+	},
 	"session.status_running": {
 		turn: PositiveInt,
 	},
@@ -253,6 +280,11 @@ export const SessionEventFields = {
 		mcp_server_name: ResourceId,
 		name: ResourceId,
 		input: Schema.JsonObject,
+		evaluated_permission: Schema.optionalKey(
+			EvaluatedPermission.annotate({
+				description: "allow: the call ran without asking. ask: it waited for a confirmation.",
+			}),
+		),
 		parent_tool_use_id: Schema.optionalKey(ResourceId),
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 	},
@@ -275,7 +307,7 @@ export const SessionEventFields = {
 		is_error: Schema.NullOr(Schema.Boolean),
 	},
 	"session.status_idle": {
-		stop_reason: StopReason,
+		stop_reason: Schema.Union([StopReason, RequiresActionStopReason]),
 		turn: PositiveInt,
 	},
 	"session.error": {
@@ -433,19 +465,16 @@ export type CredentialSnapshot = typeof CredentialSnapshot.Type
 // ---------------------------------------------------------------------------
 
 export const MAX_MCP_SERVERS = 20
+export const MAX_MCP_TOOL_POLICIES = 128
+
+export const PermissionPolicy = Schema.Literals(["always_allow", "always_ask"])
+export type PermissionPolicy = typeof PermissionPolicy.Type
 
 export const McpServerName = Schema.String.check(
 	Schema.isPattern(/^[A-Za-z0-9_-]{1,32}$/u, {
 		expected: "1-32 letters, digits, underscores or hyphens",
 	}),
 )
-
-export const McpServer = Schema.Struct({
-	type: Schema.Literal("url"),
-	name: McpServerName,
-	url: McpServerUrl,
-})
-export type McpServer = typeof McpServer.Type
 
 /** An agent's server, as one session uses it: with the credential it was bound to, or none. */
 export const McpServerBinding = Schema.Struct({

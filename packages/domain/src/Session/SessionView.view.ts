@@ -9,6 +9,7 @@ import {
 	SessionStatusIdle,
 	SpanModelRequestEnd,
 } from "./CommitModelReply.command.ts"
+import { UserToolConfirmation } from "./ConfirmTool.command.ts"
 import { SpanModelRequestStart } from "./RecordModelRequestStart.command.ts"
 import {
 	AgentMcpToolResult,
@@ -31,6 +32,7 @@ export class SessionView extends Domain.View("SessionView", {
 	events: [
 		UserMessage,
 		UserInterrupt,
+		UserToolConfirmation,
 		SessionStatusRunning,
 		SpanModelRequestStart,
 		AgentToolUse,
@@ -68,6 +70,8 @@ export class SessionView extends Domain.View("SessionView", {
 					},
 		"user.message": (state, _e, ctx) => (state === null ? null : { ...state, updated_at: ctx.at }),
 		"user.interrupt": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"user.tool_confirmation": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"session.status_running": (state, e, ctx) =>
 			state === null

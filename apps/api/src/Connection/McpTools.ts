@@ -5,6 +5,8 @@ export const McpToolDescriptor = Schema.Struct({
 	description: Schema.String,
 	inputSchema: Schema.JsonObject,
 	outputSchema: Schema.optionalKey(Schema.JsonObject),
+	// The server's own claim that the tool changes nothing.
+	readOnly: Schema.optionalKey(Schema.Literal(true)),
 })
 export type McpToolDescriptor = typeof McpToolDescriptor.Type
 

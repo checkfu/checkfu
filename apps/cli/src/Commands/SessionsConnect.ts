@@ -413,6 +413,27 @@ const renderConnectEvent = (
 				if (!rawStructuredMode && stopReason !== "end_turn") {
 					yield* writeStderrLine(`[status: idle (${stopReason})]`)
 				}
+				// A paused session goes nowhere until each waiting call is answered.
+				if (!rawStructuredMode && event.stop_reason.type === "requires_action") {
+					for (const toolUseId of event.stop_reason.event_ids) {
+						const answer = JSON.stringify({
+							type: "user.tool_confirmation",
+							tool_use_id: toolUseId,
+							result: "allow",
+						})
+						yield* writeStderrLine(
+							escapeTerminalControlCharacters(
+								`[needs approval] ${toolUseId}: checkfu sessions:events send --session-id ${sessionId} --event '${answer}' (or "result":"deny")`,
+							),
+						)
+					}
+				}
+				break
+			}
+			case "user.tool_confirmation": {
+				if (!rawStructuredMode) {
+					yield* writeStderrLine(`[approval] ${escapeTerminalControlCharacters(event.result)}`)
+				}
 				break
 			}
 			case "session.status_terminated":

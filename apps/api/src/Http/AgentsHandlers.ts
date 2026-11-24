@@ -20,7 +20,7 @@ import {
 	RecordMcpServers,
 } from "@checkfu/domain/Mcp/McpServerSet.aggregate"
 import { MAX_MCP_SERVERS_TEXT_LENGTH, McpServerList } from "@checkfu/domain/Mcp/McpServers"
-import type { McpServer } from "@checkfu/domain/Mcp/McpServers"
+import type { McpServer, McpToolPermissions } from "@checkfu/domain/Mcp/McpServers"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -60,9 +60,85 @@ export const IsSupportedAgentModel = Context.Reference<(modelId: string) => bool
 
 const unsupportedModel = (model: AgentModel) => reject(400, `Unsupported model "${model.id}".`)
 
-const mcpServersText = (servers: ReadonlyArray<McpServer>) =>
+interface McpToolset {
+	readonly type: "mcp_toolset"
+	readonly mcp_server_name: string
+	readonly default_config?: { readonly permission_policy?: { readonly type: McpPolicy } }
+	readonly configs?: ReadonlyArray<{
+		readonly name: string
+		readonly permission_policy?: { readonly type: McpPolicy }
+	}>
+}
+type McpPolicy = NonNullable<McpToolPermissions["default"]>
+
+// A toolset that sets nothing is the same as none.
+const permissionsOf = (toolset: McpToolset): McpToolPermissions | undefined => {
+	const policy = toolset.default_config?.permission_policy?.type
+	const tools = (toolset.configs ?? []).flatMap((config) =>
+		config.permission_policy === undefined
+			? []
+			: [{ name: config.name, permission_policy: config.permission_policy.type }],
+	)
+	return policy === undefined && tools.length === 0
+		? undefined
+		: {
+				...(policy === undefined ? {} : { default: policy }),
+				...(tools.length === 0 ? {} : { tools }),
+			}
+}
+
+const toolsetsOf = (servers: ReadonlyArray<McpServer>): Array<McpToolset> =>
+	servers.flatMap((server) =>
+		server.permissions === undefined
+			? []
+			: [
+					{
+						type: "mcp_toolset" as const,
+						mcp_server_name: server.name,
+						...(server.permissions.default === undefined
+							? {}
+							: { default_config: { permission_policy: { type: server.permissions.default } } }),
+						...(server.permissions.tools === undefined
+							? {}
+							: {
+									configs: server.permissions.tools.map((tool) => ({
+										name: tool.name,
+										permission_policy: { type: tool.permission_policy },
+									})),
+								}),
+					},
+				],
+	)
+
+const mcpServersText = (
+	servers: ReadonlyArray<Pick<McpServer, "type" | "name" | "url">>,
+	toolsets: ReadonlyArray<McpToolset>,
+) =>
 	Effect.gen(function* () {
 		const normalized: Array<McpServer> = []
+		for (const [index, toolset] of toolsets.entries()) {
+			if (!servers.some((server) => server.name === toolset.mcp_server_name)) {
+				return yield* reject(
+					400,
+					`tools names MCP server "${toolset.mcp_server_name}", which is not in mcp_servers.`,
+				)
+			}
+			if (
+				toolsets.findIndex((other) => other.mcp_server_name === toolset.mcp_server_name) !== index
+			) {
+				return yield* reject(
+					400,
+					`MCP server "${toolset.mcp_server_name}" has more than one mcp_toolset.`,
+				)
+			}
+			const names = (toolset.configs ?? []).map((config) => config.name)
+			if (new Set(names).size !== names.length) {
+				return yield* reject(
+					400,
+					`The mcp_toolset of "${toolset.mcp_server_name}" configures a tool more than once.`,
+				)
+			}
+		}
 		for (const server of servers) {
 			const url = normalizeMcpServerUrl(server.url)
 			if (url === undefined) {
@@ -71,13 +147,23 @@ const mcpServersText = (servers: ReadonlyArray<McpServer>) =>
 			if (normalized.some((other) => other.name === server.name)) {
 				return yield* reject(400, `MCP server name "${server.name}" is used more than once.`)
 			}
-			normalized.push({ type: "url", name: server.name, url })
+			const toolset = toolsets.find((entry) => entry.mcp_server_name === server.name)
+			const permissions = toolset === undefined ? undefined : permissionsOf(toolset)
+			normalized.push({
+				type: "url",
+				name: server.name,
+				url,
+				...(permissions === undefined ? {} : { permissions }),
+			})
 		}
-		const text = McpServerList.encode(normalized)
+		const text = yield* Effect.try({
+			try: () => McpServerList.encode(normalized),
+			catch: () => undefined,
+		}).pipe(Effect.catch(() => reject(400, "mcp_servers and tools are too large together.")))
 		if (text.length > MAX_MCP_SERVERS_TEXT_LENGTH) {
 			return yield* reject(
 				400,
-				`The agent's MCP servers take ${text.length} characters; at most ${MAX_MCP_SERVERS_TEXT_LENGTH} fit.`,
+				`The agent's mcp_servers and tools take ${text.length} characters; at most ${MAX_MCP_SERVERS_TEXT_LENGTH} fit.`,
 			)
 		}
 		return text
@@ -117,6 +203,18 @@ const changesConfiguration = (
 				: head.has_description && changes.description === head.description),
 	].every(Boolean)
 
+const mcpFields = (servers: string) => {
+	const decoded = McpServerList.decode(servers)
+	return {
+		mcp_servers: decoded.map((server) => ({
+			type: server.type,
+			name: server.name,
+			url: server.url,
+		})),
+		tools: toolsetsOf(decoded),
+	}
+}
+
 export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) =>
 	Effect.gen(function* () {
 		const agents = yield* Agent
@@ -143,7 +241,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const serializeAgent = <A extends { readonly current_version_id: string }>(agent: A) =>
 			Effect.map(serversOf(agent.current_version_id), (servers) => ({
 				...agent,
-				mcp_servers: McpServerList.decode(servers),
+				...mcpFields(servers),
 			}))
 
 		const loadCommittedAgentVersion = (
@@ -201,7 +299,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					model: minted.model,
 					system: minted.system,
 					description: minted.description,
-					mcp_servers: McpServerList.decode(yield* serversOf(minted.id)),
+					...mcpFields(yield* serversOf(minted.id)),
 					created_at: head.created_at,
 					updated_at: minted.created_at,
 					archived_at: null,
@@ -215,7 +313,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null
-					const mcpServers = yield* mcpServersText(payload.mcp_servers ?? [])
+					const mcpServers = yield* mcpServersText(payload.mcp_servers ?? [], payload.tools ?? [])
 					let id: AgentId
 					let versionId: AgentVersionId
 					let sendOptions: { readonly commandId: string } | undefined
@@ -301,7 +399,13 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
-					const { version, model: modelInput, mcp_servers: servers, ...fields } = payload
+					const {
+						version,
+						model: modelInput,
+						mcp_servers: servers,
+						tools: toolsets,
+						...fields
+					} = payload
 					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
 					if (model !== undefined) {
 						yield* supported(model)
@@ -311,7 +415,19 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const head = yield* agents.get(id)
 					const isHead = head.status === "active" && head.version === version
 					const current = isHead ? yield* serversOf(head.current_version_id) : ""
-					const next = servers === undefined ? current : yield* mcpServersText(servers)
+					// Replaced servers keep the policies of the ones that stay; replaced tools replace them all.
+					const kept = McpServerList.decode(current)
+					const nextServers = servers ?? kept
+					const next =
+						servers === undefined && toolsets === undefined
+							? current
+							: yield* mcpServersText(
+									nextServers,
+									toolsets ??
+										toolsetsOf(kept).filter((toolset) =>
+											nextServers.some((server) => server.name === toolset.mcp_server_name),
+										),
+								)
 					const nextVersionId = AgentVersionId.make(yield* randomId(random, "aver"))
 					const changes = model === undefined ? fields : { ...fields, model }
 					// Servers are staged only for a version that will be minted, so an update that

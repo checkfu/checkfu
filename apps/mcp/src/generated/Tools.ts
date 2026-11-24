@@ -129,6 +129,80 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							maxItems: 20,
 							description: "MCP servers this agent connects to. Names must be unique.",
 						},
+						tools: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["mcp_toolset"],
+									},
+									mcp_server_name: {
+										type: "string",
+										pattern: "^[A-Za-z0-9_-]{1,32}$",
+										description:
+											"The MCP server, by its name in mcp_servers, whose tools this configures",
+									},
+									default_config: {
+										type: "object",
+										properties: {
+											permission_policy: {
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["always_allow", "always_ask"],
+														description:
+															"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+													},
+												},
+												required: ["type"],
+												additionalProperties: false,
+											},
+										},
+										additionalProperties: false,
+										description:
+											"Applies to every tool of the server without an entry in configs. When no policy is given, a tool the server marks read-only runs without asking and every other tool asks.",
+									},
+									configs: {
+										type: "array",
+										items: {
+											type: "object",
+											properties: {
+												name: {
+													type: "string",
+													minLength: 1,
+													maxLength: 256,
+													description: "The tool's name on the MCP server",
+												},
+												permission_policy: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["always_allow", "always_ask"],
+															description:
+																"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+														},
+													},
+													required: ["type"],
+													additionalProperties: false,
+												},
+											},
+											required: ["name"],
+											additionalProperties: false,
+										},
+										maxItems: 128,
+									},
+								},
+								required: ["type", "mcp_server_name"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description:
+								"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server.",
+						},
 					},
 					required: ["name", "model"],
 					additionalProperties: false,
@@ -288,6 +362,80 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							},
 							maxItems: 20,
 							description: "MCP servers this agent connects to. Names must be unique.",
+						},
+						tools: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["mcp_toolset"],
+									},
+									mcp_server_name: {
+										type: "string",
+										pattern: "^[A-Za-z0-9_-]{1,32}$",
+										description:
+											"The MCP server, by its name in mcp_servers, whose tools this configures",
+									},
+									default_config: {
+										type: "object",
+										properties: {
+											permission_policy: {
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["always_allow", "always_ask"],
+														description:
+															"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+													},
+												},
+												required: ["type"],
+												additionalProperties: false,
+											},
+										},
+										additionalProperties: false,
+										description:
+											"Applies to every tool of the server without an entry in configs. When no policy is given, a tool the server marks read-only runs without asking and every other tool asks.",
+									},
+									configs: {
+										type: "array",
+										items: {
+											type: "object",
+											properties: {
+												name: {
+													type: "string",
+													minLength: 1,
+													maxLength: 256,
+													description: "The tool's name on the MCP server",
+												},
+												permission_policy: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["always_allow", "always_ask"],
+															description:
+																"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+														},
+													},
+													required: ["type"],
+													additionalProperties: false,
+												},
+											},
+											required: ["name"],
+											additionalProperties: false,
+										},
+										maxItems: 128,
+									},
+								},
+								required: ["type", "mcp_server_name"],
+								additionalProperties: false,
+							},
+							maxItems: 20,
+							description:
+								"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server.",
 						},
 					},
 					required: ["version"],
@@ -1420,6 +1568,39 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											},
 										},
 										required: ["type"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											id: {
+												type: "string",
+												pattern: "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+												minLength: 1,
+												maxLength: 128,
+											},
+											type: {
+												type: "string",
+												enum: ["user.tool_confirmation"],
+											},
+											tool_use_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+												description:
+													"The waiting tool call, as listed in stop_reason.event_ids of the session's requires_action idle event",
+											},
+											result: {
+												type: "string",
+												enum: ["allow", "deny"],
+											},
+											deny_message: {
+												type: "string",
+												maxLength: 4096,
+												description: "Why the call was denied, as the agent is told",
+											},
+										},
+										required: ["type", "tool_use_id", "result"],
 										additionalProperties: false,
 									},
 								],

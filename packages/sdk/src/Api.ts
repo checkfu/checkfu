@@ -29,6 +29,7 @@ import {
 	CredentialId,
 	CredentialSecret,
 	CredentialSnapshot,
+	DenyMessage,
 	EnvironmentConfig,
 	EnvironmentDescription,
 	EnvironmentId,
@@ -36,9 +37,11 @@ import {
 	EnvironmentSnapshot,
 	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
+	MAX_MCP_TOOL_POLICIES,
 	McpServerBinding,
 	McpServerName,
 	NonEmptyString,
+	PermissionPolicy,
 	PositiveInt,
 	ResourceId,
 	SessionEventFields,
@@ -46,6 +49,7 @@ import {
 	SessionSnapshot,
 	SessionTitle,
 	TextBlocks,
+	ToolConfirmationResult,
 	VaultDisplayName,
 	VaultId,
 	VaultSnapshot,
@@ -319,6 +323,44 @@ const McpServersInput = Schema.Array(McpServerInput)
 	.check(Schema.isMaxLength(MAX_MCP_SERVERS))
 	.annotate({ description: "MCP servers this agent connects to. Names must be unique." })
 
+const PermissionPolicyInput = Schema.Struct({
+	type: PermissionPolicy.annotate({
+		description:
+			"always_allow runs the tool without asking; always_ask pauses the session until the call is confirmed",
+	}),
+})
+
+export const McpToolsetInput = Schema.Struct({
+	type: Schema.Literal("mcp_toolset"),
+	mcp_server_name: McpServerName.annotate({
+		description: "The MCP server, by its name in mcp_servers, whose tools this configures",
+	}),
+	default_config: Schema.optionalKey(
+		Schema.Struct({ permission_policy: Schema.optionalKey(PermissionPolicyInput) }).annotate({
+			description:
+				"Applies to every tool of the server without an entry in configs. When no policy is given, a tool the server marks read-only runs without asking and every other tool asks.",
+		}),
+	),
+	configs: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				name: NonEmptyString.check(Schema.isMaxLength(256)).annotate({
+					description: "The tool's name on the MCP server",
+				}),
+				permission_policy: Schema.optionalKey(PermissionPolicyInput),
+			}),
+		).check(Schema.isMaxLength(MAX_MCP_TOOL_POLICIES)),
+	),
+})
+export type McpToolsetInput = typeof McpToolsetInput.Type
+
+const AgentToolsInput = Schema.Array(McpToolsetInput)
+	.check(Schema.isMaxLength(MAX_MCP_SERVERS))
+	.annotate({
+		description:
+			"Tool configuration. An mcp_toolset sets when the tools of one of the agent's MCP servers must be confirmed before they run. At most one per server.",
+	})
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -333,6 +375,7 @@ export const CreateAgentBody = Schema.Struct({
 		Schema.NullOr(AgentDescription).annotate({ description: "Agent description" }),
 	),
 	mcp_servers: Schema.optionalKey(McpServersInput),
+	tools: Schema.optionalKey(AgentToolsInput),
 })
 export type CreateAgentBody = typeof CreateAgentBody.Type
 
@@ -355,6 +398,7 @@ export const UpdateAgentBody = Schema.Struct({
 		}),
 	),
 	mcp_servers: Schema.optionalKey(McpServersInput),
+	tools: Schema.optionalKey(AgentToolsInput),
 })
 export type UpdateAgentBody = typeof UpdateAgentBody.Type
 
@@ -497,6 +541,18 @@ export const SendSessionEventsBody = Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.interrupt"),
 			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("user.tool_confirmation"),
+				tool_use_id: ResourceId.annotate({
+					description:
+						"The waiting tool call, as listed in stop_reason.event_ids of the session's requires_action idle event",
+				}),
+				result: ToolConfirmationResult,
+				deny_message: Schema.optionalKey(
+					DenyMessage.annotate({ description: "Why the call was denied, as the agent is told" }),
+				),
+			}),
 		]),
 	).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
 })
@@ -505,6 +561,7 @@ export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 export const AgentResource = Schema.Struct({
 	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
 	mcp_servers: Schema.Array(McpServerInput),
+	tools: Schema.Array(McpToolsetInput),
 })
 export type Agent = typeof AgentResource.Type
 
@@ -703,9 +760,18 @@ export const UserInterruptEventReceipt = Schema.Struct({
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
+export const UserToolConfirmationEventReceipt = Schema.Struct({
+	type: Schema.Literal("user.tool_confirmation"),
+	id: Schema.optionalKey(ClientEventId),
+	tool_use_id: ResourceId,
+	result: ToolConfirmationResult,
+})
+export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventReceipt.Type
+
 export const SendSessionEventReceipt = Schema.Union([
 	UserMessageEventReceipt,
 	UserInterruptEventReceipt,
+	UserToolConfirmationEventReceipt,
 ]).annotate({ identifier: "SendSessionEventReceipt" })
 export type SendSessionEventReceipt = typeof SendSessionEventReceipt.Type
 
@@ -733,6 +799,10 @@ export const UserMessageSessionEvent = wireSessionEvent(
 export const UserInterruptSessionEvent = wireSessionEvent(
 	"user.interrupt",
 	SessionEventFields["user.interrupt"],
+)
+export const UserToolConfirmationSessionEvent = wireSessionEvent(
+	"user.tool_confirmation",
+	SessionEventFields["user.tool_confirmation"],
 )
 export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
 	...SessionEventFields["session.status_running"],
@@ -790,6 +860,7 @@ export const SessionArchivedEvent = wireSessionEvent(
 export const SessionEvent = Schema.Union([
 	UserMessageSessionEvent,
 	UserInterruptSessionEvent,
+	UserToolConfirmationSessionEvent,
 	SessionStatusRunningEvent,
 	SpanModelRequestStartEvent,
 	AgentToolUseSessionEvent,
@@ -1185,6 +1256,11 @@ const Sessions = HttpApiGroup.make("sessions")
 							command:
 								'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.interrupt"}\'',
 							description: "Interrupt an active session turn",
+						},
+						{
+							command:
+								'checkfu sessions:events send --session-id sess_123 --event \'{"type":"user.tool_confirmation","tool_use_id":"call_1","result":"allow"}\'',
+							description: "Allow a tool call the session is waiting on",
 						},
 					],
 				},

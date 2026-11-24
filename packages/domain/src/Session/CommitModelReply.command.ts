@@ -5,6 +5,7 @@ import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import {
+	IdleStopReason,
 	MessageText,
 	ModelUsage,
 	NonEmptyString,
@@ -12,6 +13,7 @@ import {
 	SessionEventFields,
 	StopReason,
 	ThinkingText,
+	ToolUseIdsText,
 } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
@@ -31,10 +33,12 @@ export class SpanModelRequestEnd extends Domain.Event(
 	SessionEventFields["span.model_request_end"],
 ) {}
 
-export class SessionStatusIdle extends Domain.Event(
-	"session.status_idle",
-	SessionEventFields["session.status_idle"],
-) {}
+export class SessionStatusIdle extends Domain.Event("session.status_idle", {
+	...SessionEventFields["session.status_idle"],
+	stop_reason: IdleStopReason,
+	// The tool calls a `requires_action` pause waits on.
+	event_ids: Schema.optionalKey(ToolUseIdsText),
+}) {}
 
 export class CommitModelReply extends Domain.Command("CommitModelReply", {
 	input: {

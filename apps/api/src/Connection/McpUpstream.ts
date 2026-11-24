@@ -131,6 +131,7 @@ export const makeMcpUpstream = (
 							description: tool.description ?? "",
 							inputSchema: tool.inputSchema,
 							...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+							...(tool.annotations?.readOnlyHint === true ? { readOnly: true as const } : {}),
 						})),
 					),
 				}

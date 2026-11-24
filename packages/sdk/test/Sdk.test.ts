@@ -106,6 +106,7 @@ const sampleAgent = (overrides?: {
 	system: "Be concise.",
 	description: null,
 	mcp_servers: [],
+	tools: [],
 	created_at: ISO_NOW,
 	updated_at: ISO_NOW,
 	archived_at: null,

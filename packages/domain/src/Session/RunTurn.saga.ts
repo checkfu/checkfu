@@ -37,9 +37,10 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
 		last_reply_turn: Schema.optionalKey(NonNegativeInt),
+		resume: Schema.optionalKey(Schema.Literal(true)),
 	},
 	result: {
-		status: Schema.Literals(["completed", "failed", "interrupted", "aborted"]),
+		status: Schema.Literals(["completed", "failed", "interrupted", "paused", "aborted"]),
 	},
 }) {}
 
@@ -94,6 +95,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						...(payload.last_reply_turn === undefined
 							? {}
 							: { last_reply_turn: payload.last_reply_turn }),
+						...(payload.resume === true ? { resume: true as const } : {}),
 					})
 					.pipe(
 						Effect.map((reply) => ({
@@ -106,8 +108,11 @@ export const RunTurnLive = RunTurn.toLayer(
 							stop_reason: reply.stop_reason,
 						})),
 						Effect.catchTag(
-							["TurnFailed", "HarnessUnavailable", "TurnInterrupted"],
+							["TurnFailed", "HarnessUnavailable", "TurnInterrupted", "TurnPaused"],
 							(err): Effect.Effect<typeof TurnOutcome.Type> => {
+								if (err._tag === "TurnPaused") {
+									return Effect.succeed({ ok: "paused" })
+								}
 								if (err._tag === "TurnFailed") {
 									return Effect.succeed({
 										ok: false,
@@ -137,6 +142,11 @@ export const RunTurnLive = RunTurn.toLayer(
 						),
 					),
 			)
+
+			// The harness already ended the turn on the session; there is nothing left to record.
+			if (generated.ok === "paused") {
+				return { status: "paused" as const }
+			}
 
 			if (!generated.ok && generated.interrupted) {
 				const interrupted = yield* runTurnActivity(

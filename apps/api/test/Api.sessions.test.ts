@@ -23,6 +23,8 @@ import {
 	SessionStatusIdle,
 	SpanModelRequestEnd,
 } from "@checkfu/domain/Session/CommitModelReply.command"
+import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.command"
+import { ToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
 import {
 	AgentMcpToolResult,
@@ -2416,10 +2418,41 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated(),
+				event: new SessionStatusIdle({
+					stop_reason: { type: "requires_action" },
+					event_ids: ToolUseIds.encode(["call_3", "call_4"]),
+					turn: 2,
+				}),
 				expectedJson: {
 					id: "evt_16",
 					seq: 16,
+					type: "session.status_idle",
+					created_at: "2026-01-01T00:00:00.000Z",
+					stop_reason: { type: "requires_action", event_ids: ["call_3", "call_4"] },
+					turn: 2,
+				},
+			},
+			{
+				event: new UserToolConfirmation({
+					tool_use_id: "call_3",
+					result: "deny",
+					deny_message: "Not this one.",
+				}),
+				expectedJson: {
+					id: "evt_17",
+					seq: 17,
+					type: "user.tool_confirmation",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "call_3",
+					result: "deny",
+					deny_message: "Not this one.",
+				},
+			},
+			{
+				event: new SessionStatusTerminated(),
+				expectedJson: {
+					id: "evt_18",
+					seq: 18,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2427,8 +2460,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_17",
-					seq: 17,
+					id: "evt_19",
+					seq: 19,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},

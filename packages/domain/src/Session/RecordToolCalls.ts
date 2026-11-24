@@ -13,7 +13,10 @@ import {
 import type { TextBlock, ToolCall, ToolEvent } from "./SessionTypes.ts"
 import { truncateText } from "./TextBounds.ts"
 
-type CallUse = ToolCall["use"]
+/** A call as a transcript shows it: a result always comes with its use. */
+export type ReadToolCall = Exclude<ToolCall, { readonly _tag: "result" }>
+
+type CallUse = Extract<ToolCall, { readonly _tag: "pair" }>["use"]
 type CallResult = Extract<ToolCall, { readonly _tag: "pair" }>["result"]
 
 const DIGEST_LENGTH = 16
@@ -47,7 +50,7 @@ export interface ToolCallBounds {
 	readonly add: (event: ToolEvent) => void
 	/** True once no later event can change the calls. */
 	readonly complete: () => boolean
-	readonly calls: () => Array<ToolCall>
+	readonly calls: () => Array<ReadToolCall>
 }
 
 /**
@@ -96,6 +99,9 @@ export const boundToolCalls = (): ToolCallBounds => {
 									type: "mcp_tool_use",
 									...use,
 									mcp_server_name: clampName(event.mcp_server_name),
+									...(event.evaluated_permission === undefined
+										? {}
+										: { evaluated_permission: event.evaluated_permission }),
 									...(event.parent_tool_use_id === undefined
 										? {}
 										: { parent_tool_use_id: publicToolUseId(event.parent_tool_use_id) }),
@@ -137,7 +143,7 @@ export const boundToolCalls = (): ToolCallBounds => {
 	}
 }
 
-export const clampToolCalls = (events: Iterable<ToolEvent>): Array<ToolCall> => {
+export const clampToolCalls = (events: Iterable<ToolEvent>): Array<ReadToolCall> => {
 	const bounds = boundToolCalls()
 	for (const event of events) {
 		bounds.add(event)
@@ -160,7 +166,7 @@ export const recordToolCalls = Effect.fn("Session.recordToolCalls")(function* (a
 	const requestId = `${turnKey(args.session_id, args.turn)}:req:1`
 	const seen = new Map<string, number>()
 	const named = args.calls.map((call) => {
-		const name = `${call._tag}:${call.use.tool_use_id}`
+		const name = `${call._tag}:${call._tag === "result" ? call.result.tool_use_id : call.use.tool_use_id}`
 		const earlier = seen.get(name) ?? 0
 		seen.set(name, earlier + 1)
 		return { call, commandId: `${requestId}:tool:${name}:${earlier}` }

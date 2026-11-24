@@ -36,6 +36,10 @@ export type FakeOpenAIAction =
 			readonly arguments: JsonObject
 	  }
 	| {
+			readonly kind: "tool_calls"
+			readonly calls: ReadonlyArray<{ readonly name: string; readonly arguments: JsonObject }>
+	  }
+	| {
 			readonly kind: "hold"
 			readonly release?: Promise<string | null>
 	  }
@@ -198,61 +202,65 @@ const writeTextReplyEvents = (
 const writeToolCallEvents = (
 	res: ServerResponse,
 	responseId: string,
-	callId: string,
-	name: string,
-	args: JsonObject,
+	calls: ReadonlyArray<{
+		readonly callId: string
+		readonly name: string
+		readonly args: JsonObject
+	}>,
 ): void => {
-	const item = {
-		id: `fc_${callId}`,
+	const items = calls.map((call) => ({
+		id: `fc_${call.callId}`,
 		type: "function_call",
-		call_id: callId,
-		name,
-		arguments: JSON.stringify(args),
+		call_id: call.callId,
+		name: call.name,
+		arguments: JSON.stringify(call.args),
 		status: "completed",
-	}
+	}))
 	res.write(
 		sseEvent("response.created", {
 			type: "response.created",
 			response: { id: responseId, status: "in_progress" },
 		}),
 	)
-	res.write(
-		sseEvent("response.output_item.added", {
-			type: "response.output_item.added",
-			output_index: 0,
-			item: { ...item, arguments: "", status: "in_progress" },
-		}),
-	)
-	res.write(
-		sseEvent("response.function_call_arguments.delta", {
-			type: "response.function_call_arguments.delta",
-			item_id: item.id,
-			output_index: 0,
-			delta: item.arguments,
-		}),
-	)
-	res.write(
-		sseEvent("response.function_call_arguments.done", {
-			type: "response.function_call_arguments.done",
-			item_id: item.id,
-			output_index: 0,
-			arguments: item.arguments,
-		}),
-	)
-	res.write(
-		sseEvent("response.output_item.done", {
-			type: "response.output_item.done",
-			output_index: 0,
-			item,
-		}),
-	)
+	for (const [output_index, item] of items.entries()) {
+		res.write(
+			sseEvent("response.output_item.added", {
+				type: "response.output_item.added",
+				output_index,
+				item: { ...item, arguments: "", status: "in_progress" },
+			}),
+		)
+		res.write(
+			sseEvent("response.function_call_arguments.delta", {
+				type: "response.function_call_arguments.delta",
+				item_id: item.id,
+				output_index,
+				delta: item.arguments,
+			}),
+		)
+		res.write(
+			sseEvent("response.function_call_arguments.done", {
+				type: "response.function_call_arguments.done",
+				item_id: item.id,
+				output_index,
+				arguments: item.arguments,
+			}),
+		)
+		res.write(
+			sseEvent("response.output_item.done", {
+				type: "response.output_item.done",
+				output_index,
+				item,
+			}),
+		)
+	}
 	res.write(
 		sseEvent("response.completed", {
 			type: "response.completed",
 			response: {
 				id: responseId,
 				status: "completed",
-				output: [item],
+				output: items,
 				usage: {
 					input_tokens: 12,
 					output_tokens: 6,
@@ -366,7 +374,22 @@ export const startFakeOpenAIResponsesServer = async (
 			}
 
 			if (action.kind === "tool_call") {
-				writeToolCallEvents(res, responseId, `call_fake_${id}`, action.name, action.arguments)
+				writeToolCallEvents(res, responseId, [
+					{ callId: `call_fake_${id}`, name: action.name, args: action.arguments },
+				])
+				return
+			}
+
+			if (action.kind === "tool_calls") {
+				writeToolCallEvents(
+					res,
+					responseId,
+					action.calls.map((call, index) => ({
+						callId: `call_fake_${id}_${index}`,
+						name: call.name,
+						args: call.arguments,
+					})),
+				)
 				return
 			}
 

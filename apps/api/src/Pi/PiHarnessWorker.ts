@@ -31,6 +31,11 @@ export default PiHarnessWorker.make(
 			recoverTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).recoverTurn(operationId)),
 			runTurn: (conversation, request) => Effect.orDie(piSession(conversation).runTurn(request)),
+			resumeTurn: (conversation, operationId, decisions) =>
+				Effect.orDie(piSession(conversation).resumeTurn(operationId, decisions)),
+			waitingCalls: (conversation) => Effect.orDie(piSession(conversation).waitingCalls()),
+			cancelWaiting: (conversation, operationId) =>
+				Effect.orDie(piSession(conversation).cancelWaiting(operationId)),
 			abortTurn: (conversation, operationId) =>
 				Effect.orDie(piSession(conversation).abortTurn(operationId)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),

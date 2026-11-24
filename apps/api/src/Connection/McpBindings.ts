@@ -19,6 +19,14 @@ export type BindingResolution =
 
 const refuse = (message: string): BindingResolution => ({ ok: false, message })
 
+// A session keeps the agent's policy for each server, as it was when the session began.
+const bound = (server: McpServer, credential_id: string | null): McpServerBinding => ({
+	name: server.name,
+	url: server.url,
+	credential_id,
+	...(server.permissions === undefined ? {} : { permissions: server.permissions }),
+})
+
 /**
  * Decides which credential each of an agent's MCP servers uses in one session.
  * A server named in `explicit` uses that credential, which must be stored for
@@ -56,7 +64,7 @@ export const resolveMcpServerBindings = (input: {
 					`Credential ${explicit.credential_id} is stored for ${explicit.mcp_server_url}, not for MCP server "${server.name}" (${server.url}).`,
 				)
 			}
-			bindings.push({ name: server.name, url: server.url, credential_id: explicit.credential_id })
+			bindings.push(bound(server, explicit.credential_id))
 			continue
 		}
 		const matches = [
@@ -71,7 +79,7 @@ export const resolveMcpServerBindings = (input: {
 				`MCP server "${server.name}" matches more than one credential in vault_ids (${matches.join(", ")}). Bind one with mcp_server_credentials.`,
 			)
 		}
-		bindings.push({ name: server.name, url: server.url, credential_id: matches[0] ?? null })
+		bindings.push(bound(server, matches[0] ?? null))
 	}
 	return { ok: true, bindings }
 }

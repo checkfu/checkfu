@@ -2414,7 +2414,7 @@ describe("Sessions", () => {
 			),
 		)
 		expect(state).toEqual({
-			completed: { _tag: "Idle", turn: 1 },
+			completed: { _tag: "Idle", turn: 1, awaiting: false },
 			archived: { _tag: "Terminated", archived: true },
 			afterCompletion: "AlreadyCancelled",
 			afterArchive: "AlreadyCancelled",

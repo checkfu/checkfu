@@ -54,6 +54,7 @@ export const StartTurnLive = StartTurn.toLayer(
 				turn: state.turn,
 				input: state.input,
 				...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
+				...(state.resume === true ? { resume: true as const } : {}),
 			})
 		})
 	}),

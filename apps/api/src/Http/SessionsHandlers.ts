@@ -18,7 +18,11 @@ import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.com
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
+import {
+	MAX_MESSAGE_TEXT_LENGTH,
+	MessageText,
+	ToolUseIds,
+} from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import { Credential } from "@checkfu/domain/Vault/Credential.aggregate"
@@ -40,6 +44,9 @@ import * as Stream from "effect/Stream"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
+import { ConfirmTool } from "@checkfu/domain/Session/ConfirmTool.command"
+import { ConfirmToolDecision } from "@checkfu/domain/Session/ConfirmTool.decision"
+import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { bindSessionServers } from "../Connection/McpBindings.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
@@ -115,39 +122,43 @@ const sessionEventClaimId = (
 	eventId: string,
 ) => idempotencyClaimId(digest, "ev", [sessionId, "event", eventId])
 
-const singleEventFingerprint = (
-	digest: Digest.Digest["Service"],
-	item:
-		| { readonly type: "user.interrupt" }
-		| { readonly type: "user.message"; readonly text: string },
-) =>
-	sha256Json(
-		digest,
-		item.type === "user.interrupt" ? { type: item.type } : { type: item.type, text: item.text },
-	)
+type PreparedEvent =
+	| { readonly type: "user.interrupt" }
+	| { readonly type: "user.message"; readonly text: string }
+	| {
+			readonly type: "user.tool_confirmation"
+			readonly tool_use_id: string
+			readonly result: "allow" | "deny"
+			readonly deny_message: string
+	  }
+
+const eventContent = (item: PreparedEvent) => {
+	if (item.type === "user.interrupt") {
+		return { type: item.type }
+	}
+	return item.type === "user.message"
+		? { type: item.type, text: item.text }
+		: {
+				type: item.type,
+				tool_use_id: item.tool_use_id,
+				result: item.result,
+				deny_message: item.deny_message,
+			}
+}
+
+const singleEventFingerprint = (digest: Digest.Digest["Service"], item: PreparedEvent) =>
+	sha256Json(digest, eventContent(item))
 
 const eventBatchFingerprint = (
 	digest: Digest.Digest["Service"],
-	items: ReadonlyArray<
-		| { readonly type: "user.interrupt"; readonly eventId: string | undefined }
-		| {
-				readonly type: "user.message"
-				readonly eventId: string | undefined
-				readonly text: string
-		  }
-	>,
+	items: ReadonlyArray<PreparedEvent & { readonly eventId: string | undefined }>,
 ) =>
 	sha256Json(
 		digest,
-		items.map((item) =>
-			item.type === "user.interrupt"
-				? { type: item.type, ...(item.eventId === undefined ? {} : { id: item.eventId }) }
-				: {
-						type: item.type,
-						...(item.eventId === undefined ? {} : { id: item.eventId }),
-						text: item.text,
-					},
-		),
+		items.map((item) => {
+			const { type, ...content } = eventContent(item)
+			return { type, ...(item.eventId === undefined ? {} : { id: item.eventId }), ...content }
+		}),
 	)
 
 const serializeSession = (
@@ -156,7 +167,11 @@ const serializeSession = (
 ) => ({
 	...snapshot,
 	agent: { id: agent_id, version: agent_version },
-	mcp_servers: McpServerBindingList.decode(mcpServers),
+	mcp_servers: McpServerBindingList.decode(mcpServers).map((server) => ({
+		name: server.name,
+		url: server.url,
+		credential_id: server.credential_id,
+	})),
 })
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
@@ -190,6 +205,13 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 			}
 		case "user.interrupt":
 			return sessionEventEnvelope(entry, "user.interrupt")
+		case "user.tool_confirmation":
+			return {
+				...sessionEventEnvelope(entry, "user.tool_confirmation"),
+				tool_use_id: event.tool_use_id,
+				result: event.result,
+				...(event.deny_message === undefined ? {} : { deny_message: event.deny_message }),
+			}
 		case "session.status_running":
 			return {
 				...sessionEventEnvelope(entry, "session.status_running"),
@@ -223,6 +245,9 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				mcp_server_name: event.mcp_server_name,
 				name: event.name,
 				input: event.input,
+				...(event.evaluated_permission === undefined
+					? {}
+					: { evaluated_permission: event.evaluated_permission }),
 				...(event.parent_tool_use_id === undefined
 					? {}
 					: { parent_tool_use_id: event.parent_tool_use_id }),
@@ -260,7 +285,13 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 		case "session.status_idle":
 			return {
 				...sessionEventEnvelope(entry, "session.status_idle"),
-				stop_reason: { type: event.stop_reason.type },
+				stop_reason:
+					event.stop_reason.type === "requires_action"
+						? {
+								type: event.stop_reason.type,
+								event_ids: event.event_ids === undefined ? [] : ToolUseIds.decode(event.event_ids),
+							}
+						: { type: event.stop_reason.type },
 				turn: event.turn,
 			}
 		case "session.error":
@@ -287,6 +318,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const confirmTool = yield* ConfirmToolDecision
 		const agents = yield* Agent
 		const environments = yield* Environment
 		const vaults = yield* Vault
@@ -605,17 +637,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const idempotencyKey = headers["idempotency-key"]
 					const seenEventIds = new Set<string>()
 					const prepared: Array<
-						| {
-								readonly type: "user.interrupt"
-								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
-						  }
-						| {
-								readonly type: "user.message"
-								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
-								readonly text: typeof MessageText.Type
-						  }
+						PreparedEvent & {
+							readonly eventId: ClientEventId | undefined
+							readonly commandId: string | undefined
+						}
 					> = []
 					for (const [index, event] of payload.events.entries()) {
 						if (event.id !== undefined) {
@@ -636,6 +661,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									: undefined
 						if (event.type === "user.interrupt") {
 							prepared.push({ type: "user.interrupt", eventId: event.id, commandId })
+							continue
+						}
+						if (event.type === "user.tool_confirmation") {
+							prepared.push({
+								type: "user.tool_confirmation",
+								eventId: event.id,
+								commandId,
+								tool_use_id: event.tool_use_id,
+								result: event.result,
+								deny_message: event.result === "deny" ? (event.deny_message ?? "") : "",
+							})
 							continue
 						}
 						const joined = event.content.map((block) => block.text).join("\n")
@@ -679,56 +715,81 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										)
 									})
 						const outcome =
-							item.type === "user.interrupt"
+							item.type === "user.tool_confirmation"
 								? yield* settled(
 										claimEventId.pipe(
 											Effect.andThen(
-												sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions),
-											),
-											Effect.flatMap((receipt) =>
-												receipt.events.some((event) => event._tag === "user.interrupt")
-													? Effect.succeed({
-															type: "user.interrupt" as const,
-															...(item.eventId === undefined ? {} : { id: item.eventId }),
-														})
-													: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
-											),
-										),
-									)
-								: yield* settled(
-										claimEventId.pipe(
-											Effect.andThen(
-												sessions.send(
-													new SendUserMessage({ session_id: id, text: item.text }),
+												confirmTool.send(
+													new ConfirmTool({
+														session_id: id,
+														confirmation_id: toolConfirmationId(id, item.tool_use_id),
+														tool_use_id: item.tool_use_id,
+														result: item.result,
+														deny_message: item.deny_message,
+													}),
 													sendOptions,
 												),
 											),
-											Effect.flatMap((receipt) => {
-												const committed = receipt.events.find(
-													(event) => event._tag === "user.message",
-												)
-												if (
-													committed?._tag !== "user.message" ||
-													committed.content[0]?.text !== item.text
-												) {
-													return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-												}
-												if (receipt.reply === undefined) {
-													return Effect.die(new Error("SendUserMessage receipt is missing reply."))
-												}
-												const queued = !receipt.events.some(
-													(event) => event._tag === "session.status_running",
-												)
-												return Effect.succeed({
-													type: "user.message" as const,
-													...(item.eventId === undefined ? {} : { id: item.eventId }),
-													turn: receipt.reply.turn,
-													queued,
-													content: [{ type: "text" as const, text: item.text }],
-												})
+											Effect.as({
+												type: "user.tool_confirmation" as const,
+												...(item.eventId === undefined ? {} : { id: item.eventId }),
+												tool_use_id: item.tool_use_id,
+												result: item.result,
 											}),
 										),
 									)
+								: item.type === "user.interrupt"
+									? yield* settled(
+											claimEventId.pipe(
+												Effect.andThen(
+													sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions),
+												),
+												Effect.flatMap((receipt) =>
+													receipt.events.some((event) => event._tag === "user.interrupt")
+														? Effect.succeed({
+																type: "user.interrupt" as const,
+																...(item.eventId === undefined ? {} : { id: item.eventId }),
+															})
+														: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+												),
+											),
+										)
+									: yield* settled(
+											claimEventId.pipe(
+												Effect.andThen(
+													sessions.send(
+														new SendUserMessage({ session_id: id, text: item.text }),
+														sendOptions,
+													),
+												),
+												Effect.flatMap((receipt) => {
+													const committed = receipt.events.find(
+														(event) => event._tag === "user.message",
+													)
+													if (
+														committed?._tag !== "user.message" ||
+														committed.content[0]?.text !== item.text
+													) {
+														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+													}
+													if (receipt.reply === undefined) {
+														return Effect.die(
+															new Error("SendUserMessage receipt is missing reply."),
+														)
+													}
+													const queued = !receipt.events.some(
+														(event) => event._tag === "session.status_running",
+													)
+													return Effect.succeed({
+														type: "user.message" as const,
+														...(item.eventId === undefined ? {} : { id: item.eventId }),
+														turn: receipt.reply.turn,
+														queued,
+														content: [{ type: "text" as const, text: item.text }],
+													})
+												}),
+											),
+										)
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure
 							const mapped = toApiError(error, yield* currentRequestId)

@@ -72,7 +72,7 @@ jobs:
   # The Z3 proofs in packages/domain take minutes, so they get a runner of their own.
   domain:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
         with:
