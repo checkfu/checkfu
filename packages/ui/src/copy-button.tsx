@@ -1,6 +1,8 @@
 import { CheckIcon, CopyIcon } from "lucide-react"
-import * as React from "react"
+import { useRef, useState } from "react"
+import type * as React from "react"
 import { Button } from "./button.tsx"
+import { useMountEffect } from "./use-mount-effect.ts"
 
 export function CopyButton({
 	value,
@@ -9,14 +11,9 @@ export function CopyButton({
 	readonly value: string
 	readonly label?: string
 }): React.JSX.Element {
-	const [copied, setCopied] = React.useState(false)
-	React.useEffect(() => {
-		if (!copied) {
-			return
-		}
-		const timer = setTimeout(() => setCopied(false), 1500)
-		return () => clearTimeout(timer)
-	}, [copied])
+	const [copied, setCopied] = useState(false)
+	const reset = useRef<ReturnType<typeof setTimeout>>(undefined)
+	useMountEffect(() => () => clearTimeout(reset.current))
 	return (
 		<Button
 			variant="ghost"
@@ -25,7 +22,11 @@ export function CopyButton({
 			aria-label={copied ? "Copied" : label}
 			onClick={() => {
 				void navigator.clipboard.writeText(value).then(
-					() => setCopied(true),
+					() => {
+						clearTimeout(reset.current)
+						setCopied(true)
+						reset.current = setTimeout(() => setCopied(false), 1500)
+					},
 					() => setCopied(false),
 				)
 			}}

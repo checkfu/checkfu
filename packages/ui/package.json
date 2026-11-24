@@ -22,7 +22,8 @@
 		"./page-header": "./src/page-header.tsx",
 		"./table": "./src/table.tsx",
 		"./theme": "./src/theme.tsx",
-		"./theme-script": "./src/theme-script.ts"
+		"./theme-script": "./src/theme-script.ts",
+		"./use-mount-effect": "./src/use-mount-effect.ts"
 	},
 	"scripts": {
 		"typecheck": "effect-tsgo tsc --noEmit",

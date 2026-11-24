@@ -7,9 +7,10 @@ import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-heade
 import { DataTable } from "@checkfu/ui/table"
 import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
-import * as React from "react"
+import { useState } from "react"
+import type * as React from "react"
 import { checkfu } from "../api.ts"
-import { lifecycle, Status } from "../status.tsx"
+import { LifecycleStatus } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 
 const list = getRouteApi("/_app/environments/")
@@ -62,7 +63,7 @@ export function EnvironmentsPage(): React.JSX.Element {
 					{
 						key: "status",
 						header: "Status",
-						cell: (environment) => <Status status={lifecycle(environment)} />,
+						cell: (environment) => <LifecycleStatus resource={environment} />,
 					},
 					{
 						key: "updated",
@@ -78,8 +79,8 @@ export function EnvironmentsPage(): React.JSX.Element {
 
 export function NewEnvironmentPage(): React.JSX.Element {
 	const navigate = useNavigate()
-	const [name, setName] = React.useState("")
-	const [description, setDescription] = React.useState("")
+	const [name, setName] = useState("")
+	const [description, setDescription] = useState("")
 	const create = useAction(async () => {
 		const environment = await checkfu.environments.create({
 			name: name.trim(),
@@ -132,7 +133,7 @@ export function EnvironmentPage(): React.JSX.Element {
 				title={environment.name}
 				id={environment.id}
 				breadcrumb={<Link to="/environments">Environments</Link>}
-				accessory={<Status status={lifecycle(environment)} />}
+				accessory={<LifecycleStatus resource={environment} />}
 				description={environment.description ?? undefined}
 				actions={
 					environment.archived_at === null ? (

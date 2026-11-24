@@ -1,7 +1,9 @@
 import { cn } from "@checkfu/ui/cn"
+import { useMountEffect } from "@checkfu/ui/use-mount-effect"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
-import * as React from "react"
+import { useState } from "react"
+import type * as React from "react"
 import { checkfu } from "../api.ts"
 
 type Status = "idle" | "running" | "terminated"
@@ -36,10 +38,10 @@ const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
 }
 
 export function useSessionEvents(sessionId: string, initialStatus: Status) {
-	const [events, setEvents] = React.useState<ReadonlyArray<JsonSessionEvent>>([])
-	const [status, setStatus] = React.useState(initialStatus)
-	const [error, setError] = React.useState<string>()
-	React.useEffect(() => {
+	const [events, setEvents] = useState<ReadonlyArray<JsonSessionEvent>>([])
+	const [status, setStatus] = useState(initialStatus)
+	const [error, setError] = useState<string>()
+	useMountEffect(() => {
 		const source = new EventSource(checkfu.sessions.streamUrl(sessionId))
 		let slowReconnect: ReturnType<typeof setTimeout> | undefined
 		const settle = () => {
@@ -78,7 +80,7 @@ export function useSessionEvents(sessionId: string, initialStatus: Status) {
 			settle()
 			source.close()
 		}
-	}, [sessionId])
+	})
 	return { events, status, error }
 }
 

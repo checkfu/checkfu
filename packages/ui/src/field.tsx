@@ -1,4 +1,5 @@
-import * as React from "react"
+import { cloneElement, useId } from "react"
+import type * as React from "react"
 import { cn } from "./cn.ts"
 
 type Control = React.ReactElement<{ id?: string; "aria-describedby"?: string }>
@@ -16,7 +17,7 @@ export function Field({
 	readonly className?: string
 	readonly children: Control
 }): React.JSX.Element {
-	const generated = React.useId()
+	const generated = useId()
 	const id = children.props.id ?? generated
 	const descriptionId = `${id}-description`
 	const errorId = `${id}-error`
@@ -32,7 +33,7 @@ export function Field({
 			<label htmlFor={id} className="text-sm font-medium">
 				{label}
 			</label>
-			{React.cloneElement(children, {
+			{cloneElement(children, {
 				id,
 				...(describedBy === "" ? {} : { "aria-describedby": describedBy }),
 			})}

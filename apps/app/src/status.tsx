@@ -19,5 +19,10 @@ export function Status({ status }: { readonly status: string }): React.JSX.Eleme
 	)
 }
 
-export const lifecycle = (resource: { readonly archived_at: string | null }): string =>
-	resource.archived_at === null ? "active" : "archived"
+export function LifecycleStatus({
+	resource,
+}: {
+	readonly resource: { readonly archived_at: string | null }
+}): React.JSX.Element {
+	return <Status status={resource.archived_at === null ? "active" : "archived"} />
+}

@@ -34,9 +34,8 @@ const call = async <T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 			? { method }
 			: { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
 	)
-	const text = await response.text()
-	const json: unknown = text === "" ? undefined : JSON.parse(text)
 	if (!response.ok) {
+		const json: unknown = await response.json().catch(() => undefined)
 		const message =
 			typeof json === "object" &&
 			json !== null &&
@@ -49,6 +48,8 @@ const call = async <T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 				: `Request failed with status ${response.status}.`
 		throw new ApiError(response.status, message)
 	}
+	const text = await response.text()
+	const json: unknown = text === "" ? undefined : JSON.parse(text)
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own JSON, typed by @checkfu/sdk
 	return json as T
 }
