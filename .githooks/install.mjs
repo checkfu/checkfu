@@ -14,7 +14,7 @@ exec "$hook" "$@"
 
 const git = (...args) => {
 	const result = spawnSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
-	return result.status === 0 ? result.stdout.trim() : undefined
+	return result.status === 0 ? result.stdout.replace(/\r?\n$/, "") : undefined
 }
 
 const read = (path) => {
@@ -28,9 +28,18 @@ const read = (path) => {
 const skip = (why) =>
 	process.stderr.write(`githooks: .githooks/pre-commit is not installed: ${why}\n`)
 
+const real = (path) => {
+	try {
+		return realpathSync(path)
+	} catch {
+		return undefined
+	}
+}
+
 const top = git("rev-parse", "--show-toplevel")
 const hooks = git("rev-parse", "--git-path", "hooks")
-if (top !== undefined && hooks !== undefined && realpathSync(top) === realpathSync(".")) {
+const root = top === undefined ? undefined : real(top)
+if (root !== undefined && hooks !== undefined && root === real(".")) {
 	const hook = resolve(hooks, "pre-commit")
 	if (git("config", "--get", "core.hooksPath") !== undefined) {
 		skip("core.hooksPath is set")

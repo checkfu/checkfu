@@ -1,5 +1,7 @@
-# Run by .githooks/pre-commit. lefthook sets unstaged changes aside while the checks
-# run, so they see what is committed; every command runs, so a commit lists every failure.
+# Run by .githooks/pre-commit for fast feedback; the required CI checks verify the commit.
+# Staged files are checked as staged: lefthook sets their unstaged changes aside. Everything
+# else the tools read, such as their config and the types of other files, comes from the
+# working tree. Every command runs, so a commit lists every failure.
 no_auto_install: true
 pre-commit:
   commands:
