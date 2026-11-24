@@ -66,7 +66,9 @@ export default {
 				return new Response(null, { status: 401 })
 			}
 			const verified = await verify(env, url.origin, key)
-			return new Response(null, { status: verified.ok ? 204 : 401 })
+			return new Response(null, {
+				status: verified.ok ? 204 : verified.status === 401 ? 401 : 502,
+			})
 		}
 		if (url.pathname === "/auth/sign-in" && request.method === "POST") {
 			return signIn(request, env, url.origin)

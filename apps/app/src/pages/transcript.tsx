@@ -5,6 +5,8 @@ import { checkfu, errorMessage } from "../api.ts"
 
 type Status = "idle" | "running" | "terminated"
 
+const RECONNECT_MS = 5000
+
 const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
 	switch (event.type) {
 		case "session.status_running":
@@ -24,22 +26,36 @@ export function useSessionEvents(sessionId: string, initialStatus: Status) {
 	const [error, setError] = React.useState<string>()
 	React.useEffect(() => {
 		const controller = new AbortController()
-		const read = async (): Promise<void> => {
-			const stream = await checkfu.sessions.events.stream(sessionId, undefined, {
-				signal: controller.signal,
-			})
-			for await (const event of stream) {
-				setEvents((seen) =>
-					seen.some((known) => known.seq === event.seq) ? seen : [...seen, event],
-				)
-				setStatus((current) => statusAfter(current, event))
+		let after: number | undefined
+		const follow = async (): Promise<void> => {
+			while (!controller.signal.aborted) {
+				try {
+					const stream = await checkfu.sessions.events.stream(
+						sessionId,
+						after === undefined ? undefined : { after },
+						{ signal: controller.signal },
+					)
+					for await (const event of stream) {
+						after = event.seq
+						setError(undefined)
+						setEvents((seen) =>
+							seen.some((known) => known.seq === event.seq) ? seen : [...seen, event],
+						)
+						setStatus((current) => statusAfter(current, event))
+					}
+					return
+				} catch (error_) {
+					if (controller.signal.aborted) {
+						return
+					}
+					setError(`${errorMessage(error_)} Reconnecting…`)
+					await new Promise((resolve) => {
+						setTimeout(resolve, RECONNECT_MS)
+					})
+				}
 			}
 		}
-		read().catch((error_: unknown) => {
-			if (!controller.signal.aborted) {
-				setError(errorMessage(error_))
-			}
-		})
+		void follow()
 		return () => controller.abort()
 	}, [sessionId])
 	return { events, status, error }
@@ -109,7 +125,7 @@ export function Transcript({
 	readonly events: ReadonlyArray<JsonSessionEvent>
 }): React.JSX.Element {
 	return (
-		<ol className="space-y-5" aria-live="polite">
+		<ol className="space-y-5">
 			{events.map((event) => (
 				<li key={event.seq}>
 					<Entry event={event} />

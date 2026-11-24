@@ -20,6 +20,9 @@ export const signedIn = async (): Promise<boolean> => {
 		return true
 	}
 	const response = await fetch("/auth/session")
+	if (response.status !== 401 && !response.ok) {
+		throw new Error(`Could not reach the API (${response.status}).`)
+	}
 	verified = response.ok
 	return verified
 }

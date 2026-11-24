@@ -238,7 +238,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					className="sticky bottom-0 space-y-2 bg-background pt-2 pb-4"
 					onSubmit={(event) => {
 						event.preventDefault()
-						if (text.trim() !== "") {
+						if (!send.pending && text.trim() !== "") {
 							send.run(text)
 						}
 					}}

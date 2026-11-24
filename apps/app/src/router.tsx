@@ -12,9 +12,16 @@ import { Layout, RouteError } from "./pages/layout.tsx"
 import { NewSessionPage, SessionPage, SessionsPage } from "./pages/sessions.tsx"
 import { SignInPage } from "./pages/sign-in.tsx"
 
-const PAGE = { limit: 100 } as const
+const PAGE = { limit: 100, order: "desc" } as const
 
-const root = createRootRoute({ component: Outlet, errorComponent: RouteError })
+const root = createRootRoute({
+	component: Outlet,
+	errorComponent: (props) => (
+		<main className="mx-auto max-w-xl p-8">
+			<RouteError {...props} />
+		</main>
+	),
+})
 
 const signIn = createRoute({ getParentRoute: () => root, path: "/sign-in", component: SignInPage })
 
@@ -27,6 +34,7 @@ const app = createRoute({
 		}
 	},
 	component: Layout,
+	errorComponent: RouteError,
 })
 
 const home = createRoute({
@@ -121,6 +129,7 @@ export const router = createRouter({
 		]),
 	]),
 	defaultPreload: "intent",
+	defaultPreloadStaleTime: 0,
 	scrollRestoration: true,
 })
 

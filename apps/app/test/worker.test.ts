@@ -102,6 +102,18 @@ describe("app worker", () => {
 		expect((await session()).status).toBe(401)
 	})
 
+	it("does not report an API outage as signed out", async () => {
+		const env = {
+			API: { fetch: () => Promise.resolve(new Response(null, { status: 503 })) },
+			ASSETS: { fetch: () => Promise.resolve(new Response("index")) },
+		}
+		const response = await worker.fetch(
+			new Request(`${ORIGIN}/auth/session`, { headers: { cookie: `checkfu_key=${KEY}` } }),
+			env,
+		)
+		expect(response.status).toBe(502)
+	})
+
 	it("clears the cookie on sign-out", async () => {
 		const { env } = makeEnv()
 		const response = await worker.fetch(

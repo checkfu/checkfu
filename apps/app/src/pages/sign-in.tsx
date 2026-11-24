@@ -19,6 +19,7 @@ export function SignInPage(): React.JSX.Element {
 	const submit = (event: React.FormEvent): void => {
 		event.preventDefault()
 		setPending(true)
+		setError(undefined)
 		void signIn(key).then((result) => {
 			setPending(false)
 			if (result === "ok") {

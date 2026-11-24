@@ -3,7 +3,7 @@ import { Button } from "@checkfu/ui/button"
 import { Callout } from "@checkfu/ui/callout"
 import { Logo } from "@checkfu/ui/logo"
 import { ThemeToggle } from "@checkfu/ui/theme"
-import { Link, Navigate, Outlet, useNavigate } from "@tanstack/react-router"
+import { Link, Navigate, Outlet, useNavigate, useRouter } from "@tanstack/react-router"
 import type { ErrorComponentProps } from "@tanstack/react-router"
 import { BotIcon, BoxIcon, LogOutIcon, MessagesSquareIcon } from "lucide-react"
 import type * as React from "react"
@@ -58,14 +58,15 @@ export function Layout(): React.JSX.Element {
 	)
 }
 
-export function RouteError({ error, reset }: ErrorComponentProps): React.JSX.Element {
+export function RouteError({ error }: ErrorComponentProps): React.JSX.Element {
+	const router = useRouter()
 	if (isSignedOut(error)) {
 		return <Navigate to="/sign-in" />
 	}
 	return (
-		<div className="mx-auto max-w-xl space-y-3 p-8">
+		<div className="space-y-3">
 			<Callout tone="error">{errorMessage(error)}</Callout>
-			<Button variant="outline" size="sm" onClick={reset}>
+			<Button variant="outline" size="sm" onClick={() => void router.invalidate()}>
 				Try again
 			</Button>
 		</div>
