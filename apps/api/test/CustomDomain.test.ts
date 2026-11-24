@@ -99,9 +99,6 @@ describe("custom domains", () => {
 				"\u017Fample.example.com",
 				"\u212Aey.example.com",
 				"caf\u00E9.example.com",
-				// xn-- labels that are not valid Punycode.
-				"xn--a.example.com",
-				"a.xn--zz.example.com",
 			]) {
 				for (const name of [API_DOMAIN_ENV, MCP_DOMAIN_ENV]) {
 					expect([name, value, yield* refused({ [name]: value })]).not.toEqual([

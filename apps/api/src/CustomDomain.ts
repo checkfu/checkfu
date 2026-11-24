@@ -16,11 +16,6 @@ export const Hostname = Schema.String.check(
 	Schema.isPattern(
 		/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{0,61}[A-Za-z0-9]$/,
 	),
-	// Alchemy reads the hostname through a URL and passes it on unchanged when that fails, as
-	// it does for an xn-- label that is not valid Punycode.
-	Schema.makeFilter((hostname) =>
-		URL.canParse(`https://${hostname}`) ? undefined : "Expected a hostname a URL can carry",
-	),
 )
 
 const Setting = Schema.Union([Schema.Literal(""), Schema.Literal(DETACH_ALL), Hostname])
