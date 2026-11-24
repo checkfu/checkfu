@@ -21,28 +21,7 @@
 		},
 		"@checkfu/cli#test": {
 			"dependsOn": ["^typecheck"],
-			"passThroughEnv": [
-				"CHECKFU_BUN_PATH",
-				"BUN_INSTALL",
-				"RUNNER_TOOL_CACHE",
-				"AGENT_TOOLSDIRECTORY",
-				"ASDF_DATA_DIR",
-				"MISE_DATA_DIR",
-				"XDG_DATA_HOME",
-				"PROTO_HOME",
-				"VOLTA_HOME",
-				"LOCALAPPDATA",
-				"ProgramFiles",
-				"ProgramFiles(x86)",
-				"ChocolateyInstall",
-				"ProgramData"
-			],
-			"inputs": [
-				"$TURBO_DEFAULT$",
-				"$TURBO_ROOT$/README.md",
-				"$TURBO_ROOT$/package.json",
-				"$TURBO_ROOT$/bun.lock"
-			]
+			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json", "$TURBO_ROOT$/bunfig.toml"]
 		}
 	}
 }

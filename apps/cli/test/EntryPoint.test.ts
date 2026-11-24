@@ -4,36 +4,24 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
-import { resolveBunExecutable } from "../bin/resolve-bun.mjs"
+import { cliProcessEnv } from "./helpers/ProcessEnv.ts"
 
 const cliRoot = fileURLToPath(new URL("..", import.meta.url))
 
-interface ProcessEnv {
-	[name: string]: string
-}
-
-const cleanEnv = (extra: ProcessEnv = {}): ProcessEnv => {
-	const env: ProcessEnv = {}
-	for (const [key, value] of Object.entries(process.env)) {
-		if (value !== undefined && !key.startsWith("CHECKFU_")) {
-			env[key] = value
-		}
-	}
-	return { ...env, ...extra }
-}
-
-describe.skipIf(process.platform === "win32")("the documented `bun checkfu` entry point", () => {
-	it("gets nothing from the checkout's .env when started through the `bun checkfu` script", () => {
-		// The documented entry point is a package script. Bun must not hand the script the
-		// directory's .env, or a key meant for one deployment would count as exported and
-		// be sent to whatever --base-url names.
+describe.skipIf(process.platform === "win32")("the CLI started from another project", () => {
+	it("gets nothing from that project's .env when a package script starts it with both flags", () => {
+		// Outside the checkout the CLI only starts with both flags. Bun must then keep that
+		// directory's .env out, or a key meant for one deployment would count as exported
+		// and be sent to whatever --base-url names.
 		const project = mkdtempSync(join(tmpdir(), "checkfu-script-"))
 		try {
 			writeFileSync(
 				join(project, "package.json"),
 				JSON.stringify({
 					name: "checkout",
-					scripts: { checkfu: `node ${JSON.stringify(join(cliRoot, "bin", "checkfu.mjs"))}` },
+					scripts: {
+						checkfu: `bun --no-env-file --config=${JSON.stringify(join(cliRoot, "bunfig.toml"))} ${JSON.stringify(join(cliRoot, "src", "main.ts"))}`,
+					},
 				}),
 			)
 			writeFileSync(
@@ -41,7 +29,7 @@ describe.skipIf(process.platform === "win32")("the documented `bun checkfu` entr
 				"CHECKFU_API_KEY=planted\nCHECKFU_URL=https://planted.example\n",
 			)
 			const call = spawnSync(
-				resolveBunExecutable() ?? "bun",
+				"bun",
 				[
 					"checkfu",
 					"--base-url",
@@ -53,7 +41,7 @@ describe.skipIf(process.platform === "win32")("the documented `bun checkfu` entr
 				],
 				{
 					cwd: project,
-					env: cleanEnv({ CHECKFU_CONFIG_DIR: join(project, "config") }),
+					env: cliProcessEnv({ CHECKFU_CONFIG_DIR: join(project, "config") }),
 					encoding: "utf8",
 					timeout: 60_000,
 				},

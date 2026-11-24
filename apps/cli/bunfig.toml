@@ -1,5 +1,10 @@
-# Explicit trusted Bun runtime configuration for the Checkfu CLI.
-# Passed via `--config=...` by the launcher and documented direct invocation
-# so caller working-directory bunfig.toml files cannot inject preloads or
-# override runtime behavior when credentials are exported.
+# Bun configuration for the CLI. The `checkfu` package script, which is how
+# `bun checkfu` runs, starts Bun with exactly
+#
+#   bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts
+#
+# and the CLI refuses any other start. `--no-env-file` keeps .env files out, and this
+# file replaces the bunfig of the directory Bun starts in, so that file's preloads are
+# not run. Anything added here, a preload above all, runs in every `bun checkfu`, with
+# the caller's exported credentials in reach.
 preload = []
