@@ -2139,4 +2139,79 @@ describe("turn engine", () => {
 			await backend.close()
 		}
 	})
+	it("makes a recovery probe wait while the same turn's admission waits for a predecessor to drain", async () => {
+		let releaseFirst: () => void = () => undefined
+		const firstHeld = new Promise<void>((resolve) => {
+			releaseFirst = resolve
+		})
+		const prompts: Array<string> = []
+		const real = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model, context) => {
+				const prompt = extractLastUserText(context)
+				prompts.push(prompt)
+				if (prompt === "first") {
+					await firstHeld
+				}
+				return makeAssistantReply(model, null, `Echo ${prompt}`, 1, 1)
+			}),
+		)
+		let releaseDrain: () => void = () => undefined
+		const drainHeld = new Promise<void>((resolve) => {
+			releaseDrain = resolve
+		})
+		let draining = false
+		// Admission of turn 2 lets go of the lock to wait for turn 1; this holds it in that gap.
+		const backend: PiDurableBackend = {
+			...real,
+			abort: () => Effect.succeed(true),
+			wait: async (operationId, signal) => {
+				if (operationId === "turn:1") {
+					draining = true
+					await drainHeld
+				}
+				return real.wait(operationId, signal)
+			},
+		}
+		const turn = (number: number, text: string): PiTurnRequest => ({
+			operationId: `turn:${number}`,
+			turn: number,
+			provider: "openai",
+			modelId: "gpt-4o-mini",
+			system: null,
+			text,
+		})
+		const until = async (condition: () => boolean) => {
+			while (!condition()) {
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, 5)
+				})
+			}
+		}
+		try {
+			const first = Effect.runPromise(runPiDurableTurn(real, turn(1, "first")))
+			await until(() => prompts.length === 1)
+			const second = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second")))
+			await until(() => draining)
+			let probed = false
+			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:2")).then(
+				(outcome) => {
+					probed = true
+					return outcome
+				},
+			)
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 30)
+			})
+			expect(probed).toBe(false)
+			releaseFirst()
+			releaseDrain()
+			await first
+			expect(await second).toMatchObject({ ok: true, reply: { text: "Echo second" } })
+			expect(await recovery).toMatchObject({ ok: true, reply: { text: "Echo second" } })
+		} finally {
+			releaseFirst()
+			releaseDrain()
+			await real.close()
+		}
+	})
 })

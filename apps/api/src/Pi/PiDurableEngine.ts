@@ -4,6 +4,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai"
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { AgentChange, EntryId, Harness, Storage } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
+import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -179,7 +180,45 @@ export const abortPiDurableTurn = (
 		return yield* Fiber.join(watched)
 	})
 
+// Admissions in progress in this session object, by operation. Admission lets go of the lock
+// while a predecessor drains, so a recovery probe for the same operation waits for it to end
+// instead of reporting the operation absent in that gap.
+const admitting = new WeakMap<PiDurableBackend, Map<string, Deferred.Deferred<void>>>()
+
+const admissionsOf = (backend: PiDurableBackend) => {
+	const existing = admitting.get(backend)
+	if (existing !== undefined) {
+		return existing
+	}
+	const created = new Map<string, Deferred.Deferred<void>>()
+	admitting.set(backend, created)
+	return created
+}
+
 const admitPiTurn = (
+	backend: PiDurableBackend,
+	request: PiTurnRequest,
+): Effect.Effect<boolean | "missing_key"> =>
+	Effect.acquireUseRelease(
+		Effect.sync(() => {
+			const done = Deferred.makeUnsafe<void>()
+			admissionsOf(backend).set(request.operationId, done)
+			return done
+		}),
+		() => admitPiTurnUnderWay(backend, request),
+		(done) =>
+			Effect.andThen(
+				Effect.sync(() => {
+					const admissions = admissionsOf(backend)
+					if (admissions.get(request.operationId) === done) {
+						admissions.delete(request.operationId)
+					}
+				}),
+				Deferred.succeed(done, undefined),
+			),
+	)
+
+const admitPiTurnUnderWay = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
 ): Effect.Effect<boolean | "missing_key"> => {
@@ -307,6 +346,10 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	backend: PiDurableBackend,
 	operationId: string,
 ): Effect.fn.Return<PiTurnOutcome | null> {
+	const underWay = admissionsOf(backend).get(operationId)
+	if (underWay !== undefined) {
+		yield* Deferred.await(underWay)
+	}
 	const probe = yield* backend.withLock(
 		Effect.promise(async () => {
 			if (await backend.hasSubmission(operationId)) {

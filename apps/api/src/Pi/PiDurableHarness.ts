@@ -180,8 +180,13 @@ export const PiDurableHarnessLive = boundedHarness(
 					// A turn is submitted under its operation id, so sending it again after a
 					// lost reply joins the turn already there instead of starting another. The
 					// last attempt has no next one to join it, so Pi is asked once, read-only.
-					const { baseDelay } = yield* HarnessLimits
-					const outcome = yield* withRetry(executor.runTurn(conversation, request)).pipe(
+					const { attempts, baseDelay } = yield* HarnessLimits
+					// With no attempts allowed the turn is never submitted; Pi is only asked.
+					const submitted =
+						attempts > 0
+							? withRetry(executor.runTurn(conversation, request))
+							: Effect.fail(new HarnessCallFailed({ cause: "No submission attempts are allowed" }))
+					const outcome = yield* submitted.pipe(
 						Effect.catchTag("HarnessCallFailed", (failed) =>
 							executor.recoverTurn(conversation, operationId).pipe(
 								Effect.delay(baseDelay),
