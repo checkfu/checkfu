@@ -1,6 +1,8 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
+import type { InfiniteData } from "@tanstack/react-query"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import { checkfu } from "./api.ts"
+import type { EventPage } from "./api.ts"
 
 export const agentsPage = (after?: string) =>
 	queryOptions({
@@ -46,18 +48,30 @@ export const sessionsPage = (after?: string) =>
 export const sessionQuery = (id: string) =>
 	queryOptions({ queryKey: ["sessions", "one", id], queryFn: () => checkfu.sessions.retrieve(id) })
 
-export const sessionHistory = (id: string) =>
+export const transcriptQuery = (id: string) =>
 	infiniteQueryOptions({
-		queryKey: ["sessions", "history", id],
+		queryKey: ["transcripts", id],
 		queryFn: ({ pageParam }) => checkfu.sessions.events(id, pageParam),
 		initialPageParam: undefined as number | undefined,
 		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 
-export const sessionLive = (id: string) =>
-	queryOptions({
-		queryKey: ["sessions", "live", id],
-		queryFn: (): ReadonlyArray<JsonSessionEvent> => [],
-		staleTime: Number.POSITIVE_INFINITY,
-	})
+export type Transcript = InfiniteData<EventPage, unknown>
+
+export const eventsOf = (transcript: Transcript): ReadonlyArray<JsonSessionEvent> =>
+	transcript.pages.toReversed().flatMap((page) => page.data.toReversed())
+
+export const withStreamed = (transcript: Transcript, event: JsonSessionEvent): Transcript => {
+	const [newest, ...older] = transcript.pages
+	if (newest === undefined || (newest.data[0]?.seq ?? 0) >= event.seq) {
+		return transcript
+	}
+	return { ...transcript, pages: [{ ...newest, data: [event, ...newest.data] }, ...older] }
+}
+
+export const isFinal = (
+	session: { readonly archived_at: string | null },
+	events: ReadonlyArray<JsonSessionEvent>,
+): boolean =>
+	session.archived_at !== null || events.some((event) => event.type === "session.archived")

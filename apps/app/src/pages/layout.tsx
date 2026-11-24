@@ -3,6 +3,7 @@ import { Button } from "@checkfu/ui/button"
 import { Callout } from "@checkfu/ui/callout"
 import { Logo } from "@checkfu/ui/logo"
 import { ThemeToggle } from "@checkfu/ui/theme"
+import { useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useNavigate, useRouter } from "@tanstack/react-router"
 import type { ErrorComponentProps } from "@tanstack/react-router"
 import { BotIcon, BoxIcon, LogOutIcon, MessagesSquareIcon } from "lucide-react"
@@ -12,10 +13,12 @@ import { useAction } from "../use-action.ts"
 
 export function Layout(): React.JSX.Element {
 	const navigate = useNavigate()
+	const queryClient = useQueryClient()
 	const signOutAction = useAction(async () => {
 		await signOut()
+		queryClient.clear()
 		await navigate({ to: "/sign-in" })
-	}, [])
+	})
 	return (
 		<AppShell
 			brand={

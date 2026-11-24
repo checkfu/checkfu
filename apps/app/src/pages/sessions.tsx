@@ -167,9 +167,13 @@ export function NewSessionPage(): React.JSX.Element {
 	const [chosenEnvironment, setEnvironmentId] = useState<string>()
 	const agentId = selectedOrFirst(agents, chosenAgent)
 	const environmentId = selectedOrFirst(environments, chosenEnvironment)
+	const ready = agentId !== "" && environmentId !== ""
 	const [title, setTitle] = useState("")
 	const startKey = useSubmissionKey()
 	const start = useAction(async () => {
+		if (!ready) {
+			return
+		}
 		const body = {
 			agent: agentId,
 			environment_id: environmentId,
@@ -223,7 +227,7 @@ export function NewSessionPage(): React.JSX.Element {
 						<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 					</Field>
 					{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
-					<Button type="submit" disabled={start.pending}>
+					<Button type="submit" disabled={start.pending || !ready}>
 						Start session
 					</Button>
 				</form>
@@ -241,8 +245,7 @@ export function SessionPage(): React.JSX.Element {
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
 	const { events, status, turn, error, earlier } = useSessionEvents({
-		sessionId: session.id,
-		snapshot: session,
+		session,
 		onTransition: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
 	const [text, setText] = useState("")

@@ -5,12 +5,15 @@ import { errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
 
 export function useAction<Args extends ReadonlyArray<unknown>>(
 	action: (...args: Args) => Promise<void>,
-	invalidates: QueryKey,
+	invalidates?: QueryKey,
 ) {
 	const queryClient = useQueryClient()
 	const mutation = useMutation({
 		mutationFn: (args: Args) => action(...args),
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: invalidates }),
+		onSuccess: () =>
+			invalidates === undefined
+				? undefined
+				: queryClient.invalidateQueries({ queryKey: invalidates }),
 	})
 	return {
 		run: (...args: Args): void => mutation.mutate(args),
