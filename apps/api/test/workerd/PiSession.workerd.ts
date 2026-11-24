@@ -852,6 +852,49 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(basic)
 	}, 180_000)
 
+	it("checks out a commit behind the branch tip without fetching the history before it", async () => {
+		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
+		const tip = fakeGitHub.git("acme/api", "rev-parse", "main").trim()
+		const pinned = fakeGitHub.git("acme/api", "commit-tree", tree, "-p", tip, "-m", "Pinned").trim()
+		const later = fakeGitHub
+			.git("acme/api", "commit-tree", tree, "-p", pinned, "-m", "Later")
+			.trim()
+		fakeGitHub.git("acme/api", "update-ref", "refs/heads/main", later)
+		const repo = "/workspace/pinned"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["log", "--format=%H %s"], cwd: repo },
+					}
+				: { kind: "reply", text: `Log: ${req.toolOutputs[0] ?? ""}` },
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					mount_path: repo,
+					authorization_token: TEST_GITHUB_TOKEN,
+					checkout: { type: "commit", sha: pinned },
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [{ type: "user.message", content: [{ type: "text", text: "Show the log." }] }],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 60_000)
+		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe(`Log: ${pinned} Pinned\n`)
+	}, 120_000)
+
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
 		const queuedPrompt = "queued-after-interrupt"

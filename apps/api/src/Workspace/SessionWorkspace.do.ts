@@ -86,20 +86,14 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 
 				const clone = async (repository: RepositoryMount): Promise<void> => {
 					await fs.rm(repository.mount_path, { recursive: true, force: true })
-					if (repository.checkout?.type === "commit") {
-						await git.clone({
-							url: repository.url,
-							dir: repository.mount_path,
-							singleBranch: false,
-						})
-						await git.checkout({ dir: repository.mount_path, ref: repository.checkout.sha })
-						return
-					}
+					const { checkout } = repository
 					await git.clone({
 						url: repository.url,
 						dir: repository.mount_path,
 						depth: 1,
-						...(repository.checkout === null ? {} : { ref: repository.checkout.name }),
+						...(checkout === null
+							? {}
+							: { ref: checkout.type === "commit" ? checkout.sha : checkout.name }),
 					})
 				}
 

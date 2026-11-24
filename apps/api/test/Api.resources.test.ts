@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { makeApiHandler } from "../src/Http/Router.ts"
-import { createRepositoryFetch } from "../src/Workspace/Repositories.ts"
+import { MAX_GIT_RESPONSE_BYTES, createRepositoryFetch } from "../src/Workspace/Repositories.ts"
 import {
 	AUTH_HEADERS,
 	extractSystemText,
@@ -525,5 +525,40 @@ describe("repository fetch", () => {
 		expect(calls.map((call) => call.url)).toEqual([
 			"http://127.0.0.1:4010/acme/api/info/refs?service=git-upload-pack",
 		])
+	})
+
+	it("passes a response up to the size a workspace can hold, and fails one past it", async () => {
+		const respondWith = (bytes: number) =>
+			createRepositoryFetch({
+				repositories: () => mounted,
+				token: () => undefined,
+				baseUrl: null,
+				fetch: () => {
+					const chunk = new Uint8Array(1024 * 1024)
+					let sent = 0
+					return Promise.resolve(
+						new Response(
+							new ReadableStream<Uint8Array>({
+								pull: (controller) => {
+									const size = Math.min(chunk.byteLength, bytes - sent)
+									if (size === 0) {
+										controller.close()
+										return
+									}
+									sent += size
+									controller.enqueue(chunk.subarray(0, size))
+								},
+							}),
+							{ status: 200, headers: { "content-type": "application/x-git-upload-pack-result" } },
+						),
+					)
+				},
+			})("https://github.com/acme/api/git-upload-pack", { method: "POST" })
+		const atLimit = await respondWith(MAX_GIT_RESPONSE_BYTES)
+		expect(atLimit.headers.get("content-type")).toBe("application/x-git-upload-pack-result")
+		expect((await atLimit.arrayBuffer()).byteLength).toBe(MAX_GIT_RESPONSE_BYTES)
+		await expect((await respondWith(MAX_GIT_RESPONSE_BYTES + 1)).arrayBuffer()).rejects.toThrow(
+			"more than a workspace can take in one git transfer",
+		)
 	})
 })

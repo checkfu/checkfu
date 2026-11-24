@@ -10,6 +10,33 @@ export const githubBaseUrl = localDevBaseUrl(GITHUB_BASE_URL_ENV)
 
 const NOT_MOUNTED = "Only the repositories mounted in this session can be reached."
 
+// isomorphic-git holds a whole pack in memory while it indexes and checks it out, a few times
+// over: a 13 MB pack needed more than 24 MB of heap besides the pack itself. The isolate has 128 MB.
+export const MAX_GIT_RESPONSE_BYTES = 8 * 1024 * 1024
+const TOO_LARGE = `GitHub sent more than ${MAX_GIT_RESPONSE_BYTES / 1024 / 1024} MiB in one response, more than a workspace can take in one git transfer.`
+
+const capped = (response: Response): Response => {
+	if (response.body === null) {
+		return response
+	}
+	let received = 0
+	return new Response(
+		response.body.pipeThrough(
+			new TransformStream<Uint8Array, Uint8Array>({
+				transform: (chunk, controller) => {
+					received += chunk.byteLength
+					if (received > MAX_GIT_RESPONSE_BYTES) {
+						controller.error(new Error(TOO_LARGE))
+						return
+					}
+					controller.enqueue(chunk)
+				},
+			}),
+		),
+		response,
+	)
+}
+
 const hrefOf = (input: Parameters<typeof fetch>[0]): string | null => {
 	const raw = typeof input === "string" ? input : "href" in input ? input.href : null
 	if (raw === null) {
@@ -52,8 +79,10 @@ export const createRepositoryFetch =
 		if (token !== undefined) {
 			headers.set("authorization", `Basic ${btoa(`x-access-token:${token}`)}`)
 		}
-		return options.fetch(
-			options.baseUrl === null ? href : `${options.baseUrl}${href.slice(GITHUB_ORIGIN.length)}`,
-			{ ...init, headers, redirect: "manual" },
+		return capped(
+			await options.fetch(
+				options.baseUrl === null ? href : `${options.baseUrl}${href.slice(GITHUB_ORIGIN.length)}`,
+				{ ...init, headers, redirect: "manual" },
+			),
 		)
 	}
