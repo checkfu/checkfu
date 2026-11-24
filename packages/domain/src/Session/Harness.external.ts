@@ -83,6 +83,8 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			session_id: SessionId,
 			resource_id: SessionResourceId,
 			authorization_token: RepositoryToken,
+			// False keeps a token already stored: a retried create must not undo a later rotation.
+			replace: Schema.Boolean,
 		},
 		error: HarnessUnavailable,
 	},
@@ -181,6 +183,7 @@ export const boundedHarness = <R = never>(
 				readonly session_id: SessionId
 				readonly resource_id: SessionResourceId
 				readonly authorization_token: RepositoryToken
+				readonly replace: boolean
 			}) => Effect.Effect<void, HarnessUnavailable>
 			readonly discardWorkspace: (args: { readonly session_id: SessionId }) => Effect.Effect<void>
 		},

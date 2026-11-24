@@ -43,9 +43,9 @@ const PiHarnessExecutorLive = Layer.effect(
 				harnessCall(
 					Effect.suspend(() => harness.prepareWorkspace(sessionId, token, repositories)),
 				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
-			storeRepositoryToken: (sessionId, resourceId, token) =>
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
 				harnessCall(
-					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token)),
+					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
 				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(

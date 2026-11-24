@@ -55,7 +55,7 @@ export const PiHarnessCalls = {
 		result: WorkspacePreparation,
 	},
 	storeRepositoryToken: {
-		args: Schema.Tuple([Schema.String, Schema.String, Schema.String]),
+		args: Schema.Tuple([Schema.String, Schema.String, Schema.String, Schema.Boolean]),
 		result: Schema.Void,
 	},
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },

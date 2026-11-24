@@ -209,9 +209,14 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 								)
 							)
 						}),
-					storeRepositoryToken: (resourceId: string, token: string): Effect.Effect<void> =>
+					storeRepositoryToken: (
+						resourceId: string,
+						token: string,
+						replace: boolean,
+					): Effect.Effect<void> =>
 						Effect.sync(() => {
-							if (storage.kv.get(DISCARDED) !== true) {
+							const stored = storage.kv.get<string>(tokenKey(resourceId)) !== undefined
+							if (storage.kv.get(DISCARDED) !== true && (replace || !stored)) {
 								storage.kv.put(tokenKey(resourceId), token)
 							}
 						}),

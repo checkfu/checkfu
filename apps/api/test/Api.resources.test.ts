@@ -147,7 +147,7 @@ describe("Session resources", () => {
 		}
 	})
 
-	it("gives a retried create the same resources and stores the token again", async () => {
+	it("gives a retried create the same resources, and stores its token only where none is stored", async () => {
 		const { layer, closeAll, repositoryTokens } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
 		)
@@ -173,12 +173,27 @@ describe("Session resources", () => {
 							},
 						})
 					const first = yield* json<SessionBody>(yield* create(TOKEN))
-					const second = yield* json<SessionBody>(yield* create("ghp_rotated_before_retry"))
+					const key = `${first.id}/${first.resources[0]?.id}`
+					const second = yield* json<SessionBody>(yield* create("ghp_sent_with_a_retry"))
 					expect(second.id).toBe(first.id)
 					expect(second.resources).toEqual(first.resources)
-					expect([...repositoryTokens]).toEqual([
-						[`${first.id}/${first.resources[0]?.id}`, "ghp_rotated_before_retry"],
-					])
+					expect(repositoryTokens.get(key)).toBe(TOKEN)
+
+					// A rotation replaces the token, and a late retry of the create does not undo it.
+					const rotated = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${first.id}/resources/${first.resources[0]?.id}`,
+						headers: AUTH_HEADERS,
+						body: { authorization_token: "ghp_rotated" },
+					})
+					expect(rotated.status).toBe(200)
+					yield* create("ghp_from_a_late_retry")
+					expect(repositoryTokens.get(key)).toBe("ghp_rotated")
+
+					// A create whose token never reached the workspace stores it when retried.
+					repositoryTokens.delete(key)
+					yield* create("ghp_after_a_failed_store")
+					expect(repositoryTokens.get(key)).toBe("ghp_after_a_failed_store")
 
 					const changed = yield* sendRequest(apiFetch, {
 						method: "POST",

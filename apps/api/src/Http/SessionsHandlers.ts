@@ -300,12 +300,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			sessionId: SessionId,
 			resourceId: SessionResourceId,
 			authorization_token: RepositoryToken,
+			replace: boolean,
 		) =>
 			harness
 				.storeRepositoryToken({
 					session_id: sessionId,
 					resource_id: resourceId,
 					authorization_token,
+					replace,
 				})
 				.pipe(
 					Effect.catchTag("HarnessUnavailable", () =>
@@ -427,12 +429,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						.pipe(
 							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
 						)
-					// The token goes straight to the session's workspace: no command carries it.
+					// The token goes straight to the session's workspace: no command carries it. A retried
+					// create stores it only where none is stored yet, so it cannot undo a later rotation.
 					yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
 						return resource.authorization_token === undefined || stored === undefined
 							? Effect.void
-							: storeToken(id, stored.id, resource.authorization_token)
+							: storeToken(id, stored.id, resource.authorization_token, false)
 					})
 					const pinnedVersion = receipt.reply.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
@@ -529,7 +532,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (session.status === "terminated") {
 						return yield* reject(409, `Session ${session.id} is terminated.`)
 					}
-					yield* storeToken(session.id, resource.id, payload.authorization_token)
+					yield* storeToken(session.id, resource.id, payload.authorization_token, true)
 					const [item] = serializeResources([resource], session.created_at)
 					return yield* present(Option.fromNullishOr(item), 404, "Resource not found.")
 				}).pipe(handled),

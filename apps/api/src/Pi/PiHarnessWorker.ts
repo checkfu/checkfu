@@ -34,8 +34,8 @@ export default PiHarnessWorker.make(
 			enterWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).enter(token)),
 			prepareWorkspace: (sessionId, token, repositories) =>
 				Effect.orDie(workspace(sessionId).prepare(token, repositories)),
-			storeRepositoryToken: (sessionId, resourceId, token) =>
-				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token)),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token, replace)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
 		})
 	}).pipe(

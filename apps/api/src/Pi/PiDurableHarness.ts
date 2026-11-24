@@ -65,6 +65,7 @@ export interface WorkspaceExecutorService {
 		sessionId: string,
 		resourceId: string,
 		token: string,
+		replace: boolean,
 	) => Effect.Effect<void, HarnessCallFailed>
 	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
 }
@@ -319,6 +320,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						args.session_id,
 						args.resource_id,
 						Redacted.value(args.authorization_token),
+						args.replace,
 					),
 				).pipe(
 					Effect.tapError((error) =>

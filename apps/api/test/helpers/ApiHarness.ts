@@ -321,9 +321,12 @@ export const makePiDurableTestLayer = (
 					preparedWorkspaces.push({ sessionId, repositories })
 					return preparations.shift() ?? { ok: true }
 				}),
-			storeRepositoryToken: (sessionId, resourceId, token) =>
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
 				Effect.sync(() => {
-					repositoryTokens.set(`${sessionId}/${resourceId}`, token)
+					const key = `${sessionId}/${resourceId}`
+					if (replace || !repositoryTokens.has(key)) {
+						repositoryTokens.set(key, token)
+					}
 				}),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
