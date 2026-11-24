@@ -676,6 +676,26 @@ describe("PiSession real Durable Object under workerd", () => {
 		])
 	}, 60_000)
 
+	it("gives a new session an empty working directory it can list before writing anything", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			return output === undefined
+				? { kind: "tool_call", name: "ls", arguments: { path: "/workspace" } }
+				: { kind: "reply", text: `Listing: ${output}` }
+		})
+		const session = await createSession()
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [{ type: "user.message", content: [{ type: "text", text: "What is here?" }] }],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
+	}, 60_000)
+
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
 		const queuedPrompt = "queued-after-interrupt"

@@ -7,8 +7,10 @@ export type WorkspaceToolResult = Pick<PiToolResult, "content" | "isError">
 
 export const WORKSPACE_EXTENSION = "checkfu.workspace"
 
-// A cut-off call may run again only when running it twice leaves the same files.
-const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep", "write", "delete"])
+// Only a call that changes nothing may run again after it was cut off. Pi runs the calls of one
+// round in parallel, so a write or a delete run a second time can undo what a sibling call did
+// after it; the model is told such a call was interrupted instead.
+const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 
 const WORKSPACE_PROMPT =
 	"You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths."
