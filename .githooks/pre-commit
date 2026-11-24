@@ -1,17 +1,24 @@
 #!/bin/sh
 # Lint and format-check the files this commit adds or changes, with the same flags
 # as `bun run lint` and `bun run format:check`. Both run, so one commit lists every
-# failure. Lint and format read the working tree.
+# failure. The tools read the working tree, so a file with unstaged changes is
+# refused: what they checked would not be what is committed.
 set -u
 git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
 staged() {
 	git diff --cached --name-only --diff-filter=ACMR -z -- "$@"
 }
+partial=$(staged | xargs -0 -r git diff --name-only --)
+if [ -n "$partial" ]; then
+	echo "pre-commit: these staged files also have unstaged changes:" >&2
+	echo "$partial" | sed 's/^/  /' >&2
+	echo "Stage them in full, or set the unstaged part aside, and commit again." >&2
+	exit 1
+fi
 failed=0
 staged '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs' |
 	xargs -0 -r bun x effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings \
 		--report-unused-disable-directives --no-error-on-unmatched-pattern || failed=1
-staged '*.ts' '*.tsx' '*.mts' '*.cts' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.json' '*.jsonc' '*.md' '*.yml' '*.yaml' |
-	xargs -0 -r bun x oxfmt --check --no-error-on-unmatched-pattern ||
+staged | xargs -0 -r bun x oxfmt --check --no-error-on-unmatched-pattern ||
 	{ echo "pre-commit: run 'bun run format' and stage the result" >&2; failed=1; }
 exit $failed

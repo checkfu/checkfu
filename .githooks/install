@@ -1,0 +1,27 @@
+#!/bin/sh
+# Run by `bun install`. Adds a pre-commit hook that runs the checked-out
+# .githooks/pre-commit, and changes nothing else: outside a Git checkout of this
+# repository, with core.hooksPath set, or with a pre-commit hook already there,
+# it leaves things as they are.
+command -v git >/dev/null 2>&1 || exit 0
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ "$top" = "$(pwd -P)" ] || exit 0
+if [ -n "$(git config --get core.hooksPath)" ]; then
+	echo "githooks: core.hooksPath is set, so .githooks/pre-commit is not installed" >&2
+	exit 0
+fi
+hook="$(git rev-parse --git-path hooks)/pre-commit"
+marker="checkfu .githooks shim"
+if [ -e "$hook" ] && ! grep -q "$marker" "$hook"; then
+	echo "githooks: $hook already exists, so .githooks/pre-commit is not installed" >&2
+	exit 0
+fi
+mkdir -p "$(dirname "$hook")"
+cat >"$hook" <<SHIM
+#!/bin/sh
+# $marker: runs the pre-commit hook of whichever worktree commits.
+hook="\$(git rev-parse --show-toplevel)/.githooks/pre-commit"
+[ -x "\$hook" ] || exit 0
+exec "\$hook" "\$@"
+SHIM
+chmod +x "$hook"
