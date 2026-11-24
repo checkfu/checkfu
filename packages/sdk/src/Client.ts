@@ -9,16 +9,21 @@ import type * as Redacted from "effect/Redacted"
 import { isPendingResource, makeCheckfuHttpApiClientWith } from "./Api.ts"
 import type {
 	Agent,
+	Artifact,
+	ArtifactVersion,
 	Automation,
 	CheckfuHttpApiClient,
 	Environment,
 	PendingAgent,
+	PendingArtifact,
+	PendingArtifactVersion,
 	PendingAutomation,
 	PendingEnvironment,
 	PendingSession,
 	Session,
 } from "./Api.ts"
-import type { CheckfuConfigError, CheckfuSdkError } from "./Errors.ts"
+import { CheckfuConfigError } from "./Errors.ts"
+import type { CheckfuSdkError } from "./Errors.ts"
 import { EffectResources } from "./generated/Resources.ts"
 import type { Op } from "./generated/Resources.ts"
 import { normalizeMaxRetries, pollPending, resolveTimeout } from "./Runtime.ts"
@@ -105,6 +110,14 @@ export interface WaitForPendingMethod {
 		result: Automation | PendingAutomation,
 		options?: WaitForPendingOptions<Automation>,
 	): Effect.Effect<Automation, CheckfuSdkError>
+	(
+		result: Artifact | PendingArtifact,
+		options?: WaitForPendingOptions<Artifact>,
+	): Effect.Effect<Artifact, CheckfuSdkError>
+	(
+		result: ArtifactVersion | PendingArtifactVersion,
+		options?: WaitForPendingOptions<ArtifactVersion>,
+	): Effect.Effect<ArtifactVersion, CheckfuSdkError>
 }
 
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
@@ -155,6 +168,14 @@ export class CheckfuSdkClient extends EffectResources {
 		options?: WaitForPendingOptions<Automation>,
 	): Effect.Effect<Automation, CheckfuSdkError>
 	waitForPending(
+		result: Artifact | PendingArtifact,
+		options?: WaitForPendingOptions<Artifact>,
+	): Effect.Effect<Artifact, CheckfuSdkError>
+	waitForPending(
+		result: ArtifactVersion | PendingArtifactVersion,
+		options?: WaitForPendingOptions<ArtifactVersion>,
+	): Effect.Effect<ArtifactVersion, CheckfuSdkError>
+	waitForPending(
 		result:
 			| Agent
 			| PendingAgent
@@ -163,9 +184,18 @@ export class CheckfuSdkClient extends EffectResources {
 			| Session
 			| PendingSession
 			| Automation
-			| PendingAutomation,
-		options?: WaitForPendingOptions<Agent | Environment | Session | Automation>,
-	): Effect.Effect<Agent | Environment | Session | Automation, CheckfuSdkError> {
+			| PendingAutomation
+			| Artifact
+			| PendingArtifact
+			| ArtifactVersion
+			| PendingArtifactVersion,
+		options?: WaitForPendingOptions<
+			Agent | Environment | Session | Automation | Artifact | ArtifactVersion
+		>,
+	): Effect.Effect<
+		Agent | Environment | Session | Automation | Artifact | ArtifactVersion,
+		CheckfuSdkError
+	> {
 		if (!isPendingResource(result)) {
 			return Effect.succeed(result)
 		}
@@ -197,6 +227,37 @@ export class CheckfuSdkClient extends EffectResources {
 					...baseOpts,
 					...(until === undefined ? {} : { until: (resource: Automation) => until(resource) }),
 				})
+			case "artifact":
+				return pollPending(result, (id, opts) => this.artifacts.retrieve(id, opts), {
+					...baseOpts,
+					...(until === undefined ? {} : { until: (resource: Artifact) => until(resource) }),
+				})
+			case "artifact_version":
+				if (!Number.isInteger(result.version) || result.version < 1) {
+					return Effect.fail(
+						new CheckfuConfigError({
+							message: `waitForPending for pending artifact_version "${result.id}" needs the version it committed.`,
+						}),
+					)
+				}
+				return pollPending(
+					result,
+					(id, opts) => this.artifacts.versions.retrieve(id, result.version, opts),
+					{
+						...baseOpts,
+						...(until === undefined
+							? {}
+							: { until: (resource: ArtifactVersion) => until(resource) }),
+					},
+				)
+			default: {
+				const unknown: { readonly type: unknown } = result
+				return Effect.fail(
+					new CheckfuConfigError({
+						message: `waitForPending cannot wait for a pending ${String(unknown.type)}.`,
+					}),
+				)
+			}
 		}
 	}
 }

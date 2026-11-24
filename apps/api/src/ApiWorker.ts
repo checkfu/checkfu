@@ -10,6 +10,8 @@ import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
+import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
+import { ARTIFACT_RECONCILE_CRON, reconcileArtifactWrites } from "./Artifacts/ArtifactReconcile.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
@@ -49,6 +51,10 @@ const CheckfuLive = Checkfu.layer(
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
+	ArtifactStoreR2.pipe(
+		Layer.provide(ArtifactObjectsLive),
+		Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
+	),
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
@@ -83,6 +89,9 @@ export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 			return yield* Effect.die(new Error("ApiWorker requires an owning instance Scope."))
 		}
 		const services = yield* Layer.buildWithScope(ApiWorkerLive, scope)
+		yield* Cloudflare.Workers.cron(ARTIFACT_RECONCILE_CRON, () =>
+			reconcileArtifactWrites.pipe(Effect.provide(services)),
+		)
 		return yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
-	}),
+	}).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),
 ) {}

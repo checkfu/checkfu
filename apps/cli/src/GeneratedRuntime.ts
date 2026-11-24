@@ -20,6 +20,7 @@ import type { CliFailure } from "./Errors.ts"
 import { diagnoseSessionCreateNotFound, ensureIdempotencyKeyHeader } from "./Hooks.ts"
 import {
 	emitYamlWarnings,
+	inputBudget,
 	isPlainRecord,
 	parseJsonOrYamlDocument,
 	readPipedStdin,
@@ -27,7 +28,7 @@ import {
 	resolveStructuredInput,
 	resolveTextOrFile,
 } from "./Input.ts"
-import type { StructuredRecord, StructuredValue } from "./Input.ts"
+import type { InputLimit, StructuredRecord, StructuredValue } from "./Input.ts"
 import { getClient, renderOutput } from "./RootCommand.ts"
 
 export interface GeneratedFlagDescriptor {
@@ -54,6 +55,7 @@ export interface GeneratedOperationDescriptor {
 	readonly apiGroup: string
 	readonly apiEndpoint: string
 	readonly hasBody: boolean
+	readonly maxInputBytes?: number
 	readonly flags: ReadonlyArray<GeneratedFlagDescriptor>
 }
 
@@ -97,10 +99,11 @@ const decodeWithTop = (
 const parseTextOrObjectFlag = (
 	raw: string,
 	flagName: string,
+	maxBytes?: InputLimit,
 ): Effect.Effect<StructuredValue, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const isFile = raw.startsWith("@") && !raw.startsWith("@@") && raw.length > 1
-		const text = yield* resolveTextOrFile(raw)
+		const text = yield* resolveTextOrFile(raw, maxBytes)
 		const trimmed = text.trim()
 		const structuredSyntax =
 			trimmed.startsWith("{") || trimmed.includes("\n") || /:(?:\s|$)/.test(trimmed)
@@ -153,22 +156,30 @@ const collectRequestParts = (
 		const headers: Record<string, string> = {}
 		let body: StructuredRecord | undefined
 
+		const maxBytes = spec.maxInputBytes === undefined ? undefined : inputBudget(spec.maxInputBytes)
 		const repeatFlag = spec.flags.find((fl) => fl.kind === "repeat-structured")
 		if (spec.hasBody) {
 			if (repeatFlag !== undefined) {
 				const rawList = rawFlags[repeatFlag.propName]
 				const items = Array.isArray(rawList) ? rawList : []
-				const stdinVal = yield* readPipedStdin
+				const stdinVal = yield* readPipedStdin(maxBytes)
 				if (items.length > 0 && Option.isSome(stdinVal)) {
 					return yield* usageError(
 						`Provide ${repeatFlag.wireName} via either --${repeatFlag.flagName} or stdin, not both.`,
 					)
 				}
+				const bodyFields = new Set(
+					spec.flags.filter((fl) => fl.location === "body").map((fl) => fl.wireName),
+				)
 				if (items.length > 0) {
 					const parsed: Array<StructuredValue> = []
 					for (const [index, entry] of items.entries()) {
 						parsed.push(
-							yield* resolveStructuredInput(String(entry), `--${repeatFlag.flagName}[${index}]`),
+							yield* resolveStructuredInput(
+								String(entry),
+								`--${repeatFlag.flagName}[${index}]`,
+								maxBytes,
+							),
 						)
 					}
 					body = { [repeatFlag.wireName]: parsed }
@@ -176,12 +187,12 @@ const collectRequestParts = (
 					const val = stdinVal.value
 					if (Array.isArray(val)) {
 						body = { [repeatFlag.wireName]: val }
-					} else if (isPlainRecord(val) && repeatFlag.wireName in val) {
+					} else if (isPlainRecord(val) && Object.keys(val).some((key) => bodyFields.has(key))) {
 						body = { ...val }
-					} else if (isPlainRecord(val) && "type" in val) {
+					} else if (isPlainRecord(val) && !repeatFlag.required && !("type" in val)) {
+						body = { ...val }
+					} else if (isPlainRecord(val)) {
 						body = { [repeatFlag.wireName]: [val] }
-					} else if (isPlainRecord(val) && !repeatFlag.required) {
-						body = { ...val }
 					} else {
 						return yield* usageError(
 							`Expected stdin to be { ${repeatFlag.wireName}: [...] }, an array, or a single item object.`,
@@ -195,7 +206,7 @@ const collectRequestParts = (
 					body = {}
 				}
 			} else {
-				body = { ...(yield* readPipedStdinRecord(spec.cliLabel)) }
+				body = { ...(yield* readPipedStdinRecord(spec.cliLabel, maxBytes)) }
 			}
 		}
 
@@ -234,11 +245,15 @@ const collectRequestParts = (
 			}
 			if (body !== undefined) {
 				if (fl.kind === "file-text") {
-					body[fl.wireName] = yield* resolveTextOrFile(String(value))
+					body[fl.wireName] = yield* resolveTextOrFile(String(value), maxBytes)
 				} else if (fl.kind === "text-or-object") {
-					body[fl.wireName] = yield* parseTextOrObjectFlag(String(value), fl.flagName)
+					body[fl.wireName] = yield* parseTextOrObjectFlag(String(value), fl.flagName, maxBytes)
 				} else if (fl.kind === "structured") {
-					body[fl.wireName] = yield* resolveStructuredInput(String(value), `--${fl.flagName}`)
+					body[fl.wireName] = yield* resolveStructuredInput(
+						String(value),
+						`--${fl.flagName}`,
+						maxBytes,
+					)
 				} else {
 					body[fl.wireName] = value
 				}

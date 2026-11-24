@@ -4,6 +4,16 @@ import {
 	MAX_REQUEST_BODY_BYTES,
 } from "@checkfu/api/Http/HttpHelpers"
 import { ClientEventId } from "@checkfu/api/Http/Api"
+import { ArtifactVersionFromString } from "@checkfu/sdk/Api"
+import {
+	ArtifactContentType,
+	ArtifactPath,
+	MAX_ARTIFACT_BODY_BYTES,
+	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
+	MAX_ARTIFACT_FILE_BYTES,
+	MAX_ARTIFACT_PATH_LENGTH,
+	MAX_ARTIFACT_TOTAL_BYTES,
+} from "@checkfu/sdk/Schemas"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/domain/Agent/AgentTypes"
 import { describe, expect, it } from "@effect/vitest"
 import type * as McpClient from "effect/ai/McpClient"
@@ -162,6 +172,13 @@ describe("Checkfu MCP server", () => {
 				"agents_getAgent",
 				"agents_listAgents",
 				"agents_updateAgent",
+				"artifacts_createArtifact",
+				"artifacts_createArtifactVersion",
+				"artifacts_deleteArtifact",
+				"artifacts_getArtifact",
+				"artifacts_getArtifactFile",
+				"artifacts_getArtifactVersion",
+				"artifacts_listArtifacts",
 				"automations_archiveAutomation",
 				"automations_createAutomation",
 				"automations_getAutomation",
@@ -205,6 +222,13 @@ describe("Checkfu MCP server", () => {
 				agents_getAgent: "read-only, additive, repeatable",
 				agents_listAgents: "read-only, additive, repeatable",
 				agents_updateAgent: "writes, destructive, not repeatable",
+				artifacts_createArtifact: "writes, additive, not repeatable",
+				artifacts_createArtifactVersion: "writes, destructive, not repeatable",
+				artifacts_deleteArtifact: "writes, destructive, repeatable",
+				artifacts_getArtifact: "read-only, additive, repeatable",
+				artifacts_getArtifactFile: "read-only, additive, repeatable",
+				artifacts_getArtifactVersion: "read-only, additive, repeatable",
+				artifacts_listArtifacts: "read-only, additive, repeatable",
 				automations_archiveAutomation: "writes, destructive, repeatable",
 				automations_createAutomation: "writes, additive, repeatable",
 				automations_getAutomation: "read-only, additive, repeatable",
@@ -366,12 +390,22 @@ describe("Checkfu MCP server", () => {
 			const environment = { path: { environment_id: "env_1" } }
 			const session = { path: { session_id: "sess_1" } }
 			const automation = { path: { automation_id: "auto_1" } }
+			const artifact = { path: { artifact_id: "art_1" } }
+			const artifactVersion = { path: { artifact_id: "art_1", version: "1" } }
+			const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
 			const calls = {
 				agents_archiveAgent: agent,
 				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
 				agents_getAgent: agent,
 				agents_listAgents: { query: { limit: "5", include_archived: "true" } },
 				agents_updateAgent: { ...agent, body: { version: 1, model } },
+				artifacts_createArtifact: { body: { name: "Report", files } },
+				artifacts_createArtifactVersion: { ...artifact, body: { version: 1, files } },
+				artifacts_deleteArtifact: artifact,
+				artifacts_getArtifact: artifact,
+				artifacts_getArtifactFile: { ...artifactVersion, query: { path: "index.html" } },
+				artifacts_getArtifactVersion: artifactVersion,
+				artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
 				automations_archiveAutomation: automation,
 				automations_createAutomation: {
 					body: {
@@ -484,6 +518,7 @@ describe("Checkfu MCP server", () => {
 		)
 		expect(keyed.map(([name]) => name)).toEqual([
 			"agents_createAgent",
+			"artifacts_createArtifact",
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",
@@ -550,6 +585,119 @@ describe("Checkfu MCP server", () => {
 		)
 		// Lookaround is not part of every regular-expression engine a client may validate with.
 		expect(JSON.stringify(GENERATED_TOOLS)).not.toMatch(/\(\?<?[=!]/)
+	})
+
+	it("accepts exactly the artifact version numbers the API accepts", () => {
+		const apiAccepts = (value: string) =>
+			Option.isSome(Schema.decodeOption(ArtifactVersionFromString)(value))
+		const values = [
+			"1",
+			"9",
+			"10",
+			"999999999",
+			"0",
+			"01",
+			"-1",
+			"1.5",
+			" 1",
+			"1 ",
+			"latest",
+			"1000000000",
+			"1/2",
+			".",
+		]
+		const tools = GENERATED_TOOLS.filter((tool) => tool.path.includes("{version}"))
+		expect(tools.map((tool) => tool.name).sort()).toEqual([
+			"artifacts_getArtifactFile",
+			"artifacts_getArtifactVersion",
+		])
+		for (const tool of tools) {
+			const accepts = Schema.is(importInputSchema(Option.getOrThrow(published(tool, "path"))))
+			const disagreements = values.filter(
+				(version) => accepts({ artifact_id: "art_1", version }) !== apiAccepts(version),
+			)
+			expect([tool.name, disagreements]).toEqual([tool.name, []])
+		}
+		expect(["1", "999999999"].every(apiAccepts)).toBe(true)
+		expect(["0", "01", "latest", "1000000000"].some(apiAccepts)).toBe(false)
+	})
+
+	it("publishes the artifact file path and content-type rules the API applies", () => {
+		const emoji = String.fromCodePoint(0x1_f6_00)
+		const rules = {
+			path: {
+				api: ArtifactPath,
+				values: [
+					"a.txt",
+					"a/../b",
+					"x".repeat(MAX_ARTIFACT_PATH_LENGTH),
+					"x".repeat(MAX_ARTIFACT_PATH_LENGTH + 1),
+					emoji.repeat(MAX_ARTIFACT_PATH_LENGTH),
+					emoji.repeat(MAX_ARTIFACT_PATH_LENGTH + 1),
+				],
+			},
+			content_type: {
+				api: ArtifactContentType,
+				values: [
+					"plain",
+					"ab",
+					"a/b",
+					"Text/HTML; charset=UTF-8",
+					'video/mp4; codecs="avc1.42E01E"',
+					"text/html\r\nx: y",
+					`text/${String.fromCodePoint(0x1_7f)}tuff`,
+					`text/${String.fromCodePoint(0x21_2a)}`,
+					`x/${"a".repeat(MAX_ARTIFACT_CONTENT_TYPE_LENGTH - 2)}`,
+					`x/${"a".repeat(MAX_ARTIFACT_CONTENT_TYPE_LENGTH - 1)}`,
+				],
+			},
+		}
+		const FileProperties = Schema.Struct({
+			properties: Schema.Struct({
+				body: Schema.Struct({
+					properties: Schema.Struct({
+						files: Schema.Struct({
+							items: Schema.Struct({
+								properties: Schema.Record(
+									Schema.String,
+									Schema.Record(Schema.String, Schema.Unknown),
+								),
+							}),
+						}),
+					}),
+				}),
+			}),
+		})
+		const uploads = GENERATED_TOOLS.flatMap((tool) =>
+			Option.match(Schema.decodeUnknownOption(FileProperties)(tool.inputSchema), {
+				onNone: () => [],
+				onSome: (schema) => [
+					[tool.name, schema.properties.body.properties.files.items.properties] as const,
+				],
+			}),
+		)
+		expect(uploads.map(([name]) => name)).toEqual([
+			"artifacts_createArtifact",
+			"artifacts_createArtifactVersion",
+		])
+		for (const [name, properties] of uploads) {
+			expect(properties["path"]?.["maxLength"]).toBe(MAX_ARTIFACT_PATH_LENGTH)
+			expect(properties["content_type"]?.["pattern"]).toEqual(expect.any(String))
+			for (const [field, { api, values }] of Object.entries(rules)) {
+				const accepts = Schema.is(
+					importInputSchema({
+						type: "object",
+						properties: { value: properties[field] ?? {} },
+						required: ["value"],
+					}),
+				)
+				const apiAccepts = Schema.is(api)
+				const disagreements = values.filter((value) => accepts({ value }) !== apiAccepts(value))
+				expect([name, field, disagreements]).toEqual([name, field, []])
+			}
+		}
+		expect(Schema.is(ArtifactPath)(emoji.repeat(MAX_ARTIFACT_PATH_LENGTH))).toBe(true)
+		expect(Schema.is(ArtifactPath)(emoji.repeat(MAX_ARTIFACT_PATH_LENGTH + 1))).toBe(false)
 	})
 
 	it.live("delivers a retry key to the API unchanged and refuses the rest before any call", () =>
@@ -880,6 +1028,23 @@ describe("Checkfu MCP server", () => {
 				},
 			})
 			expect(largest["type"]).toBe("agent")
+
+			// A tool call carrying the largest artifact upload the API accepts is admitted whole.
+			expect(MAX_MCP_BODY_BYTES).toBeGreaterThanOrEqual(MAX_ARTIFACT_BODY_BYTES + 64 * 1024)
+			const escaped = `${String.fromCodePoint(0x5c)}u0436`.repeat(MAX_ARTIFACT_FILE_BYTES / 2)
+			const files = Array.from(
+				{ length: MAX_ARTIFACT_TOTAL_BYTES / MAX_ARTIFACT_FILE_BYTES },
+				(_, index) => `{"path":"f${index}.txt","content":"${escaped}"}`,
+			)
+			const upload = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"artifacts_createArtifact","arguments":{"body":{"name":"A","files":[${files.join(",")}]}},"_meta":${JSON.stringify(CLIENT_META)}}}`
+			expect(upload.length).toBeGreaterThan(MAX_ARTIFACT_TOTAL_BYTES * 2.9)
+			const template = callToolRequest("artifacts_createArtifact", {}, { authorization })
+			const uploaded = yield* server.fetch(
+				new Request(template.url, { method: "POST", headers: template.headers, body: upload }),
+			)
+			expect(uploaded.status).toBe(200)
+			const uploadedText = yield* Effect.promise(() => uploaded.text())
+			expect(uploadedText).toContain(`"total_bytes":${MAX_ARTIFACT_TOTAL_BYTES}`)
 		}).pipe(Effect.scoped),
 	)
 

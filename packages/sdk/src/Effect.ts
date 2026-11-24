@@ -64,6 +64,8 @@ export {
 	EnvironmentDeleted,
 	ListSessionEventsResponse,
 	PendingAgent,
+	PendingArtifact,
+	PendingArtifactVersion,
 	PendingAutomation,
 	PendingEnvironment,
 	PendingResource,
@@ -85,6 +87,8 @@ export {
 } from "./Api.ts"
 export type {
 	Agent,
+	Artifact,
+	ArtifactVersion,
 	Automation,
 	AutomationRun,
 	CheckfuHttpApiClient,

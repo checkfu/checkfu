@@ -152,6 +152,47 @@ describe("List endpoints", () => {
 			}),
 		))
 
+	it("lists artifacts in creation order with their latest files, never the deleted ones", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				expect(yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts")).toEqual({
+					status: 200,
+					body: { data: [], has_more: false, next_cursor: null },
+				})
+				const ids: Array<string> = []
+				for (const name of ["kept", "deleted", "updated"]) {
+					ids.push(
+						yield* create(apiFetch, "/v1/artifacts", {
+							name,
+							files: [{ path: "index.html", content: name }],
+						}),
+					)
+				}
+				expect(idsOf(yield* listed(apiFetch, "/v1/artifacts", 3))).toEqual(ids)
+				yield* call(apiFetch, "POST", `/v1/artifacts/${ids[2]}/versions`, {
+					version: 1,
+					files: [{ path: "next.html", content: "next" }],
+				})
+				expect((yield* call(apiFetch, "DELETE", `/v1/artifacts/${ids[1]}`)).status).toBe(200)
+				const page = yield* listed(apiFetch, "/v1/artifacts", 2)
+				expect(idsOf(page)).toEqual([ids[0], ids[2]])
+				const fetched = yield* call<Resource>(apiFetch, "GET", `/v1/artifacts/${ids[2]}`)
+				expect(page.body.data[1]).toEqual(fetched.body)
+				expect(fetched.body).toMatchObject({ version: 2, files: [{ path: "next.html" }] })
+
+				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts?order=desc&limit=1")
+				expect(idsOf(first)).toEqual([ids[2]])
+				expect(first.body.has_more).toBe(true)
+				const rest = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/artifacts?order=desc&limit=1&after=${first.body.next_cursor}`,
+				)
+				expect(idsOf(rest)).toEqual([ids[0]])
+				expect(rest.body).toMatchObject({ has_more: false, next_cursor: null })
+			}),
+		))
+
 	it("lists sessions, filtered by agent when asked, without archived ones by default", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
@@ -290,7 +331,7 @@ describe("List endpoints", () => {
 	it("refuses list paging values it cannot use", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
-				for (const path of ["/v1/agents", "/v1/environments", "/v1/sessions"]) {
+				for (const path of ["/v1/agents", "/v1/environments", "/v1/sessions", "/v1/artifacts"]) {
 					for (const query of [
 						"limit=0",
 						"limit=101",
@@ -298,7 +339,7 @@ describe("List endpoints", () => {
 						"after=3",
 						"after=3:a%2Fb",
 						"order=newest",
-						"include_archived=yes",
+						...(path === "/v1/artifacts" ? [] : ["include_archived=yes"]),
 					]) {
 						const refused = yield* call(apiFetch, "GET", `${path}?${query}`)
 						expect([path, query, refused.status]).toEqual([path, query, 400])

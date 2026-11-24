@@ -13,6 +13,25 @@ import type { NormalizedValue } from "./Transform.ts"
 
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024
 
+export interface InputBudget {
+	readonly limit: number
+	used: number
+}
+
+export type InputLimit = number | InputBudget
+
+export const inputBudget = (limit: number): InputBudget => ({ limit, used: 0 })
+
+const budgetOf = (limit: InputLimit = MAX_INPUT_BYTES): InputBudget =>
+	typeof limit === "number" ? inputBudget(limit) : limit
+
+const tooLarge = (label: string, budget: InputBudget) =>
+	usageError(
+		budget.used > 0
+			? `${label} exceeds ${budget.limit} byte limit together with the other inputs.`
+			: `${label} exceeds ${budget.limit} byte limit.`,
+	)
+
 export type StructuredValue = NormalizedValue
 export type StructuredRecord = Record<string, StructuredValue>
 
@@ -21,7 +40,7 @@ export const isPlainRecord = (value: unknown): value is StructuredRecord =>
 
 const readBoundedBytes = <E extends { readonly message: string }>(
 	stream: Stream.Stream<Uint8Array, E>,
-	maxBytes: number,
+	budget: InputBudget,
 	readErrorPrefix: string,
 	limitLabel: string,
 ): Effect.Effect<Uint8Array, CliFailure> =>
@@ -33,14 +52,15 @@ const readBoundedBytes = <E extends { readonly message: string }>(
 			Stream.runForEach((chunk) =>
 				Effect.suspend(() => {
 					totalBytes += chunk.byteLength
-					if (totalBytes > maxBytes) {
-						return Effect.fail(usageError(`${limitLabel} exceeds ${maxBytes} byte limit.`))
+					if (budget.used + totalBytes > budget.limit) {
+						return Effect.fail(tooLarge(limitLabel, budget))
 					}
 					chunks.push(chunk)
 					return Effect.void
 				}),
 			),
 		)
+		budget.used += totalBytes
 		const merged = new Uint8Array(totalBytes)
 		let offset = 0
 		for (const chunk of chunks) {
@@ -61,6 +81,7 @@ const decodeUtf8Strict = (
 
 export const resolveTextOrFile = (
 	raw: string,
+	limit?: InputLimit,
 ): Effect.Effect<string, CliFailure, FileSystem.FileSystem> =>
 	Effect.gen(function* () {
 		if (raw.startsWith("@@")) {
@@ -68,14 +89,18 @@ export const resolveTextOrFile = (
 		}
 		if (raw.startsWith("@") && raw.length > 1) {
 			const filePath = raw.slice(1)
+			const label = `File "${filePath}"`
+			const readError = `Failed to read file "${filePath}"`
+			const budget = budgetOf(limit)
 			const fs = yield* FileSystem.FileSystem
-			const bytes = yield* readBoundedBytes(
-				fs.stream(filePath),
-				MAX_INPUT_BYTES,
-				`Failed to read file "${filePath}"`,
-				`File "${filePath}"`,
-			)
-			return yield* decodeUtf8Strict(bytes, `File "${filePath}"`)
+			const info = yield* fs
+				.stat(filePath)
+				.pipe(Effect.mapError((err) => usageError(`${readError}: ${err.message}`)))
+			if (budget.used + Number(info.size) > budget.limit) {
+				return yield* tooLarge(label, budget)
+			}
+			const bytes = yield* readBoundedBytes(fs.stream(filePath), budget, readError, label)
+			return yield* decodeUtf8Strict(bytes, label)
 		}
 		return raw
 	})
@@ -137,40 +162,41 @@ export const parseJsonOrYaml = (
 export const resolveStructuredInput = (
 	raw: string,
 	label: string,
+	limit?: InputLimit,
 ): Effect.Effect<StructuredValue, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
-	resolveTextOrFile(raw).pipe(Effect.flatMap((text) => parseJsonOrYaml(text, label)))
+	resolveTextOrFile(raw, limit).pipe(Effect.flatMap((text) => parseJsonOrYaml(text, label)))
 
-export const readPipedStdin: Effect.Effect<
-	Option.Option<StructuredValue>,
-	CliFailure,
-	Stdio.Stdio
-> = Effect.gen(function* () {
-	const stdio = yield* Stdio.Stdio
-	if (yield* stdio.stdinIsTerminal) {
-		return Option.none()
-	}
-	const bytes = yield* readBoundedBytes(
-		stdio.stdin,
-		MAX_INPUT_BYTES,
-		"Failed to read stdin",
-		"stdin payload",
-	)
-	if (bytes.byteLength === 0) {
-		return Option.none()
-	}
-	const text = yield* decodeUtf8Strict(bytes, "stdin")
-	if (text.trim().length === 0) {
-		return Option.none()
-	}
-	const parsed = yield* parseJsonOrYaml(text, "stdin")
-	return Option.some(parsed)
-})
+export const readPipedStdin = (
+	limit?: InputLimit,
+): Effect.Effect<Option.Option<StructuredValue>, CliFailure, Stdio.Stdio> =>
+	Effect.gen(function* () {
+		const stdio = yield* Stdio.Stdio
+		if (yield* stdio.stdinIsTerminal) {
+			return Option.none()
+		}
+		const bytes = yield* readBoundedBytes(
+			stdio.stdin,
+			budgetOf(limit),
+			"Failed to read stdin",
+			"stdin payload",
+		)
+		if (bytes.byteLength === 0) {
+			return Option.none()
+		}
+		const text = yield* decodeUtf8Strict(bytes, "stdin")
+		if (text.trim().length === 0) {
+			return Option.none()
+		}
+		const parsed = yield* parseJsonOrYaml(text, "stdin")
+		return Option.some(parsed)
+	})
 
 export const readPipedStdinRecord = (
 	label: string,
+	limit?: InputLimit,
 ): Effect.Effect<StructuredRecord, CliFailure, Stdio.Stdio> =>
 	Effect.gen(function* () {
-		const input = yield* readPipedStdin
+		const input = yield* readPipedStdin(limit)
 		if (Option.isNone(input)) {
 			return {}
 		}

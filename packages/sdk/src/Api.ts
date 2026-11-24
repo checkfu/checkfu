@@ -20,6 +20,11 @@ import {
 	AgentName,
 	AgentSnapshot,
 	AgentSystem,
+	ArtifactFile,
+	ArtifactFilesInput,
+	ArtifactId,
+	ArtifactName,
+	ArtifactPath,
 	AutomationId,
 	AutomationDescription,
 	AutomationName,
@@ -32,6 +37,7 @@ import {
 	EnvironmentId,
 	EnvironmentName,
 	EnvironmentSnapshot,
+	MAX_ARTIFACT_BODY_BYTES,
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
@@ -41,6 +47,7 @@ import {
 	SessionId,
 	SessionSnapshot,
 	SessionTitle,
+	Sha256Hex,
 	TextBlocks,
 } from "./Schemas.ts"
 import type { SessionEventType } from "./Schemas.ts"
@@ -290,6 +297,11 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 	"@checkfu/api/EventBatchBodyLimit",
 ) {}
 
+export class ArtifactBodyLimit extends HttpApiMiddleware.Service<ArtifactBodyLimit>()(
+	"@checkfu/api/ArtifactBodyLimit",
+	{ error: ERRORS[413] },
+) {}
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -359,6 +371,24 @@ export const UpdateEnvironmentBody = Schema.Struct({
 	),
 })
 export type UpdateEnvironmentBody = typeof UpdateEnvironmentBody.Type
+
+const ArtifactFilesField = ArtifactFilesInput.annotate({
+	description: "Every file of the version; a new version replaces the whole set",
+})
+
+export const CreateArtifactBody = Schema.Struct({
+	name: ArtifactName.annotate({ description: "Human-readable artifact name" }),
+	files: ArtifactFilesField,
+})
+export type CreateArtifactBody = typeof CreateArtifactBody.Type
+
+export const CreateArtifactVersionBody = Schema.Struct({
+	version: PositiveInt.annotate({
+		description: "Current artifact version for optimistic concurrency",
+	}),
+	files: ArtifactFilesField,
+})
+export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
 
 const AgentReference = Schema.Union([
 	ResourceId,
@@ -558,7 +588,65 @@ export const AutomationRunQueued = Schema.Struct({
 }).pipe(HttpApiSchema.status(201))
 export type AutomationRunQueued = typeof AutomationRunQueued.Type
 
-export type PendingResourceType = "agent" | "environment" | "session" | "automation"
+const ArtifactCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
+export const ArtifactResource = Schema.Struct({
+	id: ArtifactId,
+	type: Schema.Literal("artifact"),
+	name: Schema.String,
+	version: PositiveInt,
+	file_count: ArtifactCount,
+	total_bytes: ArtifactCount,
+	files: Schema.Array(ArtifactFile),
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type Artifact = typeof ArtifactResource.Type
+
+export const ArtifactVersionResource = Schema.Struct({
+	type: Schema.Literal("artifact_version"),
+	artifact_id: Schema.String,
+	version: PositiveInt,
+	file_count: ArtifactCount,
+	total_bytes: ArtifactCount,
+	files: Schema.Array(ArtifactFile),
+	created_at: Schema.DateTimeUtc,
+})
+export type ArtifactVersion = typeof ArtifactVersionResource.Type
+
+export const ArtifactFileResource = Schema.Struct({
+	type: Schema.Literal("artifact_file"),
+	path: ArtifactPath,
+	sha256: Sha256Hex,
+	size: ArtifactCount,
+	content_type: Schema.String,
+	encoding: Schema.Literals(["utf8", "base64"]),
+	content: Schema.String,
+})
+export type ArtifactFileContent = typeof ArtifactFileResource.Type
+
+export const ArtifactDeleted = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("artifact_deleted"),
+})
+export type ArtifactDeleted = typeof ArtifactDeleted.Type
+
+export const ArtifactVersionFromString = Schema.String.check(Schema.isPattern(/^[1-9]\d{0,8}$/u))
+	.annotate({ description: "Artifact version number" })
+	.pipe(
+		Schema.decodeTo(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999 })), {
+			decode: SchemaGetter.transform(Number),
+			encode: SchemaGetter.transform(String),
+		}),
+	)
+
+export type PendingResourceType =
+	| "agent"
+	| "environment"
+	| "session"
+	| "automation"
+	| "artifact"
+	| "artifact_version"
 
 const pendingResource = <const T extends PendingResourceType>(type: T) =>
 	Schema.Struct({
@@ -578,12 +666,25 @@ export type PendingSession = typeof PendingSession.Type
 
 export const PendingAutomation = pendingResource("automation")
 export type PendingAutomation = typeof PendingAutomation.Type
+export const PendingArtifact = pendingResource("artifact")
+export type PendingArtifact = typeof PendingArtifact.Type
+
+// Names the committed version, so waiting for it reads that immutable version and not the latest.
+export const PendingArtifactVersion = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("artifact_version"),
+	version: PositiveInt,
+	pending: Schema.Literal(true),
+}).pipe(HttpApiSchema.status(202))
+export type PendingArtifactVersion = typeof PendingArtifactVersion.Type
 
 export const PendingResource = Schema.Union([
 	PendingAgent,
 	PendingEnvironment,
 	PendingSession,
 	PendingAutomation,
+	PendingArtifact,
+	PendingArtifactVersion,
 ])
 export type PendingResource = typeof PendingResource.Type
 
@@ -721,6 +822,9 @@ export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
+export const ListArtifactsResponse = listResponse(ArtifactResource, ResourceListCursor)
+export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
+
 export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
@@ -802,6 +906,8 @@ const resourceListQuery = {
 	),
 }
 
+const { include_archived: _archivedArtifacts, ...artifactListQuery } = resourceListQuery
+
 const resourceListCli = {
 	intQueryParams: {
 		limit: { min: 1, max: 100, metavar: "N" },
@@ -816,6 +922,8 @@ const sessionParams = { session_id: SessionId.annotate({ description: "Session I
 const automationParams = {
 	automation_id: AutomationId.annotate({ description: "Automation ID" }),
 }
+const artifactParams = { artifact_id: ArtifactId.annotate({ description: "Artifact ID" }) }
+const artifactVersionParams = { ...artifactParams, version: ArtifactVersionFromString }
 
 const IdempotencyHeaders = Schema.Struct({
 	"idempotency-key": Schema.optionalKey(
@@ -1488,6 +1596,163 @@ const Automations = HttpApiGroup.make("automations")
 	.annotate(OpenApi.Description, "Manage automations")
 	.middleware(Authentication)
 
+const ARTIFACT_UPLOAD_LIMIT = `The JSON request body may be at most ${MAX_ARTIFACT_BODY_BYTES} bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64".`
+
+const Artifacts = HttpApiGroup.make("artifacts")
+	.add(
+		HttpApiEndpoint.post("create", "/v1/artifacts", {
+			headers: IdempotencyHeaders,
+			payload: CreateArtifactBody,
+			success: [ArtifactResource.pipe(HttpApiSchema.status(201)), PendingArtifact],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create an artifact")
+			.annotate(
+				OpenApi.Description,
+				`Create an artifact from a set of files (version 1). ${ARTIFACT_UPLOAD_LIMIT}`,
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "create" },
+				"x-checkfu-mcp": { name: "artifacts_createArtifact", destructive: false },
+				"x-checkfu-cli": {
+					maxInputBytes: MAX_ARTIFACT_BODY_BYTES,
+					repeatArrayField: {
+						field: "files",
+						flag: "file",
+						description:
+							"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+					},
+					examples: [
+						{
+							command:
+								'checkfu artifacts create --name "Report" --file \'{"path":"index.html","content":"<h1>Hello</h1>"}\'',
+							description: "Create a one-page artifact",
+						},
+					],
+				},
+			})
+			.middleware(ArtifactBodyLimit),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/artifacts", {
+			query: artifactListQuery,
+			success: ListArtifactsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List artifacts")
+			.annotate(
+				OpenApi.Description,
+				"List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "list" },
+				"x-checkfu-mcp": { name: "artifacts_listArtifacts" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/artifacts/:artifact_id", {
+			params: artifactParams,
+			success: ArtifactResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve an artifact")
+			.annotate(OpenApi.Description, "Retrieve an artifact and the files of its latest version")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "get" },
+				"x-checkfu-mcp": { name: "artifacts_getArtifact" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/v1/artifacts/:artifact_id", {
+			params: artifactParams,
+			success: ArtifactDeleted,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete an artifact")
+			.annotate(OpenApi.Description, "Delete an artifact and every stored version of its files")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "artifacts_deleteArtifact" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("createVersion", "/v1/artifacts/:artifact_id/versions", {
+			params: artifactParams,
+			payload: CreateArtifactVersionBody,
+			success: [ArtifactVersionResource.pipe(HttpApiSchema.status(201)), PendingArtifactVersion],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create an artifact version")
+			.annotate(
+				OpenApi.Description,
+				`Add a new immutable version to an artifact. ${ARTIFACT_UPLOAD_LIMIT}`,
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.versions",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "createVersion" },
+				"x-checkfu-mcp": { name: "artifacts_createArtifactVersion" },
+				"x-checkfu-cli": {
+					groupDescription: "Create and read artifact versions",
+					maxInputBytes: MAX_ARTIFACT_BODY_BYTES,
+					repeatArrayField: {
+						field: "files",
+						flag: "file",
+						description:
+							"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+					},
+				},
+			})
+			.middleware(ArtifactBodyLimit),
+	)
+	.add(
+		HttpApiEndpoint.get("getVersion", "/v1/artifacts/:artifact_id/versions/:version", {
+			params: artifactVersionParams,
+			success: ArtifactVersionResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve an artifact version")
+			.annotate(OpenApi.Description, "Retrieve one version of an artifact and its file list")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.versions",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "getVersion" },
+				"x-checkfu-mcp": { name: "artifacts_getArtifactVersion" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getFile", "/v1/artifacts/:artifact_id/versions/:version/file", {
+			params: artifactVersionParams,
+			query: {
+				path: ArtifactPath.annotate({ description: "Path of the file inside the version" }),
+			},
+			success: ArtifactFileResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve an artifact file")
+			.annotate(
+				OpenApi.Description,
+				"Retrieve one file of an artifact version; content is text when it is valid UTF-8 and base64 otherwise",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.versions",
+				"x-forge-method-name": "file",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "getFile" },
+				"x-checkfu-mcp": { name: "artifacts_getArtifactFile" },
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage artifacts")
+	.middleware(Authentication)
+
 export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
 	.add(Auth)
@@ -1495,11 +1760,12 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Environments)
 	.add(Sessions)
 	.add(Automations)
+	.add(Artifacts)
 	.annotate(OpenApi.Title, "Checkfu API")
 	.annotate(OpenApi.Version, "0.0.1")
 	.annotate(
 		OpenApi.Description,
-		"Managed agents API for managing agents, environments, sessions, and automations.",
+		"Managed agents API for managing agents, environments, sessions, automations, and artifacts.",
 	)
 	// The published schemas forbid unknown body fields, so a misspelled field is refused rather
 	// than dropped.

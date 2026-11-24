@@ -6,6 +6,9 @@ import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
+import { ARTIFACT_LEDGER_SCHEMA } from "../../src/Artifacts/ArtifactLedgerSql.ts"
+import { ArtifactWriteMarker } from "../../src/Artifacts/ArtifactStore.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
@@ -26,6 +29,8 @@ export type PersistedKind =
 	| "pi-doc"
 	| "harness-call"
 	| "session-table"
+	| "artifact-object"
+	| "artifact-table"
 
 export const RULES: Readonly<Record<PersistedKind, string>> = {
 	event:
@@ -49,6 +54,10 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"Pi durable documents survive deployments and are read when resuming or replaying turns. Keep the document's scope and family fixed, and bump its `version` with a `migrate` handler whenever its fields change.",
 	"session-table":
 		"The table already exists in every session object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
+	"artifact-object":
+		"Artifact manifests and the reconciler's records stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
+	"artifact-table":
+		"The table already exists in every artifact owner object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table or index as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"harness-call":
 		"The API Worker and the harness Worker deploy separately, and a running object can keep its old code for the whole code-update delay, so each side meets the other's previous build. The lock proves only that this build reads the shape the last one sent. That the last build tolerates this one is yours to check: add a field only as optional, and start sending it one release after the reader ships.",
 }
@@ -449,12 +458,28 @@ const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
 	},
 ]
 
+const ARTIFACT_OBJECTS: ReadonlyArray<PersistedShape> = [
+	{ id: "artifact-object:manifest", kind: "artifact-object", schema: ArtifactManifest },
+	{ id: "artifact-object:reconcile-marker", kind: "artifact-object", schema: ArtifactWriteMarker },
+	{ id: "artifact-object:reconcile-cursor", kind: "artifact-object", schema: Schema.String },
+]
+
+const ARTIFACT_TABLES: ReadonlyArray<PersistedShape> = Object.entries(ARTIFACT_LEDGER_SCHEMA).map(
+	([name, statement]): PersistedShape => ({
+		id: `artifact-table:${name}`,
+		kind: "artifact-table",
+		schema: Schema.Literal(statement),
+	}),
+)
+
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
 	...SAGA_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,
 	...SESSION_TABLES,
+	...ARTIFACT_OBJECTS,
+	...ARTIFACT_TABLES,
 ]
 
 export const registryProblems = (
@@ -487,6 +512,8 @@ export const registryProblems = (
 		"pi-doc",
 		"harness-call",
 		"session-table",
+		"artifact-object",
+		"artifact-table",
 	] as const) {
 		if (!shapes.some((shape) => shape.kind === kind)) {
 			problems.push(`no ${kind} shape was found`)

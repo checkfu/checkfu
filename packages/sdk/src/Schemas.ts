@@ -345,3 +345,92 @@ export const AutomationSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type AutomationSnapshot = typeof AutomationSnapshot.Type
+
+// ---------------------------------------------------------------------------
+// Artifact schemas
+// ---------------------------------------------------------------------------
+
+export const MAX_ARTIFACT_NAME_LENGTH = 256
+export const MAX_ARTIFACT_FILES = 64
+export const MAX_ARTIFACT_FILE_BYTES = 1024 * 1024
+export const MAX_ARTIFACT_TOTAL_BYTES = 4 * 1024 * 1024
+export const MAX_ARTIFACT_PATH_LENGTH = 512
+export const MAX_ARTIFACT_CONTENT_TYPE_LENGTH = 128
+
+// The request body limit of the two upload endpoints: JSON escaping may triple the decoded total.
+// Content that escapes worse, such as control characters, has to be sent as base64.
+const JSON_ESCAPE_ALLOWANCE = 3
+export const MAX_ARTIFACT_BODY_BYTES =
+	MAX_ARTIFACT_TOTAL_BYTES * JSON_ESCAPE_ALLOWANCE +
+	MAX_ARTIFACT_FILES * (MAX_ARTIFACT_PATH_LENGTH * 6 + 512) +
+	16 * 1024
+
+export const ArtifactId = Schema.String.check(Schema.isMinLength(1)).pipe(
+	Schema.brand("ArtifactId"),
+)
+export type ArtifactId = typeof ArtifactId.Type
+
+export const ArtifactName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_ARTIFACT_NAME_LENGTH),
+)
+
+// Relative, with no empty, "." or ".." segment, no backslash, and no control character or line
+// separator. Published, so written without lookaround or Unicode property classes.
+const PATH_EXCLUDED = String.raw`/\\\u0000-\u001f\u007f-\u009f\u2028\u2029`
+const PATH_SEGMENT = String.raw`(?:[^.${PATH_EXCLUDED}][^${PATH_EXCLUDED}]*|\.[^.${PATH_EXCLUDED}][^${PATH_EXCLUDED}]*|\.\.[^${PATH_EXCLUDED}]+)`
+const ARTIFACT_PATH = new RegExp(String.raw`^${PATH_SEGMENT}(?:/${PATH_SEGMENT})*$`, "u")
+
+export const ArtifactPath = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_ARTIFACT_PATH_LENGTH),
+	// No unpaired surrogate: the one rule the pattern cannot state without a property class.
+	Schema.makeFilter((path) => (path.isWellFormed() ? undefined : "Expected well-formed Unicode")),
+	Schema.isPattern(ARTIFACT_PATH),
+)
+export type ArtifactPath = typeof ArtifactPath.Type
+
+// Published, so written with the u flag and no lookaround; the i flag would let [a-z] match
+// U+017F and U+212A under u.
+export const ArtifactContentType = Schema.String.check(
+	Schema.isMinCodePoints(3),
+	Schema.isMaxCodePoints(MAX_ARTIFACT_CONTENT_TYPE_LENGTH),
+	Schema.isPattern(
+		/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$/u,
+	),
+)
+
+export const Sha256Hex = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
+
+export const ArtifactFileInput = Schema.Struct({
+	path: ArtifactPath.annotate({
+		description: "Relative path inside the artifact, for example index.html or assets/app.js",
+	}),
+	content: Schema.String.annotate({
+		description: "File content: text, or base64 when encoding is base64",
+	}),
+	encoding: Schema.optionalKey(
+		Schema.Literals(["utf8", "base64"]).annotate({
+			description: "How content is encoded (default utf8)",
+		}),
+	),
+	content_type: Schema.optionalKey(
+		ArtifactContentType.annotate({
+			description: "Media type; inferred from the path extension when omitted",
+		}),
+	),
+})
+export type ArtifactFileInput = typeof ArtifactFileInput.Type
+
+export const ArtifactFilesInput = Schema.Array(ArtifactFileInput).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_ARTIFACT_FILES),
+)
+
+export const ArtifactFile = Schema.Struct({
+	path: ArtifactPath,
+	sha256: Sha256Hex,
+	size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+	content_type: Schema.String,
+})
+export type ArtifactFile = typeof ArtifactFile.Type

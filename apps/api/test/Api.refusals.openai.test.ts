@@ -33,6 +33,7 @@ import {
 	sendAndSettle,
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
+import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
 describe("Provider refusals and OpenAI Responses codec", () => {
@@ -360,6 +361,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		).pipe(Layer.provide(executorLayer))
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1688,6 +1690,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			).pipe(
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),
+				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

@@ -18,14 +18,32 @@ const D1State = Schema.fromJsonString(
 	}),
 )
 
-const D1_OBJECTS = join("local", "d1", "cloudflare-runtime-D1DatabaseObject")
+const R2BucketState = Schema.fromJsonString(
+	Schema.Struct({
+		resourceType: Schema.Literal("Cloudflare.R2.Bucket"),
+		attr: Schema.Struct({ bucketName: Schema.String }),
+	}),
+)
 
-/** The file workerd keeps a local D1 database in: its Durable Object id for `getByName(databaseId)`. */
-export const localD1File = (databaseId: string): string => {
-	const key = createHash("sha256").update("cloudflare-runtime-D1DatabaseObject").digest()
-	const name = createHmac("sha256", key).update(databaseId).digest().subarray(0, 16)
-	const mac = createHmac("sha256", key).update(name).digest().subarray(0, 16)
-	return `${Buffer.concat([name, mac]).toString("hex")}.sqlite`
+const D1_OBJECT = "cloudflare-runtime-D1DatabaseObject"
+const R2_OBJECT = "cloudflare-runtime-R2BucketObject"
+
+/** The file workerd keeps a Durable Object in: its id for `getByName(name)` in the namespace. */
+const localObjectFile = (namespace: string, name: string): string => {
+	const key = createHash("sha256").update(namespace).digest()
+	const id = createHmac("sha256", key).update(name).digest().subarray(0, 16)
+	const mac = createHmac("sha256", key).update(id).digest().subarray(0, 16)
+	return `${Buffer.concat([id, mac]).toString("hex")}.sqlite`
+}
+
+export const localD1File = (databaseId: string): string => localObjectFile(D1_OBJECT, databaseId)
+
+export const localR2File = (bucketName: string): string => localObjectFile(R2_OBJECT, bucketName)
+
+const removeObject = (dir: string, file: string) => {
+	for (const suffix of ["", "-shm", "-wal"]) {
+		rmSync(join(dir, `${file}${suffix}`), { force: true })
+	}
 }
 
 const list = (dir: string): ReadonlyArray<string> => {
@@ -38,7 +56,7 @@ const list = (dir: string): ReadonlyArray<string> => {
 
 /**
  * Removes what a local `alchemy dev` stage left in `.alchemy`: its state, its Worker bundles, and
- * the local data of each Worker and D1 database its state names. Bundles go even when the state was never
+ * the local data of each Worker, D1 database and R2 bucket its state names. Bundles go even when the state was never
  * written; local data names come only from the state, so another stage keeps its data.
  */
 export const removeStage = (alchemyDir: string, stack: string, stage: string): void => {
@@ -46,6 +64,9 @@ export const removeStage = (alchemyDir: string, stack: string, stage: string): v
 	const states = list(stateDir).map((file) => readFileSync(join(stateDir, file), "utf8"))
 	const workers = states.flatMap((state) => Option.toArray(Schema.decodeOption(WorkerState)(state)))
 	const databases = states.flatMap((state) => Option.toArray(Schema.decodeOption(D1State)(state)))
+	const buckets = states.flatMap((state) =>
+		Option.toArray(Schema.decodeOption(R2BucketState)(state)),
+	)
 	// A bundle is `<stack>-<stage>-<logical id>`, and no logical id in the stack has a hyphen, so
 	// a hyphen after this stage's prefix means the bundle belongs to a stage whose name extends it.
 	const bundlePrefix = `${stack}-${stage}-`
@@ -66,12 +87,17 @@ export const removeStage = (alchemyDir: string, stack: string, stage: string): v
 	for (const {
 		attr: { databaseId },
 	} of databases) {
-		const file = localD1File(databaseId)
-		for (const suffix of ["", "-shm", "-wal"]) {
-			rmSync(join(alchemyDir, D1_OBJECTS, `${file}${suffix}`), { force: true })
-		}
+		removeObject(join(alchemyDir, "local", "d1", D1_OBJECT), localD1File(databaseId))
 		const gateway = `alchemy-d1-gateway-${databaseId.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`
 		rmSync(join(alchemyDir, "local", "cache", gateway), { recursive: true, force: true })
+	}
+	for (const {
+		attr: { bucketName },
+	} of buckets) {
+		removeObject(join(alchemyDir, "local", "r2", R2_OBJECT), localR2File(bucketName))
+		// workerd keeps a bucket's blobs under its name with path-unsafe characters replaced.
+		const blobs = bucketName.replaceAll(/[?<>*"'^/\\:|]/g, "_")
+		rmSync(join(alchemyDir, "local", "r2", blobs), { recursive: true, force: true })
 	}
 	rmSync(stateDir, { recursive: true, force: true })
 }

@@ -9,6 +9,7 @@ import type { ListingFilter } from "../src/Listing/ListingStore.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
+import { ArtifactId } from "../src/Artifact/Artifact.id.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { AutomationId } from "../src/Automation/Automation.id.ts"
@@ -103,7 +104,28 @@ describe("ListResources", () => {
 			const archivedSession = yield* domain.ArchiveSession({
 				session_id: SessionId.make("sess_list_3"),
 			})
-			const atLeast = [archivedAgent, archivedEnv, deletedEnv, archivedSession, archivedAutomation]
+			for (const n of [1, 2, 3]) {
+				yield* domain.CreateArtifact({
+					artifact_id: ArtifactId.make(`art_list_${n}`),
+					name: `Artifact ${n}`,
+					manifest: "m".repeat(64),
+					file_count: 1,
+					total_bytes: 1,
+					fence: 0,
+				})
+			}
+			const deletedArtifact = yield* domain.DeleteArtifact({
+				artifact_id: ArtifactId.make("art_list_2"),
+				fence: 0,
+			})
+			const atLeast = [
+				archivedAgent,
+				archivedEnv,
+				deletedEnv,
+				archivedSession,
+				archivedAutomation,
+				deletedArtifact,
+			]
 
 			const list = (input: Partial<ListingFilter> & Pick<ListingFilter, "kind">) =>
 				domain
@@ -128,6 +150,12 @@ describe("ListResources", () => {
 			expect(
 				yield* list({ kind: "automation", include_archived: true, agent_id: "agent_list_1" }),
 			).toEqual(["auto_list_1", "auto_list_3"])
+			expect(yield* list({ kind: "artifact" })).toEqual(["art_list_1", "art_list_3"])
+			expect(yield* list({ kind: "artifact", include_archived: true })).toEqual([
+				"art_list_1",
+				"art_list_3",
+			])
+			expect(yield* list({ kind: "artifact", order: "desc" })).toEqual(["art_list_3", "art_list_1"])
 			expect(
 				yield* list({ kind: "session", include_archived: true, agent_id: "agent_list_1" }),
 			).toEqual(["sess_list_1", "sess_list_3"])

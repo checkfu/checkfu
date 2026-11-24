@@ -36,7 +36,8 @@ export const makeLister = Effect.gen(function* () {
 	if (query === undefined) {
 		return yield* Effect.die(new Error("ListResources is not hosted by the model."))
 	}
-	return <A extends { readonly archived_at: unknown }, E, R>(
+	// A kind that cannot be archived, such as an artifact, has no archived_at.
+	return <A extends object, E, R>(
 		kind: ListingKind,
 		input: ListQuery,
 		retrieve: (id: string) => Effect.Effect<A, E, R>,
@@ -65,7 +66,9 @@ export const makeLister = Effect.gen(function* () {
 				Stream.runForEachWhile(({ entry, outcome }) =>
 					Effect.gen(function* () {
 						const resource = yield* outcome
-						if (resource !== null && (include_archived || resource.archived_at === null)) {
+						const archived =
+							resource !== null && "archived_at" in resource && resource.archived_at !== null
+						if (resource !== null && (include_archived || !archived)) {
 							const size = utf8.encode(JSON.stringify(resource)).length
 							const next = pageBytesWith(bytes, data.length, size)
 							if (data.length > 0 && next > LIST_PAGE_BYTES) {

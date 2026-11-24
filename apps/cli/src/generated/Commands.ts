@@ -326,6 +326,349 @@ const agentsUpdateCommand = CommandMake(
 	),
 )
 
+const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts create",
+	apiGroup: "artifacts",
+	apiEndpoint: "create",
+	hasBody: true,
+	maxInputBytes: 12_828_672,
+	flags: [
+		{
+			propName: "name",
+			flagName: "name",
+			wireName: "name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "files",
+			flagName: "file",
+			wireName: "files",
+			location: "body",
+			kind: "repeat-structured",
+			required: true,
+			min: 0,
+			max: 64,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const artifactsCreateCommand = CommandMake(
+	"create",
+	{
+		name: FlagString("name").pipe(
+			FlagWithDescription("Human-readable artifact name"),
+			FlagOptional,
+		),
+		files: FlagString("file").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+			),
+			FlagBetween(0, 64),
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		'Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
+	),
+	CommandWithExamples([
+		{
+			command:
+				'checkfu artifacts create --name "Report" --file \'{"path":"index.html","content":"<h1>Hello</h1>"}\'',
+			description: "Create a one-page artifact",
+		},
+	]),
+)
+
+const artifactsDeleteCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts delete",
+	apiGroup: "artifacts",
+	apiEndpoint: "delete",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsDeleteCommand = CommandMake(
+	"delete",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsDeleteCommandSpec, flags),
+).pipe(CommandWithDescription("Delete an artifact and every stored version of its files"))
+
+const artifactsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts list",
+	apiGroup: "artifacts",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const artifactsListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+	),
+)
+
+const artifactsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts retrieve",
+	apiGroup: "artifacts",
+	apiEndpoint: "get",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve an artifact and the files of its latest version"))
+
+const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:versions create",
+	apiGroup: "artifacts",
+	apiEndpoint: "createVersion",
+	hasBody: true,
+	maxInputBytes: 12_828_672,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "body",
+			kind: "int",
+			required: false,
+		},
+		{
+			propName: "files",
+			flagName: "file",
+			wireName: "files",
+			location: "body",
+			kind: "repeat-structured",
+			required: true,
+			min: 0,
+			max: 64,
+		},
+	],
+}
+
+const artifactsVersionsCreateCommand = CommandMake(
+	"create",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		version: FlagInt("current-version").pipe(
+			FlagWithMetavar("INT"),
+			FlagWithDescription("Current artifact version for optimistic concurrency"),
+			FlagOptional,
+		),
+		files: FlagString("file").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+			),
+			FlagBetween(0, 64),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsVersionsCreateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		'Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
+	),
+)
+
+const artifactsVersionsFileCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:versions file",
+	apiGroup: "artifacts",
+	apiEndpoint: "getFile",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "path",
+			flagName: "path",
+			wireName: "path",
+			location: "query",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsVersionsFileCommand = CommandMake(
+	"file",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		version: FlagString("current-version").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact version number"),
+		),
+		path: FlagString("path").pipe(FlagWithDescription("Path of the file inside the version")),
+	},
+	(flags) => invokeGeneratedOperation(artifactsVersionsFileCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Retrieve one file of an artifact version; content is text when it is valid UTF-8 and base64 otherwise",
+	),
+)
+
+const artifactsVersionsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:versions retrieve",
+	apiGroup: "artifacts",
+	apiEndpoint: "getVersion",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const artifactsVersionsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		version: FlagString("current-version").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact version number"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsVersionsRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve one version of an artifact and its file list"))
+
 const automationsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "automations archive",
 	apiGroup: "automations",
@@ -1669,6 +2012,8 @@ const sessionsEventsStreamCommand = CommandMake(
 
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const ArtifactsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -1676,6 +2021,8 @@ export const buildGeneratedResourceCommands = <
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
+	readonly artifacts?: ArtifactsExtras
+	readonly "artifacts:versions"?: ArtifactsVersionsExtras
 	readonly automations?: AutomationsExtras
 	readonly "automations:runs"?: AutomationsRunsExtras
 	readonly environments?: EnvironmentsExtras
@@ -1692,6 +2039,25 @@ export const buildGeneratedResourceCommands = <
 				agentsRetrieveCommand,
 				agentsUpdateCommand,
 				...(extras?.["agents"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("artifacts").pipe(
+			CommandWithDescription("Manage artifacts"),
+			CommandWithSubcommands([
+				artifactsCreateCommand,
+				artifactsDeleteCommand,
+				artifactsListCommand,
+				artifactsRetrieveCommand,
+				...(extras?.["artifacts"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("artifacts:versions").pipe(
+			CommandWithDescription("Create and read artifact versions"),
+			CommandWithSubcommands([
+				artifactsVersionsCreateCommand,
+				artifactsVersionsFileCommand,
+				artifactsVersionsRetrieveCommand,
+				...(extras?.["artifacts:versions"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("automations").pipe(

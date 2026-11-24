@@ -716,7 +716,12 @@ export const pollPending = <T>(
 	options?: WaitForPendingOptions<T>,
 ): Effect.Effect<T, CheckfuSdkError> =>
 	Effect.gen(function* () {
-		const readiness = getPendingReadiness(pending)
+		// A receipt that names its committed version is read at exactly that version, so any
+		// successful read is the resource it promised.
+		const readiness: PendingReadiness | undefined =
+			pending.type === "artifact_version" && "version" in pending
+				? { kind: "create" }
+				: getPendingReadiness(pending)
 		if (readiness === undefined && options?.until === undefined) {
 			return yield* new CheckfuConfigError({
 				message: `waitForPending for unrecognized pending ${pending.type} "${pending.id}" requires an explicit "until" predicate because its originating mutation is unknown.`,
