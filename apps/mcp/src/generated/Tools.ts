@@ -399,7 +399,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
 				},
 			},
-			required: ["body"],
+			required: ["body", "idempotency_key"],
 			additionalProperties: false,
 		},
 	},

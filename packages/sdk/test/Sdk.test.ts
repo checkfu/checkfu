@@ -2137,6 +2137,7 @@ describe("@checkfu/sdk", () => {
 		it.live("waits for pending automation receipts in both clients", () =>
 			Effect.gen(function* () {
 				let createPolls = 0
+				const createKeys: Array<string | null> = []
 				let pausePolls = 0
 				let archivePolls = 0
 				const pending = (id: string) => jsonResponse({ id, type: "automation", pending: true }, 202)
@@ -2144,6 +2145,7 @@ describe("@checkfu/sdk", () => {
 					const req = toWebRequest(input, init)
 					const url = new URL(req.url)
 					if (req.method === "POST" && url.pathname === "/v1/automations") {
+						createKeys.push(req.headers.get("idempotency-key"))
 						return pending("auto_new")
 					}
 					if (req.method === "GET" && url.pathname === "/v1/automations/auto_new") {
@@ -2263,6 +2265,22 @@ describe("@checkfu/sdk", () => {
 					} finally {
 						await promiseClient.close()
 					}
+					const withoutAutoKeys = new Checkfu({
+						apiKey: "ck_test_key",
+						baseUrl: "http://localhost:1337",
+						maxRetries: 0,
+						autoIdempotencyKey: false,
+						fetch: automationFetch,
+					})
+					try {
+						await withoutAutoKeys.automations.create(body)
+						await withoutAutoKeys.automations.create(body, { idempotencyKey: "mine" })
+					} finally {
+						await withoutAutoKeys.close()
+					}
+					expect(createKeys).toHaveLength(4)
+					expect(createKeys.every((key) => key !== null && key.length > 0)).toBe(true)
+					expect(createKeys.at(-1)).toBe("mine")
 				})
 			}),
 		)

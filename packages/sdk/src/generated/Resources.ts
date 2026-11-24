@@ -27,6 +27,7 @@ import {
 	executeWithRetries,
 	pendingUpdateReadiness,
 	resolveCallIdempotencyKey,
+	resolveRequiredIdempotencyKey,
 	unwrapResponse,
 	withPendingReadiness,
 	withResolvedIdempotencyKey,
@@ -500,7 +501,7 @@ export class EffectAutomationsResource {
 		CheckfuSdkError
 	> {
 		return unwrapResponse(
-			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+			EffectFlatMap(resolveRequiredIdempotencyKey(this.#runtime, options), (key) =>
 				withPendingReadiness(
 					executeWithRetries(
 						this.#runtime,
@@ -509,7 +510,7 @@ export class EffectAutomationsResource {
 						withResolvedIdempotencyKey(options, key),
 						() =>
 							this.#runtime.raw.automations.create({
-								headers: key === undefined ? {} : { "idempotency-key": key },
+								headers: { "idempotency-key": key },
 								payload: params,
 								responseMode: "decoded-and-response",
 							}),

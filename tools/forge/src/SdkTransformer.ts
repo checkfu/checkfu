@@ -123,6 +123,7 @@ const generateResourcesFile = (
 	const executeWithRetries = runtimeMod.ident("executeWithRetries")
 	const pendingUpdateReadiness = runtimeMod.ident("pendingUpdateReadiness")
 	const resolveCallIdempotencyKey = runtimeMod.ident("resolveCallIdempotencyKey")
+	const resolveRequiredIdempotencyKey = runtimeMod.ident("resolveRequiredIdempotencyKey")
 	const unwrapResponse = runtimeMod.ident("unwrapResponse")
 	const withPendingReadiness = runtimeMod.ident("withPendingReadiness")
 	const withResolvedIdempotencyKey = runtimeMod.ident("withResolvedIdempotencyKey")
@@ -399,7 +400,9 @@ const generateResourcesFile = (
 							})
 							out("},")
 						}
-						if (op.supportsIdempotencyKey) {
+						if (op.requiresIdempotencyKey) {
+							out('headers: { "idempotency-key": key },')
+						} else if (op.supportsIdempotencyKey) {
 							out('headers: key === undefined ? {} : { "idempotency-key": key },')
 						}
 						if (op.hasBody) {
@@ -448,8 +451,10 @@ const generateResourcesFile = (
 				out(
 					EffectFlatMap,
 					"(",
-					resolveCallIdempotencyKey,
-					"(this.#runtime, options, true), (key) =>",
+					op.requiresIdempotencyKey ? resolveRequiredIdempotencyKey : resolveCallIdempotencyKey,
+					op.requiresIdempotencyKey
+						? "(this.#runtime, options), (key) =>"
+						: "(this.#runtime, options, true), (key) =>",
 				)
 				out.indent(() => emitInvoke())
 				out(")")

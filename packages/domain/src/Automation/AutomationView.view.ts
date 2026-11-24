@@ -1,8 +1,10 @@
 import * as Domain from "@alchemy.run/domain"
 import { AutomationSnapshot } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
+import { AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { AutomationCreated } from "./CreateAutomation.command.ts"
+import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
 import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
 
@@ -14,7 +16,13 @@ export class AutomationView extends Domain.View("AutomationView", {
 	key: Automation,
 	state: Schema.NullOr(AutomationSnapshot),
 	initial: null,
-	events: [AutomationCreated, AutomationUnpaused, AutomationFired],
+	events: [
+		AutomationCreated,
+		AutomationUnpaused,
+		AutomationFired,
+		AutomationPaused,
+		AutomationArchived,
+	],
 	evolve: {
 		"automation.created": (state, e, ctx) =>
 			state !== null

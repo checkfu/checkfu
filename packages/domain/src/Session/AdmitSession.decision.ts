@@ -1,11 +1,8 @@
 import * as Domain from "@alchemy.run/domain"
 import { Agent } from "../Agent/Agent.aggregate.ts"
-import { AgentArchivedError } from "../Agent/AgentArchived.rejection.ts"
-import { AgentNotFound } from "../Agent/AgentNotFound.rejection.ts"
 import { Environment } from "../Environment/Environment.aggregate.ts"
-import { EnvironmentArchivedError } from "../Environment/EnvironmentArchived.rejection.ts"
-import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejection.ts"
-import { AdmitSession, AgentVersionNotFound } from "./AdmitSession.command.ts"
+import { AdmitSession } from "./AdmitSession.command.ts"
+import { admissionRefusal } from "./AdmissionRefusal.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { Session } from "./Session.aggregate.ts"
 
@@ -22,21 +19,10 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 		session: cmd.session_id,
 	}),
 	decide: ({ agent, environment, session }, cmd) => {
-		if (agent.state.status === "") {
-			return new AgentNotFound({ agent_id: agent.id })
-		}
-		if (agent.state.status !== "active") {
-			return new AgentArchivedError({ agent_id: agent.id })
-		}
 		const pinnedVersion = cmd.agent_version ?? agent.state.version
-		if (pinnedVersion > agent.state.version) {
-			return new AgentVersionNotFound({ agent_id: agent.id, version: pinnedVersion })
-		}
-		if (environment.state.status === "" || environment.state.status === "deleted") {
-			return new EnvironmentNotFound({ environment_id: environment.id })
-		}
-		if (environment.state.status !== "active") {
-			return new EnvironmentArchivedError({ environment_id: environment.id })
+		const refused = admissionRefusal(agent, environment, pinnedVersion)
+		if (refused !== undefined) {
+			return refused
 		}
 		if (session.state._tag !== "Uninitialized") {
 			return new SessionAlreadyExists({ session_id: session.id })

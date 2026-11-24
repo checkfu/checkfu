@@ -1,21 +1,29 @@
 import * as Domain from "@alchemy.run/domain"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import { AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { SCHEDULE_EXHAUSTED } from "./AutomationTypes.ts"
 import { AutomationView } from "./AutomationView.view.ts"
 import { AutomationCreated } from "./CreateAutomation.command.ts"
 import { FireAutomation } from "./FireAutomation.command.ts"
+import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
 import { nextOccurrence } from "./Schedule.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
 
-const NEXT_FIRING = "next-firing"
+export const NEXT_FIRING = "next-firing"
 
 export class ArmAutomation extends Domain.Policy("ArmAutomation", {
 	from: AutomationView,
-	on: [AutomationCreated, AutomationUnpaused, AutomationFired],
+	on: [
+		AutomationCreated,
+		AutomationUnpaused,
+		AutomationFired,
+		AutomationPaused,
+		AutomationArchived,
+	],
 }) {}
 
 export const ArmAutomationLive = ArmAutomation.toLayer(
@@ -23,6 +31,17 @@ export const ArmAutomationLive = ArmAutomation.toLayer(
 		const automations = yield* Automation
 		return Effect.fn(function* ({ source, state, event }) {
 			if (state === null) {
+				return
+			}
+			if (event._tag === "automation.paused" || event._tag === "automation.archived") {
+				yield* automations
+					.unschedule(source.id, NEXT_FIRING)
+					.pipe(
+						Effect.catchTag(
+							["AlreadyExecuted", "AlreadyCancelled", "NotScheduled"],
+							() => Effect.void,
+						),
+					)
 				return
 			}
 			if (event._tag === "automation.fired" && event.trigger === "manual") {

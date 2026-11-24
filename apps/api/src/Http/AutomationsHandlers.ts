@@ -23,7 +23,6 @@ import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyCl
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
-import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as DateTime from "effect/DateTime"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -38,7 +37,6 @@ import {
 	idempotentId,
 	isPending,
 	orPending,
-	randomId,
 	reject,
 } from "./HttpHelpers.ts"
 
@@ -112,7 +110,6 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const automationRuns = yield* AutomationRunView
 		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
-		const random = yield* SecureRandom.SecureRandom
 
 		const committed = (id: AutomationId) =>
 			Effect.gen(function* () {
@@ -141,9 +138,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 			})
 
 		return handlers
-			.handle("create", ({ payload, request }) =>
+			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
-					const idempotencyKey = request.headers["idempotency-key"]
+					const idempotencyKey = headers["idempotency-key"]
 					const rawAgentId = typeof payload.agent === "string" ? payload.agent : payload.agent.id
 					const agentId = Schema.decodeOption(AgentId)(rawAgentId)
 					if (Option.isNone(agentId)) {
@@ -179,26 +176,19 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						text,
 						schedule: payload.schedule,
 					}
-					let id: AutomationId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						const commandId = yield* claimCreate(
-							idempotencyClaims,
-							digest,
-							"automation",
-							idempotencyKey,
-							command,
-						)
-						id = AutomationId.make(
-							yield* idempotentId(digest, "auto", ["create", "automation", "id", idempotencyKey]),
-						)
-						sendOptions = { commandId }
-					} else {
-						id = AutomationId.make(yield* randomId(random, "auto"))
-					}
+					const commandId = yield* claimCreate(
+						idempotencyClaims,
+						digest,
+						"automation",
+						idempotencyKey,
+						command,
+					)
+					const id = AutomationId.make(
+						yield* idempotentId(digest, "auto", ["create", "automation", "id", idempotencyKey]),
+					)
 					const receipt = yield* admission.send(
 						new AdmitAutomation({ automation_id: id, ...command }),
-						sendOptions,
+						{ commandId },
 					)
 					const committed = commitForStream(receipt.commits, `Automation/${id}`)
 					return committed === undefined

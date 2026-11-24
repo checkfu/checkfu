@@ -59,6 +59,8 @@ interface ErrorBody {
 const weekdayMornings = { type: "cron", expression: "0 9 * * 1-5", timezone: "America/New_York" }
 const message = (text: string) => [{ type: "user.message", content: [{ type: "text", text }] }]
 
+let createKeys = 0
+
 const call = <A>(
 	apiFetch: ApiFetch,
 	method: string,
@@ -67,10 +69,14 @@ const call = <A>(
 	headers: Record<string, string> = {},
 ) =>
 	Effect.gen(function* () {
+		const keyed =
+			method === "POST" && path === "/v1/automations" && !("idempotency-key" in headers)
+				? { "idempotency-key": `test-create-${++createKeys}` }
+				: {}
 		const response = yield* sendRequest(apiFetch, {
 			method,
 			path,
-			headers: { ...AUTH_HEADERS, ...headers },
+			headers: { ...AUTH_HEADERS, ...keyed, ...headers },
 			...(body === undefined ? {} : { body }),
 		})
 		return {
@@ -164,7 +170,7 @@ describe("Automations API", () => {
 					last_run_at: null,
 					archived_at: null,
 				})
-				expect(created.body.id).toMatch(/^auto_[0-9a-f]{24}$/u)
+				expect(created.body.id).toMatch(/^auto_[0-9a-f]{64}$/u)
 				expect(created.body.upcoming_runs_at).toEqual([
 					"2026-01-05T14:00:00.000Z",
 					"2026-01-06T14:00:00.000Z",
@@ -526,6 +532,13 @@ describe("Automations API", () => {
 				)
 				expect(afterCorrection.status).toBe(201)
 
+				const unkeyed = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: "/v1/automations",
+					headers: AUTH_HEADERS,
+					body,
+				})
+				expect(unkeyed.status).toBe(400)
 				const key = { "idempotency-key": "create-morning-report" }
 				const first = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", body, key)
 				expect(first.status).toBe(201)

@@ -358,6 +358,16 @@ export const resolveCallIdempotencyKey = (
 	return Effect.flatMap(runtime.generateIdempotencyKey, decodeClientIdempotencyKey)
 }
 
+export const resolveRequiredIdempotencyKey = (
+	runtime: EffectSdkRuntime,
+	options: AnyRequestOptions | undefined,
+): Effect.Effect<ClientEventId, BadRequestError> =>
+	Effect.filterOrElse(
+		resolveCallIdempotencyKey(runtime, options, true),
+		(key): key is ClientEventId => key !== undefined,
+		() => Effect.flatMap(runtime.generateIdempotencyKey, decodeClientIdempotencyKey),
+	)
+
 export const withResolvedIdempotencyKey = (
 	options: AnyRequestOptions | undefined,
 	key: ClientEventId | undefined,

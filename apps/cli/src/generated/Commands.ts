@@ -373,7 +373,9 @@ const automationsCreateCommand = CommandMake(
 		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
-			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagWithDescription(
+				"Idempotency-Key header. Required: resending the request with the same key returns the automation the first request created, so a lost response never leaves a second schedule running",
+			),
 			FlagOptional,
 		),
 	},

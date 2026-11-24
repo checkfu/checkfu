@@ -705,6 +705,13 @@ const IdempotencyHeaders = Schema.Struct({
 	),
 })
 
+const RequiredIdempotencyHeaders = Schema.Struct({
+	"idempotency-key": ClientEventId.annotate({
+		description:
+			"Idempotency-Key header. Required: resending the request with the same key returns the automation the first request created, so a lost response never leaves a second schedule running",
+	}),
+})
+
 const Health = HttpApiGroup.make("health").add(
 	HttpApiEndpoint.get("health", "/health", {
 		success: Schema.Struct({ status: Schema.Literal("ok") }),
@@ -1079,7 +1086,7 @@ const Sessions = HttpApiGroup.make("sessions")
 const Automations = HttpApiGroup.make("automations")
 	.add(
 		HttpApiEndpoint.post("create", "/v1/automations", {
-			headers: IdempotencyHeaders,
+			headers: RequiredIdempotencyHeaders,
 			payload: CreateAutomationBody,
 			success: [AutomationResource.pipe(HttpApiSchema.status(201)), PendingAutomation],
 			error: BodyErrors,

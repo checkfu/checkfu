@@ -8411,9 +8411,9 @@
 							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
 							"minLength": 1,
 							"maxLength": 128,
-							"description": "Optional Idempotency-Key header for safe retries"
+							"description": "Idempotency-Key header. Required: resending the request with the same key returns the automation the first request created, so a lost response never leaves a second schedule running"
 						},
-						"required": false
+						"required": true
 					}
 				],
 				"security": [

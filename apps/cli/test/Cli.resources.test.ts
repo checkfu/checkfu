@@ -311,7 +311,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"--schedule",
 						'{"type":"cron","expression":"0 9 * * 1-5","timezone":"America/New_York"}',
 					])
-					expect(created.stderr).toBe("")
+					expect(created.stderr).toMatch(/^Idempotency-Key: \S+\n$/u)
 					expect(created.exitCode).toBe(0)
 					const automation = JSON.parse(created.stdout) as {
 						id: string

@@ -363,6 +363,7 @@ describe("Checkfu MCP server", () => {
 						],
 						schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
 					},
+					idempotency_key: "create-morning-report",
 				},
 				automations_getAutomation: automation,
 				automations_listRuns: { ...automation, query: { limit: "5" } },
