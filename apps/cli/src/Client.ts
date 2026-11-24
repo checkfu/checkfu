@@ -137,10 +137,13 @@ export const resolveApiKey = <R = never>(
 const VERIFY_TIMEOUT = Duration.seconds(20)
 const decodeJsonOption = Schema.decodeOption(Schema.fromJsonString(Schema.Unknown))
 
+const isVerified = Schema.is(Schema.Struct({ type: Schema.Literal("authentication_verified") }))
+
+// The API's credential check: 401 without an accepted key, a confirmation with one.
 const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
 	Effect.gen(function* () {
 		const http = yield* HttpClient.HttpClient
-		const request = HttpClientRequest.get(`${baseUrl}/v1/agents/agent_unknown`)
+		const request = HttpClientRequest.get(`${baseUrl}/v1/auth/verify`)
 		const response = yield* http.execute(
 			Option.match(apiKey, {
 				onNone: () => request,
@@ -153,7 +156,11 @@ const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
 			VERIFY_BODY_TIMEOUT_MS,
 		)
 		const body = Option.getOrNull(decodeJsonOption(text))
-		return { status: response.status, error: isApiErrorEnvelope(body) ? body.error : undefined }
+		return {
+			status: response.status,
+			error: isApiErrorEnvelope(body) ? body.error : undefined,
+			verified: response.status === 200 && isVerified(body),
+		}
 	}).pipe(
 		Effect.scoped,
 		Effect.mapError((error) => networkFailure(`${baseUrl} is not reachable: ${error.message}`)),
@@ -171,9 +178,11 @@ export const verifyApiKey = (
 	apiKey: string,
 ): Effect.Effect<void, CliFailure, HttpClient.HttpClient> =>
 	Effect.gen(function* () {
+		// An API deployed before the credential check existed answers 404 here, as does a
+		// mistyped path.
 		const notCheckfu = (status: number) =>
 			networkFailure(
-				`${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path.`,
+				`${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path${status === 404 ? "; a deployment older than this CLI needs redeploying first" : ""}.`,
 			)
 		// The key is only sent to a route that has just refused a request for lacking one.
 		const anonymous = yield* probeProtectedRoute(baseUrl, Option.none())
@@ -181,14 +190,14 @@ export const verifyApiKey = (
 			return yield* notCheckfu(anonymous.status)
 		}
 		const authed = yield* probeProtectedRoute(baseUrl, Option.some(apiKey))
-		if (authed.error === undefined) {
-			return yield* notCheckfu(authed.status)
+		if (authed.verified) {
+			return
 		}
-		if (authed.status !== 404 || authed.error.type !== "not_found_error") {
-			return yield* networkFailure(
-				`${baseUrl} rejected the API key (HTTP ${authed.status}): ${authed.error.message}`,
-			)
-		}
+		return yield* authed.error === undefined
+			? notCheckfu(authed.status)
+			: networkFailure(
+					`${baseUrl} rejected the API key (HTTP ${authed.status}): ${authed.error.message}`,
+				)
 	})
 
 export interface CheckfuClient {
