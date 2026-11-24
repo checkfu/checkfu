@@ -3,6 +3,7 @@ import * as Context from "effect/Context"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Hex from "effect/encoding/Hex"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientError from "effect/http/HttpClientError"
@@ -357,10 +358,7 @@ export const generateIdempotencyKey = (
 	random: SecureRandom.SecureRandom["Service"],
 	prefix = "sdk",
 ): Effect.Effect<string> =>
-	Effect.map(
-		random.randomBytes(12),
-		(bytes) => `${prefix}_${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`,
-	)
+	Effect.map(random.randomBytes(12), (bytes) => `${prefix}_${Hex.encode(bytes)}`)
 
 export const parseRetryAfterMs = (
 	headers: Readonly<Record<string, string>> | undefined,
