@@ -7,6 +7,12 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
+import { AutomationReadWaitTimeout } from "../src/Http/AutomationsHandlers.ts"
+import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import * as Domain from "@alchemy.run/domain"
+import * as Option from "effect/Option"
+import type * as Layer from "effect/Layer"
+import type * as Scope from "effect/Scope"
 import {
 	AUTH_HEADERS,
 	extractLastUserText,
@@ -112,7 +118,11 @@ const atNow = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> 
 		}),
 	)
 
-const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A> => {
+type Hosted = Layer.Success<ReturnType<typeof makePiDurableTestLayer>["layer"]>
+
+const run = async <A>(
+	body: (apiFetch: ApiFetch) => Effect.Effect<A, never, Hosted | Scope.Scope>,
+): Promise<A> => {
 	const { layer, closeAll } = makePiDurableTestLayer(
 		async (model, context) =>
 			makeAssistantReply(model, null, `Done: ${extractLastUserText(context)}`, 4, 2),
@@ -130,6 +140,21 @@ const run = async <A>(body: (apiFetch: ApiFetch) => Effect.Effect<A>): Promise<A
 		await closeAll()
 	}
 }
+
+interface ListBody {
+	readonly data: ReadonlyArray<AutomationBody>
+	readonly has_more: boolean
+	readonly next_cursor: number | null
+}
+
+const listed = (apiFetch: ApiFetch, query: string, count: number) =>
+	call<ListBody>(apiFetch, "GET", `/v1/automations${query}`).pipe(
+		Effect.repeat({
+			schedule: Schedule.spaced("5 millis"),
+			times: 400,
+			until: (page) => page.body.data.length === count,
+		}),
+	)
 
 const settledRuns = (apiFetch: ApiFetch, automationId: string, count: number) =>
 	call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
@@ -450,6 +475,153 @@ describe("Automations API", () => {
 					`/v1/automations/${id}/archive`,
 				)
 				expect(archivedAgain.status).toBe(200)
+			}),
+		))
+
+	it("lists the automations that are not archived, a page at a time in either order", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const empty = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
+				expect(empty).toEqual({
+					status: 200,
+					body: { data: [], has_more: false, next_cursor: null },
+				})
+				const ids: Array<string> = []
+				for (const name of ["First", "Second", "Third"]) {
+					const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+						name,
+						agent: agentId,
+						environment_id: environmentId,
+						initial_events: message(`Run ${name}.`),
+						schedule: weekdayMornings,
+					})
+					ids.push(created.body.id)
+				}
+				const all = yield* listed(apiFetch, "", 3)
+				expect(all.body.data.map((automation) => automation.name)).toEqual([
+					"First",
+					"Second",
+					"Third",
+				])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${ids[0]}`)
+				expect(all.body.data[0]).toEqual(fetched.body)
+				expect(all.body).toMatchObject({ has_more: false, next_cursor: null })
+
+				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?limit=2")
+				expect(first.body.data.map((automation) => automation.id)).toEqual(ids.slice(0, 2))
+				expect(first.body.has_more).toBe(true)
+				const second = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/automations?limit=2&after=${first.body.next_cursor}`,
+				)
+				expect(second.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(second.body.data.map((automation) => automation.id)).toEqual(ids.slice(2))
+
+				const newest = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?order=desc&limit=2")
+				expect(newest.body.data.map((automation) => automation.id)).toEqual([ids[2], ids[1]])
+				const oldest = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/automations?order=desc&after=${newest.body.next_cursor}`,
+				)
+				expect(oldest.body.data.map((automation) => automation.id)).toEqual([ids[0]])
+
+				yield* call(apiFetch, "POST", `/v1/automations/${ids[1]}/pause`)
+				yield* call(apiFetch, "POST", `/v1/automations/${ids[0]}/archive`)
+				const remaining = yield* listed(apiFetch, "", 2)
+				expect(remaining.body.data.map((automation) => [automation.id, automation.status])).toEqual(
+					[
+						[ids[1], "paused"],
+						[ids[2], "active"],
+					],
+				)
+				const afterArchived = yield* call<ListBody>(
+					apiFetch,
+					"GET",
+					`/v1/automations?after=${first.body.next_cursor}`,
+				)
+				expect(afterArchived.body.data.map((automation) => automation.id)).toEqual([ids[2]])
+			}),
+		))
+
+	it("lists while the directory is ahead of an automation's own view: waits for it, or answers 503 with no page", () =>
+		run(() =>
+			Effect.gen(function* () {
+				const views = yield* AutomationView
+				let lag: "off" | "missing" | "timeout" | "archived" = "off"
+				let waits = 0
+				const lagging = {
+					...views,
+					get: (ref: Parameters<typeof views.get>[0], options?: Parameters<typeof views.get>[1]) =>
+						lag === "off"
+							? views.get(ref, options)
+							: lag === "archived"
+								? Effect.map(
+										views.get(ref, options),
+										Option.map((state) =>
+											state === null ? state : { ...state, status: "archived" as const },
+										),
+									)
+								: Effect.succeedNone,
+					waitFor: (
+						ref: Parameters<typeof views.waitFor>[0],
+						where: Parameters<typeof views.waitFor>[1],
+						options: Parameters<typeof views.waitFor>[2],
+					) => {
+						waits += 1
+						return lag === "timeout"
+							? Effect.fail(new Domain.WaitTimeout({ view: "AutomationView", key: ref.id }))
+							: views.waitFor(ref, where, options)
+					},
+				} as unknown as typeof views
+				const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+					Effect.provideService(AutomationView, lagging),
+					Effect.provideService(AutomationReadWaitTimeout, "50 millis"),
+				)
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Lagging",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Report."),
+					schedule: weekdayMornings,
+				})
+				yield* listed(apiFetch, "", 1)
+
+				lag = "missing"
+				const waited = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?limit=1")
+				expect([waited.status, waited.body.data.map((automation) => automation.id), waits]).toEqual(
+					[200, [created.body.id], 1],
+				)
+
+				lag = "timeout"
+				const unavailable = yield* call<ErrorBody & Partial<ListBody>>(
+					apiFetch,
+					"GET",
+					"/v1/automations?limit=1",
+				)
+				expect([
+					unavailable.status,
+					unavailable.body.next_cursor,
+					unavailable.body.data,
+					waits,
+				]).toEqual([503, undefined, undefined, 2])
+
+				lag = "archived"
+				const archived = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?limit=1")
+				expect([archived.status, archived.body.data, waits]).toEqual([200, [], 2])
+			}),
+		))
+
+	it("refuses list paging values it cannot use", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				for (const query of ["limit=0", "limit=101", "after=-1", "order=newest"]) {
+					const refused = yield* call<ErrorBody>(apiFetch, "GET", `/v1/automations?${query}`)
+					expect([query, refused.status]).toEqual([query, 400])
+				}
 			}),
 		))
 

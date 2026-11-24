@@ -178,6 +178,10 @@ describe("@checkfu/sdk live API integration", () => {
 								client.automations.runs.listStream(automation.id, { limit: 1, order: "desc" }),
 							)
 							expect(Array.from(pagedNewestFirst, (entry) => entry.run)).toEqual([3, 2, 1])
+							const listedAutomations = yield* Stream.runCollect(
+								client.automations.listStream({ limit: 1 }),
+							)
+							expect(Array.from(listedAutomations, (entry) => entry.id)).toEqual([automation.id])
 							const tooFrequent = yield* Effect.flip(
 								client.automations.create(
 									{
@@ -394,6 +398,11 @@ describe("@checkfu/sdk live API integration", () => {
 								}
 								await expect.poll(() => runNumbers(), { timeout: 5000 }).toEqual([1, 2, 3])
 								expect(await runNumbers("desc")).toEqual([3, 2, 1])
+								const listedIds: Array<string> = []
+								for await (const entry of client.automations.list({ limit: 1 })) {
+									listedIds.push(entry.id)
+								}
+								expect(listedIds).toContain(automation.id)
 
 								// 404 unwraps directly to NotFoundError
 								await expect(client.sessions.retrieve("sess_does_not_exist")).rejects.toThrow(
