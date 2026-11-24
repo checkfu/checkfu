@@ -75,16 +75,17 @@ import {
 import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import {
 	AUTH_HEADERS,
-	TEST_API_KEY,
 	extractLastUserText,
 	makeApiTestClient,
 	makeApiTestHttpClient,
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	makeScriptedPiModels,
+	openApiDocument,
 	readSseUntil,
 	sendAndSettle,
 	sendRequest,
+	TEST_API_KEY,
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
@@ -803,12 +804,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const { fetch: apiFetch } = yield* makeApiHandler
 
 					// OpenAPI schema for POST /v1/sessions must require either `agent` or `agent_id`.
-					const openapiRes = yield* sendRequest(apiFetch, {
-						method: "GET",
-						path: "/openapi.json",
-					})
-					expect(openapiRes.status).toBe(200)
-					const spec = (yield* Effect.promise(() => openapiRes.json())) as {
+					const spec = openApiDocument<{
 						paths: Record<
 							string,
 							{
@@ -823,7 +819,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								}
 							}
 						>
-					}
+					}>()
 					const sessionBodySchema =
 						spec.paths["/v1/sessions"]?.post?.requestBody?.content?.["application/json"]?.schema
 					const requiredSets = (sessionBodySchema?.anyOf ?? []).map(
@@ -1892,9 +1888,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						Effect.provideService(Environment, wrappedEnvironments),
 					)
 
-					const openapiRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(openapiRes.status).toBe(200)
-					const spec = (yield* Effect.promise(() => openapiRes.json())) as {
+					const spec = openApiDocument<{
 						paths: Record<
 							string,
 							{
@@ -1907,7 +1901,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								}
 							}
 						>
-					}
+					}>()
 					const eventsIdempotencyParam = spec.paths[
 						"/v1/sessions/{session_id}/events"
 					]?.post?.parameters?.find((p) => p.name === "idempotency-key" && p.in === "header")
@@ -2557,9 +2551,7 @@ describe("Agent and environment field length limits", () => {
 					})
 					expect(tooLargeRes.status).toBe(413)
 
-					const specRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(specRes.status).toBe(200)
-					const spec = (yield* Effect.promise(() => specRes.json())) as {
+					const spec = openApiDocument<{
 						paths: Record<
 							string,
 							Record<
@@ -2573,7 +2565,7 @@ describe("Agent and environment field length limits", () => {
 								}
 							>
 						>
-					}
+					}>()
 					const schemaJson = (path: string, method: string) =>
 						JSON.stringify(
 							spec.paths[path]?.[method]?.requestBody?.content?.["application/json"]?.schema,

@@ -27,21 +27,21 @@ import * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
 import { MAX_AGENT_BODY_BYTES, handled, toApiError } from "../src/Http/HttpHelpers.ts"
-import { OPENAPI_DOCUMENT_JSON } from "../src/Http/OpenApiDocument.generated.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableHarness.ts"
 import {
 	AUTH_HEADERS,
-	TEST_API_KEY,
 	createIdleSession,
 	extractConversationMessageCount,
 	extractLastUserText,
 	extractSystemText,
 	makeAssistantReply,
 	makePiDurableTestLayer,
+	openApiDocument,
 	providerError,
 	readSseUntil,
 	sendRequest,
+	TEST_API_KEY,
 } from "./helpers/ApiHarness.ts"
 import type { RecordedModelCall } from "./helpers/ApiHarness.ts"
 
@@ -417,9 +417,9 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 
 	it("rejects missing and wrong credentials on every operation outside the public allow-list", async () => {
 		const publicPaths = ["/health"]
-		const spec = JSON.parse(OPENAPI_DOCUMENT_JSON) as {
+		const spec = openApiDocument<{
 			readonly paths: Record<string, Record<string, { readonly operationId?: string }>>
-		}
+		}>()
 		const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
 			Object.keys(methods).map((method) => ({
 				label: `${method.toUpperCase()} ${path}`,
@@ -676,9 +676,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
-					const specRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(specRes.status).toBe(200)
-					const spec = (yield* Effect.promise(() => specRes.json())) as {
+					const spec = openApiDocument<{
 						paths: Record<
 							string,
 							Record<
@@ -686,7 +684,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 								{ readonly responses?: Record<string, { readonly description?: string }> }
 							>
 						>
-					}
+					}>()
 					expect(Object.keys(spec.paths).toSorted()).toEqual([
 						"/health",
 						"/v1/agents",
@@ -752,165 +750,153 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
-	it("describes the SessionEvent union in /openapi.json for list and SSE endpoints", async () => {
-		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
-			makeAssistantReply(model, null, "unused", 1, 1),
-		)
-		try {
-			await Effect.runPromise(
-				Effect.gen(function* () {
-					const { fetch: apiFetch } = yield* makeApiHandler
-					const specRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(specRes.status).toBe(200)
-					type JsonSchemaNode = {
-						readonly $ref?: string
-						readonly type?: string
-						readonly enum?: ReadonlyArray<unknown>
-						readonly properties?: Record<string, JsonSchemaNode>
-						readonly required?: ReadonlyArray<string>
-						readonly additionalProperties?: boolean
-						readonly items?: JsonSchemaNode
-						readonly anyOf?: ReadonlyArray<JsonSchemaNode>
-						readonly contentMediaType?: string
-						readonly contentSchema?: JsonSchemaNode
-					}
-					const spec = (yield* Effect.promise(() => specRes.json())) as {
-						readonly paths: Record<
+	it("describes the SessionEvent union in /openapi.json for list and SSE endpoints", () => {
+		type JsonSchemaNode = {
+			readonly $ref?: string
+			readonly type?: string
+			readonly enum?: ReadonlyArray<unknown>
+			readonly properties?: Record<string, JsonSchemaNode>
+			readonly required?: ReadonlyArray<string>
+			readonly additionalProperties?: boolean
+			readonly items?: JsonSchemaNode
+			readonly anyOf?: ReadonlyArray<JsonSchemaNode>
+			readonly contentMediaType?: string
+			readonly contentSchema?: JsonSchemaNode
+		}
+		const spec = openApiDocument<{
+			readonly paths: Record<
+				string,
+				{
+					readonly get?: {
+						readonly responses?: Record<
 							string,
 							{
-								readonly get?: {
-									readonly responses?: Record<
-										string,
-										{
-											readonly content?: Record<
-												string,
-												{
-													readonly schema?: JsonSchemaNode
-													readonly "x-effect-stream"?: { readonly encoding?: string }
-												}
-											>
-										}
-									>
-								}
+								readonly content?: Record<
+									string,
+									{
+										readonly schema?: JsonSchemaNode
+										readonly "x-effect-stream"?: { readonly encoding?: string }
+									}
+								>
 							}
 						>
-						readonly components?: { readonly schemas?: Record<string, JsonSchemaNode> }
 					}
-					const schemas = spec.components?.schemas ?? {}
-					const resolve = (node: JsonSchemaNode | undefined): JsonSchemaNode | undefined => {
-						if (node?.$ref === undefined) {
-							return node
-						}
-						const name = node.$ref.replace(/^#\/components\/schemas\//, "")
-						return schemas[name]
-					}
+				}
+			>
+			readonly components?: { readonly schemas?: Record<string, JsonSchemaNode> }
+		}>()
+		const schemas = spec.components?.schemas ?? {}
+		const resolve = (node: JsonSchemaNode | undefined): JsonSchemaNode | undefined => {
+			if (node?.$ref === undefined) {
+				return node
+			}
+			const name = node.$ref.replace(/^#\/components\/schemas\//, "")
+			return schemas[name]
+		}
 
-					const listMedia =
-						spec.paths["/v1/sessions/{session_id}/events"]?.get?.responses?.["200"]?.content?.[
-							"application/json"
-						]
-					const listItemsRef = listMedia?.schema?.properties?.["data"]?.items
-					expect(listItemsRef?.$ref).toBe("#/components/schemas/SessionEvent")
+		const listMedia =
+			spec.paths["/v1/sessions/{session_id}/events"]?.get?.responses?.["200"]?.content?.[
+				"application/json"
+			]
+		const listItemsRef = listMedia?.schema?.properties?.["data"]?.items
+		expect(listItemsRef?.$ref).toBe("#/components/schemas/SessionEvent")
 
-					const streamMedia =
-						spec.paths["/v1/sessions/{session_id}/events/stream"]?.get?.responses?.["200"]
-							?.content?.["text/event-stream"]
-					expect(streamMedia?.["x-effect-stream"]?.encoding).toBe("sse")
-					const streamData = resolve(streamMedia?.schema?.properties?.["data"])
-					expect(streamData?.type).toBe("string")
-					expect(streamData?.contentMediaType).toBe("application/json")
-					expect(streamData?.contentSchema?.$ref).toBe("#/components/schemas/SessionEvent")
+		const streamMedia =
+			spec.paths["/v1/sessions/{session_id}/events/stream"]?.get?.responses?.["200"]?.content?.[
+				"text/event-stream"
+			]
+		expect(streamMedia?.["x-effect-stream"]?.encoding).toBe("sse")
+		const streamData = resolve(streamMedia?.schema?.properties?.["data"])
+		expect(streamData?.type).toBe("string")
+		expect(streamData?.contentMediaType).toBe("application/json")
+		expect(streamData?.contentSchema?.$ref).toBe("#/components/schemas/SessionEvent")
 
-					const sessionEventSchema = resolve(listItemsRef)
-					const members = (sessionEventSchema?.anyOf ?? []).map((member) => resolve(member))
-					const expectedTags = (SessionView.definition.events ?? []).map((event) => event.tag)
-					expect(members).toHaveLength(expectedTags.length)
+		const sessionEventSchema = resolve(listItemsRef)
+		const members = (sessionEventSchema?.anyOf ?? []).map((member) => resolve(member))
+		const expectedTags = (SessionView.definition.events ?? []).map((event) => event.tag)
+		expect(members).toHaveLength(expectedTags.length)
 
-					const byType = new Map<string, JsonSchemaNode>()
-					for (const member of members) {
-						expect(member?.type).toBe("object")
-						expect(member?.additionalProperties).toBe(false)
-						expect(member?.required).toEqual(
-							expect.arrayContaining(["id", "seq", "type", "created_at"]),
-						)
-						const typeEnum = member?.properties?.["type"]?.enum
-						expect(typeEnum).toHaveLength(1)
-						byType.set(String(typeEnum?.[0]), member!)
-					}
-					expect([...byType.keys()].toSorted()).toEqual(expectedTags.toSorted())
+		const byType = new Map<string, JsonSchemaNode>()
+		for (const member of members) {
+			expect(member?.type).toBe("object")
+			expect(member?.additionalProperties).toBe(false)
+			expect(member?.required).toEqual(expect.arrayContaining(["id", "seq", "type", "created_at"]))
+			const typeEnum = member?.properties?.["type"]?.enum
+			expect(typeEnum).toHaveLength(1)
+			byType.set(String(typeEnum?.[0]), member!)
+		}
+		expect([...byType.keys()].toSorted()).toEqual(expectedTags.toSorted())
 
-					expect(Object.keys(byType.get("user.message")?.properties ?? {}).toSorted()).toEqual([
-						"content",
-						"created_at",
-						"id",
-						"seq",
-						"type",
-					])
-					expect(Object.keys(byType.get("agent.message")?.properties ?? {}).toSorted()).toEqual([
-						"content",
-						"created_at",
-						"id",
-						"seq",
-						"truncated",
-						"type",
-					])
-					expect(byType.get("agent.message")?.required?.toSorted()).toEqual([
-						"content",
-						"created_at",
-						"id",
-						"seq",
-						"type",
-					])
-					expect(
-						Object.keys(byType.get("span.model_request_start")?.properties ?? {}).toSorted(),
-					).toEqual(["created_at", "id", "model_request_start_id", "seq", "type"])
-					expect(
-						Object.keys(byType.get("span.model_request_end")?.properties ?? {}).toSorted(),
-					).toEqual([
-						"created_at",
-						"id",
-						"is_error",
-						"model_request_start_id",
-						"model_usage",
-						"seq",
-						"type",
-					])
-					expect(Object.keys(byType.get("agent.thinking")?.properties ?? {}).toSorted()).toEqual([
-						"created_at",
-						"id",
-						"seq",
-						"thinking",
-						"type",
-					])
-					expect(
-						Object.keys(byType.get("session.status_running")?.properties ?? {}).toSorted(),
-					).toEqual(["created_at", "id", "seq", "turn", "type"])
-					expect(
-						Object.keys(byType.get("session.status_idle")?.properties ?? {}).toSorted(),
-					).toEqual(["created_at", "id", "seq", "stop_reason", "turn", "type"])
-					expect(Object.keys(byType.get("session.error")?.properties ?? {}).toSorted()).toEqual([
-						"created_at",
-						"error",
-						"id",
-						"seq",
-						"type",
-					])
-					for (const emptyTag of [
-						"user.interrupt",
-						"session.status_terminated",
-						"session.archived",
-					]) {
-						expect(Object.keys(byType.get(emptyTag)?.properties ?? {}).toSorted()).toEqual([
-							"created_at",
-							"id",
-							"seq",
-							"type",
-						])
-					}
-				}).pipe(Effect.scoped, Effect.provide(layer)),
-			)
-		} finally {
-			await closeAll()
+		expect(Object.keys(byType.get("user.message")?.properties ?? {}).toSorted()).toEqual([
+			"content",
+			"created_at",
+			"id",
+			"seq",
+			"type",
+		])
+		expect(Object.keys(byType.get("agent.message")?.properties ?? {}).toSorted()).toEqual([
+			"content",
+			"created_at",
+			"id",
+			"seq",
+			"truncated",
+			"type",
+		])
+		expect(byType.get("agent.message")?.required?.toSorted()).toEqual([
+			"content",
+			"created_at",
+			"id",
+			"seq",
+			"type",
+		])
+		expect(
+			Object.keys(byType.get("span.model_request_start")?.properties ?? {}).toSorted(),
+		).toEqual(["created_at", "id", "model_request_start_id", "seq", "type"])
+		expect(Object.keys(byType.get("span.model_request_end")?.properties ?? {}).toSorted()).toEqual([
+			"created_at",
+			"id",
+			"is_error",
+			"model_request_start_id",
+			"model_usage",
+			"seq",
+			"type",
+		])
+		expect(Object.keys(byType.get("agent.thinking")?.properties ?? {}).toSorted()).toEqual([
+			"created_at",
+			"id",
+			"seq",
+			"thinking",
+			"type",
+		])
+		expect(Object.keys(byType.get("session.status_running")?.properties ?? {}).toSorted()).toEqual([
+			"created_at",
+			"id",
+			"seq",
+			"turn",
+			"type",
+		])
+		expect(Object.keys(byType.get("session.status_idle")?.properties ?? {}).toSorted()).toEqual([
+			"created_at",
+			"id",
+			"seq",
+			"stop_reason",
+			"turn",
+			"type",
+		])
+		expect(Object.keys(byType.get("session.error")?.properties ?? {}).toSorted()).toEqual([
+			"created_at",
+			"error",
+			"id",
+			"seq",
+			"type",
+		])
+		for (const emptyTag of ["user.interrupt", "session.status_terminated", "session.archived"]) {
+			expect(Object.keys(byType.get(emptyTag)?.properties ?? {}).toSorted()).toEqual([
+				"created_at",
+				"id",
+				"seq",
+				"type",
+			])
 		}
 	})
 
@@ -1253,7 +1239,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
-	it("sets Cache-Control: no-store on protected responses without altering /health or /openapi.json", async () => {
+	it("sets Cache-Control: no-store on protected responses without altering /health", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
 		)
@@ -1267,10 +1253,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const healthRes = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
 					expect(healthRes.status).toBe(200)
 					expect(healthRes.headers.get("cache-control")).toBeNull()
-
-					const openapiRes = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(openapiRes.status).toBe(200)
-					expect(openapiRes.headers.get("cache-control")).toBeNull()
 
 					// Protected JSON and SSE routes authenticated via x-api-key MUST include no-store.
 					const agentRes = yield* sendRequest(apiFetch, {
@@ -1345,7 +1327,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		}
 	})
 
-	it("returns a unique request-id header on every response, echoes it in error bodies and /openapi.json, and ignores caller-supplied IDs", async () => {
+	it("returns a unique request-id header on every response, echoes it in error bodies, documents it in the OpenAPI document, and ignores caller-supplied IDs", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
 		)
@@ -1394,10 +1376,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(health2.status).toBe(200)
 					expectRequestId(health2)
 
-					const openapi1 = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(openapi1.status).toBe(200)
-					expectRequestId(openapi1)
-					const spec = (yield* Effect.promise(() => openapi1.json())) as {
+					const spec = openApiDocument<{
 						paths: Record<
 							string,
 							Record<
@@ -1419,17 +1398,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 								}
 							>
 						>
-					}
+					}>()
 					const agentGetResponses = spec.paths["/v1/agents/{agent_id}"]?.get?.responses
 					for (const status of ["400", "401", "404", "500"]) {
 						const errorSchema = agentGetResponses?.[status]?.content?.["application/json"]?.schema
 						expect(errorSchema?.properties).toHaveProperty("request_id")
 						expect(errorSchema?.required).toContain("request_id")
 					}
-
-					const openapi2 = yield* sendRequest(apiFetch, { method: "GET", path: "/openapi.json" })
-					expect(openapi2.status).toBe(200)
-					expectRequestId(openapi2)
 
 					const unauthedRes = yield* sendRequest(apiFetch, {
 						method: "GET",

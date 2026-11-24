@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
 import * as Digest from "effect/crypto/Digest"
@@ -54,6 +55,10 @@ export const API_WORKER_PROPS = {
 		date: "2026-11-17",
 	},
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
+	// The generated OpenAPI document is a static asset: GET /openapi.json is served without
+	// running the Worker, and the document is not part of the code every isolate loads.
+	// Resolved from this module, like `main`, so Alchemy finds it from any working directory.
+	assets: fileURLToPath(new URL("../public", import.meta.url)),
 	observability: {
 		// Keep top-level Workers Observability enabled when adding `issues`, since
 		// providing `observability` bypasses Alchemy's DEFAULT_OBSERVABILITY fallback.
