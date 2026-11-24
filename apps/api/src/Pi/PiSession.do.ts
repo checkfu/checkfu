@@ -176,6 +176,12 @@ export const PiSessionLive = PiSession.make(
 						),
 					)
 					upstreams.set(key, created)
+					// A failed load or connect is forgotten, so the next call tries again.
+					created.catch(() => {
+						if (upstreams.get(key) === created) {
+							upstreams.delete(key)
+						}
+					})
 					return created
 				}
 				let registry: Registry | undefined
