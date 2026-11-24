@@ -1613,7 +1613,7 @@ const Vaults = HttpApiGroup.make("vaults")
 				"x-forge-group-name": "vaults.credentials",
 				"x-forge-method-name": "create",
 				"x-checkfu-endpoint": { group: "vaults", endpoint: "createCredential" },
-				"x-checkfu-mcp": { name: "vaults_createCredential", destructive: false },
+				"x-checkfu-mcp": false,
 			}),
 	)
 	.add(
@@ -1659,7 +1659,7 @@ const Vaults = HttpApiGroup.make("vaults")
 				"x-forge-group-name": "vaults.credentials",
 				"x-forge-method-name": "update",
 				"x-checkfu-endpoint": { group: "vaults", endpoint: "updateCredential" },
-				"x-checkfu-mcp": { name: "vaults_updateCredential" },
+				"x-checkfu-mcp": false,
 			}),
 	)
 	.add(

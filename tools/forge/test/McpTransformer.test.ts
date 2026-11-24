@@ -121,7 +121,6 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",
-			"vaults_createCredential",
 			"vaults_createVault",
 		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])
