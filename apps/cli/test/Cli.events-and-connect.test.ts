@@ -2898,7 +2898,7 @@ describe("CLI sessions:events and sessions connect", () => {
 	const isLinuxCi = process.env["CI"] === "true" && process.platform === "linux"
 	const ptySupported = isLinuxCi || hasPosixPythonPty()
 
-	it("starts `bun checkfu` with .env loading off, refuses anything extra, and stops on a forwarded SIGTERM", async () => {
+	it("starts `bun checkfu` with .env loading off and refuses anything extra", () => {
 		const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 		const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
 			readonly scripts?: Record<string, string>
@@ -2935,89 +2935,107 @@ describe("CLI sessions:events and sessions connect", () => {
 			expect(refused.status).toBe(1)
 			expect(refused.stderr).toContain("--no-env-file")
 		}
+	})
 
-		// `bun checkfu`'s PID is Bun's script runner, which passes SIGTERM on to the CLI. The
-		// CLI must stop, closing the caller's output and the stream connection. SIGKILL cannot
-		// be passed on; the README says to kill the process group, or to use the binary.
-		let streamClosed = false
-		const server = Http.createServer((req, res) => {
-			res.writeHead(200, {
-				"content-type": "text/event-stream; charset=utf-8",
-				"cache-control": "no-cache",
-			})
-			res.write(
-				'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
-			)
-			req.on("close", () => {
-				streamClosed = true
-			})
-		})
-		await new Promise<void>((resolve) => {
-			server.listen(0, "127.0.0.1", resolve)
-		})
-		try {
-			const port = (server.address() as { port: number }).port
-			const outcome = await new Promise<{
-				readonly stdoutEnded: boolean
-				readonly signal: NodeJS.Signals | null
-			}>((resolve, reject) => {
-				const child = spawn(
-					"bun",
-					[
-						"checkfu",
-						"sessions:events",
-						"stream",
-						"--session-id",
-						"sess_kill",
-						"--base-url",
-						`http://127.0.0.1:${port}`,
-					],
-					{
-						cwd: repoRoot,
-						env: { ...env, CHECKFU_API_KEY: "ck_kill" },
-						stdio: ["ignore", "pipe", "pipe"],
-					},
+	// Windows has no SIGTERM to forward: Node terminates the runner outright.
+	it.skipIf(process.platform === "win32")(
+		"stops a stream when SIGTERM is sent to `bun checkfu`'s PID",
+		async () => {
+			// `bun checkfu`'s PID is Bun's script runner, which passes SIGTERM on to the CLI. The
+			// CLI must stop, closing the caller's output and the stream connection. SIGKILL cannot
+			// be passed on; the README says to kill the process group, or to use the binary.
+			const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
+			const env: Record<string, string> = {}
+			for (const [name, value] of Object.entries(process.env)) {
+				if (value !== undefined && !name.startsWith("CHECKFU_") && name !== "BUN_OPTIONS") {
+					env[name] = value
+				}
+			}
+			let streamClosed = false
+			const server = Http.createServer((req, res) => {
+				res.writeHead(200, {
+					"content-type": "text/event-stream; charset=utf-8",
+					"cache-control": "no-cache",
+				})
+				res.write(
+					'id: 1\nevent: session.status_running\ndata: {"id":"evt_1","seq":1,"type":"session.status_running","turn":1,"created_at":"2026-11-22T00:00:00.000Z"}\n\n',
 				)
-				let stdout = ""
-				let stdoutEnded = false
-				let killed = false
-				const timer = setTimeout(() => {
-					child.kill("SIGKILL")
-					reject(new Error(`stream did not stop after SIGTERM to its PID: ${stdout}`))
-				}, 15_000)
-				child.stdout.setEncoding("utf8")
-				child.stdout.on("data", (chunk: string) => {
-					stdout += chunk
-					if (!killed && stdout.includes("session.status_running")) {
-						killed = true
-						child.kill("SIGTERM")
-					}
-				})
-				child.stdout.on("end", () => {
-					stdoutEnded = true
-				})
-				child.on("error", reject)
-				child.on("close", (_code, signal) => {
-					clearTimeout(timer)
-					resolve({ stdoutEnded, signal })
+				req.on("close", () => {
+					streamClosed = true
 				})
 			})
-			expect(outcome.stdoutEnded).toBe(true)
-			for (let waited = 0; waited < 3000 && !streamClosed; waited += 50) {
+			await new Promise<void>((resolve) => {
+				server.listen(0, "127.0.0.1", resolve)
+			})
+			try {
+				const port = (server.address() as { port: number }).port
+				const outcome = await new Promise<{
+					readonly stdoutEnded: boolean
+					readonly signal: NodeJS.Signals | null
+				}>((resolve, reject) => {
+					const child = spawn(
+						"bun",
+						[
+							"checkfu",
+							"sessions:events",
+							"stream",
+							"--session-id",
+							"sess_kill",
+							"--base-url",
+							`http://127.0.0.1:${port}`,
+						],
+						{
+							cwd: repoRoot,
+							env: { ...env, CHECKFU_API_KEY: "ck_kill" },
+							stdio: ["ignore", "pipe", "pipe"],
+							// Its own process group, so a timeout can stop the runner and the CLI together.
+							detached: true,
+						},
+					)
+					let stdout = ""
+					let stdoutEnded = false
+					let killed = false
+					const timer = setTimeout(() => {
+						if (child.pid !== undefined) {
+							process.kill(-child.pid, "SIGKILL")
+						}
+						reject(new Error(`stream did not stop after SIGTERM to its PID: ${stdout}`))
+					}, 15_000)
+					child.stdout.setEncoding("utf8")
+					child.stdout.on("data", (chunk: string) => {
+						stdout += chunk
+						if (!killed && stdout.includes("session.status_running")) {
+							killed = true
+							child.kill("SIGTERM")
+						}
+					})
+					child.stdout.on("end", () => {
+						stdoutEnded = true
+					})
+					child.on("error", reject)
+					child.on("close", (_code, signal) => {
+						clearTimeout(timer)
+						resolve({ stdoutEnded, signal })
+					})
+				})
+				expect(outcome.stdoutEnded).toBe(true)
+				for (let waited = 0; waited < 3000 && !streamClosed; waited += 50) {
+					await new Promise<void>((resolve) => {
+						setTimeout(resolve, 50)
+					})
+				}
+				expect(streamClosed).toBe(true)
+			} finally {
+				server.closeAllConnections()
 				await new Promise<void>((resolve) => {
-					setTimeout(resolve, 50)
+					server.close(() => {
+						resolve()
+					})
 				})
 			}
-			expect(streamClosed).toBe(true)
-		} finally {
-			server.closeAllConnections()
-			await new Promise<void>((resolve) => {
-				server.close(() => {
-					resolve()
-				})
-			})
-		}
-	})
+		},
+		30_000,
+	)
 
 	it.runIf(ptySupported)(
 		"delivers one interrupt per Ctrl-C to a single-process start in a real PTY",
