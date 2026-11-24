@@ -44,6 +44,9 @@ export const MemoryReadWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
+const holdsOrIsHeldBy = (a: string, b: string): boolean =>
+	a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+
 const isDirectChild = (path: string, prefix: string): boolean =>
 	!path.slice(prefix.length).includes("/")
 
@@ -202,6 +205,19 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 				Effect.gen(function* () {
 					const storeId = params.memory_store_id
 					const memoryId = MemoryId.make(yield* memoryIdOf(digest, storeId, payload.path))
+					// A store is mounted as files, where one path cannot be both a file and a
+					// directory. The index is read, not locked: two writers at the same instant can
+					// still store such a pair, and a mount then leaves the file out.
+					const { entries } = Option.getOrElse(yield* index.get(MemoryStore.ref(storeId)), () => ({
+						entries: [],
+					}))
+					const clash = entries.find((entry) => holdsOrIsHeldBy(entry.path, payload.path))
+					if (clash !== undefined) {
+						return yield* reject(
+							409,
+							`Memory path ${payload.path} conflicts with ${clash.path}: a path cannot be both a memory and a directory of memories.`,
+						)
+					}
 					return yield* write(storeId, memoryId, payload.path, payload.content, {
 						type: "absent",
 					})

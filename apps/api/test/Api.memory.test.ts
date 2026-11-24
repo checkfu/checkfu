@@ -234,6 +234,41 @@ describe("Memory stores", () => {
 			}),
 		))
 
+	it("refuses a path that would be both a memory and a directory of memories, in either order", () =>
+		withApi((apiFetch) =>
+			Effect.gen(function* () {
+				const store = yield* json<StoreBody>(
+					yield* request(apiFetch, "POST", "/v1/memory_stores", { name: "Notes" }),
+				)
+				const create = (path: string) =>
+					Effect.flatMap(
+						request(apiFetch, "POST", `/v1/memory_stores/${store.id}/memories`, {
+							path,
+							content: "x",
+						}),
+						(res) =>
+							Effect.map(
+								json<{ error?: { message: string } }>(res),
+								(body) => [res.status, body.error?.message] as const,
+							),
+					)
+				expect((yield* create("/notes"))[0]).toBe(201)
+				expect(yield* create("/notes/todo.md")).toEqual([
+					409,
+					"Memory path /notes/todo.md conflicts with /notes: a path cannot be both a memory and a directory of memories.",
+				])
+				expect((yield* create("/team/plan/q3.md"))[0]).toBe(201)
+				expect(yield* create("/team")).toEqual([
+					409,
+					"Memory path /team conflicts with /team/plan/q3.md: a path cannot be both a memory and a directory of memories.",
+				])
+				// A shared prefix is not a shared directory.
+				expect((yield* create("/notes-archive"))[0]).toBe(201)
+				expect((yield* create("/team/plan/q3.md.bak"))[0]).toBe(201)
+				expect((yield* create("/team/plans"))[0]).toBe(201)
+			}),
+		))
+
 	it("updates and deletes a memory only as its precondition allows, and only in its own store", () =>
 		withApi((apiFetch) =>
 			Effect.gen(function* () {
