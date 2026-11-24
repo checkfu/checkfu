@@ -72,6 +72,7 @@ import {
 } from "../src/Http/Router.ts"
 import { MAX_AGENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHelpers.ts"
 import {
+	AgentVersionLookupTimeout,
 	HarnessCallFailed,
 	HarnessLimits,
 	PiDurableHarnessLive,
@@ -242,6 +243,60 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const otherEnv = yield* write("POST", "/v1/environments", { name: "Active environment" })
 					const active = (yield* Effect.promise(() => otherEnv.json())) as { id: string }
 					expect((yield* create(active.id)).status).toBe(409)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("keeps every turn after the last published reply out of the model's context, even one that never reached Pi", async () => {
+		const contexts: Array<string> = []
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) => {
+			contexts.push(
+				context.messages
+					.map((m) =>
+						typeof m.content === "string"
+							? m.content
+							: m.content.map((p) => (p.type === "text" ? p.text : "")).join(""),
+					)
+					.join(" | "),
+			)
+			return makeAssistantReply(model, null, `Echo ${extractLastUserText(context)}`, 1, 1)
+		})
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const provider = yield* Harness
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Abandoned", model: "gpt-4o-mini" },
+					})
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const turn = (number: number, text: string, last_reply_turn: number, agent_version = 1) =>
+						provider.runTurn({
+							session_id: SessionId.make("sess_abandoned_context"),
+							agent_id: agent.id,
+							agent_version,
+							environment_id: "env_1",
+							turn: number,
+							generation: 0,
+							input: [text],
+							last_reply_turn,
+						})
+					yield* turn(1, "lost", 0)
+					// Turn 2 fails before it reaches Pi, so nothing removes turn 1 from the context for it.
+					yield* Effect.flip(
+						turn(2, "missing version", 0, 99).pipe(
+							Effect.provideService(AgentVersionLookupTimeout, "10 millis"),
+						),
+					)
+					yield* turn(3, "kept", 0)
+					yield* turn(4, "next", 3)
+					expect(contexts).toEqual(["lost", "kept", "kept | Echo kept | next"])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

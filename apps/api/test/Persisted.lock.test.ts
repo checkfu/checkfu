@@ -95,7 +95,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"command-reply:Checkfu/ClaimIdempotencyKey",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
-						"pi-doc:checkfu.seed-state",
 					]),
 				)
 			}),
@@ -399,14 +398,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("lets a view change shape only when its version increased", () =>
 		Effect.gen(function* () {
-			const id = "view:Checkfu.TurnInput@v2"
+			const id = "view:Checkfu.TurnInput@v3"
 			expect(persistedShapes.map((shape) => shape.id)).toContain(id)
 			const earlier = viewShapeId("Checkfu", "TurnInput", 0)
-			const later = viewShapeId("Checkfu", "TurnInput", 3)
+			const later = viewShapeId("Checkfu", "TurnInput", 4)
 
 			expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
 
-			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v3" }] }))
+			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v4" }] }))
 			expect(downgraded.length).toBe(1)
 			expect(downgraded[0]).toContain("only ever increases")
 
@@ -433,9 +432,27 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
+	it.effect(
+		"reads TurnInput state queued before last_reply_turn existed, and drops nothing for it",
+		() =>
+			Effect.gen(function* () {
+				const queued = yield* Schema.decodeEffect(TurnInputState)({
+					agent_id: "agent_1",
+					agent_version: 1,
+					environment_id: "env_1",
+					turn: 2,
+					harness_generation: 0,
+					input: ["hi"],
+					unsent: [],
+				})
+				expect(queued.turn).toBe(2)
+				expect(queued.last_reply_turn).toBeUndefined()
+			}),
+	)
+
 	it.effect("blocks a view version bump whose new state breaks queued policy deliveries", () =>
 		Effect.gen(function* () {
-			const viewId = "view:Checkfu.TurnInput@v2"
+			const viewId = "view:Checkfu.TurnInput@v3"
 			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
 			const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
 			expect(persistedShapes.map((shape) => shape.id)).toEqual(
@@ -450,7 +467,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					if (shape.id === viewId) {
 						return {
 							...shape,
-							id: viewShapeId("Checkfu", "TurnInput", 3),
+							id: viewShapeId("Checkfu", "TurnInput", 4),
 							schema: nextState as unknown as PersistedShape["schema"],
 						}
 					}
@@ -460,7 +477,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					return shape
 				})
 
-			// Even with TurnInput bumped to v3, adding a required field breaks queued deliveries.
+			// Even with TurnInput bumped to v4, adding a required field breaks queued deliveries.
 			const breaking = upgradedTurnInput(
 				Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
 			)

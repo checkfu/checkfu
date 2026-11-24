@@ -1,23 +1,17 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai"
+import type { AssistantMessage } from "@earendil-works/pi-ai"
 import {
 	AssistantEntry,
 	ROOT_CONVERSATION_ID,
 	ResetEntry,
 	UserEntry,
 } from "@earendil-works/pi-durable"
-import type {
-	AgentChange,
-	ConversationId,
-	ConversationInit,
-	Cursor,
-	EntryId,
-	Harness,
-	Storage,
-	Tx,
-} from "@earendil-works/pi-durable"
+import type { AgentChange, Cursor, EntryId, Harness, Storage } from "@earendil-works/pi-durable"
+import * as Context from "effect/Context"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
 import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import type { SupportedProvider } from "./PiCatalog.ts"
@@ -29,12 +23,9 @@ import {
 	normalizeRefusalAssistantMessage,
 } from "./PiRefusals.ts"
 import type { UnansweredSubmissionInfo } from "./PiRefusals.ts"
-import { SeedState, clearSeedRebuild } from "./PiTurnUsage.ts"
 import type { BeginTurnUsageResult } from "./PiTurnUsage.ts"
 
-import type { PiSeed, PiTurnOutcome, PiTurnRequest, PiTurnResult } from "./PiTurn.ts"
-
-export type PiSeedContext = Pick<PiTurnRequest, "operationId" | "provider" | "modelId">
+import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
@@ -42,14 +33,12 @@ export interface PiDurableBackend {
 	readonly isCancelled: (operationId: string) => boolean
 	readonly beginUsage: (
 		operationId: string,
+		turn: number,
 		finalizedPrevious?: string,
-		hasSeed?: boolean,
 	) => Promise<BeginTurnUsageResult>
 	readonly settleUsage: (operationId: string) => Promise<ModelUsage>
 	readonly hasSubmission: (operationId: string) => Promise<boolean>
-	readonly ensureRoot: (agent: AgentChange, create: ConversationInit | boolean) => Promise<boolean>
-	readonly rebuildRoot: (agent: AgentChange, request: PiSeedContext, seed: PiSeed) => Promise<void>
-	readonly markSeedCommitted: () => Promise<void>
+	readonly ensureRoot: (agent: AgentChange) => Promise<void>
 	readonly submit: (text: string, operationId: string) => Promise<void>
 	readonly wait: (
 		operationId: string,
@@ -58,6 +47,7 @@ export interface PiDurableBackend {
 		{ readonly status: "done" } | { readonly status: "unanswered"; readonly reason?: string }
 	>
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
+	readonly reset: Effect.Effect<never>
 	readonly readAnswerEntry: (operationId: string) => Promise<AssistantMessage | null>
 	readonly readUnansweredSubmission: (
 		operationId: string,
@@ -186,8 +176,8 @@ export const readUnansweredSubmissionFromStorage = async (
 /**
  * Replaces an error-stopped refusal `AssistantEntry` in Pi's live context with
  * a `stopReason: "stop"` entry carrying the published refusal text. Because Pi
- * excludes `stopReason: "error"` entries from model context, this keeps retained
- * Pi roots consistent with history rebuilt from Checkfu's session log.
+ * excludes `stopReason: "error"` entries from model context, this keeps the
+ * conversation consistent with the refusal Checkfu published to the session.
  */
 export const restoreRefusalEntryInStorage = async (
 	pi: Harness,
@@ -220,9 +210,9 @@ export const restoreRefusalEntryInStorage = async (
 
 /**
  * Omits a non-committed turn's placed user (and, if present, answer) entries
- * from Pi's live model context so interrupted and failed turns match history
- * rebuilt from Checkfu's session log regardless of whether the interrupt or
- * failure landed before or after Pi placed the user entry.
+ * from Pi's live model context, so the model does not see a prompt the session
+ * records as interrupted or failed, whether the interrupt or failure landed
+ * before or after Pi placed the user entry.
  */
 export const omitTurnEntriesFromStorage = async (
 	pi: Harness,
@@ -302,7 +292,6 @@ export const finalizeSettledTurnFromStorage = async (
 					info.assistantMessage,
 				)
 			}
-			await clearSeedRebuild(pi)
 			return
 		}
 		await omitTurnEntriesFromStorage(pi, storage, operationId)
@@ -312,89 +301,46 @@ export const finalizeSettledTurnFromStorage = async (
 		const answer = await readAssistantMessageFromStorage(pi, storage, operationId)
 		if (answer === null || !mapAssistantMessageToOutcome(answer, ZERO_MODEL_USAGE).ok) {
 			await omitTurnEntriesFromStorage(pi, storage, operationId)
-		} else {
-			await clearSeedRebuild(pi)
 		}
 	}
 }
 
-const ZERO_USAGE: Usage = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-}
-
-const appendSeedToTx = async (
-	tx: Tx,
-	conversationId: ConversationId,
-	request: PiSeedContext,
-	seed: PiSeed,
-): Promise<void> => {
-	for (const message of seed.messages) {
-		if (message.role === "user") {
-			await tx.appendEntry(UserEntry, conversationId, {
-				model: [{ role: "user", content: message.text, timestamp: 0 }],
-			})
-		} else {
-			await tx.appendEntry(AssistantEntry, conversationId, {
-				model: [
-					{
-						role: "assistant",
-						content: [{ type: "text", text: message.text }],
-						api: seed.api,
-						provider: request.provider,
-						model: request.modelId,
-						usage: ZERO_USAGE,
-						stopReason: "stop",
-						timestamp: 0,
-					},
-				],
-			})
-		}
-	}
-	const seedState = await tx.doc(SeedState)
-	seedState.rebuildRequired = seed.trimmed === true
-	seedState.seededByOperation = seed.trimmed === true ? request.operationId : null
-}
+export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortGrace", {
+	defaultValue: () => "10 seconds",
+})
 
 /**
- * Resets an existing Pi root whose earlier recovery seed was trimmed and did
- * not commit a reply, replacing its active context with a fresh seed.
+ * Pi's abort returns once the conversation is idle, so work that ignores its
+ * abort signal would hold it, and every later turn of the session, forever.
+ * Past the grace the object is reset: its in-flight work dies with the isolate,
+ * and Pi, which has the abort on record, settles the operation when it reopens.
  */
-export const rebuildRootInStorage = async (
-	pi: Harness,
-	agent: AgentChange,
-	request: PiSeedContext,
-	seed: PiSeed,
-): Promise<void> => {
-	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-	if (conversation === undefined) {
-		return
-	}
-	await conversation.configure(agent, BACKGROUND_CONTEXT)
-	await pi.commit(async (tx) => {
-		await tx.appendEntry(ROOT_CONVERSATION_ID, { kind: ResetEntry.kind, head: "self" })
-		await appendSeedToTx(tx, ROOT_CONVERSATION_ID, request, seed)
-	}, BACKGROUND_CONTEXT)
-}
-
-const seedInit = (request: PiTurnRequest): ConversationInit | undefined => {
-	const seed = request.seed
-	if (seed === undefined || (seed.messages.length === 0 && seed.trimmed !== true)) {
-		return undefined
-	}
-	return (tx, conversationId) => appendSeedToTx(tx, conversationId, request, seed)
-}
+export const abortPiDurableTurn = (
+	backend: PiDurableBackend,
+	operationId: string,
+): Effect.Effect<boolean> =>
+	Effect.gen(function* () {
+		const grace = yield* AbortGrace
+		// The abort cannot be interrupted, so it runs detached and only the wait for it is
+		// bounded. The bounded wait is detached too: a caller that stops waiting must not take
+		// the reset with it, or a stuck abort would hold the session's lock for good.
+		const watched = yield* Effect.forkDetach(
+			Effect.gen(function* () {
+				const aborting = yield* Effect.forkDetach(backend.abort(operationId))
+				return yield* Fiber.join(aborting).pipe(
+					Effect.timeoutOrElse({ duration: grace, orElse: () => backend.reset }),
+				)
+			}),
+		)
+		return yield* Fiber.join(watched)
+	})
 
 const inFlightAdmissions = new WeakMap<PiDurableBackend, Map<string, Set<Latch.Latch>>>()
 
 const admitPiTurn = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<boolean | "history_required" | "missing_key"> => {
+): Effect.Effect<boolean | "missing_key"> => {
 	const operationId = request.operationId
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
@@ -431,22 +377,19 @@ const admitPiTurn = (
 							if (!backend.hasApiKey(request.provider)) {
 								return "missing_key" as const
 							}
-							const rooted = await backend.ensureRoot(
-								agent,
-								seedInit(request) ?? (request.turn === 1 || request.seed !== undefined),
-							)
-							if (!rooted) {
-								return "history_required" as const
-							}
+							await backend.ensureRoot(agent)
 							if (backend.isCancelled(operationId)) {
 								return false
 							}
 							while (true) {
 								const turnState = await backend.beginUsage(
 									operationId,
+									request.turn,
 									finalizedPrevious,
-									request.seed !== undefined,
 								)
+								if (turnState.status === "stale") {
+									return false
+								}
 								if (turnState.status === "waiting") {
 									return { waitingFor: turnState.operationId }
 								}
@@ -455,17 +398,12 @@ const admitPiTurn = (
 									finalizedPrevious = turnState.operationId
 									continue
 								}
-								if (turnState.status === "history_required") {
-									return "history_required" as const
-								}
-								if (turnState.status === "rebuild") {
-									if (request.seed === undefined) {
-										return "history_required" as const
-									}
-									await backend.rebuildRoot(agent, request, request.seed)
-									continue
-								}
 								break
+							}
+							// A turn the session never published a reply for (abandoned, failed or interrupted)
+							// must not reach the model, whatever Pi made of it.
+							for (const unpublished of request.unpublishedOperationIds ?? []) {
+								await backend.omitEntries(unpublished)
 							}
 							if (backend.isCancelled(operationId)) {
 								return false
@@ -477,6 +415,9 @@ const admitPiTurn = (
 					if (typeof admitted !== "object") {
 						return admitted
 					}
+					// The domain starts a turn only once it has ended the one before, so an
+					// operation still running here is one the domain gave up on.
+					yield* abortPiDurableTurn(backend, admitted.waitingFor)
 					yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
 				}
 			}),
@@ -520,7 +461,6 @@ const resolveSettledPiTurn = (
 						const message = submissionInfo.assistantMessage
 						yield* Effect.promise(() => backend.restoreRefusal(operationId, entryId, message))
 					}
-					yield* Effect.promise(() => backend.markSeedCommitted())
 					const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
 					return mapAssistantMessageToOutcome(submissionInfo.assistantMessage, usage)
 				}
@@ -556,8 +496,6 @@ const resolveSettledPiTurn = (
 			}
 			if (!mapAssistantMessageToOutcome(assistantMessage, ZERO_MODEL_USAGE).ok) {
 				yield* Effect.promise(() => backend.omitEntries(operationId))
-			} else {
-				yield* Effect.promise(() => backend.markSeedCommitted())
 			}
 			const usage = yield* Effect.promise(() => backend.settleUsage(operationId))
 			return mapAssistantMessageToOutcome(assistantMessage, usage)
@@ -607,7 +545,7 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.fn.Return<PiTurnResult> {
+): Effect.fn.Return<PiTurnOutcome> {
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
 	if (admitted === "missing_key") {
@@ -620,9 +558,6 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 				terminal: false,
 			},
 		}
-	}
-	if (admitted === "history_required") {
-		return admitted
 	}
 	if (!admitted) {
 		return { ok: false, error: { _tag: "TurnInterrupted" } }

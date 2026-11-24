@@ -10,7 +10,9 @@ import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Sse from "effect/encoding/Sse"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
@@ -21,15 +23,22 @@ import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
-import { recoverPiDurableTurn, runPiDurableTurn } from "../../src/Pi/PiDurableEngine.ts"
+import {
+	AbortGrace,
+	abortPiDurableTurn,
+	recoverPiDurableTurn,
+	runPiDurableTurn,
+} from "../../src/Pi/PiDurableEngine.ts"
 import type { PiTurnRequest } from "../../src/Pi/PiTurn.ts"
 import {
 	HarnessCallFailed,
 	HarnessLimits,
 	PiDurableHarnessLive,
+	harnessCall,
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
+import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -175,29 +184,71 @@ export const makePiDurableTestLayer = (
 	},
 	platform = Domain.InMemory,
 ) => {
-	const backends = new Map<
-		string,
-		Promise<Awaited<ReturnType<typeof createInMemoryPiDurableBackend>>>
-	>()
-	const getBackend = (sessionId: string) => {
-		let existing = backends.get(sessionId)
+	interface SessionObject {
+		readonly backend: InMemoryPiDurableBackend
+		/** Fails every call still running against this object once it is reset. */
+		readonly gone: Deferred.Deferred<never, HarnessCallFailed>
+	}
+	const objects = new Map<string, Promise<SessionObject>>()
+	const resets: Array<string> = []
+	const open = async (
+		sessionId: string,
+		storage?: InMemoryPiDurableBackend["storage"],
+	): Promise<SessionObject> => {
+		const gone = Deferred.makeUnsafe<never, HarnessCallFailed>()
+		const backend = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(handler),
+			undefined,
+			undefined,
+			(provider) => (envOverrides[PROVIDER_API_KEY_ENV[provider]] ?? "").length > 0,
+			{
+				...(storage === undefined ? {} : { storage }),
+				// A reset Durable Object: the isolate and every call it was serving are gone,
+				// and a new one opens Pi over the same storage.
+				reset: Effect.andThen(
+					Effect.promise(async () => {
+						// Only the object currently serving the session is replaced.
+						const serving = await objects.get(sessionId)
+						if (serving?.gone === gone) {
+							resets.push(sessionId)
+							serving.backend.retire()
+							objects.set(sessionId, open(sessionId, serving.backend.storage))
+						}
+					}),
+					Effect.andThen(
+						Deferred.fail(gone, new HarnessCallFailed({ cause: "object reset in test" })),
+						Effect.never,
+					),
+				),
+			},
+		)
+		return { backend, gone }
+	}
+	const getObject = (sessionId: string) => {
+		let existing = objects.get(sessionId)
 		if (existing === undefined) {
-			existing = createInMemoryPiDurableBackend(
-				makeScriptedPiModels(handler),
-				undefined,
-				undefined,
-				(provider) => (envOverrides[PROVIDER_API_KEY_ENV[provider]] ?? "").length > 0,
-			)
-			backends.set(sessionId, existing)
+			existing = open(sessionId)
+			objects.set(sessionId, existing)
 		}
 		return existing
 	}
+	const onObject = <A>(
+		sessionId: string,
+		call: (backend: InMemoryPiDurableBackend) => Effect.Effect<A>,
+	): Effect.Effect<A, HarnessCallFailed> =>
+		Effect.gen(function* () {
+			const { backend, gone } = yield* Effect.promise(() => getObject(sessionId))
+			// Parts of a call cannot be interrupted, so it runs detached and the caller
+			// stops waiting when the object goes away.
+			const running = yield* Effect.forkDetach(harnessCall(call(backend)))
+			return yield* Effect.raceFirst(Fiber.join(running), Deferred.await(gone))
+		}).pipe(Effect.provideService(AbortGrace, "30 millis"))
 
 	const requests: Array<PiTurnRequest> = []
 	const forgetPiState = async (sessionId: string) => {
-		const existing = backends.get(sessionId)
-		backends.delete(sessionId)
-		await (await existing)?.close()
+		const existing = objects.get(sessionId)
+		objects.delete(sessionId)
+		await (await existing)?.backend.close()
 	}
 
 	const unreachable = new Set<string>()
@@ -207,12 +258,9 @@ export const makePiDurableTestLayer = (
 			Effect.suspend(() =>
 				unreachable.has(conversation)
 					? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
-					: !backends.has(conversation)
+					: !objects.has(conversation)
 						? Effect.succeed(null)
-						: Effect.flatMap(
-								Effect.promise(() => getBackend(conversation)),
-								(backend) => recoverPiDurableTurn(backend, operationId),
-							),
+						: onObject(conversation, (backend) => recoverPiDurableTurn(backend, operationId)),
 			),
 		runTurn: (conversation, request) =>
 			Effect.suspend(() => {
@@ -221,18 +269,14 @@ export const makePiDurableTestLayer = (
 				}
 				requests.push(request)
 				conversations.push(conversation)
-				return Effect.flatMap(
-					Effect.promise(() => getBackend(conversation)),
-					(backend) => runPiDurableTurn(backend, request),
-				)
+				return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
 			}),
 		abortTurn: (conversation, operationId) =>
 			Effect.suspend(() =>
 				unreachable.has(conversation)
 					? Effect.never
-					: Effect.flatMap(
-							Effect.promise(() => getBackend(conversation)),
-							(backend) => Effect.asVoid(backend.abort(operationId)),
+					: onObject(conversation, (backend) =>
+							Effect.asVoid(abortPiDurableTurn(backend, operationId)),
 						),
 			),
 	})
@@ -246,12 +290,11 @@ export const makePiDurableTestLayer = (
 	)
 
 	const closeAll = async () => {
-		const pending = [...backends.values()]
-		backends.clear()
+		const pending = [...objects.values()]
+		objects.clear()
 		const results = await Promise.allSettled(
-			pending.map(async (backendPromise) => {
-				const backend = await backendPromise
-				await backend.close()
+			pending.map(async (object) => {
+				await (await object).backend.close()
 			}),
 		)
 		const firstFailure = results.find(
@@ -278,7 +321,7 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 	)
 
-	return { layer, closeAll, requests, forgetPiState, unreachable, conversations }
+	return { layer, closeAll, requests, forgetPiState, unreachable, conversations, resets }
 }
 
 export const sendRequest = (

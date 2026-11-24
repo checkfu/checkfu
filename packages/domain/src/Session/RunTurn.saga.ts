@@ -37,6 +37,7 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		turn: PositiveInt,
 		generation: NonNegativeInt,
 		input: Schema.Array(MessageText),
+		last_reply_turn: Schema.optionalKey(NonNegativeInt),
 	},
 	result: {
 		status: Schema.Literals(["completed", "failed", "interrupted", "aborted"]),
@@ -92,6 +93,9 @@ export const RunTurnLive = RunTurn.toLayer(
 						turn: payload.turn,
 						generation: payload.generation,
 						input: payload.input,
+						...(payload.last_reply_turn === undefined
+							? {}
+							: { last_reply_turn: payload.last_reply_turn }),
 					})
 					.pipe(
 						Effect.map((reply) => ({

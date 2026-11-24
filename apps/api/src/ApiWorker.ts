@@ -1,6 +1,5 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
-import * as Cause from "effect/Cause"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
@@ -10,18 +9,9 @@ import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { customDomains } from "./CustomDomain.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
-import { HarnessCallFailed, PiDurableHarnessLive, PiTurnExecutor } from "./Pi/PiDurableHarness.ts"
+import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
-
-const harnessCall = <A, E, R>(
-	call: Effect.Effect<A, E, R>,
-): Effect.Effect<A, HarnessCallFailed, R> =>
-	Effect.catchCause(call, (cause): Effect.Effect<never, HarnessCallFailed> =>
-		Cause.hasInterruptsOnly(cause)
-			? Effect.interrupt
-			: Effect.fail(new HarnessCallFailed({ cause })),
-	)
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
