@@ -60,13 +60,18 @@ describe("removing a local stage", () => {
 		expect(existsSync(join(root, "log/run.ndjson"))).toBe(true)
 	})
 
-	it("removes nothing for a stage whose state is gone", () => {
+	it("removes the bundles of a stage that stopped before writing its state, and no one else's", () => {
 		const root = mkdtempSync(join(tmpdir(), "checkfu-alchemy-"))
 		dirs.push(root)
+		const bundles = ["bundles/Checkfu-wd-a-ApiWorker", "bundles/Checkfu-wd-a-McpWorker"]
+		for (const bundle of bundles) {
+			write(root, `${bundle}/Worker.js`)
+		}
 		const kept = stage(root, "wd-a-debug", "checkfu-apiworker-wd-a-debug-pvulsnfwd6s6iu2h")
 
 		removeStage(root, "Checkfu", "wd-a")
 
+		expect(bundles.filter((path) => existsSync(join(root, path)))).toEqual([])
 		expect(kept.filter((path) => !existsSync(join(root, path)))).toEqual([])
 	})
 })

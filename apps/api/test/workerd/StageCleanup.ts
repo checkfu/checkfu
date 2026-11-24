@@ -5,7 +5,6 @@ import * as Schema from "effect/Schema"
 
 const WorkerState = Schema.fromJsonString(
 	Schema.Struct({
-		logicalId: Schema.String,
 		resourceType: Schema.Literal("Cloudflare.Worker"),
 		attr: Schema.Struct({ workerName: Schema.String }),
 	}),
@@ -20,20 +19,22 @@ const list = (dir: string): ReadonlyArray<string> => {
 }
 
 /**
- * Removes what a local `alchemy dev` stage left in `.alchemy`: its state, and the bundle and
- * local data of each Worker that state names. Every name comes from the state, so another stage
- * whose name starts with this one keeps its data; a stage with no state left removes nothing.
+ * Removes what a local `alchemy dev` stage left in `.alchemy`: its state, its Worker bundles, and
+ * the local data of each Worker its state names. Bundles go even when the state was never
+ * written; local data names come only from the state, so another stage keeps its data.
  */
 export const removeStage = (alchemyDir: string, stack: string, stage: string): void => {
 	const stateDir = join(alchemyDir, "state", stack, stage)
 	const workers = list(stateDir).flatMap((file) =>
 		Option.toArray(Schema.decodeOption(WorkerState)(readFileSync(join(stateDir, file), "utf8"))),
 	)
-	for (const { logicalId } of workers) {
-		rmSync(join(alchemyDir, "bundles", `${stack}-${stage}-${logicalId}`), {
-			recursive: true,
-			force: true,
-		})
+	// A bundle is `<stack>-<stage>-<logical id>`, and no logical id in the stack has a hyphen, so
+	// a hyphen after this stage's prefix means the bundle belongs to a stage whose name extends it.
+	const bundlePrefix = `${stack}-${stage}-`
+	for (const name of list(join(alchemyDir, "bundles"))) {
+		if (name.startsWith(bundlePrefix) && !name.slice(bundlePrefix.length).includes("-")) {
+			rmSync(join(alchemyDir, "bundles", name), { recursive: true, force: true })
+		}
 	}
 	const owned = (name: string) =>
 		workers.some(
