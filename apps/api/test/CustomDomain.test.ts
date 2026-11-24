@@ -69,6 +69,13 @@ describe("custom domains", () => {
 			expect(
 				yield* parse({ [API_DOMAIN_ENV]: "api.example.com", [MCP_DOMAIN_ENV]: "mcp.example.com" }),
 			).toEqual({ api: { domain: "api.example.com" }, mcp: { domain: "mcp.example.com" } })
+			// A spelling that only a URL would fold into the other hostname is not accepted at all.
+			expect(
+				yield* refused({
+					[API_DOMAIN_ENV]: "sample.example.com",
+					[MCP_DOMAIN_ENV]: "\u017Fample.example.com",
+				}),
+			).not.toBe("accepted")
 		}),
 	)
 
@@ -84,6 +91,10 @@ describe("custom domains", () => {
 				"api..example.com",
 				".example.com",
 				`${"a".repeat(64)}.example.com`,
+				// Letters a URL turns into ASCII ones: these would name sample… and key….
+				"\u017Fample.example.com",
+				"\u212Aey.example.com",
+				"caf\u00E9.example.com",
 			]) {
 				for (const name of [API_DOMAIN_ENV, MCP_DOMAIN_ENV]) {
 					expect([name, value, yield* refused({ [name]: value })]).not.toEqual([

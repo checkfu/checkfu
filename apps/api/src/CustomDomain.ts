@@ -7,11 +7,15 @@ export const MCP_DOMAIN_ENV = "CHECKFU_MCP_DOMAIN"
 /** The value that removes every custom hostname from a Worker. */
 export const DETACH_ALL = "none"
 
-// A bare hostname such as api.example.com: no scheme, port or path. A single label is refused,
-// so no hostname can be mistaken for `none`.
+// A bare ASCII hostname such as api.example.com: no scheme, port or path. A single label is
+// refused, so no hostname can be mistaken for `none`. Letters are listed rather than matched
+// case-insensitively, which would also accept characters such as "ſ" that a URL turns into
+// ASCII letters; an international name is written in its xn-- form.
 export const Hostname = Schema.String.check(
 	Schema.isMaxLength(253),
-	Schema.isPattern(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/iu),
+	Schema.isPattern(
+		/^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{0,61}[A-Za-z0-9]$/,
+	),
 )
 
 const Setting = Schema.Union([Schema.Literal(""), Schema.Literal(DETACH_ALL), Hostname])
