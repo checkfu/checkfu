@@ -22,7 +22,12 @@ import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { createPiHarnessSettings } from "../src/Pi/PiContextBudget.ts"
-import { AbortGrace, recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import {
+	AbortGrace,
+	abortPiDurableTurn,
+	recoverPiDurableTurn,
+	runPiDurableTurn,
+} from "../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "../src/Pi/PiTurn.ts"
 import {
@@ -2449,6 +2454,35 @@ describe("turn engine", () => {
 			})
 		} finally {
 			await second.close()
+		}
+	})
+	it("resets a stuck session object even when the caller stops waiting for the abort", async () => {
+		const real = await createInMemoryPiDurableBackend(
+			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "unused", 1, 1)),
+		)
+		let resets = 0
+		const stuck: PiDurableBackend = {
+			...real,
+			abort: () => Effect.never,
+			reset: Effect.andThen(
+				Effect.sync(() => {
+					resets += 1
+				}),
+				Effect.never,
+			),
+		}
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const waiting = yield* Effect.forkChild(abortPiDurableTurn(stuck, "turn:1"))
+					yield* Effect.sleep("5 millis")
+					yield* Fiber.interrupt(waiting)
+					yield* Effect.sleep("100 millis")
+				}).pipe(Effect.provideService(AbortGrace, "20 millis")),
+			)
+			expect(resets).toBe(1)
+		} finally {
+			await real.close()
 		}
 	})
 })

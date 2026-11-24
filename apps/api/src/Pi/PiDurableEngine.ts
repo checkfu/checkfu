@@ -320,11 +320,19 @@ export const abortPiDurableTurn = (
 	operationId: string,
 ): Effect.Effect<boolean> =>
 	Effect.gen(function* () {
-		// The abort cannot be interrupted, so it runs detached and only the wait is bounded.
-		const aborting = yield* Effect.forkDetach(backend.abort(operationId))
-		return yield* Fiber.join(aborting).pipe(
-			Effect.timeoutOrElse({ duration: yield* AbortGrace, orElse: () => backend.reset }),
+		const grace = yield* AbortGrace
+		// The abort cannot be interrupted, so it runs detached and only the wait for it is
+		// bounded. The bounded wait is detached too: a caller that stops waiting must not take
+		// the reset with it, or a stuck abort would hold the session's lock for good.
+		const watched = yield* Effect.forkDetach(
+			Effect.gen(function* () {
+				const aborting = yield* Effect.forkDetach(backend.abort(operationId))
+				return yield* Fiber.join(aborting).pipe(
+					Effect.timeoutOrElse({ duration: grace, orElse: () => backend.reset }),
+				)
+			}),
 		)
+		return yield* Fiber.join(watched)
 	})
 
 const inFlightAdmissions = new WeakMap<PiDurableBackend, Map<string, Set<Latch.Latch>>>()
