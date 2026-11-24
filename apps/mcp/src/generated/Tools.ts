@@ -241,6 +241,351 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "automations_archiveAutomation",
+		title: "Archive an automation",
+		description: "Archive an automation so it never runs again",
+		method: "POST",
+		path: "/v1/automations/{automation_id}/archive",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_createAutomation",
+		title: "Create an automation",
+		description:
+			"Create an automation that opens a new session with its message every time its schedule fires",
+		method: "POST",
+		path: "/v1/automations",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				body: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Human-readable automation name",
+						},
+						agent: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 256,
+								},
+								{
+									type: "object",
+									properties: {
+										id: {
+											type: "string",
+											minLength: 1,
+											maxLength: 256,
+										},
+										version: {
+											type: "integer",
+											minimum: 1,
+											maximum: 9007199254740991,
+										},
+									},
+									required: ["id"],
+									additionalProperties: false,
+								},
+							],
+							description:
+								"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+						},
+						environment_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Environment ID each run's session uses",
+						},
+						initial_events: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["user.message"],
+									},
+									content: {
+										type: "array",
+										items: {
+											type: "object",
+											properties: {
+												type: {
+													type: "string",
+													enum: ["text"],
+												},
+												text: {
+													type: "string",
+													minLength: 1,
+												},
+											},
+											required: ["type", "text"],
+											additionalProperties: false,
+										},
+										minItems: 1,
+									},
+								},
+								required: ["type", "content"],
+								additionalProperties: false,
+							},
+							minItems: 1,
+							maxItems: 1,
+							description: "The one user message each run's session starts with",
+						},
+						schedule: {
+							type: "object",
+							properties: {
+								type: {
+									type: "string",
+									enum: ["cron"],
+								},
+								expression: {
+									type: "string",
+									minLength: 1,
+									maxLength: 256,
+								},
+								timezone: {
+									type: "string",
+									minLength: 1,
+									maxLength: 64,
+								},
+							},
+							required: ["type", "expression", "timezone"],
+							additionalProperties: false,
+							description:
+								"When the automation fires: a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York",
+						},
+					},
+					required: ["name", "agent", "environment_id", "initial_events", "schedule"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_getAutomation",
+		title: "Retrieve an automation",
+		description: "Retrieve an automation by ID",
+		method: "GET",
+		path: "/v1/automations/{automation_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_listRuns",
+		title: "List automation runs",
+		description:
+			"List the runs of an automation that have started or failed, newest first by default",
+		method: "GET",
+		path: "/v1/automations/{automation_id}/runs",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}$",
+							description:
+								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of events to return (1-100)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order: asc or desc",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_pauseAutomation",
+		title: "Pause an automation",
+		description:
+			"Stop an automation's schedule until it is unpaused; it can still be run on request",
+		method: "POST",
+		path: "/v1/automations/{automation_id}/pause",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_runAutomation",
+		title: "Run an automation now",
+		description:
+			"Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+		method: "POST",
+		path: "/v1/automations/{automation_id}/run",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_unpauseAutomation",
+		title: "Unpause an automation",
+		description:
+			"Resume an automation's schedule from now, without running the occurrences it missed",
+		method: "POST",
+		path: "/v1/automations/{automation_id}/unpause",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "environments_archiveEnvironment",
 		title: "Archive an environment",
 		description: "Archive an environment",

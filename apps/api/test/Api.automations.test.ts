@@ -432,6 +432,7 @@ describe("Automations API", () => {
 					["interval type", { schedule: { type: "interval", every: "1 hour" } }, 400],
 					["two messages", { initial_events: [...message("a"), ...message("b")] }, 400],
 					["no message", { initial_events: [] }, 400],
+					["field the schema does not declare", { budget: { max: 1 } }, 400],
 					["unknown agent", { agent: "agent_missing" }, 404],
 					["agent reference that is not an id", { agent: "team/agent" }, 404],
 					["pinned agent reference that is not an id", { agent: { id: "..", version: 1 } }, 404],

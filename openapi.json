@@ -9153,6 +9153,10 @@
 					"group": "automations",
 					"endpoint": "create"
 				},
+				"x-checkfu-mcp": {
+					"name": "automations_createAutomation",
+					"destructive": false
+				},
 				"x-checkfu-cli": {
 					"textOrObjectFields": ["agent"],
 					"repeatArrayField": {
@@ -9696,6 +9700,9 @@
 				"x-checkfu-endpoint": {
 					"group": "automations",
 					"endpoint": "get"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_getAutomation"
 				}
 			}
 		},
@@ -10251,6 +10258,9 @@
 				"x-checkfu-endpoint": {
 					"group": "automations",
 					"endpoint": "pause"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_pauseAutomation"
 				},
 				"x-checkfu-idempotent": true
 			}
@@ -10808,6 +10818,9 @@
 					"group": "automations",
 					"endpoint": "unpause"
 				},
+				"x-checkfu-mcp": {
+					"name": "automations_unpauseAutomation"
+				},
 				"x-checkfu-idempotent": true
 			}
 		},
@@ -11364,6 +11377,9 @@
 					"group": "automations",
 					"endpoint": "archive"
 				},
+				"x-checkfu-mcp": {
+					"name": "automations_archiveAutomation"
+				},
 				"x-checkfu-idempotent": true
 			}
 		},
@@ -11759,6 +11775,9 @@
 				"x-checkfu-endpoint": {
 					"group": "automations",
 					"endpoint": "run"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_runAutomation"
 				}
 			}
 		},
@@ -12267,6 +12286,9 @@
 				"x-checkfu-endpoint": {
 					"group": "automations",
 					"endpoint": "listRuns"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_listRuns"
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {

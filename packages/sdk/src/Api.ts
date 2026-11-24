@@ -1092,6 +1092,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "create",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "create" },
+				"x-checkfu-mcp": { name: "automations_createAutomation", destructive: false },
 				"x-checkfu-cli": {
 					textOrObjectFields: ["agent"],
 					repeatArrayField: {
@@ -1121,6 +1122,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "get" },
+				"x-checkfu-mcp": { name: "automations_getAutomation" },
 			}),
 	)
 	.add(
@@ -1138,6 +1140,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "pause",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "pause" },
+				"x-checkfu-mcp": { name: "automations_pauseAutomation" },
 				"x-checkfu-idempotent": true,
 			}),
 	)
@@ -1156,6 +1159,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "unpause",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "unpause" },
+				"x-checkfu-mcp": { name: "automations_unpauseAutomation" },
 				"x-checkfu-idempotent": true,
 			}),
 	)
@@ -1171,6 +1175,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "archive",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "archive" },
+				"x-checkfu-mcp": { name: "automations_archiveAutomation" },
 				"x-checkfu-idempotent": true,
 			}),
 	)
@@ -1189,6 +1194,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "run",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "run" },
+				"x-checkfu-mcp": { name: "automations_runAutomation" },
 			}),
 	)
 	.add(
@@ -1213,6 +1219,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-group-name": "automations.runs",
 				"x-forge-method-name": "list",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "listRuns" },
+				"x-checkfu-mcp": { name: "automations_listRuns" },
 				"x-checkfu-cli": {
 					intQueryParams: {
 						after: { min: 0, metavar: "SEQ" },

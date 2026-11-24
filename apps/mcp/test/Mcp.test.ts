@@ -161,6 +161,13 @@ describe("Checkfu MCP server", () => {
 				"agents_createAgent",
 				"agents_getAgent",
 				"agents_updateAgent",
+				"automations_archiveAutomation",
+				"automations_createAutomation",
+				"automations_getAutomation",
+				"automations_listRuns",
+				"automations_pauseAutomation",
+				"automations_runAutomation",
+				"automations_unpauseAutomation",
 				"environments_archiveEnvironment",
 				"environments_createEnvironment",
 				"environments_deleteEnvironment",
@@ -191,6 +198,13 @@ describe("Checkfu MCP server", () => {
 				agents_createAgent: "writes, additive, not repeatable",
 				agents_getAgent: "read-only, additive, repeatable",
 				agents_updateAgent: "writes, destructive, not repeatable",
+				automations_archiveAutomation: "writes, destructive, repeatable",
+				automations_createAutomation: "writes, additive, not repeatable",
+				automations_getAutomation: "read-only, additive, repeatable",
+				automations_listRuns: "read-only, additive, repeatable",
+				automations_pauseAutomation: "writes, destructive, repeatable",
+				automations_runAutomation: "writes, destructive, not repeatable",
+				automations_unpauseAutomation: "writes, destructive, repeatable",
 				environments_archiveEnvironment: "writes, destructive, repeatable",
 				environments_createEnvironment: "writes, additive, not repeatable",
 				environments_deleteEnvironment: "writes, destructive, repeatable",
@@ -332,11 +346,29 @@ describe("Checkfu MCP server", () => {
 			const agent = { path: { agent_id: "agent_1" } }
 			const environment = { path: { environment_id: "env_1" } }
 			const session = { path: { session_id: "sess_1" } }
+			const automation = { path: { automation_id: "auto_1" } }
 			const calls = {
 				agents_archiveAgent: agent,
 				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
 				agents_getAgent: agent,
 				agents_updateAgent: { ...agent, body: { version: 1, model } },
+				automations_archiveAutomation: automation,
+				automations_createAutomation: {
+					body: {
+						name: "Morning report",
+						agent: { id: "agent_1", version: 1 },
+						environment_id: "env_1",
+						initial_events: [
+							{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+						],
+						schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+					},
+				},
+				automations_getAutomation: automation,
+				automations_listRuns: { ...automation, query: { limit: "5" } },
+				automations_pauseAutomation: automation,
+				automations_runAutomation: automation,
+				automations_unpauseAutomation: automation,
 				environments_archiveEnvironment: environment,
 				environments_createEnvironment: { body: { name: "default", config } },
 				environments_deleteEnvironment: environment,
@@ -426,6 +458,7 @@ describe("Checkfu MCP server", () => {
 		)
 		expect(keyed.map(([name]) => name)).toEqual([
 			"agents_createAgent",
+			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
