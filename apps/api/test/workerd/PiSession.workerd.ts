@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -113,38 +113,28 @@ const ANSI_ESCAPE_RE = new RegExp(
 
 const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
 
-const cleanupStageState = (stage: string): void => {
-	const stateDir = join(REPO_ROOT, ".alchemy", "state", "Checkfu", stage)
-	let workerName: string | null = null
+const removeEntries = (dir: string, matches: (name: string) => boolean): void => {
+	let entries: Array<string>
 	try {
-		const saved = JSON.parse(readFileSync(join(stateDir, "ApiWorker.json"), "utf8")) as {
-			readonly attr?: { readonly workerName?: unknown }
-		}
-		if (typeof saved.attr?.workerName === "string") {
-			workerName = saved.attr.workerName
-		}
+		entries = readdirSync(dir)
 	} catch {
-		workerName = null
+		return
 	}
-	rmSync(stateDir, { recursive: true, force: true })
-	rmSync(join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-ApiWorker`), {
-		recursive: true,
-		force: true,
-	})
-	const prefix = workerName ?? `checkfu-apiworker-${stage}`
+	for (const entry of entries) {
+		if (matches(entry)) {
+			rmSync(join(dir, entry), { recursive: true, force: true })
+		}
+	}
+}
+
+// Whatever Workers the stack has, each leaves a bundle and local data named after the stage.
+const cleanupStageState = (stage: string): void => {
+	const alchemy = join(REPO_ROOT, ".alchemy")
+	rmSync(join(alchemy, "state", "Checkfu", stage), { recursive: true, force: true })
+	removeEntries(join(alchemy, "bundles"), (name) => name.startsWith(`Checkfu-${stage}-`))
+	const local = new RegExp(`^checkfu-[a-z]+-${stage}(?:-|$)`)
 	for (const subdir of ["local", join("local", "cache"), join("local", "workflows")]) {
-		const dir = join(REPO_ROOT, ".alchemy", subdir)
-		let entries: Array<string>
-		try {
-			entries = readdirSync(dir)
-		} catch {
-			continue
-		}
-		for (const entry of entries) {
-			if (entry === prefix || entry.startsWith(`${prefix}-`)) {
-				rmSync(join(dir, entry), { recursive: true, force: true })
-			}
-		}
+		removeEntries(join(alchemy, subdir), (name) => local.test(name))
 	}
 }
 
