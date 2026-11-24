@@ -196,12 +196,14 @@ const manual = (run: number) =>
 		scheduled_at: null,
 	})
 
-const startedOn = (run: number, iso: string | null) =>
+const startedOn = (run: number, iso: string | null, agent_version = 1) =>
 	new AutomationRunStarted({
 		run,
 		session_id: sessionOf(run).id,
 		trigger: iso === null ? "manual" : "schedule",
 		scheduled_at: iso === null ? null : ms(iso),
+		agent_id: agent.id,
+		agent_version,
 	})
 
 const failedOn = (run: number, iso: string | null, type: string, message: string) =>
@@ -209,6 +211,8 @@ const failedOn = (run: number, iso: string | null, type: string, message: string
 		run,
 		trigger: iso === null ? "manual" : "schedule",
 		scheduled_at: iso === null ? null : ms(iso),
+		agent_id: agent.id,
+		agent_version: null,
 		error: { type, message },
 	})
 
@@ -470,7 +474,7 @@ describe("Checkfu automations", () => {
 			...created(),
 			...updated,
 			Story.when(new RunAutomation({ automation_id: automation.id })),
-			Story.then(automation, manual(1), startedOn(1, null)),
+			Story.then(automation, manual(1), startedOn(1, null, 2)),
 			Story.replied({ run: 1 }),
 			...opened(1, 2),
 		).pipe(

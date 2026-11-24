@@ -842,6 +842,22 @@ const automationsRunsListCommandSpec: GeneratedOperationDescriptor = {
 			kind: "literals",
 			required: false,
 		},
+		{
+			propName: "hasError",
+			flagName: "has-error",
+			wireName: "has_error",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "triggerType",
+			flagName: "trigger-type",
+			wireName: "trigger_type",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
 	],
 }
 
@@ -868,11 +884,60 @@ const automationsRunsListCommand = CommandMake(
 			FlagWithDescription("Sort order: asc or desc"),
 			FlagOptional,
 		),
+		hasError: FlagLiterals("has-error", ["true", "false"]).pipe(
+			FlagWithDescription("Only failed runs (true) or only started runs (false)"),
+			FlagOptional,
+		),
+		triggerType: FlagLiterals("trigger-type", ["schedule", "manual"]).pipe(
+			FlagWithDescription("Only runs the schedule started, or only runs started on request"),
+			FlagOptional,
+		),
 	},
 	(flags) => invokeGeneratedOperation(automationsRunsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
 		"List the runs of an automation that have started or failed, oldest first by default",
+	),
+)
+
+const automationsRunsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations:runs retrieve",
+	apiGroup: "automations",
+	apiEndpoint: "getRun",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "run",
+			flagName: "run",
+			wireName: "run",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsRunsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+		run: FlagString("run").pipe(FlagWithMetavar("ID"), FlagWithDescription("run parameter")),
+	},
+	(flags) => invokeGeneratedOperation(automationsRunsRetrieveCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Retrieve one run of an automation by its run number, once it has started or failed",
 	),
 )
 
@@ -1668,6 +1733,7 @@ export const buildGeneratedResourceCommands = <
 			CommandWithDescription("Manage automations:runs"),
 			CommandWithSubcommands([
 				automationsRunsListCommand,
+				automationsRunsRetrieveCommand,
 				...(extras?.["automations:runs"] ?? ([] as const)),
 			]),
 		),

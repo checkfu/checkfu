@@ -493,6 +493,42 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "automations_getRun",
+		title: "Retrieve an automation run",
+		description:
+			"Retrieve one run of an automation by its run number, once it has started or failed",
+		method: "GET",
+		path: "/v1/automations/{automation_id}/runs/{run}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						run: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id", "run"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "automations_listAutomations",
 		title: "List automations",
 		description:
@@ -589,6 +625,16 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							type: "string",
 							enum: ["asc", "desc"],
 							description: "Sort order: asc or desc",
+						},
+						has_error: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Only failed runs (true) or only started runs (false)",
+						},
+						trigger_type: {
+							type: "string",
+							enum: ["schedule", "manual"],
+							description: "Only runs the schedule started, or only runs started on request",
 						},
 					},
 					required: [],

@@ -90,6 +90,7 @@ const automationRunResource = (
 					type: "schedule" as const,
 					scheduled_at: DateTime.makeUnsafe(entry.event.scheduled_at),
 				},
+	agent: { id: entry.event.agent_id, version: entry.event.agent_version },
 	session_id: entry.event._tag === "automation.run_started" ? entry.event.session_id : null,
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,
@@ -137,6 +138,19 @@ const textOf = (
 	)
 
 const UPDATE_RETRIES = 3
+
+const runFilter = (query: {
+	readonly has_error?: boolean
+	readonly trigger_type?: "schedule" | "manual"
+}) => {
+	const trigger = query.trigger_type === undefined ? {} : { trigger: query.trigger_type }
+	if (query.has_error === undefined) {
+		return trigger
+	}
+	return query.has_error
+		? { _tag: "automation.run_failed" as const, ...trigger }
+		: { _tag: "automation.run_started" as const, ...trigger }
+}
 
 const present = (snapshot: AutomationSnapshot) =>
 	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
@@ -365,12 +379,28 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						...(query.after === undefined ? {} : { after: query.after }),
 						take: query.limit ?? 50,
 						order: query.order ?? "asc",
+						where: runFilter(query),
 					})
 					return {
 						data: page.entries.map((entry) => automationRunResource(id, entry)),
 						has_more: page.cursor !== null,
 						next_cursor: page.cursor,
 					}
+				}).pipe(handled),
+			)
+			.handle("getRun", ({ params }) =>
+				Effect.gen(function* () {
+					const id = params.automation_id
+					yield* committed(id)
+					const page = yield* automationRuns.list(Automation.ref(id), {
+						take: 1,
+						where: { run: params.run },
+					})
+					const entry = page.entries[0]
+					if (entry === undefined) {
+						return yield* reject(404, `Run ${params.run} of automation ${id} not found.`)
+					}
+					return automationRunResource(id, entry)
 				}).pipe(handled),
 			)
 	}),

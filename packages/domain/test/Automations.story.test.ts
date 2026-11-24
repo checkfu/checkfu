@@ -367,23 +367,31 @@ describe("Automations", () => {
 			run: 1,
 			trigger: "schedule" as const,
 			scheduled_at: ms("2026-01-01T09:00:00.000Z"),
+			agent_id: config.agent_id,
+			agent_version: 1,
 		}
 		const second = {
 			automation_id: automation.id,
 			run: 2,
 			trigger: "schedule" as const,
 			scheduled_at: ms("2026-01-02T09:00:00.000Z"),
+			agent_id: config.agent_id,
+			agent_version: 1,
 		}
 		const started = new AutomationRunStarted({
 			run: 1,
 			session_id: SessionId.make("sess_auto_001_1"),
 			trigger: "schedule",
 			scheduled_at: first.scheduled_at,
+			agent_id: config.agent_id,
+			agent_version: 1,
 		})
 		const failed = new AutomationRunFailed({
 			run: 2,
 			trigger: "schedule",
 			scheduled_at: second.scheduled_at,
+			agent_id: config.agent_id,
+			agent_version: 1,
 			error: { type: "session_unavailable", message: "The session stopped." },
 		})
 		return story(
@@ -471,6 +479,8 @@ describe("Automations", () => {
 					trigger: "manual",
 					scheduled_at: null,
 					revision: 1,
+					agent_id: config.agent_id,
+					agent_version: null,
 					error_type: "agent_unavailable",
 					message: "The agent is archived.",
 					unrecoverable: true,
@@ -482,6 +492,8 @@ describe("Automations", () => {
 					run: 1,
 					trigger: "manual",
 					scheduled_at: null,
+					agent_id: config.agent_id,
+					agent_version: null,
 					error: { type: "agent_unavailable", message: "The agent is archived." },
 				}),
 				new AutomationPaused({ reason: "agent_unavailable" }),

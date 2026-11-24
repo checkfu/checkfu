@@ -227,11 +227,7 @@ const generateResourcesFile = (
 					if (pathArgs.length === 0) {
 						out("{},")
 					} else {
-						out(
-							"{ ",
-							pathArgs.map((pa) => `${JSON.stringify(pa.wireName)}: ${pa.argName}`).join(", "),
-							" },",
-						)
+						out("{ ", pathArgs.map(pathArgEntry).join(", "), " },")
 					}
 					if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 						out("params,")
@@ -473,7 +469,7 @@ const generateResourcesFile = (
 						", ",
 						e,
 						", { ",
-						pathArgs.map((pa) => `${JSON.stringify(pa.wireName)}: ${pa.argName}`).join(", "),
+						pathArgs.map(pathArgEntry).join(", "),
 						" }), (pathParams) =>",
 					)
 					out.indent(() => emitWithIdempotency())
@@ -934,6 +930,9 @@ const generateResourcesFile = (
 		content: cleanGeneratedHeader(out.content),
 	}
 }
+
+const pathArgEntry = (pa: { readonly wireName: string; readonly argName: string }): string =>
+	pa.wireName === pa.argName ? pa.argName : `${JSON.stringify(pa.wireName)}: ${pa.argName}`
 
 export const generateSdkFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => {
 	const catalog = buildSurfaceCatalog(forge)

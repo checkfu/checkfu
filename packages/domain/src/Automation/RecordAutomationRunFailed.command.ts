@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
-import { ErrorMessage, ErrorType } from "../Session/SessionTypes.ts"
+import { ErrorMessage, ErrorType, ResourceId } from "../Session/SessionTypes.ts"
 import { AutomationId } from "./Automation.id.ts"
 import {
 	AutomationRunError,
@@ -14,6 +14,8 @@ export class AutomationRunFailed extends Domain.Event("automation.run_failed", {
 	run: PositiveInt,
 	trigger: AutomationTrigger,
 	scheduled_at: Schema.NullOr(NonNegativeInt),
+	agent_id: ResourceId,
+	agent_version: Schema.NullOr(PositiveInt),
 	error: AutomationRunError,
 }) {}
 
@@ -24,6 +26,8 @@ export class RecordAutomationRunFailed extends Domain.Command("RecordAutomationR
 		trigger: AutomationTrigger,
 		scheduled_at: Schema.NullOr(NonNegativeInt),
 		revision: PositiveInt,
+		agent_id: ResourceId,
+		agent_version: Schema.NullOr(PositiveInt),
 		error_type: ErrorType,
 		message: ErrorMessage,
 		unrecoverable: Schema.Boolean,

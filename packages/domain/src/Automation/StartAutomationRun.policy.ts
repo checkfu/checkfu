@@ -18,6 +18,13 @@ const ENVIRONMENT_UNAVAILABLE_MESSAGE = "The automation's environment is not ava
 const SESSION_CONFLICT_MESSAGE =
 	"A session this run did not create already has the run's session id."
 
+const refused = (error_type: string, message: string, unrecoverable: boolean) => ({
+	opened: false as const,
+	error_type,
+	message,
+	unrecoverable,
+})
+
 export class StartAutomationRun extends Domain.Policy("StartAutomationRun", {
 	from: AutomationView,
 	on: [AutomationFired],
@@ -42,6 +49,8 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 					new RecordAutomationRunFailed({
 						...run,
 						revision: state.revision,
+						agent_id: state.agent_id,
+						agent_version: state.agent_version,
 						error_type,
 						message,
 						unrecoverable,
@@ -49,7 +58,7 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 				)
 			// A retried delivery resends the same command id and gets the first receipt back,
 			// so SessionAlreadyExists here means another caller owns that session.
-			const refused = yield* opening
+			const outcome = yield* opening
 				.send(
 					new OpenAutomationSession({
 						session_id: event.session_id,
@@ -61,26 +70,38 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 					}),
 				)
 				.pipe(
-					Effect.as(null),
+					Effect.map((receipt) => ({
+						opened: true as const,
+						agent_version:
+							receipt.events.find((created) => created._tag === "session.created")?.agent_version ??
+							null,
+					})),
 					Effect.catchTag("SessionAlreadyExists", () =>
-						Effect.succeed([SESSION_CONFLICT, SESSION_CONFLICT_MESSAGE, false] as const),
+						Effect.succeed(refused(SESSION_CONFLICT, SESSION_CONFLICT_MESSAGE, false)),
 					),
 					Effect.catchTag(["AgentNotFound", "AgentArchivedError", "AgentVersionNotFound"], () =>
-						Effect.succeed([AGENT_UNAVAILABLE, AGENT_UNAVAILABLE_MESSAGE, true] as const),
+						Effect.succeed(refused(AGENT_UNAVAILABLE, AGENT_UNAVAILABLE_MESSAGE, true)),
 					),
 					Effect.catchTag(["EnvironmentNotFound", "EnvironmentArchivedError"], () =>
-						Effect.succeed([
-							ENVIRONMENT_UNAVAILABLE,
-							ENVIRONMENT_UNAVAILABLE_MESSAGE,
-							true,
-						] as const),
+						Effect.succeed(refused(ENVIRONMENT_UNAVAILABLE, ENVIRONMENT_UNAVAILABLE_MESSAGE, true)),
 					),
 				)
-			if (refused !== null) {
-				yield* fail(refused[0], refused[1], refused[2])
+			if (!outcome.opened) {
+				yield* fail(outcome.error_type, outcome.message, outcome.unrecoverable)
 				return
 			}
-			yield* automations.send(new RecordAutomationRunStarted(run))
+			if (outcome.agent_version === null) {
+				return yield* Effect.die(
+					new Error("An opened automation session records its agent version."),
+				)
+			}
+			yield* automations.send(
+				new RecordAutomationRunStarted({
+					...run,
+					agent_id: state.agent_id,
+					agent_version: outcome.agent_version,
+				}),
+			)
 		})
 	}),
 )

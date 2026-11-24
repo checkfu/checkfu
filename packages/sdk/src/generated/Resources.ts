@@ -136,6 +136,12 @@ export interface CheckfuOperations {
 		EndpointBody<"automations", "listRuns">,
 		EndpointSuccess<"automations", "listRuns">
 	>
+	readonly "automations.runs.retrieve": OperationShape<
+		EndpointParams<"automations", "getRun">,
+		EndpointQuery<"automations", "getRun">,
+		EndpointBody<"automations", "getRun">,
+		EndpointSuccess<"automations", "getRun">
+	>
 	readonly "environments.archive": OperationShape<
 		EndpointParams<"environments", "archive">,
 		EndpointQuery<"environments", "archive">,
@@ -484,6 +490,12 @@ export class EffectAutomationsRunsResource {
 									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+									...(params?.["has_error"] === undefined
+										? {}
+										: { has_error: params["has_error"] }),
+									...(params?.["trigger_type"] === undefined
+										? {}
+										: { trigger_type: params["trigger_type"] }),
 								},
 								responseMode: "decoded-and-response",
 							}),
@@ -532,6 +544,46 @@ export class EffectAutomationsRunsResource {
 				),
 			params?.["after"],
 			params?.order ?? "asc",
+		)
+	}
+
+	/** Retrieve one run of an automation by its run number, once it has started or failed */
+	retrieve(
+		automationId: string,
+		run: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "getRun">>, CheckfuSdkError>
+	retrieve(
+		automationId: string,
+		run: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "getRun">, CheckfuSdkError>
+	retrieve(
+		automationId: string,
+		run: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "getRun">
+		| WithResponse<EndpointSuccess<"automations", "getRun">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "getRun", { automation_id: automationId, run }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.runs.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.automations.getRun({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
 		)
 	}
 }
@@ -1646,6 +1698,20 @@ export class AutomationsRunsResource {
 					},
 					{ ...effectOpts, withResponse: true },
 				),
+		)
+	}
+
+	/** Retrieve one run of an automation by its run number, once it has started or failed */
+	retrieve(
+		automationId: string,
+		run: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "getRun">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsRunsResource(effectRuntime).retrieve(automationId, run, {
+				...effectOpts,
+				withResponse: true,
+			}),
 		)
 	}
 }
