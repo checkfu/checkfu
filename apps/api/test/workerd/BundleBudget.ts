@@ -38,6 +38,12 @@ const probe = async (entry: string, resultFile: string, timeout: number) => {
 	return Schema.decodeSync(ProbeResult)(readFileSync(resultFile, "utf8"))
 }
 
+// Every file under the bundle, at any depth, so no check sees less than what ships.
+const bundleFiles = (root: string): ReadonlyArray<string> =>
+	readdirSync(root, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => join(entry.parentPath, entry.name))
+
 const bytes = (files: ReadonlyArray<string>) =>
 	files.reduce((sum, file) => sum + statSync(file).size, 0)
 
@@ -67,11 +73,7 @@ export const measureBundle = async (
 		return {
 			eagerBytes: bytes(eager),
 			eagerFiles: eager.map((file) => file.slice(root.length + 1)).toSorted(),
-			totalBytes: bytes(
-				readdirSync(root)
-					.filter((name) => name.endsWith(".js"))
-					.map((name) => join(root, name)),
-			),
+			totalBytes: bytes(bundleFiles(root).filter((file) => !file.endsWith(".map"))),
 			startupCpuMs: Math.min(...samples.map((sample) => sample.cpuMs)),
 		}
 	} finally {
