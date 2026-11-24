@@ -13,8 +13,8 @@ import { checkfu } from "../api.ts"
 import { lifecycle, Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 
-const list = getRouteApi("/app/agents")
-const detail = getRouteApi("/app/agents/$agentId")
+const list = getRouteApi("/_app/agents/")
+const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
 	const page = list.useLoaderData()

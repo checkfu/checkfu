@@ -12,8 +12,8 @@ import { checkfu } from "../api.ts"
 import { lifecycle, Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 
-const list = getRouteApi("/app/environments")
-const detail = getRouteApi("/app/environments/$environmentId")
+const list = getRouteApi("/_app/environments/")
+const detail = getRouteApi("/_app/environments/$environmentId")
 
 export function EnvironmentsPage(): React.JSX.Element {
 	const page = list.useLoaderData()

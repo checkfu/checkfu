@@ -14,9 +14,9 @@ import { Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 import { Transcript, useSessionEvents } from "./transcript.tsx"
 
-const list = getRouteApi("/app/sessions")
-const create = getRouteApi("/app/sessions/new")
-const detail = getRouteApi("/app/sessions/$sessionId")
+const list = getRouteApi("/_app/sessions/")
+const create = getRouteApi("/_app/sessions/new")
+const detail = getRouteApi("/_app/sessions/$sessionId")
 
 export function SessionsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
