@@ -22,7 +22,59 @@ const WORKSPACE_PROMPT =
  */
 export const MAX_INLINE_IMAGE_BYTES = 1024 * 1024
 
-export const WORKSPACE_TOOL_OPTIONS = { read: { maxModelBytes: MAX_INLINE_IMAGE_BYTES } } as const
+// Pi keeps the head of a tool result up to its output limits and drops the rest. A paged result
+// is JSON with its continuation offsets after the content, so a cut result loses them: every
+// result is made to fit instead. Pi's own default for a tool's text is 50 KB in 2,000 lines.
+const RESULT_BYTES = 50 * 1024
+const RESULT_LINES = 2000
+
+// A page of `read` is sent as a JSON string. Escaping turns one byte into at most six characters
+// (a control character as \u00XX), and the page's offsets and flags follow it.
+const READ_PAGE_BYTES = 48 * 1024
+const READ_RESULT_BYTES = READ_PAGE_BYTES * 6 + 4 * 1024
+
+export const WORKSPACE_TOOL_OPTIONS = {
+	read: {
+		maxModelBytes: MAX_INLINE_IMAGE_BYTES,
+		maxBytes: READ_PAGE_BYTES,
+		maxLines: RESULT_LINES,
+	},
+} as const
+
+/** What Pi keeps of a workspace tool's result: a result the workspace returns always fits it. */
+export const workspaceOutputLimits = (tool: string) =>
+	({
+		maxBytes: tool === "read" ? READ_RESULT_BYTES : RESULT_BYTES,
+		maxLines: RESULT_LINES,
+	}) as const
+
+/**
+ * A result over its tool's limits, `grep` with long matching lines and context, say, is refused
+ * in the workspace: Pi would cut it, and one large enough would not cross between the objects.
+ */
+export const boundWorkspaceResult = (
+	tool: string,
+	result: WorkspaceToolResult,
+): WorkspaceToolResult => {
+	const { maxBytes, maxLines } = workspaceOutputLimits(tool)
+	const text = result.content
+		.flatMap((part) => (part.type === "text" ? [part.text] : []))
+		.join("\n")
+	const bytes = new TextEncoder().encode(text).byteLength
+	const lines = text.split("\n").length
+	if (bytes <= maxBytes && lines <= maxLines) {
+		return result
+	}
+	return {
+		content: [
+			{
+				type: "text",
+				text: `${tool} returned ${bytes} bytes in ${lines} lines, more than the ${maxBytes} bytes or ${maxLines} lines one call can return. Ask for less: a narrower path or pattern, a lower limit, fewer context lines, or a later offset.`,
+			},
+		],
+		isError: true,
+	}
+}
 
 const declaredOnly = (): Promise<never> =>
 	Promise.reject(new Error("Workspace tools run in the session's workspace, not here."))
@@ -66,6 +118,7 @@ export const workspaceExtension = (
 			? {}
 			: { constrainedSampling: tool.constrainedSampling }),
 		replay: REPLAY_SAFE.has(tool.name) ? "safe" : "unsafe",
+		outputLimits: workspaceOutputLimits(tool.name),
 		execute: async (args, api, context) => {
 			// An interrupted turn sends nothing more to its workspace.
 			if (context.abortSignal?.aborted === true) {
