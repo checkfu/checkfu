@@ -16,7 +16,7 @@ env:
   TURBO_CACHE_DIR: .turbo/cache
   TURBO_TELEMETRY_DISABLED: 1
 
-# The jobs together run exactly what `bun run check`, `test:bun` and `test:workerd` run:
+# The jobs together run exactly what `bun run check`, `test`, `test:bun` and `test:workerd` run:
 # the two test jobs split the workspace with `--filter=@checkfu/domain` and its negation.
 jobs:
   static:

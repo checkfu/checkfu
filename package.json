@@ -47,7 +47,7 @@
 		"format": "oxfmt .",
 		"format:check": "oxfmt --check .",
 		"prepare": "bun .githooks/install.mjs",
-		"check": "bun run generate:check && bun run format:check && bun run lint && bun run typecheck && bun run test",
+		"check": "bun run generate:check && bun run format:check && bun run lint && bun run typecheck",
 		"persisted:check": "bun apps/api/test/persisted/main.ts check",
 		"persisted:cut": "bun apps/api/test/persisted/main.ts cut"
 	},
