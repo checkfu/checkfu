@@ -1,12 +1,12 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Effect from "effect/Effect"
-import { admitGeneration } from "./WorkspaceFence.ts"
+import { makeTurnFence } from "./WorkspaceFence.ts"
+import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
-import type { FenceStore } from "./WorkspaceFence.ts"
 import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts"
 
 const DISCARDED = "discarded"
-const GENERATION = "generation"
+const NEWEST_TURN = "newest-turn"
 const INITIALIZED = "initialized"
 const WORKING_DIRECTORY = "/workspace"
 
@@ -27,10 +27,10 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 			const { storage } = state.raw
 			const { fs } = new Workspace({ storage })
 			const { execute } = createPiTools({ workspace: { fs } })
-			const fence: FenceStore = {
-				get: () => storage.kv.get<number>(GENERATION),
-				put: (generation) => storage.kv.put(GENERATION, generation),
-			}
+			const fence = makeTurnFence({
+				get: () => storage.kv.get<TurnToken>(NEWEST_TURN),
+				put: (token) => storage.kv.put(NEWEST_TURN, token),
+			})
 			// The prompt names this directory, so a new filesystem gets it before its first call.
 			// Only a new one: the agent may remove it or put a file there, and setting it up again
 			// must not stand between the object and its other methods.
@@ -42,26 +42,25 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 			}
 
 			return {
-				// A new turn retires the harness generations before it. A turn of a retired
-				// generation, or of an ended session, is refused before it asks a model anything.
-				enter: (generation: number): Effect.Effect<boolean> =>
-					Effect.sync(
-						() => storage.kv.get(DISCARDED) !== true && admitGeneration(fence, generation),
+				// A new turn retires every turn before it. A turn that is no longer current, or one
+				// of an ended session, is refused before it asks a model anything.
+				enter: (token: TurnToken): Effect.Effect<boolean> =>
+					Effect.promise(
+						async () => storage.kv.get(DISCARDED) !== true && (await fence.enter(token)),
 					),
-				runTool: (
-					call: WorkspaceToolCall,
-					generation: number,
-				): Effect.Effect<WorkspaceToolResult> =>
+				runTool: (call: WorkspaceToolCall, token: TurnToken): Effect.Effect<WorkspaceToolResult> =>
 					Effect.promise(async (abortSignal) => {
 						if (storage.kv.get(DISCARDED) === true) {
 							return failed("The session has ended and its workspace was discarded.")
 						}
-						if (!admitGeneration(fence, generation)) {
-							return failed("This turn was abandoned; the workspace no longer accepts its calls.")
-						}
-						await initialize()
-						const { content, isError } = await execute(call, { abortSignal })
-						return { content, isError }
+						const result = await fence.run(token, async () => {
+							await initialize()
+							const { content, isError } = await execute(call, { abortSignal })
+							return { content, isError }
+						})
+						return (
+							result ?? failed("This turn has ended; the workspace no longer accepts its calls.")
+						)
 					}),
 				// The marker goes first and stays: from it on every call is refused, also while the
 				// files are removed, after a reset part way through, and on a second delivery.
