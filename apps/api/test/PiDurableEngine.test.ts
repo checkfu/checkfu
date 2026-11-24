@@ -2002,6 +2002,8 @@ describe("turn engine", () => {
 			})
 		} finally {
 			await second.close()
+		}
+	})
 
 	it("synchronizes recoverPiDurableTurn with an in-progress admission before submit", async () => {
 		let markEnteredEnsureRoot!: () => void

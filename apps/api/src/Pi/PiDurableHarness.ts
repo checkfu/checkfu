@@ -178,8 +178,19 @@ export const PiDurableHarnessLive = boundedHarness(
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
 					}
 					// A turn is submitted under its operation id, so sending it again after a
-					// lost reply joins the turn already there instead of starting another.
+					// lost reply joins the turn already there instead of starting another. The
+					// last attempt has no next one to join it, so Pi is asked once, read-only.
+					const { baseDelay } = yield* HarnessLimits
 					const outcome = yield* withRetry(executor.runTurn(conversation, request)).pipe(
+						Effect.catchTag("HarnessCallFailed", (failed) =>
+							executor.recoverTurn(conversation, operationId).pipe(
+								Effect.delay(baseDelay),
+								Effect.filterOrFail(
+									(recovered): recovered is PiTurnOutcome => recovered !== null,
+									() => failed,
+								),
+							),
+						),
 						Effect.tapError((error) =>
 							Effect.logError("Harness unreachable", conversation, error.cause),
 						),
