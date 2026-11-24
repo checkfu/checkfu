@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -905,6 +906,52 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				globalThis.fetch = originalFetch
 				await backend.close()
 			}
+		}
+	})
+
+	it("hands Pi a refusal without Anthropic's explanation, so a compaction neither stores nor retries it", async () => {
+		const explanation = "Request blocked: timeout policy"
+		const originalFetch = globalThis.fetch
+		globalThis.fetch = async () =>
+			new Response(
+				[
+					`event: message_start\ndata: ${JSON.stringify({
+						type: "message_start",
+						message: {
+							id: "msg_compaction_refusal",
+							type: "message",
+							role: "assistant",
+							model: "claude-sonnet-4-6",
+							content: [],
+							stop_reason: null,
+							stop_sequence: null,
+							usage: { input_tokens: 10, output_tokens: 0 },
+						},
+					})}\n\n`,
+					`event: message_delta\ndata: ${JSON.stringify({
+						type: "message_delta",
+						delta: { stop_reason: "refusal", stop_sequence: null, stop_details: { explanation } },
+						usage: { input_tokens: 10, output_tokens: 2 },
+					})}\n\n`,
+					`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+				].join(""),
+				{ status: 200, headers: { "content-type": "text/event-stream" } },
+			)
+		try {
+			const models = createPiModels({ openai: null, anthropic: Redacted.make("sk-ant-test") })
+			const model = models.getModel("anthropic", "claude-sonnet-4-6")
+			if (model === undefined) {
+				throw new Error("expected claude-sonnet-4-6")
+			}
+			// Pi's compaction asks for its summary this way, outside the generation hooks.
+			const summary = await models.completeSimple(model, {
+				messages: [{ role: "user", content: "summarize", timestamp: 0 }],
+			})
+			expect(summary).toMatchObject({ stopReason: "error", rawStopReason: "refusal" })
+			expect(JSON.stringify(summary)).not.toContain(explanation)
+			expect(isRetryableAssistantError(summary)).toBe(false)
+		} finally {
+			globalThis.fetch = originalFetch
 		}
 	})
 
