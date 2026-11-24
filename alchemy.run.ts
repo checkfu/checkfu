@@ -1,6 +1,8 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "./apps/api/src/ApiWorker.ts"
+import { ConnectionWorker } from "./apps/api/src/Connection/ConnectionHost.ts"
+import ConnectionWorkerLive from "./apps/api/src/Connection/ConnectionWorker.ts"
 import { customDomains } from "./apps/api/src/CustomDomain.ts"
 import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
 import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection.ts"
@@ -43,6 +45,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			),
 		},
 		Effect.gen(function* () {
+			yield* ConnectionWorker
 			yield* PiHarnessWorker
 			const api = yield* ApiWorker
 			const mcp = yield* Cloudflare.Worker("McpWorker", {
@@ -57,7 +60,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				api: api.url.as<string>(),
 				mcp: mcp.url.as<string>(),
 			}
-		}).pipe(Effect.provide(PiHarnessWorkerLive), protectInProduction),
+		}).pipe(Effect.provide([PiHarnessWorkerLive, ConnectionWorkerLive]), protectInProduction),
 	)
 
 export default checkfuStack(requireShippedBaseline)

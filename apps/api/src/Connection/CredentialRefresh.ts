@@ -9,7 +9,7 @@ import { ConnectionExecutor } from "./CredentialCustody.ts"
 
 /**
  * Records on the credential what its connection's last token refresh came to, then tells the
- * connection it is recorded. The connection lives in the harness Worker, which cannot reach the
+ * connection it is recorded. The connection lives in its own Worker, which cannot reach the
  * domain, so the API asks: after each turn of a session that uses the credential, and before
  * each read of it. Each outcome is recorded once, by its count, however often it is asked for.
  */

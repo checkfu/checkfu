@@ -21,6 +21,7 @@ import stack, {
 	inProduction,
 } from "../../../alchemy.run.ts"
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
+import { CONNECTION_WORKER_PROPS } from "../src/Connection/ConnectionWorker.ts"
 import { PI_HARNESS_WORKER_PROPS } from "../src/Pi/PiHarnessWorker.ts"
 
 describe("Alchemy stack and worker entry", () => {
@@ -50,6 +51,9 @@ describe("Alchemy stack and worker entry", () => {
 					enabled: true,
 					issues: { enabled: true },
 				})
+				// Traces record each outbound request's full URL, where an API key can be.
+				expect(CONNECTION_WORKER_PROPS.observability.traces).toEqual({ enabled: false })
+				expect(CONNECTION_WORKER_PROPS.workersDev).toBe(false)
 				expect(CLOUDFLARE_STATE_OBSERVABILITY).toEqual({
 					enabled: true,
 					logs: { enabled: true, invocationLogs: false },

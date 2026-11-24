@@ -5,8 +5,6 @@ import { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import { ModelUsage, TextBlock, ToolCall } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
-import { CustodyReport, HeldSecret, SecretReplacement } from "../Connection/SecretCustody.ts"
-import { CatalogConfig } from "../OpenApi/ApiCatalogStore.ts"
 import { ApiSpecSelection, ApiSpecSummary } from "../OpenApi/ApiSpecCheck.ts"
 
 export const PiTurnRequest = Schema.Struct({
@@ -105,19 +103,14 @@ export const PiHarnessCalls = {
 		result: PiRecoveredTurn,
 	},
 	waitingCalls: { args: Schema.Tuple([Schema.String]), result: Schema.Array(Schema.String) },
-	// Whether Pi can check calls against each custom tool's input schema; the API asks before
-	// it accepts an agent's tools.
-	// The importer runs here, beside the catalogs, so the API Worker asks it whether a document
-	// can be an API server, stores the document in its catalog object, and confirms it there.
+	// The OpenAPI importer stays out of the API Worker, which asks here whether a document can be
+	// an API server.
 	checkApiSpec: {
 		args: Schema.Tuple([Schema.String, ApiSpecSelection]),
 		result: ApiSpecSummary,
 	},
-	storeCatalog: {
-		args: Schema.Tuple([Schema.String, Schema.String, CatalogConfig]),
-		result: Schema.Boolean,
-	},
-	keepCatalog: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	// Whether Pi can check calls against each custom tool's input schema; the API asks before
+	// it accepts an agent's tools.
 	checkToolSchemas: {
 		args: Schema.Tuple([Schema.Array(Schema.JsonObject)]),
 		result: Schema.Array(Schema.Boolean),
@@ -126,28 +119,4 @@ export const PiHarnessCalls = {
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	// The workspace is the harness's: its tools run next to the session object that calls them.
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
-	// A credential's secret is held by its connection object, which lives here beside the sessions
-	// that use it. The API stores, replaces, confirms and erases it by credential id.
-	// The secret is stored with the one MCP server URL it may ever be sent to.
-	storeSecret: {
-		args: Schema.Tuple([Schema.String, HeldSecret, Schema.String]),
-		result: Schema.Boolean,
-	},
-	// The secret's new revision, or null when it held nothing to replace.
-	replaceSecret: {
-		args: Schema.Tuple([Schema.String, SecretReplacement]),
-		result: Schema.NullOr(Schema.Int),
-	},
-	keepSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
-	eraseSecret: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
-	// What a credential's last token refresh came to, until the API records it and acknowledges
-	// it by its count: the domain lives in the API Worker.
-	credentialRefreshReport: {
-		args: Schema.Tuple([Schema.String]),
-		result: Schema.NullOr(CustodyReport),
-	},
-	acknowledgeCredentialRefresh: {
-		args: Schema.Tuple([Schema.String, Schema.Int]),
-		result: Schema.Void,
-	},
 } as const

@@ -28,7 +28,7 @@ export interface ApiSpecCheckService {
 
 /**
  * Imports an API server's document as the session will, with every bound applied. The importer
- * runs in the harness Worker, beside the catalogs, so the API Worker asks it there. A setup
+ * stays out of the API Worker, which asks the harness Worker instead. A setup
  * that provides no check refuses every API server instead of accepting it unchecked.
  */
 export const ApiSpecCheck = Context.Reference<ApiSpecCheckService>("@checkfu/api/ApiSpecCheck", {

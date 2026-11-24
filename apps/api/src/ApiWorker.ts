@@ -10,6 +10,8 @@ import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { Connection } from "./Connection/Connection.ts"
+import { ConnectionWorker } from "./Connection/ConnectionHost.ts"
 import {
 	ConnectionCallFailed,
 	ConnectionExecutor,
@@ -17,6 +19,7 @@ import {
 } from "./Connection/CredentialCustody.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
+import { ApiCatalog } from "./OpenApi/ApiCatalog.ts"
 import { ApiCatalogCallFailed, ApiCatalogExecutor } from "./OpenApi/ApiCatalogExecutor.ts"
 import { ApiCatalogsLive } from "./OpenApi/ApiCatalogKeeper.ts"
 import { ApiSpecCheck } from "./OpenApi/ApiSpecCheck.ts"
@@ -24,6 +27,7 @@ import type { ApiSpecSelection } from "./OpenApi/ApiSpecCheck.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { placedStub, placement } from "./Placement.ts"
 import { ToolSchemaCheck } from "./Pi/PiToolSchemaCheck.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
@@ -73,36 +77,38 @@ const connectionCall = <A, E, R>(
 			: Effect.fail(new ConnectionCallFailed({ cause })),
 	)
 
-// Connection objects live in the harness Worker, next to the sessions that use them; the API
-// reaches them through its calls.
+// The API reaches each credential's connection object in the connection Worker directly.
 const ConnectionExecutorLive = Layer.effect(
 	ConnectionExecutor,
 	Effect.gen(function* () {
-		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		const connection = placedStub(
+			yield* Connection.from(ConnectionWorker),
+			yield* Effect.orDie(placement),
+		)
 		return {
 			storeSecret: (credentialId, secret, target) =>
 				connectionCall(
-					Effect.suspend(() => harness.storeSecret(credentialId, secret, target)),
+					Effect.suspend(() => connection(credentialId).storeSecret(secret, target)),
 				).pipe(Effect.withSpan("Connection.storeSecret")),
 			replaceSecret: (credentialId, secret) =>
-				connectionCall(Effect.suspend(() => harness.replaceSecret(credentialId, secret))).pipe(
+				connectionCall(Effect.suspend(() => connection(credentialId).replaceSecret(secret))).pipe(
 					Effect.withSpan("Connection.replaceSecret"),
 				),
 			keepSecret: (credentialId) =>
-				connectionCall(Effect.suspend(() => harness.keepSecret(credentialId))).pipe(
+				connectionCall(Effect.suspend(() => connection(credentialId).keepSecret())).pipe(
 					Effect.withSpan("Connection.keepSecret"),
 				),
 			erase: (credentialId) =>
-				connectionCall(Effect.suspend(() => harness.eraseSecret(credentialId))).pipe(
+				connectionCall(Effect.suspend(() => connection(credentialId).erase())).pipe(
 					Effect.withSpan("Connection.erase"),
 				),
 			refreshReport: (credentialId) =>
-				connectionCall(Effect.suspend(() => harness.credentialRefreshReport(credentialId))).pipe(
+				connectionCall(Effect.suspend(() => connection(credentialId).refreshReport())).pipe(
 					Effect.withSpan("Connection.refreshReport"),
 				),
 			acknowledgeRefresh: (credentialId, refreshes) =>
 				connectionCall(
-					Effect.suspend(() => harness.acknowledgeCredentialRefresh(credentialId, refreshes)),
+					Effect.suspend(() => connection(credentialId).acknowledgeRefresh(refreshes)),
 				).pipe(Effect.withSpan("Connection.acknowledgeRefresh")),
 		}
 	}),
@@ -132,18 +138,20 @@ const catalogCall = <A, E, R>(
 			: Effect.fail(new ApiCatalogCallFailed({ cause })),
 	)
 
-// Catalog objects live in the harness Worker, beside the sessions that read them.
 const ApiCatalogExecutorLive = Layer.effect(
 	ApiCatalogExecutor,
 	Effect.gen(function* () {
-		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		const catalog = placedStub(
+			yield* ApiCatalog.from(ConnectionWorker),
+			yield* Effect.orDie(placement),
+		)
 		return {
 			store: (catalogId, document, config) =>
-				catalogCall(Effect.suspend(() => harness.storeCatalog(catalogId, document, config))).pipe(
+				catalogCall(Effect.suspend(() => catalog(catalogId).store(document, config))).pipe(
 					Effect.withSpan("ApiCatalog.store"),
 				),
 			keep: (catalogId) =>
-				catalogCall(Effect.suspend(() => harness.keepCatalog(catalogId))).pipe(
+				catalogCall(Effect.suspend(() => catalog(catalogId).keep())).pipe(
 					Effect.withSpan("ApiCatalog.keep"),
 				),
 		}

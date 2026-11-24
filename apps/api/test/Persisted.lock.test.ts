@@ -381,21 +381,13 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			).toEqual(
 				[
 					"abortTurn",
-					"acknowledgeCredentialRefresh",
 					"cancelWaiting",
 					"checkApiSpec",
 					"checkToolSchemas",
-					"credentialRefreshReport",
 					"discardWorkspace",
-					"eraseSecret",
-					"keepCatalog",
-					"keepSecret",
 					"recoverTurn",
-					"replaceSecret",
 					"resumeTurn",
 					"runTurn",
-					"storeCatalog",
-					"storeSecret",
 					"waitingCalls",
 				].flatMap((method) => [
 					`harness-call:PiHarness.${method}/args`,

@@ -6,9 +6,10 @@ import type { PiHarness } from "agents/harness/pi"
 import type { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
-import { Connection, connectionName } from "../Connection/Connection.do.ts"
+import { Connection, connectionName } from "../Connection/Connection.ts"
+import { ConnectionWorker } from "../Connection/ConnectionHost.ts"
 import type { McpUpstream } from "../Connection/McpUpstream.ts"
-import { ApiCatalog } from "../OpenApi/ApiCatalog.do.ts"
+import { ApiCatalog } from "../OpenApi/ApiCatalog.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
@@ -139,8 +140,8 @@ export const PiSessionLive = PiSession.make(
 			baseUrls: providerBaseUrls,
 			workspaces: SessionWorkspace,
 			sandboxes: codemodeSandboxes,
-			connections: Connection,
-			catalogs: ApiCatalog,
+			connections: Connection.from(ConnectionWorker),
+			catalogs: ApiCatalog.from(ConnectionWorker),
 			where: Effect.orDie(placement),
 		}),
 		({ state, apiKeys, baseUrls, workspaces, sandboxes, connections, catalogs, where }) =>
@@ -201,7 +202,11 @@ export const PiSessionLive = PiSession.make(
 					}
 					const created = import("../Connection/McpUpstream.ts").then(({ makeMcpUpstream }) =>
 						makeMcpUpstream(binding.url, (request) =>
-							Effect.runPromise(connection(connectionName(binding)).forward(request)),
+							Effect.runPromise(
+								binding.credential_id === null
+									? connection(connectionName(binding)).forwardOpen(request)
+									: connection(binding.credential_id).forward(request),
+							),
 						),
 					)
 					upstreams.set(key, created)
@@ -265,12 +270,14 @@ export const PiSessionLive = PiSession.make(
 									)
 									return built.ok
 										? Effect.runPromise(
-												connection(
-													connectionName({
-														url: binding.base_url,
-														credential_id: binding.credential_id,
-													}),
-												).callApi(binding.base_url, built.request),
+												binding.credential_id === null
+													? connection(
+															connectionName({ url: binding.base_url, credential_id: null }),
+														).callOpenApi(binding.base_url, built.request)
+													: connection(binding.credential_id).callApi(
+															binding.base_url,
+															built.request,
+														),
 											)
 										: built
 								}),

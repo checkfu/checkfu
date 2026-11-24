@@ -10,6 +10,7 @@ import {
 	EAGER_BYTES_HELP,
 	HARNESS_SOURCES_HELP,
 	PI_HARNESS_WORKER_BUDGET,
+	CONNECTION_WORKER_BUDGET,
 	STARTUP_HELP,
 	measureBundle,
 } from "./BundleBudget.ts"
@@ -137,7 +138,7 @@ const ANSI_ESCAPE_RE = new RegExp(
 
 const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
 
-const WORKERS = ["ApiWorker", "PiHarnessWorker"] as const
+const WORKERS = ["ApiWorker", "PiHarnessWorker", "ConnectionWorker"] as const
 
 const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyArray<string> => {
 	const saved = JSON.parse(
@@ -503,6 +504,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		for (const [worker, budget] of [
 			["ApiWorker", API_WORKER_BUDGET],
 			["PiHarnessWorker", PI_HARNESS_WORKER_BUDGET],
+			["ConnectionWorker", CONNECTION_WORKER_BUDGET],
 		] as const) {
 			const measured = await measureBundle(
 				join(REPO_ROOT, ".alchemy", "bundles", `Checkfu-${stage}-${worker}`),
@@ -518,7 +520,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			)
 			if (worker === "ApiWorker") {
 				expect(measured.harnessSources, HARNESS_SOURCES_HELP).toEqual([])
-			} else {
+			} else if (worker === "PiHarnessWorker") {
 				expect(measured.harnessSources.length).toBeGreaterThan(0)
 			}
 		}
@@ -527,6 +529,10 @@ describe("PiSession real Durable Object under workerd", () => {
 	it("binds provider keys only to the harness Worker and the API key only to the API Worker", () => {
 		const api = boundNames(stage, "ApiWorker")
 		const harness = boundNames(stage, "PiHarnessWorker")
+		const connections = boundNames(stage, "ConnectionWorker")
+		expect(connections).not.toContain("CHECKFU_API_KEY")
+		expect(connections).not.toContain("OPENAI_API_KEY")
+		expect(connections).not.toContain("ANTHROPIC_API_KEY")
 		expect(api).toContain("CHECKFU_API_KEY")
 		expect(api).not.toContain("OPENAI_API_KEY")
 		expect(api).not.toContain("ANTHROPIC_API_KEY")

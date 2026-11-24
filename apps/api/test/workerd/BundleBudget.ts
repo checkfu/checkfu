@@ -120,6 +120,12 @@ export const PI_HARNESS_WORKER_BUDGET = {
 	startupCpuMs: 1000,
 } as const
 
+export const CONNECTION_WORKER_BUDGET = {
+	eagerBytes: 600_000,
+	totalBytes: 950_000,
+	startupCpuMs: 1000,
+} as const
+
 export const HARNESS_SOURCES_HELP =
 	"The API Worker bundled code that belongs to the harness Worker. Import the harness through apps/api/src/Pi/PiHarness.ts, PiCatalog.ts or a type-only import, so the public Worker never loads provider SDKs or Pi."
 
