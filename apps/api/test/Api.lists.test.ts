@@ -4,7 +4,8 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/sdk/Schemas"
-import { LIST_PAGE_BYTES, pageBytesWith } from "../src/Http/Listing.ts"
+import { apiError, RequestId } from "@checkfu/sdk/Api"
+import { LIST_PAGE_BYTES, makeLister, pageBytesWith } from "../src/Http/Listing.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	AUTH_HEADERS,
@@ -242,6 +243,35 @@ describe("List endpoints", () => {
 				expect(seen).toEqual(ids)
 			}),
 		))
+
+	it("returns the page a byte cutoff ends even when a later entry's read fails", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) =>
+			makeAssistantReply(model, null, `Done: ${extractLastUserText(context)}`, 4, 2),
+		)
+		try {
+			const page = await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const ids: Array<string> = []
+					for (const name of ["Fits", "Overflows", "Fails"]) {
+						ids.push(yield* create(apiFetch, "/v1/agents", { name, model: "gpt-4o-mini" }))
+					}
+					yield* listed(apiFetch, "/v1/agents", 3)
+					const list = yield* makeLister
+					const half = "x".repeat(LIST_PAGE_BYTES / 2)
+					return yield* list("agent", { limit: 100 }, (id) =>
+						id === ids[2]
+							? Effect.fail(apiError(503, "not ready", RequestId.make("req_test")))
+							: Effect.succeed({ id, archived_at: null, half }),
+					)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+			expect(page.data.map((resource) => resource.id)).toHaveLength(1)
+			expect(page.has_more).toBe(true)
+		} finally {
+			await closeAll()
+		}
+	})
 
 	it("counts a page's brackets and commas against its byte budget", () => {
 		const half = (LIST_PAGE_BYTES - 2) / 2

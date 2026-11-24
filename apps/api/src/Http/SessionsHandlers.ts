@@ -17,6 +17,7 @@ import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import type * as DateTime from "effect/DateTime"
+import * as Cache from "effect/Cache"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Sse from "effect/encoding/Sse"
@@ -28,6 +29,7 @@ import * as Stream from "effect/Stream"
 import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
+import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
@@ -276,19 +278,19 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return projected
 			})
 
-		const retrieve = (id: SessionId) =>
+		const pinnedVersionReady = (agentId: string, version: number) =>
 			Effect.gen(function* () {
-				const snapshot = yield* existing(id)
-				const versionTimeout = Duration.min(
+				const timeout = Duration.min(
 					Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
 					Duration.fromInputUnsafe(yield* AgentVersionWaitTimeout),
 				)
-				const ready = yield* waitForPinnedAgentVersion(
-					snapshot.agent_id,
-					snapshot.agent_version,
-					versionTimeout,
-				)
-				if (!ready) {
+				return yield* waitForPinnedAgentVersion(agentId, version, timeout)
+			})
+
+		const retrieve = (id: SessionId, ready: typeof pinnedVersionReady = pinnedVersionReady) =>
+			Effect.gen(function* () {
+				const snapshot = yield* existing(id)
+				if (!(yield* ready(snapshot.agent_id, snapshot.agent_version))) {
 					return yield* reject(503, `Session ${id} pinned agent version projection is not ready.`)
 				}
 				return serializeSession(snapshot)
@@ -404,7 +406,21 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
-				list("session", query, (id) => retrieve(SessionId.make(id))).pipe(handled),
+				Effect.gen(function* () {
+					const pinned = yield* Cache.make({
+						capacity: LIST_PAGE_MAX,
+						lookup: (key: string) =>
+							pinnedVersionReady(
+								key.slice(key.indexOf(":") + 1),
+								Number(key.slice(0, key.indexOf(":"))),
+							),
+					})
+					return yield* list("session", query, (id) =>
+						retrieve(SessionId.make(id), (agentId, version) =>
+							Cache.get(pinned, `${version}:${agentId}`),
+						),
+					)
+				}).pipe(handled),
 			)
 			.handle("get", ({ params }) => retrieve(params.session_id).pipe(handled))
 			.handle("archive", ({ params }) =>

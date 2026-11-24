@@ -56,10 +56,13 @@ export const makeLister = Effect.gen(function* () {
 				const found = yield* Effect.forEach(
 					batch,
 					(entry) =>
-						retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
+						Effect.exit(
+							retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
+						),
 					{ concurrency: "unbounded" },
 				)
-				for (const [offset, resource] of found.entries()) {
+				for (const [offset, outcome] of found.entries()) {
+					const resource = yield* outcome
 					if (resource === null || (!include_archived && resource.archived_at !== null)) {
 						continue
 					}
