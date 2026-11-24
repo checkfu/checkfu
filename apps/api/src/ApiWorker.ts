@@ -94,3 +94,5 @@ export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 		return yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
 	}),
 ) {}
+
+// cache probe, not for merge
