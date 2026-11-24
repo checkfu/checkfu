@@ -671,7 +671,7 @@ export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
-export const ListAutomationsResponse = listResponse(AutomationResource, Schema.Finite)
+export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
@@ -1238,10 +1238,9 @@ const Automations = HttpApiGroup.make("automations")
 	.add(
 		HttpApiEndpoint.get("list", "/v1/automations", {
 			query: {
-				after: Schema.optionalKey(EventListAfterFromString),
-				limit: Schema.optionalKey(EventListLimitFromString),
-				order: Schema.optionalKey(
-					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
+				...resourceListQuery,
+				agent_id: Schema.optionalKey(
+					ResourceId.annotate({ description: "Only automations created with this agent" }),
 				),
 			},
 			success: ListAutomationsResponse,
@@ -1250,19 +1249,14 @@ const Automations = HttpApiGroup.make("automations")
 			.annotate(OpenApi.Summary, "List automations")
 			.annotate(
 				OpenApi.Description,
-				"List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
+				"List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "list",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "list" },
 				"x-checkfu-mcp": { name: "automations_listAutomations" },
-				"x-checkfu-cli": {
-					intQueryParams: {
-						after: { min: 0, metavar: "SEQ" },
-						limit: { min: 1, max: 100, metavar: "N" },
-					},
-				},
+				"x-checkfu-cli": resourceListCli,
 			}),
 	)
 	.add(

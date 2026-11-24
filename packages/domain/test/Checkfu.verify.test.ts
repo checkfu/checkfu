@@ -22,7 +22,6 @@ import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 import { RunAutomation } from "../src/Automation/RunAutomation.command.ts"
 import { AutomationId, sessionIdOfNextRun } from "../src/Automation/Automation.id.ts"
 import { AutomationCapacity } from "../src/Automation/AutomationCapacity.aggregate.ts"
-import { AutomationDirectory } from "../src/Automation/AutomationDirectory.view.ts"
 import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
 import { isUsableSchedule, upcomingOccurrences } from "../src/Automation/Schedule.ts"
@@ -143,7 +142,6 @@ const STANDING = {
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
 	"Checkfu.AutomationViewsMatchAutomations": "checked",
-	"Checkfu.AutomationDirectoryListsLiveAutomations": "checked",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -218,7 +216,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"SessionView",
 			"AutomationView",
 			"AutomationRunView",
-			"AutomationDirectory",
 		])
 		const report = await Effect.runPromise(
 			Verify.model(Checkfu, {
@@ -444,7 +441,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							AutomationCapacity: yield* readAggregate(AutomationCapacity),
 							AutomationView: yield* readView(AutomationView),
 							AutomationRunView: yield* readView(AutomationRunView),
-							AutomationDirectory: yield* readView(AutomationDirectory),
 						}
 					})
 
@@ -593,7 +589,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				HostedViewsMatchAggregates: true,
 				EnvironmentViewConfigMatchesEnvironment: true,
 				AutomationViewsMatchAutomations: true,
-				AutomationDirectoryListsLiveAutomations: true,
 			})
 		}
 
@@ -632,30 +627,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			[["active", 1]],
 		)
 		expect(automationWorld.AutomationRunView.map((row) => row.state)).toEqual([{ recorded: 1 }])
-		expect(automationWorld.AutomationDirectory.map((row) => row.state)).toEqual([
-			{ listed: 1, live: [{ automation_id: automationRef.id, seq: 1 }] },
-		])
-		for (const live of [
-			[],
-			[
-				{ automation_id: automationRef.id, seq: 1 },
-				{ automation_id: "auto_gone", seq: 2 },
-			],
-			[
-				{ automation_id: automationRef.id, seq: 1 },
-				{ automation_id: automationRef.id, seq: 2 },
-			],
-		]) {
-			expect(
-				evaluateCheckfuInvariants({
-					...automationWorld,
-					AutomationDirectory: automationWorld.AutomationDirectory.map((row) => ({
-						...row,
-						state: { listed: 2, live },
-					})),
-				}).AutomationDirectoryListsLiveAutomations,
-			).toBe(false)
-		}
 		const runSession = automationWorld.Session.find(
 			(row) => row.id === `sess_${automationRef.id}_1`,
 		)
@@ -745,7 +716,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			AutomationDirectoryListsLiveAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -760,7 +730,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			AutomationDirectoryListsLiveAutomations: true,
 		})
 		// A pinned session reads its version's row, so a wrong historical row must be caught
 		// even when the row is present and the head is right.
@@ -801,7 +770,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			AutomationDirectoryListsLiveAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -814,7 +782,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			AutomationDirectoryListsLiveAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -832,7 +799,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			AutomationDirectoryListsLiveAutomations: true,
 		})
 	})
 })

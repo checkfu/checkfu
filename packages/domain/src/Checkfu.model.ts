@@ -7,17 +7,13 @@ import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.policy.ts"
 import { Automation } from "./Automation/Automation.aggregate.ts"
-import {
-	AutomationCapacity,
-	MAX_LIVE_AUTOMATIONS,
-} from "./Automation/AutomationCapacity.aggregate.ts"
+import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
 import { OpenAutomationSessionDecision } from "./Automation/OpenAutomationSession.decision.ts"
 import {
 	FreeAutomationSlot,
 	FreeAutomationSlotLive,
 } from "./Automation/FreeAutomationSlot.policy.ts"
-import { AutomationDirectory } from "./Automation/AutomationDirectory.view.ts"
 import { AutomationRunView } from "./Automation/AutomationRunView.view.ts"
 import { AutomationView } from "./Automation/AutomationView.view.ts"
 import {
@@ -60,7 +56,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		TurnInput,
 		AutomationView,
 		AutomationRunView,
-		AutomationDirectory,
 	],
 	policies: [StartTurn, StopModelRequest, ArmAutomation, StartAutomationRun, FreeAutomationSlot],
 	sagas: [RunTurn],
@@ -304,22 +299,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					m.Automation.some((a) => [a.id === v.id, a.state.status !== ""].every((ok) => ok)),
 				),
 			].every((ok) => ok),
-		AutomationDirectoryListsLiveAutomations: (m) => {
-			const live = m.AutomationDirectory.flatMap((d) => d.state.live)
-			return [
-				live.length <= MAX_LIVE_AUTOMATIONS,
-				live.every((entry, index) => index === 0 || entry.seq > (live[index - 1]?.seq ?? 0)),
-				m.AutomationDirectory.every((d) =>
-					d.state.live.every((entry) => entry.seq <= d.state.listed),
-				),
-				m.Automation.every(
-					(a) =>
-						live.filter((entry) => entry.automation_id === a.id).length ===
-						([a.state.status !== "", a.state.status !== "archived"].every((ok) => ok) ? 1 : 0),
-				),
-				live.every((entry) => m.Automation.some((a) => a.id === entry.automation_id)),
-			].every((ok) => ok)
-		},
 	},
 	sometimes: {
 		ASessionIsAdmitted: (m) => m.Session.some((s) => s.state._tag === "Idle"),
@@ -359,7 +338,6 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"SessionView",
 		"AutomationView",
 		"AutomationRunView",
-		"AutomationDirectory",
 	],
 	queries: ["ListResources"],
 }) {}

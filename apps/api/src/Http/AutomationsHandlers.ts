@@ -6,10 +6,7 @@ import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomat
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
-import { AutomationCapacity } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
-import { AutomationDirectory } from "@checkfu/domain/Automation/AutomationDirectory.view"
-import type { AutomationDirectoryEntry } from "@checkfu/domain/Automation/AutomationDirectory.view"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
 import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
@@ -32,6 +29,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { CheckfuApi } from "./Api.ts"
+import { makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
@@ -94,29 +92,6 @@ const automationRunResource = (
 	created_at: entry.envelope.at,
 })
 
-const listPage = <E, R>(
-	live: ReadonlyArray<AutomationDirectoryEntry>,
-	query: { readonly after?: number; readonly limit?: number; readonly order?: "asc" | "desc" },
-	snapshotOf: (id: AutomationId) => Effect.Effect<AutomationSnapshot, E, R>,
-) =>
-	Effect.gen(function* () {
-		const order = query.order ?? "asc"
-		const { after } = query
-		const remaining = (order === "asc" ? live : live.toReversed()).filter(
-			(entry) => after === undefined || (order === "asc" ? entry.seq > after : entry.seq < after),
-		)
-		const page = remaining.slice(0, query.limit ?? 50)
-		const snapshots = yield* Effect.forEach(page, (entry) => snapshotOf(entry.automation_id), {
-			concurrency: "unbounded",
-		})
-		const has_more = remaining.length > page.length
-		return {
-			data: snapshots.filter((snapshot) => snapshot.status !== "archived"),
-			has_more,
-			next_cursor: has_more ? (page.at(-1)?.seq ?? null) : null,
-		}
-	})
-
 const present = (snapshot: AutomationSnapshot) =>
 	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
@@ -126,7 +101,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const automations = yield* Automation
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
-		const directories = yield* AutomationDirectory
+		const list = yield* makeLister
 		const digest = yield* Digest.Digest
 
 		const committed = (id: AutomationId) =>
@@ -229,13 +204,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
-				Effect.gen(function* () {
-					const directory = Option.getOrNull(
-						yield* directories.get(AutomationCapacity.ref(AUTOMATION_CAPACITY)),
-					)
-					const page = yield* listPage(directory?.live ?? [], query, snapshotOf)
-					return { ...page, data: yield* Effect.forEach(page.data, present) }
-				}).pipe(handled),
+				list("automation", query, (id) =>
+					Effect.flatMap(snapshotOf(AutomationId.make(id)), present),
+				).pipe(handled),
 			)
 			.handle("get", ({ params }) =>
 				Effect.gen(function* () {

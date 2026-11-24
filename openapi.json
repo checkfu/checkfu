@@ -10756,8 +10756,8 @@
 						"in": "query",
 						"schema": {
 							"type": "string",
-							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
+							"pattern": "^\\d{1,15}:[^/\\\\]+$",
+							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 						},
 						"required": false
 					},
@@ -10767,7 +10767,7 @@
 						"schema": {
 							"type": "string",
 							"pattern": "^(?:[1-9]\\d?|100)$",
-							"description": "Maximum number of events to return (1-100)"
+							"description": "Maximum number of results to return (1-100, default 50)"
 						},
 						"required": false
 					},
@@ -10777,7 +10777,28 @@
 						"schema": {
 							"type": "string",
 							"enum": ["asc", "desc"],
-							"description": "Sort order: asc or desc"
+							"description": "Sort order by creation: asc (oldest first, the default) or desc"
+						},
+						"required": false
+					},
+					{
+						"name": "include_archived",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["true", "false"],
+							"description": "Include archived results: true or false (default false)"
+						},
+						"required": false
+					},
+					{
+						"name": "agent_id",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256,
+							"description": "Only automations created with this agent"
 						},
 						"required": false
 					}
@@ -10978,7 +10999,9 @@
 										"next_cursor": {
 											"anyOf": [
 												{
-													"type": "number"
+													"type": "string",
+													"pattern": "^\\d{1,15}:[^/\\\\]+$",
+													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
 												},
 												{
 													"type": "null"
@@ -11308,7 +11331,7 @@
 						}
 					}
 				},
-				"description": "List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
+				"description": "List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
 				"summary": "List automations",
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "list",
@@ -11321,10 +11344,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,

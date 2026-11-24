@@ -484,7 +484,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "automations_listAutomations",
 		title: "List automations",
 		description:
-			"List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
+			"List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
 		method: "GET",
 		path: "/v1/automations",
 		readOnly: true,
@@ -498,19 +498,30 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					properties: {
 						after: {
 							type: "string",
-							pattern: "^\\d{1,15}$",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
 							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
-							description: "Maximum number of events to return (1-100)",
+							description: "Maximum number of results to return (1-100, default 50)",
 						},
 						order: {
 							type: "string",
 							enum: ["asc", "desc"],
-							description: "Sort order: asc or desc",
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+						agent_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Only automations created with this agent",
 						},
 					},
 					required: [],

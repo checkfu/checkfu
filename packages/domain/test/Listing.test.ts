@@ -11,6 +11,8 @@ import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
+import { AutomationId } from "../src/Automation/Automation.id.ts"
+import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 
 const ids = (page: { readonly entries: ReadonlyArray<{ readonly id: string }> }) =>
 	page.entries.map((entry) => entry.id)
@@ -70,6 +72,26 @@ describe("ListResources", () => {
 					title: null,
 				})
 			}
+			const automations = [
+				["auto_list_1", "agent_list_1"],
+				["auto_list_2", "agent_list_2"],
+				["auto_list_3", "agent_list_1"],
+			] as const
+			for (const [automation, agent] of automations) {
+				yield* domain.AdmitAutomation({
+					automation_id: AutomationId.make(automation),
+					capacity_id: AUTOMATION_CAPACITY,
+					name: automation,
+					agent_id: BoundedAgentId.make(agent),
+					agent_version: null,
+					environment_id: BoundedEnvironmentId.make("env_list_1"),
+					text: "Report.",
+					schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+				})
+			}
+			const archivedAutomation = yield* domain.ArchiveAutomation({
+				automation_id: AutomationId.make("auto_list_3"),
+			})
 			const archivedAgent = yield* domain.ArchiveAgent({ agent_id: AgentId.make("agent_list_2") })
 			const archivedEnv = yield* domain.ArchiveEnvironment({
 				environment_id: EnvironmentId.make("env_list_2"),
@@ -80,7 +102,7 @@ describe("ListResources", () => {
 			const archivedSession = yield* domain.ArchiveSession({
 				session_id: SessionId.make("sess_list_3"),
 			})
-			const atLeast = [archivedAgent, archivedEnv, deletedEnv, archivedSession]
+			const atLeast = [archivedAgent, archivedEnv, deletedEnv, archivedSession, archivedAutomation]
 
 			const list = (input: Partial<ListingFilter> & Pick<ListingFilter, "kind">) =>
 				domain
@@ -101,6 +123,10 @@ describe("ListResources", () => {
 			])
 			expect(yield* list({ kind: "environment" })).toEqual(["env_list_1"])
 			expect(yield* list({ kind: "session" })).toEqual(["sess_list_1", "sess_list_2"])
+			expect(yield* list({ kind: "automation" })).toEqual(["auto_list_1", "auto_list_2"])
+			expect(
+				yield* list({ kind: "automation", include_archived: true, agent_id: "agent_list_1" }),
+			).toEqual(["auto_list_1", "auto_list_3"])
 			expect(
 				yield* list({ kind: "session", include_archived: true, agent_id: "agent_list_1" }),
 			).toEqual(["sess_list_1", "sess_list_3"])
