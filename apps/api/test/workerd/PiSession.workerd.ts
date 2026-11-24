@@ -19,6 +19,7 @@ import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
 const TEST_OPENAI_KEY = "sk-workerd-fake-key"
+const TEST_ANTHROPIC_KEY = "sk-ant-workerd-fake-key"
 const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
 }
@@ -140,7 +141,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 			[
 				`CHECKFU_API_KEY=${TEST_API_KEY}`,
 				`OPENAI_API_KEY=${TEST_OPENAI_KEY}`,
-				"ANTHROPIC_API_KEY=",
+				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
 				"",
 			].join("\n"),
@@ -485,6 +486,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(api).not.toContain("OPENAI_API_KEY")
 		expect(api).not.toContain("ANTHROPIC_API_KEY")
 		expect(harness).toContain("OPENAI_API_KEY")
+		expect(harness).toContain("ANTHROPIC_API_KEY")
 		expect(harness).not.toContain("CHECKFU_API_KEY")
 	})
 
