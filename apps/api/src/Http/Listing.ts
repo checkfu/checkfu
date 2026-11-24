@@ -16,6 +16,10 @@ export interface ListQuery {
 
 export const LIST_PAGE_BYTES = 4_000_000
 
+const HYDRATE_BATCH = 10
+
+const utf8 = new TextEncoder()
+
 const isNotFound = Schema.is(ERRORS[404])
 
 const decodePage = Schema.decodeUnknownEffect(
@@ -41,23 +45,27 @@ export const makeLister = Effect.gen(function* () {
 					{ take: input.limit ?? 50, ...(input.after === undefined ? {} : { after: input.after }) },
 				),
 			).pipe(Effect.flatMap(decodePage), Effect.orDie)
-			const found = yield* Effect.forEach(
-				page.entries,
-				(entry) => retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
-				{ concurrency: "unbounded" },
-			)
 			const data: Array<A> = []
 			let bytes = 0
-			for (const [index, resource] of found.entries()) {
-				if (resource === null || (!include_archived && resource.archived_at !== null)) {
-					continue
+			for (let start = 0; start < page.entries.length; start += HYDRATE_BATCH) {
+				const batch = page.entries.slice(start, start + HYDRATE_BATCH)
+				const found = yield* Effect.forEach(
+					batch,
+					(entry) =>
+						retrieve(entry.id).pipe(Effect.catchIf(isNotFound, () => Effect.succeed(null))),
+					{ concurrency: "unbounded" },
+				)
+				for (const [offset, resource] of found.entries()) {
+					if (resource === null || (!include_archived && resource.archived_at !== null)) {
+						continue
+					}
+					bytes += utf8.encode(JSON.stringify(resource)).length
+					const previous = page.entries[start + offset - 1]
+					if (data.length > 0 && bytes > LIST_PAGE_BYTES && previous !== undefined) {
+						return { data, has_more: true, next_cursor: listingCursor(previous) }
+					}
+					data.push(resource)
 				}
-				bytes += JSON.stringify(resource).length
-				const previous = page.entries[index - 1]
-				if (data.length > 0 && bytes > LIST_PAGE_BYTES && previous !== undefined) {
-					return { data, has_more: true, next_cursor: listingCursor(previous) }
-				}
-				data.push(resource)
 			}
 			return { data, has_more: page.cursor !== null, next_cursor: page.cursor }
 		})

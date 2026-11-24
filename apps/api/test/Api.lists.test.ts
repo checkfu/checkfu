@@ -194,12 +194,12 @@ describe("List endpoints", () => {
 			}),
 		))
 
-	it("ends a page before its encoded resources pass the byte budget and continues after it", () =>
+	it("ends a page before its UTF-8 JSON passes the byte budget and continues after it", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
-				const system = "\u0001".repeat(MAX_AGENT_SYSTEM_LENGTH)
+				const system = "\u754c".repeat(MAX_AGENT_SYSTEM_LENGTH)
 				const ids: Array<string> = []
-				for (let n = 0; n < 8; n++) {
+				for (let n = 0; n < 20; n++) {
 					ids.push(
 						yield* create(apiFetch, "/v1/agents", {
 							name: `Big ${n}`,
@@ -209,6 +209,7 @@ describe("List endpoints", () => {
 					)
 				}
 				yield* listed(apiFetch, "/v1/agents?limit=1", 1)
+				const utf8 = new TextEncoder()
 				const seen: Array<string> = []
 				let path = "/v1/agents?limit=100"
 				let pages = 0
@@ -216,11 +217,8 @@ describe("List endpoints", () => {
 					const page = yield* call<ListBody>(apiFetch, "GET", path)
 					expect(page.status).toBe(200)
 					pages += 1
-					const encoded = page.body.data.reduce(
-						(sum, agent) => sum + JSON.stringify(agent).length,
-						0,
-					)
-					expect(page.body.data.length === 1 || encoded <= LIST_PAGE_BYTES).toBe(true)
+					const bytes = utf8.encode(JSON.stringify(page.body.data)).length
+					expect(page.body.data.length === 1 || bytes <= LIST_PAGE_BYTES).toBe(true)
 					seen.push(...idsOf(page))
 					if (page.body.next_cursor === null) {
 						break
