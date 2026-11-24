@@ -40,6 +40,7 @@ import {
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
+import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
@@ -312,7 +313,12 @@ export const makePiDurableTestLayer = (
 	}
 
 	const artifactStore = makeArtifactStoreMemory()
-	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive, artifactStore.layer).pipe(
+	const layer = Layer.mergeAll(
+		CheckfuLive,
+		PiProviderLive,
+		artifactStore.layer,
+		ArtifactLinksTest,
+	).pipe(
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,

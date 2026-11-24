@@ -146,6 +146,8 @@ export const makeArtifactStoreMemory = (options?: {
 	let clock = 0
 	let writeCount = 0
 	let deleteCount = 0
+	let blobReads = 0
+	let blobChecks = 0
 
 	const now = Effect.sync(() => clock)
 	const online = Effect.suspend(() =>
@@ -266,7 +268,15 @@ export const makeArtifactStoreMemory = (options?: {
 					}),
 				),
 			getBlob: (artifactId, sha256) =>
-				read(() => objects.get(artifactBlobKey(scope, artifactId, sha256)) ?? null),
+				read(() => {
+					blobReads += 1
+					return objects.get(artifactBlobKey(scope, artifactId, sha256)) ?? null
+				}),
+			hasBlob: (artifactId, sha256) =>
+				read(() => {
+					blobChecks += 1
+					return objects.has(artifactBlobKey(scope, artifactId, sha256))
+				}),
 			markDeleting: (artifactId) =>
 				Effect.suspend(() => {
 					deleteCount += 1
@@ -326,6 +336,8 @@ export const makeArtifactStoreMemory = (options?: {
 			uploadedAt.set(key, clock)
 		},
 		putCount: (key: string) => puts.get(key) ?? 0,
+		blobReads: () => blobReads,
+		blobChecks: () => blobChecks,
 		ledgers,
 		alarms,
 		advanceClock: (millis: number) => {

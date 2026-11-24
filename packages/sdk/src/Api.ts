@@ -38,6 +38,8 @@ import {
 	EnvironmentName,
 	EnvironmentSnapshot,
 	MAX_ARTIFACT_BODY_BYTES,
+	MAX_LINK_TTL_SECONDS,
+	MIN_LINK_TTL_SECONDS,
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
@@ -624,6 +626,26 @@ export const ArtifactFileResource = Schema.Struct({
 	content: Schema.String,
 })
 export type ArtifactFileContent = typeof ArtifactFileResource.Type
+
+export const CreateArtifactLinkBody = Schema.Struct({
+	expires_in: Schema.optionalKey(
+		Schema.Int.check(
+			Schema.isBetween({ minimum: MIN_LINK_TTL_SECONDS, maximum: MAX_LINK_TTL_SECONDS }),
+		).annotate({
+			description: "Seconds until the link stops working (default 3600, at most 7 days)",
+		}),
+	),
+})
+export type CreateArtifactLinkBody = typeof CreateArtifactLinkBody.Type
+
+export const ArtifactLinkResource = Schema.Struct({
+	type: Schema.Literal("artifact_link"),
+	artifact_id: Schema.String,
+	version: PositiveInt,
+	url: Schema.String,
+	expires_at: Schema.DateTimeUtc,
+})
+export type ArtifactLink = typeof ArtifactLinkResource.Type
 
 export const ArtifactDeleted = Schema.Struct({
 	id: Schema.String,
@@ -1748,6 +1770,34 @@ const Artifacts = HttpApiGroup.make("artifacts")
 				"x-forge-method-name": "file",
 				"x-checkfu-endpoint": { group: "artifacts", endpoint: "getFile" },
 				"x-checkfu-mcp": { name: "artifacts_getArtifactFile" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("createLink", "/v1/artifacts/:artifact_id/versions/:version/links", {
+			params: artifactVersionParams,
+			payload: CreateArtifactLinkBody,
+			success: ArtifactLinkResource.pipe(HttpApiSchema.status(201)),
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a viewing link")
+			.annotate(
+				OpenApi.Description,
+				"Create a link that opens one artifact version in a browser until it expires; anyone holding the link can view it",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts.versions",
+				"x-forge-method-name": "link",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "createLink" },
+				"x-checkfu-mcp": { name: "artifacts_createArtifactLink" },
+				"x-checkfu-cli": {
+					examples: [
+						{
+							command:
+								"checkfu artifacts:versions link --artifact-id art_123 --current-version 1 --expires-in 600",
+							description: "Create a link that works for ten minutes",
+						},
+					],
+				},
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage artifacts")

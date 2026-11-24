@@ -10,6 +10,7 @@ import {
 	EAGER_BYTES_HELP,
 	describeEager,
 	HARNESS_SOURCES_HELP,
+	CONTENT_WORKER_BUDGET,
 	PI_HARNESS_WORKER_BUDGET,
 	STARTUP_HELP,
 	measureBundle,
@@ -547,6 +548,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	it("keeps the code every isolate loads at start-up inside its budget", async () => {
 		for (const [worker, budget] of [
 			["ApiWorker", API_WORKER_BUDGET],
+			["ContentWorker", CONTENT_WORKER_BUDGET],
 			["PiHarnessWorker", PI_HARNESS_WORKER_BUDGET],
 		] as const) {
 			const measured = await measureBundle(
@@ -562,10 +564,10 @@ describe("PiSession real Durable Object under workerd", () => {
 			expect(measured.startupCpuMs, `${STARTUP_HELP} ${found}`).toBeLessThanOrEqual(
 				budget.startupCpuMs,
 			)
-			if (worker === "ApiWorker") {
-				expect(measured.harnessSources, HARNESS_SOURCES_HELP).toEqual([])
-			} else {
+			if (worker === "PiHarnessWorker") {
 				expect(measured.harnessSources.length).toBeGreaterThan(0)
+			} else {
+				expect(measured.harnessSources, HARNESS_SOURCES_HELP).toEqual([])
 			}
 		}
 	}, 60_000)
@@ -1098,5 +1100,63 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(kept.status).toBe(200)
 		expect(await kept.text()).toBe(marker)
 		expect(workerLogs.join("")).not.toContain("Artifact write reconciliation failed")
+	}, 30_000)
+
+	it("opens an artifact through a viewing link on the content origin until it is deleted", async () => {
+		const created = await apiJson<{ readonly id: string }>("/v1/artifacts", {
+			method: "POST",
+			body: {
+				name: "Linked",
+				files: [
+					{ path: "index.html", content: '<script src="app.js"></script>' },
+					{ path: "app.js", content: "document.title = 'ok'" },
+				],
+			},
+		})
+		expect(created.status).toBe(201)
+		const id = created.body.id
+		const link = await apiJson<{ readonly url: string; readonly expires_at: string }>(
+			`/v1/artifacts/${id}/versions/1/links`,
+			{ method: "POST", body: { expires_in: 120 } },
+		)
+		expect(link.status).toBe(201)
+		const url = new URL(link.body.url)
+		expect(url.origin).not.toBe(new URL(baseUrl).origin)
+
+		const page = await fetch(url)
+		expect(page.status).toBe(200)
+		expect(await page.text()).toBe('<script src="app.js"></script>')
+		expect(page.headers.get("content-type")).toContain("text/html")
+		expect(page.headers.get("content-security-policy")).toBe(
+			"sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock; base-uri 'none'; object-src 'none'; form-action 'none'",
+		)
+		expect(page.headers.get("referrer-policy")).toBe("no-referrer")
+		expect(page.headers.get("x-content-type-options")).toBe("nosniff")
+		const etag = page.headers.get("etag") ?? ""
+		expect(etag).toMatch(/^"[0-9a-f]{64}-[0-9a-f]{16}"$/)
+		const unchanged = await fetch(url, { headers: { "if-none-match": etag } })
+		expect(unchanged.status).toBe(304)
+		expect(unchanged.headers.get("etag")).toBe(etag)
+
+		const head = await fetch(url, { method: "HEAD" })
+		expect(head.status).toBe(200)
+		expect(head.headers.get("content-type")).toBe(page.headers.get("content-type"))
+		expect(head.headers.get("content-length")).toBe(String('<script src="app.js"></script>'.length))
+		expect(await head.text()).toBe("")
+
+		const script = await fetch(new URL("app.js", url))
+		expect(script.status).toBe(200)
+		expect(await script.text()).toBe("document.title = 'ok'")
+
+		const forged = new URL(url)
+		forged.pathname = forged.pathname.replace(/\.(.)/, (_, first: string) =>
+			first === "A" ? ".B" : ".A",
+		)
+		expect((await fetch(forged)).status).toBe(404)
+		expect((await fetch(new URL("/v1/artifacts", url))).status).toBe(404)
+		expect((await fetch(`${baseUrl}${url.pathname}`)).status).toBe(404)
+
+		expect((await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })).status).toBe(200)
+		expect((await fetch(url)).status).toBe(404)
 	}, 30_000)
 })

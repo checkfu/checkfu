@@ -629,6 +629,70 @@ const artifactsVersionsFileCommand = CommandMake(
 	),
 )
 
+const artifactsVersionsLinkCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts:versions link",
+	apiGroup: "artifacts",
+	apiEndpoint: "createLink",
+	hasBody: true,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "expiresIn",
+			flagName: "expires-in",
+			wireName: "expires_in",
+			location: "body",
+			kind: "int",
+			required: false,
+		},
+	],
+}
+
+const artifactsVersionsLinkCommand = CommandMake(
+	"link",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		version: FlagString("current-version").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact version number"),
+		),
+		expiresIn: FlagInt("expires-in").pipe(
+			FlagWithMetavar("INT"),
+			FlagWithDescription("Seconds until the link stops working (default 3600, at most 7 days)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsVersionsLinkCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Create a link that opens one artifact version in a browser until it expires; anyone holding the link can view it (accepts flags and/or JSON/YAML on stdin)",
+	),
+	CommandWithExamples([
+		{
+			command:
+				"checkfu artifacts:versions link --artifact-id art_123 --current-version 1 --expires-in 600",
+			description: "Create a link that works for ten minutes",
+		},
+	]),
+)
+
 const artifactsVersionsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts:versions retrieve",
 	apiGroup: "artifacts",
@@ -2056,6 +2120,7 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				artifactsVersionsCreateCommand,
 				artifactsVersionsFileCommand,
+				artifactsVersionsLinkCommand,
 				artifactsVersionsRetrieveCommand,
 				...(extras?.["artifacts:versions"] ?? ([] as const)),
 			]),

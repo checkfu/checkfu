@@ -365,6 +365,59 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "artifacts_createArtifactLink",
+		title: "Create a viewing link",
+		description:
+			"Create a link that opens one artifact version in a browser until it expires; anyone holding the link can view it",
+		method: "POST",
+		path: "/v1/artifacts/{artifact_id}/versions/{version}/links",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						version: {
+							type: "string",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Artifact version number",
+							allOf: [
+								{
+									pattern: "^[1-9]\\d{0,8}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "version"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						expires_in: {
+							type: "integer",
+							minimum: 60,
+							maximum: 604800,
+							description: "Seconds until the link stops working (default 3600, at most 7 days)",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "artifacts_createArtifactVersion",
 		title: "Create an artifact version",
 		description:

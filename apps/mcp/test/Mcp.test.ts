@@ -173,6 +173,7 @@ describe("Checkfu MCP server", () => {
 				"agents_listAgents",
 				"agents_updateAgent",
 				"artifacts_createArtifact",
+				"artifacts_createArtifactLink",
 				"artifacts_createArtifactVersion",
 				"artifacts_deleteArtifact",
 				"artifacts_getArtifact",
@@ -223,6 +224,7 @@ describe("Checkfu MCP server", () => {
 				agents_listAgents: "read-only, additive, repeatable",
 				agents_updateAgent: "writes, destructive, not repeatable",
 				artifacts_createArtifact: "writes, additive, not repeatable",
+				artifacts_createArtifactLink: "writes, destructive, not repeatable",
 				artifacts_createArtifactVersion: "writes, destructive, not repeatable",
 				artifacts_deleteArtifact: "writes, destructive, repeatable",
 				artifacts_getArtifact: "read-only, additive, repeatable",
@@ -400,6 +402,7 @@ describe("Checkfu MCP server", () => {
 				agents_listAgents: { query: { limit: "5", include_archived: "true" } },
 				agents_updateAgent: { ...agent, body: { version: 1, model } },
 				artifacts_createArtifact: { body: { name: "Report", files } },
+				artifacts_createArtifactLink: { ...artifactVersion, body: { expires_in: 600 } },
 				artifacts_createArtifactVersion: { ...artifact, body: { version: 1, files } },
 				artifacts_deleteArtifact: artifact,
 				artifacts_getArtifact: artifact,
@@ -608,6 +611,7 @@ describe("Checkfu MCP server", () => {
 		]
 		const tools = GENERATED_TOOLS.filter((tool) => tool.path.includes("{version}"))
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
+			"artifacts_createArtifactLink",
 			"artifacts_getArtifactFile",
 			"artifacts_getArtifactVersion",
 		])

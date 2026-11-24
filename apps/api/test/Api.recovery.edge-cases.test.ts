@@ -37,6 +37,7 @@ import {
 } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 
 describe("interrupted turns and turn recovery", () => {
 	it("keeps a prompt interrupted mid-stream out of the conversation", async () => {
@@ -216,6 +217,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 2,
@@ -366,6 +368,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(Layer.succeed(AgentVersionLookupTimeout, "40 millis")),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -559,6 +562,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 0,
@@ -658,6 +662,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
 					attempts: 1,

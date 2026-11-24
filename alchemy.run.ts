@@ -1,9 +1,12 @@
 import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
-import ApiWorker from "./apps/api/src/ApiWorker.ts"
+import { ApiWorker } from "./apps/api/src/Api.ts"
+import ApiWorkerLive from "./apps/api/src/ApiWorker.ts"
 import { COMPATIBILITY_DATE } from "./apps/api/src/Compatibility.ts"
 import { customDomains } from "./apps/api/src/CustomDomain.ts"
+import { ContentWorker } from "./apps/api/src/Content/Content.ts"
+import ContentWorkerLive from "./apps/api/src/Content/ContentWorker.ts"
 import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
 import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection.ts"
 import PiHarnessWorkerLive from "./apps/api/src/Pi/PiHarnessWorker.ts"
@@ -48,6 +51,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 		},
 		Effect.gen(function* () {
 			yield* PiHarnessWorker
+			const content = yield* ContentWorker
 			const api = yield* ApiWorker
 			const mcp = yield* Cloudflare.Worker("McpWorker", {
 				...(yield* customDomains).mcp,
@@ -78,10 +82,14 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			})
 			return {
 				api: api.url.as<string>(),
+				content: content.url.as<string>(),
 				mcp: mcp.url.as<string>(),
 				app: app.url.as<string>(),
 			}
-		}).pipe(Effect.provide(PiHarnessWorkerLive), protectInProduction),
+		}).pipe(
+			Effect.provide([PiHarnessWorkerLive, ContentWorkerLive, ApiWorkerLive]),
+			protectInProduction,
+		),
 	)
 
 export default checkfuStack(requireShippedBaseline)

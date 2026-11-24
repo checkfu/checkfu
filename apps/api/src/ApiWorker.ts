@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Alchemy from "alchemy"
 import * as Digest from "effect/crypto/Digest"
+import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -12,6 +13,9 @@ import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { ARTIFACT_RECONCILE_CRON, reconcileArtifactWrites } from "./Artifacts/ArtifactReconcile.ts"
+import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
+import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
+import { ApiWorker } from "./Api.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
@@ -56,6 +60,7 @@ const ApiWorkerLive = Layer.mergeAll(
 		Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
 	),
 	Layer.succeed(ViewEventsOverObjectSockets, true),
+	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,
@@ -77,8 +82,7 @@ export const API_WORKER_PROPS = {
 	},
 } satisfies Cloudflare.WorkerProps
 
-export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
-	"ApiWorker",
+export default ApiWorker.make(
 	Effect.map(customDomains, ({ api }) => ({ ...API_WORKER_PROPS, ...api })),
 	Effect.gen(function* () {
 		// Platform pins the owning instance/build Scope onto the Worker init context.
@@ -92,6 +96,10 @@ export default class ApiWorker extends Cloudflare.Worker<ApiWorker>()(
 		yield* Cloudflare.Workers.cron(ARTIFACT_RECONCILE_CRON, () =>
 			reconcileArtifactWrites.pipe(Effect.provide(services)),
 		)
-		return yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
+		const handler = yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
+		return ApiWorker.of({
+			...handler,
+			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
+		})
 	}).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),
-) {}
+)

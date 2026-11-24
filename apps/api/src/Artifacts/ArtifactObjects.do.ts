@@ -8,7 +8,6 @@ import * as Hex from "effect/encoding/Hex"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { placedStub, placement, storageScope, storageScopeOf } from "../Placement.ts"
-import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import type { BuiltArtifactVersion } from "./ArtifactFiles.ts"
 import { makeArtifactOwner } from "./ArtifactOwnership.ts"
 import { makeSqlLedger } from "./ArtifactLedgerSql.ts"
@@ -21,12 +20,11 @@ import {
 	ArtifactWriteMarkerJson,
 	ArtifactWriteRefused,
 	listedMarkers,
-	artifactBlobKey,
+	artifactReads,
 	artifactMarkerKey,
 	artifactMarkerPrefix,
 	artifactReconcileCursorKey,
 	committedOrFailed,
-	artifactManifestKey,
 } from "./ArtifactStore.ts"
 import type { ArtifactWriteMarker, StagedWrite } from "./ArtifactStore.ts"
 
@@ -123,7 +121,6 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 	),
 )
 
-const decodeManifest = Schema.decodeUnknownEffect(ArtifactManifestJson)
 const decodeMarker = Schema.decodeUnknownEffect(ArtifactWriteMarkerJson)
 
 export const ArtifactStoreR2 = Layer.effect(
@@ -182,20 +179,7 @@ export const ArtifactStoreR2 = Layer.effect(
 			stage,
 			putVersion: (artifactId, version) =>
 				Effect.flatMap(stage(artifactId, version), (write) => committedOrFailed(write)),
-			getManifest: (artifactId, manifestHash) =>
-				run(
-					Effect.gen(function* () {
-						const object = yield* bucket.get(artifactManifestKey(scope, artifactId, manifestHash))
-						return object === null ? null : yield* decodeManifest(yield* object.text())
-					}),
-				),
-			getBlob: (artifactId, sha256) =>
-				run(
-					Effect.gen(function* () {
-						const object = yield* bucket.get(artifactBlobKey(scope, artifactId, sha256))
-						return object === null ? null : yield* object.bytes()
-					}),
-				),
+			...artifactReads(scope, bucket, run),
 			markDeleting: (artifactId) =>
 				Effect.gen(function* () {
 					const deleteId = `${ARTIFACT_DELETE_PREFIX}${Hex.encode(yield* random.randomBytes(12))}`
