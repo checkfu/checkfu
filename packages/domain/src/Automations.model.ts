@@ -37,6 +37,11 @@ export class Automations extends Domain.Model("Automations", {
 				const ledger = m.AutomationRunView.find((v) => v.id === a.id)
 				return (ledger === undefined ? 0 : ledger.state.recorded) === a.state.reported
 			}),
+		AutomationViewRevisionMatchesAutomation: (m) =>
+			m.Automation.every((a) => {
+				const view = m.AutomationView.find((v) => v.id === a.id)
+				return view === undefined || view.state.revision === a.state.revision
+			}),
 	},
 	sometimes: {
 		AnAutomationFiresOnSchedule: (m) =>

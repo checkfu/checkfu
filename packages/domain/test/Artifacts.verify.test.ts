@@ -27,6 +27,7 @@ const STANDING = {
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Artifacts.ArtifactViewMatchesArtifact": "checked",
 	"Artifacts.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
+	"Artifacts.EveryArtifactVersionIsRecorded": "checked",
 	"Artifacts.AnArtifactGainsASecondVersion": "reached",
 	"Artifacts.AnArtifactIsDeleted": "reached",
 	"Artifacts.AnArtifactIsPublished": "reached",
