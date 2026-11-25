@@ -1,7 +1,4 @@
-import {
-	AdmitAutomation,
-	AutomationScheduleUnusable,
-} from "@checkfu/domain/Automation/AdmitAutomation.command"
+import { AdmitAutomation } from "@checkfu/domain/Automation/AdmitAutomation.command"
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
@@ -14,7 +11,7 @@ import { PauseAutomation } from "@checkfu/domain/Automation/PauseAutomation.comm
 import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutomationRunFailed.command"
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
-import { firingsAhead, isUsableSchedule, sameSchedule } from "@checkfu/domain/Automation/Schedule"
+import { firingsAhead, sameSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
 import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
 import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
@@ -30,6 +27,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
@@ -216,9 +214,6 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const idempotencyKey = headers["idempotency-key"]
 					const { agent_id, agent_version } = yield* agentOf(payload.agent)
 					const environment_id = yield* environmentOf(payload.environment_id)
-					if (!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)) {
-						return yield* new AutomationScheduleUnusable(payload.schedule)
-					}
 					const command = {
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
@@ -297,17 +292,19 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						)
 						return commitForStream(receipt.commits, `Automation/${id}`)
 					})
-					const attempt = (
-						retries: number,
-					): Effect.Effect<Effect.Success<typeof send>, Effect.Error<typeof send>> =>
-						Effect.catchTag(send, "AutomationRevisionConflict", (conflict) =>
-							retries === 0
-								? Effect.fail(conflict)
-								: automationViews
-										.waitFor(ref, { revision: { gte: conflict.current_revision } }, { timeout })
-										.pipe(Effect.andThen(attempt(retries - 1))),
-						)
-					const committed = yield* attempt(UPDATE_RETRIES)
+					const committed = yield* send.pipe(
+						Effect.tapErrorTag("AutomationRevisionConflict", (conflict) =>
+							automationViews.waitFor(
+								ref,
+								{ revision: { gte: conflict.current_revision } },
+								{ timeout },
+							),
+						),
+						Effect.retry({
+							times: UPDATE_RETRIES,
+							while: (error) => Predicate.isTagged(error, "AutomationRevisionConflict"),
+						}),
+					)
 					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }
 						: yield* after(id, committed)
