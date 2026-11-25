@@ -819,11 +819,18 @@ describe("PiSession real Durable Object under workerd", () => {
 		const rest = await resumed.until("session.status_idle")
 		expect(rest.map((frame) => frame.id)).toEqual(["3", "4", "5", "6"])
 
+		// A cursor past the session's head reads nothing, and the stream still ends on archive.
+		const ahead = await openStream("100")
+		expect(ahead.res.status).toBe(200)
+
 		const archiveRes = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
 		expect([200, 202]).toContain(archiveRes.status)
 		const ending = await resumed.until("session.archived")
 		expect(ending.at(-1)?.event).toBe("session.archived")
 		expect(await resumed.next()).toBeNull()
+		expect(
+			await Promise.race([ahead.next(), sleep(15_000).then(() => "still open after archive")]),
+		).toBeNull()
 
 		const caughtUp = await openStream(ending.at(-1)?.id)
 		expect(caughtUp.res.status).toBe(204)

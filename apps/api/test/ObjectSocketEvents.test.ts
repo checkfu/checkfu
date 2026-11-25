@@ -40,22 +40,28 @@ const answering =
 			return HttpServerResponse.raw({ webSocket: socket }, { status: 101 })
 		})
 
-const stateFrame = (bytes: number) =>
-	JSON.stringify({ _tag: "Chunk", values: [{ cursor: 1, state: { pad: "x".repeat(bytes) } }] })
+const stateFrame = (bytes: number, cursor = 1, archivedAt: string | null = null) =>
+	JSON.stringify({
+		_tag: "Chunk",
+		values: [{ cursor, state: { archived_at: archivedAt, pad: "x".repeat(bytes) } }],
+	})
 
 describe("objectSocketChanges", () => {
-	it.effect("watches the key's state, so no frame replays a backlog", () =>
+	it.effect("watches the key's head, so no frame replays a backlog", () =>
 		Effect.gen(function* () {
 			const subscriptions: Array<Subscription> = []
 			const socket = pushingSocket([
-				stateFrame(10),
-				stateFrame(10),
+				stateFrame(10, 6),
+				stateFrame(10, 7, "2026-11-24T00:00:00Z"),
 				JSON.stringify({ _tag: "Exit" }),
 			])
 			const ticks = yield* objectSocketChanges(answering(socket, subscriptions), "session").pipe(
 				Stream.runCollect,
 			)
-			expect(ticks).toHaveLength(2)
+			expect(ticks).toEqual([
+				{ seq: 6, archived: false },
+				{ seq: 7, archived: true },
+			])
 			expect(subscriptions).toEqual([expect.objectContaining({ mode: "watch", cursor: 0 })])
 		}),
 	)

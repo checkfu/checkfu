@@ -653,16 +653,24 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						),
 					).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
 					const catchUp = cursor < head.cursor ? pagesAfterCursor : Stream.empty
-					// On Cloudflare the view object only says that the session changed, once on connect and
-					// once per commit, and the change is read in pages: no read is ever larger than a page,
-					// however late the socket opened. Ticks that arrive during a read fold into one.
+					// On Cloudflare the view object sends the session's head once on connect and once per
+					// commit, and what is new is read in pages: no read is ever larger than a page, however
+					// late the socket opened. Heads that arrive during a read fold into the newest. Pages
+					// start past what the client asked for and are read only when the head moved past them;
+					// a session archived at or below that point has nothing left to send.
 					const live: Stream.Stream<SessionEventEntry> =
 						connectSessionView === undefined
 							? Stream.suspend(() => sessionViews.events(ref, { after: cursor }))
-							: objectSocketChanges(connectSessionView, id).pipe(
-									Stream.buffer({ capacity: 1, strategy: "sliding" }),
-									Stream.flatMap(() => pagesAfterCursor),
-								)
+							: Stream.suspend(() => {
+									cursor = Math.max(cursor, from)
+									return objectSocketChanges(connectSessionView, id).pipe(
+										Stream.buffer({ capacity: 1, strategy: "sliding" }),
+										Stream.takeWhile((latest) => !(latest.archived && latest.seq <= cursor)),
+										Stream.flatMap((latest) =>
+											latest.seq > cursor ? pagesAfterCursor : Stream.empty,
+										),
+									)
+								})
 					const frames = Stream.concat(catchUp, live).pipe(
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
 						Stream.filter((entry) => entry.envelope.seq > from),
