@@ -1,4 +1,5 @@
 import { RUN_TURN_ACTIVITIES } from "@checkfu/domain/Session/RunTurn.saga"
+import { OPEN_AUTOMATION_RUN_ACTIVITIES } from "@checkfu/domain/Session/RunTurnActivities"
 import { copyJson } from "@earendil-works/chord/json"
 import type { JsonObject } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
@@ -426,6 +427,14 @@ const SAGA_STEPS: ReadonlyArray<PersistedShape> = Object.values(RUN_TURN_ACTIVIT
 	}),
 )
 
+const AUTOMATION_RUN_STEPS: ReadonlyArray<PersistedShape> = Object.values(
+	OPEN_AUTOMATION_RUN_ACTIVITIES,
+).map((activity): PersistedShape => ({
+	id: `saga-step:Checkfu.OpenAutomationRun/${activity.name}`,
+	kind: "saga-step",
+	schema: activity.success as unknown as PersistedSchema,
+}))
+
 const PI_DOCS: ReadonlyArray<PersistedShape> = CHECKFU_PI_DOCS.map((spec): PersistedShape => ({
 	id: piDocShapeId(spec.token.definition.kind),
 	kind: "pi-doc",
@@ -476,6 +485,7 @@ const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMa
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
 	...SAGA_STEPS,
+	...AUTOMATION_RUN_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,
 	...SESSION_TABLES,

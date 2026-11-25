@@ -21,6 +21,7 @@ import {
 	FreeAutomationSlotLive,
 } from "./Automation/FreeAutomationSlot.policy.ts"
 import { AutomationRunView } from "./Automation/AutomationRunView.view.ts"
+import { OpenAutomationRun, OpenAutomationRunLive } from "./Automation/OpenAutomationRun.saga.ts"
 import { AutomationView } from "./Automation/AutomationView.view.ts"
 import {
 	EnsureAutomationRunStarted,
@@ -75,7 +76,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		EnsureAutomationRunStarted,
 		FreeAutomationSlot,
 	],
-	sagas: [RunTurn],
+	sagas: [RunTurn, OpenAutomationRun],
 	projections: [Listing],
 	queries: [ListResources],
 	invariants: {
@@ -403,6 +404,7 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	EnsureTurnStartedLive,
 	EnsureTurnStoppedLive,
 	RunTurnLive,
+	OpenAutomationRunLive,
 	ArmAutomationLive,
 	EnsureAutomationArmedLive,
 	StartAutomationRunLive,

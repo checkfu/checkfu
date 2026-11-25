@@ -12,6 +12,7 @@ import {
 	EnsureAutomationArmedLive,
 } from "../src/Automation/ArmAutomation.policy.ts"
 import { FreeAutomationSlotLive } from "../src/Automation/FreeAutomationSlot.policy.ts"
+import { OpenAutomationRunLive } from "../src/Automation/OpenAutomationRun.saga.ts"
 import {
 	EnsureAutomationRunStartedLive,
 	StartAutomationRunLive,
@@ -141,6 +142,7 @@ const handlersOf =
 			EnsureAutomationArmedLive,
 			StartAutomationRunLive,
 			EnsureAutomationRunStartedLive,
+			OpenAutomationRunLive,
 			FreeAutomationSlotLive,
 			ListingLive,
 			ListResourcesLive,

@@ -37,7 +37,7 @@ const OWNED = [
 	{
 		owner: "packages/domain/src/Session/RunTurnActivities.ts",
 		message:
-			"Declare RunTurn workflow activities through runTurnActivity in packages/domain/src/Session/RunTurnActivities.ts so they are covered by Persisted.lock.json.",
+			"Declare workflow activities in packages/domain/src/Session/RunTurnActivities.ts so they are covered by Persisted.lock.json.",
 		imports: [{ name: "effect/workflow", importNames: ["Activity"] }],
 		properties: [],
 	},

@@ -13,7 +13,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { ArchiveAutomation } from "../src/Automation/ArchiveAutomation.command.ts"
-import { ArmAutomationLive, NEXT_FIRING } from "../src/Automation/ArmAutomation.policy.ts"
+import { ArmAutomationLive } from "../src/Automation/ArmAutomation.policy.ts"
 import { Automation } from "../src/Automation/Automation.aggregate.ts"
 import { AutomationId } from "../src/Automation/Automation.id.ts"
 import { CreateAutomation } from "../src/Automation/CreateAutomation.command.ts"
@@ -22,11 +22,9 @@ import { UnpauseAutomation } from "../src/Automation/UnpauseAutomation.command.t
 import { Automations } from "../src/Automations.model.ts"
 
 describe("Automation alarms", () => {
-	it.effect("cancels the armed firing when the automation is paused or archived", () => {
-		const platform = InMemory.make({
-			manual: true,
-			now: () => Date.parse("2026-01-01T08:00:00.000Z"),
-		})
+	it.effect("fires nothing while paused or archived, and fires again once unpaused", () => {
+		let at = Date.parse("2026-01-01T08:00:00.000Z")
+		const platform = InMemory.make({ manual: true, now: () => at })
 		const id = AutomationId.make("auto_alarm")
 		return Effect.gen(function* () {
 			const automations = yield* Automation
@@ -44,9 +42,12 @@ describe("Automation alarms", () => {
 				}
 				return yield* Effect.die(new Error("the platform did not settle"))
 			})
-			const cancelAgain = Effect.flip(automations.unschedule(id, NEXT_FIRING)).pipe(
-				Effect.map((error) => error._tag),
-			)
+			const runsAt = (when: string) =>
+				Effect.gen(function* () {
+					at = Date.parse(when)
+					yield* settle
+					return (yield* automations.get(Automation.ref(id))).runs
+				})
 			yield* automations.send(
 				new CreateAutomation({
 					automation_id: id,
@@ -62,24 +63,25 @@ describe("Automation alarms", () => {
 			yield* settle
 			yield* automations.send(new PauseAutomation({ automation_id: id }))
 			yield* settle
-			expect(yield* cancelAgain).toBe("AlreadyCancelled")
+			expect(yield* runsAt("2026-01-01T09:00:01.000Z")).toBe(0)
 
 			yield* automations.send(new UnpauseAutomation({ automation_id: id }))
 			yield* settle
+			const resumed = yield* runsAt("2026-01-02T09:00:01.000Z")
+			expect(resumed).toBeGreaterThan(0)
+
 			yield* automations.send(new ArchiveAutomation({ automation_id: id }))
 			yield* settle
-			expect(yield* cancelAgain).toBe("AlreadyCancelled")
+			expect(yield* runsAt("2026-01-03T09:00:01.000Z")).toBe(resumed)
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(Automations.layer(ArmAutomationLive).pipe(Layer.provide(platform.layer))),
 		)
 	})
 
-	it.effect("arms nothing when a paused automation is updated, even with a new schedule", () => {
-		const platform = InMemory.make({
-			manual: true,
-			now: () => Date.parse("2026-01-01T08:00:00.000Z"),
-		})
+	it.effect("fires nothing when a paused automation is updated, even with a new schedule", () => {
+		let at = Date.parse("2026-01-01T08:00:00.000Z")
+		const platform = InMemory.make({ manual: true, now: () => at })
 		const harness = Harness.toLayer(
 			Effect.succeed({
 				interrupt: () => Effect.void,
@@ -157,8 +159,9 @@ describe("Automation alarms", () => {
 				}),
 			)
 			yield* settle
-			const cancelled = yield* Effect.flip(automations.unschedule(id, NEXT_FIRING))
-			expect(cancelled._tag).toBe("AlreadyCancelled")
+			at = Date.parse("2026-01-01T12:00:01.000Z")
+			yield* settle
+			expect((yield* automations.get(Automation.ref(id))).runs).toBe(0)
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
