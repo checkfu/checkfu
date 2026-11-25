@@ -54,9 +54,22 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 				env: { API: api },
 				dev: { port: 1338 },
 			})
+			const app = yield* Cloudflare.Website.Vite("App", {
+				rootDir: "apps/app",
+				main: "worker.ts",
+				compatibility: { date: COMPATIBILITY_DATE },
+				observability: { enabled: true },
+				env: { API: api },
+				assets: {
+					notFoundHandling: "single-page-application",
+					runWorkerFirst: ["/v1/*", "/auth/*"],
+				},
+				dev: { port: 1340 },
+			})
 			return {
 				api: api.url.as<string>(),
 				mcp: mcp.url.as<string>(),
+				app: app.url.as<string>(),
 			}
 		}).pipe(Effect.provide(PiHarnessWorkerLive), protectInProduction),
 	)

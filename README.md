@@ -12,7 +12,7 @@ bun install
 bun checkfu deploy
 ```
 
-`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys three Workers to your account: the API with its Durable Objects, the Pi harness that runs the model calls, and the MCP server. It generates the API key for you and keeps the secrets in the checkout's `.env`. As soon as Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go. Both files are made owner-only on macOS and Linux; on Windows they are as private as the folder they are in.
+`deploy` signs you in to Cloudflare in the browser the first time, asks for your model provider key if it cannot find one, shows what it will create, and deploys four Workers to your account: the API with its Durable Objects, the Pi harness that runs the model calls, the MCP server, and the dashboard. It generates the API key for you and keeps the secrets in the checkout's `.env`. As soon as Alchemy has deployed, it records what this checkout now manages (Cloudflare account, stage, Alchemy profile, URL) in `.checkfu/deployment.json`, waits for the Worker to answer, and saves the URL and key to `~/.config/checkfu/config.json` so every later command already knows where to go. Both files are made owner-only on macOS and Linux; on Windows they are as private as the folder they are in.
 
 Then create an agent, an environment, and a session, and connect to it. Each command prints the ID the next one needs:
 
@@ -33,7 +33,7 @@ After that:
 - **Use it from another machine** — `bun checkfu --base-url https://<your-worker>.workers.dev login`.
 - **Deploy from CI** — export `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, a model provider key, and a persistent `CHECKFU_API_KEY` (the one from your first deploy, or `openssl rand -hex 32`), then run `bun checkfu deploy --yes`. Without a terminal the deploy refuses to invent an API key, because a fresh runner would rotate it on every run.
 - **Use your own hostnames** — set `CHECKFU_API_DOMAIN` and `CHECKFU_MCP_DOMAIN` in `.env` (for example `api.example.com` and `mcp.example.com`) and deploy again. Each zone has to be in the Cloudflare account you deploy to, and `deploy` then reports those addresses; the `workers.dev` ones keep working too. A hostname set here replaces every custom hostname on that Worker, including any you attached in the Cloudflare dashboard. To go back, set the variable to `none` and deploy: emptying it leaves attached hostnames in place, as long as your shell does not export it either, since an empty `.env` entry falls back to the shell. To change a hostname, set `none` and deploy first, then the new one: a one-step change detaches the old hostname before attaching the new, so a new hostname that cannot be attached leaves the Worker with neither.
-- **Remove it** — `bun checkfu destroy --stage live` deletes all three Workers and all of their data. It never picks a stage for you, and it only deletes a stage this checkout recorded deploying, in the account it deployed it to. For anything else, use Alchemy directly: `bun run destroy --stage <name>`.
+- **Remove it** — `bun checkfu destroy --stage live` deletes all four Workers and all of their data. It never picks a stage for you, and it only deletes a stage this checkout recorded deploying, in the account it deployed it to. For anything else, use Alchemy directly: `bun run destroy --stage <name>`.
 
 ## Run locally
 
@@ -87,6 +87,10 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 
 `@checkfu/sdk` ([packages/sdk/README.md](packages/sdk/README.md)) provides an Effect-native client (`CheckfuClient` service + `Layer`s + `Stream`s + `Data.TaggedError`s) and a thin Promise / `AsyncIterable` facade (`new Checkfu(...)`) sharing the single-source `CheckfuApi` contract with the server and CLI.
 
+## Dashboard
+
+`deploy` prints the dashboard URL as `Dashboard`, and `bun run dev` prints it as `app`. Open it and sign in with the same `CHECKFU_API_KEY` to list, create and archive agents, environments and sessions, and to talk to a session as it runs.
+
 ## MCP
 
 `bun run dev` also starts the MCP server and prints its URL as `mcp` (`http://localhost:1338` unless that port is taken). It offers one tool per API operation, generated from the same `CheckfuApi` contract as the CLI, and passes your `CHECKFU_API_KEY` through to the API:
@@ -113,7 +117,7 @@ The server speaks MCP revision `2026-07-28`. It deploys as its own Worker (`McpW
 - `bun run checkfu:build` — compile the CLI to a single binary at `apps/cli/dist/checkfu`, built so that it never loads a `.env` or `bunfig.toml` from the directory it is run in. It still deploys from this checkout, which it locates from its own path.
 - `bun run generate` — regenerate OpenAPI spec and Forge-derived CLI, SDK, and MCP artifacts from `CheckfuApi`
 - `bun run check` — verify generated artifacts, format, lint, and typecheck. Tests run in CI; to run the same suites locally, run `bun run test`, `bun run test:bun` and `bun run test:workerd`
-- `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds. Either way it creates three Workers: the API, which serves HTTP and hosts the domain model, the MCP server, and the Pi harness, which has no public URL, runs the model calls, and is the only one that holds `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+- `bun run deploy` — raw `alchemy deploy` to your personal stage, without the secret setup, health check, or saved connection that `bun checkfu deploy` adds. Either way it creates four Workers: the API, which serves HTTP and hosts the domain model, the MCP server, the dashboard, and the Pi harness, which has no public URL, runs the model calls, and is the only one that holds `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
 - `bun run persisted:cut` → commit `apps/api/test/persisted/Persisted.lock.json` → `bun run deploy:production` — production deploy
   - Until that first baseline is cut, stored shapes may change without a migration: events, states, view rows, receipts and pending two-phase outcomes on a personal stage are not carried across an upgrade. If an upgrade breaks a personal stage, destroy and redeploy it. The baseline is where compatibility starts; after it, a removed shape is retired through the lock.
   - The production stack refuses to build until that baseline is cut and committed, so every `alchemy` command with `--stage production` needs it: `deploy`, `logs`, `drift` and `destroy`. Run them from a checkout whose baseline is shipped.

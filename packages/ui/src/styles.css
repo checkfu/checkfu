@@ -1,0 +1,117 @@
+@source "./";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.145 0 0);
+	--primary: oklch(0.205 0 0);
+	--primary-foreground: oklch(0.985 0 0);
+	--secondary: oklch(0.97 0 0);
+	--secondary-foreground: oklch(0.205 0 0);
+	--muted: oklch(0.97 0 0);
+	--muted-foreground: oklch(0.5 0 0);
+	--accent: oklch(0.955 0 0);
+	--accent-foreground: oklch(0.205 0 0);
+	--destructive: oklch(0.55 0.19 27);
+	--border: oklch(0.922 0 0);
+	--input: oklch(0.898 0 0);
+	--ring: oklch(0.708 0 0);
+	--radius: 0.625rem;
+
+	--tone-green-bg: #dbeddb;
+	--tone-green-ink: #1c3829;
+	--tone-yellow-bg: #fdecc8;
+	--tone-yellow-ink: #402c1b;
+	--tone-blue-bg: #d3e5ef;
+	--tone-blue-ink: #183347;
+	--tone-red-bg: #ffe2dd;
+	--tone-red-ink: #5d1715;
+	--tone-gray-bg: #e3e2e0;
+	--tone-gray-ink: #32302c;
+
+	--motion-fast: 120ms;
+	--motion-base: 180ms;
+	--motion-ease: cubic-bezier(0.25, 0.6, 0.3, 1);
+}
+
+.dark {
+	--background: oklch(0.185 0 0);
+	--foreground: oklch(0.92 0 0);
+	--primary: oklch(0.922 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--secondary: oklch(0.26 0 0);
+	--secondary-foreground: oklch(0.92 0 0);
+	--muted: oklch(0.255 0 0);
+	--muted-foreground: oklch(0.66 0 0);
+	--accent: oklch(0.285 0 0);
+	--accent-foreground: oklch(0.94 0 0);
+	--destructive: oklch(0.66 0.17 25);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 14%);
+	--ring: oklch(0.556 0 0);
+
+	--tone-green-bg: rgb(45 85 64 / 0.45);
+	--tone-green-ink: #b5e0c4;
+	--tone-yellow-bg: rgb(137 99 42 / 0.4);
+	--tone-yellow-ink: #f0d8a8;
+	--tone-blue-bg: rgb(43 81 105 / 0.45);
+	--tone-blue-ink: #b9d6e8;
+	--tone-red-bg: rgb(110 54 48 / 0.45);
+	--tone-red-ink: #f0b8b2;
+	--tone-gray-bg: rgb(255 255 255 / 0.1);
+	--tone-gray-ink: rgb(255 255 255 / 0.7);
+}
+
+@theme inline {
+	--font-sans:
+		-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif,
+		"Apple Color Emoji", "Segoe UI Emoji";
+	--font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", "Liberation Mono", monospace;
+	--text-meta: 11px;
+	--text-control: 13px;
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--radius-sm: calc(var(--radius) * 0.7);
+	--radius-md: calc(var(--radius) * 0.85);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.5);
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	html {
+		@apply font-sans;
+	}
+	body {
+		@apply bg-background text-foreground antialiased;
+		margin: 0;
+		font-size: 15px;
+	}
+}
+
+@keyframes live-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.live-dot {
+		animation: live-pulse 1.6s ease-in-out infinite;
+	}
+}

@@ -1,0 +1,48 @@
+{
+	"name": "@checkfu/ui",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": [
+		"./src/styles.css"
+	],
+	"exports": {
+		"./styles.css": "./src/styles.css",
+		"./app-shell": "./src/app-shell.tsx",
+		"./button": "./src/button.tsx",
+		"./callout": "./src/callout.tsx",
+		"./chip": "./src/chip.tsx",
+		"./cn": "./src/cn.ts",
+		"./copy-button": "./src/copy-button.tsx",
+		"./field": "./src/field.tsx",
+		"./format": "./src/format.ts",
+		"./input": "./src/input.tsx",
+		"./logo": "./src/logo.tsx",
+		"./page-header": "./src/page-header.tsx",
+		"./table": "./src/table.tsx",
+		"./theme": "./src/theme.tsx",
+		"./theme-script": "./src/theme-script.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"class-variance-authority": "0.7.1",
+		"clsx": "2.1.1",
+		"lucide-react": "1.77.0",
+		"radix-ui": "1.8.1",
+		"tailwind-merge": "3.7.1"
+	},
+	"devDependencies": {
+		"@types/react": "19.3.0",
+		"react": "19.3.1",
+		"tailwindcss": "4.3.5",
+		"vitest": "catalog:"
+	},
+	"peerDependencies": {
+		"react": "^19.3.0",
+		"tailwindcss": "^4.3.0"
+	}
+}
