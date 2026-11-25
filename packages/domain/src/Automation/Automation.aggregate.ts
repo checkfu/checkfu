@@ -188,6 +188,15 @@ export class Automation extends Domain.Aggregate("Automation", {
 				after.status === before.status,
 				[before.status === "active", after.status === "paused"].every((ok) => ok),
 			].some((ok) => ok),
+		AFailedRunPausesOnlyWhenUnrecoverableAtTheCurrentRevision: ({ before, after, command }) => {
+			if (command._tag !== "RecordAutomationRunFailed") {
+				return true
+			}
+			return [
+				after.status === before.status,
+				[command.unrecoverable, command.revision === before.revision].every((ok) => ok),
+			].some((ok) => ok)
+		},
 	},
 	decide: {
 		CreateAutomation: (state, cmd, ctx) => {

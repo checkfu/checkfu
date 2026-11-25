@@ -47,6 +47,7 @@ const STANDING = {
 	"Automation.FiredCarriesTheNewRun": "proved",
 	"Automation.RunsAreReportedInOrder": "proved",
 	"Automation.AFailedRunPausesOnlyAnActiveAutomation": "proved",
+	"Automation.AFailedRunPausesOnlyWhenUnrecoverableAtTheCurrentRevision": "proved",
 	"Automation.OnlyCreationOrAnUpdateRevisesIt": "proved",
 	"Automation.AnUpdateLeavesRunsAlone": "proved",
 	"Automations.AutomationViewMatchesAutomation": "checked",

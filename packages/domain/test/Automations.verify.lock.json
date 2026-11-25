@@ -97,6 +97,10 @@
 			"Automation.AnUpdateLeavesRunsAlone": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every((event) => event._tag !== \"automation.updated\") ||\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tafter.reported === before.reported,\n\t\t\t\tafter.last_scheduled_at === before.last_scheduled_at,\n\t\t\t].every((ok) => ok)"
+			},
+			"Automation.AFailedRunPausesOnlyWhenUnrecoverableAtTheCurrentRevision": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\t\tif (command._tag !== \"RecordAutomationRunFailed\") {\n\t\t\t\t\treturn true\n\t\t\t\t}\n\t\t\t\treturn [\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\t[command.unrecoverable, command.revision === before.revision].every((ok) => ok),\n\t\t\t\t].some((ok) => ok)\n\t\t\t}"
 			}
 		}
 	}
