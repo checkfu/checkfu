@@ -2940,4 +2940,63 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			await closeAll()
 		}
 	})
+
+	it("names the agent, the agent version or the environment that does not exist", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const created = (
+						path: string,
+						body: { readonly name: string; readonly model?: string },
+					) =>
+						sendRequest(apiFetch, { method: "POST", path, headers: AUTH_HEADERS, body }).pipe(
+							Effect.flatMap((res) => Effect.promise(() => res.json() as Promise<{ id: string }>)),
+						)
+					const agent = yield* created("/v1/agents", { name: "Agent", model: "gpt-4o-mini" })
+					const environment = yield* created("/v1/environments", { name: "Env" })
+					const refusal = (body: {
+						readonly agent: string | { readonly id: string; readonly version: number }
+						readonly environment_id: string
+					}) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: AUTH_HEADERS,
+							body,
+						}).pipe(
+							Effect.flatMap((res) =>
+								Effect.promise(async () => {
+									const { error } = (await res.json()) as { error: { message: string } }
+									return [res.status, error.message]
+								}),
+							),
+						)
+					expect(yield* refusal({ agent: "agent_gone", environment_id: environment.id })).toEqual([
+						404,
+						"Agent agent_gone not found.",
+					])
+					expect(yield* refusal({ agent: agent.id, environment_id: "env_gone" })).toEqual([
+						404,
+						"Environment env_gone not found.",
+					])
+					expect(yield* refusal({ agent: "agent_gone", environment_id: "env_gone" })).toEqual([
+						404,
+						"Agent agent_gone not found.",
+					])
+					expect(
+						yield* refusal({
+							agent: { id: agent.id, version: 7 },
+							environment_id: environment.id,
+						}),
+					).toEqual([404, `Agent ${agent.id} has no version 7.`])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
 })
