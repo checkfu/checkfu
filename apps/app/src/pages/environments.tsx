@@ -5,19 +5,23 @@ import { shortId, timeAgo } from "@checkfu/ui/format"
 import { Input } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
-import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
+import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
+import { environmentQuery, environmentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
-import { useAction } from "../use-action.ts"
+import { useAction, useSubmissionKey } from "../use-action.ts"
 
 const list = getRouteApi("/_app/environments/")
 const detail = getRouteApi("/_app/environments/$environmentId")
 
 export function EnvironmentsPage(): React.JSX.Element {
-	const page = list.useLoaderData()
+	const search = list.useSearch()
+	const page = useSuspenseQuery(environmentsPage(search.after)).data
 	return (
 		<>
 			<PageHeader
@@ -73,6 +77,7 @@ export function EnvironmentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }
@@ -81,16 +86,23 @@ export function NewEnvironmentPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const [name, setName] = useState("")
 	const [description, setDescription] = useState("")
-	const create = useAction(async () => {
-		const environment = await checkfu.environments.create({
-			name: name.trim(),
-			description: description === "" ? null : description,
-		})
-		await navigate({
-			to: "/environments/$environmentId",
-			params: { environmentId: environment.id },
-		})
-	})
+	const createKey = useSubmissionKey()
+	const create = useAction(
+		async () => {
+			const body = { name: name.trim(), description: description === "" ? null : description }
+			const environment = await checkfu.environments.create(body, createKey.keyFor(body))
+			createKey.settle()
+			return environment
+		},
+		{
+			invalidates: [["environments"]],
+			then: (environment) =>
+				void navigate({
+					to: "/environments/$environmentId",
+					params: { environmentId: environment.id },
+				}),
+		},
+	)
 	return (
 		<>
 			<PageHeader
@@ -98,34 +110,38 @@ export function NewEnvironmentPage(): React.JSX.Element {
 				breadcrumb={<Link to="/environments">Environments</Link>}
 			/>
 			<form
-				className="max-w-2xl space-y-4"
+				className="max-w-2xl"
 				onSubmit={(event) => {
 					event.preventDefault()
 					create.run()
 				}}
 			>
-				<Field label="Name">
-					<Input required value={name} onChange={(event) => setName(event.target.value)} />
-				</Field>
-				<Field label="Description">
-					<Input value={description} onChange={(event) => setDescription(event.target.value)} />
-				</Field>
-				{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-				<Button type="submit" disabled={create.pending}>
-					Create environment
-				</Button>
+				<fieldset disabled={create.pending} className="min-w-0 space-y-4">
+					<Field label="Name">
+						<Input required value={name} onChange={(event) => setName(event.target.value)} />
+					</Field>
+					<Field label="Description">
+						<Input value={description} onChange={(event) => setDescription(event.target.value)} />
+					</Field>
+					{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
+					<Button type="submit" disabled={create.pending}>
+						Create environment
+					</Button>
+				</fieldset>
 			</form>
 		</>
 	)
 }
 
 export function EnvironmentPage(): React.JSX.Element {
-	const environment = detail.useLoaderData()
-	const router = useRouter()
-	const archive = useAction(async () => {
-		await checkfu.environments.archive(environment.id)
-		await router.invalidate()
-	})
+	const { environmentId } = detail.useParams()
+	const environment = present(useSuspenseQuery(environmentQuery(environmentId)))
+	const archive = useAction(
+		async () => {
+			await checkfu.environments.archive(environment.id)
+		},
+		{ invalidates: [["environments"]] },
+	)
 	const networking = environment.config.networking
 	return (
 		<>

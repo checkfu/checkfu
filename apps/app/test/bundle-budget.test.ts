@@ -84,9 +84,10 @@ const ROUTES = [
 describe("first view", () => {
 	it.each(ROUTES)("keeps a cold load of %s within budget", (route) => {
 		const entry = closure(Object.keys(manifest).filter((key) => manifest[key]?.isEntry))
+		const own = chunksOf(route)
+		expect(own.length).toBeGreaterThan(0)
 		const layouts = route.startsWith("src/routes/_app/") ? chunksOf("src/routes/_app.tsx") : []
-		const routeChunks = [...chunksOf(route), ...layouts]
-		expect(routeChunks.length).toBeGreaterThan(0)
+		const routeChunks = [...own, ...layouts]
 		const cold = closure([...entry, ...routeChunks])
 		const specific = [...cold].filter((key) => !entry.has(key))
 		expect({

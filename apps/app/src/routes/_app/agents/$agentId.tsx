@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { checkfu } from "../../../api.ts"
 import { AgentPage } from "../../../pages/agents.tsx"
+import { agentQuery } from "../../../queries.ts"
 
 export const Route = createFileRoute("/_app/agents/$agentId")({
-	loader: ({ params }) => checkfu.agents.retrieve(params.agentId),
+	loader: ({ context, params }) => context.queryClient.ensureQueryData(agentQuery(params.agentId)),
 	component: AgentPage,
 })

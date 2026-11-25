@@ -6,19 +6,25 @@ import { Input, Textarea } from "@checkfu/ui/input"
 import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonAgent } from "@checkfu/sdk/client"
-import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
+import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
+import { agentQuery, agentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
-import { useAction } from "../use-action.ts"
+import { useAction, useSubmissionKey } from "../use-action.ts"
+import { bodyOf, changesFrom, draftOf, emptyDraft, FIELD_LABELS, rebase } from "../agent-draft.ts"
+import type { AgentDraft } from "../agent-draft.ts"
 
 const list = getRouteApi("/_app/agents/")
 const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
-	const page = list.useLoaderData()
+	const search = list.useSearch()
+	const page = useSuspenseQuery(agentsPage(search.after)).data
 	return (
 		<>
 			<PageHeader
@@ -81,108 +87,148 @@ export function AgentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }
 
-interface AgentDraft {
-	readonly name: string
-	readonly model: string
-	readonly system: string
-	readonly description: string
-}
-
-const draftOf = (agent: JsonAgent): AgentDraft => ({
-	name: agent.name,
-	model: agent.model.id,
-	system: agent.system ?? "",
-	description: agent.description ?? "",
-})
-
-const bodyOf = (draft: AgentDraft) => ({
-	name: draft.name.trim(),
-	model: draft.model.trim(),
-	system: draft.system === "" ? null : draft.system,
-	description: draft.description === "" ? null : draft.description,
-})
-
-function AgentForm({
-	initial,
+function AgentForm<Saved>({
+	draft,
+	onChange,
 	submitLabel,
+	notice,
 	onSubmit,
+	onSaved,
 	onCancel,
 }: {
-	readonly initial: AgentDraft
+	readonly draft: AgentDraft
+	readonly onChange: (draft: AgentDraft) => void
 	readonly submitLabel: string
-	readonly onSubmit: (draft: AgentDraft) => Promise<void>
+	readonly notice?: React.ReactNode
+	readonly onSubmit: (draft: AgentDraft) => Promise<Saved>
+	readonly onSaved: (saved: Saved) => void
 	readonly onCancel?: () => void
 }): React.JSX.Element {
-	const [draft, setDraft] = useState(initial)
-	const action = useAction(onSubmit)
+	const action = useAction(onSubmit, { invalidates: [["agents"]], then: onSaved })
 	const set =
 		(field: keyof AgentDraft) =>
 		(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-			setDraft({ ...draft, [field]: event.target.value })
+			onChange({ ...draft, [field]: event.target.value })
 	return (
 		<form
-			className="max-w-2xl space-y-4"
+			className="max-w-2xl"
 			onSubmit={(event) => {
 				event.preventDefault()
 				action.run(draft)
 			}}
 		>
-			<Field label="Name">
-				<Input required value={draft.name} onChange={set("name")} />
-			</Field>
-			<Field label="Model" description="For example claude-sonnet-5-5 or gpt-6.2-sol.">
-				<Input required value={draft.model} onChange={set("model")} className="font-mono" />
-			</Field>
-			<Field label="System prompt">
-				<Textarea rows={8} value={draft.system} onChange={set("system")} />
-			</Field>
-			<Field label="Description">
-				<Input value={draft.description} onChange={set("description")} />
-			</Field>
-			{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
-			<div className="flex gap-2">
-				<Button type="submit" disabled={action.pending}>
-					{submitLabel}
-				</Button>
-				{onCancel === undefined ? null : (
-					<Button variant="ghost" onClick={onCancel}>
-						Cancel
+			<fieldset disabled={action.pending} className="min-w-0 space-y-4">
+				<Field label="Name">
+					<Input required value={draft.name} onChange={set("name")} />
+				</Field>
+				<Field label="Model" description="For example claude-sonnet-5-5 or gpt-6.2-sol.">
+					<Input required value={draft.model} onChange={set("model")} className="font-mono" />
+				</Field>
+				<Field label="System prompt">
+					<Textarea rows={8} value={draft.system} onChange={set("system")} />
+				</Field>
+				<Field label="Description">
+					<Input value={draft.description} onChange={set("description")} />
+				</Field>
+				{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
+				{notice}
+				<div className="flex gap-2">
+					<Button type="submit" disabled={action.pending || notice !== undefined}>
+						{submitLabel}
 					</Button>
-				)}
-			</div>
+					{onCancel === undefined ? null : (
+						<Button variant="ghost" onClick={onCancel}>
+							Cancel
+						</Button>
+					)}
+				</div>
+			</fieldset>
 		</form>
 	)
 }
 
 export function NewAgentPage(): React.JSX.Element {
 	const navigate = useNavigate()
+	const createKey = useSubmissionKey()
+	const [draft, setDraft] = useState(emptyDraft)
 	return (
 		<>
 			<PageHeader title="New agent" breadcrumb={<Link to="/agents">Agents</Link>} />
 			<AgentForm
-				initial={{ name: "", model: "", system: "", description: "" }}
+				draft={draft}
+				onChange={setDraft}
 				submitLabel="Create agent"
 				onSubmit={async (draft) => {
-					const agent = await checkfu.agents.create(bodyOf(draft))
-					await navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
+					const body = bodyOf(draft)
+					const agent = await checkfu.agents.create(body, createKey.keyFor(body))
+					createKey.settle()
+					return agent
 				}}
+				onSaved={(agent) =>
+					void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
+				}
 			/>
 		</>
 	)
 }
 
 export function AgentPage(): React.JSX.Element {
-	const agent = detail.useLoaderData()
-	const router = useRouter()
-	const [editing, setEditing] = useState(false)
-	const archive = useAction(async () => {
-		await checkfu.agents.archive(agent.id)
-		await router.invalidate()
-	})
+	const { agentId } = detail.useParams()
+	const agent = present(useSuspenseQuery(agentQuery(agentId)))
+	return <AgentView key={agent.id} agent={agent} />
+}
+
+interface Edit {
+	readonly base: JsonAgent
+	readonly draft: AgentDraft
+}
+
+const editNotice = (
+	agent: JsonAgent,
+	edit: Edit,
+	apply: (draft: AgentDraft) => void,
+): React.ReactNode => {
+	if (agent.archived_at !== null) {
+		return (
+			<Callout>
+				This agent was archived while you were editing, so it can no longer be updated. Your draft
+				is still here to copy.
+			</Callout>
+		)
+	}
+	if (agent.version <= edit.base.version) {
+		return undefined
+	}
+	const { draft, overlapping } = rebase(edit.base, edit.draft, agent)
+	return (
+		<Callout>
+			<p>
+				This agent was saved as v{agent.version} while you were editing v{edit.base.version}. Your
+				edits are kept.
+				{overlapping.length === 0
+					? " None of them touch the fields that changed."
+					: ` Yours will replace the newer ${overlapping.map((field) => FIELD_LABELS[field]).join(", ")}.`}
+			</p>
+			<Button size="sm" variant="outline" className="mt-2" onClick={() => apply(draft)}>
+				Apply my edits to v{agent.version}
+			</Button>
+		</Callout>
+	)
+}
+
+function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
+	const [edit, setEdit] = useState<Edit | null>(null)
+	const archive = useAction(
+		async () => {
+			await checkfu.agents.archive(agent.id)
+		},
+		{ invalidates: [["agents"]] },
+	)
 	const archived = agent.archived_at !== null
 	return (
 		<>
@@ -193,9 +239,13 @@ export function AgentPage(): React.JSX.Element {
 				accessory={<LifecycleStatus resource={agent} />}
 				description={agent.description ?? undefined}
 				actions={
-					archived || editing ? undefined : (
+					archived || edit !== null ? undefined : (
 						<>
-							<Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setEdit({ base: agent, draft: draftOf(agent) })}
+							>
 								Edit
 							</Button>
 							<Button
@@ -211,18 +261,7 @@ export function AgentPage(): React.JSX.Element {
 				}
 			/>
 			{archive.error === undefined ? null : <Callout tone="error">{archive.error}</Callout>}
-			{editing ? (
-				<AgentForm
-					initial={draftOf(agent)}
-					submitLabel="Save new version"
-					onCancel={() => setEditing(false)}
-					onSubmit={async (draft) => {
-						await checkfu.agents.update(agent.id, { version: agent.version, ...bodyOf(draft) })
-						setEditing(false)
-						await router.invalidate()
-					}}
-				/>
-			) : (
+			{edit === null ? (
 				<>
 					<DescriptionList>
 						<Description label="Model">
@@ -239,6 +278,24 @@ export function AgentPage(): React.JSX.Element {
 						</pre>
 					</section>
 				</>
+			) : (
+				<AgentForm
+					draft={edit.draft}
+					onChange={(draft) => setEdit({ ...edit, draft })}
+					submitLabel="Save new version"
+					notice={editNotice(agent, edit, (draft) => setEdit({ base: agent, draft }))}
+					onCancel={() => setEdit(null)}
+					onSubmit={async (draft) => {
+						const changes = changesFrom(edit.base, draft)
+						if (Object.keys(changes).length > 0) {
+							await checkfu.agents.update(edit.base.id, {
+								version: edit.base.version,
+								...changes,
+							})
+						}
+					}}
+					onSaved={() => setEdit(null)}
+				/>
 			)}
 		</>
 	)

@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { checkfu } from "../../../api.ts"
+import { environmentsPage } from "../../../queries.ts"
+import { pageSearch } from "../../../page-search.ts"
 import { EnvironmentsPage } from "../../../pages/environments.tsx"
 
 export const Route = createFileRoute("/_app/environments/")({
-	loader: () => checkfu.environments.list(),
+	validateSearch: pageSearch,
+	loaderDeps: ({ search }) => search,
+	loader: ({ context, deps }) => context.queryClient.ensureQueryData(environmentsPage(deps.after)),
 	component: EnvironmentsPage,
 })

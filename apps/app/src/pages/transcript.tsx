@@ -1,88 +1,6 @@
 import { cn } from "@checkfu/ui/cn"
-import { useMountEffect } from "@checkfu/ui/use-mount-effect"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
-import type { SessionEventType } from "@checkfu/sdk/Schemas"
-import { useState } from "react"
 import type * as React from "react"
-import { checkfu } from "../api.ts"
-
-type Status = "idle" | "running" | "terminated"
-
-const QUIET_RECONNECT_MS = 5000
-
-const EVENT_TYPES: Record<SessionEventType, true> = {
-	"user.message": true,
-	"user.interrupt": true,
-	"session.status_running": true,
-	"span.model_request_start": true,
-	"agent.thinking": true,
-	"agent.message": true,
-	"span.model_request_end": true,
-	"session.status_idle": true,
-	"session.error": true,
-	"session.status_terminated": true,
-	"session.archived": true,
-}
-
-const statusAfter = (status: Status, event: JsonSessionEvent): Status => {
-	switch (event.type) {
-		case "session.status_running":
-			return "running"
-		case "session.status_idle":
-			return "idle"
-		case "session.status_terminated":
-			return "terminated"
-		default:
-			return status
-	}
-}
-
-export function useSessionEvents(sessionId: string, initialStatus: Status) {
-	const [events, setEvents] = useState<ReadonlyArray<JsonSessionEvent>>([])
-	const [status, setStatus] = useState(initialStatus)
-	const [error, setError] = useState<string>()
-	useMountEffect(() => {
-		const source = new EventSource(checkfu.sessions.streamUrl(sessionId))
-		let slowReconnect: ReturnType<typeof setTimeout> | undefined
-		const settle = () => {
-			clearTimeout(slowReconnect)
-			slowReconnect = undefined
-		}
-		const receive = (message: MessageEvent<string>) => {
-			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
-			const event = JSON.parse(message.data) as JsonSessionEvent
-			setEvents((seen) => (seen.some((known) => known.seq === event.seq) ? seen : [...seen, event]))
-			setStatus((current) => statusAfter(current, event))
-			if (event.type === "session.archived") {
-				settle()
-				source.close()
-			}
-		}
-		for (const type of Object.keys(EVENT_TYPES)) {
-			source.addEventListener(type, receive)
-		}
-		source.addEventListener("open", () => {
-			settle()
-			setError(undefined)
-		})
-		source.addEventListener("error", () => {
-			if (source.readyState === EventSource.CLOSED) {
-				settle()
-				setError("Live updates stopped. Reload the page to try again.")
-			} else if (slowReconnect === undefined) {
-				slowReconnect = setTimeout(
-					() => setError("Live updates were interrupted. Reconnecting…"),
-					QUIET_RECONNECT_MS,
-				)
-			}
-		})
-		return () => {
-			settle()
-			source.close()
-		}
-	})
-	return { events, status, error }
-}
 
 const text = (content: ReadonlyArray<{ readonly text: string }>): string =>
 	content.map((block) => block.text).join("")
@@ -104,7 +22,7 @@ function Bubble({
 	)
 }
 
-function Entry({ event }: { readonly event: JsonSessionEvent }): React.JSX.Element | null {
+const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 	switch (event.type) {
 		case "user.message":
 			return (
@@ -113,7 +31,16 @@ function Entry({ event }: { readonly event: JsonSessionEvent }): React.JSX.Eleme
 				</Bubble>
 			)
 		case "agent.message":
-			return <Bubble from="Agent">{text(event.content)}</Bubble>
+			return (
+				<Bubble from="Agent">
+					{text(event.content)}
+					{event.truncated === true ? (
+						<span className="mt-2 block text-control text-muted-foreground">
+							Checkfu shortened this reply: the rest was too long to store.
+						</span>
+					) : null}
+				</Bubble>
+			)
 		case "agent.thinking":
 			return event.thinking === "" ? null : (
 				<details className="text-control text-muted-foreground">
@@ -147,16 +74,17 @@ export function Transcript({
 }: {
 	readonly events: ReadonlyArray<JsonSessionEvent>
 }): React.JSX.Element {
+	const rows = events.flatMap((event) => {
+		const entry = entryOf(event)
+		return entry === null ? [] : [<li key={event.seq}>{entry}</li>]
+	})
 	return (
 		<ol className="space-y-5">
-			{events.map((event) => (
-				<li key={event.seq}>
-					<Entry event={event} />
-				</li>
-			))}
-			{events.length === 0 ? (
+			{rows.length === 0 ? (
 				<li className="text-sm text-muted-foreground">No messages yet.</li>
-			) : null}
+			) : (
+				rows
+			)}
 		</ol>
 	)
 }

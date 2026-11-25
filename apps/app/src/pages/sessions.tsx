@@ -6,21 +6,34 @@ import { Input, Select, Textarea } from "@checkfu/ui/input"
 import { PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
-import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
-import { checkfu } from "../api.ts"
+import { Pager } from "../pager.tsx"
+import { checkfu, errorMessage, isSignedOut } from "../api.ts"
+import {
+	agentChoices,
+	environmentChoices,
+	present,
+	sessionQuery,
+	sessionsPage,
+} from "../queries.ts"
+import { selection } from "../selection.ts"
+import type { Selection } from "../selection.ts"
+import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
-import { useAction } from "../use-action.ts"
-import { Transcript, useSessionEvents } from "./transcript.tsx"
+import { useAction, useSubmissionKey } from "../use-action.ts"
+import { Transcript } from "./transcript.tsx"
+import { useSessionEvents } from "./use-session-events.ts"
 
 const list = getRouteApi("/_app/sessions/")
-const create = getRouteApi("/_app/sessions/new")
 const detail = getRouteApi("/_app/sessions/$sessionId")
 
 export function SessionsPage(): React.JSX.Element {
-	const page = list.useLoaderData()
+	const search = list.useSearch()
+	const page = useSuspenseQuery(sessionsPage(search.after)).data
 	return (
 		<>
 			<PageHeader
@@ -48,7 +61,7 @@ export function SessionsPage(): React.JSX.Element {
 								params={{ sessionId: session.id }}
 								className="hover:underline"
 							>
-								{session.title ?? shortId(session.id)}
+								{sessionTitle(session) ?? shortId(session.id)}
 							</Link>
 						),
 					},
@@ -86,28 +99,124 @@ export function SessionsPage(): React.JSX.Element {
 					},
 				]}
 			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
 	)
 }
 
+interface Choices<T> {
+	readonly items: ReadonlyArray<T>
+	readonly pending: boolean
+	readonly error: string | undefined
+	readonly more: (() => void) | null
+}
+
+const choicesOf = <T,>(query: {
+	readonly data: { readonly pages: ReadonlyArray<{ readonly data: ReadonlyArray<T> }> }
+	readonly isFetchingNextPage: boolean
+	readonly error: unknown
+	readonly hasNextPage: boolean
+	readonly fetchNextPage: () => Promise<{ readonly isError: boolean }>
+}): Choices<T> => ({
+	items: query.data.pages.flatMap((page) => page.data),
+	pending: query.isFetchingNextPage,
+	error: query.error === null || isSignedOut(query.error) ? undefined : errorMessage(query.error),
+	more: query.hasNextPage ? () => void query.fetchNextPage() : null,
+})
+
+function OptionPicker<T extends { readonly id: string }>({
+	label,
+	noun,
+	placeholder,
+	options,
+	value,
+	onChange,
+	describe,
+}: {
+	readonly label: string
+	readonly noun: string
+	readonly placeholder: string
+	readonly options: Choices<T>
+	readonly value: Selection
+	readonly onChange: (id: string) => void
+	readonly describe: (option: T) => string
+}): React.JSX.Element {
+	return (
+		<div className="space-y-2">
+			<Field
+				label={label}
+				error={
+					value.gone
+						? `The ${label.toLowerCase()} you chose is no longer available. Choose another.`
+						: undefined
+				}
+			>
+				<Select required value={value.id} onChange={(event) => onChange(event.target.value)}>
+					{value.id === "" ? (
+						<option value="" disabled>
+							{placeholder}
+						</option>
+					) : null}
+					{options.items.map((option) => (
+						<option key={option.id} value={option.id}>
+							{describe(option)}
+						</option>
+					))}
+				</Select>
+			</Field>
+			{options.more === null ? null : (
+				<Button variant="ghost" size="sm" disabled={options.pending} onClick={options.more}>
+					Load more {noun}
+				</Button>
+			)}
+			{options.error === undefined ? null : <Callout tone="error">{options.error}</Callout>}
+		</div>
+	)
+}
+
 export function NewSessionPage(): React.JSX.Element {
-	const { agents, environments } = create.useLoaderData()
 	const navigate = useNavigate()
-	const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
-	const [environmentId, setEnvironmentId] = useState(environments[0]?.id ?? "")
+	const agentOptions = choicesOf(useSuspenseInfiniteQuery(agentChoices))
+	const environmentOptions = choicesOf(useSuspenseInfiniteQuery(environmentChoices))
+	const agents = agentOptions.items
+	const environments = environmentOptions.items
+	const [chosenAgent, setAgentId] = useState(() => agents[0]?.id)
+	const [chosenEnvironment, setEnvironmentId] = useState(() => environments[0]?.id)
+	const agent = selection(agents, chosenAgent)
+	const environment = selection(environments, chosenEnvironment)
+	const agentId = agent.id
+	const environmentId = environment.id
+	const ready = agentId !== "" && environmentId !== ""
 	const [title, setTitle] = useState("")
-	const start = useAction(async () => {
-		const session = await checkfu.sessions.create({
-			agent: agentId,
-			environment_id: environmentId,
-			title: title.trim() === "" ? null : title.trim(),
-		})
-		await navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
-	})
+	const startKey = useSubmissionKey()
+	const start = useAction(
+		async () => {
+			if (!ready) {
+				return undefined
+			}
+			const body = {
+				agent: agentId,
+				environment_id: environmentId,
+				title: title.trim() === "" ? null : title.trim(),
+			}
+			const session = await checkfu.sessions.create(body, startKey.keyFor(body))
+			startKey.settle()
+			return session
+		},
+		{
+			invalidates: [["sessions"]],
+			then: (session) => {
+				if (session !== undefined) {
+					void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
+				}
+			},
+		},
+	)
 	return (
 		<>
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />
-			{agents.length === 0 || environments.length === 0 ? (
+			{(agents.length === 0 && agentOptions.more === null) ||
+			(environments.length === 0 && environmentOptions.more === null) ? (
 				<Callout>
 					A session needs an{" "}
 					<Link to="/agents/new" className="underline">
@@ -121,40 +230,39 @@ export function NewSessionPage(): React.JSX.Element {
 				</Callout>
 			) : (
 				<form
-					className="max-w-2xl space-y-4"
+					className="max-w-2xl"
 					onSubmit={(event) => {
 						event.preventDefault()
 						start.run()
 					}}
 				>
-					<Field label="Agent">
-						<Select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
-							{agents.map((agent) => (
-								<option key={agent.id} value={agent.id}>
-									{agent.name} ({agent.model.id})
-								</option>
-							))}
-						</Select>
-					</Field>
-					<Field label="Environment">
-						<Select
-							value={environmentId}
-							onChange={(event) => setEnvironmentId(event.target.value)}
-						>
-							{environments.map((environment) => (
-								<option key={environment.id} value={environment.id}>
-									{environment.name}
-								</option>
-							))}
-						</Select>
-					</Field>
-					<Field label="Title">
-						<Input value={title} onChange={(event) => setTitle(event.target.value)} />
-					</Field>
-					{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
-					<Button type="submit" disabled={start.pending}>
-						Start session
-					</Button>
+					<fieldset disabled={start.pending} className="min-w-0 space-y-4">
+						<OptionPicker
+							label="Agent"
+							noun="agents"
+							placeholder="Choose an agent"
+							options={agentOptions}
+							value={agent}
+							onChange={setAgentId}
+							describe={(agent) => `${agent.name} (${agent.model.id})`}
+						/>
+						<OptionPicker
+							label="Environment"
+							noun="environments"
+							placeholder="Choose an environment"
+							options={environmentOptions}
+							value={environment}
+							onChange={setEnvironmentId}
+							describe={(environment) => environment.name}
+						/>
+						<Field label="Title">
+							<Input value={title} onChange={(event) => setTitle(event.target.value)} />
+						</Field>
+						{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
+						<Button type="submit" disabled={start.pending || !ready}>
+							Start session
+						</Button>
+					</fieldset>
 				</form>
 			)}
 		</>
@@ -162,35 +270,61 @@ export function NewSessionPage(): React.JSX.Element {
 }
 
 export function SessionPage(): React.JSX.Element {
-	const session = detail.useLoaderData()
+	const { sessionId } = detail.useParams()
+	const session = present(useSuspenseQuery(sessionQuery(sessionId)))
 	return <SessionView key={session.id} session={session} />
 }
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
-	const router = useRouter()
-	const { events, status, error } = useSessionEvents(session.id, session.status)
+	const queryClient = useQueryClient()
+	const { events, reconnecting, earlier } = useSessionEvents({
+		session,
+		onSnapshotChange: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+	})
+	const { status, turn } = session
 	const [text, setText] = useState("")
-	const send = useAction(async (message: string) => {
-		await checkfu.sessions.send(session.id, {
-			events: [{ type: "user.message", content: [{ type: "text", text: message }] }],
-		})
-		setText("")
-	})
-	const interrupt = useAction(async () => {
-		await checkfu.sessions.send(session.id, { events: [{ type: "user.interrupt" }] })
-	})
-	const archive = useAction(async () => {
-		await checkfu.sessions.archive(session.id)
-		await router.invalidate()
-	})
-	const open = session.archived_at === null && status !== "terminated"
+	const sendKey = useSubmissionKey()
+	const send = useAction(
+		async (message: string) => {
+			const body = {
+				events: [
+					{ type: "user.message" as const, content: [{ type: "text" as const, text: message }] },
+				],
+			}
+			await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
+			sendKey.settle()
+		},
+		{
+			invalidates: [["sessions", "one", session.id]],
+			then: (_, message) => {
+				setText((current) => (current === message ? "" : current))
+			},
+		},
+	)
+	const interruptKey = useSubmissionKey()
+	const interrupt = useAction(
+		async () => {
+			const body = { events: [{ type: "user.interrupt" as const }] }
+			await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
+			interruptKey.settle()
+		},
+		{ invalidates: [["sessions", "one", session.id]] },
+	)
+	const archive = useAction(
+		async () => {
+			await checkfu.sessions.archive(session.id)
+		},
+		{ invalidates: [["sessions"]] },
+	)
+	const archived = session.archived_at !== null
+	const open = !archived && status !== "terminated"
 	return (
 		<>
 			<PageHeader
-				title={session.title ?? "Untitled session"}
+				title={sessionTitle(session) ?? "Untitled session"}
 				id={session.id}
 				breadcrumb={<Link to="/sessions">Sessions</Link>}
-				accessory={<Status status={session.archived_at === null ? status : "archived"} />}
+				accessory={<Status status={archived ? "archived" : status} />}
 				description={
 					<>
 						<Link
@@ -212,7 +346,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					</>
 				}
 				actions={
-					session.archived_at === null ? (
+					!archived ? (
 						<Button
 							variant="destructive"
 							size="sm"
@@ -224,12 +358,30 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					) : undefined
 				}
 			/>
-			{[error, send.error, interrupt.error, archive.error].map((message) =>
+			{[
+				reconnecting ? "Live updates were interrupted. Reconnecting…" : undefined,
+				send.error,
+				interrupt.error,
+				archive.error,
+			].map((message) =>
 				message === undefined ? null : (
 					<Callout key={message} tone="error">
 						{message}
 					</Callout>
 				),
+			)}
+			{earlier === null ? null : (
+				<div className="space-y-2">
+					<Button
+						variant="ghost"
+						size="sm"
+						disabled={earlier.pending}
+						onClick={() => earlier.run()}
+					>
+						Load earlier messages
+					</Button>
+					{earlier.error === undefined ? null : <Callout tone="error">{earlier.error}</Callout>}
+				</div>
 			)}
 			<Transcript events={events} />
 			{open ? (
