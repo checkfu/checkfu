@@ -317,6 +317,8 @@ describe("Automations API", () => {
 
 				yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
 				const afterSecond = yield* settledRuns(apiFetch, id, 2)
+				const second = yield* call<RunBody>(apiFetch, "GET", `/v1/automations/${id}/runs/2`)
+				expect([second.status, second.body]).toEqual([200, afterSecond.body.data[1]])
 				expect(afterSecond.body.data.map((entry) => [entry.run, entry.session_id])).toEqual([
 					[1, `sess_${id}_1`],
 					[2, `sess_${id}_2`],

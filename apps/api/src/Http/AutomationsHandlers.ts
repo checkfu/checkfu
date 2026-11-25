@@ -145,7 +145,7 @@ const runFilter = (query: {
 }) => {
 	const trigger = query.trigger_type === undefined ? {} : { trigger: query.trigger_type }
 	if (query.has_error === undefined) {
-		return trigger
+		return query.trigger_type === undefined ? undefined : trigger
 	}
 	return query.has_error
 		? { _tag: "automation.run_failed" as const, ...trigger }
@@ -375,11 +375,12 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				Effect.gen(function* () {
 					const id = params.automation_id
 					yield* committed(id)
+					const where = runFilter(query)
 					const page = yield* automationRuns.list(Automation.ref(id), {
 						...(query.after === undefined ? {} : { after: query.after }),
 						take: query.limit ?? 50,
 						order: query.order ?? "asc",
-						where: runFilter(query),
+						...(where === undefined ? {} : { where }),
 					})
 					return {
 						data: page.entries.map((entry) => automationRunResource(id, entry)),
@@ -393,11 +394,11 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const id = params.automation_id
 					yield* committed(id)
 					const page = yield* automationRuns.list(Automation.ref(id), {
+						after: params.run - 1,
 						take: 1,
-						where: { run: params.run },
 					})
 					const entry = page.entries[0]
-					if (entry === undefined) {
+					if (entry === undefined || entry.event.run !== params.run) {
 						return yield* reject(404, `Run ${params.run} of automation ${id} not found.`)
 					}
 					return automationRunResource(id, entry)

@@ -100,6 +100,13 @@ export type EndpointDecodedParams<
 	E extends ApiEndpointName<G>,
 > = SchemaTypeOrNever<EndpointProp<ApiEndpoint<G, E>, "~Params">>
 
+/** A path argument: a number where the endpoint's parameter decodes to one, otherwise a string. */
+export type PathParam<
+	G extends ApiGroupName,
+	E extends ApiEndpointName<G>,
+	K extends keyof EndpointDecodedParams<G, E>,
+> = EndpointDecodedParams<G, E>[K] extends number ? number : string
+
 export type EndpointParams<G extends ApiGroupName, E extends ApiEndpointName<G>> = IsoDateTimes<
 	EndpointDecodedParams<G, E>
 >
@@ -278,8 +285,11 @@ export const resolveTimeout = (
 export const decodeEndpointParams = <G extends ApiGroupName, E extends ApiEndpointName<G>>(
 	group: G,
 	endpoint: E,
-	rawParams: Readonly<Record<string, string>>,
+	pathArgs: Readonly<Record<string, string | number>>,
 ): Effect.Effect<EndpointDecodedParams<G, E>, BadRequestError> => {
+	const rawParams = Object.fromEntries(
+		Object.entries(pathArgs).map(([label, value]) => [label, String(value)]),
+	)
 	for (const [label, rawValue] of Object.entries(rawParams)) {
 		const pathErr = validatePathSegment(rawValue, label)
 		if (pathErr !== undefined) {

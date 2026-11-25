@@ -104,6 +104,7 @@ const generateResourcesFile = (
 	const EndpointBody = runtimeMod.ident("EndpointBody").ty()
 	const EndpointJsonSuccess = runtimeMod.ident("EndpointJsonSuccess").ty()
 	const EndpointParams = runtimeMod.ident("EndpointParams").ty()
+	const PathParam = runtimeMod.ident("PathParam").ty()
 	const EndpointQuery = runtimeMod.ident("EndpointQuery").ty()
 	const EndpointSseEvent = runtimeMod.ident("EndpointSseEvent").ty()
 	const EndpointSuccess = runtimeMod.ident("EndpointSuccess").ty()
@@ -200,7 +201,7 @@ const generateResourcesFile = (
 			out(op.methodName, "(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 					if (op.sse?.cursorParam !== undefined) {
@@ -249,7 +250,7 @@ const generateResourcesFile = (
 
 		const emitSignatureArgs = (mode: "withResponse" | "default" | "impl"): void => {
 			for (const pa of pathArgs) {
-				out(pa.argName, ": string,")
+				out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 			}
 			if (hasBodyOnly) {
 				const opt = !op.bodyRequired && mode !== "withResponse" ? "?" : ""
@@ -495,7 +496,7 @@ const generateResourcesFile = (
 			out(op.methodName, "Pages(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
 				out("options?: ", RequestOptions, ",")
@@ -533,7 +534,7 @@ const generateResourcesFile = (
 			out(op.methodName, "Stream(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
 				out("options?: ", RequestOptions, ",")
@@ -597,7 +598,7 @@ const generateResourcesFile = (
 			out(op.methodName, "(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 					if (op.sse?.cursorParam !== undefined) {
@@ -663,7 +664,7 @@ const generateResourcesFile = (
 			out(op.methodName, "(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
 				out("options?: ", PromiseRequestOptions, ",")
@@ -733,7 +734,7 @@ const generateResourcesFile = (
 		out(op.methodName, "(")
 		out.indent(() => {
 			for (const pa of pathArgs) {
-				out(pa.argName, ": string,")
+				out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 			}
 			if (hasBodyOnly) {
 				out("params", op.bodyRequired ? "" : "?", ": ", EndpointBody, "<", g, ", ", e, ">,")
