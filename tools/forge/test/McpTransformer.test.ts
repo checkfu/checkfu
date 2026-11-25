@@ -113,6 +113,8 @@ describe("MCP tool projection", () => {
 		).toEqual([
 			"agents_createAgent",
 			"artifacts_createArtifact",
+			"artifacts_createArtifactLink",
+			"artifacts_createArtifactVersion",
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",

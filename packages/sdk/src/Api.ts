@@ -38,6 +38,9 @@ import {
 	EnvironmentName,
 	EnvironmentSnapshot,
 	MAX_ARTIFACT_BODY_BYTES,
+	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_ARTIFACT_FILE_BYTES,
+	MAX_ARTIFACT_FILES,
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
 	NonEmptyString,
@@ -1638,7 +1641,7 @@ const Automations = HttpApiGroup.make("automations")
 	.annotate(OpenApi.Description, "Manage automations")
 	.middleware(Authentication)
 
-const ARTIFACT_UPLOAD_LIMIT = `The JSON request body may be at most ${MAX_ARTIFACT_BODY_BYTES} bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64".`
+const ARTIFACT_UPLOAD_LIMIT = `A version holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / 1024 / 1024} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / 1024 / 1024} MiB in total. The JSON request body may be at most ${MAX_ARTIFACT_BODY_BYTES} bytes; send large or heavily escaped file content with "encoding": "base64".`
 
 const Artifacts = HttpApiGroup.make("artifacts")
 	.add(
@@ -1742,7 +1745,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 				"x-forge-group-name": "artifacts.versions",
 				"x-forge-method-name": "create",
 				"x-checkfu-endpoint": { group: "artifacts", endpoint: "createVersion" },
-				"x-checkfu-mcp": { name: "artifacts_createArtifactVersion" },
+				"x-checkfu-mcp": { name: "artifacts_createArtifactVersion", destructive: false },
 				"x-checkfu-cli": {
 					groupDescription: "Create and read artifact versions",
 					maxInputBytes: MAX_ARTIFACT_BODY_BYTES,
@@ -1808,7 +1811,7 @@ const Artifacts = HttpApiGroup.make("artifacts")
 				"x-forge-group-name": "artifacts.versions",
 				"x-forge-method-name": "link",
 				"x-checkfu-endpoint": { group: "artifacts", endpoint: "createLink" },
-				"x-checkfu-mcp": { name: "artifacts_createArtifactLink" },
+				"x-checkfu-mcp": { name: "artifacts_createArtifactLink", destructive: false },
 				"x-checkfu-cli": {
 					examples: [
 						{

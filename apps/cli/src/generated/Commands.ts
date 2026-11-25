@@ -385,7 +385,7 @@ const artifactsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		'Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
+		'Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
 	),
 	CommandWithExamples([
 		{
@@ -683,7 +683,7 @@ const artifactsVersionsCreateCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsVersionsCreateCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		'Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
+		'Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". (accepts flags and/or JSON/YAML on stdin)',
 	),
 )
 
