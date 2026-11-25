@@ -70,10 +70,11 @@ const json = (value: unknown, isError = false): WorkspaceToolResult => ({
 const encoder = new TextEncoder()
 const byteLength = (text: string): number => encoder.encode(text).byteLength
 
-const GREP_PAGE = 200
+// One call returns at most this many matches. The filesystem pages by scanning from the start, so
+// a page is one scan: a larger one held in a single call would hold that many whole lines at once.
+const GREP_PAGE = 20
 const EARLY_END_NOTE =
 	"This page ended early to fit what one call returns; go on from nextOffset, or ask with fewer context lines."
-const GREP_BATCH = 20
 // Long enough to show a match in its line; a minified file's line is cut here.
 const GREP_LINE_CHARACTERS = 500
 
@@ -90,8 +91,8 @@ const globList = (value: string | ReadonlyArray<string> | undefined): Array<stri
 }
 
 /**
- * A page of matches, collected a batch at a time and measured as it grows, each line cut to a
- * readable length. A page that reaches `maxBytes` ends early with the offset to go on from.
+ * A page of matches from one scan, measured as it grows, each line cut to a readable length. A
+ * page that reaches `maxBytes` ends early with the offset to go on from.
  */
 export const grepWithin = async (
 	files: PagingFiles,
@@ -110,7 +111,7 @@ export const grepWithin = async (
 	}
 	const args = decoded.value
 	const path = args.path ?? "/workspace"
-	const pageSize = args.limit ?? GREP_PAGE
+	const pageSize = Math.min(args.limit ?? GREP_PAGE, GREP_PAGE)
 	const start = args.offset ?? 0
 	const includes = globList(args.include)
 	const exclude = globList(args.exclude)
@@ -133,54 +134,42 @@ export const grepWithin = async (
 			note: EARLY_END_NOTE,
 		}),
 	)
-	let more = false
+	let found: ReadonlyArray<GrepMatch>
+	try {
+		found = await files.grep(args.query, path, {
+			regex: args.regex ?? false,
+			ignoreCase: args.ignoreCase ?? false,
+			context: args.context ?? 0,
+			limit: pageSize + 1,
+			offset: start,
+			...(include === undefined ? {} : { include }),
+			...(exclude === undefined ? {} : { exclude }),
+		})
+	} catch (error) {
+		return json({ error: error instanceof Error ? error.message : String(error) }, true)
+	}
+	const more = found.length > pageSize
 	let full = false
-	while (!more && !full) {
-		const wanted = Math.min(GREP_BATCH, pageSize + 1 - matches.length)
-		let batch: ReadonlyArray<GrepMatch>
-		try {
-			batch = await files.grep(args.query, path, {
-				regex: args.regex ?? false,
-				ignoreCase: args.ignoreCase ?? false,
-				context: args.context ?? 0,
-				limit: wanted,
-				offset: start + matches.length,
-				...(include === undefined ? {} : { include }),
-				...(exclude === undefined ? {} : { exclude }),
-			})
-		} catch (error) {
-			return json({ error: error instanceof Error ? error.message : String(error) }, true)
+	for (const each of found.slice(0, pageSize)) {
+		const match: GrepMatch = {
+			path: each.path,
+			line: each.line,
+			text: clip(each.text),
+			...(each.context === undefined
+				? {}
+				: { context: each.context.map((line) => ({ ...line, text: clip(line.text) })) }),
 		}
-		for (const found of batch) {
-			if (matches.length === pageSize) {
-				more = true
-				break
+		const cost = byteLength(JSON.stringify(match)) + 1
+		if (bytes + cost > maxBytes) {
+			// A page always moves on: its first match goes in without its context if it must.
+			if (matches.length === 0) {
+				matches.push({ path: match.path, line: match.line, text: match.text })
 			}
-			const match: GrepMatch = {
-				path: found.path,
-				line: found.line,
-				text: clip(found.text),
-				...(found.context === undefined
-					? {}
-					: { context: found.context.map((line) => ({ ...line, text: clip(line.text) })) }),
-			}
-			const cost = byteLength(JSON.stringify(match)) + 1
-			if (bytes + cost > maxBytes) {
-				// A page always moves on: its first match goes in without its context if it must.
-				if (matches.length === 0) {
-					const bare: GrepMatch = { path: match.path, line: match.line, text: match.text }
-					matches.push(bare)
-					bytes += byteLength(JSON.stringify(bare)) + 1
-				}
-				full = true
-				break
-			}
-			matches.push(match)
-			bytes += cost
-		}
-		if (batch.length < wanted) {
+			full = true
 			break
 		}
+		matches.push(match)
+		bytes += cost
 	}
 	return json({
 		path,

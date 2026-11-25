@@ -243,12 +243,12 @@ describe("workspace tool output", () => {
 		expect(page.nextOffset).toBe(7 + page.count)
 	})
 
-	it("collects grep matches a batch at a time and ends a page at its byte budget", async () => {
+	it("scans once per call for a page of matches, and ends a page at its byte budget", async () => {
 		const line = "match ".repeat(20_000)
-		const asked: Array<number> = []
+		const asked: Array<readonly [number, number]> = []
 		const files: PagingFiles = {
 			grep: (_query, path, options) => {
-				asked.push(options.limit)
+				asked.push([options.offset, options.limit])
 				const total = 300
 				const from = options.offset
 				const to = Math.min(total, from + options.limit)
@@ -265,21 +265,24 @@ describe("workspace tool output", () => {
 			readFile: () => Promise.reject(new Error("not used")),
 		}
 		const { maxBytes } = workspaceOutputLimits("grep")
-		const page = await grepWithin(files, { query: "match", context: 1 }, maxBytes)
+		// A budget smaller than a page of these matches, so the page ends early.
+		const budget = maxBytes / 8
+		const page = await grepWithin(files, { query: "match", context: 1, limit: 1000 }, budget)
 		expect(page.isError).toBe(false)
-		expect(new TextEncoder().encode(textOf(page)).byteLength).toBeLessThanOrEqual(maxBytes)
+		expect(new TextEncoder().encode(textOf(page)).byteLength).toBeLessThanOrEqual(budget)
 		const parsed = JSON.parse(textOf(page)) as { count: number; nextOffset?: number; note?: string }
 		expect(parsed.count).toBeGreaterThan(0)
 		expect(parsed.nextOffset).toBe(parsed.count)
 		expect(parsed.note).toContain("nextOffset")
-		expect(Math.max(...asked)).toBeLessThanOrEqual(20)
+		// One scan for the call, however large a page was asked for.
+		expect(asked).toEqual([[0, 21]])
 
 		const short: PagingFiles = {
 			...files,
 			grep: (_query, path, options) =>
 				Promise.resolve(
 					Array.from(
-						{ length: Math.max(0, Math.min(250, options.offset + options.limit) - options.offset) },
+						{ length: Math.max(0, Math.min(25, options.offset + options.limit) - options.offset) },
 						(_, index) => ({
 							path,
 							line: options.offset + index + 1,
@@ -292,11 +295,11 @@ describe("workspace tool output", () => {
 			count: number
 			nextOffset?: number
 		}
-		expect(first).toMatchObject({ count: 200, nextOffset: 200 })
+		expect(first).toMatchObject({ count: 20, nextOffset: 20 })
 		const last = JSON.parse(
-			textOf(await grepWithin(short, { query: "match", offset: 200 }, maxBytes)),
+			textOf(await grepWithin(short, { query: "match", offset: 20 }, maxBytes)),
 		) as { count: number; nextOffset?: number }
-		expect(last.count).toBe(50)
+		expect(last.count).toBe(5)
 		expect(last).not.toHaveProperty("nextOffset")
 	})
 
