@@ -238,6 +238,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 	it.effect("blocks a release that cannot deliver an already-armed turn deadline", () =>
 		Effect.gen(function* () {
 			const id = "scheduled-command:Checkfu.Session/AbandonTurn"
+
 			const lock = lockWith({
 				[id]: [
 					{
@@ -579,9 +580,8 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		Effect.gen(function* () {
 			const viewId = "view:Checkfu.TurnInput@v3"
 			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
-			const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
 			expect(persistedShapes.map((shape) => shape.id)).toEqual(
-				expect.arrayContaining([viewId, startDeliveryId, stopDeliveryId]),
+				expect.arrayContaining([viewId, startDeliveryId]),
 			)
 
 			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -596,7 +596,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							schema: nextState as unknown as PersistedShape["schema"],
 						}
 					}
-					if (shape.id === startDeliveryId || shape.id === stopDeliveryId) {
+					if (shape.id === startDeliveryId) {
 						return { ...shape, schema: nextState as unknown as PersistedShape["schema"] }
 					}
 					return shape
@@ -606,13 +606,8 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
 			)
 			const breakingProblems = yield* lockProblems(lock, breaking)
-			expect(breakingProblems.length).toBe(2)
-			expect(breakingProblems).toEqual(
-				expect.arrayContaining([
-					expect.stringContaining(startDeliveryId),
-					expect.stringContaining(stopDeliveryId),
-				]),
-			)
+			expect(breakingProblems.length).toBe(1)
+			expect(breakingProblems).toEqual([expect.stringContaining(startDeliveryId)])
 			expect(breakingProblems.every((p) => p.includes("Queued policy deliveries"))).toBe(true)
 
 			const compatible = upgradedTurnInput(
@@ -624,10 +619,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				),
 			)
 			const unreviewed = yield* lockProblems(lock, compatible)
-			expect(unreviewed.length).toBe(2)
+			expect(unreviewed.length).toBe(1)
 			expect(unreviewed.every((p) => p.includes("has not been reviewed"))).toBe(true)
 
-			const reviewedEntries = yield* Effect.forEach([startDeliveryId, stopDeliveryId], (id) =>
+			const reviewedEntries = yield* Effect.forEach([startDeliveryId], (id) =>
 				Effect.gen(function* () {
 					const shape = compatible.find((candidate) => candidate.id === id)
 					if (shape === undefined) {
@@ -794,6 +789,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					).rejects.toThrow(/Unregistered Pi durable document/),
 				)
 			}),
+
 		30_000,
 	)
 
@@ -1019,6 +1015,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							definition: {
 								...SettledUsage.definition,
 								version: 2,
+
 								migrate: (value) => ({
 									count: typeof value.input_tokens === "number" ? String(value.input_tokens) : "0",
 									output_tokens: value.output_tokens ?? 0,
@@ -1241,6 +1238,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							definition: {
 								...SettledUsage.definition,
 								version: 2,
+
 								migrate: (value) => ({
 									prompt_tokens: value.input_tokens ?? 0,
 									extra_seen: "legacy_extra" in value ? "unexpected_extra" : "stored",
@@ -1366,9 +1364,11 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(yield* shipBlockers(convLock, [changedFork])).toEqual([
 					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
 				])
+
 				expect(yield* shipBlockers(convLock, [makeConvShape("rewindable", "current", 2)])).toEqual([
 					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
 				])
+
 				const validConvV2 = [makeConvShape("latest", "current", 2)]
 				expect(
 					yield* lockProblems(yield* reviewing(convLock, convId, validConvV2), validConvV2),

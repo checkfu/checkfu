@@ -29,13 +29,13 @@ import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
 import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
-import { RunTurn } from "./Session/RunTurn.saga.ts"
+import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
-import { StartTurn } from "./Session/StartTurn.policy.ts"
-import { StopModelRequest } from "./Session/StopModelRequest.policy.ts"
+import { EnsureTurnStarted, EnsureTurnStartedLive } from "./Session/EnsureTurnStarted.policy.ts"
+import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
+import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
-import { SessionsHandlersLive } from "./Sessions.model.ts"
 
 export class Checkfu extends Domain.Model("Checkfu", {
 	aggregates: [Agent, Environment, Session, Automation, AutomationCapacity, Artifact],
@@ -58,7 +58,14 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ArtifactView,
 		ArtifactVersionView,
 	],
-	policies: [StartTurn, StopModelRequest, ArmAutomation, StartAutomationRun, FreeAutomationSlot],
+	policies: [
+		StartTurn,
+		EnsureTurnStarted,
+		EnsureTurnStopped,
+		ArmAutomation,
+		StartAutomationRun,
+		FreeAutomationSlot,
+	],
 	sagas: [RunTurn],
 	projections: [Listing],
 	queries: [ListResources],
@@ -118,6 +125,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					if (a.state.status === "") {
 						return true
 					}
+
 					if (
 						m.AgentVersionByNumberView.filter((v) => v.state.agent_id === a.id).length !==
 						a.state.version
@@ -382,7 +390,10 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 }) {}
 
 export const CheckfuHandlersLive = Layer.mergeAll(
-	SessionsHandlersLive,
+	StartTurnLive,
+	EnsureTurnStartedLive,
+	EnsureTurnStoppedLive,
+	RunTurnLive,
 	ArmAutomationLive,
 	StartAutomationRunLive,
 	FreeAutomationSlotLive,

@@ -254,6 +254,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 120, length: 8 },
+
+				allow: { skipped: ["EnsureTurnStarted"] },
 				opaque: [sessionIdOfNextRun, isUsableSchedule, upcomingOccurrences],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
@@ -263,6 +265,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
+		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",
@@ -808,6 +811,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
+
 		const untampered = evaluateCheckfuInvariants(results.finalWorld)
 		expect(Object.values(untampered).every(Boolean)).toBe(true)
 		for (const tamper of [

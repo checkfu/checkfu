@@ -802,6 +802,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 
 					const allFrames = yield* Effect.promise(() => readerPromise)
+
 					const expectedTotal = extraErrors + 1
 					expect(allFrames.length).toBe(expectedTotal)
 					for (let i = 0; i < allFrames.length; i++) {
@@ -813,6 +814,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						expect(call.take).toBeLessThanOrEqual(SSE_CATCHUP_PAGE_SIZE)
 					}
 					expect(eventsCalls).toEqual([{ after: extraErrors }])
+
 					expect(listCalls.at(-1)).toMatchObject({ after: extraErrors, returned: 0 })
 				}).pipe(Effect.scoped, Effect.provide(spiedLayer)),
 			)
@@ -955,6 +957,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							ref: Parameters<typeof realSessionViews.get>[0],
 							options?: Parameters<typeof realSessionViews.get>[1],
 						) => (lagMode !== "off" ? Effect.succeedNone : realSessionViews.get(ref, options)),
+
 						snapshot: (
 							ref: Parameters<typeof realSessionViews.snapshot>[0],
 							options?: Parameters<typeof realSessionViews.snapshot>[1],
@@ -1228,6 +1231,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							Effect.gen(function* () {
 								if (raceUpdateToV2) {
 									raceUpdateToV2 = false
+
 									yield* updateAgent.send(
 										new UpdateAgent({
 											agent_id: command.agent_id,
@@ -2267,7 +2271,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new UserInterrupt(),
+				event: new UserInterrupt({ turn: 1 }),
 				expectedJson: {
 					id: "evt_2",
 					seq: 2,
@@ -2393,7 +2397,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated(),
+				event: new SessionStatusTerminated({ running_turn: null }),
 				expectedJson: {
 					id: "evt_12",
 					seq: 12,

@@ -260,6 +260,7 @@ describe("interrupted turns and turn recovery", () => {
 						headers: AUTH_HEADERS,
 						body: { events: [{ type: "user.interrupt" }] },
 					})
+
 					yield* Effect.promise(() => turn2Aborted)
 					releaseTurn2Admit?.()
 
@@ -701,8 +702,10 @@ describe("interrupted turns and turn recovery", () => {
 							}),
 						),
 					)
+
 					yield* TestClock.adjust("1 second")
 					yield* Deferred.await(submitted)
+
 					yield* TestClock.adjust("500 millis")
 					return yield* TestClock.withLive(Effect.timeout(Fiber.join(turn), "2 seconds"))
 				}).pipe(Effect.provide(TestClock.layer()))
