@@ -40,6 +40,9 @@ export const WORKSPACE_TOOL_OPTIONS = {
 		maxModelBytes: MAX_INLINE_IMAGE_BYTES,
 		maxBytes: READ_PAGE_BYTES,
 		maxLines: RESULT_LINES,
+		// A longer line is cut with a marker, as Claude Code's Read cuts it, so no line is too long
+		// to read and the page goes on after it.
+		lineTruncation: { chars: 2000 },
 	},
 } as const
 

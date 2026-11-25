@@ -3,10 +3,10 @@ import type { TranscriptContext } from "@earendil-works/pi-ai"
 import * as Effect from "effect/Effect"
 import { runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
-import { grepWithin, readLongLine } from "../src/Workspace/WorkspacePaging.ts"
+import { grepWithin } from "../src/Workspace/WorkspacePaging.ts"
 import type { PagingFiles } from "../src/Workspace/WorkspacePaging.ts"
 import {
-	READ_PAGE_BYTES,
+	MAX_INLINE_IMAGE_BYTES,
 	WORKSPACE_TOOL_OPTIONS,
 	boundWorkspaceResult,
 	workspaceExtension,
@@ -233,8 +233,6 @@ describe("workspace tool output", () => {
 						})),
 					})),
 				),
-			stat: () => Promise.reject(new Error("not used")),
-			readFile: () => Promise.reject(new Error("not used")),
 		}
 		const page = JSON.parse(
 			textOf(await grepWithin(files, { query: "match", context: 10, offset: 7 }, maxBytes / 8)),
@@ -261,8 +259,6 @@ describe("workspace tool output", () => {
 					})),
 				)
 			},
-			stat: () => Promise.reject(new Error("not used")),
-			readFile: () => Promise.reject(new Error("not used")),
 		}
 		const { maxBytes } = workspaceOutputLimits("grep")
 		// A budget smaller than a page of these matches, so the page ends early.
@@ -316,8 +312,6 @@ describe("workspace tool output", () => {
 							text: "m".repeat(length),
 						})),
 					),
-				stat: () => Promise.reject(new Error("not used")),
-				readFile: () => Promise.reject(new Error("not used")),
 			}
 			const page = await grepWithin(files, { query: "m", limit: 1000 }, maxBytes)
 			expect([length, new TextEncoder().encode(textOf(page)).byteLength <= maxBytes]).toEqual([
@@ -327,48 +321,45 @@ describe("workspace tool output", () => {
 		}
 	})
 
-	it("reads a line longer than a page in byte slices that join back into the line", async () => {
+	it("cuts a line too long to read, and reads on past it", async () => {
 		const line = `${'{"k":"välue"},'.repeat(12_000)}`
-		const bytes = new TextEncoder().encode(`short first line\n${line}\nlast\n`)
-		const fs = oneFile("/workspace/data.min.json", bytes)
+		const fs = oneFile(
+			"/workspace/data.min.json",
+			new TextEncoder().encode(`short first line\n${line}\nlast\n`),
+		)
 		const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
 		const { execute } = createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } })
-		const files: PagingFiles = { ...fs, grep: () => Promise.reject(new Error("not used")) }
-		interface ReadPosition {
-			readonly offset?: number
-			readonly byteOffset?: number
-			readonly limit: number
-		}
-		const read = async (args: ReadPosition) => {
-			const result = await execute(
-				{ id: "call", name: "read", arguments: { path: "/workspace/data.min.json", ...args } },
-				{},
-			)
-			const text = textOf(result)
-			if (!result.isError) {
-				return text
-			}
-			const page = await readLongLine(
-				files,
-				{ path: "/workspace/data.min.json", ...args },
-				READ_PAGE_BYTES,
-			)
-			return page === undefined ? text : textOf(page)
-		}
-		let joined = ""
-		let next: ReadPosition = { offset: 2, limit: 1 }
-		for (let pages = 0; pages < 20; pages += 1) {
-			const page = JSON.parse(await read(next)) as {
-				content: string
-				nextOffset?: number
-				nextByteOffset?: number
-			}
-			joined += page.content
-			if (page.nextByteOffset === undefined || joined.length >= line.length) {
-				break
-			}
-			next = { offset: page.nextOffset ?? 2, byteOffset: page.nextByteOffset, limit: 1 }
-		}
-		expect(joined.startsWith(line)).toBe(true)
+		const result = await execute(
+			{ id: "call", name: "read", arguments: { path: "/workspace/data.min.json" } },
+			{},
+		)
+		const [first, cut, last] = textOf(result).split("\n")
+		expect([result.isError, first, last]).toEqual([false, "short first line", "last"])
+		expect(line.startsWith((cut ?? "").slice(0, 2000))).toBe(true)
+		expect((cut ?? "").length).toBeLessThan(2100)
+	})
+
+	it("refuses an image too large to show, rather than reading its bytes as text", async () => {
+		const png = new Uint8Array(MAX_INLINE_IMAGE_BYTES + 1)
+		png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+		const fs = oneFile("/workspace/big.png", png)
+		const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
+		const { execute } = createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: { fs } })
+		const result = await execute(
+			{ id: "call", name: "read", arguments: { path: "/workspace/big.png" } },
+			{},
+		)
+		expect(result.isError).toBe(true)
+		expect(textOf(result)).toContain("inline model output limit")
+	})
+
+	it("holds grep's whole result to what one call returns, the query it echoes included", async () => {
+		const files: PagingFiles = { grep: () => Promise.resolve([]) }
+		const page = await grepWithin(files, { query: "q".repeat(80_000) }, 1024)
+		const { maxBytes } = workspaceOutputLimits("grep")
+		expect([page.isError, new TextEncoder().encode(textOf(page)).byteLength <= maxBytes]).toEqual([
+			true,
+			true,
+		])
 	})
 })

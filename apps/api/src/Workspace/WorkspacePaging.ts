@@ -1,10 +1,10 @@
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { boundWorkspaceResult } from "./WorkspaceTools.ts"
 import type { WorkspaceToolResult } from "./WorkspaceTools.ts"
 
-// grep and read as the library declares them, run here where the library cannot bound them: grep
-// collects a whole page of matches before anything measures it, and read refuses a line longer
-// than one page.
+// grep as the library declares it, run here where the library cannot bound it: the library
+// collects a whole page of matches before anything measures it.
 
 interface GrepContextLine {
 	readonly line: number
@@ -33,11 +33,6 @@ export interface PagingFiles {
 			readonly exclude?: Array<string>
 		},
 	) => Promise<ReadonlyArray<GrepMatch>>
-	readonly stat: (path: string) => Promise<{ readonly size: number }>
-	readonly readFile: (
-		path: string,
-		options: { readonly byteOffset: number; readonly byteLength: number },
-	) => Promise<ReadableStream<Uint8Array>>
 }
 
 const Count = (minimum: number, maximum: number) =>
@@ -54,12 +49,6 @@ const GrepArguments = Schema.Struct({
 	context: Schema.optionalKey(Count(0, 10)),
 	limit: Schema.optionalKey(Count(1, 1000)),
 	offset: Schema.optionalKey(Count(0, Number.MAX_SAFE_INTEGER)),
-})
-
-const ReadArguments = Schema.Struct({
-	path: Schema.String,
-	offset: Schema.optionalKey(Count(1, Number.MAX_SAFE_INTEGER)),
-	byteOffset: Schema.optionalKey(Count(0, Number.MAX_SAFE_INTEGER)),
 })
 
 const json = (value: unknown, isError = false): WorkspaceToolResult => ({
@@ -171,104 +160,20 @@ export const grepWithin = async (
 		matches.push(match)
 		bytes += cost
 	}
-	return json({
-		path,
-		query: args.query,
-		count: matches.length,
-		matches,
-		...(more || full ? { nextOffset: start + matches.length } : {}),
-		...(full
-			? {
-					note: EARLY_END_NOTE,
-				}
-			: {}),
-	})
-}
-
-const readBytes = async (
-	files: PagingFiles,
-	path: string,
-	byteOffset: number,
-	length: number,
-): Promise<Uint8Array> =>
-	new Uint8Array(
-		await new Response(
-			await files.readFile(path, { byteOffset, byteLength: length }),
-		).arrayBuffer(),
+	// The query and path come back too, so the whole result is held to what one call returns.
+	return boundWorkspaceResult(
+		"grep",
+		json({
+			path,
+			query: args.query,
+			count: matches.length,
+			matches,
+			...(more || full ? { nextOffset: start + matches.length } : {}),
+			...(full
+				? {
+						note: EARLY_END_NOTE,
+					}
+				: {}),
+		}),
 	)
-
-const SCAN_BYTES = 64 * 1024
-const NEWLINE = 10
-
-// Where a line starts: line 1 at 0, a later one just after the newline before it.
-const lineStart = async (
-	files: PagingFiles,
-	path: string,
-	line: number,
-	size: number,
-): Promise<number | undefined> => {
-	let seen = 1
-	for (let position = 0; seen < line && position < size; position += SCAN_BYTES) {
-		const chunk = await readBytes(files, path, position, SCAN_BYTES)
-		for (
-			let index = chunk.indexOf(NEWLINE);
-			index !== -1;
-			index = chunk.indexOf(NEWLINE, index + 1)
-		) {
-			seen += 1
-			if (seen === line) {
-				return position + index + 1
-			}
-		}
-		if (chunk.byteLength === 0) {
-			break
-		}
-	}
-	return seen === line ? 0 : undefined
-}
-
-// The UTF-8 bytes from the start up to `end`, moved back so no character is split.
-const characterEnd = (bytes: Uint8Array, end: number): number => {
-	let at = end
-	while (at > 0 && at < bytes.byteLength && ((bytes[at] ?? 0) & 0b1100_0000) === 0b1000_0000) {
-		at -= 1
-	}
-	return at
-}
-
-/**
- * The library refuses a line longer than one page. When the line a read asks for is one, this
- * returns a page of its bytes and the byte offset to read on from; otherwise undefined.
- */
-export const readLongLine = async (
-	files: PagingFiles,
-	input: unknown,
-	pageBytes: number,
-): Promise<WorkspaceToolResult | undefined> => {
-	const decoded = Schema.decodeUnknownOption(ReadArguments)(input)
-	if (Option.isNone(decoded)) {
-		return undefined
-	}
-	const { path, offset = 1, byteOffset } = decoded.value
-	const { size } = await files.stat(path)
-	const start = byteOffset ?? (await lineStart(files, path, offset, size))
-	if (start === undefined || start >= size) {
-		return undefined
-	}
-	const bytes = await readBytes(files, path, start, pageBytes + 1)
-	const newline = bytes.indexOf(NEWLINE)
-	if (bytes.byteLength <= pageBytes || (newline !== -1 && newline <= pageBytes)) {
-		return undefined
-	}
-	const end = characterEnd(bytes, pageBytes)
-	return json({
-		path,
-		offset,
-		byteOffset: start,
-		content: new TextDecoder().decode(bytes.subarray(0, end)),
-		truncated: true,
-		nextOffset: offset,
-		nextByteOffset: start + end,
-		note: `Line ${offset} is longer than one page; this is part of it. Read on with offset ${offset} and nextByteOffset.`,
-	})
 }
