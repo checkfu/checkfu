@@ -592,6 +592,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					}
 					const agentId = decodedAgentId.value
 					const environmentId = decodedEnvironmentId.value
+					const missing = {
+						AgentNotFound: () => reject(404, `Agent ${agentId} not found.`),
+						AgentVersionNotFound: ({ version }: { readonly version: number }) =>
+							reject(404, `Agent ${agentId} has no version ${version}.`),
+						EnvironmentNotFound: () => reject(404, `Environment ${environmentId} not found.`),
+					}
 					const agentVersion = typeof agent === "string" ? null : (agent.version ?? null)
 					const title = payload.title ?? null
 					const first = payload.initial_events?.[0]
@@ -629,7 +635,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const given =
 						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
 							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
-							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
+							: yield* credentialsFor(agentId, agentVersion, environmentId, payload).pipe(
+									Effect.catchTags(missing),
+								)
 					const prior =
 						idempotencyKey === undefined || (yield* sessions.get(id))._tag === "Uninitialized"
 							? undefined
@@ -671,13 +679,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						initialMessage === undefined
 							? yield* admitSession
 									.send(new AdmitSession(admission), sendOptions)
-									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+									.pipe(
+										Effect.catchTags({ SessionAlreadyExists: rejectReusedSessionKey, ...missing }),
+									)
 							: yield* startSession
 									.send(
 										new OpenAutomationSession({ ...admission, text: initialMessage }),
 										sendOptions,
 									)
-									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+									.pipe(
+										Effect.catchTags({ SessionAlreadyExists: rejectReusedSessionKey, ...missing }),
+									)
 					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
 						return resource.type !== "github_repository" ||
