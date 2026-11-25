@@ -315,6 +315,28 @@ describe("MCP tool projection", () => {
 			},
 		})
 
+		const [named] = project(
+			withOperation("/v1/agents/{agent_id}", "get", {
+				...searchAgents,
+				"x-checkfu-mcp": { name: "agents_getAgent" },
+				parameters: [
+					{
+						name: "agent_id",
+						in: "path",
+						required: true,
+						schema: { type: "string", pattern: "^(1|latest)$" },
+					},
+				],
+			}),
+		).filter((projected) => projected.name === "agents_getAgent")
+		expect(named?.inputSchema["properties"]).toMatchObject({
+			path: {
+				properties: {
+					agent_id: { type: "string", pattern: segment, allOf: [{ pattern: "^(1|latest)$" }] },
+				},
+			},
+		})
+
 		const version = project(exportDeterministicOpenApiJson()).find(
 			(projected) => projected.name === "artifacts_getArtifactVersion",
 		)

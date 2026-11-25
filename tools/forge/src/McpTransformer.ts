@@ -8,21 +8,14 @@ import * as Schema from "effect/Schema"
 import { buildSurfaceCatalog, isJsonArray } from "./SurfaceCatalog.ts"
 import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
-const NOT_DIGITS = ["", "a", "-1", "+1", "1.5", "1e3", " 1", "1 "]
+const POSITIVE_DECIMAL = /^\^\[1-9\]\\d\{0,(\d{1,2})\}\$$/u
 
-const digitsOnly = (pattern: Json | undefined) => {
-	if (typeof pattern !== "string") {
+const positiveDecimal = (pattern: Json | undefined) => {
+	const more = typeof pattern === "string" ? POSITIVE_DECIMAL.exec(pattern)?.[1] : undefined
+	if (more === undefined || Number(more) > 14) {
 		return undefined
 	}
-	const accepts = (value: string) => new RegExp(pattern, "u").test(value)
-	if (!accepts("1") || NOT_DIGITS.some(accepts)) {
-		return undefined
-	}
-	let digits = 1
-	while (digits < 15 && accepts("9".repeat(digits + 1))) {
-		digits += 1
-	}
-	return { minimum: accepts("0") ? 0 : 1, maximum: 10 ** digits - 1 }
+	return { minimum: 1, maximum: 10 ** (Number(more) + 1) - 1 }
 }
 
 type JsonRecord = Readonly<Record<string, Json>>
@@ -233,7 +226,7 @@ const projectOperation = (
 			pathParameters.map((parameter) => {
 				const own = parameter.schema["pattern"]
 				const clauses = parameter.schema["allOf"]
-				const integer = digitsOnly(own)
+				const integer = positiveDecimal(own)
 				if (integer !== undefined) {
 					const description = parameter.schema["description"]
 					return {
