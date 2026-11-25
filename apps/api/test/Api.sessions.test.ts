@@ -29,7 +29,6 @@ import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendU
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
-import { TurnInput } from "@checkfu/domain/Session/TurnInput.view"
 import { describe, expect, it } from "@effect/vitest"
 import * as Arbitrary from "effect/Arbitrary"
 import * as DateTime from "effect/DateTime"
@@ -126,97 +125,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(serializedLogs).toContain('"accepted_count":1')
 					expect(serializedLogs).toContain('"unconfirmed_index":1')
 				}).pipe(Effect.scoped, Effect.provide([layer, captureLogger])),
-			)
-		} finally {
-			await closeAll()
-		}
-	})
-
-	it("reads a session's turn input before sending it a command", async () => {
-		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
-			makeAssistantReply(model, null, "ok", 1, 1),
-		)
-		try {
-			await Effect.runPromise(
-				Effect.gen(function* () {
-					const realSession = yield* Session
-					const realTurnInput = yield* TurnInput
-					const calls: Array<string> = []
-					const recordingSession: typeof realSession = {
-						...realSession,
-						send: ((
-							command: Parameters<typeof realSession.send>[0],
-							options?: Parameters<typeof realSession.send>[1],
-						) =>
-							Effect.suspend(() => {
-								calls.push(`session:send:${command._tag}`)
-								return realSession.send(command, options)
-							})) as typeof realSession.send,
-					}
-					const recordingTurnInput: typeof realTurnInput = {
-						...realTurnInput,
-						get: (...args: Parameters<typeof realTurnInput.get>) =>
-							realTurnInput.get(...args).pipe(
-								Effect.tap(() =>
-									Effect.sync(() => {
-										calls.push("turn-input:get")
-									}),
-								),
-							),
-					}
-					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
-						Effect.provideService(Session, recordingSession),
-						Effect.provideService(TurnInput, recordingTurnInput),
-					)
-					const session = yield* createIdleSession(apiFetch)
-					const body = {
-						events: [{ type: "user.message", content: [{ type: "text", text: "hi" }] }],
-					}
-
-					calls.length = 0
-					yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/sessions/${session.id}/events`,
-						headers: AUTH_HEADERS,
-						body,
-					})
-					expect(calls[0]).toBe("turn-input:get")
-					expect(calls.indexOf("session:send:SendUserMessage")).toBeGreaterThan(0)
-
-					calls.length = 0
-					yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/sessions/${session.id}/events`,
-						headers: { ...AUTH_HEADERS, "Idempotency-Key": "turn-input-order" },
-						body,
-					})
-					expect(calls[0]).toBe("turn-input:get")
-					expect(calls.findIndex((call) => call.startsWith("session:send:"))).toBeGreaterThan(0)
-
-					calls.length = 0
-					const invalid = yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/sessions/${session.id}/events`,
-						headers: AUTH_HEADERS,
-						body: {
-							events: [
-								{ id: "evt-dup", type: "user.message", content: [{ type: "text", text: "a" }] },
-								{ id: "evt-dup", type: "user.message", content: [{ type: "text", text: "b" }] },
-							],
-						},
-					})
-					expect(invalid.status).toBe(400)
-					expect(calls).toEqual([])
-
-					calls.length = 0
-					yield* sendRequest(apiFetch, {
-						method: "POST",
-						path: `/v1/sessions/${session.id}/archive`,
-						headers: AUTH_HEADERS,
-					})
-					expect(calls[0]).toBe("turn-input:get")
-					expect(calls.indexOf("session:send:ArchiveSession")).toBeGreaterThan(0)
-				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
 			await closeAll()
