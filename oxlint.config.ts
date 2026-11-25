@@ -61,7 +61,7 @@ const confined = (exempt?: string): NonNullable<OxlintConfig["rules"]> => {
 export default defineConfig({
 	...cloudflare,
 	extends: [effectStrict],
-	ignorePatterns: [...(cloudflare.ignorePatterns ?? []), ".turbo"],
+	ignorePatterns: [...(cloudflare.ignorePatterns ?? []), ".turbo", "**/routeTree.gen.ts"],
 	rules: {
 		...cloudflare.rules,
 		"effecttsgo/any-unknown-in-error-context": "error",

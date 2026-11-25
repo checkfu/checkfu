@@ -13,8 +13,8 @@ import { checkfu } from "../api.ts"
 import { lifecycle, Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 
-const list = getRouteApi("/app/agents")
-const detail = getRouteApi("/app/agents/$agentId")
+const list = getRouteApi("/_app/agents/")
+const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
@@ -166,7 +166,7 @@ export function NewAgentPage(): React.JSX.Element {
 				initial={{ name: "", model: "", system: "", description: "" }}
 				submitLabel="Create agent"
 				onSubmit={async (draft) => {
-					const agent = await checkfu.waitForPending(await checkfu.agents.create(bodyOf(draft)))
+					const agent = await checkfu.agents.create(bodyOf(draft))
 					await navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
 				}}
 			/>
@@ -216,9 +216,7 @@ export function AgentPage(): React.JSX.Element {
 					submitLabel="Save new version"
 					onCancel={() => setEditing(false)}
 					onSubmit={async (draft) => {
-						await checkfu.waitForPending(
-							await checkfu.agents.update(agent.id, { version: agent.version, ...bodyOf(draft) }),
-						)
+						await checkfu.agents.update(agent.id, { version: agent.version, ...bodyOf(draft) })
 						setEditing(false)
 						await router.invalidate()
 					}}

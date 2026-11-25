@@ -12,8 +12,8 @@ import { checkfu } from "../api.ts"
 import { lifecycle, Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 
-const list = getRouteApi("/app/environments")
-const detail = getRouteApi("/app/environments/$environmentId")
+const list = getRouteApi("/_app/environments/")
+const detail = getRouteApi("/_app/environments/$environmentId")
 
 export function EnvironmentsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
@@ -81,12 +81,10 @@ export function NewEnvironmentPage(): React.JSX.Element {
 	const [name, setName] = React.useState("")
 	const [description, setDescription] = React.useState("")
 	const create = useAction(async () => {
-		const environment = await checkfu.waitForPending(
-			await checkfu.environments.create({
-				name: name.trim(),
-				description: description === "" ? null : description,
-			}),
-		)
+		const environment = await checkfu.environments.create({
+			name: name.trim(),
+			description: description === "" ? null : description,
+		})
 		await navigate({
 			to: "/environments/$environmentId",
 			params: { environmentId: environment.id },

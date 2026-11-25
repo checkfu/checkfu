@@ -14,9 +14,9 @@ import { Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 import { Transcript, useSessionEvents } from "./transcript.tsx"
 
-const list = getRouteApi("/app/sessions")
-const create = getRouteApi("/app/sessions/new")
-const detail = getRouteApi("/app/sessions/$sessionId")
+const list = getRouteApi("/_app/sessions/")
+const create = getRouteApi("/_app/sessions/new")
+const detail = getRouteApi("/_app/sessions/$sessionId")
 
 export function SessionsPage(): React.JSX.Element {
 	const page = list.useLoaderData()
@@ -96,13 +96,11 @@ export function NewSessionPage(): React.JSX.Element {
 	const [environmentId, setEnvironmentId] = React.useState(environments[0]?.id ?? "")
 	const [title, setTitle] = React.useState("")
 	const start = useAction(async () => {
-		const session = await checkfu.waitForPending(
-			await checkfu.sessions.create({
-				agent: agentId,
-				environment_id: environmentId,
-				title: title.trim() === "" ? null : title.trim(),
-			}),
-		)
+		const session = await checkfu.sessions.create({
+			agent: agentId,
+			environment_id: environmentId,
+			title: title.trim() === "" ? null : title.trim(),
+		})
 		await navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
 	})
 	return (
@@ -172,13 +170,13 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 	const { events, status, error } = useSessionEvents(session.id, session.status)
 	const [text, setText] = React.useState("")
 	const send = useAction(async (message: string) => {
-		await checkfu.sessions.events.send(session.id, {
+		await checkfu.sessions.send(session.id, {
 			events: [{ type: "user.message", content: [{ type: "text", text: message }] }],
 		})
 		setText("")
 	})
 	const interrupt = useAction(async () => {
-		await checkfu.sessions.events.send(session.id, { events: [{ type: "user.interrupt" }] })
+		await checkfu.sessions.send(session.id, { events: [{ type: "user.interrupt" }] })
 	})
 	const archive = useAction(async () => {
 		await checkfu.sessions.archive(session.id)
