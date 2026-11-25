@@ -9,6 +9,21 @@ import type {
 
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 export const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
+export const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+export const DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
+export const DEFAULT_CLOUDFLARE_AI_GATEWAY_HTTPS_ROOT = "https://gateway.ai.cloudflare.com/v1"
+export const DEFAULT_CLOUDFLARE_AI_GATEWAY_BINDING_ROOT =
+	"https://workers-binding.ai/ai-gateway/gateways"
+export const DEFAULT_CLOUDFLARE_WORKERS_AI_BASE_ROOT =
+	"https://api.cloudflare.com/client/v4/accounts"
+
+// Dedicated inference token variable kept strictly separate from Alchemy / Cloudflare
+// deployment credentials (`CLOUDFLARE_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_EMAIL`)
+// so deployment keys are never bound to runtime Workers and inference tokens never trigger
+// Alchemy's legacy global-key environment auth.
+export const CLOUDFLARE_AI_API_KEY_ENV = "CLOUDFLARE_AI_API_KEY"
+export const CLOUDFLARE_ACCOUNT_ID_ENV = "CLOUDFLARE_ACCOUNT_ID"
+export const CLOUDFLARE_GATEWAY_ID_ENV = "CLOUDFLARE_GATEWAY_ID"
 
 export const defineProvider = <const T extends ProviderSpec>(spec: T): T => spec
 
@@ -48,6 +63,54 @@ export const BUILTIN_PROVIDERS = [
 		resolveBareModelIds: true,
 		allowUnlistedModels: true,
 	}),
+	defineProvider({
+		id: "openrouter",
+		name: "OpenRouter",
+		source: "builtin",
+		defaultModel: "openrouter/anthropic/claude-sonnet-5.5",
+		defaultFormat: "openai-completions",
+		formats: ["anthropic-messages", "openai-completions"],
+		baseUrl: DEFAULT_OPENROUTER_BASE_URL,
+		auth: {
+			kind: "bearer",
+			env: "OPENROUTER_API_KEY",
+			label: "OpenRouter API key",
+			keyPrefixes: ["sk-or-"],
+		},
+		resolveBareModelIds: false,
+		allowUnlistedModels: true,
+	}),
+	defineProvider({
+		id: "cloudflare-ai-gateway",
+		name: "Cloudflare AI Gateway",
+		source: "builtin",
+		defaultModel: "cloudflare-ai-gateway/claude-sonnet-5-5",
+		defaultFormat: "openai-completions",
+		formats: ["anthropic-messages", "openai-responses", "openai-completions"],
+		auth: {
+			kind: "cloudflare_ai_gateway",
+			apiKeyEnv: CLOUDFLARE_AI_API_KEY_ENV,
+			accountIdEnv: CLOUDFLARE_ACCOUNT_ID_ENV,
+			gatewayIdEnv: CLOUDFLARE_GATEWAY_ID_ENV,
+		},
+		resolveBareModelIds: false,
+		allowUnlistedModels: true,
+	}),
+	defineProvider({
+		id: "cloudflare-workers-ai",
+		name: "Cloudflare Workers AI",
+		source: "builtin",
+		defaultModel: "cloudflare-workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+		defaultFormat: "openai-completions",
+		formats: ["openai-completions"],
+		auth: {
+			kind: "cloudflare_workers_ai",
+			apiKeyEnv: CLOUDFLARE_AI_API_KEY_ENV,
+			accountIdEnv: CLOUDFLARE_ACCOUNT_ID_ENV,
+		},
+		resolveBareModelIds: false,
+		allowUnlistedModels: true,
+	}),
 ] as const satisfies ReadonlyArray<ProviderSpec>
 
 export type BuiltinProvider = (typeof BUILTIN_PROVIDERS)[number]
@@ -65,7 +128,11 @@ export const isBuiltinProviderId = (value: string): value is BuiltinProviderId =
 	BUILTIN_PROVIDER_MAP.has(value)
 
 const isSupportedAuthKind = (kind: string): kind is ProviderAuthSpec["kind"] =>
-	kind === "none" || kind === "bearer" || kind === "api_key_header"
+	kind === "none" ||
+	kind === "bearer" ||
+	kind === "api_key_header" ||
+	kind === "cloudflare_ai_gateway" ||
+	kind === "cloudflare_workers_ai"
 
 const hasControlOrWhitespace = (value: string): boolean => {
 	for (let i = 0; i < value.length; i += 1) {
@@ -109,7 +176,24 @@ export const assertValidProviderSpec = (spec: ProviderSpec): void => {
 			`Provider "${spec.id}" defaultFormat "${spec.defaultFormat}" must be listed in formats (${spec.formats.join(", ")}).`,
 		)
 	}
-	parsePinnedProviderBaseUrl(spec.baseUrl, `provider "${spec.id}" baseUrl`)
+	if (spec.auth.kind === "cloudflare_workers_ai") {
+		if (spec.formats.some((format) => format !== "openai-completions")) {
+			throw new Error(
+				`Provider "${spec.id}" uses "cloudflare_workers_ai" auth and only supports the "openai-completions" wire format.`,
+			)
+		}
+	}
+	const hasDynamicCloudflareEndpoint =
+		spec.auth.kind === "cloudflare_ai_gateway" || spec.auth.kind === "cloudflare_workers_ai"
+	if (hasDynamicCloudflareEndpoint) {
+		if (spec.baseUrl !== undefined) {
+			throw new Error(
+				`Provider "${spec.id}" uses "${spec.auth.kind}" auth and must not declare a static baseUrl.`,
+			)
+		}
+	} else {
+		parsePinnedProviderBaseUrl(spec.baseUrl, `provider "${spec.id}" baseUrl`)
+	}
 }
 
 const assertUniqueCustomProviders = (customProviders: ReadonlyArray<ProviderSpec>): void => {
@@ -170,6 +254,10 @@ export const providerRequiredSecretEnvs = (
 			case "api_key_header":
 				add(provider.auth.env)
 				break
+			case "cloudflare_ai_gateway":
+			case "cloudflare_workers_ai":
+				add(provider.auth.apiKeyEnv)
+				break
 			case "none":
 				break
 		}
@@ -185,9 +273,23 @@ export const providerRequiredSecretEnvs = (
 export const providerRequiredConfigEnvs = (
 	providers: ReadonlyArray<ProviderSpec> = BUILTIN_PROVIDERS,
 ): ReadonlyArray<string> => {
+	const seen = new Set<string>()
 	const envs: Array<string> = []
+	const add = (envName: string) => {
+		if (!seen.has(envName)) {
+			seen.add(envName)
+			envs.push(envName)
+		}
+	}
 	for (const provider of providers) {
 		switch (provider.auth.kind) {
+			case "cloudflare_ai_gateway":
+				add(provider.auth.accountIdEnv)
+				add(provider.auth.gatewayIdEnv)
+				break
+			case "cloudflare_workers_ai":
+				add(provider.auth.accountIdEnv)
+				break
 			case "bearer":
 			case "api_key_header":
 			case "none":
@@ -201,6 +303,59 @@ const hasEnvValue = (env: Readonly<Record<string, string | undefined>>, name: st
 	const value = ownProperty(env, name)
 	return value !== undefined && value.trim().length > 0
 }
+
+export type CloudflareGatewayAuthMode =
+	| { readonly mode: "https" }
+	| { readonly mode: "binding" }
+	| { readonly mode: "incomplete"; readonly missing: ReadonlyArray<string> }
+
+export interface CloudflareGatewayAuthInputs {
+	readonly hasGatewayId: boolean
+	readonly hasAccountId: boolean
+	readonly hasApiKey: boolean
+	readonly hasBinding: boolean
+	readonly gatewayIdEnv?: string
+	readonly accountIdEnv?: string
+	readonly apiKeyEnv?: string
+}
+
+export const resolveCloudflareGatewayAuthMode = (
+	inputs: CloudflareGatewayAuthInputs,
+): CloudflareGatewayAuthMode => {
+	const gatewayIdEnv = inputs.gatewayIdEnv ?? CLOUDFLARE_GATEWAY_ID_ENV
+	const accountIdEnv = inputs.accountIdEnv ?? CLOUDFLARE_ACCOUNT_ID_ENV
+	const apiKeyEnv = inputs.apiKeyEnv ?? CLOUDFLARE_AI_API_KEY_ENV
+
+	if (inputs.hasApiKey) {
+		const missing: Array<string> = []
+		if (!inputs.hasGatewayId) {
+			missing.push(gatewayIdEnv)
+		}
+		if (!inputs.hasAccountId) {
+			missing.push(accountIdEnv)
+		}
+		return missing.length === 0 ? { mode: "https" } : { mode: "incomplete", missing }
+	}
+	if (inputs.hasBinding) {
+		return inputs.hasGatewayId
+			? { mode: "binding" }
+			: { mode: "incomplete", missing: [gatewayIdEnv] }
+	}
+	const missing: Array<string> = []
+	if (!inputs.hasGatewayId) {
+		missing.push(gatewayIdEnv)
+	}
+	if (!inputs.hasAccountId) {
+		missing.push(accountIdEnv)
+	}
+	missing.push(apiKeyEnv)
+	return { mode: "incomplete", missing }
+}
+
+export const shouldBindCloudflareAiGateway = (
+	env: Readonly<Record<string, string | undefined>>,
+): boolean =>
+	hasEnvValue(env, CLOUDFLARE_GATEWAY_ID_ENV) && !hasEnvValue(env, CLOUDFLARE_AI_API_KEY_ENV)
 
 export const checkProviderCredentials = (
 	provider: ProviderSpec,
@@ -231,6 +386,42 @@ export const checkProviderCredentials = (
 		case "api_key_header":
 			if (!hasEnvValue(config.env, provider.auth.env)) {
 				missingSecrets.unshift(provider.auth.env)
+			}
+			break
+		case "cloudflare_ai_gateway": {
+			const gatewayAuth = resolveCloudflareGatewayAuthMode({
+				hasGatewayId: hasEnvValue(config.env, provider.auth.gatewayIdEnv),
+				hasAccountId: hasEnvValue(config.env, provider.auth.accountIdEnv),
+				hasApiKey: hasEnvValue(config.env, provider.auth.apiKeyEnv),
+				hasBinding: typeof config.aiBinding?.fetch === "function",
+				gatewayIdEnv: provider.auth.gatewayIdEnv,
+				accountIdEnv: provider.auth.accountIdEnv,
+				apiKeyEnv: provider.auth.apiKeyEnv,
+			})
+			const combinedMissing: Array<string> = []
+			if (gatewayAuth.mode === "incomplete") {
+				combinedMissing.push(...gatewayAuth.missing)
+			}
+			for (const secretEnv of missingSecrets) {
+				if (!combinedMissing.includes(secretEnv)) {
+					combinedMissing.push(secretEnv)
+				}
+			}
+			if (combinedMissing.length > 0) {
+				return {
+					ok: false,
+					missing: combinedMissing,
+					message: `Missing ${combinedMissing.join(", ")} for provider "${provider.id}". Set ${provider.auth.gatewayIdEnv} with ${provider.auth.apiKeyEnv} and ${provider.auth.accountIdEnv} (or bind Cloudflare AI on deploy).`,
+				}
+			}
+			return { ok: true }
+		}
+		case "cloudflare_workers_ai":
+			if (!hasEnvValue(config.env, provider.auth.apiKeyEnv)) {
+				missingSecrets.unshift(provider.auth.apiKeyEnv)
+			}
+			if (!hasEnvValue(config.env, provider.auth.accountIdEnv)) {
+				missingSecrets.push(provider.auth.accountIdEnv)
 			}
 			break
 	}

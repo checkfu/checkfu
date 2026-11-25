@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs"
 import * as Domain from "@alchemy.run/domain"
+import { allProviders } from "@checkfu/pi-providers/catalog"
+import { buildPiProvider, withDynamicModelLookup } from "@checkfu/pi-providers/runtime"
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { Api, AssistantMessage, Model, TranscriptContext } from "@earendil-works/pi-ai"
-import { createModels, createProvider } from "@earendil-works/pi-ai/models"
-import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
-import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
+import { createModels } from "@earendil-works/pi-ai/models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
 import type { JsonObject } from "@earendil-works/pi-durable"
 import { expect } from "@effect/vitest"
@@ -152,27 +152,13 @@ export const makeScriptedPiModels = (
 		},
 	}
 
-	models.setProvider(
-		createProvider({
-			id: "openai",
-			name: "OpenAI",
-			baseUrl: "https://api.openai.com/v1",
-			auth: testAuth,
-			models: Object.values(OPENAI_MODELS),
-			api: { stream: streamImpl, streamSimple: streamImpl },
-		}),
-	)
-	models.setProvider(
-		createProvider({
-			id: "anthropic",
-			name: "Anthropic",
-			baseUrl: "https://api.anthropic.com",
-			auth: testAuth,
-			models: Object.values(ANTHROPIC_MODELS),
-			api: { stream: streamImpl, streamSimple: streamImpl },
-		}),
-	)
-	return models
+	const scriptedStreams = { stream: streamImpl, streamSimple: streamImpl }
+	for (const spec of allProviders()) {
+		models.setProvider(
+			buildPiProvider(spec, { env: {} }, { streams: scriptedStreams, auth: testAuth }),
+		)
+	}
+	return withDynamicModelLookup(models, { env: {} })
 }
 
 export const makePiDurableTestLayer = (

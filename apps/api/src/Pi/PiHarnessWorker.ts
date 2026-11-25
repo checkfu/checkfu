@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "../Compatibility.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
+import { piHarnessAiBindingProps } from "./PiModels.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
 
 export const PI_HARNESS_WORKER_PROPS = {
@@ -18,7 +19,7 @@ export const PI_HARNESS_WORKER_PROPS = {
 } satisfies Cloudflare.WorkerProps
 
 export default PiHarnessWorker.make(
-	PI_HARNESS_WORKER_PROPS,
+	Effect.map(piHarnessAiBindingProps, (aiProps) => ({ ...PI_HARNESS_WORKER_PROPS, ...aiProps })),
 	Effect.gen(function* () {
 		const piSession = placedStub(yield* PiSession, yield* placement)
 		return PiHarnessWorker.of({

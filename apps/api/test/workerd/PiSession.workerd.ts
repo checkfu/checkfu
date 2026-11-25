@@ -25,6 +25,8 @@ const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
 const TEST_OPENAI_KEY = "sk-workerd-fake-key"
 const TEST_ANTHROPIC_KEY = "sk-ant-workerd-fake-key"
+const TEST_OPENROUTER_KEY = "sk-or-v1-workerd-fake-key"
+const TEST_CLOUDFLARE_AI_KEY = "cf-ai-workerd-fake-key"
 const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
 }
@@ -202,6 +204,8 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				`CHECKFU_API_KEY=${TEST_API_KEY}`,
 				`OPENAI_API_KEY=${TEST_OPENAI_KEY}`,
 				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
+				`OPENROUTER_API_KEY=${TEST_OPENROUTER_KEY}`,
+				`CLOUDFLARE_AI_API_KEY=${TEST_CLOUDFLARE_AI_KEY}`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
 				"CHECKFU_PUBLISH_DOMAIN=pages.example",
 				"CHECKFU_API_DOMAIN=none",
@@ -219,7 +223,14 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.CHECKFU_API_KEY
 	delete childEnv.OPENAI_API_KEY
 	delete childEnv.ANTHROPIC_API_KEY
+	delete childEnv.OPENROUTER_API_KEY
+	delete childEnv.CLOUDFLARE_AI_API_KEY
+	delete childEnv.CLOUDFLARE_API_KEY
+	delete childEnv.CLOUDFLARE_GATEWAY_ID
 	delete childEnv.CHECKFU_OPENAI_BASE_URL
+	delete childEnv.CHECKFU_OPENROUTER_BASE_URL
+	delete childEnv.CHECKFU_CLOUDFLARE_AI_GATEWAY_BASE_URL
+	delete childEnv.CHECKFU_CLOUDFLARE_WORKERS_AI_BASE_URL
 	delete childEnv.CHECKFU_PUBLISH_DOMAIN
 	delete childEnv.CHECKFU_API_DOMAIN
 	delete childEnv.CHECKFU_MCP_DOMAIN
@@ -585,8 +596,14 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(api).toContain("CHECKFU_API_KEY")
 		expect(api).not.toContain("OPENAI_API_KEY")
 		expect(api).not.toContain("ANTHROPIC_API_KEY")
+		expect(api).not.toContain("OPENROUTER_API_KEY")
+		expect(api).not.toContain("CLOUDFLARE_AI_API_KEY")
+		expect(api).not.toContain("CLOUDFLARE_API_KEY")
 		expect(harness).toContain("OPENAI_API_KEY")
 		expect(harness).toContain("ANTHROPIC_API_KEY")
+		expect(harness).toContain("OPENROUTER_API_KEY")
+		expect(harness).toContain("CLOUDFLARE_AI_API_KEY")
+		expect(harness).not.toContain("CLOUDFLARE_API_KEY")
 		expect(harness).not.toContain("CHECKFU_API_KEY")
 	})
 

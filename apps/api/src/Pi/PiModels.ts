@@ -1,11 +1,21 @@
+import * as Cloudflare from "@alchemy.run/cloudflare"
 import {
 	BUILTIN_PROVIDERS,
+	CLOUDFLARE_AI_API_KEY_ENV,
+	CLOUDFLARE_GATEWAY_ID_ENV,
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
+	DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL,
+	DEFAULT_OPENROUTER_BASE_URL,
 	providerRequiredConfigEnvs,
 	providerRequiredSecretEnvs,
+	shouldBindCloudflareAiGateway,
 } from "@checkfu/pi-providers/catalog"
-import type { ProviderRuntimeConfig, ProviderSpec } from "@checkfu/pi-providers/catalog"
+import type {
+	CloudflareAiBindingLike,
+	ProviderRuntimeConfig,
+	ProviderSpec,
+} from "@checkfu/pi-providers/catalog"
 import {
 	createNoRedirectProviderFetch,
 	createProviderModels,
@@ -24,9 +34,18 @@ import { optionalSecret } from "../Secrets.ts"
 import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
 import { PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW } from "./PiContextBudget.ts"
 
-export { DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, createNoRedirectProviderFetch }
+export {
+	DEFAULT_ANTHROPIC_BASE_URL,
+	DEFAULT_OPENAI_BASE_URL,
+	DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL,
+	DEFAULT_OPENROUTER_BASE_URL,
+	createNoRedirectProviderFetch,
+}
 
 export const OPENAI_BASE_URL_ENV = "CHECKFU_OPENAI_BASE_URL"
+export const OPENROUTER_BASE_URL_ENV = "CHECKFU_OPENROUTER_BASE_URL"
+export const CLOUDFLARE_AI_GATEWAY_BASE_URL_ENV = "CHECKFU_CLOUDFLARE_AI_GATEWAY_BASE_URL"
+export const CLOUDFLARE_WORKERS_AI_BASE_URL_ENV = "CHECKFU_CLOUDFLARE_WORKERS_AI_BASE_URL"
 export const LOCAL_DEV_SIGNAL_ENV = "CHECKFU_LOCAL_DEV"
 export const LOCAL_DEV_SIGNAL_VALUE = "local-dev"
 
@@ -36,6 +55,13 @@ export const parseLoopbackBaseUrl = (raw: string): string =>
 export interface ProviderBaseUrlOverrides {
 	readonly openai?: string | null
 	readonly anthropic?: string | null
+	readonly openrouter?: string | null
+	readonly "cloudflare-ai-gateway"?: string | null
+	readonly "cloudflare-workers-ai"?: string | null
+}
+
+const EMPTY_BASE_URLS: ProviderBaseUrlOverrides = {
+	openai: null,
 }
 
 const optionalConfigString = (name: string): Config.Config<string | null> =>
@@ -77,40 +103,105 @@ export const providerApiKeys = Effect.map(loadProviderEnv(BUILTIN_PROVIDERS), (e
 			: Redacted.make(env[PROVIDER_API_KEY_ENV.anthropic ?? "ANTHROPIC_API_KEY"] ?? ""),
 }))
 
+/**
+ * Attaches the native Cloudflare Workers `AI` binding to `PiHarnessWorker` on
+ * deploy when `CLOUDFLARE_GATEWAY_ID` is configured without a `CLOUDFLARE_AI_API_KEY`,
+ * enabling zero-token in-account AI Gateway passthrough. Never attached in
+ * `alchemy dev`, so local development and offline workerd tests stay fully local.
+ */
+export const piHarnessAiBindingProps = Effect.gen(function* () {
+	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
+	if (Option.isNone(alchemyContext) || alchemyContext.value.dev) {
+		return {}
+	}
+	const gatewayId = yield* optionalConfigString(CLOUDFLARE_GATEWAY_ID_ENV)
+	const apiKey = yield* optionalSecret(CLOUDFLARE_AI_API_KEY_ENV)
+	const env = Object.fromEntries([
+		[CLOUDFLARE_GATEWAY_ID_ENV, gatewayId ?? undefined],
+		[CLOUDFLARE_AI_API_KEY_ENV, apiKey === null ? undefined : Redacted.value(apiKey)],
+	])
+	return shouldBindCloudflareAiGateway(env) ? { env: { AI: Cloudflare.Workers.AI() } } : {}
+}).pipe(Effect.orDie)
+
+const isAiBindingLike = (value: unknown): value is CloudflareAiBindingLike =>
+	typeof value === "object" &&
+	value !== null &&
+	"fetch" in value &&
+	typeof value.fetch === "function"
+
+export const extractAiBinding = (workerEnv: unknown): CloudflareAiBindingLike | null => {
+	if (typeof workerEnv !== "object" || workerEnv === null || !("AI" in workerEnv)) {
+		return null
+	}
+	return isAiBindingLike(workerEnv.AI) ? workerEnv.AI : null
+}
+
+const readLoopbackOverrides = Effect.gen(function* () {
+	const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
+	const rawOpenRouter = yield* optionalConfigString(OPENROUTER_BASE_URL_ENV)
+	const rawGateway = yield* optionalConfigString(CLOUDFLARE_AI_GATEWAY_BASE_URL_ENV)
+	const rawWorkersAi = yield* optionalConfigString(CLOUDFLARE_WORKERS_AI_BASE_URL_ENV)
+	const overrides: ProviderBaseUrlOverrides = {
+		openai:
+			rawOpenAI === null ? null : parseProviderLoopbackBaseUrl(rawOpenAI, OPENAI_BASE_URL_ENV),
+		...(rawOpenRouter === null
+			? {}
+			: { openrouter: parseProviderLoopbackBaseUrl(rawOpenRouter, OPENROUTER_BASE_URL_ENV) }),
+		...(rawGateway === null
+			? {}
+			: {
+					"cloudflare-ai-gateway": parseProviderLoopbackBaseUrl(
+						rawGateway,
+						CLOUDFLARE_AI_GATEWAY_BASE_URL_ENV,
+					),
+				}),
+		...(rawWorkersAi === null
+			? {}
+			: {
+					"cloudflare-workers-ai": parseProviderLoopbackBaseUrl(
+						rawWorkersAi,
+						CLOUDFLARE_WORKERS_AI_BASE_URL_ENV,
+					),
+				}),
+	}
+	return overrides
+})
+
 export const providerBaseUrls = Effect.gen(function* () {
 	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
 	if (Option.isSome(alchemyContext)) {
 		if (!alchemyContext.value.dev) {
-			return { openai: null }
+			return EMPTY_BASE_URLS
 		}
 		const stage = yield* Effect.serviceOption(Stage)
 		if (Option.isSome(stage) && stage.value === "production") {
-			return { openai: null }
+			return EMPTY_BASE_URLS
 		}
-		const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
-		if (rawOpenAI === null) {
-			return { openai: null }
+		const overrides = yield* readLoopbackOverrides
+		const hasAny =
+			overrides.openai !== null ||
+			overrides.openrouter !== undefined ||
+			overrides["cloudflare-ai-gateway"] !== undefined ||
+			overrides["cloudflare-workers-ai"] !== undefined
+		if (!hasAny) {
+			return EMPTY_BASE_URLS
 		}
-		const openai = parseLoopbackBaseUrl(rawOpenAI)
 		const runtimeContext = yield* CurrentRuntimeContext
 		yield* (
 			runtimeContext?.set(LOCAL_DEV_SIGNAL_ENV, Output.literal(LOCAL_DEV_SIGNAL_VALUE)) ??
 			Effect.void
 		)
-		return { openai }
+		return overrides
 	}
 	const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
 	if (runtimeStage === "production") {
-		return { openai: null }
+		return EMPTY_BASE_URLS
 	}
 	const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
 	if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) {
-		return { openai: null }
+		return EMPTY_BASE_URLS
 	}
-	const rawOpenAI = yield* optionalConfigString(OPENAI_BASE_URL_ENV)
-	return {
-		openai: rawOpenAI === null ? null : parseLoopbackBaseUrl(rawOpenAI),
-	}
+	return yield* readLoopbackOverrides
 }).pipe(Effect.orDie)
 
 export interface ProviderApiKeysInput {
@@ -146,6 +237,9 @@ export const toProviderRuntimeConfig = (
 					baseUrlOverrides: {
 						openai: baseUrls.openai,
 						anthropic: baseUrls.anthropic,
+						openrouter: baseUrls.openrouter,
+						"cloudflare-ai-gateway": baseUrls["cloudflare-ai-gateway"],
+						"cloudflare-workers-ai": baseUrls["cloudflare-workers-ai"],
 					},
 				}),
 		...(extra?.aiBinding === undefined ? {} : { aiBinding: extra.aiBinding }),

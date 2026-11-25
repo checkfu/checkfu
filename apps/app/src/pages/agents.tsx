@@ -126,7 +126,10 @@ function AgentForm<Saved>({
 				<Field label="Name">
 					<Input required value={draft.name} onChange={set("name")} />
 				</Field>
-				<Field label="Model" description="For example claude-sonnet-5-5 or gpt-6.2-sol.">
+				<Field
+					label="Model"
+					description="For example claude-sonnet-5-5, gpt-6.2-sol, openrouter/anthropic/claude-sonnet-5.5, or cloudflare-ai-gateway/claude-sonnet-5-5."
+				>
 					<Input required value={draft.model} onChange={set("model")} className="font-mono" />
 				</Field>
 				<Field label="System prompt">

@@ -3,12 +3,31 @@ import { BUILTIN_PROVIDERS, allProviders, findProvider } from "./Providers.ts"
 import { DEFAULT_MIN_CONTEXT_WINDOW, MAX_MODEL_ID_LENGTH } from "./Types.ts"
 import type { ProviderSpec, ResolvedModelSpecifier } from "./Types.ts"
 
+export {
+	getCloudflareAiGatewayCatalogEntry,
+	getCloudflareAiGatewayCatalogIndex,
+	getCloudflareWorkersAiCatalogEntry,
+	getCloudflareWorkersAiCatalogIndex,
+	getKnownNonChatModelIds,
+	getOpenRouterCatalogEntry,
+	getOpenRouterCatalogIndex,
+	isKnownNonChatModel,
+} from "./CatalogIndex.ts"
+export type { CatalogIndexEntry } from "./CatalogIndex.ts"
 export { parseLoopbackBaseUrl, parseProviderBaseUrl } from "./Fetch.ts"
 export {
 	BUILTIN_PROVIDERS,
 	BUILTIN_PROVIDER_IDS,
+	CLOUDFLARE_ACCOUNT_ID_ENV,
+	CLOUDFLARE_AI_API_KEY_ENV,
+	CLOUDFLARE_GATEWAY_ID_ENV,
 	DEFAULT_ANTHROPIC_BASE_URL,
+	DEFAULT_CLOUDFLARE_AI_GATEWAY_BINDING_ROOT,
+	DEFAULT_CLOUDFLARE_AI_GATEWAY_HTTPS_ROOT,
+	DEFAULT_CLOUDFLARE_WORKERS_AI_BASE_ROOT,
 	DEFAULT_OPENAI_BASE_URL,
+	DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL,
+	DEFAULT_OPENROUTER_BASE_URL,
 	allProviders,
 	checkProviderCredentials,
 	defineProvider,
@@ -17,8 +36,15 @@ export {
 	isBuiltinProviderId,
 	providerRequiredConfigEnvs,
 	providerRequiredSecretEnvs,
+	resolveCloudflareGatewayAuthMode,
+	shouldBindCloudflareAiGateway,
 } from "./Providers.ts"
-export type { BuiltinProvider, BuiltinProviderId } from "./Providers.ts"
+export type {
+	BuiltinProvider,
+	BuiltinProviderId,
+	CloudflareGatewayAuthInputs,
+	CloudflareGatewayAuthMode,
+} from "./Providers.ts"
 export {
 	DEFAULT_MIN_CONTEXT_WINDOW,
 	DEFAULT_SYNTHESIZED_CONTEXT_WINDOW,

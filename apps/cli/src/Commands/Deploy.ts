@@ -1,3 +1,12 @@
+import {
+	CLOUDFLARE_ACCOUNT_ID_ENV,
+	CLOUDFLARE_AI_API_KEY_ENV,
+	CLOUDFLARE_GATEWAY_ID_ENV,
+	checkProviderCredentials,
+	findProvider,
+	inferProviderForApiKey,
+	shouldBindCloudflareAiGateway,
+} from "@checkfu/pi-providers/catalog"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
@@ -33,14 +42,58 @@ export const STACK_NAME = "Checkfu"
 export const DEFAULT_STAGE = "live"
 const API_KEY_ENV = "CHECKFU_API_KEY"
 
-export const MODEL_PROVIDERS = [
-	{ name: "Anthropic", env: "ANTHROPIC_API_KEY", model: "claude-sonnet-5-5" },
-	{ name: "OpenAI", env: "OPENAI_API_KEY", model: "gpt-6.2-sol" },
-] as const
-type ModelProvider = (typeof MODEL_PROVIDERS)[number]
+export interface ModelProvider {
+	readonly name: string
+	readonly env: string
+	readonly model: string
+}
 
-export const providerForKey = (key: string): ModelProvider =>
-	key.startsWith("sk-ant-") ? MODEL_PROVIDERS[0] : MODEL_PROVIDERS[1]
+const singleKeyProvider = (id: "anthropic" | "openai" | "openrouter"): ModelProvider => {
+	const spec = findProvider(id)
+	if (
+		spec === undefined ||
+		spec.defaultModel === undefined ||
+		(spec.auth.kind !== "bearer" && spec.auth.kind !== "api_key_header")
+	) {
+		throw new Error(`Missing built-in provider specification for "${id}".`)
+	}
+	return { name: spec.name, env: spec.auth.env, model: spec.defaultModel }
+}
+
+const CLOUDFLARE_AI_GATEWAY_PROVIDER: ModelProvider = {
+	name: "Cloudflare AI Gateway",
+	env: CLOUDFLARE_GATEWAY_ID_ENV,
+	model:
+		findProvider("cloudflare-ai-gateway")?.defaultModel ??
+		"cloudflare-ai-gateway/claude-sonnet-5-5",
+}
+
+const CLOUDFLARE_WORKERS_AI_PROVIDER: ModelProvider = {
+	name: "Cloudflare Workers AI",
+	env: CLOUDFLARE_AI_API_KEY_ENV,
+	model:
+		findProvider("cloudflare-workers-ai")?.defaultModel ??
+		"cloudflare-workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+}
+
+export const MODEL_PROVIDERS: ReadonlyArray<ModelProvider> = [
+	singleKeyProvider("anthropic"),
+	singleKeyProvider("openai"),
+	singleKeyProvider("openrouter"),
+]
+
+const OPENAI_PROVIDER = singleKeyProvider("openai")
+
+export const providerForKey = (key: string): ModelProvider => {
+	const inferred = inferProviderForApiKey(key)
+	if (inferred !== undefined) {
+		const matched = MODEL_PROVIDERS.find((candidate) => candidate.name === inferred.name)
+		if (matched !== undefined) {
+			return matched
+		}
+	}
+	return OPENAI_PROVIDER
+}
 
 export interface Checkout {
 	readonly root: string
@@ -282,13 +335,15 @@ const promptForProviderKey = (retry: string) =>
 	Effect.gen(function* () {
 		const stdio = yield* Stdio.Stdio
 		if (!(yield* stdio.stdinIsTerminal)) {
+			const envList = [...MODEL_PROVIDERS.map((provider) => provider.env), "CLOUDFLARE_GATEWAY_ID"]
 			return yield* configError(
-				`No model provider key found. Export ${MODEL_PROVIDERS.map((provider) => provider.env).join(" or ")} and run \`${retry}\` again.`,
+				`No model provider key found. Export ${envList.slice(0, -1).join(", ")}, or ${envList.at(-1)} and run \`${retry}\` again.`,
 			)
 		}
 		const key = yield* Prompt.run(
 			Prompt.Hidden({
-				message: "Paste an Anthropic or OpenAI API key (your agents call the model with it)",
+				message:
+					"Paste an Anthropic, OpenAI, or OpenRouter API key (your agents call the model with it)",
 				validate: (value) =>
 					value.trim().length === 0
 						? Effect.fail("An API key is required.")
@@ -296,6 +351,26 @@ const promptForProviderKey = (retry: string) =>
 			}),
 		).pipe(Effect.mapError(() => new CliFailure({ message: "Deploy cancelled.", exitCode: 130 })))
 		return Redacted.value(key).trim()
+	})
+
+const syncEnvEntry = (
+	contents: string,
+	name: string,
+	options?: { readonly secret?: boolean },
+): Effect.Effect<{ readonly contents: string; readonly value: string }, CliFailure, Stdio.Stdio> =>
+	Effect.gen(function* () {
+		let value = options?.secret
+			? yield* readDotEnvSecret(contents, name)
+			: (yield* readDotEnvValue(contents, name)).trim()
+		if (value.length === 0) {
+			value = yield* envValue(name)
+			if (value.length > 0) {
+				const next = yield* setDotEnvValue(contents, name, value)
+				yield* writeStderrLine(`Using ${name} from your environment.`)
+				return { contents: next, value }
+			}
+		}
+		return { contents, value }
 	})
 
 const prepareEnvFile = (envFile: string, retry: string) =>
@@ -327,18 +402,69 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 
 		let provider: ModelProvider | undefined
 		for (const candidate of MODEL_PROVIDERS) {
-			let key = yield* readDotEnvSecret(contents, candidate.env)
-			if (key.length === 0) {
-				key = yield* envValue(candidate.env)
-				if (key.length > 0) {
-					contents = yield* setDotEnvValue(contents, candidate.env, key)
-					yield* writeStderrLine(`Using ${candidate.env} from your environment.`)
-				}
-			}
-			if (key.length > 0) {
+			const synced = yield* syncEnvEntry(contents, candidate.env, { secret: true })
+			contents = synced.contents
+			if (synced.value.length > 0) {
 				provider ??= candidate
 			}
 		}
+
+		// Cloudflare AI Gateway (zero-token native Worker AI binding when CLOUDFLARE_GATEWAY_ID
+		// is set without CLOUDFLARE_AI_API_KEY, or HTTPS with CLOUDFLARE_AI_API_KEY +
+		// CLOUDFLARE_ACCOUNT_ID) and Cloudflare Workers AI (CLOUDFLARE_AI_API_KEY +
+		// CLOUDFLARE_ACCOUNT_ID). Deliberately never reads Alchemy's deployment CLOUDFLARE_API_KEY.
+		const gatewaySynced = yield* syncEnvEntry(contents, CLOUDFLARE_GATEWAY_ID_ENV)
+		contents = gatewaySynced.contents
+		const cloudflareAiKeySynced = yield* syncEnvEntry(contents, CLOUDFLARE_AI_API_KEY_ENV, {
+			secret: true,
+		})
+		contents = cloudflareAiKeySynced.contents
+		let accountIdValue = ""
+		if (cloudflareAiKeySynced.value.length > 0) {
+			const accountSynced = yield* syncEnvEntry(contents, CLOUDFLARE_ACCOUNT_ID_ENV)
+			contents = accountSynced.contents
+			accountIdValue = accountSynced.value
+		}
+		const cloudflareEnv: Readonly<Record<string, string | undefined>> = Object.fromEntries([
+			[CLOUDFLARE_GATEWAY_ID_ENV, gatewaySynced.value.length > 0 ? gatewaySynced.value : undefined],
+			[
+				CLOUDFLARE_AI_API_KEY_ENV,
+				cloudflareAiKeySynced.value.length > 0 ? cloudflareAiKeySynced.value : undefined,
+			],
+			[CLOUDFLARE_ACCOUNT_ID_ENV, accountIdValue.length > 0 ? accountIdValue : undefined],
+		])
+		const gatewaySpec = findProvider("cloudflare-ai-gateway")
+		const workersAiSpec = findProvider("cloudflare-workers-ai")
+		const gatewayCheck =
+			gatewaySpec === undefined
+				? { ok: false as const, missing: [] as ReadonlyArray<string>, message: "" }
+				: checkProviderCredentials(gatewaySpec, {
+						env: cloudflareEnv,
+						aiBinding: shouldBindCloudflareAiGateway(cloudflareEnv)
+							? { fetch: globalThis.fetch }
+							: null,
+					})
+		const workersAiCheck =
+			workersAiSpec === undefined
+				? { ok: false as const, missing: [] as ReadonlyArray<string>, message: "" }
+				: checkProviderCredentials(workersAiSpec, { env: cloudflareEnv })
+		if (gatewayCheck.ok) {
+			provider ??= CLOUDFLARE_AI_GATEWAY_PROVIDER
+		} else if (workersAiCheck.ok) {
+			provider ??= CLOUDFLARE_WORKERS_AI_PROVIDER
+		} else if (provider === undefined) {
+			if (gatewaySynced.value.length > 0 && cloudflareAiKeySynced.value.length > 0) {
+				return yield* configError(
+					`${CLOUDFLARE_GATEWAY_ID_ENV} and ${CLOUDFLARE_AI_API_KEY_ENV} are set without ${CLOUDFLARE_ACCOUNT_ID_ENV}, so neither HTTPS AI Gateway auth nor the native Worker AI binding can be used. Set ${CLOUDFLARE_ACCOUNT_ID_ENV} for HTTPS auth, or unset ${CLOUDFLARE_AI_API_KEY_ENV} to use the native Worker AI binding on deploy.`,
+				)
+			}
+			if (cloudflareAiKeySynced.value.length > 0) {
+				return yield* configError(
+					`${CLOUDFLARE_AI_API_KEY_ENV} is set without ${CLOUDFLARE_ACCOUNT_ID_ENV}. Set ${CLOUDFLARE_ACCOUNT_ID_ENV} to use Cloudflare Workers AI (or also set ${CLOUDFLARE_GATEWAY_ID_ENV} for AI Gateway).`,
+				)
+			}
+		}
+
 		if (provider === undefined) {
 			const key = yield* promptForProviderKey(retry)
 			provider = providerForKey(key)
