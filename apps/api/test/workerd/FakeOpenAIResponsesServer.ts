@@ -11,6 +11,7 @@ export interface OpenAIInputMessage {
 export interface RecordedOpenAIRequest {
 	readonly id: number
 	readonly authorization: string | undefined
+	readonly headers: IncomingMessage["headers"]
 	readonly model: string | undefined
 	readonly body: JsonObject
 	readonly messages: ReadonlyArray<OpenAIInputMessage>
@@ -319,6 +320,7 @@ export const startFakeOpenAIResponsesServer = async (
 			const record: RecordedOpenAIRequest = {
 				id,
 				authorization: req.headers.authorization,
+				headers: req.headers,
 				model: typeof body.model === "string" ? body.model : undefined,
 				body,
 				messages,

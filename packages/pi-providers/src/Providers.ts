@@ -127,6 +127,22 @@ const BUILTIN_PROVIDER_MAP: ReadonlyMap<string, BuiltinProvider> = new Map(
 export const isBuiltinProviderId = (value: string): value is BuiltinProviderId =>
 	BUILTIN_PROVIDER_MAP.has(value)
 
+const CATALOG_ONLY_PROVIDER_SPECS = new WeakSet<ProviderSpec>()
+
+/**
+ * Marks a stripped validation-only provider projection (such as those parsed
+ * from `CHECKFU_PROVIDER_CATALOG` for public API Workers) so catalog validation
+ * permits the intentionally omitted `baseUrl` while runtime registration still
+ * rejects it.
+ */
+export const markCatalogOnlyProviderSpec = <T extends ProviderSpec>(spec: T): T => {
+	CATALOG_ONLY_PROVIDER_SPECS.add(spec)
+	return spec
+}
+
+export const isCatalogOnlyProviderSpec = (spec: ProviderSpec): boolean =>
+	CATALOG_ONLY_PROVIDER_SPECS.has(spec)
+
 const isSupportedAuthKind = (kind: string): kind is ProviderAuthSpec["kind"] =>
 	kind === "none" ||
 	kind === "bearer" ||
@@ -191,7 +207,7 @@ export const assertValidProviderSpec = (spec: ProviderSpec): void => {
 				`Provider "${spec.id}" uses "${spec.auth.kind}" auth and must not declare a static baseUrl.`,
 			)
 		}
-	} else {
+	} else if (!isCatalogOnlyProviderSpec(spec) || spec.baseUrl !== undefined) {
 		parsePinnedProviderBaseUrl(spec.baseUrl, `provider "${spec.id}" baseUrl`)
 	}
 }

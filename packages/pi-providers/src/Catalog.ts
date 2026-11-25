@@ -14,6 +14,30 @@ export {
 	isKnownNonChatModel,
 } from "./CatalogIndex.ts"
 export type { CatalogIndexEntry } from "./CatalogIndex.ts"
+export {
+	CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+	CUSTOM_PROVIDERS_ENV,
+	CUSTOM_PROVIDER_CATALOG_ENV,
+	CUSTOM_PROVIDER_SECRET_ENV_PREFIX,
+	CustomProviderConfigError,
+	assertCloudflareWorkerEnvByteLimit,
+	assertValidCustomProviderCredentials,
+	isCustomProviderSecretEnv,
+	isSendableBearerToken,
+	isValidHeaderValue,
+	packAlchemyConfigEnvValue,
+	parseCustomProviderCatalog,
+	parseCustomProvidersManifest,
+	serializeCustomProviderCatalog,
+	usesLoopbackHttpBaseUrl,
+	utf8ByteLength,
+	validateCustomProviderCredentials,
+} from "./CustomProviders.ts"
+export type {
+	AssertWorkerEnvByteLimitOptions,
+	CustomProviderCredentialsValidationResult,
+	ParseCustomProvidersOptions,
+} from "./CustomProviders.ts"
 export { parseLoopbackBaseUrl, parseProviderBaseUrl } from "./Fetch.ts"
 export {
 	BUILTIN_PROVIDERS,

@@ -41,6 +41,7 @@ import {
 	DEFAULT_OPENROUTER_BASE_URL,
 	allProviders,
 	assertValidProviderSpec,
+	isCatalogOnlyProviderSpec,
 	resolveCloudflareGatewayAuthMode,
 } from "./Providers.ts"
 import { DEFAULT_MIN_CONTEXT_WINDOW, DEFAULT_SYNTHESIZED_MAX_TOKENS, ownProperty } from "./Types.ts"
@@ -48,6 +49,27 @@ import type { ProviderAuthSpec, ProviderRuntimeConfig, ProviderSpec, WireFormat 
 import { createWireFormatStreams } from "./WireFormats.ts"
 import type { WireFormatOptions } from "./WireFormats.ts"
 
+export {
+	CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+	CUSTOM_PROVIDERS_ENV,
+	CUSTOM_PROVIDER_SECRET_ENV_PREFIX,
+	CustomProviderConfigError,
+	assertCloudflareWorkerEnvByteLimit,
+	assertValidCustomProviderCredentials,
+	isCustomProviderSecretEnv,
+	isSendableBearerToken,
+	isValidHeaderValue,
+	packAlchemyConfigEnvValue,
+	parseCustomProvidersManifest,
+	usesLoopbackHttpBaseUrl,
+	utf8ByteLength,
+	validateCustomProviderCredentials,
+} from "./CustomProviders.ts"
+export type {
+	AssertWorkerEnvByteLimitOptions,
+	CustomProviderCredentialsValidationResult,
+	ParseCustomProvidersOptions,
+} from "./CustomProviders.ts"
 export {
 	createNoRedirectProviderFetch,
 	parseLoopbackBaseUrl,
@@ -1288,6 +1310,15 @@ const providerWireOptions = (
 	}
 }
 
+const assertRuntimeProviderSpec = (spec: ProviderSpec): void => {
+	if (isCatalogOnlyProviderSpec(spec)) {
+		throw new Error(
+			`Provider "${spec.id}" is a catalog-only projection and cannot be registered at runtime.`,
+		)
+	}
+	assertValidProviderSpec(spec)
+}
+
 /**
  * Resolves and materializes a valid `Model<WireFormat>` for `spec` and `modelId`
  * using the same `resolveProviderModelPlan` engine as `resolveModelSpecifier`.
@@ -1297,7 +1328,7 @@ export const synthesizeProviderModel = (
 	modelId: string,
 	config: ProviderRuntimeConfig,
 ): Model<WireFormat> | undefined => {
-	assertValidProviderSpec(spec)
+	assertRuntimeProviderSpec(spec)
 	const minContextWindow = config.minContextWindow ?? DEFAULT_MIN_CONTEXT_WINDOW
 	const plan = resolveProviderModelPlan(spec, modelId, minContextWindow)
 	if (plan === undefined) {
@@ -1364,7 +1395,7 @@ export const buildPiProvider = (
 	config: ProviderRuntimeConfig,
 	overrides?: BuildPiProviderOverrides,
 ): Provider<WireFormat> => {
-	assertValidProviderSpec(spec)
+	assertRuntimeProviderSpec(spec)
 	const resolvedBaseUrl = resolveProviderBaseUrl(spec, config)
 	const apiMap: Partial<Record<WireFormat, ProviderStreams>> = {}
 	for (const format of spec.formats) {

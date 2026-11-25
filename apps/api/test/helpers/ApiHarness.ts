@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs"
 import * as Domain from "@alchemy.run/domain"
-import { allProviders } from "@checkfu/pi-providers/catalog"
+import {
+	CUSTOM_PROVIDERS_ENV,
+	allProviders,
+	parseCustomProvidersManifest,
+} from "@checkfu/pi-providers/catalog"
+import type { ProviderSpec } from "@checkfu/pi-providers/catalog"
 import { buildPiProvider, withDynamicModelLookup } from "@checkfu/pi-providers/runtime"
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { Api, AssistantMessage, Model, TranscriptContext } from "@earendil-works/pi-ai"
@@ -93,6 +98,7 @@ export const makeScriptedPiModels = (
 		context: TranscriptContext,
 		signal?: AbortSignal,
 	) => Promise<AssistantMessage>,
+	customProviders?: ReadonlyArray<ProviderSpec>,
 ) => {
 	const models = createModels({
 		authContext: {
@@ -153,12 +159,15 @@ export const makeScriptedPiModels = (
 	}
 
 	const scriptedStreams = { stream: streamImpl, streamSimple: streamImpl }
-	for (const spec of allProviders()) {
+	for (const spec of allProviders(customProviders)) {
 		models.setProvider(
 			buildPiProvider(spec, { env: {} }, { streams: scriptedStreams, auth: testAuth }),
 		)
 	}
-	return withDynamicModelLookup(models, { env: {} })
+	return withDynamicModelLookup(models, {
+		env: {},
+		...(customProviders === undefined ? {} : { customProviders }),
+	})
 }
 
 export const makePiDurableTestLayer = (
@@ -180,16 +189,23 @@ export const makePiDurableTestLayer = (
 	}
 	const objects = new Map<string, Promise<SessionObject>>()
 	const resets: Array<string> = []
+	const customProviders =
+		envOverrides[CUSTOM_PROVIDERS_ENV] === undefined
+			? []
+			: parseCustomProvidersManifest(envOverrides[CUSTOM_PROVIDERS_ENV], {
+					allowLoopbackHttp: envOverrides.CHECKFU_LOCAL_DEV === "local-dev",
+				})
 	const open = async (
 		sessionId: string,
 		storage?: InMemoryPiDurableBackend["storage"],
 	): Promise<SessionObject> => {
 		const gone = Deferred.makeUnsafe<never, HarnessCallFailed>()
 		const backend = await createInMemoryPiDurableBackend(
-			makeScriptedPiModels(handler),
+			makeScriptedPiModels(handler, customProviders),
 			undefined,
 			undefined,
-			(provider) => checkCatalogProviderCredentials(provider, { env: envOverrides }).ok,
+			(provider) =>
+				checkCatalogProviderCredentials(provider, { env: envOverrides }, customProviders).ok,
 			{
 				...(storage === undefined ? {} : { storage }),
 				reset: Effect.andThen(

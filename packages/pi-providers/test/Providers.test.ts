@@ -30,8 +30,12 @@ import { describe, expect, it } from "vitest"
 import {
 	BUILTIN_PROVIDERS,
 	CLOUDFLARE_AI_API_KEY_ENV,
+	CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+	CUSTOM_PROVIDER_SECRET_ENV_PREFIX,
+	CustomProviderConfigError,
 	DEFAULT_MIN_CONTEXT_WINDOW,
 	MAX_MODEL_ID_LENGTH,
+	assertCloudflareWorkerEnvByteLimit,
 	checkProviderCredentials,
 	defineProvider,
 	getCloudflareAiGatewayCatalogIndex,
@@ -40,11 +44,19 @@ import {
 	getOpenRouterCatalogEntry,
 	getOpenRouterCatalogIndex,
 	inferProviderForApiKey,
+	isCustomProviderSecretEnv,
+	isValidHeaderValue,
+	packAlchemyConfigEnvValue,
+	parseCustomProviderCatalog,
+	parseCustomProvidersManifest,
 	parseLoopbackBaseUrl,
 	parseProviderBaseUrl,
 	providerRequiredSecretEnvs,
 	resolveModelSpecifier,
+	serializeCustomProviderCatalog,
 	shouldBindCloudflareAiGateway,
+	utf8ByteLength,
+	validateCustomProviderCredentials,
 } from "../src/Catalog.ts"
 import { hydrateIndexedModel } from "../src/CatalogCapabilities.ts"
 import {
@@ -60,6 +72,7 @@ import {
 	createOpenAICompletionsWire,
 	createOpenAIResponsesWire,
 	createProviderModels,
+	synthesizeProviderModel,
 	withDynamicModelLookup,
 } from "../src/Runtime.ts"
 
@@ -4076,5 +4089,1337 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 		expect(lowFloorRegistry.getModel("acme-floor", "model-8k")).toBeUndefined()
 		expect(lowFloorRegistry.getModels("acme-floor")).toEqual([])
 		expect(await lowFloorRegistry.getAvailable("acme-floor")).toEqual([])
+	})
+})
+
+describe("@checkfu/pi-providers custom format-compatible providers", () => {
+	it("parses object and array CHECKFU_PROVIDERS manifests and enforces security invariants", async () => {
+		expect(CUSTOM_PROVIDER_SECRET_ENV_PREFIX).toBe("CHECKFU_PROVIDER_SECRET_")
+		expect(isCustomProviderSecretEnv("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")).toBe(true)
+		expect(isCustomProviderSecretEnv("CHECKFU_PROVIDER_SECRET_")).toBe(false)
+		expect(isCustomProviderSecretEnv("CHECKFU_PROVIDER_SECRET__BAD")).toBe(false)
+		expect(isCustomProviderSecretEnv("GH_ENTERPRISE_TOKEN")).toBe(false)
+		expect(isCustomProviderSecretEnv("OPENAI_API_KEY")).toBe(false)
+		expect(isCustomProviderSecretEnv("AI")).toBe(false)
+
+		const fromObject = parseCustomProvidersManifest(
+			JSON.stringify({
+				xai: {
+					name: "xAI",
+					format: "openai-responses",
+					base_url: "https://api.x.ai/v1/",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+					default_model: "grok-4",
+					context_window: 256_000,
+					max_tokens: 32_768,
+					reasoning: true,
+					headers: { "x-team": "agents" },
+					secret_headers: { "x-gateway-token": "CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN" },
+					models: {
+						"grok-4-fast": { context_window: 131_072, max_tokens: 16_384, reasoning: false },
+					},
+				},
+				"corp-claude": {
+					format: "anthropic-messages",
+					base_url: "https://llm.corp.example",
+					auth: { type: "bearer", env: "CHECKFU_PROVIDER_SECRET_CORP_CLAUDE_BEARER" },
+				},
+				azureish: {
+					format: "openai-completions",
+					base_url: "https://gw.corp.example/v1",
+					auth: {
+						type: "api_key_header",
+						header: "api-key",
+						env: "CHECKFU_PROVIDER_SECRET_AZUREISH_KEY",
+					},
+					headers: { "CF-Access-Client-Id": "public-client-id" },
+					secret_headers: {
+						"CF-Access-Client-Secret": "CHECKFU_PROVIDER_SECRET_CF_ACCESS_SECRET",
+						Cookie: "CHECKFU_PROVIDER_SECRET_SESSION_COOKIE",
+					},
+				},
+			}),
+		)
+		expect(fromObject).toHaveLength(3)
+		expect(fromObject[0]).toMatchObject({
+			id: "xai",
+			name: "xAI",
+			source: "custom",
+			defaultModel: "xai/grok-4",
+			defaultFormat: "openai-responses",
+			baseUrl: "https://api.x.ai/v1",
+			auth: { kind: "bearer", env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY" },
+			headers: { "x-team": "agents" },
+			secretHeaders: { "x-gateway-token": "CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN" },
+		})
+		expect(providerRequiredSecretEnvs(fromObject)).toEqual([
+			"CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+			"CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN",
+			"CHECKFU_PROVIDER_SECRET_CORP_CLAUDE_BEARER",
+			"CHECKFU_PROVIDER_SECRET_AZUREISH_KEY",
+			"CHECKFU_PROVIDER_SECRET_CF_ACCESS_SECRET",
+			"CHECKFU_PROVIDER_SECRET_SESSION_COOKIE",
+		])
+		expect(fromObject[1]?.defaultModel).toBeUndefined()
+		const declaredDefault = parseCustomProvidersManifest(
+			JSON.stringify({
+				declared: {
+					format: "openai-completions",
+					base_url: "https://api.declared.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_DECLARED_KEY",
+					models: { "model-a": { context_window: 131_072 } },
+				},
+				acme: {
+					format: "openai-completions",
+					base_url: "https://api.acme.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_KEY",
+					context_window: 200_000,
+					models: {
+						"acme/chat": {},
+						chat: {},
+					},
+				},
+			}),
+		)
+		expect(declaredDefault[0]?.defaultModel).toBe("declared/model-a")
+		// Declared models with empty `{}` overrides are retained and namespaced wire IDs keep their prefix.
+		expect(declaredDefault[1]?.defaultModel).toBe("acme/acme/chat")
+		expect(declaredDefault[1]?.models).toEqual({ "acme/chat": {}, chat: {} })
+		expect(resolveModelSpecifier("acme/acme/chat", { customProviders: declaredDefault })).toEqual({
+			provider: "acme",
+			modelId: "acme/chat",
+			cataloged: true,
+		})
+		expect(resolveModelSpecifier("acme/chat", { customProviders: declaredDefault })).toEqual({
+			provider: "acme",
+			modelId: "chat",
+			cataloged: true,
+		})
+		const declaredCatalogRoundtrip = parseCustomProviderCatalog(
+			serializeCustomProviderCatalog(declaredDefault),
+		)
+		expect(declaredCatalogRoundtrip[1]?.defaultModel).toBe("acme/acme/chat")
+		expect(declaredCatalogRoundtrip[1]?.models).toEqual({ "acme/chat": {}, chat: {} })
+		expect(
+			resolveModelSpecifier("acme/acme/chat", { customProviders: declaredCatalogRoundtrip }),
+		).toEqual({
+			provider: "acme",
+			modelId: "acme/chat",
+			cataloged: true,
+		})
+		const declaredRuntimeModels = createProviderModels({
+			env: {
+				CHECKFU_PROVIDER_SECRET_DECLARED_KEY: "k1",
+				CHECKFU_PROVIDER_SECRET_ACME_KEY: "k2",
+			},
+			customProviders: declaredDefault,
+		})
+		expect(declaredRuntimeModels.getModels("acme").map((model) => model.id)).toEqual([
+			"acme/chat",
+			"chat",
+		])
+		expect((await declaredRuntimeModels.getAvailable("acme")).map((model) => model.id)).toEqual([
+			"acme/chat",
+			"chat",
+		])
+		expect(declaredRuntimeModels.getModel("acme", "acme/chat")?.contextWindow).toBe(200_000)
+		expect(declaredRuntimeModels.getModel("acme", "chat")?.contextWindow).toBe(200_000)
+		const explicitNamespacedDefault = parseCustomProvidersManifest(
+			JSON.stringify({
+				acme: {
+					format: "openai-completions",
+					base_url: "https://api.acme.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_KEY",
+					default_model: "acme/chat",
+					models: { "acme/chat": {} },
+				},
+			}),
+		)
+		expect(explicitNamespacedDefault[0]?.defaultModel).toBe("acme/acme/chat")
+
+		// Stripped API catalog projection omits headers, secret_headers, auth, and base_url.
+		const serializedCatalog = serializeCustomProviderCatalog(fromObject)
+		expect(serializedCatalog).not.toContain("x-team")
+		expect(serializedCatalog).not.toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+		expect(serializedCatalog).not.toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+		expect(serializedCatalog).not.toContain("https://api.x.ai")
+		const reparsedCatalog = parseCustomProviderCatalog(serializedCatalog)
+		expect(resolveModelSpecifier("xai/grok-4", { customProviders: reparsedCatalog })).toEqual({
+			provider: "xai",
+			modelId: "grok-4",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("xai/grok-4-fast", { customProviders: reparsedCatalog })).toEqual({
+			provider: "xai",
+			modelId: "grok-4-fast",
+			cataloged: true,
+		})
+		expect(() =>
+			parseCustomProviderCatalog(
+				JSON.stringify([{ id: "bad", format: "openai-responses", headers: { "x-a": "1" } }]),
+			),
+		).toThrow(/Disallowed field "headers"/)
+		// Catalog-only projections are rejected at runtime registration boundaries even if a
+		// loopback baseUrlOverride supplies an endpoint for that provider ID.
+		const catalogOnlyXai = reparsedCatalog[0]!
+		expect(() =>
+			buildPiProvider(catalogOnlyXai, {
+				env: {},
+				baseUrlOverrides: { xai: "http://127.0.0.1:11434/v1" },
+			}),
+		).toThrow(/catalog-only projection/i)
+		expect(() =>
+			createProviderModels({
+				env: {},
+				customProviders: reparsedCatalog,
+				baseUrlOverrides: { xai: "http://127.0.0.1:11434/v1" },
+			}),
+		).toThrow(/catalog-only projection/i)
+		expect(() =>
+			synthesizeProviderModel(catalogOnlyXai, "grok-4", {
+				env: {},
+				baseUrlOverrides: { xai: "http://127.0.0.1:11434/v1" },
+			}),
+		).toThrow(/catalog-only projection/i)
+
+		// Custom provider named "constructor" is valid and must not trip Object.prototype lookups.
+		const ctorParsed = parseCustomProvidersManifest(
+			JSON.stringify({
+				constructor: {
+					format: "openai-completions",
+					base_url: "https://ctor.example/v1",
+					auth: { type: "none" },
+				},
+			}),
+		)
+		const ctorModels = createProviderModels({
+			env: { OPENAI_API_KEY: "sk-test" },
+			baseUrlOverrides: { openai: null },
+			customProviders: ctorParsed,
+		})
+		expect(ctorModels.getModel("constructor", "m1")?.baseUrl).toBe("https://ctor.example/v1")
+		expect(ctorModels.getModel("openai", "gpt-4o-mini")?.id).toBe("gpt-4o-mini")
+		expect(resolveModelSpecifier("xai/grok-4", { customProviders: fromObject })).toEqual({
+			provider: "xai",
+			modelId: "grok-4",
+			cataloged: false,
+		})
+
+		// Array form with local loopback HTTP allowed ONLY when allowLoopbackHttp: true
+		const localJson = JSON.stringify([
+			{
+				id: "ollama",
+				format: "openai-completions",
+				base_url: "http://127.0.0.1:11434/v1",
+				auth: { type: "none" },
+			},
+		])
+		expect(() => parseCustomProvidersManifest(localJson, { allowLoopbackHttp: false })).toThrow(
+			CustomProviderConfigError,
+		)
+		const localParsed = parseCustomProvidersManifest(localJson, { allowLoopbackHttp: true })
+		expect(localParsed[0]).toMatchObject({
+			id: "ollama",
+			baseUrl: "http://127.0.0.1:11434/v1",
+			auth: { kind: "none" },
+		})
+
+		// Underscore-separated credential headers are permitted in auth/secret_headers (and non-credential
+		// underscore headers in static headers) with their original header names preserved on the wire.
+		const underscoreHeaders = parseCustomProvidersManifest(
+			JSON.stringify({
+				underscore: {
+					format: "openai-completions",
+					base_url: "https://api.example.com/v1",
+					auth: {
+						type: "api_key_header",
+						header: "X_API_KEY",
+						env: "CHECKFU_PROVIDER_SECRET_UNDERSCORE_API_KEY",
+					},
+					headers: { x_tenant_id: "tenant-42" },
+					secret_headers: { x_gateway_token: "CHECKFU_PROVIDER_SECRET_UNDERSCORE_GW_TOKEN" },
+				},
+			}),
+		)
+		expect(underscoreHeaders[0]).toMatchObject({
+			id: "underscore",
+			auth: {
+				kind: "api_key_header",
+				header: "X_API_KEY",
+				env: "CHECKFU_PROVIDER_SECRET_UNDERSCORE_API_KEY",
+			},
+			headers: { x_tenant_id: "tenant-42" },
+			secretHeaders: { x_gateway_token: "CHECKFU_PROVIDER_SECRET_UNDERSCORE_GW_TOKEN" },
+		})
+
+		// Cloudflare Workers 5 KB UTF-8 byte-limit helper & HTTP header value validator
+		expect(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES).toBe(5120)
+		expect(utf8ByteLength("東")).toBe(3)
+		expect(() =>
+			assertCloudflareWorkerEnvByteLimit(
+				"CHECKFU_PROVIDER_CATALOG",
+				"a".repeat(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES),
+			),
+		).not.toThrow()
+		expect(() =>
+			assertCloudflareWorkerEnvByteLimit(
+				"CHECKFU_PROVIDER_CATALOG",
+				"a".repeat(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES + 1),
+			),
+		).toThrow(/CHECKFU_PROVIDER_CATALOG.*5121 UTF-8 bytes.*5120-byte/i)
+		const multibyteOverLimit = "東".repeat(1707)
+		expect(multibyteOverLimit.length).toBeLessThan(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		expect(() =>
+			assertCloudflareWorkerEnvByteLimit("CHECKFU_PROVIDERS", multibyteOverLimit),
+		).toThrow(/CHECKFU_PROVIDERS.*5121 UTF-8 bytes.*5120-byte/i)
+		const packedOverflowManifest = JSON.stringify({
+			acme: {
+				format: "openai-responses",
+				base_url: "https://api.acme.example/v1",
+				auth: { type: "none" },
+				headers: Object.fromEntries(
+					Array.from({ length: 300 }, (_, index) => [`x-h-${String(index).padStart(3, "0")}`, "v"]),
+				),
+			},
+		})
+		expect(utf8ByteLength(packedOverflowManifest)).toBeLessThan(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		expect(utf8ByteLength(packAlchemyConfigEnvValue(packedOverflowManifest))).toBeGreaterThan(
+			CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+		)
+		expect(() =>
+			assertCloudflareWorkerEnvByteLimit("CHECKFU_PROVIDERS", packedOverflowManifest, {
+				packedConfigBinding: true,
+			}),
+		).toThrow(/CHECKFU_PROVIDERS encodes to \d+ UTF-8 bytes.*5120-byte/i)
+		expect(isValidHeaderValue("Basic dXNlcjpwYXNz")).toBe(true)
+		expect(isValidHeaderValue("a\tb")).toBe(true)
+		expect(isValidHeaderValue("line1\nline2")).toBe(false)
+		expect(isValidHeaderValue("line1\rline2")).toBe(false)
+		expect(isValidHeaderValue("nul\u0000byte")).toBe(false)
+		expect(isValidHeaderValue("tok-東京")).toBe(false)
+
+		// Packed 5 KiB secret binding limit & whitespace rejection on custom credentials
+		const xaiOnly = [fromObject[0]!]
+		expect(utf8ByteLength(packAlchemyConfigEnvValue("k".repeat(5090)))).toBe(
+			CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+		)
+		expect(
+			validateCustomProviderCredentials(xaiOnly, {
+				CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "k".repeat(5090),
+				CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "t".repeat(5090),
+			}).ok,
+		).toBe(true)
+		const oversizedPrimaryCred = validateCustomProviderCredentials(xaiOnly, {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "k".repeat(5091),
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok",
+		})
+		expect(oversizedPrimaryCred.ok).toBe(false)
+		expect(oversizedPrimaryCred.invalidCredentialErrors).toEqual([
+			"CHECKFU_PROVIDER_SECRET_XAI_API_KEY encodes to 5121 UTF-8 bytes, exceeding Cloudflare Workers' 5120-byte secret limit.",
+		])
+		const oversizedHeaderCred = validateCustomProviderCredentials(xaiOnly, {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "sk-ok",
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "t".repeat(5091),
+		})
+		expect(oversizedHeaderCred.ok).toBe(false)
+		expect(oversizedHeaderCred.invalidCredentialErrors).toEqual([
+			"CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN encodes to 5121 UTF-8 bytes, exceeding Cloudflare Workers' 5120-byte secret limit.",
+		])
+		const trailingWhitespaceCred = validateCustomProviderCredentials(xaiOnly, {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "sk-ok\n",
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: " gw-ok ",
+		})
+		expect(trailingWhitespaceCred.ok).toBe(false)
+		expect(trailingWhitespaceCred.invalidCredentialErrors).toHaveLength(2)
+		expect(trailingWhitespaceCred.invalidCredentialErrors[0]).toContain(
+			"CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+		)
+		expect(trailingWhitespaceCred.invalidCredentialErrors[1]).toContain(
+			"CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN",
+		)
+
+		// Fail-closed security & schema rejections
+		const GOOD_SECRET_ENV = "CHECKFU_PROVIDER_SECRET_GOOD_KEY"
+		const invalidManifests: ReadonlyArray<[string, RegExp]> = [
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key: "sk-inline-secret",
+					},
+				}),
+				/inline secret/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "CHECKFU_API_KEY",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "CLOUDFLARE_API_KEY",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: { "x-email": "CLOUDFLARE_ACCOUNT_EMAIL" },
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "CLOUDFLARE_API_TOKEN",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "CLOUDFLARE_ACCESS_CLIENT_SECRET",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: { "CF-Access-Client-Id": "CLOUDFLARE_ACCESS_CLIENT_ID" },
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: { "CF-Access-Client-Secret": "CLOUDFLARE_ACCESS_CLIENT_SECRET" },
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: { "x-leak": "ALCHEMY_PASSWORD" },
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "AI",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: { "x-auth": "AI" },
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "GH_TOKEN",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "GH_ENTERPRISE_TOKEN",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: { "x-auth": "GH_ENTERPRISE_TOKEN" },
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "NODE_AUTH_TOKEN",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "AWS_SECRET_ACCESS_KEY",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "OPENAI_API_KEY",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: "CHECKFU_PROVIDER_SECRET_",
+					},
+				}),
+				/Disallowed environment variable in .*CHECKFU_PROVIDER_SECRET_/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { Authorization: "Bearer inline-leak" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { Cookie: "session=secret-cookie" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "CF-Access-Client-Secret": "inline-cf-secret" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "X-Goog-Api-Key": "inline-goog-key" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "x-portkey-api-key": "inline-portkey-key" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "x-custom-secret": "inline-secret-header" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { api_key: "sk-inline-underscore" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { X_API_KEY: "sk-inline-underscore" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { x_auth_token: "tok-inline-underscore" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "X-RapidAPI-Key": "inline-rapidapi-key" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "X-Gateway-Key": "inline-gateway-key" },
+					},
+				}),
+				/cannot be placed in non-secret "headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						default_model: "model\u001b[31m",
+					},
+				}),
+				/default_model/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						auth: {
+							type: "api_key_header",
+							header: "x-custom-id",
+							env: "CHECKFU_PROVIDER_SECRET_GW_KEY",
+						},
+						headers: { "X-Custom-Id": "inline-override" },
+					},
+				}),
+				/cannot appear in both non-secret "headers" and auth header/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "X-Custom-Id": "inline-override" },
+						secret_headers: { "x-custom-id": "CHECKFU_PROVIDER_SECRET_GW_SECRET" },
+					},
+				}),
+				/cannot appear in both non-secret "headers" and "secret_headers"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						auth: {
+							type: "api_key_header",
+							header: "X-Corp-Key",
+							env: "CHECKFU_PROVIDER_SECRET_CORP_KEY",
+						},
+						secret_headers: { "x-corp-key": "CHECKFU_PROVIDER_SECRET_OTHER_SECRET" },
+					},
+				}),
+				/conflicts with auth header/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "X-Tenant": "a", "x-tenant": "b" },
+					},
+				}),
+				/Duplicate header/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						secret_headers: {
+							"X-Secret": "CHECKFU_PROVIDER_SECRET_SEC_A",
+							"x-secret": "CHECKFU_PROVIDER_SECRET_SEC_B",
+						},
+					},
+				}),
+				/Duplicate header/i,
+			],
+			[
+				JSON.stringify({
+					openrouter: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+					},
+				}),
+				/collides with a built-in provider/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+					},
+				}),
+				/must specify "api_key_env" or "auth"/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						context_window: 8192,
+					},
+				}),
+				/context_window/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "x-tenant": "東京" },
+					},
+				}),
+				/Custom provider "bad" header "x-tenant".*printable ASCII/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						headers: { "x-tenant": "escape\u001b[31m" },
+					},
+				}),
+				/Custom provider "bad" header "x-tenant".*printable ASCII/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						max_tokens: 4,
+					},
+				}),
+				/max_tokens.*between 16 and/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						models: { m1: { max_tokens: 15 } },
+					},
+				}),
+				/max_tokens.*between 16 and/i,
+			],
+			[
+				JSON.stringify({
+					acme: {
+						format: "openai-completions",
+						base_url: "https://api.acme.example/v1",
+						api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_KEY",
+						default_model: "acme/",
+					},
+				}),
+				/default_model.*non-empty model ID/i,
+			],
+			[
+				JSON.stringify({
+					bad: {
+						format: "openai-responses",
+						base_url: "https://api.example.com/v1",
+						api_key_env: GOOD_SECRET_ENV,
+						unknown_field: true,
+					},
+				}),
+				/Unknown field/i,
+			],
+		]
+		for (const [manifest, pattern] of invalidManifests) {
+			expect(() => parseCustomProvidersManifest(manifest)).toThrow(pattern)
+		}
+
+		// Valid boundary limits: openai-responses accepts max_tokens >= 16; completions accepts >= 1.
+		const boundaryParsed = parseCustomProvidersManifest(
+			JSON.stringify({
+				resp: {
+					format: "openai-responses",
+					base_url: "https://resp.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_RESP_KEY",
+					max_tokens: 16,
+				},
+				comp: {
+					format: "openai-completions",
+					base_url: "https://comp.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_COMP_KEY",
+					max_tokens: 4,
+				},
+			}),
+		)
+		expect(boundaryParsed[0]?.modelDefaults?.maxTokens).toBe(16)
+		expect(boundaryParsed[1]?.modelDefaults?.maxTokens).toBe(4)
+
+		// Provider-specific Cloudflare Access tokens under the explicit secret namespace remain allowed.
+		const accessParsed = parseCustomProvidersManifest(
+			JSON.stringify({
+				"private-gw": {
+					format: "openai-completions",
+					base_url: "https://llm.internal.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_PRIVATE_GW_KEY",
+					secret_headers: {
+						"CF-Access-Client-Id": "CHECKFU_PROVIDER_SECRET_PRIVATE_GW_ACCESS_CLIENT_ID",
+						"CF-Access-Client-Secret": "CHECKFU_PROVIDER_SECRET_PRIVATE_GW_ACCESS_CLIENT_SECRET",
+					},
+				},
+			}),
+		)
+		expect(accessParsed[0]?.secretHeaders).toEqual({
+			"CF-Access-Client-Id": "CHECKFU_PROVIDER_SECRET_PRIVATE_GW_ACCESS_CLIENT_ID",
+			"CF-Access-Client-Secret": "CHECKFU_PROVIDER_SECRET_PRIVATE_GW_ACCESS_CLIENT_SECRET",
+		})
+
+		// Gateway key headers (such as X-RapidAPI-Key) remain usable through auth.header or
+		// secret_headers while companion non-secret headers (X-RapidAPI-Host) remain allowed in headers.
+		const rapidApiParsed = parseCustomProvidersManifest(
+			JSON.stringify({
+				"rapidapi-auth": {
+					format: "openai-completions",
+					base_url: "https://rapidapi.example/v1",
+					auth: {
+						type: "api_key_header",
+						header: "X-RapidAPI-Key",
+						env: "CHECKFU_PROVIDER_SECRET_RAPIDAPI_KEY",
+					},
+					headers: { "X-RapidAPI-Host": "llm.p.rapidapi.com" },
+				},
+				"rapidapi-secret-header": {
+					format: "openai-completions",
+					base_url: "https://rapidapi.example/v1",
+					auth: { type: "none" },
+					headers: { "X-RapidAPI-Host": "llm.p.rapidapi.com" },
+					secret_headers: { "X-RapidAPI-Key": "CHECKFU_PROVIDER_SECRET_RAPIDAPI_KEY" },
+				},
+			}),
+		)
+		expect(rapidApiParsed[0]).toMatchObject({
+			auth: {
+				kind: "api_key_header",
+				header: "X-RapidAPI-Key",
+				env: "CHECKFU_PROVIDER_SECRET_RAPIDAPI_KEY",
+			},
+			headers: { "X-RapidAPI-Host": "llm.p.rapidapi.com" },
+		})
+		expect(rapidApiParsed[1]).toMatchObject({
+			headers: { "X-RapidAPI-Host": "llm.p.rapidapi.com" },
+			secretHeaders: { "X-RapidAPI-Key": "CHECKFU_PROVIDER_SECRET_RAPIDAPI_KEY" },
+		})
+
+		// Malformed JSON errors never echo raw tokens or unquoted secrets from the manifest.
+		const secretSentinel = "sk_unquoted_secret_leak_check_999"
+		let parseErr: unknown
+		try {
+			parseCustomProvidersManifest(`{"x":{"api_key":${secretSentinel}}}`)
+		} catch (error) {
+			parseErr = error
+		}
+		expect(parseErr).toBeInstanceOf(CustomProviderConfigError)
+		expect(String(parseErr)).toContain("Invalid CHECKFU_PROVIDERS JSON")
+		expect(String(parseErr)).not.toContain(secretSentinel)
+
+		let catalogErr: unknown
+		try {
+			parseCustomProviderCatalog(`[{"id":${secretSentinel}}]`)
+		} catch (error) {
+			catalogErr = error
+		}
+		expect(catalogErr).toBeInstanceOf(CustomProviderConfigError)
+		expect(String(catalogErr)).toContain("Invalid CHECKFU_PROVIDER_CATALOG JSON")
+		expect(String(catalogErr)).not.toContain(secretSentinel)
+		expect(() =>
+			parseCustomProviderCatalog(
+				JSON.stringify([{ id: "acme", format: "openai-completions", default_model: "acme/" }]),
+			),
+		).toThrow(/Invalid default_model/)
+		expect(() =>
+			parseCustomProvidersManifest(
+				JSON.stringify({
+					acme: {
+						format: "openai-completions",
+						base_url: "https://api.acme.example/v1",
+						api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_KEY",
+						default_model: "m".repeat(MAX_MODEL_ID_LENGTH),
+					},
+				}),
+			),
+		).toThrow(/default_model/)
+		expect(() =>
+			parseCustomProvidersManifest(
+				JSON.stringify({
+					acme: {
+						format: "openai-completions",
+						base_url: "https://api.acme.example/v1",
+						api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_KEY",
+						models: { ["m".repeat(MAX_MODEL_ID_LENGTH)]: { context_window: 128_000 } },
+					},
+				}),
+			),
+		).toThrow(/Invalid model ID/)
+
+		// Invalid auth.type / format / header values never interpolate pasted secrets into errors.
+		const pastedAuthSecret = "Bearer sk_pasted_into_auth_type_888"
+		let authTypeErr: unknown
+		try {
+			parseCustomProvidersManifest(
+				JSON.stringify({
+					bad: {
+						format: "openai-completions",
+						base_url: "https://api.example.com/v1",
+						auth: { type: pastedAuthSecret, env: "CHECKFU_PROVIDER_SECRET_BAD_KEY" },
+					},
+				}),
+			)
+		} catch (error) {
+			authTypeErr = error
+		}
+		expect(authTypeErr).toBeInstanceOf(CustomProviderConfigError)
+		expect(String(authTypeErr)).toContain('Custom provider "bad"')
+		expect(String(authTypeErr)).toContain("auth.type")
+		expect(String(authTypeErr)).not.toContain(pastedAuthSecret)
+
+		// Uppercase alphanumeric credentials pasted into api_key_env or secret_headers are never
+		// echoed back in the disallowed-prefix error message.
+		const pastedUppercaseToken = "AKIASECRETTOKEN99998888"
+		for (const badEnvManifest of [
+			JSON.stringify({
+				bad: {
+					format: "openai-responses",
+					base_url: "https://api.example.com/v1",
+					api_key_env: pastedUppercaseToken,
+				},
+			}),
+			JSON.stringify({
+				bad: {
+					format: "openai-responses",
+					base_url: "https://api.example.com/v1",
+					api_key_env: GOOD_SECRET_ENV,
+					secret_headers: { "x-auth": pastedUppercaseToken },
+				},
+			}),
+		]) {
+			let disallowedErr: unknown
+			try {
+				parseCustomProvidersManifest(badEnvManifest)
+			} catch (error) {
+				disallowedErr = error
+			}
+			expect(disallowedErr).toBeInstanceOf(CustomProviderConfigError)
+			expect(String(disallowedErr)).toContain("CHECKFU_PROVIDER_SECRET_")
+			expect(String(disallowedErr)).not.toContain(pastedUppercaseToken)
+		}
+
+		// Duplicate provider IDs in object-form manifests (including Unicode escapes) are rejected
+		// instead of silently collapsing to the last entry.
+		expect(() =>
+			parseCustomProvidersManifest(
+				'{"acme":{"format":"openai-completions","base_url":"https://a.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_A_KEY"},"acme":{"format":"openai-completions","base_url":"https://b.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_B_KEY"}}',
+			),
+		).toThrow(/Duplicate custom provider id "acme"/)
+		expect(() =>
+			parseCustomProvidersManifest(
+				String.raw`{"\u0061cme":{"format":"openai-completions","base_url":"https://a.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_A_KEY"},"acme":{"format":"openai-completions","base_url":"https://b.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_B_KEY"}}`,
+			),
+		).toThrow(/Duplicate custom provider id "acme"/)
+		expect(() =>
+			parseCustomProvidersManifest(
+				'{"acme":{"format":"openai-completions","base_url":"https://a.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_A_KEY","headers":{"x-a":"1","x-a":"2"}}}',
+			),
+		).toThrow(/Duplicate JSON property "x-a"/)
+	})
+
+	it("sends exact auth, static headers, and secret_headers across all 3 wire formats and auth modes", async () => {
+		const customProviders = parseCustomProvidersManifest(
+			JSON.stringify({
+				"custom-anthropic-bearer": {
+					format: "anthropic-messages",
+					base_url: "https://anth.example",
+					auth: { type: "bearer", env: "CHECKFU_PROVIDER_SECRET_ANTH_BEARER" },
+					headers: { "x-tenant": "acme" },
+					secret_headers: { "x-gw": "CHECKFU_PROVIDER_SECRET_ANTH_GW_SECRET" },
+				},
+				"custom-anthropic-dual": {
+					format: "anthropic-messages",
+					base_url: "https://anth-dual.example",
+					auth: { type: "bearer", env: "CHECKFU_PROVIDER_SECRET_ANTH_BEARER" },
+					secret_headers: { "x-api-key": "CHECKFU_PROVIDER_SECRET_ANTH_SECONDARY_KEY" },
+				},
+				"custom-auth-header-raw": {
+					format: "openai-completions",
+					base_url: "https://raw-auth.example/v1",
+					auth: {
+						type: "api_key_header",
+						header: "Authorization",
+						env: "CHECKFU_PROVIDER_SECRET_RAW_AUTH_HEADER",
+					},
+				},
+				"custom-header-auth": {
+					format: "openai-completions",
+					base_url: "https://hdr.example/v1",
+					auth: {
+						type: "api_key_header",
+						header: "api-key",
+						env: "CHECKFU_PROVIDER_SECRET_HDR_API_KEY",
+					},
+				},
+				"custom-none": {
+					format: "openai-completions",
+					base_url: "http://127.0.0.1:11434/v1",
+					auth: { type: "none" },
+					headers: { "x-local": "1" },
+				},
+			}),
+			{ allowLoopbackHttp: true },
+		)
+		const models = createProviderModels({
+			env: {
+				CHECKFU_PROVIDER_SECRET_ANTH_BEARER: "tok-anth-bearer",
+				CHECKFU_PROVIDER_SECRET_ANTH_GW_SECRET: "sec-gw",
+				CHECKFU_PROVIDER_SECRET_ANTH_SECONDARY_KEY: "sec-anth-x-api-key",
+				CHECKFU_PROVIDER_SECRET_RAW_AUTH_HEADER: "Token raw-auth-val",
+				CHECKFU_PROVIDER_SECRET_HDR_API_KEY: "key-custom-hdr",
+			},
+			customProviders,
+		})
+
+		const completionsSse = [
+			`data: ${JSON.stringify({
+				id: "chatcmpl_c",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "m",
+				choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null }],
+			})}\n\n`,
+			`data: ${JSON.stringify({
+				id: "chatcmpl_c",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "m",
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			})}\n\n`,
+			"data: [DONE]\n\n",
+		].join("")
+
+		const anthropicSse = [
+			`event: message_start\ndata: ${JSON.stringify({
+				type: "message_start",
+				message: {
+					id: "msg_1",
+					type: "message",
+					role: "assistant",
+					model: "claude-custom",
+					content: [],
+					stop_reason: null,
+					usage: { input_tokens: 5, output_tokens: 0 },
+				},
+			})}\n\n`,
+			`event: content_block_start\ndata: ${JSON.stringify({
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "" },
+			})}\n\n`,
+			`event: content_block_delta\ndata: ${JSON.stringify({
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "ok-anth" },
+			})}\n\n`,
+			`event: content_block_stop\ndata: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`,
+			`event: message_delta\ndata: ${JSON.stringify({
+				type: "message_delta",
+				delta: { stop_reason: "end_turn" },
+				usage: { output_tokens: 3 },
+			})}\n\n`,
+			`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+		].join("")
+
+		// 1. Custom Anthropic Messages with explicit Bearer auth + static + secret header
+		let capturedAnthropicHeaders: Headers | undefined
+		const anthModel = models.getModel("custom-anthropic-bearer", "claude-custom")!
+		const anthResult = await models.complete(
+			anthModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (_input, init) => {
+					capturedAnthropicHeaders = new Headers(init?.headers)
+					return new Response(anthropicSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(anthResult.stopReason).toBe("stop")
+		expect(capturedAnthropicHeaders?.get("authorization")).toBe("Bearer tok-anth-bearer")
+		expect(capturedAnthropicHeaders?.get("x-api-key")).toBeNull()
+		expect(capturedAnthropicHeaders?.get("x-tenant")).toBe("acme")
+		expect(capturedAnthropicHeaders?.get("x-gw")).toBe("sec-gw")
+
+		// 1b. Custom Anthropic Messages with Bearer + explicit secondary x-api-key preserves both
+		let capturedAnthropicDualHeaders: Headers | undefined
+		const anthDualModel = models.getModel("custom-anthropic-dual", "claude-custom")!
+		const anthDualResult = await models.complete(
+			anthDualModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (_input, init) => {
+					capturedAnthropicDualHeaders = new Headers(init?.headers)
+					return new Response(anthropicSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(anthDualResult.stopReason).toBe("stop")
+		expect(capturedAnthropicDualHeaders?.get("authorization")).toBe("Bearer tok-anth-bearer")
+		expect(capturedAnthropicDualHeaders?.get("x-api-key")).toBe("sec-anth-x-api-key")
+
+		// 1c. Custom api_key_header naming Authorization preserves the configured value
+		let capturedRawAuthHeaders: Headers | undefined
+		const rawAuthModel = models.getModel("custom-auth-header-raw", "my-model")!
+		const rawAuthResult = await models.complete(
+			rawAuthModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (_input, init) => {
+					capturedRawAuthHeaders = new Headers(init?.headers)
+					return new Response(completionsSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(rawAuthResult.stopReason).toBe("stop")
+		expect(capturedRawAuthHeaders?.get("authorization")).toBe("Token raw-auth-val")
+		expect(capturedRawAuthHeaders?.get("x-api-key")).toBeNull()
+
+		// 2. Custom OpenAI Completions with custom api_key_header ("api-key")
+		let capturedHdrHeaders: Headers | undefined
+		const hdrModel = models.getModel("custom-header-auth", "my-model")!
+		const hdrResult = await models.complete(
+			hdrModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (_input, init) => {
+					capturedHdrHeaders = new Headers(init?.headers)
+					return new Response(completionsSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(hdrResult.stopReason).toBe("stop")
+		expect(capturedHdrHeaders?.get("api-key")).toBe("key-custom-hdr")
+		expect(capturedHdrHeaders?.get("authorization")).toBeNull()
+
+		// 3. Unauthenticated local provider (auth: { type: "none" }) strips Authorization/x-api-key
+		let capturedNoneHeaders: Headers | undefined
+		const noneModel = models.getModel("custom-none", "llama3")!
+		const noneResult = await models.complete(
+			noneModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (_input, init) => {
+					capturedNoneHeaders = new Headers(init?.headers)
+					return new Response(completionsSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(noneResult.stopReason).toBe("stop")
+		expect(capturedNoneHeaders?.get("authorization")).toBeNull()
+		expect(capturedNoneHeaders?.get("x-api-key")).toBeNull()
+		expect(capturedNoneHeaders?.get("x-local")).toBe("1")
+
+		// 4. Manifest-declared openai-responses reasoning provider omits reasoning.effort: "none"
+		//    on ordinary turns and applies rotated keys + static headers to retained models.
+		const xaiInitial = parseCustomProvidersManifest(
+			JSON.stringify({
+				xai: {
+					format: "openai-responses",
+					base_url: "https://api.x.ai/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+					headers: { "x-tenant": "tenant-1" },
+					models: { "grok-4.6": { reasoning: true } },
+				},
+			}),
+		)
+		const xaiRotated = parseCustomProvidersManifest(
+			JSON.stringify({
+				xai: {
+					format: "openai-responses",
+					base_url: "https://api.x.ai/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+					headers: { "x-tenant": "tenant-2" },
+					models: { "grok-4.6": { reasoning: true } },
+				},
+			}),
+		)
+		const xaiModels = createProviderModels({
+			env: { CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-key-1" },
+			customProviders: xaiInitial,
+		})
+		const retainedGrok = xaiModels.getModel("xai", "grok-4.6")!
+		expect(retainedGrok.headers).toBeUndefined()
+		expect(retainedGrok.thinkingLevelMap).toEqual({ off: null })
+		const xaiResponseSse = [
+			`event: response.completed\ndata: ${JSON.stringify({
+				type: "response.completed",
+				response: {
+					id: "resp_xai_1",
+					status: "completed",
+					output: [
+						{
+							type: "message",
+							id: "msg_xai_1",
+							role: "assistant",
+							status: "completed",
+							content: [{ type: "output_text", text: "ok-grok" }],
+						},
+					],
+					usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+				},
+			})}\n\n`,
+		].join("")
+		const xaiCaptured: Array<{
+			readonly auth: string | null
+			readonly tenant: string | null
+			readonly hasReasoning: boolean
+		}> = []
+		const xaiFetch: typeof fetch = async (_input, init) => {
+			const headers = new Headers(init?.headers)
+			const body =
+				typeof init?.body === "string"
+					? (JSON.parse(init.body) as { readonly reasoning?: { readonly effort?: string } })
+					: {}
+			xaiCaptured.push({
+				auth: headers.get("authorization"),
+				tenant: headers.get("x-tenant"),
+				hasReasoning: body.reasoning !== undefined,
+			})
+			return new Response(xaiResponseSse, {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			})
+		}
+		await xaiModels.completeSimple(
+			retainedGrok,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{ fetch: xaiFetch },
+		)
+		xaiModels.setProvider(
+			buildPiProvider(xaiRotated[0]!, {
+				env: { CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-key-2" },
+			}),
+		)
+		await xaiModels.completeSimple(
+			retainedGrok,
+			{ messages: [{ role: "user", content: "hi again", timestamp: 0 }] },
+			{ fetch: xaiFetch },
+		)
+		expect(xaiCaptured).toEqual([
+			{ auth: "Bearer xai-key-1", tenant: "tenant-1", hasReasoning: false },
+			{ auth: "Bearer xai-key-2", tenant: "tenant-2", hasReasoning: false },
+		])
 	})
 })

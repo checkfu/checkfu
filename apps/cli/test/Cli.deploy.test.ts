@@ -1,4 +1,7 @@
+import { parseCustomProvidersManifest } from "@checkfu/pi-providers/catalog"
 import { describe, expect, it } from "@effect/vitest"
+import * as Config from "effect/Config"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { providerForKey, readDotEnvValue, setDotEnvValue } from "../src/Commands/Deploy.ts"
@@ -718,6 +721,685 @@ describe("checkfu deploy", () => {
 			expect(httpsGwResult.stderr).toContain(
 				`${COMMAND} agents create --name Assistant --model cloudflare-ai-gateway/claude-sonnet-5-5`,
 			)
+
+			// 6. Custom format-compatible provider declared via CHECKFU_PROVIDERS
+			const customManifest = JSON.stringify({
+				xai: {
+					name: "xAI",
+					format: "openai-responses",
+					base_url: "https://api.x.ai/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+					default_model: "grok-4",
+				},
+			})
+			const customFiles = virtualFiles(checkout)
+			const customResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-1",
+				},
+				files: customFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(customResult.errorMessage).toBeUndefined()
+			expect(yield* readDotEnvValue(customFiles[ENV_FILE] ?? "", "CHECKFU_PROVIDERS")).toBe(
+				customManifest,
+			)
+			expect(
+				yield* readDotEnvValue(customFiles[ENV_FILE] ?? "", "CHECKFU_PROVIDER_SECRET_XAI_API_KEY"),
+			).toBe("xai-secret-1")
+			expect(customResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model xai/grok-4`,
+			)
+
+			// 7. Exported pretty-printed multiline CHECKFU_PROVIDERS compacts into .env and
+			//    shell-quotes custom default_model IDs containing glob/shell metacharacters.
+			const prettyCustomManifest = JSON.stringify(
+				{
+					acme: {
+						name: "Acme",
+						format: "openai-completions",
+						base_url: "https://api.acme.example/v1",
+						api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_API_KEY",
+						default_model: "model[v1];id",
+					},
+				},
+				null,
+				2,
+			)
+			const compactCustomManifest = JSON.stringify(JSON.parse(prettyCustomManifest))
+			const prettyFiles = virtualFiles(checkout)
+			const prettyResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: prettyCustomManifest,
+					CHECKFU_PROVIDER_SECRET_ACME_API_KEY: "acme-secret-1",
+				},
+				files: prettyFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(prettyResult.errorMessage).toBeUndefined()
+			expect(yield* readDotEnvValue(prettyFiles[ENV_FILE] ?? "", "CHECKFU_PROVIDERS")).toBe(
+				compactCustomManifest,
+			)
+			expect(prettyResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model 'acme/model[v1];id'`,
+			)
+
+			// 7b. Exported CHECKFU_PROVIDERS with both apostrophes and backticks inside strings
+			//     escapes cleanly into .env and round-trips back to identical strings.
+			const quotedCustomManifest = JSON.stringify({
+				acme: {
+					name: "Acme's `prod` LLM",
+					format: "openai-completions",
+					base_url: "https://api.acme.example/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_API_KEY",
+					headers: { "x-note": 'it\'s `ok` "yes"' },
+				},
+			})
+			const quotedFiles = virtualFiles(checkout)
+			const quotedResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: quotedCustomManifest,
+					CHECKFU_PROVIDER_SECRET_ACME_API_KEY: "acme-secret-1",
+				},
+				files: quotedFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(quotedResult.errorMessage).toBeUndefined()
+			const storedQuotedManifest = yield* readDotEnvValue(
+				quotedFiles[ENV_FILE] ?? "",
+				"CHECKFU_PROVIDERS",
+			)
+			const parsedQuotedProviders = parseCustomProvidersManifest(storedQuotedManifest)
+			expect(parsedQuotedProviders[0]?.name).toBe("Acme's `prod` LLM")
+			expect(parsedQuotedProviders[0]?.headers).toEqual({ "x-note": 'it\'s `ok` "yes"' })
+
+			// 8. Missing custom-provider secret_headers variable reports the exact missing env var
+			const missingCustomCalls: Array<ReadonlyArray<string>> = []
+			const missingCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						xai: {
+							name: "xAI",
+							format: "openai-responses",
+							base_url: "https://api.x.ai/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+							secret_headers: { "x-gateway-token": "CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN" },
+						},
+					}),
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-1",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(missingCustomCalls),
+			})
+			expect(missingCustom.exitCode).toBe(1)
+			expect(missingCustom.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(missingCustomCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// 8b. Missing custom-provider credentials still block deploy when a built-in key or
+			//     another custom provider is already configured.
+			const mixedBuiltinCalls: Array<ReadonlyArray<string>> = []
+			const mixedBuiltin = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					ANTHROPIC_API_KEY: "sk-ant-from-env",
+					CHECKFU_PROVIDERS: JSON.stringify({
+						xai: {
+							name: "xAI",
+							format: "openai-responses",
+							base_url: "https://api.x.ai/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+						},
+					}),
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(mixedBuiltinCalls),
+			})
+			expect(mixedBuiltin.exitCode).toBe(1)
+			expect(mixedBuiltin.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(mixedBuiltinCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const mixedMultiCustomCalls: Array<ReadonlyArray<string>> = []
+			const mixedMultiCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						acme: {
+							name: "Acme",
+							format: "openai-completions",
+							base_url: "https://api.acme.example/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_API_KEY",
+						},
+						xai: {
+							name: "xAI",
+							format: "openai-responses",
+							base_url: "https://api.x.ai/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+							secret_headers: { "x-gateway-token": "CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN" },
+						},
+					}),
+					CHECKFU_PROVIDER_SECRET_ACME_API_KEY: "acme-secret-1",
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-1",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(mixedMultiCustomCalls),
+			})
+			expect(mixedMultiCustom.exitCode).toBe(1)
+			expect(mixedMultiCustom.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(mixedMultiCustomCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// 9. Custom provider omitting default_model uses declared model (including empty overrides
+			//    and namespaced wire IDs) when present, or a placeholder instead of fabricating `<provider>/default`.
+			const declaredOnlyResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						acme: {
+							format: "openai-completions",
+							base_url: "https://api.acme.example/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_API_KEY",
+							models: { "acme/chat": {} },
+						},
+					}),
+					CHECKFU_PROVIDER_SECRET_ACME_API_KEY: "acme-secret-1",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([]),
+			})
+			expect(declaredOnlyResult.errorMessage).toBeUndefined()
+			expect(declaredOnlyResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model acme/acme/chat`,
+			)
+
+			const noDefaultResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						acme: {
+							format: "openai-completions",
+							base_url: "https://api.acme.example/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_ACME_API_KEY",
+						},
+					}),
+					CHECKFU_PROVIDER_SECRET_ACME_API_KEY: "acme-secret-1",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([]),
+			})
+			expect(noDefaultResult.errorMessage).toBeUndefined()
+			expect(noDefaultResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model acme/<model-id>`,
+			)
+			expect(noDefaultResult.stderr).not.toContain("acme/default")
+
+			// 10. Invalid CHECKFU_PROVIDERS (inline secret, non-namespaced secret env, or non-ASCII
+			//     header value) stops before deploying.
+			const badCalls: Array<ReadonlyArray<string>> = []
+			const badCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						bad: {
+							format: "openai-responses",
+							base_url: "https://api.example.com/v1",
+							api_key: "sk-inline-leak",
+						},
+					}),
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(badCalls),
+			})
+			expect(badCustom.exitCode).toBe(1)
+			expect(badCustom.errorMessage).toContain("inline secret")
+			expect(badCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const disallowedEnvCalls: Array<ReadonlyArray<string>> = []
+			const disallowedEnvCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					GH_ENTERPRISE_TOKEN: "ghp_unrelated_deploy_secret",
+					CHECKFU_PROVIDERS: JSON.stringify({
+						bad: {
+							format: "openai-responses",
+							base_url: "https://api.example.com/v1",
+							api_key_env: "GH_ENTERPRISE_TOKEN",
+						},
+					}),
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(disallowedEnvCalls),
+			})
+			expect(disallowedEnvCustom.exitCode).toBe(1)
+			expect(disallowedEnvCustom.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_")
+			expect(disallowedEnvCustom.errorMessage).not.toContain("ghp_unrelated_deploy_secret")
+			expect(disallowedEnvCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const badHeaderCalls: Array<ReadonlyArray<string>> = []
+			const badHeaderCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						bad: {
+							format: "openai-responses",
+							base_url: "https://api.example.com/v1",
+							api_key_env: "CHECKFU_PROVIDER_SECRET_BAD_API_KEY",
+							headers: { "x-tenant": "東京" },
+						},
+					}),
+					CHECKFU_PROVIDER_SECRET_BAD_API_KEY: "bad-key",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(badHeaderCalls),
+			})
+			expect(badHeaderCustom.exitCode).toBe(1)
+			expect(badHeaderCustom.errorMessage).toContain('Custom provider "bad" header "x-tenant"')
+			expect(badHeaderCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// 11. Malformed CHECKFU_PROVIDERS JSON never echoes unquoted credentials into CLI errors
+			const leakedSecret = "sk_unquoted_ci_secret_4242"
+			const badJsonCalls: Array<ReadonlyArray<string>> = []
+			const badJsonCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: `{"bad":{"api_key":${leakedSecret}}}`,
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(badJsonCalls),
+			})
+			expect(badJsonCustom.exitCode).toBe(1)
+			expect(badJsonCustom.errorMessage).toContain("Invalid CHECKFU_PROVIDERS JSON")
+			expect(badJsonCustom.errorMessage).not.toContain(leakedSecret)
+			expect(badJsonCustom.stderr).not.toContain(leakedSecret)
+			expect(badJsonCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// 12. Pasted credential in auth.type never leaks into CLI errors, and duplicate
+			//     object-form provider IDs stop before deploying.
+			const pastedBearer = "Bearer sk_accidental_auth_type_secret"
+			const badAuthTypeCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						bad: {
+							format: "openai-completions",
+							base_url: "https://api.example.com/v1",
+							auth: { type: pastedBearer, env: "CHECKFU_PROVIDER_SECRET_BAD_KEY" },
+						},
+					}),
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([]),
+			})
+			expect(badAuthTypeCustom.exitCode).toBe(1)
+			expect(badAuthTypeCustom.errorMessage).toContain("auth.type")
+			expect(badAuthTypeCustom.errorMessage).not.toContain(pastedBearer)
+			expect(badAuthTypeCustom.stderr).not.toContain(pastedBearer)
+
+			const dupObjectCustom = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS:
+						'{"acme":{"format":"openai-completions","base_url":"https://a.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_A_KEY"},"acme":{"format":"openai-completions","base_url":"https://b.example/v1","api_key_env":"CHECKFU_PROVIDER_SECRET_B_KEY"}}',
+					CHECKFU_PROVIDER_SECRET_A_KEY: "a",
+					CHECKFU_PROVIDER_SECRET_B_KEY: "b",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([]),
+			})
+			expect(dupObjectCustom.exitCode).toBe(1)
+			expect(dupObjectCustom.errorMessage).toContain('Duplicate custom provider id "acme"')
+
+			// 13. Oversized CHECKFU_PROVIDERS (including Alchemy-packed Redacted encoding) or
+			//     serialized CHECKFU_PROVIDER_CATALOG (> 5,120 UTF-8 bytes) stops before writing
+			//     .env or invoking Alchemy.
+			const packedOverflowCalls: Array<ReadonlyArray<string>> = []
+			const packedOverflowFiles = virtualFiles(checkout)
+			const packedOverflow = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						acme: {
+							format: "openai-responses",
+							base_url: "https://api.acme.example/v1",
+							auth: { type: "none" },
+							headers: Object.fromEntries(
+								Array.from({ length: 300 }, (_, index) => [
+									`x-h-${String(index).padStart(3, "0")}`,
+									"v",
+								]),
+							),
+						},
+					}),
+				},
+				files: packedOverflowFiles,
+				spawn: fakeAlchemy(packedOverflowCalls),
+			})
+			expect(packedOverflow.exitCode).toBe(1)
+			expect(packedOverflow.errorMessage).toContain("CHECKFU_PROVIDERS")
+			expect(packedOverflow.errorMessage).toContain("5120")
+			expect(packedOverflowFiles[ENV_FILE]).toBeUndefined()
+			expect(packedOverflowCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const oversizedRawCalls: Array<ReadonlyArray<string>> = []
+			const oversizedRawFiles = virtualFiles(checkout)
+			const oversizedRaw = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						acme: {
+							name: "東".repeat(1750),
+							format: "openai-responses",
+							base_url: "https://api.acme.example/v1",
+							auth: { type: "none" },
+						},
+					}),
+				},
+				files: oversizedRawFiles,
+				spawn: fakeAlchemy(oversizedRawCalls),
+			})
+			expect(oversizedRaw.exitCode).toBe(1)
+			expect(oversizedRaw.errorMessage).toContain("CHECKFU_PROVIDERS")
+			expect(oversizedRaw.errorMessage).toContain("5120")
+			expect(oversizedRawFiles[ENV_FILE]).toBeUndefined()
+			expect(oversizedRawCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const oversizedCatalogCalls: Array<ReadonlyArray<string>> = []
+			const oversizedCatalogFiles = virtualFiles(checkout)
+			const oversizedCatalog = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify(
+						Object.fromEntries(
+							Array.from({ length: 31 }, (_, index) => [
+								`provider-${String(index).padStart(2, "0")}-${"x".repeat(46)}`,
+								{
+									format: "openai-responses",
+									base_url: "https://a.co",
+									auth: { type: "none" },
+								},
+							]),
+						),
+					),
+				},
+				files: oversizedCatalogFiles,
+				spawn: fakeAlchemy(oversizedCatalogCalls),
+			})
+			expect(oversizedCatalog.exitCode).toBe(1)
+			expect(oversizedCatalog.errorMessage).toContain("CHECKFU_PROVIDER_CATALOG")
+			expect(oversizedCatalog.errorMessage).toContain("5120")
+			expect(oversizedCatalogFiles[ENV_FILE]).toBeUndefined()
+			expect(oversizedCatalogCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// 14. Custom credentials that cannot be sent as HTTP headers (embedded newlines,
+			//     non-ASCII, or whitespace in bearer tokens) fail before deploy and report
+			//     only the env var name; interior spaces remain allowed in api_key_header / secret_headers.
+			const customSecretManifest = JSON.stringify({
+				xai: {
+					name: "xAI",
+					format: "openai-responses",
+					base_url: "https://api.x.ai/v1",
+					api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+					secret_headers: { "x-gateway-token": "CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN" },
+				},
+			})
+			const newlinePrimaryCalls: Array<ReadonlyArray<string>> = []
+			const newlinePrimary = yield* cli.run(["deploy", "--yes"], {
+				env: { CHECKFU_CONFIG_DIR: "/config" },
+				files: virtualFiles({
+					...checkout,
+					[ENV_FILE]: [
+						`CHECKFU_API_KEY=${TEST_API_KEY}`,
+						`CHECKFU_PROVIDERS='${customSecretManifest}'`,
+						String.raw`CHECKFU_PROVIDER_SECRET_XAI_API_KEY="sk-primary-line1\nsk-primary-line2"`,
+						"CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN=gw-ok-token",
+					].join("\n"),
+				}),
+				spawn: fakeAlchemy(newlinePrimaryCalls),
+			})
+			expect(newlinePrimary.exitCode).toBe(1)
+			expect(newlinePrimary.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(newlinePrimary.errorMessage).toContain("HTTP header")
+			expect(newlinePrimary.errorMessage).not.toContain("sk-primary-line1")
+			expect(newlinePrimary.stderr).not.toContain("sk-primary-line1")
+			expect(newlinePrimaryCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const newlineHeaderCalls: Array<ReadonlyArray<string>> = []
+			const newlineHeader = yield* cli.run(["deploy", "--yes"], {
+				env: { CHECKFU_CONFIG_DIR: "/config" },
+				files: virtualFiles({
+					...checkout,
+					[ENV_FILE]: [
+						`CHECKFU_API_KEY=${TEST_API_KEY}`,
+						`CHECKFU_PROVIDERS='${customSecretManifest}'`,
+						"CHECKFU_PROVIDER_SECRET_XAI_API_KEY=sk-primary-ok",
+						String.raw`CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN="gw-secret-line1\ngw-secret-line2"`,
+					].join("\n"),
+				}),
+				spawn: fakeAlchemy(newlineHeaderCalls),
+			})
+			expect(newlineHeader.exitCode).toBe(1)
+			expect(newlineHeader.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(newlineHeader.errorMessage).toContain("HTTP header")
+			expect(newlineHeader.errorMessage).not.toContain("gw-secret-line1")
+			expect(newlineHeader.stderr).not.toContain("gw-secret-line1")
+			expect(newlineHeaderCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const nonAsciiSecretFiles = virtualFiles(checkout)
+			const nonAsciiSecretCalls: Array<ReadonlyArray<string>> = []
+			const nonAsciiSecret = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "sk-primary-ok",
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-東京-secret",
+				},
+				files: nonAsciiSecretFiles,
+				spawn: fakeAlchemy(nonAsciiSecretCalls),
+			})
+			expect(nonAsciiSecret.exitCode).toBe(1)
+			expect(nonAsciiSecret.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(nonAsciiSecret.errorMessage).toContain("HTTP header")
+			expect(nonAsciiSecret.errorMessage).not.toContain("東京")
+			expect(nonAsciiSecret.stderr).not.toContain("東京")
+			expect(nonAsciiSecretFiles[ENV_FILE]).toBeUndefined()
+			expect(nonAsciiSecretCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const spacedBearerFiles = virtualFiles(checkout)
+			const spacedBearer = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "Bearer sk-accidental-prefix",
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok-token",
+				},
+				files: spacedBearerFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(spacedBearer.exitCode).toBe(1)
+			expect(spacedBearer.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(spacedBearer.errorMessage).toContain("HTTP header")
+			expect(spacedBearer.errorMessage).not.toContain("sk-accidental-prefix")
+			expect(spacedBearerFiles[ENV_FILE]).toBeUndefined()
+
+			// Exported shell secrets with trailing newlines or surrounding spaces are rejected
+			// before trimming or writing .env (matching quoted .env validation).
+			const trailingNewlineShellFiles = virtualFiles(checkout)
+			const trailingNewlineShellCalls: Array<ReadonlyArray<string>> = []
+			const trailingNewlineShell = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "sk-shell-trailing-nl\n",
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok-token",
+				},
+				files: trailingNewlineShellFiles,
+				spawn: fakeAlchemy(trailingNewlineShellCalls),
+			})
+			expect(trailingNewlineShell.exitCode).toBe(1)
+			expect(trailingNewlineShell.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(trailingNewlineShell.errorMessage).toContain("HTTP header")
+			expect(trailingNewlineShell.errorMessage).not.toContain("sk-shell-trailing-nl")
+			expect(trailingNewlineShell.stderr).not.toContain("sk-shell-trailing-nl")
+			expect(trailingNewlineShellFiles[ENV_FILE]).toBeUndefined()
+			expect(trailingNewlineShellCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const surroundingSpaceHeaderFiles = virtualFiles(checkout)
+			const surroundingSpaceHeaderCalls: Array<ReadonlyArray<string>> = []
+			const surroundingSpaceHeader = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "sk-primary-ok",
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: " gw-shell-surrounded ",
+				},
+				files: surroundingSpaceHeaderFiles,
+				spawn: fakeAlchemy(surroundingSpaceHeaderCalls),
+			})
+			expect(surroundingSpaceHeader.exitCode).toBe(1)
+			expect(surroundingSpaceHeader.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(surroundingSpaceHeader.errorMessage).toContain("HTTP header")
+			expect(surroundingSpaceHeader.errorMessage).not.toContain("gw-shell-surrounded")
+			expect(surroundingSpaceHeader.stderr).not.toContain("gw-shell-surrounded")
+			expect(surroundingSpaceHeaderFiles[ENV_FILE]).toBeUndefined()
+			expect(surroundingSpaceHeaderCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// Printable custom secrets whose Alchemy-packed binding exceeds 5,120 UTF-8 bytes fail
+			// before writing .env or deploying, reporting only the variable name and size.
+			const oversizedSecretFiles = virtualFiles(checkout)
+			const oversizedSecretCalls: Array<ReadonlyArray<string>> = []
+			const oversizedSecret = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "k".repeat(5091),
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok-token",
+				},
+				files: oversizedSecretFiles,
+				spawn: fakeAlchemy(oversizedSecretCalls),
+			})
+			expect(oversizedSecret.exitCode).toBe(1)
+			expect(oversizedSecret.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(oversizedSecret.errorMessage).toContain("5121")
+			expect(oversizedSecret.errorMessage).toContain("5120")
+			expect(oversizedSecret.errorMessage).not.toContain("kkkkkk")
+			expect(oversizedSecret.stderr).not.toContain("kkkkkk")
+			expect(oversizedSecretFiles[ENV_FILE]).toBeUndefined()
+			expect(oversizedSecretCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const oversizedHeaderSecretFiles = virtualFiles(checkout)
+			const oversizedHeaderSecretCalls: Array<ReadonlyArray<string>> = []
+			const oversizedHeaderSecret = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "sk-primary-ok",
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "t".repeat(5091),
+				},
+				files: oversizedHeaderSecretFiles,
+				spawn: fakeAlchemy(oversizedHeaderSecretCalls),
+			})
+			expect(oversizedHeaderSecret.exitCode).toBe(1)
+			expect(oversizedHeaderSecret.errorMessage).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(oversizedHeaderSecret.errorMessage).toContain("5121")
+			expect(oversizedHeaderSecret.errorMessage).toContain("5120")
+			expect(oversizedHeaderSecret.errorMessage).not.toContain("tttttt")
+			expect(oversizedHeaderSecret.stderr).not.toContain("tttttt")
+			expect(oversizedHeaderSecretFiles[ENV_FILE]).toBeUndefined()
+			expect(oversizedHeaderSecretCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			const spacedHeaderAuthResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: JSON.stringify({
+						corp: {
+							name: "Corp",
+							format: "openai-completions",
+							base_url: "https://corp.example/v1",
+							auth: {
+								type: "api_key_header",
+								header: "X-Corp-Auth",
+								env: "CHECKFU_PROVIDER_SECRET_CORP_AUTH",
+							},
+							secret_headers: { "CF-AIG-Authorization": "CHECKFU_PROVIDER_SECRET_CORP_GW_AUTH" },
+						},
+					}),
+					CHECKFU_PROVIDER_SECRET_CORP_AUTH: "Basic dXNlcjpwYXNz",
+					CHECKFU_PROVIDER_SECRET_CORP_GW_AUTH: "Bearer gw-token-ok",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy([]),
+			})
+			expect(spacedHeaderAuthResult.errorMessage).toBeUndefined()
+
+			// 15. Valid exported custom secrets containing all three quote characters (', ", `)
+			//     pass validation and deploy via Alchemy's inherited shell ConfigProvider fallback
+			//     without corrupting .env (even when .env holds an empty placeholder line).
+			const allQuotesSecret = "sk-'single'-\"double\"-`backtick`"
+			for (const initialEnvContents of [
+				undefined,
+				`CHECKFU_API_KEY=${TEST_API_KEY}\nCHECKFU_PROVIDER_SECRET_XAI_API_KEY=\n`,
+			]) {
+				const allQuotesFiles = virtualFiles(
+					initialEnvContents === undefined
+						? checkout
+						: { ...checkout, [ENV_FILE]: initialEnvContents },
+				)
+				const allQuotesEnv = {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CHECKFU_PROVIDERS: customSecretManifest,
+					CHECKFU_PROVIDER_SECRET_XAI_API_KEY: allQuotesSecret,
+					CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok-token",
+				}
+				const allQuotesResult = yield* cli.run(["deploy", "--yes"], {
+					env: allQuotesEnv,
+					files: allQuotesFiles,
+					spawn: fakeAlchemy([]),
+				})
+				expect(allQuotesResult.errorMessage).toBeUndefined()
+				expect(allQuotesResult.stderr).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+				expect(allQuotesResult.stderr).toContain("not saved to .env")
+				expect(allQuotesResult.stderr).not.toContain(allQuotesSecret)
+				const envText = allQuotesFiles[ENV_FILE] ?? ""
+				expect(envText).not.toContain(allQuotesSecret)
+				// Verify Alchemy's `--env-file` ConfigProvider (`orElse(dotEnv, shell)`) resolves the
+				// exact lossless secret from the inherited shell environment.
+				const alchemyProvider = ConfigProvider.orElse(
+					ConfigProvider.fromDotEnvContents(envText),
+					ConfigProvider.fromEnvRecord(allQuotesEnv),
+				)
+				const resolvedSecret = yield* Config.String("CHECKFU_PROVIDER_SECRET_XAI_API_KEY").parse(
+					alchemyProvider,
+				)
+				expect(resolvedSecret).toBe(allQuotesSecret)
+			}
 		}),
 	)
 

@@ -7,6 +7,7 @@ import {
 	DEFAULT_OPENAI_BASE_URL,
 	DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENROUTER_BASE_URL,
+	assertValidCustomProviderCredentials,
 	providerRequiredConfigEnvs,
 	providerRequiredSecretEnvs,
 	shouldBindCloudflareAiGateway,
@@ -31,7 +32,12 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import { optionalSecret } from "../Secrets.ts"
-import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
+import {
+	LOCAL_DEV_SIGNAL_ENV,
+	LOCAL_DEV_SIGNAL_VALUE,
+	PROVIDER_API_KEY_ENV,
+	allProviders,
+} from "./PiCatalog.ts"
 import { PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW } from "./PiContextBudget.ts"
 
 export {
@@ -39,6 +45,8 @@ export {
 	DEFAULT_OPENAI_BASE_URL,
 	DEFAULT_OPENROUTER_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENROUTER_BASE_URL,
+	LOCAL_DEV_SIGNAL_ENV,
+	LOCAL_DEV_SIGNAL_VALUE,
 	createNoRedirectProviderFetch,
 }
 
@@ -46,8 +54,6 @@ export const OPENAI_BASE_URL_ENV = "CHECKFU_OPENAI_BASE_URL"
 export const OPENROUTER_BASE_URL_ENV = "CHECKFU_OPENROUTER_BASE_URL"
 export const CLOUDFLARE_AI_GATEWAY_BASE_URL_ENV = "CHECKFU_CLOUDFLARE_AI_GATEWAY_BASE_URL"
 export const CLOUDFLARE_WORKERS_AI_BASE_URL_ENV = "CHECKFU_CLOUDFLARE_WORKERS_AI_BASE_URL"
-export const LOCAL_DEV_SIGNAL_ENV = "CHECKFU_LOCAL_DEV"
-export const LOCAL_DEV_SIGNAL_VALUE = "local-dev"
 
 export const parseLoopbackBaseUrl = (raw: string): string =>
 	parseProviderLoopbackBaseUrl(raw, OPENAI_BASE_URL_ENV)
@@ -91,17 +97,29 @@ export const loadProviderEnv = (
 		return Object.fromEntries(entries)
 	}).pipe(Effect.orDie)
 
-export const providerApiKeys = Effect.map(loadProviderEnv(BUILTIN_PROVIDERS), (env) => ({
-	env,
-	openai:
-		env[PROVIDER_API_KEY_ENV.openai ?? "OPENAI_API_KEY"] === undefined
-			? null
-			: Redacted.make(env[PROVIDER_API_KEY_ENV.openai ?? "OPENAI_API_KEY"] ?? ""),
-	anthropic:
-		env[PROVIDER_API_KEY_ENV.anthropic ?? "ANTHROPIC_API_KEY"] === undefined
-			? null
-			: Redacted.make(env[PROVIDER_API_KEY_ENV.anthropic ?? "ANTHROPIC_API_KEY"] ?? ""),
-}))
+export const loadProviderApiKeys = (customProviders?: ReadonlyArray<ProviderSpec>) =>
+	Effect.gen(function* () {
+		const env = yield* loadProviderEnv(allProviders(customProviders))
+		if (customProviders !== undefined && customProviders.length > 0) {
+			const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
+			if (Option.isSome(alchemyContext)) {
+				assertValidCustomProviderCredentials(customProviders, env)
+			}
+		}
+		return {
+			env,
+			openai:
+				env[PROVIDER_API_KEY_ENV.openai ?? "OPENAI_API_KEY"] === undefined
+					? null
+					: Redacted.make(env[PROVIDER_API_KEY_ENV.openai ?? "OPENAI_API_KEY"] ?? ""),
+			anthropic:
+				env[PROVIDER_API_KEY_ENV.anthropic ?? "ANTHROPIC_API_KEY"] === undefined
+					? null
+					: Redacted.make(env[PROVIDER_API_KEY_ENV.anthropic ?? "ANTHROPIC_API_KEY"] ?? ""),
+		}
+	}).pipe(Effect.orDie)
+
+export const providerApiKeys = loadProviderApiKeys()
 
 /**
  * Attaches the native Cloudflare Workers `AI` binding to `PiHarnessWorker` on

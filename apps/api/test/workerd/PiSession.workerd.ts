@@ -27,6 +27,9 @@ const TEST_OPENAI_KEY = "sk-workerd-fake-key"
 const TEST_ANTHROPIC_KEY = "sk-ant-workerd-fake-key"
 const TEST_OPENROUTER_KEY = "sk-or-v1-workerd-fake-key"
 const TEST_CLOUDFLARE_AI_KEY = "cf-ai-workerd-fake-key"
+const TEST_CUSTOM_PROVIDER_ID = "custom-local"
+const TEST_CUSTOM_API_KEY = "sk-custom-workerd-fake-key"
+const TEST_CUSTOM_HEADER_SECRET = "hdr-custom-workerd-secret"
 const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
 }
@@ -186,17 +189,31 @@ const stripAnsi = (text: string): string => text.replaceAll(ANSI_ESCAPE_RE, "")
 
 const WORKERS = ["ApiWorker", "PiHarnessWorker"] as const
 
-const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyArray<string> => {
+const boundEnv = (stage: string, worker: (typeof WORKERS)[number]): object => {
 	const saved = JSON.parse(
 		readFileSync(join(REPO_ROOT, ".alchemy", "state", "Checkfu", stage, `${worker}.json`), "utf8"),
 	) as { readonly props?: { readonly env?: object } }
-	return Object.keys(saved.props?.env ?? {})
+	return saved.props?.env ?? {}
 }
+
+const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyArray<string> =>
+	Object.keys(boundEnv(stage, worker))
 
 const startAlchemyDev = async (openAIBaseUrl: string) => {
 	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
+	const customProvidersJson = JSON.stringify({
+		[TEST_CUSTOM_PROVIDER_ID]: {
+			name: "Custom Local",
+			format: "openai-responses",
+			base_url: openAIBaseUrl,
+			api_key_env: "CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_API_KEY",
+			headers: { "x-tenant": "acme-tenant-tag" },
+			secret_headers: { "x-custom-secret": "CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_HEADER_SECRET" },
+			default_model: "custom-model-v1",
+		},
+	})
 	try {
 		writeFileSync(
 			envFile,
@@ -206,6 +223,9 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
 				`OPENROUTER_API_KEY=${TEST_OPENROUTER_KEY}`,
 				`CLOUDFLARE_AI_API_KEY=${TEST_CLOUDFLARE_AI_KEY}`,
+				`CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_API_KEY=${TEST_CUSTOM_API_KEY}`,
+				`CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_HEADER_SECRET=${TEST_CUSTOM_HEADER_SECRET}`,
+				`CHECKFU_PROVIDERS='${customProvidersJson}'`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
 				"CHECKFU_PUBLISH_DOMAIN=pages.example",
 				"CHECKFU_API_DOMAIN=none",
@@ -227,6 +247,10 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.CLOUDFLARE_AI_API_KEY
 	delete childEnv.CLOUDFLARE_API_KEY
 	delete childEnv.CLOUDFLARE_GATEWAY_ID
+	delete childEnv.CHECKFU_PROVIDERS
+	delete childEnv.CHECKFU_PROVIDER_CATALOG
+	delete childEnv.CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_API_KEY
+	delete childEnv.CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_HEADER_SECRET
 	delete childEnv.CHECKFU_OPENAI_BASE_URL
 	delete childEnv.CHECKFU_OPENROUTER_BASE_URL
 	delete childEnv.CHECKFU_CLOUDFLARE_AI_GATEWAY_BASE_URL
@@ -592,20 +616,77 @@ describe("PiSession real Durable Object under workerd", () => {
 
 	it("binds provider keys only to the harness Worker and the API key only to the API Worker", () => {
 		const api = boundNames(stage, "ApiWorker")
+		const apiEnvSerialized = JSON.stringify(boundEnv(stage, "ApiWorker"))
 		const harness = boundNames(stage, "PiHarnessWorker")
 		expect(api).toContain("CHECKFU_API_KEY")
+		expect(api).toContain("CHECKFU_PROVIDER_CATALOG")
+		expect(api).not.toContain("CHECKFU_PROVIDERS")
+		expect(apiEnvSerialized).toContain(TEST_CUSTOM_PROVIDER_ID)
+		expect(apiEnvSerialized).not.toContain("x-tenant")
+		expect(apiEnvSerialized).not.toContain("acme-tenant-tag")
+		expect(apiEnvSerialized).not.toContain("x-custom-secret")
+		expect(apiEnvSerialized).not.toContain("CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_API_KEY")
 		expect(api).not.toContain("OPENAI_API_KEY")
 		expect(api).not.toContain("ANTHROPIC_API_KEY")
 		expect(api).not.toContain("OPENROUTER_API_KEY")
 		expect(api).not.toContain("CLOUDFLARE_AI_API_KEY")
 		expect(api).not.toContain("CLOUDFLARE_API_KEY")
+		expect(api).not.toContain("CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_API_KEY")
+		expect(api).not.toContain("CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_HEADER_SECRET")
+		expect(harness).toContain("CHECKFU_PROVIDERS")
 		expect(harness).toContain("OPENAI_API_KEY")
 		expect(harness).toContain("ANTHROPIC_API_KEY")
 		expect(harness).toContain("OPENROUTER_API_KEY")
 		expect(harness).toContain("CLOUDFLARE_AI_API_KEY")
 		expect(harness).not.toContain("CLOUDFLARE_API_KEY")
+		expect(harness).toContain("CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_API_KEY")
+		expect(harness).toContain("CHECKFU_PROVIDER_SECRET_CUSTOM_LOCAL_HEADER_SECRET")
 		expect(harness).not.toContain("CHECKFU_API_KEY")
 	})
+
+	it("runs a turn against a custom format-compatible provider with isolated secrets", async () => {
+		fakeOpenAI.setHandler((req) => ({
+			kind: "reply",
+			text: `Custom echo: ${req.lastUserText}`,
+			inputTokens: 13,
+			outputTokens: 6,
+		}))
+
+		const customAgent = await createResource<{ readonly id: string }>("/v1/agents", {
+			name: "Custom Provider Agent",
+			model: `${TEST_CUSTOM_PROVIDER_ID}/custom-model-v1`,
+			system: "Respond concisely.",
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: customAgent.id,
+			environment_id: environmentId,
+		})
+		const startCount = fakeOpenAI.requests.length
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [
+					{
+						type: "user.message",
+						content: [{ type: "text", text: "Hello custom provider" }],
+					},
+				],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+
+		const req = fakeOpenAI.requests[startCount]
+		expect(req?.model).toBe("custom-model-v1")
+		expect(req?.authorization).toBe(`Bearer ${TEST_CUSTOM_API_KEY}`)
+		expect(req?.headers["x-tenant"]).toBe("acme-tenant-tag")
+		expect(req?.headers["x-custom-secret"]).toBe(TEST_CUSTOM_HEADER_SECRET)
+
+		const events = await listAllEvents(session.id)
+		expect(events.find((e) => e.type === "agent.message")?.content).toEqual([
+			{ type: "text", text: "Custom echo: Hello custom provider" },
+		])
+	}, 30_000)
 
 	it("runs a turn from message to reply and remembers the first turn on the second", async () => {
 		fakeOpenAI.setHandler((req) => {
