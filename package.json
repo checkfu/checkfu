@@ -11,6 +11,7 @@
 		"catalog": {
 			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d49aab2e8f5ab9abbec4b4bcbd8d4d7b428c14143eb0e20a07eba6b5194ade5d.tgz",
 			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/300073173839ac69f7f76fd46021bdc13ce7386471bda71ff2b930b6f319f117.tgz",
+			"@cloudflare/computer": "0.11.4",
 			"@cloudflare/forge": "0.2.0",
 			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
 			"@earendil-works/chord": "1.6.0",
@@ -26,7 +27,8 @@
 			"effect": "4.1.5",
 			"typescript": "7.0.2",
 			"vitest": "5.1.1",
-			"yaml": "2.9.1"
+			"yaml": "2.9.1",
+			"zod": "4.6.7"
 		}
 	},
 	"type": "module",

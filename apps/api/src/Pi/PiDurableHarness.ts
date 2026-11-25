@@ -41,6 +41,7 @@ export interface PiTurnExecutorService {
 		conversation: string,
 		operationId: string,
 	) => Effect.Effect<void, HarnessCallFailed>
+	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
 }
 
 export const HarnessLimits = Context.Reference<{
@@ -216,9 +217,21 @@ export const PiDurableHarnessLive = boundedHarness(
 					),
 					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 				),
+			discardWorkspace: (args) =>
+				withRetry(executor.discardWorkspace(args.session_id)).pipe(
+					Effect.tap(() => Effect.logInfo("Workspace discarded", args.session_id)),
+					Effect.tapError((error) =>
+						Effect.logError("Workspace not discarded", args.session_id, error.cause),
+					),
+					Effect.orDie,
+				),
 		}
 	}),
 )
 
-export const makePiTurnExecutorLayer = (service: PiTurnExecutorService) =>
-	Layer.succeed(PiTurnExecutor, service)
+export const makePiTurnExecutorLayer = (
+	turns: Omit<PiTurnExecutorService, "discardWorkspace">,
+	workspaces: Pick<PiTurnExecutorService, "discardWorkspace"> = {
+		discardWorkspace: () => Effect.void,
+	},
+) => Layer.succeed(PiTurnExecutor, { ...turns, ...workspaces })

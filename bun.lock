@@ -34,6 +34,7 @@
         "@checkfu/domain": "workspace:*",
         "@checkfu/sdk": "workspace:*",
         "@checkfu/snapshots": "workspace:*",
+        "@cloudflare/computer": "catalog:",
         "@distilled.cloud/cloudflare": "catalog:",
         "@earendil-works/chord": "catalog:",
         "@earendil-works/pi-ai": "catalog:",
@@ -42,6 +43,7 @@
         "agents": "catalog:",
         "alchemy": "catalog:",
         "effect": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@effect/platform-bun": "catalog:",
@@ -191,6 +193,7 @@
   "catalog": {
     "@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d49aab2e8f5ab9abbec4b4bcbd8d4d7b428c14143eb0e20a07eba6b5194ade5d.tgz",
     "@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/300073173839ac69f7f76fd46021bdc13ce7386471bda71ff2b930b6f319f117.tgz",
+    "@cloudflare/computer": "0.11.4",
     "@cloudflare/forge": "0.2.0",
     "@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
     "@earendil-works/chord": "1.6.0",
@@ -207,6 +210,7 @@
     "typescript": "7.0.2",
     "vitest": "5.1.1",
     "yaml": "2.9.1",
+    "zod": "4.6.7",
   },
   "packages": {
     "@alchemy.run/acme": ["@alchemy.run/acme@https://pkg.alchemy.run/@alchemy.run/acme/-/a3d6d22584c50c319f1eedce02f179accda0e6f0a3724422068a9a66fca58b7b.tgz", { "dependencies": { "@distilled.cloud/acme": "https://pkg.alchemy.run/@distilled.cloud/acme/-/93cdeb63385c621e30cc363c24b6111d68f2e9796416c9d22532b5f3d6f14a0e.tgz" }, "peerDependencies": { "alchemy": "https://pkg.alchemy.run/alchemy/-/3882966d5d3b5229ec2df019a1d53902e85bd720a17326cf3e24c6bba3cb78bc.tgz", "effect": "^4.1.4" } }, "sha512-JmxNRgcopvtu2LWMx4DRimssJIBtHWKrIAuel/Ui2R8PJNayGkhzHnfqyIr3nWhoL5I9mFv9ID+X1Fh/U10SZw=="],
@@ -342,6 +346,8 @@
     "@checkfu/snapshots": ["@checkfu/snapshots@workspace:packages/snapshots"],
 
     "@checkfu/ui": ["@checkfu/ui@workspace:packages/ui"],
+
+    "@cloudflare/computer": ["@cloudflare/computer@0.11.4", "", { "dependencies": { "capnweb": "^0.12.0" }, "peerDependencies": { "@cloudflare/workers-types": "^4.20260616.1 || ^5.20260921.1", "@platformatic/vfs": "*", "ai": "^6.0.196 || ^7.0.0", "just-bash": "^3.6.0", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0", "zod": "^4.6.6" }, "optionalPeers": ["@cloudflare/workers-types", "@platformatic/vfs", "ai", "just-bash", "vite", "zod"] }, "sha512-OFjc8pTkXmc/lYEcLQHDE8OEfIYD1051xLv7K1eoeQLCrkHqKLuHntfB4K7u5AkO7JfXIEGy3sgmbtDoSou0KQ=="],
 
     "@cloudflare/forge": ["@cloudflare/forge@0.2.0", "", { "optionalDependencies": { "@cloudflare/forge-darwin-arm64": "0.2.0", "@cloudflare/forge-darwin-x64": "0.2.0", "@cloudflare/forge-linux-arm64": "0.2.0", "@cloudflare/forge-linux-x64": "0.2.0", "@cloudflare/forge-win32-arm64": "0.2.0", "@cloudflare/forge-win32-x64": "0.2.0" }, "peerDependencies": { "@bytecodealliance/jco": "^1.37.0" }, "optionalPeers": ["@bytecodealliance/jco"], "bin": { "forge": "bin/forge.cjs", "forge-plugin": "bin/forge-plugin.mjs" } }, "sha512-EN8NAKt82nvdomOVoGJzYTpWglyWBC2IAdb1/jlYdPLjgQ4Lwsm+q/zXyL1Vj2t4uQBtmsYgRPjNmVVBvKYxLg=="],
 
