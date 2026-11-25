@@ -832,10 +832,9 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									maxLength: 64,
 								},
 							},
-							required: ["type", "expression", "timezone"],
 							additionalProperties: false,
 							description:
-								"New schedule, with the same rules as on create. On an active automation the next firing moves to it.",
+								"New schedule, with the same rules as on create. A field left out keeps its value, so the expression and the timezone can change separately. On an active automation the next firing moves to it.",
 						},
 					},
 					additionalProperties: false,

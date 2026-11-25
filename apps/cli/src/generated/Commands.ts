@@ -789,7 +789,7 @@ const automationsUpdateCommand = CommandMake(
 		schedule: FlagString("schedule").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"New schedule, with the same rules as on create. On an active automation the next firing moves to it. (JSON, YAML, or @file)",
+				"New schedule, with the same rules as on create. A field left out keeps its value, so the expression and the timezone can change separately. On an active automation the next firing moves to it. (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),

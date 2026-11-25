@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { MessageText, ResourceId } from "../Session/SessionTypes.ts"
 import { AutomationId } from "./Automation.id.ts"
@@ -11,7 +12,10 @@ import {
 
 export class AutomationCreated extends Domain.Event("automation.created", {
 	name: AutomationName,
-	description: Schema.NullOr(AutomationDescription),
+	// Events recorded before automations had a description read as having none.
+	description: Schema.NullOr(AutomationDescription).pipe(
+		Schema.withDecodingDefaultKey(Effect.succeed(null)),
+	),
 	agent_id: ResourceId,
 	agent_version: Schema.NullOr(PositiveInt),
 	environment_id: ResourceId,

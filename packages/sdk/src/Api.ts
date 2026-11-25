@@ -25,6 +25,7 @@ import {
 	AutomationName,
 	AutomationRunError,
 	AutomationSchedule,
+	CronExpression,
 	AutomationSnapshot,
 	EnvironmentConfig,
 	EnvironmentDescription,
@@ -34,6 +35,7 @@ import {
 	NonEmptyString,
 	PositiveInt,
 	ResourceId,
+	Timezone,
 	ResourceListCursor,
 	SessionEventFields,
 	SessionId,
@@ -452,9 +454,13 @@ export const UpdateAutomationBody = Schema.Struct({
 		}),
 	),
 	schedule: Schema.optionalKey(
-		AutomationSchedule.annotate({
+		Schema.Struct({
+			type: Schema.optionalKey(Schema.Literal("cron")),
+			expression: Schema.optionalKey(CronExpression),
+			timezone: Schema.optionalKey(Timezone),
+		}).annotate({
 			description:
-				"New schedule, with the same rules as on create. On an active automation the next firing moves to it.",
+				"New schedule, with the same rules as on create. A field left out keeps its value, so the expression and the timezone can change separately. On an active automation the next firing moves to it.",
 		}),
 	),
 })

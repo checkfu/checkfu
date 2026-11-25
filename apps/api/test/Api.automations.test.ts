@@ -810,6 +810,42 @@ describe("Automations API", () => {
 			}),
 		))
 
+	it("changes the cron expression and the timezone separately, keeping both of two concurrent edits", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const zoned = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					schedule: { timezone: "Europe/London" },
+				})
+				expect(zoned.body.schedule).toEqual({ ...weekdayMornings, timezone: "Europe/London" })
+				yield* Effect.all(
+					[
+						call(apiFetch, "POST", `/v1/automations/${id}`, {
+							schedule: { timezone: "Asia/Tokyo" },
+						}),
+						call(apiFetch, "POST", `/v1/automations/${id}`, {
+							schedule: { expression: "0 13 * * *" },
+						}),
+					],
+					{ concurrency: "unbounded" },
+				)
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body.schedule).toEqual({
+					type: "cron",
+					expression: "0 13 * * *",
+					timezone: "Asia/Tokyo",
+				})
+			}),
+		))
+
 	it("updates a paused automation without starting it, and refuses what it cannot update", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {

@@ -262,7 +262,11 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 							agent_version: agent === undefined ? current.agent_version : agent.agent_version,
 							environment_id: environment_id ?? BoundedEnvironmentId.make(current.environment_id),
 							text: text ?? current.text,
-							schedule: payload.schedule ?? current.schedule,
+							schedule: {
+								type: "cron" as const,
+								expression: payload.schedule?.expression ?? current.schedule.expression,
+								timezone: payload.schedule?.timezone ?? current.schedule.timezone,
+							},
 						}
 						const reschedule = !sameSchedule(next.schedule, current.schedule)
 						const agent_changed =
