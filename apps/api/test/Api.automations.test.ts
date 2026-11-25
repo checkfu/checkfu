@@ -592,11 +592,11 @@ describe("Automations API", () => {
 			}),
 		))
 
-	it("lists while the listing is ahead of an automation's own view: waits for it, or answers 503 with no page", () =>
+	it("lists while the listing is ahead of an automation's own view: waits for it, answers 503 with no page, or leaves out what the view no longer matches", () =>
 		run(() =>
 			Effect.gen(function* () {
 				const views = yield* AutomationView
-				let lag: "off" | "missing" | "timeout" | "archived" = "off"
+				let lag: "off" | "missing" | "timeout" | "archived" | "moved" = "off"
 				let waits = 0
 				const lagging = {
 					...views,
@@ -612,7 +612,14 @@ describe("Automations API", () => {
 												: { ...state, status: "archived" as const, archived_at: state.updated_at },
 										),
 									)
-								: Effect.succeedNone,
+								: lag === "moved"
+									? Effect.map(
+											views.get(ref, options),
+											Option.map((state) =>
+												state === null ? state : { ...state, agent_id: "agent_elsewhere" },
+											),
+										)
+									: Effect.succeedNone,
 					waitFor: (
 						ref: Parameters<typeof views.waitFor>[0],
 						where: Parameters<typeof views.waitFor>[1],
@@ -660,6 +667,14 @@ describe("Automations API", () => {
 				lag = "archived"
 				const archived = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?limit=1")
 				expect([archived.status, archived.body.data, waits]).toEqual([200, [], 2])
+
+				lag = "moved"
+				const moved = yield* call<ListBody>(apiFetch, "GET", `/v1/automations?agent_id=${agentId}`)
+				expect([moved.status, moved.body.data, waits]).toEqual([200, [], 2])
+				const unfiltered = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
+				expect(unfiltered.body.data.map((automation) => automation.agent.id)).toEqual([
+					"agent_elsewhere",
+				])
 			}),
 		))
 
