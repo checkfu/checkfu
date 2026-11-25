@@ -374,6 +374,9 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"AddArtifactVersion",
 		"DeleteArtifact",
 		"FenceArtifactWrites",
+		"PublishArtifact",
+		"UnpublishArtifact",
+		"ClaimArtifactIdempotencyKey",
 	],
 	views: [
 		"AgentView",

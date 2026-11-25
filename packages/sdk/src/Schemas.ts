@@ -374,6 +374,15 @@ export const ArtifactId = Schema.String.check(Schema.isMinLength(1)).pipe(
 )
 export type ArtifactId = typeof ArtifactId.Type
 
+export const PUBLICATION_TOKEN_LENGTH = 25
+
+// One DNS label, so a publication can also be served at <address>.<domain>: "a", the artifact id's
+// hex, "-", and a token of 128 random bits in base 36.
+export const PublicationAddress = Schema.String.check(
+	Schema.isPattern(/^a[0-9a-f]{1,32}-[0-9a-z]{25}$/u),
+).pipe(Schema.brand("PublicationAddress"))
+export type PublicationAddress = typeof PublicationAddress.Type
+
 export const ArtifactName = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxCodePoints(MAX_ARTIFACT_NAME_LENGTH),

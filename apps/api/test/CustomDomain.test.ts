@@ -2,7 +2,15 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import { API_DOMAIN_ENV, DETACH_ALL, MCP_DOMAIN_ENV, customDomains } from "../src/CustomDomain.ts"
+import {
+	API_DOMAIN_ENV,
+	DETACH_ALL,
+	MCP_DOMAIN_ENV,
+	PUBLISH_DOMAIN_ENV,
+	customDomains,
+	publishDomain,
+} from "../src/CustomDomain.ts"
+import { CONTENT_WORKER_PROPS, contentWorkerProps } from "../src/Content/ContentWorker.ts"
 
 // An empty entry in `.env` arrives as "".
 const parse = (env: Record<string, string>) =>
@@ -83,6 +91,34 @@ describe("custom domains", () => {
 		}),
 	)
 
+	it.effect("needs the API and MCP hostnames named outright while a publish domain is set", () =>
+		Effect.gen(function* () {
+			const publish = { [PUBLISH_DOMAIN_ENV]: "pages.example" }
+			for (const [name, other] of [
+				[API_DOMAIN_ENV, MCP_DOMAIN_ENV],
+				[MCP_DOMAIN_ENV, API_DOMAIN_ENV],
+			] as const) {
+				for (const left of [{}, { [name]: "" }]) {
+					expect(yield* refused({ ...publish, ...left, [other]: DETACH_ALL })).toContain(
+						`${name} must be a hostname outside ${PUBLISH_DOMAIN_ENV} pages.example, or none`,
+					)
+				}
+			}
+			expect(yield* refused(publish)).toContain(`${API_DOMAIN_ENV} must be`)
+			expect(
+				yield* parse({ ...publish, [API_DOMAIN_ENV]: DETACH_ALL, [MCP_DOMAIN_ENV]: DETACH_ALL }),
+			).toEqual({ api: { domain: null }, mcp: { domain: null } })
+			expect(
+				yield* parse({
+					...publish,
+					[API_DOMAIN_ENV]: "api.example.com",
+					[MCP_DOMAIN_ENV]: "mcp.example.com",
+				}),
+			).toEqual({ api: { domain: "api.example.com" }, mcp: { domain: "mcp.example.com" } })
+			expect(yield* parse({ [PUBLISH_DOMAIN_ENV]: "" })).toEqual({ api: {}, mcp: {} })
+		}),
+	)
+
 	it.effect("refuses anything that is not a bare hostname", () =>
 		Effect.gen(function* () {
 			for (const value of [
@@ -109,5 +145,66 @@ describe("custom domains", () => {
 				}
 			}
 		}),
+	)
+
+	it.effect(
+		"serves publications from a wildcard route on the publish domain, and keeps API hostnames out of it",
+		() =>
+			Effect.gen(function* () {
+				const domain = (env: Record<string, string>) =>
+					publishDomain.parse(ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true }))
+				expect(yield* domain({})).toBeUndefined()
+				expect(yield* domain({ [PUBLISH_DOMAIN_ENV]: "" })).toBeUndefined()
+				expect(yield* domain({ [PUBLISH_DOMAIN_ENV]: "Example-Pages.dev" })).toBe(
+					"example-pages.dev",
+				)
+				for (const value of ["*.pages.dev", "none", "pages", "https://pages.dev"]) {
+					expect([
+						value,
+						Exit.isFailure(yield* Effect.exit(domain({ [PUBLISH_DOMAIN_ENV]: value }))),
+					]).toEqual([value, true])
+				}
+				expect(contentWorkerProps(undefined)).toBe(CONTENT_WORKER_PROPS)
+				expect(contentWorkerProps("example-pages.dev")).toEqual({
+					...CONTENT_WORKER_PROPS,
+					routes: [{ pattern: "*.example-pages.dev/*", zoneName: "example-pages.dev" }],
+				})
+
+				for (const [name, other, hostname, publish] of [
+					[API_DOMAIN_ENV, MCP_DOMAIN_ENV, "api.example.com", "example.com"],
+					[MCP_DOMAIN_ENV, API_DOMAIN_ENV, "mcp.agents.example.com", "Example.com"],
+					[API_DOMAIN_ENV, MCP_DOMAIN_ENV, "example.com", "example.com"],
+					[MCP_DOMAIN_ENV, API_DOMAIN_ENV, "MCP.Example.com", "example.com"],
+				] as const) {
+					expect(
+						yield* refused({
+							[name]: hostname,
+							[other]: DETACH_ALL,
+							[PUBLISH_DOMAIN_ENV]: publish,
+						}),
+					).toContain(`${name} is inside ${PUBLISH_DOMAIN_ENV} example.com`)
+				}
+				expect(
+					yield* parse({
+						[API_DOMAIN_ENV]: "api.example.com",
+						[MCP_DOMAIN_ENV]: DETACH_ALL,
+						[PUBLISH_DOMAIN_ENV]: "example-pages.com",
+					}),
+				).toEqual({ api: { domain: "api.example.com" }, mcp: { domain: null } })
+				expect(
+					yield* parse({
+						[API_DOMAIN_ENV]: "myexample.com",
+						[MCP_DOMAIN_ENV]: "mcp.myexample.com",
+						[PUBLISH_DOMAIN_ENV]: "example.com",
+					}),
+				).toEqual({ api: { domain: "myexample.com" }, mcp: { domain: "mcp.myexample.com" } })
+				expect(
+					yield* parse({
+						[API_DOMAIN_ENV]: "example.com",
+						[MCP_DOMAIN_ENV]: DETACH_ALL,
+						[PUBLISH_DOMAIN_ENV]: "pages.example.com",
+					}),
+				).toEqual({ api: { domain: "example.com" }, mcp: { domain: null } })
+			}),
 	)
 })

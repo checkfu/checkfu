@@ -101,11 +101,23 @@ export interface CheckfuOperations {
 		EndpointBody<"artifacts", "list">,
 		EndpointSuccess<"artifacts", "list">
 	>
+	readonly "artifacts.publish": OperationShape<
+		EndpointParams<"artifacts", "publish">,
+		EndpointQuery<"artifacts", "publish">,
+		EndpointBody<"artifacts", "publish">,
+		EndpointSuccess<"artifacts", "publish">
+	>
 	readonly "artifacts.retrieve": OperationShape<
 		EndpointParams<"artifacts", "get">,
 		EndpointQuery<"artifacts", "get">,
 		EndpointBody<"artifacts", "get">,
 		EndpointSuccess<"artifacts", "get">
+	>
+	readonly "artifacts.unpublish": OperationShape<
+		EndpointParams<"artifacts", "unpublish">,
+		EndpointQuery<"artifacts", "unpublish">,
+		EndpointBody<"artifacts", "unpublish">,
+		EndpointSuccess<"artifacts", "unpublish">
 	>
 	readonly "artifacts.versions.create": OperationShape<
 		EndpointParams<"artifacts", "createVersion">,
@@ -824,6 +836,49 @@ export class EffectArtifactsResource {
 		)
 	}
 
+	/** Serve an artifact at a public address that anyone who has it can view. Publishing again changes the version served and keeps the address; after an unpublish, the next publish gets a new address. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later unpublish; the same key with another version, or one used to unpublish, answers 409 */
+	publish(
+		artifactId: PathParam<"artifacts", "publish", "artifact_id">,
+		params: EndpointBody<"artifacts", "publish">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "publish">>, CheckfuSdkError>
+	publish(
+		artifactId: PathParam<"artifacts", "publish", "artifact_id">,
+		params: EndpointBody<"artifacts", "publish">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "publish">, CheckfuSdkError>
+	publish(
+		artifactId: PathParam<"artifacts", "publish", "artifact_id">,
+		params: EndpointBody<"artifacts", "publish">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"artifacts", "publish"> | WithResponse<EndpointSuccess<"artifacts", "publish">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "publish", { artifact_id: artifactId }),
+				(pathParams) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.publish",
+							key !== undefined ? "idempotent" : "pre-commit-only",
+							withResolvedIdempotencyKey(options, key),
+							() =>
+								this.#runtime.raw.artifacts.publish({
+									params: pathParams,
+									headers: key === undefined ? {} : { "idempotency-key": key },
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
 	/** Retrieve an artifact and the files of its latest version */
 	retrieve(
 		artifactId: PathParam<"artifacts", "get", "artifact_id">,
@@ -854,6 +909,46 @@ export class EffectArtifactsResource {
 								params: pathParams,
 								responseMode: "decoded-and-response",
 							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409 */
+	unpublish(
+		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "unpublish">>, CheckfuSdkError>
+	unpublish(
+		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "unpublish">, CheckfuSdkError>
+	unpublish(
+		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"artifacts", "unpublish">
+		| WithResponse<EndpointSuccess<"artifacts", "unpublish">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "unpublish", { artifact_id: artifactId }),
+				(pathParams) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.unpublish",
+							key !== undefined ? "idempotent" : "pre-commit-only",
+							withResolvedIdempotencyKey(options, key),
+							() =>
+								this.#runtime.raw.artifacts.unpublish({
+									params: pathParams,
+									headers: key === undefined ? {} : { "idempotency-key": key },
+									responseMode: "decoded-and-response",
+								}),
+						),
 					),
 			),
 			options,
@@ -2203,6 +2298,20 @@ export class ArtifactsResource {
 		)
 	}
 
+	/** Serve an artifact at a public address that anyone who has it can view. Publishing again changes the version served and keeps the address; after an unpublish, the next publish gets a new address. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later unpublish; the same key with another version, or one used to unpublish, answers 409 */
+	publish(
+		artifactId: PathParam<"artifacts", "publish", "artifact_id">,
+		params: EndpointBody<"artifacts", "publish">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "publish">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsResource(effectRuntime).publish(artifactId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
 	/** Retrieve an artifact and the files of its latest version */
 	retrieve(
 		artifactId: PathParam<"artifacts", "get", "artifact_id">,
@@ -2210,6 +2319,19 @@ export class ArtifactsResource {
 	): APIPromise<EndpointJsonSuccess<"artifacts", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsResource(effectRuntime).retrieve(artifactId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409 */
+	unpublish(
+		artifactId: PathParam<"artifacts", "unpublish", "artifact_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "unpublish">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsResource(effectRuntime).unpublish(artifactId, {
 				...effectOpts,
 				withResponse: true,
 			}),

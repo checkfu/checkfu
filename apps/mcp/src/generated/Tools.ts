@@ -698,6 +698,105 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "artifacts_publishArtifact",
+		title: "Publish an artifact",
+		description:
+			"Serve an artifact at a public address that anyone who has it can view. Publishing again changes the version served and keeps the address; after an unpublish, the next publish gets a new address. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later unpublish; the same key with another version, or one used to unpublish, answers 409",
+		method: "POST",
+		path: "/v1/artifacts/{artifact_id}/publication",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						version: {
+							anyOf: [
+								{
+									type: "integer",
+									minimum: 1,
+									maximum: 9007199254740991,
+								},
+								{
+									type: "string",
+									enum: ["latest"],
+								},
+							],
+							description:
+								'Version to serve, or "latest" (the default) to serve each new version as it is added',
+						},
+					},
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_unpublishArtifact",
+		title: "Unpublish an artifact",
+		description:
+			"Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+		method: "DELETE",
+		path: "/v1/artifacts/{artifact_id}/publication",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "automations_archiveAutomation",
 		title: "Archive an automation",
 		description: "Archive an automation so it never runs again",

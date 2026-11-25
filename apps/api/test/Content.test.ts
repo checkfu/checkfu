@@ -15,6 +15,7 @@ import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionVie
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { ArtifactStore } from "../src/Artifacts/ArtifactStore.ts"
 import { ArtifactVersionResolver } from "../src/Artifacts/ResolveArtifactVersion.ts"
+import { PublicationResolver } from "../src/Artifacts/ResolvePublication.ts"
 import type { ArtifactLinkClaims } from "../src/Content/ArtifactLink.ts"
 import {
 	DEFAULT_LINK_TTL_SECONDS,
@@ -87,6 +88,7 @@ const withContent = <A>(
 			let now: number | undefined
 			const store = yield* ArtifactStore
 			const resolveArtifactVersion = yield* ArtifactVersionResolver
+			const resolvePublication = yield* PublicationResolver
 			const versionViews = yield* ArtifactVersionView
 			const laggingResolver = (lag: ViewLag) =>
 				ArtifactVersionResolver.pipe(
@@ -115,6 +117,7 @@ const withContent = <A>(
 					key,
 					store,
 					resolveArtifactVersion: resolve,
+					resolvePublication,
 					scope,
 					nowMillis: Effect.map(Clock.currentTimeMillis, (millis) => now ?? millis),
 				})

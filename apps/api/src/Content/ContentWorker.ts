@@ -14,6 +14,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { ApiWorker, ArtifactVersionNotReady } from "../Api.ts"
 import { ArtifactReader, ArtifactReaderR2, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
+import { publishDomain } from "../CustomDomain.ts"
 import { storageScope } from "../Placement.ts"
 import { linkKey } from "./ArtifactLink.ts"
 import { ArtifactLinkSecret, ContentWorker } from "./Content.ts"
@@ -39,31 +40,42 @@ const ContentLive = Layer.mergeAll(
 
 const notReady = Schema.decodeUnknownExit(ArtifactVersionNotReady)
 
+const apiCall = <A>(
+	call: () => Effect.Effect<A, ArtifactVersionNotReady>,
+): Effect.Effect<A, ArtifactStoreError | ArtifactVersionNotReady> =>
+	Effect.suspend(call).pipe(
+		Effect.catchCause(
+			(cause): Effect.Effect<never, ArtifactStoreError | ArtifactVersionNotReady> => {
+				if (Cause.hasInterruptsOnly(cause)) {
+					return Effect.interrupt
+				}
+				const pending = Option.map(Cause.findErrorOption(cause), notReady)
+				return Option.isSome(pending) && Exit.isSuccess(pending.value)
+					? Effect.fail(pending.value.value)
+					: Effect.fail(new ArtifactStoreError({ cause: Cause.squash(cause) }))
+			},
+		),
+	)
+
+// Each publication gets its own hostname, so pages that load files from `/` work as at a root.
+// A route, not a Custom Domain: only routes take a wildcard hostname.
+export const contentWorkerProps = (domain: string | undefined) =>
+	domain === undefined
+		? CONTENT_WORKER_PROPS
+		: { ...CONTENT_WORKER_PROPS, routes: [{ pattern: `*.${domain}/*`, zoneName: domain }] }
+
 export default ContentWorker.make(
-	CONTENT_WORKER_PROPS,
+	Effect.map(publishDomain, contentWorkerProps),
 	Effect.gen(function* () {
 		const mac = yield* Mac.Mac
 		const digest = yield* Digest.Digest
 		const store = yield* ArtifactReader
 		const scope = yield* storageScope
+		const domain = yield* publishDomain
 		const api = yield* Cloudflare.Workers.bindWorker(ApiWorker)
-		const resolveArtifactVersion = (
-			artifactId: string,
-			version: number,
-		): Effect.Effect<string | null, ArtifactStoreError | ArtifactVersionNotReady> =>
-			Effect.suspend(() => api.resolveArtifactVersion(artifactId, version)).pipe(
-				Effect.catchCause(
-					(cause): Effect.Effect<never, ArtifactStoreError | ArtifactVersionNotReady> => {
-						if (Cause.hasInterruptsOnly(cause)) {
-							return Effect.interrupt
-						}
-						const pending = Option.map(Cause.findErrorOption(cause), notReady)
-						return Option.isSome(pending) && Exit.isSuccess(pending.value)
-							? Effect.fail(pending.value.value)
-							: Effect.fail(new ArtifactStoreError({ cause: Cause.squash(cause) }))
-					},
-				),
-			)
+		const resolveArtifactVersion = (artifactId: string, version: number) =>
+			apiCall(() => api.resolveArtifactVersion(artifactId, version))
+		const resolvePublication = (address: string) => apiCall(() => api.resolvePublication(address))
 		const secret = yield* (yield* ArtifactLinkSecret).text
 		const runtime = yield* Cloudflare.Worker
 		const key = yield* Effect.cached(
@@ -82,7 +94,9 @@ export default ContentWorker.make(
 					key: yield* key,
 					store,
 					resolveArtifactVersion,
+					resolvePublication,
 					scope,
+					publishDomain: domain,
 					nowMillis,
 				})
 				return yield* serve(contentRequestOf(request))

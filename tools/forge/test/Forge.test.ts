@@ -51,9 +51,21 @@ describe("Cloudflare Forge pipeline", () => {
 			{ group: "artifacts", name: "list", httpMethod: "GET", path: "/v1/artifacts" },
 			{
 				group: "artifacts",
+				name: "publish",
+				httpMethod: "POST",
+				path: "/v1/artifacts/{artifact_id}/publication",
+			},
+			{
+				group: "artifacts",
 				name: "retrieve",
 				httpMethod: "GET",
 				path: "/v1/artifacts/{artifact_id}",
+			},
+			{
+				group: "artifacts",
+				name: "unpublish",
+				httpMethod: "DELETE",
+				path: "/v1/artifacts/{artifact_id}/publication",
 			},
 			{
 				group: "artifacts:versions",
@@ -527,7 +539,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(36)
+		expect(inspectedMethods.length).toBe(38)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

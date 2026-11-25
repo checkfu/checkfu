@@ -466,6 +466,9 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				"api-call:Api.resolveArtifactVersion/args",
 				"api-call:Api.resolveArtifactVersion/error",
 				"api-call:Api.resolveArtifactVersion/result",
+				"api-call:Api.resolvePublication/args",
+				"api-call:Api.resolvePublication/error",
+				"api-call:Api.resolvePublication/result",
 			])
 			const claims = "signed-link:ArtifactLink/claims"
 			const signed = lockWith({ [claims]: ["default.art_1.1.1800000000"] })
@@ -501,20 +504,22 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			)
 			expect(changed.length).toBe(1)
 			expect(changed[0]).toContain("content Worker and the API Worker")
-			const error = "api-call:Api.resolveArtifactVersion/error"
-			const failed = lockWith({
-				[error]: [{ _tag: "ArtifactVersionNotReady", artifactId: "art_1", version: 2 }],
-			})
-			expect(yield* lockProblems(failed)).toEqual([])
-			const refailed = yield* lockProblems(
-				failed,
-				replacing(
-					error,
-					Schema.TaggedStruct("ArtifactVersionNotReady", { artifact_id: Schema.String }),
-				),
-			)
-			expect(refailed.length).toBe(1)
-			expect(refailed[0]).toContain(error)
+			for (const method of ["resolveArtifactVersion", "resolvePublication"]) {
+				const error = `api-call:Api.${method}/error`
+				const failed = lockWith({
+					[error]: [{ _tag: "ArtifactVersionNotReady", artifactId: "art_1", version: 2 }],
+				})
+				expect(yield* lockProblems(failed)).toEqual([])
+				const refailed = yield* lockProblems(
+					failed,
+					replacing(
+						error,
+						Schema.TaggedStruct("ArtifactVersionNotReady", { artifact_id: Schema.String }),
+					),
+				)
+				expect(refailed.length).toBe(1)
+				expect(refailed[0]).toContain(error)
+			}
 		}).pipe(Effect.provide(Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCrypto)))),
 	)
 

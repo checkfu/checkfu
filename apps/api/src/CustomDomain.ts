@@ -1,8 +1,10 @@
 import * as Config from "effect/Config"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
 export const API_DOMAIN_ENV = "CHECKFU_API_DOMAIN"
 export const MCP_DOMAIN_ENV = "CHECKFU_MCP_DOMAIN"
+export const PUBLISH_DOMAIN_ENV = "CHECKFU_PUBLISH_DOMAIN"
 
 /** The value that removes every custom hostname from a Worker. */
 export const DETACH_ALL = "none"
@@ -29,21 +31,58 @@ const hostnameOf = (setting: Setting | undefined) =>
 		? undefined
 		: setting.toLowerCase()
 
+const PublishSetting = Schema.Union([Schema.Literal(""), Hostname])
+
+const publishHostnameOf = (setting: typeof PublishSetting.Type | undefined) =>
+	setting === undefined || setting === "" ? undefined : setting.toLowerCase()
+
+/** The domain whose subdomains serve publications, `<address>.<domain>`; undefined serves them under `/p/`. */
+export const publishDomain: Config.Config<string | undefined> = Config.option(
+	Config.schema(PublishSetting, PUBLISH_DOMAIN_ENV),
+).pipe(Config.map((setting) => publishHostnameOf(Option.getOrUndefined(setting))))
+
 // Read together, so a hostname named for both Workers is refused before either is deployed.
 // Cloudflare attaches a hostname to one Worker only, and Alchemy detaches a Worker's current
 // hostnames before it finds out the new one belongs to the other Worker.
+// A zone route takes precedence over a custom domain, so the publish wildcard would also take the
+// API's or the MCP server's requests if either hostname sat under it.
 const Settings = Schema.Struct({
 	[API_DOMAIN_ENV]: Schema.optionalKey(Setting),
 	[MCP_DOMAIN_ENV]: Schema.optionalKey(Setting),
+	[PUBLISH_DOMAIN_ENV]: Schema.optionalKey(PublishSetting),
 }).check(
 	Schema.makeFilter((settings) => {
 		const api = hostnameOf(settings[API_DOMAIN_ENV])
-		return api !== undefined && api === hostnameOf(settings[MCP_DOMAIN_ENV])
-			? {
-					path: [MCP_DOMAIN_ENV],
-					issue: `${API_DOMAIN_ENV} and ${MCP_DOMAIN_ENV} both name ${api}; a hostname can serve only one Worker`,
+		if (api !== undefined && api === hostnameOf(settings[MCP_DOMAIN_ENV])) {
+			return {
+				path: [MCP_DOMAIN_ENV],
+				issue: `${API_DOMAIN_ENV} and ${MCP_DOMAIN_ENV} both name ${api}; a hostname can serve only one Worker`,
+			}
+		}
+		const publish = publishHostnameOf(settings[PUBLISH_DOMAIN_ENV])
+		const covered = ([API_DOMAIN_ENV, MCP_DOMAIN_ENV] as const).find((name) => {
+			const hostname = hostnameOf(settings[name])
+			return (
+				publish !== undefined && hostname !== undefined && `.${hostname}`.endsWith(`.${publish}`)
+			)
+		})
+		if (covered !== undefined) {
+			return {
+				path: [covered],
+				issue: `${covered} is inside ${PUBLISH_DOMAIN_ENV} ${publish}, which serves published artifacts only; give them a domain of their own`,
+			}
+		}
+		// Left empty, a Worker keeps hostnames attached earlier, and one of them could sit inside the
+		// publish domain, so with a publish domain each Worker's hostnames are named outright.
+		const implicit = ([API_DOMAIN_ENV, MCP_DOMAIN_ENV] as const).find(
+			(name) => settings[name] === undefined || settings[name] === "",
+		)
+		return publish === undefined || implicit === undefined
+			? undefined
+			: {
+					path: [implicit],
+					issue: `${implicit} must be a hostname outside ${PUBLISH_DOMAIN_ENV} ${publish}, or ${DETACH_ALL}: left empty, hostnames already attached to the Worker stay, and one could be inside it`,
 				}
-			: undefined
 	}),
 )
 

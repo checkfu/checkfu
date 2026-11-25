@@ -194,6 +194,7 @@ const sampleArtifact = (overrides?: { readonly id?: string; readonly version?: n
 	file_count: 1,
 	total_bytes: 14,
 	files: sampleArtifactFiles,
+	publication: null,
 	created_at: ISO_NOW,
 	updated_at: ISO_NOW,
 	...overrides,
@@ -209,6 +210,7 @@ const sampleArtifactVersion = (overrides?: {
 	file_count: 1,
 	total_bytes: 14,
 	files: sampleArtifactFiles,
+	publication: null,
 	created_at: ISO_NOW,
 	...overrides,
 })
@@ -656,6 +658,56 @@ describe("@checkfu/sdk", () => {
 				}).pipe(Effect.provide(makeEffectLayer(update500Fetch, { maxRetries: 3 })))
 				expect(err2._tag).toBe("InternalServerError")
 				expect(update500Calls).toBe(1)
+			}),
+		)
+
+		it.live("resends a publish or an unpublish whose response was lost with the same key", () =>
+			Effect.gen(function* () {
+				const seen: Array<string> = []
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					seen.push(
+						`${req.method} ${new URL(req.url).pathname} ${req.headers.get("idempotency-key") ?? ""}`,
+					)
+					return seen.length % 2 === 1
+						? jsonResponse(apiErrorBody("internal_error", "maybe committed"), 500, {
+								"retry-after-ms": "1",
+							})
+						: jsonResponse(sampleArtifact())
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					yield* client.artifacts.publish("art_1", { version: "latest" })
+					yield* client.artifacts.unpublish("art_1")
+				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 1 })))
+				const [publish = "", publishRetry, unpublish = "", unpublishRetry] = seen
+				expect(publish).toMatch(/^POST \/v1\/artifacts\/art_1\/publication \S+$/)
+				expect(unpublish).toMatch(/^DELETE \/v1\/artifacts\/art_1\/publication \S+$/)
+				expect([publishRetry, unpublishRetry]).toEqual([publish, unpublish])
+				expect(publish.split(" ")[2]).not.toBe(unpublish.split(" ")[2])
+			}),
+		)
+
+		it.live("does not resend a publish or an unpublish that may have landed without a key", () =>
+			Effect.gen(function* () {
+				const seen: Array<string> = []
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					seen.push(`${req.method} ${req.headers.get("idempotency-key") ?? "no key"}`)
+					return jsonResponse(apiErrorBody("internal_error", "maybe committed"), 500, {
+						"retry-after-ms": "1",
+					})
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					yield* Effect.flip(client.artifacts.publish("art_1", {}))
+					yield* Effect.flip(client.artifacts.unpublish("art_1"))
+				}).pipe(
+					Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 2, autoIdempotencyKey: false })),
+				)
+				expect(seen).toEqual(["POST no key", "DELETE no key"])
 			}),
 		)
 

@@ -120,6 +120,14 @@ const STANDING = {
 	"Artifact.AddedVersionRecordsItsManifest": "proved",
 	"Artifact.FenceNeverDecreasesAndOnlyFencingMovesIt": "proved",
 	"Artifact.DeleteLandsOnlyAtTheCurrentFence": "proved",
+	"Artifact.PublishedOnlyOnceCreated": "proved",
+	"Artifact.UnpublishedHoldsNoSettings": "proved",
+	"Artifact.PinnedVersionWithinHead": "proved",
+	"Artifact.ATokenIsOnlyOpenedOrDropped": "proved",
+	"Artifact.UnpublishDropsTheToken": "proved",
+	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
+	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
+	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
 	"Automation.ReportedNeverExceedsRuns": "proved",
@@ -229,6 +237,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"AddArtifactVersion",
 			"DeleteArtifact",
 			"FenceArtifactWrites",
+			"PublishArtifact",
+			"UnpublishArtifact",
+			"ClaimArtifactIdempotencyKey",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
 		expect(hostedCommands).not.toContain("CreateAutomation")

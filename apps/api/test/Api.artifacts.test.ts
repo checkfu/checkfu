@@ -12,7 +12,6 @@ import {
 	MAX_ARTIFACT_TOTAL_BYTES,
 } from "../src/Artifacts/ArtifactFiles.ts"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
-import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import { ArtifactView } from "@checkfu/domain/Artifact/ArtifactView.view"
 import * as Digest from "effect/crypto/Digest"
@@ -36,11 +35,8 @@ import {
 	parseArtifactMarkerKey,
 } from "../src/Artifacts/ArtifactStore.ts"
 import type { ArtifactStoreService, ArtifactWriteCheck } from "../src/Artifacts/ArtifactStore.ts"
-import {
-	ARTIFACT_BODY_TOO_LARGE_MESSAGE,
-	MAX_REQUEST_BODY_BYTES,
-	idempotentId,
-} from "../src/Http/HttpHelpers.ts"
+import { ARTIFACT_BODY_TOO_LARGE_MESSAGE, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHelpers.ts"
+import { keyedArtifactId } from "../src/Http/ArtifactsHandlers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { DEFAULT_STORAGE_SCOPE } from "../src/Placement.ts"
 import {
@@ -378,13 +374,8 @@ const withApi = <A>(
 					),
 				statusForKey: (idempotencyKey) =>
 					Effect.gen(function* () {
-						const id = yield* idempotentId(digest, "art", [
-							"create",
-							"artifact",
-							"id",
-							idempotencyKey,
-						])
-						return (yield* artifacts.get(ArtifactId.make(id))).status
+						const id = yield* keyedArtifactId(digest, idempotencyKey)
+						return (yield* artifacts.get(id)).status
 					}).pipe(Effect.orDie),
 				call: (method, path, body, headers) =>
 					sendRequest(apiFetch, {
@@ -1066,6 +1057,10 @@ describe("Artifacts API", () => {
 					version: 1,
 					files: [{ path: "b.txt", content: "two" }],
 				})
+				expect((yield* call("POST", `/v1/artifacts/${created.id}/publication`, {})).status).toBe(
+					200,
+				)
+				expect(created).toMatchObject({ publication: null })
 				expect(
 					yield* json<ArtifactBody>(yield* call("POST", "/v1/artifacts", body, headers)),
 				).toEqual(created)
@@ -1867,6 +1862,7 @@ describe("Artifacts API", () => {
 					const retried = yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)
 					expect(retried.status).toBe(201)
 					const { id } = yield* json<ArtifactBody>(retried)
+					expect(yield* statusForKey("fenced-then-retried")).toBe("active")
 					expect(yield* everyFileReadable(call, id)).toBe(1)
 					expect(store.markers()).toEqual([])
 				}),
