@@ -1,6 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { Story } from "@alchemy.run/domain/Story"
-import { describe, it } from "@effect/vitest"
+import { describe, expect, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -17,6 +17,10 @@ import {
 } from "../src/Artifact/ArtifactVersionView.view.ts"
 import { ArtifactView } from "../src/Artifact/ArtifactView.view.ts"
 import {
+	ArtifactIdempotencyKeyClaimed,
+	ClaimArtifactIdempotencyKey,
+} from "../src/Artifact/ClaimArtifactIdempotencyKey.command.ts"
+import {
 	ArtifactAlreadyExists,
 	ArtifactCreated,
 	CreateArtifact,
@@ -27,6 +31,15 @@ import {
 	ArtifactWritesFenced,
 	FenceArtifactWrites,
 } from "../src/Artifact/FenceArtifactWrites.command.ts"
+import {
+	ArtifactPublished,
+	ArtifactVersionNotFound,
+	PublishArtifact,
+} from "../src/Artifact/PublishArtifact.command.ts"
+import {
+	ArtifactUnpublished,
+	UnpublishArtifact,
+} from "../src/Artifact/UnpublishArtifact.command.ts"
 import { Artifacts } from "../src/Artifacts.model.ts"
 
 const story = Story.make(Artifacts)
@@ -479,5 +492,118 @@ describe("Artifacts", () => {
 				fence: 1,
 			}),
 		)
+	})
+
+	it.effect("publishes with a fresh token, keeps it on republish and never takes another", () => {
+		const artifact = Artifact.ref("art_pub")
+		const publish = (token: string, pinned_version: number) =>
+			new PublishArtifact({ artifact_id: artifact.id, token, pinned_version })
+		const millis = DateTime.toEpochMillis
+		return story(
+			Story.given(
+				artifact,
+				new ArtifactCreated({
+					version: 1,
+					name: "Page",
+					manifest: manifestA,
+					file_count: 1,
+					total_bytes: 1,
+				}),
+			),
+			Story.given(
+				artifact,
+				new ArtifactVersionAdded({
+					version: 2,
+					manifest: manifestB,
+					file_count: 1,
+					total_bytes: 2,
+				}),
+			),
+			Story.clock(t0),
+			Story.when(publish("first", 0)),
+			Story.then(artifact, new ArtifactPublished({ token: "first", pinned_version: 0 })),
+			Story.state(artifact, {
+				publication_token: "first",
+				pinned_version: 0,
+				published_at: millis(t0),
+			}),
+			Story.when(publish("unused", 0)),
+			Story.then(artifact),
+			Story.clock(t1),
+			Story.when(publish("unused", 2)),
+			Story.then(artifact, new ArtifactPublished({ token: "first", pinned_version: 2 })),
+			Story.state(artifact, {
+				publication_token: "first",
+				pinned_version: 2,
+				published_at: millis(t1),
+			}),
+			Story.when(publish("unused", 3)),
+			Story.rejected(new ArtifactVersionNotFound({ artifact_id: artifact.id, version: 3 })),
+			Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),
+			Story.then(artifact, new ArtifactUnpublished()),
+			Story.state(artifact, { publication_token: "", pinned_version: 0, published_at: 0 }),
+			Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),
+			Story.then(artifact),
+			Story.clock(t2),
+			Story.when(publish("second", 1)),
+			Story.then(artifact, new ArtifactPublished({ token: "second", pinned_version: 1 })),
+			Story.state(artifact, {
+				publication_token: "second",
+				pinned_version: 1,
+				published_at: millis(t2),
+			}),
+			Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 0 })),
+			Story.then(artifact, new ArtifactDeleted()),
+			Story.when(publish("third", 0)),
+			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
+			Story.when(new UnpublishArtifact({ artifact_id: artifact.id })),
+			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
+		)
+	})
+
+	it.effect(
+		"records the first fingerprint claimed under a command id, replays it for every later claim, and changes nothing",
+		() => {
+			const missing = Artifact.ref("art_missing")
+			const artifact = Artifact.ref("art_claims")
+			const claim = (fingerprint: string) =>
+				new ClaimArtifactIdempotencyKey({ artifact_id: artifact.id, fingerprint })
+			return story(
+				Story.when(
+					new ClaimArtifactIdempotencyKey({ artifact_id: missing.id, fingerprint: "fp_a" }),
+				),
+				Story.rejected(new ArtifactNotFound({ artifact_id: missing.id })),
+				Story.given(
+					artifact,
+					new ArtifactCreated({
+						version: 1,
+						name: "Page",
+						manifest: manifestA,
+						file_count: 1,
+						total_bytes: 1,
+					}),
+				),
+				Story.when(claim("fp_a"), { commandId: "publication:key-1" }),
+				Story.then(artifact, new ArtifactIdempotencyKeyClaimed({ fingerprint: "fp_a" })),
+				Story.state(artifact, { status: "active", version: 1, publication_token: "" }),
+				Story.when(claim("fp_b"), { commandId: "publication:key-1" }),
+				Story.then(artifact),
+				Story.when(claim("fp_a"), { commandId: "publication:key-1" }),
+				Story.then(artifact),
+				Story.when(claim("fp_b"), { commandId: "publication:key-2" }),
+				Story.then(artifact, new ArtifactIdempotencyKeyClaimed({ fingerprint: "fp_b" })),
+				Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 0 })),
+				Story.then(artifact, new ArtifactDeleted()),
+				Story.when(claim("fp_c"), { commandId: "publication:key-3" }),
+				Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
+			)
+		},
+	)
+
+	it("publishes on the artifact alone: no other aggregate and no decision take part", () => {
+		expect(Artifacts.aggregates.map((aggregate) => aggregate.aggregateName)).toEqual(["Artifact"])
+		expect(Artifacts.decisions).toEqual([])
+		expect(Artifact.definition.commands).toContain(PublishArtifact)
+		expect(Artifact.definition.commands).toContain(UnpublishArtifact)
 	})
 })

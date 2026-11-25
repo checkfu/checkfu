@@ -485,6 +485,72 @@ const artifactsListCommand = CommandMake(
 	),
 )
 
+const artifactsPublishCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts publish",
+	apiGroup: "artifacts",
+	apiEndpoint: "publish",
+	hasBody: true,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const artifactsPublishCommand = CommandMake(
+	"publish",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		version: FlagString("current-version").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				'Version to serve, or "latest" (the default) to serve each new version as it is added (JSON, YAML, or @file)',
+			),
+			FlagOptional,
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsPublishCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Serve an artifact at a public address that anyone who has it can view. Publishing again changes the version served and keeps the address; after an unpublish, the next publish gets a new address. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later unpublish; the same key with another version, or one used to unpublish, answers 409 (accepts flags and/or JSON/YAML on stdin)",
+	),
+	CommandWithExamples([
+		{
+			command: "checkfu artifacts publish --artifact-id art_123",
+			description: "Publish an artifact and serve each new version as it is added",
+		},
+	]),
+)
+
 const artifactsRetrieveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts retrieve",
 	apiGroup: "artifacts",
@@ -512,6 +578,51 @@ const artifactsRetrieveCommand = CommandMake(
 	},
 	(flags) => invokeGeneratedOperation(artifactsRetrieveCommandSpec, flags),
 ).pipe(CommandWithDescription("Retrieve an artifact and the files of its latest version"))
+
+const artifactsUnpublishCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "artifacts unpublish",
+	apiGroup: "artifacts",
+	apiEndpoint: "unpublish",
+	hasBody: false,
+	flags: [
+		{
+			propName: "artifactId",
+			flagName: "artifact-id",
+			wireName: "artifact_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "idempotencyKey",
+			flagName: "idempotency-key",
+			wireName: "idempotency-key",
+			location: "header",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const artifactsUnpublishCommand = CommandMake(
+	"unpublish",
+	{
+		artifactId: FlagString("artifact-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Artifact ID"),
+		),
+		idempotencyKey: FlagString("idempotency-key").pipe(
+			FlagWithMetavar("KEY"),
+			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(artifactsUnpublishCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+	),
+)
 
 const artifactsVersionsCreateCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts:versions create",
@@ -2111,7 +2222,9 @@ export const buildGeneratedResourceCommands = <
 				artifactsCreateCommand,
 				artifactsDeleteCommand,
 				artifactsListCommand,
+				artifactsPublishCommand,
 				artifactsRetrieveCommand,
+				artifactsUnpublishCommand,
 				...(extras?.["artifacts"] ?? ([] as const)),
 			]),
 		),

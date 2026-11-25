@@ -15972,6 +15972,44 @@
 												"additionalProperties": false
 											}
 										},
+										"publication": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"address": {
+															"type": "string",
+															"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$"
+														},
+														"url": {
+															"type": "string"
+														},
+														"version": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 1,
+																	"maximum": 9007199254740991
+																},
+																{
+																	"type": "null"
+																}
+															],
+															"description": "The version served, or null when the latest version is served"
+														},
+														"published_at": {
+															"type": "string"
+														}
+													},
+													"required": ["address", "url", "version", "published_at"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact's public address, or null when it is not published"
+										},
 										"created_at": {
 											"type": "string"
 										},
@@ -15987,6 +16025,7 @@
 										"file_count",
 										"total_bytes",
 										"files",
+										"publication",
 										"created_at",
 										"updated_at"
 									],
@@ -16619,6 +16658,44 @@
 															"additionalProperties": false
 														}
 													},
+													"publication": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"address": {
+																		"type": "string",
+																		"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$"
+																	},
+																	"url": {
+																		"type": "string"
+																	},
+																	"version": {
+																		"anyOf": [
+																			{
+																				"type": "integer",
+																				"minimum": 1,
+																				"maximum": 9007199254740991
+																			},
+																			{
+																				"type": "null"
+																			}
+																		],
+																		"description": "The version served, or null when the latest version is served"
+																	},
+																	"published_at": {
+																		"type": "string"
+																	}
+																},
+																"required": ["address", "url", "version", "published_at"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														],
+														"description": "The artifact's public address, or null when it is not published"
+													},
 													"created_at": {
 														"type": "string"
 													},
@@ -16634,6 +16711,7 @@
 													"file_count",
 													"total_bytes",
 													"files",
+													"publication",
 													"created_at",
 													"updated_at"
 												],
@@ -17086,6 +17164,44 @@
 												"additionalProperties": false
 											}
 										},
+										"publication": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"address": {
+															"type": "string",
+															"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$"
+														},
+														"url": {
+															"type": "string"
+														},
+														"version": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 1,
+																	"maximum": 9007199254740991
+																},
+																{
+																	"type": "null"
+																}
+															],
+															"description": "The version served, or null when the latest version is served"
+														},
+														"published_at": {
+															"type": "string"
+														}
+													},
+													"required": ["address", "url", "version", "published_at"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact's public address, or null when it is not published"
+										},
 										"created_at": {
 											"type": "string"
 										},
@@ -17101,6 +17217,7 @@
 										"file_count",
 										"total_bytes",
 										"files",
+										"publication",
 										"created_at",
 										"updated_at"
 									],
@@ -19801,6 +19918,1107 @@
 							"description": "Create a link that works for ten minutes"
 						}
 					]
+				}
+			}
+		},
+		"/v1/artifacts/{artifact_id}/publication": {
+			"post": {
+				"tags": ["artifacts"],
+				"operationId": "artifacts.publish",
+				"parameters": [
+					{
+						"name": "artifact_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Artifact ID"
+						},
+						"required": true
+					},
+					{
+						"name": "idempotency-key",
+						"in": "header",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Optional Idempotency-Key header for safe retries"
+						},
+						"required": false
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"type": {
+											"type": "string",
+											"enum": ["artifact"]
+										},
+										"name": {
+											"type": "string"
+										},
+										"version": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
+										"file_count": {
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										"total_bytes": {
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										"files": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"path": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 512,
+														"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$"
+													},
+													"sha256": {
+														"type": "string",
+														"pattern": "^[0-9a-f]{64}$"
+													},
+													"size": {
+														"type": "integer",
+														"minimum": 0,
+														"maximum": 9007199254740991
+													},
+													"content_type": {
+														"type": "string"
+													}
+												},
+												"required": ["path", "sha256", "size", "content_type"],
+												"additionalProperties": false
+											}
+										},
+										"publication": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"address": {
+															"type": "string",
+															"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$"
+														},
+														"url": {
+															"type": "string"
+														},
+														"version": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 1,
+																	"maximum": 9007199254740991
+																},
+																{
+																	"type": "null"
+																}
+															],
+															"description": "The version served, or null when the latest version is served"
+														},
+														"published_at": {
+															"type": "string"
+														}
+													},
+													"required": ["address", "url", "version", "published_at"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact's public address, or null when it is not published"
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"version",
+										"file_count",
+										"total_bytes",
+										"files",
+										"publication",
+										"created_at",
+										"updated_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["payload_too_large"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"415": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["unsupported_media_type"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Serve an artifact at a public address that anyone who has it can view. Publishing again changes the version served and keeps the address; after an unpublish, the next publish gets a new address. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later unpublish; the same key with another version, or one used to unpublish, answers 409",
+				"summary": "Publish an artifact",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"version": {
+										"anyOf": [
+											{
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 9007199254740991
+											},
+											{
+												"type": "string",
+												"enum": ["latest"]
+											}
+										],
+										"description": "Version to serve, or \"latest\" (the default) to serve each new version as it is added"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": true
+				},
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "publish",
+				"x-checkfu-endpoint": {
+					"group": "artifacts",
+					"endpoint": "publish"
+				},
+				"x-checkfu-mcp": {
+					"name": "artifacts_publishArtifact"
+				},
+				"x-checkfu-cli": {
+					"examples": [
+						{
+							"command": "checkfu artifacts publish --artifact-id art_123",
+							"description": "Publish an artifact and serve each new version as it is added"
+						}
+					]
+				}
+			},
+			"delete": {
+				"tags": ["artifacts"],
+				"operationId": "artifacts.unpublish",
+				"parameters": [
+					{
+						"name": "artifact_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Artifact ID"
+						},
+						"required": true
+					},
+					{
+						"name": "idempotency-key",
+						"in": "header",
+						"schema": {
+							"type": "string",
+							"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Optional Idempotency-Key header for safe retries"
+						},
+						"required": false
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"type": {
+											"type": "string",
+											"enum": ["artifact"]
+										},
+										"name": {
+											"type": "string"
+										},
+										"version": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
+										"file_count": {
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										"total_bytes": {
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										},
+										"files": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"path": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 512,
+														"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$"
+													},
+													"sha256": {
+														"type": "string",
+														"pattern": "^[0-9a-f]{64}$"
+													},
+													"size": {
+														"type": "integer",
+														"minimum": 0,
+														"maximum": 9007199254740991
+													},
+													"content_type": {
+														"type": "string"
+													}
+												},
+												"required": ["path", "sha256", "size", "content_type"],
+												"additionalProperties": false
+											}
+										},
+										"publication": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"address": {
+															"type": "string",
+															"pattern": "^a[0-9a-f]{1,32}-[0-9a-z]{25}$"
+														},
+														"url": {
+															"type": "string"
+														},
+														"version": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 1,
+																	"maximum": 9007199254740991
+																},
+																{
+																	"type": "null"
+																}
+															],
+															"description": "The version served, or null when the latest version is served"
+														},
+														"published_at": {
+															"type": "string"
+														}
+													},
+													"required": ["address", "url", "version", "published_at"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											],
+											"description": "The artifact's public address, or null when it is not published"
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"version",
+										"file_count",
+										"total_bytes",
+										"files",
+										"publication",
+										"created_at",
+										"updated_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+				"summary": "Unpublish an artifact",
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "unpublish",
+				"x-checkfu-endpoint": {
+					"group": "artifacts",
+					"endpoint": "unpublish"
+				},
+				"x-checkfu-mcp": {
+					"name": "artifacts_unpublishArtifact"
 				}
 			}
 		}

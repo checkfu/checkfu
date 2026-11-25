@@ -42,6 +42,7 @@ import {
 	MIN_LINK_TTL_SECONDS,
 	NonEmptyString,
 	PositiveInt,
+	PublicationAddress,
 	ResourceId,
 	Timezone,
 	ResourceListCursor,
@@ -592,6 +593,16 @@ export type AutomationRunQueued = typeof AutomationRunQueued.Type
 
 const ArtifactCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
+export const ArtifactPublication = Schema.Struct({
+	address: PublicationAddress,
+	url: Schema.String,
+	version: Schema.NullOr(PositiveInt).annotate({
+		description: "The version served, or null when the latest version is served",
+	}),
+	published_at: Schema.DateTimeUtc,
+})
+export type ArtifactPublication = typeof ArtifactPublication.Type
+
 export const ArtifactResource = Schema.Struct({
 	id: ArtifactId,
 	type: Schema.Literal("artifact"),
@@ -600,10 +611,23 @@ export const ArtifactResource = Schema.Struct({
 	file_count: ArtifactCount,
 	total_bytes: ArtifactCount,
 	files: Schema.Array(ArtifactFile),
+	publication: Schema.NullOr(ArtifactPublication).annotate({
+		description: "The artifact's public address, or null when it is not published",
+	}),
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,
 })
 export type Artifact = typeof ArtifactResource.Type
+
+export const PublishArtifactBody = Schema.Struct({
+	version: Schema.optionalKey(
+		Schema.Union([PositiveInt, Schema.Literal("latest")]).annotate({
+			description:
+				'Version to serve, or "latest" (the default) to serve each new version as it is added',
+		}),
+	),
+})
+export type PublishArtifactBody = typeof PublishArtifactBody.Type
 
 export const ArtifactVersionResource = Schema.Struct({
 	type: Schema.Literal("artifact_version"),
@@ -1798,6 +1822,53 @@ const Artifacts = HttpApiGroup.make("artifacts")
 						},
 					],
 				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("publish", "/v1/artifacts/:artifact_id/publication", {
+			params: artifactParams,
+			headers: IdempotencyHeaders,
+			payload: PublishArtifactBody,
+			success: ArtifactResource,
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Publish an artifact")
+			.annotate(
+				OpenApi.Description,
+				"Serve an artifact at a public address that anyone who has it can view. Publishing again changes the version served and keeps the address; after an unpublish, the next publish gets a new address. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later unpublish; the same key with another version, or one used to unpublish, answers 409",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "publish",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "publish" },
+				"x-checkfu-mcp": { name: "artifacts_publishArtifact" },
+				"x-checkfu-cli": {
+					examples: [
+						{
+							command: "checkfu artifacts publish --artifact-id art_123",
+							description: "Publish an artifact and serve each new version as it is added",
+						},
+					],
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("unpublish", "/v1/artifacts/:artifact_id/publication", {
+			params: artifactParams,
+			headers: IdempotencyHeaders,
+			success: ArtifactResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Unpublish an artifact")
+			.annotate(
+				OpenApi.Description,
+				"Take an artifact's public address down at once; the artifact is kept. A retry with the same Idempotency-Key is not applied again, so it cannot undo a later publish; a key used to publish answers 409",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "artifacts",
+				"x-forge-method-name": "unpublish",
+				"x-checkfu-endpoint": { group: "artifacts", endpoint: "unpublish" },
+				"x-checkfu-mcp": { name: "artifacts_unpublishArtifact" },
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage artifacts")

@@ -201,6 +201,10 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				`OPENAI_API_KEY=${TEST_OPENAI_KEY}`,
 				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
+				// Dev provisions no wildcard route, so publications must stay under /p/<address>/.
+				"CHECKFU_PUBLISH_DOMAIN=pages.example",
+				"CHECKFU_API_DOMAIN=none",
+				"CHECKFU_MCP_DOMAIN=none",
 				"",
 			].join("\n"),
 			{ flag: "wx", mode: 0o600 },
@@ -215,6 +219,9 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.OPENAI_API_KEY
 	delete childEnv.ANTHROPIC_API_KEY
 	delete childEnv.CHECKFU_OPENAI_BASE_URL
+	delete childEnv.CHECKFU_PUBLISH_DOMAIN
+	delete childEnv.CHECKFU_API_DOMAIN
+	delete childEnv.CHECKFU_MCP_DOMAIN
 	delete childEnv.CHECKFU_LOCAL_DEV
 	delete childEnv.ALCHEMY_STAGE
 	delete childEnv.ALCHEMY_PROFILE
@@ -1158,5 +1165,55 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		expect((await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })).status).toBe(200)
 		expect((await fetch(url)).status).toBe(404)
+	}, 30_000)
+
+	it("publishes an artifact at a public address that follows the latest version or a pinned one", async () => {
+		interface Published {
+			readonly publication: { readonly url: string; readonly version: number | null } | null
+		}
+		const created = await apiJson<{ readonly id: string }>("/v1/artifacts", {
+			method: "POST",
+			body: { name: "Published", files: [{ path: "index.html", content: "first" }] },
+		})
+		expect(created.status).toBe(201)
+		const id = created.body.id
+		const published = await apiJson<Published>(`/v1/artifacts/${id}/publication`, {
+			method: "POST",
+			body: { version: "latest" },
+		})
+		expect(published.status).toBe(200)
+		const publication = published.body.publication
+		expect(publication?.version).toBe(null)
+		const url = new URL(publication?.url ?? "")
+		expect(url.origin).not.toBe(new URL(baseUrl).origin)
+		expect(url.pathname).toMatch(/^\/p\/a[0-9a-f]{1,32}-[0-9a-z]{25}\/$/)
+
+		const page = await fetch(url)
+		expect(page.status).toBe(200)
+		expect(await page.text()).toBe("first")
+		expect(page.headers.get("content-security-policy") ?? "").toContain("sandbox")
+		expect(page.headers.get("content-security-policy") ?? "").not.toContain("allow-same-origin")
+
+		const added = await apiFetch(`/v1/artifacts/${id}/versions`, {
+			method: "POST",
+			body: { version: 1, files: [{ path: "index.html", content: "second" }] },
+		})
+		expect(added.status).toBe(201)
+		expect(await (await fetch(url)).text()).toBe("second")
+
+		const pinned = await apiJson<Published>(`/v1/artifacts/${id}/publication`, {
+			method: "POST",
+			body: { version: 1 },
+		})
+		expect(pinned.body.publication).toMatchObject({ url: url.href, version: 1 })
+		expect(await (await fetch(url)).text()).toBe("first")
+
+		const unpublished = await apiJson<Published>(`/v1/artifacts/${id}/publication`, {
+			method: "DELETE",
+		})
+		expect(unpublished.status).toBe(200)
+		expect(unpublished.body.publication).toBe(null)
+		expect((await fetch(url)).status).toBe(404)
+		expect((await apiFetch(`/v1/artifacts/${id}`)).status).toBe(200)
 	}, 30_000)
 })

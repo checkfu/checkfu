@@ -45,11 +45,20 @@ export class Artifacts extends Domain.Model("Artifacts", {
 		AnArtifactGainsASecondVersion: (m) =>
 			m.Artifact.some((a) => [a.state.status === "active", a.state.version >= 2].every((ok) => ok)),
 		AnArtifactIsDeleted: (m) => m.Artifact.some((a) => a.state.status === "deleted"),
+		AnArtifactIsPublished: (m) => m.Artifact.some((a) => a.state.publication_token !== ""),
 	},
 }) {}
 
 export class ArtifactsApi extends Domain.Api("ArtifactsApi", {
 	model: Artifacts,
-	commands: ["CreateArtifact", "AddArtifactVersion", "DeleteArtifact", "FenceArtifactWrites"],
+	commands: [
+		"CreateArtifact",
+		"AddArtifactVersion",
+		"DeleteArtifact",
+		"FenceArtifactWrites",
+		"PublishArtifact",
+		"UnpublishArtifact",
+		"ClaimArtifactIdempotencyKey",
+	],
 	views: ["ArtifactView", "ArtifactVersionView"],
 }) {}

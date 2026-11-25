@@ -1,11 +1,14 @@
 import * as Mac from "effect/crypto/Mac"
+import type * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Base64Url from "effect/encoding/Base64Url"
+import * as Hex from "effect/encoding/Hex"
 import * as Exit from "effect/Exit"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
+import { PUBLICATION_TOKEN_LENGTH, PublicationAddress } from "@checkfu/sdk/Schemas"
 
 export {
 	DEFAULT_LINK_TTL_SECONDS,
@@ -116,3 +119,46 @@ export const verifyLink = (
 
 export const linkUrl = (contentOrigin: string, token: string) =>
 	`${contentOrigin.replace(/\/+$/, "")}${CONTENT_PATH_PREFIX}${token}/`
+
+export const PUBLICATION_PATH_PREFIX = "/p/"
+
+export const isPublicationAddress = Schema.is(PublicationAddress)
+
+const ARTIFACT_ID_PREFIX = "art_"
+
+// 128 bits from the platform's secure random, written as 25 base-36 digits.
+export const newPublicationToken = (random: SecureRandom.SecureRandom["Service"]) =>
+	Effect.map(random.randomBytes(16), (bytes) =>
+		BigInt(`0x${Hex.encode(bytes)}`)
+			.toString(36)
+			.padStart(PUBLICATION_TOKEN_LENGTH, "0"),
+	)
+
+// One DNS label, `a<artifact hex>-<token>`: serving reads the one artifact it names and checks the
+// token. Every artifact id is `art_` and at most 32 hex digits, so the label stays within 63.
+export const publicationAddress = (artifactId: string, token: string) =>
+	`a${artifactId.slice(ARTIFACT_ID_PREFIX.length)}-${token}`
+
+export const parsePublicationAddress = (address: string) =>
+	isPublicationAddress(address)
+		? {
+				artifactId: `${ARTIFACT_ID_PREFIX}${address.slice(1, -PUBLICATION_TOKEN_LENGTH - 1)}`,
+				token: address.slice(-PUBLICATION_TOKEN_LENGTH),
+			}
+		: null
+
+export const publicationUrl = (
+	contentOrigin: string,
+	publishDomain: string | undefined,
+	address: string,
+) =>
+	publishDomain === undefined
+		? `${contentOrigin.replace(/\/+$/, "")}${PUBLICATION_PATH_PREFIX}${address}/`
+		: `https://${address}.${publishDomain}/`
+
+// The label before `.<publishDomain>`, which names a publication, or undefined for a host outside
+// that domain. A URL's hostname is already lowercase.
+export const publicationOfHost = (hostname: string, publishDomain: string | undefined) =>
+	publishDomain !== undefined && `.${hostname}`.endsWith(`.${publishDomain}`)
+		? hostname.slice(0, -publishDomain.length - 1)
+		: undefined

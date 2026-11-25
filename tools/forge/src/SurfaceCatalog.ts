@@ -211,7 +211,8 @@ export const isObjectOrComplexUnion = (ty: Type): boolean => {
 		return isObjectOrComplexUnion(unwrapped.model.type)
 	}
 	if (unwrapped.kind === "union") {
-		return unwrapped.members.some((m) => isObjectOrComplexUnion(m))
+		// A number in a union needs parsing too, so the flag reads JSON or YAML.
+		return unwrapped.members.some((m) => isObjectOrComplexUnion(m) || isNumberScalar(m))
 	}
 	return false
 }
@@ -424,11 +425,14 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 		sse !== undefined ? "sse" : pagination !== undefined ? "paginated" : "unary"
 
 	const explicitIdempotent = method.extension("x-checkfu-idempotent") === true
-	const retrySafety: SurfaceRetrySafety =
-		explicitIdempotent || IDEMPOTENT_HTTP_METHODS.has(httpMethod)
-			? "idempotent"
-			: supportsIdempotencyKey
-				? "idempotency-key-gated"
+	// An operation that takes a retry key needs one to be retried after it may have landed, whatever
+	// its method: a delete that a later call can undo is not safe to resend without it.
+	const retrySafety: SurfaceRetrySafety = explicitIdempotent
+		? "idempotent"
+		: supportsIdempotencyKey
+			? "idempotency-key-gated"
+			: IDEMPOTENT_HTTP_METHODS.has(httpMethod)
+				? "idempotent"
 				: "pre-commit-only"
 
 	return {

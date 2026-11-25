@@ -190,8 +190,8 @@ export const measureBundle = async (
 // Each byte budget is what the Worker measured when it was last set, plus about 25 KB. The
 // start-up budget is half of Cloudflare's one second, so the trend is caught with room to act.
 export const API_WORKER_BUDGET = {
-	eagerBytes: 1_255_000,
-	totalBytes: 1_255_000,
+	eagerBytes: 1_270_000,
+	totalBytes: 1_270_000,
 	startupCpuMs: 500,
 } as const
 

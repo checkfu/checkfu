@@ -21,11 +21,19 @@ import stack, {
 	CLOUDFLARE_STATE_OBSERVABILITY,
 	checkfuStack,
 	inProduction,
+	publishDomainOnlyWhenRouted,
 } from "../../../alchemy.run.ts"
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
 import { PI_HARNESS_WORKER_PROPS } from "../src/Pi/PiHarnessWorker.ts"
 import { ARTIFACT_BUCKET_PROPS, artifactBucketProps } from "../src/Artifacts/ArtifactStore.ts"
 import { CONTENT_WORKER_PROPS } from "../src/Content/ContentWorker.ts"
+import {
+	API_DOMAIN_ENV,
+	DETACH_ALL,
+	MCP_DOMAIN_ENV,
+	PUBLISH_DOMAIN_ENV,
+	publishDomain,
+} from "../src/CustomDomain.ts"
 import { JURISDICTION_ENV } from "../src/Placement.ts"
 
 const RemovalPolicyName = Schema.Literals(["retain", "destroy", "protect"])
@@ -206,6 +214,103 @@ describe("Alchemy stack and worker entry", () => {
 				expect(yield* bucketPolicy("staging")).toBe("destroy")
 			}),
 		60_000,
+	)
+
+	it.live(
+		"gives no Worker the publish domain in dev, where nothing routes it, and refuses API settings that could sit inside it",
+		() =>
+			Effect.gen(function* () {
+				const scratch = yield* Effect.acquireRelease(
+					Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-"))),
+					(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+				)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+					() => Effect.sync(() => vi.unstubAllEnvs()),
+				)
+				const planned = (stage: string, env: Record<string, string>) =>
+					Effect.sync(() => {
+						for (const [name, value] of Object.entries(env)) {
+							vi.stubEnv(name, value)
+						}
+					}).pipe(
+						Effect.andThen(
+							Alchemist.plan({
+								stack: checkfuStack(Effect.void),
+								stage,
+								operation: "deploy",
+								dev: true,
+							}),
+						),
+						Effect.map(({ native }) => {
+							const content = native.resources["ContentWorker"]
+							const api = native.resources["ApiWorker"]
+							return {
+								routes: content?.action === "create" ? content.props.routes : content?.action,
+								record: native.resources["PublishWildcard"] !== undefined,
+								told: [content, api].map((worker) =>
+									worker?.action === "create"
+										? Object.keys(worker.props.env ?? {}).includes(PUBLISH_DOMAIN_ENV)
+										: worker?.action,
+								),
+							}
+						}),
+						Effect.scoped,
+						Effect.provide(Alchemist.layer()),
+						Effect.provideService(Alchemy.AlchemyContext, {
+							dotAlchemy: join(scratch, stage),
+							dev: true,
+							adopt: false,
+						}),
+						Effect.exit,
+						Effect.map((exit) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : exit.value)),
+					)
+				const none = { routes: undefined, record: false, told: [false, false] }
+				expect(yield* planned("unset", {})).toEqual(none)
+				expect(
+					yield* planned("set", {
+						[PUBLISH_DOMAIN_ENV]: "pages.example",
+						[API_DOMAIN_ENV]: DETACH_ALL,
+						[MCP_DOMAIN_ENV]: DETACH_ALL,
+					}),
+				).toEqual(none)
+				expect(
+					yield* planned("inside", {
+						[PUBLISH_DOMAIN_ENV]: "pages.example",
+						[API_DOMAIN_ENV]: "api.pages.example",
+						[MCP_DOMAIN_ENV]: DETACH_ALL,
+					}),
+				).toContain(`${API_DOMAIN_ENV} is inside ${PUBLISH_DOMAIN_ENV} pages.example`)
+				expect(
+					yield* planned("implicit", {
+						[PUBLISH_DOMAIN_ENV]: "pages.example",
+						[API_DOMAIN_ENV]: "",
+						[MCP_DOMAIN_ENV]: "",
+					}),
+				).toContain(
+					`${API_DOMAIN_ENV} must be a hostname outside ${PUBLISH_DOMAIN_ENV} pages.example, or none`,
+				)
+			}),
+		60_000,
+	)
+
+	it.effect("passes the publish domain to the Workers only outside dev", () =>
+		Effect.gen(function* () {
+			const seen = (dev: boolean) =>
+				publishDomainOnlyWhenRouted(publishDomain).pipe(
+					Effect.provideService(Alchemy.AlchemyContext, {
+						dotAlchemy: "/nonexistent/.alchemy",
+						dev,
+						adopt: false,
+					}),
+					Effect.provideService(
+						ConfigProvider.ConfigProvider,
+						ConfigProvider.fromUnknown({ [PUBLISH_DOMAIN_ENV]: "Pages.example" }),
+					),
+				)
+			expect(yield* seen(false)).toBe("pages.example")
+			expect(yield* seen(true)).toBeUndefined()
+		}),
 	)
 
 	it.effect("checks the shipped baseline only for a production deploy", () =>

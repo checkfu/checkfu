@@ -361,6 +361,38 @@
 			"Artifact.DeleteLandsOnlyAtTheCurrentFence": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"DeleteArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [after.status === before.status, command.fence === before.fence].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.PublishedOnlyOnceCreated": {
+				"kind": "invariant",
+				"source": "(s) => [s.publication_token === \"\", s.status !== \"\"].some((ok) => ok)"
+			},
+			"Artifact.UnpublishedHoldsNoSettings": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.publication_token !== \"\",\n\t\t\t\t[s.pinned_version === 0, s.published_at === 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.PinnedVersionWithinHead": {
+				"kind": "invariant",
+				"source": "(s) => s.pinned_version <= s.version"
+			},
+			"Artifact.ATokenIsOnlyOpenedOrDropped": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\tbefore.publication_token === \"\",\n\t\t\t\tafter.publication_token === \"\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.UnpublishDropsTheToken": {
+				"kind": "transition",
+				"source": "({ after, command }) =>\n\t\t\t[command._tag !== \"UnpublishArtifact\", after.publication_token === \"\"].some((ok) => ok)"
+			},
+			"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t[before.publication_token === \"\", after.publication_token === command.token].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.PublishServesAVersionTheArtifactHas": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"PublishArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\t[\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.published_at === before.published_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.publication_token !== \"\",\n\t\t\t\t\tcommand.pinned_version <= before.version,\n\t\t\t\t\tafter.pinned_version === command.pinned_version,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Artifact.ClaimingAKeyChangesNoState": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"ClaimArtifactIdempotencyKey\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.manifest === before.manifest,\n\t\t\t\t\tafter.fence === before.fence,\n\t\t\t\t\tafter.created_at === before.created_at,\n\t\t\t\t\tafter.updated_at === before.updated_at,\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.published_at === before.published_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

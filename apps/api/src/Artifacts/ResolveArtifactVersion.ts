@@ -1,4 +1,5 @@
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
+import type { ArtifactState } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import {
 	ArtifactVersionView,
@@ -9,23 +10,21 @@ import * as Option from "effect/Option"
 import { ArtifactVersionNotReady } from "../Api.ts"
 import { ArtifactReadWaitTimeout } from "../Http/ArtifactsHandlers.ts"
 
-export const ArtifactVersionResolver = Effect.gen(function* () {
+const has = (state: ArtifactState, version: number) =>
+	state.status === "active" && version <= state.version
+
+// The manifest of a version of the artifact in `state`, or null when the artifact does not have it.
+// The head comes from the aggregate; only an older version is read from the view.
+export const ArtifactManifestAt = Effect.gen(function* () {
 	const artifacts = yield* Artifact
 	const versionViews = yield* ArtifactVersionView
 	return (
-		artifactId: string,
+		id: ArtifactId,
+		state: ArtifactState,
 		version: number,
 	): Effect.Effect<string | null, ArtifactVersionNotReady> =>
 		Effect.gen(function* () {
-			if (artifactId === "" || !Number.isSafeInteger(version) || version < 1) {
-				return null
-			}
-			const id = ArtifactId.make(artifactId)
-			const head = Effect.map(Effect.orDie(artifacts.get(id)), (state) =>
-				state.status === "active" && version <= state.version ? state : null,
-			)
-			const state = yield* head
-			if (state === null) {
+			if (!has(state, version)) {
 				return null
 			}
 			if (version === state.version) {
@@ -40,8 +39,24 @@ export const ArtifactVersionResolver = Effect.gen(function* () {
 			if (row !== null) {
 				return row.manifest
 			}
-			return (yield* head) === null
-				? null
-				: yield* new ArtifactVersionNotReady({ artifactId, version })
+			return has(yield* Effect.orDie(artifacts.get(id)), version)
+				? yield* new ArtifactVersionNotReady({ artifactId: id, version })
+				: null
+		})
+})
+
+export const ArtifactVersionResolver = Effect.gen(function* () {
+	const artifacts = yield* Artifact
+	const manifestAt = yield* ArtifactManifestAt
+	return (
+		artifactId: string,
+		version: number,
+	): Effect.Effect<string | null, ArtifactVersionNotReady> =>
+		Effect.gen(function* () {
+			if (artifactId === "" || !Number.isSafeInteger(version) || version < 1) {
+				return null
+			}
+			const id = ArtifactId.make(artifactId)
+			return yield* manifestAt(id, yield* Effect.orDie(artifacts.get(id)), version)
 		})
 })

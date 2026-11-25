@@ -4,14 +4,16 @@ import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import { ApiWorker } from "./apps/api/src/Api.ts"
 import ApiWorkerLive from "./apps/api/src/ApiWorker.ts"
 import { COMPATIBILITY_DATE } from "./apps/api/src/Compatibility.ts"
-import { customDomains } from "./apps/api/src/CustomDomain.ts"
+import { PUBLISH_DOMAIN_ENV, customDomains, publishDomain } from "./apps/api/src/CustomDomain.ts"
 import { ContentWorker } from "./apps/api/src/Content/Content.ts"
 import ContentWorkerLive from "./apps/api/src/Content/ContentWorker.ts"
 import { PiHarnessWorker } from "./apps/api/src/Pi/PiHarness.ts"
 import { PRODUCTION_STAGE, protectInProduction } from "./apps/api/src/Protection.ts"
 import PiHarnessWorkerLive from "./apps/api/src/Pi/PiHarnessWorker.ts"
 import * as Alchemy from "alchemy"
+import * as Output from "alchemy/Output"
 import * as Config from "effect/Config"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Option from "effect/Option"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -27,6 +29,25 @@ export const inProduction = <E, R>(check: Effect.Effect<void, E, R>) =>
 		if (!ctx.dev && (yield* Alchemy.Stage) === PRODUCTION_STAGE) {
 			yield* check
 		}
+	})
+
+// `alchemy dev` provisions no wildcard route or DNS record, so under it no Worker reads a publish
+// domain: the content Worker takes no route and publications live under /p/<address>/.
+export const publishDomainOnlyWhenRouted = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.gen(function* () {
+		if (!(yield* Alchemy.AlchemyContext).dev) {
+			return yield* effect
+		}
+		const provider = yield* ConfigProvider.ConfigProvider
+		return yield* Effect.provideService(
+			effect,
+			ConfigProvider.ConfigProvider,
+			ConfigProvider.make((path) =>
+				path.length === 1 && path[0] === PUBLISH_DOMAIN_ENV
+					? Effect.undefined
+					: provider.load(path),
+			),
+		)
 	})
 
 const requireShippedBaseline = Effect.flatMap(
@@ -52,6 +73,17 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 		Effect.gen(function* () {
 			yield* PiHarnessWorker
 			const content = yield* ContentWorker
+			const publish = yield* publishDomain
+			// The route needs a proxied record for every name it serves; 100:: is never reached.
+			if (publish !== undefined) {
+				yield* Cloudflare.DNS.Record("PublishWildcard", {
+					zoneId: Output.map(content.routes, (routes) => routes[0]?.zoneId ?? ""),
+					name: `*.${publish}`,
+					type: "AAAA",
+					content: "100::",
+					proxied: true,
+				})
+			}
 			const api = yield* ApiWorker
 			const mcp = yield* Cloudflare.Worker("McpWorker", {
 				...(yield* customDomains).mcp,
@@ -88,6 +120,9 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			}
 		}).pipe(
 			Effect.provide([PiHarnessWorkerLive, ContentWorkerLive, ApiWorkerLive]),
+			publishDomainOnlyWhenRouted,
+			// Checked against the real settings, so dev refuses what a deploy would.
+			(stack) => Effect.andThen(customDomains, stack),
 			protectInProduction,
 		),
 	)

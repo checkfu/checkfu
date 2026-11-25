@@ -2,12 +2,15 @@ import { AddArtifactVersion } from "@checkfu/domain/Artifact/AddArtifactVersion.
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type { ArtifactState } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
+import { ClaimArtifactIdempotencyKey } from "@checkfu/domain/Artifact/ClaimArtifactIdempotencyKey.command"
 import {
 	ArtifactVersionView,
 	artifactVersionLookupKey,
 } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
+import { PublishArtifact } from "@checkfu/domain/Artifact/PublishArtifact.command"
+import { UnpublishArtifact } from "@checkfu/domain/Artifact/UnpublishArtifact.command"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -19,6 +22,7 @@ import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import { PublicationAddress } from "@checkfu/sdk/Schemas"
 import { buildArtifactVersion } from "../Artifacts/ArtifactFiles.ts"
 import type {
 	ArtifactFileInput,
@@ -27,7 +31,11 @@ import type {
 } from "../Artifacts/ArtifactFiles.ts"
 import { ArtifactStore, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import type { ArtifactWriteCheck, StagedWrite } from "../Artifacts/ArtifactStore.ts"
-import { DEFAULT_LINK_TTL_SECONDS } from "../Content/ArtifactLink.ts"
+import {
+	DEFAULT_LINK_TTL_SECONDS,
+	newPublicationToken,
+	publicationAddress,
+} from "../Content/ArtifactLink.ts"
 import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
@@ -35,17 +43,25 @@ import {
 	IDEMPOTENCY_KEY_REUSED,
 	createCommandId,
 	handled,
+	idempotentCommandId,
 	idempotentId,
 	isPending,
 	orPending,
 	randomId,
 	reject,
+	sha256Json,
 } from "./HttpHelpers.ts"
 
 export const ArtifactReadWaitTimeout = Context.Reference<Duration.Input>(
 	"@checkfu/api/ArtifactReadWaitTimeout",
 	{ defaultValue: () => "5 seconds" },
 )
+
+// The first 128 bits of the key's hash, so the id fits in a publication address with its token.
+export const keyedArtifactId = (digest: Digest.Digest["Service"], idempotencyKey: string) =>
+	Effect.map(idempotentId(digest, "art", ["create", "artifact", "id", idempotencyKey]), (id) =>
+		ArtifactId.make(id.slice(0, "art_".length + 32)),
+	)
 
 const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 
@@ -79,12 +95,25 @@ const filesOf = (manifest: ArtifactManifest) => ({
 	files: manifest.files,
 })
 
-const artifactResource = (id: ArtifactId, state: ArtifactState, manifest: ArtifactManifest) => ({
+interface Publication {
+	readonly address: PublicationAddress
+	readonly url: string
+	readonly version: number | null
+	readonly published_at: DateTime.Utc
+}
+
+const artifactResource = (
+	id: ArtifactId,
+	state: ArtifactState,
+	manifest: ArtifactManifest,
+	publication: Publication | null,
+) => ({
 	id,
 	type: "artifact" as const,
 	name: state.name,
 	version: state.version,
 	...filesOf(manifest),
+	publication,
 	created_at: DateTime.makeUnsafe(state.created_at),
 	updated_at: DateTime.makeUnsafe(state.updated_at),
 })
@@ -178,10 +207,62 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				? Effect.succeed(built.manifest)
 				: loadManifest(id, hash)
 
+		const publicationOf = (id: ArtifactId, state: ArtifactState) =>
+			Effect.gen(function* () {
+				if (state.publication_token === "") {
+					return null
+				}
+				const address = PublicationAddress.make(publicationAddress(id, state.publication_token))
+				const publication: Publication = {
+					address,
+					url: yield* links.publicationUrl(address),
+					version: state.pinned_version === 0 ? null : state.pinned_version,
+					published_at: DateTime.makeUnsafe(state.published_at),
+				}
+				return publication
+			})
+
 		const readArtifact = (id: ArtifactId, state: ArtifactState) =>
-			Effect.map(loadManifest(id, state.manifest), (manifest) =>
-				artifactResource(id, state, manifest),
-			)
+			Effect.gen(function* () {
+				const manifest = yield* loadManifest(id, state.manifest)
+				return artifactResource(id, state, manifest, yield* publicationOf(id, state))
+			})
+
+		// The key's first request is claimed on the artifact under a command id of (artifact, key), so
+		// the same key with another request is refused, and a retry is the same command, applied once.
+		const sentWith = (
+			id: ArtifactId,
+			idempotencyKey: string | undefined,
+			request:
+				| { readonly operation: "publish"; readonly pinned_version: number }
+				| { readonly operation: "unpublish" },
+		) =>
+			Effect.gen(function* () {
+				if (idempotencyKey === undefined) {
+					return undefined
+				}
+				const fingerprint = yield* sha256Json(digest, request)
+				const claim = yield* artifacts.send(
+					new ClaimArtifactIdempotencyKey({ artifact_id: id, fingerprint }),
+					{ commandId: yield* idempotentCommandId(digest, "publication", [id, idempotencyKey]) },
+				)
+				if (
+					!claim.events.some(
+						(event) =>
+							event._tag === "artifact.idempotency_key_claimed" &&
+							event.fingerprint === fingerprint,
+					)
+				) {
+					return yield* reject(409, IDEMPOTENCY_KEY_REUSED)
+				}
+				const commandId = yield* idempotentCommandId(digest, `${request.operation}-artifact`, [
+					request.operation,
+					"artifact",
+					id,
+					idempotencyKey,
+				])
+				return { commandId }
+			})
 
 		const retrieve = (id: ArtifactId) =>
 			Effect.flatMap(requireActive(id), (state) => readArtifact(id, state))
@@ -225,9 +306,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					let id: ArtifactId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						id = ArtifactId.make(
-							yield* idempotentId(digest, "art", ["create", "artifact", "id", idempotencyKey]),
-						)
+						id = yield* keyedArtifactId(digest, idempotencyKey)
 						sendOptions = {
 							commandId: yield* createCommandId(digest, "artifact", idempotencyKey, {
 								name: payload.name,
@@ -280,6 +359,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						id,
 						{ ...settled, version: receipt.reply.version, updated_at: settled.created_at },
 						built.manifest,
+						null,
 					)
 				}).pipe(handled),
 			)
@@ -287,6 +367,36 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				list("artifact", query, (id) => retrieve(ArtifactId.make(id))).pipe(handled),
 			)
 			.handle("get", ({ params }) => retrieve(params.artifact_id).pipe(handled))
+			.handle("publish", ({ params, payload, headers }) =>
+				Effect.gen(function* () {
+					const id = params.artifact_id
+					const pinned_version =
+						payload.version === undefined || payload.version === "latest" ? 0 : payload.version
+					const sendOptions = yield* sentWith(id, headers["idempotency-key"], {
+						operation: "publish",
+						pinned_version,
+					})
+					yield* artifacts.send(
+						new PublishArtifact({
+							artifact_id: id,
+							token: yield* newPublicationToken(random),
+							pinned_version,
+						}),
+						sendOptions,
+					)
+					return yield* readArtifact(id, yield* requireActive(id))
+				}).pipe(handled),
+			)
+			.handle("unpublish", ({ params, headers }) =>
+				Effect.gen(function* () {
+					const id = params.artifact_id
+					const sendOptions = yield* sentWith(id, headers["idempotency-key"], {
+						operation: "unpublish",
+					})
+					yield* artifacts.send(new UnpublishArtifact({ artifact_id: id }), sendOptions)
+					return yield* readArtifact(id, yield* requireActive(id))
+				}).pipe(handled),
+			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.artifact_id

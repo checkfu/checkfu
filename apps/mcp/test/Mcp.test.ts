@@ -180,6 +180,8 @@ describe("Checkfu MCP server", () => {
 				"artifacts_getArtifactFile",
 				"artifacts_getArtifactVersion",
 				"artifacts_listArtifacts",
+				"artifacts_publishArtifact",
+				"artifacts_unpublishArtifact",
 				"automations_archiveAutomation",
 				"automations_createAutomation",
 				"automations_getAutomation",
@@ -231,6 +233,8 @@ describe("Checkfu MCP server", () => {
 				artifacts_getArtifactFile: "read-only, additive, repeatable",
 				artifacts_getArtifactVersion: "read-only, additive, repeatable",
 				artifacts_listArtifacts: "read-only, additive, repeatable",
+				artifacts_publishArtifact: "writes, destructive, not repeatable",
+				artifacts_unpublishArtifact: "writes, destructive, not repeatable",
 				automations_archiveAutomation: "writes, destructive, repeatable",
 				automations_createAutomation: "writes, additive, repeatable",
 				automations_getAutomation: "read-only, additive, repeatable",
@@ -409,6 +413,8 @@ describe("Checkfu MCP server", () => {
 				artifacts_getArtifactFile: { ...artifactVersion, query: { path: "index.html" } },
 				artifacts_getArtifactVersion: artifactVersion,
 				artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
+				artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
+				artifacts_unpublishArtifact: artifact,
 				automations_archiveAutomation: automation,
 				automations_createAutomation: {
 					body: {
@@ -522,6 +528,8 @@ describe("Checkfu MCP server", () => {
 		expect(keyed.map(([name]) => name)).toEqual([
 			"agents_createAgent",
 			"artifacts_createArtifact",
+			"artifacts_publishArtifact",
+			"artifacts_unpublishArtifact",
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"sessions_createSession",

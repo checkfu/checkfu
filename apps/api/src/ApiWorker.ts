@@ -14,6 +14,7 @@ import { customDomains } from "./CustomDomain.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { ARTIFACT_RECONCILE_CRON, reconcileArtifactWrites } from "./Artifacts/ArtifactReconcile.ts"
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
+import { PublicationResolver } from "./Artifacts/ResolvePublication.ts"
 import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
 import { ApiWorker } from "./Api.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
@@ -100,6 +101,7 @@ export default ApiWorker.make(
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
+			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),
 		})
 	}).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),
 )

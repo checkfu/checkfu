@@ -3,10 +3,16 @@ import type * as Mac from "effect/crypto/Mac"
 import * as Effect from "effect/Effect"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
-import type { ArtifactVersionNotReady } from "../Api.ts"
+import type { ArtifactVersionNotReady, ResolvedPublication } from "../Api.ts"
 import type { ArtifactManifest } from "../Artifacts/ArtifactFiles.ts"
 import type { ArtifactReaderService, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
-import { CONTENT_PATH_PREFIX, verifyLink } from "./ArtifactLink.ts"
+import {
+	CONTENT_PATH_PREFIX,
+	PUBLICATION_PATH_PREFIX,
+	isPublicationAddress,
+	publicationOfHost,
+	verifyLink,
+} from "./ArtifactLink.ts"
 
 export const CONTENT_SECURITY_POLICY = [
 	"sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-pointer-lock",
@@ -111,39 +117,77 @@ export const serveContent = (options: {
 		artifactId: string,
 		version: number,
 	) => Effect.Effect<string | null, ArtifactStoreError | ArtifactVersionNotReady>
+	readonly resolvePublication: (
+		address: string,
+	) => Effect.Effect<ResolvedPublication | null, ArtifactStoreError | ArtifactVersionNotReady>
 	readonly scope: string
+	readonly publishDomain?: string | undefined
 	readonly nowMillis: Effect.Effect<number>
 }) => {
-	const { mac, digest, key, store, resolveArtifactVersion, scope, nowMillis } = options
+	const {
+		mac,
+		digest,
+		key,
+		store,
+		resolveArtifactVersion,
+		resolvePublication,
+		scope,
+		publishDomain,
+		nowMillis,
+	} = options
+
+	const target = (prefix: string, name: string) =>
+		Effect.gen(function* () {
+			if (prefix === PUBLICATION_PATH_PREFIX) {
+				if (!isPublicationAddress(name)) {
+					return null
+				}
+				const found = yield* resolvePublication(name)
+				return found === null ? null : { artifactId: found.artifact_id, manifest: found.manifest }
+			}
+			const claims = yield* verifyLink(mac, key, name, yield* nowMillis)
+			if (claims === null || claims.scope !== scope) {
+				return null
+			}
+			const manifest = yield* resolveArtifactVersion(claims.artifactId, claims.version)
+			return manifest === null ? null : { artifactId: claims.artifactId, manifest }
+		})
+
 	return (request: ContentRequest): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
 		Effect.gen(function* () {
 			if (request.method !== "GET" && request.method !== "HEAD") {
 				return plain(405, "Method not allowed.")
 			}
 			const url = URL.parse(request.url)
-			if (url === null || !url.pathname.startsWith(CONTENT_PATH_PREFIX)) {
+			if (url === null) {
 				return notFound
 			}
 			const { pathname, search } = url
+			const hosted = publicationOfHost(url.hostname, publishDomain)
+			const prefix =
+				hosted === undefined
+					? [CONTENT_PATH_PREFIX, PUBLICATION_PATH_PREFIX].find((candidate) =>
+							pathname.startsWith(candidate),
+						)
+					: PUBLICATION_PATH_PREFIX
+			if (prefix === undefined) {
+				return notFound
+			}
 			const toFolder = HttpServerResponse.empty({
 				status: 308,
 				headers: { ...CONTENT_HEADERS, location: `${pathname}/${search}` },
 			})
-			const rest = pathname.slice(CONTENT_PATH_PREFIX.length)
+			const rest = hosted === undefined ? pathname.slice(prefix.length) : `${hosted}${pathname}`
 			const slash = rest.indexOf("/")
 			if (slash === -1) {
 				return rest.length === 0 ? notFound : toFolder
 			}
-			const claims = yield* verifyLink(mac, key, rest.slice(0, slash), yield* nowMillis)
+			const found = yield* target(prefix, rest.slice(0, slash))
 			const requested = decodePath(rest.slice(slash + 1))
-			if (claims === null || claims.scope !== scope || requested === null) {
+			if (found === null || requested === null) {
 				return notFound
 			}
-			const manifestHash = yield* resolveArtifactVersion(claims.artifactId, claims.version)
-			if (manifestHash === null) {
-				return notFound
-			}
-			const manifest = yield* store.getManifest(claims.artifactId, manifestHash)
+			const manifest = yield* store.getManifest(found.artifactId, found.manifest)
 			if (manifest === null) {
 				return notFound
 			}
@@ -187,7 +231,7 @@ export const serveContent = (options: {
 				return HttpServerResponse.empty({ status: 304, headers: fileHeaders })
 			}
 			if (request.method === "HEAD") {
-				return (yield* store.hasBlob(claims.artifactId, file.sha256))
+				return (yield* store.hasBlob(found.artifactId, file.sha256))
 					? HttpServerResponse.empty({
 							status: 200,
 							headers: {
@@ -198,7 +242,7 @@ export const serveContent = (options: {
 						})
 					: notFound
 			}
-			const bytes = yield* store.getBlob(claims.artifactId, file.sha256)
+			const bytes = yield* store.getBlob(found.artifactId, file.sha256)
 			if (bytes === null) {
 				return notFound
 			}

@@ -17,10 +17,19 @@ const STANDING = {
 	"Artifact.AddedVersionRecordsItsManifest": "proved",
 	"Artifact.FenceNeverDecreasesAndOnlyFencingMovesIt": "proved",
 	"Artifact.DeleteLandsOnlyAtTheCurrentFence": "proved",
+	"Artifact.PublishedOnlyOnceCreated": "proved",
+	"Artifact.UnpublishedHoldsNoSettings": "proved",
+	"Artifact.PinnedVersionWithinHead": "proved",
+	"Artifact.ATokenIsOnlyOpenedOrDropped": "proved",
+	"Artifact.UnpublishDropsTheToken": "proved",
+	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
+	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
+	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Artifacts.ArtifactViewMatchesArtifact": "checked",
 	"Artifacts.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
 	"Artifacts.AnArtifactGainsASecondVersion": "reached",
 	"Artifacts.AnArtifactIsDeleted": "reached",
+	"Artifacts.AnArtifactIsPublished": "reached",
 } as const
 
 const PROVED = Object.entries(STANDING)
