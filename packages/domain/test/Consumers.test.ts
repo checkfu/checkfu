@@ -38,10 +38,16 @@ describe("views and projections", () => {
 			[...new Set(SOURCES.map((entry) => entry.name))].toSorted(),
 		)
 		for (const consumer of declared) {
+			const recorded = SOURCES.find(
+				(entry) => entry.name === consumer.name && entry.version === consumer.version,
+			)
 			expect(
-				SOURCES.find((entry) => entry.name === consumer.name && entry.version === consumer.version)
-					?.from,
-				`${consumer.name} is at version ${consumer.version} with no recorded sources: add an entry for the new version`,
+				recorded,
+				`${consumer.name} is at version ${consumer.version}, which has no entry: add one with the sources it reads`,
+			).toBeDefined()
+			expect(
+				recorded?.from,
+				`${consumer.name} reads different sources than version ${consumer.version} recorded: bump its version and add an entry for the new one, leaving this entry as it is`,
 			).toEqual(consumer.from.map(nameOf).toSorted())
 		}
 	})
