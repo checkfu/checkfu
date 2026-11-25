@@ -5,7 +5,7 @@ import * as Predicate from "effect/Predicate"
 import { createRepositoryFetch, githubBaseUrl, makeGitCalls } from "./Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
-import { ARTIFACT_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
+import { ARTIFACT_MOUNT_ROOT, SKILL_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
 import { makeArtifactMount } from "./ArtifactMount.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
 import type { SessionArtifacts } from "./SessionArtifacts.ts"
@@ -96,6 +96,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						mounts: {
 							[MEMORY_ROOT]: makeMemoryMount(memory),
 							[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts),
+							[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts),
 						},
 						git: createGitClient({
 							fetch: createRepositoryFetch({

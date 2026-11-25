@@ -4,6 +4,7 @@ import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "../Compatibility.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { piHarnessAiBindingProps } from "./PiModels.ts"
+import { readSkill } from "../Skills/ReadSkill.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
 
@@ -38,6 +39,7 @@ export default PiHarnessWorker.make(
 				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token, replace)),
 			interruptWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).interrupt(token)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
+			readSkill: (markdown) => Effect.promise(() => readSkill(markdown)),
 		})
 	}).pipe(
 		Effect.provide([

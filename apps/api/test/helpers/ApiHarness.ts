@@ -57,6 +57,8 @@ import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
 import { makeSessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type { SessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
+import { readSkill } from "../../src/Skills/ReadSkill.ts"
+import { SkillReader } from "../../src/Skills/SkillReader.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
@@ -515,6 +517,9 @@ export const makePiDurableTestLayer = (
 		ArtifactLinksTest,
 	).pipe(
 		Layer.provideMerge(
+			Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
+		),
+		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
 				baseDelay: "1 millis",
@@ -568,17 +573,19 @@ export const sendRequest = (
 		readonly method: string
 		readonly path: string
 		readonly body?: unknown
+		readonly json?: string
 		readonly headers?: Record<string, string>
 	},
 ) =>
 	Effect.gen(function* () {
+		const json = input.json ?? (input.body === undefined ? undefined : JSON.stringify(input.body))
 		const init: RequestInit = {
 			method: input.method,
 			headers: {
-				...(input.body === undefined ? {} : { "content-type": "application/json" }),
+				...(json === undefined ? {} : { "content-type": "application/json" }),
 				...input.headers,
 			},
-			...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+			...(json === undefined ? {} : { body: json }),
 		}
 		const webRequest = new Request(`http://localhost${input.path}`, init)
 		const response = yield* fetchEffect.pipe(

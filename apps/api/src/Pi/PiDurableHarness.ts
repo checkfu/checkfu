@@ -20,8 +20,13 @@ import {
 	artifactsOf,
 	memoryStoresOf,
 	repositoriesOf,
+	skillsOf,
 } from "@checkfu/domain/Session/SessionResource"
-import type { ArtifactMount, MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
+import type {
+	ArtifactMount,
+	MemoryStoreResource,
+	SkillMount,
+} from "@checkfu/domain/Session/SessionResource"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -192,6 +197,7 @@ export const describeMounts = (
 	repositories: ReadonlyArray<RepositoryMount>,
 	stores: ReadonlyArray<MemoryStoreResource> = [],
 	artifacts: ReadonlyArray<ArtifactMount> = [],
+	skills: ReadonlyArray<SkillMount> = [],
 ): string | null => {
 	const sections = [
 		...(system === null || system.length === 0 ? [] : [system]),
@@ -225,8 +231,18 @@ export const describeMounts = (
 						),
 					].join("\n"),
 				]),
+		...(skills.length === 0
+			? []
+			: [
+					[
+						"Skills in your workspace. Each is a directory of instructions for one kind of task. When a task matches a skill's description, read its SKILL.md before you start:",
+						...skills.map(
+							(skill) => `- ${skill.mount_path}/SKILL.md: ${skill.name}. ${skill.description}`,
+						),
+					].join("\n"),
+				]),
 	]
-	return repositories.length + stores.length + artifacts.length === 0
+	return repositories.length + stores.length + artifacts.length + skills.length === 0
 		? system
 		: sections.join("\n\n")
 }
@@ -350,7 +366,8 @@ export const PiDurableHarnessLive = boundedHarness(
 							})
 						}
 					}
-					const system = describeMounts(version.system, repositories, stores, artifacts)
+					const skills = skillsOf(args.resources)
+					const system = describeMounts(version.system, repositories, stores, artifacts, skills)
 
 					const request: PiTurnRequest = {
 						operationId,

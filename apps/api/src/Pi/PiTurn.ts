@@ -1,6 +1,7 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
+import { SkillReading } from "../Skills/SkillReader.ts"
 import { RepositoryMount, TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
 
 const TURN_OPERATION_PREFIX = "turn:"
@@ -77,4 +78,5 @@ export const PiHarnessCalls = {
 	},
 	interruptWorkspace: { args: Schema.Tuple([Schema.String, TurnToken]), result: Schema.Void },
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	readSkill: { args: Schema.Tuple([Schema.String]), result: SkillReading },
 } as const

@@ -6,6 +6,15 @@ import {
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
+import {
+	MAX_MEMORY_INSTRUCTIONS_LENGTH,
+	MAX_MOUNT_PATH_LENGTH,
+	MAX_REPOSITORY_TOKEN_LENGTH,
+	MAX_SESSION_ARTIFACTS,
+	MAX_SESSION_MEMORY_STORES,
+	MAX_SESSION_REPOSITORIES,
+	MAX_SESSION_SKILLS,
+} from "@checkfu/domain/Session/SessionResource"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
@@ -33,6 +42,7 @@ import {
 	Authentication,
 	EventBatchBodyLimit,
 	MemoryBodyLimit,
+	SessionBodyLimit,
 	RequestId,
 	RequestValidation,
 	apiError,
@@ -54,6 +64,12 @@ export const MAX_AGENT_BODY_BYTES =
 	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) * 12 + 16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
 export const MAX_MEMORY_BODY_BYTES = MAX_MEMORY_CONTENT_BYTES * 6 + 16 * 1024
+export const MAX_SESSION_BODY_BYTES =
+	(MAX_SESSION_REPOSITORIES * (2 * MAX_MOUNT_PATH_LENGTH + MAX_REPOSITORY_TOKEN_LENGTH) +
+		MAX_SESSION_MEMORY_STORES * (MAX_MOUNT_PATH_LENGTH + MAX_MEMORY_INSTRUCTIONS_LENGTH) +
+		(MAX_SESSION_ARTIFACTS + MAX_SESSION_SKILLS) * MAX_MOUNT_PATH_LENGTH) *
+		6 +
+	16 * 1024
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
 	type: "cloud",
@@ -383,6 +399,14 @@ export const MemoryBodyLimitLive = Layer.succeed(MemoryBodyLimit, (httpEffect) =
 		httpEffect,
 		HttpIncomingMessage.MaxBodySize,
 		ByteSize.bytes(MAX_MEMORY_BODY_BYTES),
+	),
+)
+
+export const SessionBodyLimitLive = Layer.succeed(SessionBodyLimit, (httpEffect) =>
+	Effect.provideService(
+		httpEffect,
+		HttpIncomingMessage.MaxBodySize,
+		ByteSize.bytes(MAX_SESSION_BODY_BYTES),
 	),
 )
 

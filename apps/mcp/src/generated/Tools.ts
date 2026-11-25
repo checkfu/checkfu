@@ -2497,11 +2497,35 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												required: ["type", "artifact_id"],
 												additionalProperties: false,
 											},
+											{
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["skill"],
+													},
+													artifact_id: {
+														type: "string",
+														minLength: 1,
+														maxLength: 256,
+														description:
+															"Artifact that holds the skill: a SKILL.md at its root, and the files it refers to",
+													},
+													version: {
+														type: "integer",
+														minimum: 1,
+														maximum: 9007199254740991,
+														description: "Version to use (default: the current version)",
+													},
+												},
+												required: ["type", "artifact_id"],
+												additionalProperties: false,
+											},
 										],
 									},
-									maxItems: 24,
+									maxItems: 40,
 									description:
-										"Repositories, memory stores and artifacts to mount in the session's workspace",
+										"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
 								},
 							},
 							required: ["agent", "environment_id"],
@@ -2700,11 +2724,35 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												required: ["type", "artifact_id"],
 												additionalProperties: false,
 											},
+											{
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["skill"],
+													},
+													artifact_id: {
+														type: "string",
+														minLength: 1,
+														maxLength: 256,
+														description:
+															"Artifact that holds the skill: a SKILL.md at its root, and the files it refers to",
+													},
+													version: {
+														type: "integer",
+														minimum: 1,
+														maximum: 9007199254740991,
+														description: "Version to use (default: the current version)",
+													},
+												},
+												required: ["type", "artifact_id"],
+												additionalProperties: false,
+											},
 										],
 									},
-									maxItems: 24,
+									maxItems: 40,
 									description:
-										"Repositories, memory stores and artifacts to mount in the session's workspace",
+										"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
 								},
 							},
 							required: ["agent_id", "environment_id"],
