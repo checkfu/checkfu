@@ -22,6 +22,7 @@ import {
 } from "../queries.ts"
 import { selection } from "../selection.ts"
 import type { Selection } from "../selection.ts"
+import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { Transcript } from "./transcript.tsx"
@@ -60,7 +61,7 @@ export function SessionsPage(): React.JSX.Element {
 								params={{ sessionId: session.id }}
 								className="hover:underline"
 							>
-								{session.title ?? shortId(session.id)}
+								{sessionTitle(session) ?? shortId(session.id)}
 							</Link>
 						),
 					},
@@ -203,7 +204,7 @@ export function NewSessionPage(): React.JSX.Element {
 			return session
 		},
 		{
-			invalidates: ["sessions"],
+			invalidates: [["sessions"], ["agents"], ["environments"]],
 			then: (session) => {
 				if (session !== undefined) {
 					void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
@@ -276,10 +277,11 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, status, turn, final, error, earlier, catchUp } = useSessionEvents({
+	const { events, reconnecting, earlier } = useSessionEvents({
 		session,
-		onTransition: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+		onSnapshotChange: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
+	const { status, turn } = session
 	const [text, setText] = useState("")
 	const sendKey = useSubmissionKey()
 	const send = useAction(
@@ -293,9 +295,8 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 			sendKey.settle()
 		},
 		{
-			invalidates: ["sessions", "one", session.id],
+			invalidates: [["sessions", "one", session.id]],
 			then: (_, message) => {
-				catchUp()
 				setText((current) => (current === message ? "" : current))
 			},
 		},
@@ -307,20 +308,20 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 			await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
 			interruptKey.settle()
 		},
-		{ invalidates: ["sessions", "one", session.id], then: catchUp },
+		{ invalidates: [["sessions", "one", session.id]] },
 	)
 	const archive = useAction(
 		async () => {
 			await checkfu.sessions.archive(session.id)
 		},
-		{ invalidates: ["sessions"] },
+		{ invalidates: [["sessions"]] },
 	)
-	const archived = session.archived_at !== null || final
+	const archived = session.archived_at !== null
 	const open = !archived && status !== "terminated"
 	return (
 		<>
 			<PageHeader
-				title={session.title ?? "Untitled session"}
+				title={sessionTitle(session) ?? "Untitled session"}
 				id={session.id}
 				breadcrumb={<Link to="/sessions">Sessions</Link>}
 				accessory={<Status status={archived ? "archived" : status} />}
@@ -357,7 +358,12 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					) : undefined
 				}
 			/>
-			{[error, send.error, interrupt.error, archive.error].map((message) =>
+			{[
+				reconnecting ? "Live updates were interrupted. Reconnecting…" : undefined,
+				send.error,
+				interrupt.error,
+				archive.error,
+			].map((message) =>
 				message === undefined ? null : (
 					<Callout key={message} tone="error">
 						{message}

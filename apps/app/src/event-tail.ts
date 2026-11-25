@@ -1,4 +1,4 @@
-import type { JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
+import type { JsonSessionEvent } from "@checkfu/sdk/client"
 
 const FLUSH_MS = 50
 
@@ -61,62 +61,4 @@ export const transcriptEvents = (
 	const newest = history.at(-1)?.seq ?? 0
 	const start = tail.findIndex((event) => event.seq > newest)
 	return start === -1 ? history : history.concat(tail.slice(start))
-}
-
-const statusOf = (event: JsonSessionEvent): JsonSession["status"] | undefined => {
-	switch (event.type) {
-		case "session.status_running":
-			return "running"
-		case "session.status_idle":
-			return "idle"
-		case "session.status_terminated":
-			return "terminated"
-		default:
-			return undefined
-	}
-}
-
-const turnOf = (event: JsonSessionEvent): number | undefined =>
-	event.type === "session.status_running" && "turn" in event && typeof event.turn === "number"
-		? event.turn
-		: undefined
-
-const latest = <T>(
-	events: ReadonlyArray<JsonSessionEvent>,
-	read: (event: JsonSessionEvent) => T | undefined,
-): T | undefined => {
-	for (let index = events.length - 1; index >= 0; index -= 1) {
-		const event = events[index]
-		const value = event === undefined ? undefined : read(event)
-		if (value !== undefined) {
-			return value
-		}
-	}
-	return undefined
-}
-
-type Progress = Pick<JsonSession, "status" | "turn">
-
-const PHASE: Record<JsonSession["status"], number> = { running: 0, idle: 1, terminated: 2 }
-
-const later = (a: Progress, b: Progress): Progress =>
-	a.status === "terminated" || b.status === "terminated"
-		? { status: "terminated", turn: Math.max(a.turn, b.turn) }
-		: a.turn !== b.turn
-			? a.turn > b.turn
-				? a
-				: b
-			: PHASE[a.status] >= PHASE[b.status]
-				? a
-				: b
-
-export const progressOf = (
-	events: ReadonlyArray<JsonSessionEvent>,
-	snapshot: Progress,
-): Progress => {
-	const status = latest(events, statusOf)
-	if (status === undefined) {
-		return snapshot
-	}
-	return later(snapshot, { status, turn: latest(events, turnOf) ?? 0 })
 }

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import { providers as domainProviders } from "@alchemy.run/domain/Cloudflare"
 import ApiWorker from "./apps/api/src/ApiWorker.ts"
@@ -58,7 +59,7 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			})
 			const dashboardKey = yield* Config.option(Config.Redacted("CHECKFU_API_KEY"))
 			const app = yield* Cloudflare.Website.Vite("App", {
-				rootDir: "apps/app",
+				rootDir: fileURLToPath(new URL("./apps/app", import.meta.url)),
 				main: "worker.ts",
 				compatibility: { date: COMPATIBILITY_DATE },
 				observability: { enabled: true },

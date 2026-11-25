@@ -3,6 +3,7 @@ import { ApiError } from "../src/api.ts"
 import { present } from "../src/queries.ts"
 import { returnTo } from "../src/return-to.ts"
 import { selection } from "../src/selection.ts"
+import { sessionTitle } from "../src/session-title.ts"
 
 describe("returning after sign-in", () => {
 	it("keeps a same-origin path with its search and hash", () => {
@@ -47,5 +48,13 @@ describe("detail pages", () => {
 		expect(() =>
 			present({ data: cached, error: new ApiError(404, "Environment not found.") }),
 		).toThrow("Environment not found.")
+	})
+})
+
+describe("session titles", () => {
+	it("treats a blank title as missing", () => {
+		expect(sessionTitle({ title: null })).toBeUndefined()
+		expect(sessionTitle({ title: "   " })).toBeUndefined()
+		expect(sessionTitle({ title: " Plan " })).toBe(" Plan ")
 	})
 })

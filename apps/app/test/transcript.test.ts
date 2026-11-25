@@ -2,7 +2,7 @@ import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import { infiniteQueryOptions, QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 import type { EventPage } from "../src/api.ts"
-import { EventBatch, mergeBySeq, progressOf, transcriptEvents } from "../src/event-tail.ts"
+import { EventBatch, mergeBySeq, transcriptEvents } from "../src/event-tail.ts"
 import { eventsOf, isFinal, liveQuery, newestSeqOf, transcriptQuery } from "../src/queries.ts"
 import type { Transcript } from "../src/queries.ts"
 
@@ -14,22 +14,6 @@ const message = (seq: number): JsonSessionEvent => ({
 	type: "agent.message",
 	created_at: at,
 	content: [{ type: "text", text: `message ${seq}` }],
-})
-
-const running = (seq: number, turn: number): JsonSessionEvent => ({
-	id: `evt_${seq}`,
-	seq,
-	type: "session.status_running",
-	created_at: at,
-	turn,
-})
-
-const idle = (seq: number): JsonSessionEvent => ({
-	id: `evt_${seq}`,
-	seq,
-	type: "session.status_idle",
-	created_at: at,
-	stop_reason: { type: "end_turn" },
 })
 
 const archived = (seq: number): JsonSessionEvent => ({
@@ -135,38 +119,5 @@ describe("transcript", () => {
 	it("is final only when the transcript itself holds the archive event", () => {
 		expect(isFinal([message(1)])).toBe(false)
 		expect(isFinal([message(1), archived(2)])).toBe(true)
-	})
-
-	it("shows whichever of the snapshot and the events is further along, and never regresses", () => {
-		const terminated = (seq: number): JsonSessionEvent => ({
-			id: `evt_${seq}`,
-			seq,
-			type: "session.status_terminated",
-			created_at: at,
-		})
-		expect(progressOf([message(1)], { status: "running", turn: 4 })).toEqual({
-			status: "running",
-			turn: 4,
-		})
-		expect(progressOf([running(1, 2)], { status: "terminated", turn: 2 })).toEqual({
-			status: "terminated",
-			turn: 2,
-		})
-		expect(progressOf([running(1, 1), idle(2)], { status: "running", turn: 2 })).toEqual({
-			status: "running",
-			turn: 2,
-		})
-		expect(progressOf([running(1, 2), idle(2)], { status: "running", turn: 2 })).toEqual({
-			status: "idle",
-			turn: 2,
-		})
-		expect(progressOf([idle(2), running(3, 3)], { status: "idle", turn: 2 })).toEqual({
-			status: "running",
-			turn: 3,
-		})
-		expect(progressOf([running(1, 3), terminated(2)], { status: "running", turn: 3 })).toEqual({
-			status: "terminated",
-			turn: 3,
-		})
 	})
 })

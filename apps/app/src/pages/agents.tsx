@@ -109,7 +109,7 @@ function AgentForm<Saved>({
 	readonly onSaved: (saved: Saved) => void
 	readonly onCancel?: () => void
 }): React.JSX.Element {
-	const action = useAction(onSubmit, { invalidates: ["agents"], then: onSaved })
+	const action = useAction(onSubmit, { invalidates: [["agents"]], then: onSaved })
 	const set =
 		(field: keyof AgentDraft) =>
 		(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -193,7 +193,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 		async () => {
 			await checkfu.agents.archive(agent.id)
 		},
-		{ invalidates: ["agents"] },
+		{ invalidates: [["agents"]] },
 	)
 	const archived = agent.archived_at !== null
 	return (

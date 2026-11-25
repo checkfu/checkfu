@@ -95,7 +95,7 @@ export function NewEnvironmentPage(): React.JSX.Element {
 			return environment
 		},
 		{
-			invalidates: ["environments"],
+			invalidates: [["environments"]],
 			then: (environment) =>
 				void navigate({
 					to: "/environments/$environmentId",
@@ -140,7 +140,7 @@ export function EnvironmentPage(): React.JSX.Element {
 		async () => {
 			await checkfu.environments.archive(environment.id)
 		},
-		{ invalidates: ["environments"] },
+		{ invalidates: [["environments"]] },
 	)
 	const networking = environment.config.networking
 	return (
