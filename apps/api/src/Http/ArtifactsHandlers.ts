@@ -421,6 +421,17 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const id = params.artifact_id
 					const state = yield* requireActive(id)
 					if (state.version !== payload.version) {
+						if (state.version === payload.version + 1) {
+							const resent = yield* build(payload.files)
+							if (resent.manifest_hash === state.manifest) {
+								const replay = yield* loadVersion(id, state.version, resent).pipe(
+									orPending(id, "artifact_version"),
+								)
+								return isPending(replay)
+									? { ...replay, version: state.version }
+									: versionResource(id, replay.found, replay.manifest)
+							}
+						}
 						return yield* reject(
 							409,
 							`Artifact ${id} is at version ${state.version}, not ${payload.version}.`,
@@ -444,6 +455,13 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 									total_bytes: built.total_bytes,
 									fence: state.fence,
 								}),
+								{
+									commandId: yield* idempotentCommandId(digest, "add-artifact-version", [
+										id,
+										payload.version,
+										built.manifest_hash,
+									]),
+								},
 							)
 							.pipe(
 								Effect.tapError(() => quietly(write.abandon)),

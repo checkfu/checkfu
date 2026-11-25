@@ -1504,6 +1504,96 @@ describe("Artifacts API", () => {
 			}),
 		))
 
+	it("answers a resent version upload with the version it already committed", () =>
+		withApi(({ call, callLostReply }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "A",
+						files: [{ path: "a.txt", content: "a" }],
+					}),
+				)
+				const body = { version: 1, files: [{ path: "b.txt", content: "kept" }] }
+				const lost = yield* callLostReply(`/v1/artifacts/${id}/versions`, body)
+				expect(lost.status).toBe(500)
+				const resent = yield* call("POST", `/v1/artifacts/${id}/versions`, body)
+				expect(resent.status).toBe(201)
+				expect((yield* json<VersionBody>(resent)).version).toBe(2)
+				const head = yield* call("GET", `/v1/artifacts/${id}`)
+				expect((yield* json<ArtifactBody>(head)).version).toBe(2)
+			}),
+		))
+
+	it("refuses a resend whose files differ from the committed version", () =>
+		withApi(({ call, callLostReply }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "A",
+						files: [{ path: "a.txt", content: "a" }],
+					}),
+				)
+				const lost = yield* callLostReply(`/v1/artifacts/${id}/versions`, {
+					version: 1,
+					files: [{ path: "b.txt", content: "kept" }],
+				})
+				expect(lost.status).toBe(500)
+				const resent = yield* call("POST", `/v1/artifacts/${id}/versions`, {
+					version: 1,
+					files: [{ path: "b.txt", content: "other" }],
+				})
+				expect(resent.status).toBe(409)
+			}),
+		))
+
+	it("commits one version when the same upload arrives twice at once", () =>
+		withApi(({ call }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "A",
+						files: [{ path: "a.txt", content: "a" }],
+					}),
+				)
+				const body = { version: 1, files: [{ path: "b.txt", content: "kept" }] }
+				const [first, second] = yield* Effect.all(
+					[
+						call("POST", `/v1/artifacts/${id}/versions`, body),
+						call("POST", `/v1/artifacts/${id}/versions`, body),
+					],
+					{ concurrency: 2 },
+				)
+				expect(first.status).toBe(201)
+				expect(second.status).toBe(201)
+				expect((yield* json<VersionBody>(first)).version).toBe(2)
+				expect((yield* json<VersionBody>(second)).version).toBe(2)
+				const head = yield* call("GET", `/v1/artifacts/${id}`)
+				expect((yield* json<ArtifactBody>(head)).version).toBe(2)
+			}),
+		))
+
+	it("refuses a resend once a later version exists", () =>
+		withApi(({ call, callLostReply }) =>
+			Effect.gen(function* () {
+				const { id } = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "A",
+						files: [{ path: "a.txt", content: "a" }],
+					}),
+				)
+				const body = { version: 1, files: [{ path: "b.txt", content: "kept" }] }
+				const lost = yield* callLostReply(`/v1/artifacts/${id}/versions`, body)
+				expect(lost.status).toBe(500)
+				const next = yield* call("POST", `/v1/artifacts/${id}/versions`, {
+					version: 2,
+					files: [{ path: "c.txt", content: "c" }],
+				})
+				expect(next.status).toBe(201)
+				const resent = yield* call("POST", `/v1/artifacts/${id}/versions`, body)
+				expect(resent.status).toBe(409)
+			}),
+		))
+
 	it("answers 404 and keeps no bytes when a delete lands between a version's upload and its commit", () =>
 		withApi(({ call, store }) =>
 			Effect.gen(function* () {
