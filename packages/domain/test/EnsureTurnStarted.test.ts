@@ -3,6 +3,8 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+import * as TestClock from "effect/testing/TestClock"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { ArmAutomationLive } from "../src/Automation/ArmAutomation.policy.ts"
@@ -15,10 +17,12 @@ import { ListingLive } from "../src/Listing/Listing.projection.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { ListResourcesLive } from "../src/Listing/ListResources.query.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
+import { SessionStatusTerminated } from "../src/Session/ArchiveSession.command.ts"
 import { EnsureTurnStarted, ensureTurnStarted } from "../src/Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStoppedLive } from "../src/Session/EnsureTurnStopped.policy.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, Harness } from "../src/Session/Harness.external.ts"
-import { RunTurnLive } from "../src/Session/RunTurn.saga.ts"
+import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
+import { UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
@@ -45,54 +49,67 @@ const settle = (platform: Platform) =>
 	})
 
 // Like the real harness: a run for a turn it was told to stop is refused, and a stop ends a run
-// under way. Turn 1 waits for `hold`, or for its stop, before it replies.
-const harnessOf = (calls: Array<string>, hold?: Deferred.Deferred<void>) => (platform: Platform) =>
-	Harness.toLayer(
-		Effect.sync(() => {
-			const stopped = new Map<number, Deferred.Deferred<void>>()
-			const stopOf = (turn: number) => {
-				const found = stopped.get(turn)
-				if (found !== undefined) {
-					return found
+// under way. A held turn (turn 1 by default) waits for `hold`, or for its stop, before it replies.
+// `slowStop` names a turn whose stop takes effect but is never acknowledged.
+const harnessOf =
+	(
+		calls: Array<string>,
+		hold?: Deferred.Deferred<void>,
+		{
+			heldTurns = [1],
+			slowStop,
+		}: { readonly heldTurns?: ReadonlyArray<number>; readonly slowStop?: number } = {},
+	) =>
+	(platform: Platform) =>
+		Harness.toLayer(
+			Effect.sync(() => {
+				const stopped = new Map<number, Deferred.Deferred<void>>()
+				const stopOf = (turn: number) => {
+					const found = stopped.get(turn)
+					if (found !== undefined) {
+						return found
+					}
+					const made = Deferred.makeUnsafe<void>()
+					stopped.set(turn, made)
+					return made
 				}
-				const made = Deferred.makeUnsafe<void>()
-				stopped.set(turn, made)
-				return made
-			}
-			const isStopped = (turn: number) => Deferred.isDoneUnsafe(stopOf(turn))
-			return {
-				interrupt: ({ turn }: { readonly turn: number }) =>
-					Effect.sync(() => {
-						calls.push(`interrupt:${turn}`)
-						Deferred.doneUnsafe(stopOf(turn), Effect.void)
-					}),
-				runTurn: ({ turn }: { readonly turn: number }) =>
-					Effect.gen(function* () {
-						if (isStopped(turn)) {
-							calls.push(`refused:${turn}`)
-							return yield* Effect.fail({ _tag: "TurnInterrupted" as const })
-						}
-						calls.push(`run:${turn}`)
-						if (hold !== undefined && turn === 1) {
-							yield* platform.control.suspended(
-								Effect.raceFirst(Deferred.await(hold), Deferred.await(stopOf(turn))),
-							)
-						}
-						if (isStopped(turn)) {
-							return yield* Effect.fail({ _tag: "TurnInterrupted" as const })
-						}
-						calls.push(`reply:${turn}`)
-						return {
-							thinking: null,
-							text: "ok",
-							input_tokens: 1,
-							output_tokens: 1,
-							stop_reason: { type: "end_turn" as const },
-						}
-					}),
-			}
-		}),
-	)
+				const isStopped = (turn: number) => Deferred.isDoneUnsafe(stopOf(turn))
+				return {
+					interrupt: ({ turn }: { readonly turn: number }) =>
+						Effect.gen(function* () {
+							calls.push(`interrupt:${turn}`)
+							Deferred.doneUnsafe(stopOf(turn), Effect.void)
+							if (turn === slowStop) {
+								return yield* platform.control.suspended(Effect.never)
+							}
+						}),
+					runTurn: ({ turn }: { readonly turn: number }) =>
+						Effect.gen(function* () {
+							if (isStopped(turn)) {
+								calls.push(`refused:${turn}`)
+								return yield* Effect.fail({ _tag: "TurnInterrupted" as const })
+							}
+							calls.push(`run:${turn}`)
+							if (hold !== undefined && heldTurns.includes(turn)) {
+								yield* platform.control.suspended(
+									Effect.raceFirst(Deferred.await(hold), Deferred.await(stopOf(turn))),
+								)
+							}
+							if (isStopped(turn)) {
+								return yield* Effect.fail({ _tag: "TurnInterrupted" as const })
+							}
+							calls.push(`reply:${turn}`)
+							return {
+								thinking: null,
+								text: "ok",
+								input_tokens: 1,
+								output_tokens: 1,
+								stop_reason: { type: "end_turn" as const },
+							}
+						}),
+				}
+			}),
+		)
 
 interface Handlers {
 	// As if every event reached the view-fed policy only as history, while its view rebuilt.
@@ -132,6 +149,15 @@ const handlersOf =
 		)
 
 const sessionId = SessionId.make("sess_ensure")
+
+// The platform stamps events with its clock; policies read the Effect clock. Keep them equal.
+const moveTo = (clock: { now: number }, at: number) =>
+	Effect.andThen(
+		Effect.sync(() => {
+			clock.now = at
+		}),
+		TestClock.setTime(at),
+	)
 
 const run = <A, E, R>(
 	handlers: (platform: Platform) => typeof CheckfuHandlersLive,
@@ -244,11 +270,11 @@ describe("turn deadlines with a late EnsureTurnStarted delivery", () => {
 						const sessions = yield* Session
 						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
 						yield* settle(platform)
-						clock.now = T0 + DEFAULT_TURN_TIMEOUT_MS - 60 * 1000
+						yield* moveTo(clock, T0 + DEFAULT_TURN_TIMEOUT_MS - 60 * 1000)
 						yield* Deferred.succeed(delayEnsure, undefined)
 						yield* settle(platform)
 						expect(yield* sessions.get(sessionId)).toMatchObject({ _tag: "Running", turn: 1 })
-						clock.now = T0 + DEFAULT_TURN_TIMEOUT_MS + 1000
+						yield* moveTo(clock, T0 + DEFAULT_TURN_TIMEOUT_MS + 1000)
 						yield* settle(platform)
 						expect(yield* sessions.get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
 						expect(calls).not.toContain("reply:1")
@@ -312,4 +338,124 @@ describe("EnsureTurnStopped", () => {
 			)
 		},
 	)
+})
+
+describe("an expired turn", () => {
+	it.effect("is ended, not started, when its recovery arrives after the deadline", () => {
+		const calls: Array<string> = []
+		return Effect.flatMap(Deferred.make<void>(), (delayEnsure) =>
+			run(handlersOf({ missStartTurn: true, delayEnsure }), harnessOf(calls), (platform, clock) =>
+				Effect.gen(function* () {
+					const domain = yield* CheckfuDomainApi.clientInProcess
+					yield* moveTo(clock, T0)
+					yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+					yield* settle(platform)
+					yield* moveTo(clock, T0 + DEFAULT_TURN_TIMEOUT_MS + 1000)
+					yield* Deferred.succeed(delayEnsure, undefined)
+					yield* settle(platform)
+					expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
+					// No run was started for it, so nothing could reach the harness before the abandon.
+					expect((yield* (yield* RunTurn).get(turnKey(sessionId, 1)).status)._tag).toBe(
+						"NotStarted",
+					)
+					expect(calls.filter((call) => !call.startsWith("interrupt:"))).toEqual([])
+					expect(platform.control.failures).toEqual([])
+				}),
+			),
+		)
+	})
+})
+
+describe("EnsureTurnStopped on termination", () => {
+	it.effect(
+		"stops a run under way when the session is archived and StopModelRequest never saw it",
+		() => {
+			const calls: Array<string> = []
+			return Effect.flatMap(Deferred.make<void>(), (hold) =>
+				run(handlersOf({ missStopModelRequest: true }), harnessOf(calls, hold), (platform) =>
+					Effect.gen(function* () {
+						const domain = yield* CheckfuDomainApi.clientInProcess
+						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+						yield* settle(platform)
+						yield* domain.ArchiveSession({ session_id: sessionId })
+						yield* settle(platform)
+						expect(yield* (yield* Session).get(sessionId)).toEqual({
+							_tag: "Terminated",
+							archived: true,
+						})
+						expect(calls).toEqual(["run:1", "interrupt:1"])
+						expect(platform.control.failures).toEqual([])
+					}),
+				),
+			)
+		},
+	)
+
+	it.effect("refuses the recovered run of a session archived before it started", () => {
+		const calls: Array<string> = []
+		return Effect.flatMap(Deferred.make<void>(), (delayEnsure) =>
+			run(
+				handlersOf({ missStartTurn: true, missStopModelRequest: true, delayEnsure }),
+				harnessOf(calls),
+				(platform) =>
+					Effect.gen(function* () {
+						const domain = yield* CheckfuDomainApi.clientInProcess
+						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+						yield* domain.ArchiveSession({ session_id: sessionId })
+						yield* settle(platform)
+						yield* Deferred.succeed(delayEnsure, undefined)
+						yield* settle(platform)
+						expect(calls).toEqual(["interrupt:1"])
+						expect(platform.control.failures).toEqual([])
+					}),
+			),
+		)
+	})
+})
+
+describe("EnsureTurnStopped per turn", () => {
+	it.effect("stops a later turn while an earlier turn's stop is still unacknowledged", () => {
+		const calls: Array<string> = []
+		return Effect.flatMap(Deferred.make<void>(), (hold) =>
+			run(
+				handlersOf({ missStopModelRequest: true }),
+				harnessOf(calls, hold, { heldTurns: [1, 2], slowStop: 1 }),
+				(platform) =>
+					Effect.gen(function* () {
+						const domain = yield* CheckfuDomainApi.clientInProcess
+						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+						yield* settle(platform)
+						yield* domain.SendUserMessage({ session_id: sessionId, text: "second" })
+						yield* domain.SendUserInterrupt({ session_id: sessionId })
+						yield* settle(platform)
+						expect(yield* (yield* Session).get(sessionId)).toMatchObject({
+							_tag: "Running",
+							turn: 2,
+						})
+						yield* domain.SendUserInterrupt({ session_id: sessionId })
+						yield* settle(platform)
+						expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 2 })
+						expect(calls).toEqual(["run:1", "interrupt:1", "run:2", "interrupt:2"])
+						expect(platform.control.failures).toEqual([])
+					}),
+			),
+		)
+	})
+})
+
+describe("stop events recorded before they named a turn", () => {
+	// The kernel decodes a stored event with the JSON codec of its class's current schema.
+	it("read an interrupt with no turn as naming none", () => {
+		expect(
+			Schema.decodeSync(Schema.toCodecJson(UserInterrupt))({ _tag: "user.interrupt" }),
+		).toMatchObject({ turn: null })
+	})
+
+	it("read a termination with no running turn as naming none", () => {
+		expect(
+			Schema.decodeSync(Schema.toCodecJson(SessionStatusTerminated))({
+				_tag: "session.status_terminated",
+			}),
+		).toMatchObject({ running_turn: null })
+	})
 })
