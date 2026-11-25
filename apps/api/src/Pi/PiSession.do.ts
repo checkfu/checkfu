@@ -4,10 +4,17 @@ import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
+import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
-import { createPiModels, providerApiKeys, providerBaseUrls } from "./PiModels.ts"
+import {
+	createPiModels,
+	providerApiKeys,
+	providerBaseUrls,
+	toProviderRuntimeConfig,
+} from "./PiModels.ts"
+import type { ProviderApiKeysInput } from "./PiModels.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
@@ -24,16 +31,21 @@ class PiSessionHost {
 export const makePiHarnessBackend = (
 	harness: PiHarness,
 	fence: SqliteTurnFence,
-	apiKeys: Effect.Success<typeof providerApiKeys>,
+	apiKeys: ProviderApiKeysInput,
 	reset: () => void,
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
+	const runtimeConfig = toProviderRuntimeConfig(apiKeys)
 
 	return {
 		withLock,
-		hasApiKey: (provider) => apiKeys[provider] !== null,
+		hasApiKey: (provider) => checkCatalogProviderCredentials(provider, runtimeConfig).ok,
+		missingCredentialsMessage: (provider) => {
+			const check = checkCatalogProviderCredentials(provider, runtimeConfig)
+			return check.ok ? `Missing credentials for provider "${provider}".` : check.message
+		},
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
 		pi: () => harness.pi(),

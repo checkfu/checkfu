@@ -1,3 +1,4 @@
+import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
@@ -46,7 +47,10 @@ export const IsSupportedAgentModel = Context.Reference<(modelId: string) => bool
 	{ defaultValue: () => (modelId) => resolveCatalogModel(modelId) !== null },
 )
 
-const unsupportedModel = (model: AgentModel) => reject(400, `Unsupported model "${model.id}".`)
+const unsupportedModel = (model: AgentModel) =>
+	model.id.length > MAX_MODEL_ID_LENGTH
+		? reject(400, `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`)
+		: reject(400, `Unsupported model "${model.id}".`)
 
 export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) =>
 	Effect.gen(function* () {
@@ -82,7 +86,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				return projected
 			})
 		const supported = (model: AgentModel) =>
-			isSupportedModel(model.id) ? Effect.void : unsupportedModel(model)
+			model.id.length <= MAX_MODEL_ID_LENGTH && isSupportedModel(model.id)
+				? Effect.void
+				: unsupportedModel(model)
 
 		const loadCommittedAgentVersion = (
 			id: AgentId,

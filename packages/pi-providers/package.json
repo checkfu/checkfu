@@ -1,0 +1,24 @@
+{
+	"name": "@checkfu/pi-providers",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./catalog": "./src/Catalog.ts",
+		"./runtime": "./src/Runtime.ts",
+		"./refusals": "./src/Refusals.ts",
+		"./fetch": "./src/Fetch.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit",
+		"test": "vitest run --pool=threads --no-allowOnly"
+	},
+	"dependencies": {
+		"@earendil-works/pi-ai": "catalog:"
+	},
+	"devDependencies": {
+		"vitest": "catalog:"
+	}
+}

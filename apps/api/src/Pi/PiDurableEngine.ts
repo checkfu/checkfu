@@ -8,8 +8,7 @@ import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
-import { PROVIDER_API_KEY_ENV } from "./PiCatalog.ts"
-import type { SupportedProvider } from "./PiCatalog.ts"
+import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
 import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
@@ -17,7 +16,8 @@ import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
-	readonly hasApiKey: (provider: SupportedProvider) => boolean
+	readonly hasApiKey: (provider: string) => boolean
+	readonly missingCredentialsMessage?: (provider: string) => string
 	readonly isCancelled: (operationId: string) => boolean
 	readonly pi: () => Promise<Harness>
 	readonly ensureRoot: (agent: AgentChange) => Promise<void>
@@ -323,12 +323,18 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
 	if (admitted === "missing_key") {
+		const fallbackCheck = checkCatalogProviderCredentials(request.provider, { env: {} })
+		const message =
+			backend.missingCredentialsMessage?.(request.provider) ??
+			(fallbackCheck.ok
+				? `Missing credentials for provider "${request.provider}".`
+				: fallbackCheck.message)
 		return {
 			ok: false,
 			error: {
 				_tag: "TurnFailed",
 				error_type: "missing_api_key_error",
-				message: `Missing ${PROVIDER_API_KEY_ENV[request.provider]} for provider "${request.provider}".`,
+				message,
 				terminal: false,
 			},
 		}

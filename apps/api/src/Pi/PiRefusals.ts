@@ -1,12 +1,19 @@
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
+import {
+	DEFAULT_REFUSAL_TEXT,
+	isRefusalAssistantMessage,
+	isWireFormatRefusalStopReason,
+	normalizeRefusalAssistantMessage as normalizeWireRefusalAssistantMessage,
+} from "@checkfu/pi-providers/refusals"
 import type { Api, AssistantMessage } from "@earendil-works/pi-ai"
 import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"
 
 import type { PiTurnOutcome } from "./PiTurn.ts"
 
+export { DEFAULT_REFUSAL_TEXT, isRefusalAssistantMessage }
+
 export const PROVIDER_FAILURE_MESSAGE = "The model provider returned an error."
-export const DEFAULT_REFUSAL_TEXT = "The model refused to complete the request."
 
 const ABORTED_ERROR: TurnFailed = {
 	_tag: "TurnFailed",
@@ -17,25 +24,11 @@ const ABORTED_ERROR: TurnFailed = {
 
 export const isProviderRefusalStopReason = (
 	api: Api,
-	provider: string,
+	_provider: string,
 	rawStopReason: string | undefined,
-): boolean => {
-	if (rawStopReason === undefined) {
-		return false
-	}
-	if (api === "anthropic-messages" && provider === "anthropic") {
-		return rawStopReason === "refusal" || rawStopReason === "sensitive"
-	}
-	if (api === "openai-responses" && provider === "openai") {
-		return rawStopReason === "refusal" || rawStopReason === "incomplete.content_filter"
-	}
-	return false
-}
+): boolean => isWireFormatRefusalStopReason(api, rawStopReason)
 
-export const isRefusalAssistantMessage = (message: AssistantMessage): boolean =>
-	isProviderRefusalStopReason(message.api, message.provider, message.rawStopReason)
-
-const refusalFallbackText = (message: AssistantMessage): string => {
+const logRefusalFallback = (message: AssistantMessage): void => {
 	const detail = message.errorMessage?.trim()
 	if (detail !== undefined && detail.length > 0 && detail !== DEFAULT_REFUSAL_TEXT) {
 		console.warn("pi refusal fallback", {
@@ -44,29 +37,15 @@ const refusalFallbackText = (message: AssistantMessage): string => {
 			rawStopReason: message.rawStopReason,
 		})
 	}
+}
+
+const refusalFallbackText = (message: AssistantMessage): string => {
+	logRefusalFallback(message)
 	return DEFAULT_REFUSAL_TEXT
 }
 
-const preservesExplicitRefusalContent = (message: AssistantMessage): boolean =>
-	message.api === "openai-responses" &&
-	message.provider === "openai" &&
-	message.rawStopReason === "refusal"
-
-export const normalizeRefusalAssistantMessage = (message: AssistantMessage): AssistantMessage => {
-	const explicitText = preservesExplicitRefusalContent(message)
-		? message.content.filter((block) => block.type === "text" && block.text.length > 0)
-		: []
-	const content =
-		explicitText.length > 0
-			? explicitText
-			: [{ type: "text" as const, text: refusalFallbackText(message) }]
-	const { errorMessage: _cleared, ...rest } = message
-	return {
-		...rest,
-		content,
-		stopReason: "stop",
-	}
-}
+export const normalizeRefusalAssistantMessage = (message: AssistantMessage): AssistantMessage =>
+	normalizeWireRefusalAssistantMessage(message, logRefusalFallback)
 
 export const createCheckfuRegistry = () => {
 	const registry = createRegistry()

@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
-import { resolveCatalogModel } from "./PiCatalog.ts"
+import { resolveCatalogModel, supportedProvidersDescription } from "./PiCatalog.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -141,7 +141,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						return yield* Effect.fail<TurnFailed>({
 							_tag: "TurnFailed",
 							error_type: "unknown_model_error",
-							message: `Unsupported model "${version.model.id}". Only OpenAI and Anthropic models are supported.`,
+							message: `Unsupported model "${version.model.id}". Supported providers: ${supportedProvidersDescription()}.`,
 							terminal: true,
 						})
 					}
@@ -160,7 +160,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						operationId,
 						turn: args.turn,
 						provider: resolved.provider,
-						modelId: resolved.model.id,
+						modelId: resolved.modelId,
 						system: version.system,
 						text: userText,
 						...(args.last_reply_turn === undefined

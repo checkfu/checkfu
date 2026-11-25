@@ -1,6 +1,7 @@
 import * as v8 from "node:v8"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
+import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
 import { Agent, AgentStateSnapshot } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
@@ -1336,6 +1337,15 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const unsupported = yield* update(agent.id, { version: 8, model: "not-a-model" })
 					expect(unsupported.status).toBe(400)
 					expect((yield* errorOf(unsupported)).message).toBe('Unsupported model "not-a-model".')
+
+					const oversizedModel = yield* update(agent.id, {
+						version: 8,
+						model: `openai/${"a".repeat(MAX_MODEL_ID_LENGTH)}`,
+					})
+					expect(oversizedModel.status).toBe(400)
+					expect((yield* errorOf(oversizedModel)).message).toBe(
+						`Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`,
+					)
 
 					const missing = yield* update("agent_never_created", { version: 1, name: "Missing" })
 					expect(missing.status).toBe(404)
@@ -2772,12 +2782,20 @@ describe("Agent and environment field length limits", () => {
 						const v1Id = AgentVersionId.make("aver_do_size_emoji_1")
 						const v2Id = AgentVersionId.make("aver_do_size_emoji_2")
 
+						const maxLengthModelId = (char: string) => {
+							const prefix = "openai/"
+							const remainingUnits = MAX_MODEL_ID_LENGTH - prefix.length
+							const repeatCount = Math.floor(remainingUnits / char.length)
+							const pad = "a".repeat(remainingUnits - repeatCount * char.length)
+							return `${prefix}${pad}${char.repeat(repeatCount)}`
+						}
+
 						const createReceipt = yield* createAgent.send(
 							new CreateAgent({
 								agent_id: agentId,
 								version_id: v1Id,
 								name: "😀".repeat(MAX_AGENT_NAME_LENGTH),
-								model: { id: "anthropic/claude-sonnet-4-5" },
+								model: { id: maxLengthModelId("😀") },
 								system: "😀".repeat(MAX_AGENT_SYSTEM_LENGTH),
 								description: "😀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
 							}),
@@ -2804,7 +2822,7 @@ describe("Agent and environment field length limits", () => {
 								next_version_id: v2Id,
 								changes: {
 									name: "🚀".repeat(MAX_AGENT_NAME_LENGTH),
-									model: { id: "anthropic/claude-sonnet-4-5" },
+									model: { id: maxLengthModelId("🚀") },
 									system: "🚀".repeat(MAX_AGENT_SYSTEM_LENGTH),
 									description: "🚀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
 								},
@@ -2829,7 +2847,7 @@ describe("Agent and environment field length limits", () => {
 									agent_id: id,
 									version_id: versionId,
 									name: char.repeat(MAX_AGENT_NAME_LENGTH),
-									model: { id: "anthropic/claude-sonnet-4-5" },
+									model: { id: maxLengthModelId(char) },
 									system: char.repeat(MAX_AGENT_SYSTEM_LENGTH),
 									description: char.repeat(MAX_AGENT_DESCRIPTION_LENGTH),
 								}),

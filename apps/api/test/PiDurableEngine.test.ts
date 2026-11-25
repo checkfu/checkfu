@@ -217,15 +217,19 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 	})
 
 	it("offers no model whose context window is too small for Pi's compaction defaults", () => {
-		const models = createPiModels({ openai: null, anthropic: null }).getModels()
+		const registry = createPiModels({ openai: null, anthropic: null })
+		const models = registry.getModels()
 		const small = models.filter(
 			(model) => model.contextWindow < PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
 		)
-		expect(small.map((model) => `${model.provider}/${model.id}`)).toContain("openai/gpt-4")
-		for (const model of small) {
-			expect(resolveCatalogModel(`${model.provider}/${model.id}`)).toBeNull()
+		expect(small).toEqual([])
+		expect(models.map((model) => `${model.provider}/${model.id}`)).not.toContain("openai/gpt-4")
+		expect(registry.getModel("openai", "gpt-4")).toBeUndefined()
+		for (const model of models) {
+			expect(resolveCatalogModel(`${model.provider}/${model.id}`)).not.toBeNull()
 		}
 		expect(resolveCatalogModel("gpt-4")).toBeNull()
+		expect(resolveCatalogModel("openai/gpt-4")).toBeNull()
 		expect(resolveCatalogModel("gpt-4o-mini")).not.toBeNull()
 		expect("modelOverrides" in PI_HARNESS_SETTINGS.compaction).toBe(false)
 	})
@@ -717,17 +721,23 @@ describe("turn engine", () => {
 		const redirectorPort = (redirectorServer.address() as { port: number }).port
 
 		try {
-			const models = createPiModels({
-				openai: Redacted.make("sk-openai-test"),
-				anthropic: Redacted.make("sk-ant-test"),
-			})
+			const models = createPiModels(
+				{
+					openai: Redacted.make("sk-openai-test"),
+					anthropic: Redacted.make("sk-ant-test"),
+				},
+				{
+					openai: `http://127.0.0.1:${redirectorPort}/v1`,
+					anthropic: `http://127.0.0.1:${redirectorPort}`,
+				},
+			)
 
 			const openaiBase = models.getModel("openai", "gpt-4o-mini")
 			if (openaiBase === undefined) {
 				throw new Error("expected gpt-4o-mini")
 			}
 			const openaiStream = models.streamSimple(
-				{ ...openaiBase, baseUrl: `http://127.0.0.1:${redirectorPort}/v1` },
+				openaiBase,
 				{ messages: [{ role: "user", content: "secret transcript", timestamp: 0 }] },
 				{ apiKey: "sk-openai-test", maxRetries: 0 },
 			)
@@ -742,7 +752,7 @@ describe("turn engine", () => {
 				throw new Error("expected claude-sonnet-4-5")
 			}
 			const anthropicStream = models.streamSimple(
-				{ ...anthropicBase, baseUrl: `http://127.0.0.1:${redirectorPort}` },
+				anthropicBase,
 				{ messages: [{ role: "user", content: "secret transcript", timestamp: 0 }] },
 				{ apiKey: "sk-ant-test", maxRetries: 0 },
 			)
@@ -751,6 +761,30 @@ describe("turn engine", () => {
 			expect(redirectorHits).toBeGreaterThan(hitsBeforeAnthropic)
 			expect(targetHits).toBe(0)
 
+			const hitsBeforePinnedCheck = redirectorHits
+			const prodModels = createPiModels({
+				openai: Redacted.make("sk-openai-prod"),
+				anthropic: Redacted.make("sk-ant-prod"),
+			})
+			const rejectedOpenAI = await prodModels
+				.streamSimple(
+					openaiBase,
+					{ messages: [{ role: "user", content: "secret transcript", timestamp: 0 }] },
+					{ maxRetries: 0 },
+				)
+				.result()
+			expect(rejectedOpenAI.stopReason).toBe("error")
+			expect(rejectedOpenAI.errorMessage).toMatch(/disallowed origin/i)
+			const rejectedAnthropic = await prodModels
+				.streamSimple(
+					anthropicBase,
+					{ messages: [{ role: "user", content: "secret transcript", timestamp: 0 }] },
+					{ maxRetries: 0 },
+				)
+				.result()
+			expect(rejectedAnthropic.stopReason).toBe("error")
+			expect(rejectedAnthropic.errorMessage).toMatch(/disallowed origin/i)
+			expect(redirectorHits).toBe(hitsBeforePinnedCheck)
 			const seenInits: Array<RequestInit | undefined> = []
 			const mockRedirectFetch = (async (
 				_input: Parameters<typeof fetch>[0],

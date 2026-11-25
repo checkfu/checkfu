@@ -24,7 +24,7 @@ import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
-import { PROVIDER_API_KEY_ENV } from "../../src/Pi/PiCatalog.ts"
+import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
 import {
 	AbortGrace,
 	abortPiDurableTurn,
@@ -203,7 +203,7 @@ export const makePiDurableTestLayer = (
 			makeScriptedPiModels(handler),
 			undefined,
 			undefined,
-			(provider) => (envOverrides[PROVIDER_API_KEY_ENV[provider]] ?? "").length > 0,
+			(provider) => checkCatalogProviderCredentials(provider, { env: envOverrides }).ok,
 			{
 				...(storage === undefined ? {} : { storage }),
 				reset: Effect.andThen(
