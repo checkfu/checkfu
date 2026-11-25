@@ -10,8 +10,8 @@ import {
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { DeleteArtifact } from "@checkfu/domain/Artifact/DeleteArtifact.command"
 import { PublishArtifact } from "@checkfu/domain/Artifact/PublishArtifact.command"
+import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
 import { UnpublishArtifact } from "@checkfu/domain/Artifact/UnpublishArtifact.command"
-import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -29,8 +29,8 @@ import type {
 	ArtifactManifest,
 	BuiltArtifactVersion,
 } from "../Artifacts/ArtifactFiles.ts"
-import { ArtifactStore, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
-import type { ArtifactWriteCheck, StagedWrite } from "../Artifacts/ArtifactStore.ts"
+import { ArtifactStore } from "../Artifacts/ArtifactStore.ts"
+import type { ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import {
 	DEFAULT_LINK_TTL_SECONDS,
 	newPublicationToken,
@@ -72,7 +72,9 @@ const encodeContent = (bytes: Uint8Array) => {
 	}
 }
 
-const stored = <A, R>(effect: Effect.Effect<A, ArtifactStoreError, R>) =>
+const stored = <A, E extends { readonly _tag: string }, R>(
+	effect: Effect.Effect<A, E | ArtifactStoreError, R>,
+) =>
 	effect.pipe(
 		Effect.catchTag("ArtifactStoreError", (error) =>
 			Effect.andThen(
@@ -125,16 +127,7 @@ const versionResource = (id: ArtifactId, found: LocatedVersion, manifest: Artifa
 	created_at: found.created_at,
 })
 
-const quietly = <E, R>(effect: Effect.Effect<void, E, R>) =>
-	effect.pipe(
-		Effect.catchCause((cause) =>
-			Cause.hasInterruptsOnly(cause)
-				? Effect.interrupt
-				: Effect.logError("Artifact write cleanup failed", cause),
-		),
-	)
-
-const interrupted = reject(503, "The write was interrupted; retry the request.")
+const interrupted = reject(503, "The create took too long; retry the request.")
 
 export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (handlers) =>
 	Effect.gen(function* () {
@@ -159,34 +152,13 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				),
 			)
 
-		const purgeIfDeleted = (id: ArtifactId) =>
-			quietly(
-				Effect.gen(function* () {
-					const state = yield* artifacts.get(id)
-					if (state.status === "deleted") {
-						yield* store.purge(id)
-					}
+		const stage = (id: ArtifactId, built: BuiltArtifactVersion, reservation: number | null) =>
+			stored(store.stage(id, built, reservation)).pipe(
+				Effect.catchTags({
+					ArtifactPurged: () => reject(404, `Artifact ${id} not found.`),
+					ArtifactReservationStale: () => interrupted,
 				}),
 			)
-
-		const commitWrite = (id: ArtifactId, write: StagedWrite, check: ArtifactWriteCheck) =>
-			Effect.gen(function* () {
-				const deleted = yield* write.markCommitted(check).pipe(
-					Effect.tapError(() => quietly(write.abandon)),
-					Effect.as(false),
-					Effect.catchTag("ArtifactWriteRefused", (refusal) =>
-						Effect.flatMap(artifacts.get(id), (state) =>
-							state.status === "deleted"
-								? Effect.succeed(true)
-								: Effect.fail(new ArtifactStoreError({ cause: refusal })),
-						),
-					),
-					stored,
-				)
-				if (deleted) {
-					return yield* reject(404, `Artifact ${id} not found.`)
-				}
-			})
 
 		const missingBytes = (id: ArtifactId, detail: Record<string, string>) =>
 			Effect.gen(function* () {
@@ -313,12 +285,15 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					} else {
 						id = ArtifactId.make(yield* randomId(random, "art"))
 					}
-					let write: StagedWrite | undefined
-					const before = yield* artifacts.get(id)
-					if (before.status === "") {
-						write = yield* stored(store.stage(id, built))
-						yield* commitWrite(id, write, { kind: "create", manifest: built.manifest_hash })
-						sendOptions ??= { commandId: `create-artifact:${write.id}` }
+					let reservation = 0
+					if ((yield* artifacts.get(id)).status === "") {
+						reservation = yield* artifacts.send(new ReserveArtifact({ artifact_id: id })).pipe(
+							Effect.map((reserved) => reserved.reply.reservation),
+							Effect.catchTag("ArtifactAlreadyExists", () => Effect.succeed(0)),
+						)
+						if (reservation !== 0) {
+							yield* stage(id, built, reservation)
+						}
 					}
 					const receipt = yield* artifacts
 						.send(
@@ -328,27 +303,21 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 								manifest: built.manifest_hash,
 								file_count: built.file_count,
 								total_bytes: built.total_bytes,
-								fence: before.fence,
+								reservation,
 							}),
-							sendOptions,
+							sendOptions ?? { commandId: `create-artifact:${id}` },
 						)
 						.pipe(
-							Effect.tapError(() => (write === undefined ? Effect.void : quietly(write.abandon))),
-							Effect.onError(() => purgeIfDeleted(id)),
 							Effect.catchTags({
-								ArtifactWriteFenced: () => interrupted,
+								ArtifactReservationLapsed: () => interrupted,
 								ArtifactAlreadyExists: () => reject(409, IDEMPOTENCY_KEY_REUSED),
 							}),
 						)
-					if (write !== undefined) {
-						yield* quietly(write.confirm)
-					}
 					const settled = yield* artifacts.get(id).pipe(orPending(id, "artifact"))
 					if (isPending(settled)) {
 						return settled
 					}
 					if (settled.status === "deleted") {
-						yield* purgeIfDeleted(id)
 						return yield* reject(404, `Artifact ${id} was deleted after creation committed.`)
 					}
 					return artifactResource(
@@ -400,17 +369,16 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					if (state.status === "") {
 						return yield* reject(404, `Artifact ${id} not found.`)
 					}
-					yield* stored(store.markDeleting(id))
 					if (state.status !== "deleted") {
-						yield* artifacts.send(new DeleteArtifact({ artifact_id: id, fence: state.fence })).pipe(
-							Effect.catchTags({
-								ArtifactNotFound: (refused) =>
+						yield* artifacts
+							.send(new DeleteArtifact({ artifact_id: id }))
+							.pipe(
+								Effect.catchTag("ArtifactNotFound", (refused) =>
 									Effect.flatMap(artifacts.get(id), (now) =>
 										now.status === "deleted" ? Effect.void : Effect.fail(refused),
 									),
-								ArtifactWriteFenced: () => interrupted,
-							}),
-						)
+								),
+							)
 					}
 					yield* stored(store.purge(id))
 					return { id, type: "artifact_deleted" as const }
@@ -441,38 +409,22 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						)
 					}
 					const built = yield* build(payload.files)
-					const receipt = yield* Effect.gen(function* () {
-						const write = yield* stored(store.stage(id, built))
-						yield* commitWrite(id, write, {
-							kind: "version",
-							manifest: built.manifest_hash,
+					yield* stage(id, built, null)
+					const receipt = yield* artifacts.send(
+						new AddArtifactVersion({
+							artifact_id: id,
 							expected_version: payload.version,
-						})
-						return yield* artifacts
-							.send(
-								new AddArtifactVersion({
-									artifact_id: id,
-									expected_version: payload.version,
-									manifest: built.manifest_hash,
-									file_count: built.file_count,
-									total_bytes: built.total_bytes,
-									fence: state.fence,
-								}),
-								{
-									commandId: yield* idempotentCommandId(digest, "add-artifact-version", [
-										id,
-										payload.version,
-										built.manifest_hash,
-									]),
-								},
-							)
-							.pipe(
-								Effect.tapError(() => quietly(write.abandon)),
-								Effect.tap(() => quietly(write.confirm)),
-							)
-					}).pipe(
-						Effect.onError(() => purgeIfDeleted(id)),
-						Effect.catchTag("ArtifactWriteFenced", () => interrupted),
+							manifest: built.manifest_hash,
+							file_count: built.file_count,
+							total_bytes: built.total_bytes,
+						}),
+						{
+							commandId: yield* idempotentCommandId(digest, "add-artifact-version", [
+								id,
+								payload.version,
+								built.manifest_hash,
+							]),
+						},
 					)
 					const version = receipt.reply.version
 					const result = yield* loadVersion(id, version, built).pipe(

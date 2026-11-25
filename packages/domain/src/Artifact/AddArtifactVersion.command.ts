@@ -1,7 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactId } from "./Artifact.id.ts"
 import { ArtifactNotFound } from "./ArtifactNotFound.rejection.ts"
-import { ArtifactWriteFenced } from "./ArtifactWriteFenced.rejection.ts"
 import { ManifestHash, NonNegativeInt, PositiveInt } from "./ArtifactTypes.ts"
 
 export class ArtifactVersionAdded extends Domain.Event("artifact.version_added", {
@@ -28,10 +27,9 @@ export class AddArtifactVersion extends Domain.Command("AddArtifactVersion", {
 		manifest: ManifestHash,
 		file_count: PositiveInt,
 		total_bytes: NonNegativeInt,
-		fence: NonNegativeInt,
 	},
 	events: [ArtifactVersionAdded],
-	rejects: [ArtifactWriteFenced, ArtifactNotFound, ArtifactVersionConflict],
+	rejects: [ArtifactNotFound, ArtifactVersionConflict],
 	reply: {
 		version: PositiveInt,
 	},

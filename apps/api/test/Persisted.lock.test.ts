@@ -16,7 +16,6 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { ARTIFACT_LEDGER_SCHEMA } from "../src/Artifacts/ArtifactLedgerSql.ts"
 import { ArtifactLinkClaims, linkKey, signLink } from "../src/Content/ArtifactLink.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import { CHECKFU_PI_DOCS, SettledUsage, SettledUsageState } from "../src/Pi/PiTurnUsage.ts"
@@ -397,28 +396,15 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
-	it.effect("locks the artifact files in R2, the reconciler's records and the owner ledger", () =>
+	it.effect("locks the artifact files in R2 and the marks each owner object keeps", () =>
 		Effect.gen(function* () {
 			const idsOf = (kind: PersistedShape["kind"]) =>
 				persistedShapes
 					.filter((shape) => shape.kind === kind)
 					.map((shape) => shape.id)
 					.toSorted()
-			expect(idsOf("artifact-object")).toEqual([
-				"artifact-object:manifest",
-				"artifact-object:reconcile-cursor",
-				"artifact-object:reconcile-marker",
-			])
-			expect(idsOf("artifact-table")).toEqual(
-				[
-					"artifact_keys",
-					"artifact_orphan_candidates",
-					"artifact_refs",
-					"artifact_refs_by_write",
-					"artifact_writes",
-					"artifact_writes_by_status",
-				].map((name) => `artifact-table:${name}`),
-			)
+			expect(idsOf("artifact-object")).toEqual(["artifact-object:manifest"])
+			expect(idsOf("artifact-marks")).toEqual(["artifact-marks:ArtifactObjects/marks"])
 			const manifest = "artifact-object:manifest"
 			const written = lockWith({
 				[manifest]: [
@@ -438,18 +424,15 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(renamed.length).toBe(1)
 			expect(renamed[0]).toContain(manifest)
 			expect(renamed[0]).toContain("Artifact manifests")
-			const table = "artifact-table:artifact_writes"
-			const created = lockWith({ [table]: [ARTIFACT_LEDGER_SCHEMA.artifact_writes] })
-			expect(yield* lockProblems(created)).toEqual([])
-			const altered = yield* lockProblems(
-				created,
-				replacing(
-					table,
-					Schema.Literal("CREATE TABLE IF NOT EXISTS artifact_writes (write_id TEXT)"),
-				),
+			const marks = "artifact-marks:ArtifactObjects/marks"
+			const kept = lockWith({ [marks]: [{ purged: true, staged: 2, released: 1 }] })
+			expect(yield* lockProblems(kept)).toEqual([])
+			const reshaped = yield* lockProblems(
+				kept,
+				replacing(marks, Schema.Struct({ deleted: Schema.Boolean })),
 			)
-			expect(altered.length).toBe(1)
-			expect(altered[0]).toContain("artifact owner object")
+			expect(reshaped.length).toBe(1)
+			expect(reshaped[0]).toContain("artifact owner object")
 		}),
 	)
 

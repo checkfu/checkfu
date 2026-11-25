@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry"
 import { createRegistry } from "@earendil-works/pi-durable"
 import { describe, expect, it } from "@effect/vitest"
@@ -187,6 +188,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),
@@ -444,6 +446,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		})
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),
@@ -1047,6 +1050,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			})
 			const normalizedLayer = Checkfu.layer(
 				CheckfuHandlersLive.pipe(
+					Layer.provide(ArtifactBytesKept),
 					Layer.provide(ListingStore.memory),
 					Layer.provide(PiDurableHarnessLive),
 				),
@@ -1260,6 +1264,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			})
 			const unnormalizedLayer = Checkfu.layer(
 				CheckfuHandlersLive.pipe(
+					Layer.provide(ArtifactBytesKept),
 					Layer.provide(ListingStore.memory),
 					Layer.provide(PiDurableHarnessLive),
 				),

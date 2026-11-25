@@ -15,14 +15,18 @@ import {
 } from "./ClaimArtifactIdempotencyKey.command.ts"
 import { NonNegativeInt } from "./ArtifactTypes.ts"
 import { ArtifactAlreadyExists, ArtifactCreated, CreateArtifact } from "./CreateArtifact.command.ts"
-import { ArtifactWriteFenced } from "./ArtifactWriteFenced.rejection.ts"
+import { ArtifactReservationLapsed } from "./ArtifactReservationLapsed.rejection.ts"
 import { ArtifactDeleted, DeleteArtifact } from "./DeleteArtifact.command.ts"
-import { ArtifactWritesFenced, FenceArtifactWrites } from "./FenceArtifactWrites.command.ts"
+import {
+	ArtifactReservationExpired,
+	ExpireArtifactReservation,
+} from "./ExpireArtifactReservation.command.ts"
 import {
 	ArtifactPublished,
 	ArtifactVersionNotFound,
 	PublishArtifact,
 } from "./PublishArtifact.command.ts"
+import { ArtifactReserved, ReserveArtifact } from "./ReserveArtifact.command.ts"
 import { ArtifactUnpublished, UnpublishArtifact } from "./UnpublishArtifact.command.ts"
 
 export const ArtifactState = Schema.Struct({
@@ -30,7 +34,8 @@ export const ArtifactState = Schema.Struct({
 	version: NonNegativeInt,
 	name: Schema.String,
 	manifest: Schema.String,
-	fence: NonNegativeInt,
+	reservations: NonNegativeInt,
+	open_reservation: NonNegativeInt,
 	created_at: NonNegativeInt,
 	updated_at: NonNegativeInt,
 	publication_token: Schema.String,
@@ -54,7 +59,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		version: 0,
 		name: "",
 		manifest: "",
-		fence: 0,
+		reservations: 0,
+		open_reservation: 0,
 		created_at: 0,
 		updated_at: 0,
 		publication_token: "",
@@ -62,10 +68,11 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		published_at: 0,
 	},
 	commands: [
+		ReserveArtifact,
+		ExpireArtifactReservation,
 		CreateArtifact,
 		AddArtifactVersion,
 		DeleteArtifact,
-		FenceArtifactWrites,
 		PublishArtifact,
 		UnpublishArtifact,
 		ClaimArtifactIdempotencyKey,
@@ -86,6 +93,10 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				[s.pinned_version === 0, s.published_at === 0].every((ok) => ok),
 			].some((ok) => ok),
 		PinnedVersionWithinHead: (s) => s.pinned_version <= s.version,
+		AReservationIsOpenOnlyBeforeCreation: (s) =>
+			[s.open_reservation === 0, s.status === ""].some((ok) => ok),
+		OnlyTheLatestReservationIsOpen: (s) =>
+			[s.open_reservation === 0, s.open_reservation === s.reservations].some((ok) => ok),
 	},
 	transitions: {
 		CreatedArtifactNeverReturnsToUninitialized: ({ before, after }) =>
@@ -137,18 +148,23 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				),
 			].some((ok) => ok)
 		},
-		FenceNeverDecreasesAndOnlyFencingMovesIt: ({ before, after, command }) =>
+		ReservationsAreNumberedInOrder: ({ before, after, command }) =>
 			[
-				after.fence === before.fence,
-				[command._tag === "FenceArtifactWrites", after.fence === before.fence + 1].every(
+				after.reservations === before.reservations,
+				[command._tag === "ReserveArtifact", after.reservations === before.reservations + 1].every(
 					(ok) => ok,
 				),
 			].some((ok) => ok),
-		DeleteLandsOnlyAtTheCurrentFence: ({ before, after, command }) => {
-			if (command._tag !== "DeleteArtifact") {
+		CreatingTakesTheOpenReservation: ({ before, after, command }) => {
+			if (command._tag !== "CreateArtifact") {
 				return true
 			}
-			return [after.status === before.status, command.fence === before.fence].some((ok) => ok)
+			return [
+				after.status === before.status,
+				[before.open_reservation !== 0, before.open_reservation === command.reservation].every(
+					(ok) => ok,
+				),
+			].some((ok) => ok)
 		},
 		ATokenIsOnlyOpenedOrDropped: ({ before, after }) =>
 			[
@@ -195,7 +211,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					after.version === before.version,
 					after.name === before.name,
 					after.manifest === before.manifest,
-					after.fence === before.fence,
+					after.reservations === before.reservations,
+					after.open_reservation === before.open_reservation,
 					after.created_at === before.created_at,
 					after.updated_at === before.updated_at,
 					after.publication_token === before.publication_token,
@@ -205,12 +222,20 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			].some((ok) => ok),
 	},
 	decide: {
+		ReserveArtifact: (state, _cmd, ctx) =>
+			state.status !== ""
+				? new ArtifactAlreadyExists({ artifact_id: ctx.id })
+				: [new ArtifactReserved({ reservation: state.reservations + 1 })],
+		ExpireArtifactReservation: (state, cmd) =>
+			[state.status === "", state.open_reservation === cmd.reservation].every((ok) => ok)
+				? [new ArtifactReservationExpired({ reservation: cmd.reservation })]
+				: [],
 		CreateArtifact: (state, cmd, ctx) => {
-			if (cmd.fence !== state.fence) {
-				return new ArtifactWriteFenced({ artifact_id: ctx.id })
-			}
 			if (state.status !== "") {
 				return new ArtifactAlreadyExists({ artifact_id: ctx.id })
+			}
+			if (state.open_reservation === 0 || state.open_reservation !== cmd.reservation) {
+				return new ArtifactReservationLapsed({ artifact_id: ctx.id })
 			}
 			return [
 				new ArtifactCreated({
@@ -223,9 +248,6 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			]
 		},
 		AddArtifactVersion: (state, cmd, ctx) => {
-			if (cmd.fence !== state.fence) {
-				return new ArtifactWriteFenced({ artifact_id: ctx.id })
-			}
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
 			}
@@ -245,17 +267,12 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				}),
 			]
 		},
-		DeleteArtifact: (state, cmd, ctx) => {
-			if (cmd.fence !== state.fence) {
-				return new ArtifactWriteFenced({ artifact_id: ctx.id })
-			}
+		DeleteArtifact: (state, _cmd, ctx) => {
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
 			}
 			return [new ArtifactDeleted()]
 		},
-		FenceArtifactWrites: (state) =>
-			state.status === "deleted" ? [] : [new ArtifactWritesFenced({ fence: state.fence + 1 })],
 		PublishArtifact: (state, cmd, ctx) => {
 			if (state.status !== "active") {
 				return new ArtifactNotFound({ artifact_id: ctx.id })
@@ -287,16 +304,23 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				: [new ArtifactIdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })],
 	},
 	reply: {
+		ReserveArtifact: (state) => ({ reservation: state.reservations }),
 		CreateArtifact: (state) => ({ version: state.version }),
 		AddArtifactVersion: (state) => ({ version: state.version }),
-		FenceArtifactWrites: (state) => ({ fence: state.fence }),
 	},
 	evolve: {
+		"artifact.reserved": (state, e) =>
+			state.status === ""
+				? { ...state, reservations: e.reservation, open_reservation: e.reservation }
+				: state,
+		"artifact.reservation_expired": (state, e) =>
+			state.open_reservation === e.reservation ? { ...state, open_reservation: 0 } : state,
 		"artifact.created": (state, e, envelope) =>
 			state.status === ""
 				? {
 						...state,
 						status: "active",
+						open_reservation: 0,
 						version: e.version,
 						name: e.name,
 						manifest: e.manifest,
@@ -320,7 +344,6 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 						status: "deleted",
 					}
 				: state,
-		"artifact.writes_fenced": (state, e) => ({ ...state, fence: e.fence }),
 		"artifact.published": (state, e, envelope) =>
 			state.status === "active"
 				? {

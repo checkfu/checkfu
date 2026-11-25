@@ -290,7 +290,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifact",
 		title: "Create an artifact",
 		description:
-			'Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64".',
+			'Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64".',
 		method: "POST",
 		path: "/v1/artifacts",
 		readOnly: false,
@@ -373,7 +373,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		path: "/v1/artifacts/{artifact_id}/versions/{version}/links",
 		readOnly: false,
 		idempotent: false,
-		destructive: true,
+		destructive: false,
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -421,12 +421,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "artifacts_createArtifactVersion",
 		title: "Create an artifact version",
 		description:
-			'Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64".',
+			'Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64".',
 		method: "POST",
 		path: "/v1/artifacts/{artifact_id}/versions",
 		readOnly: false,
 		idempotent: false,
-		destructive: true,
+		destructive: false,
 		inputSchema: {
 			type: "object",
 			properties: {

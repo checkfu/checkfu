@@ -16465,7 +16465,7 @@
 						}
 					}
 				},
-				"description": "Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with \"encoding\": \"base64\".",
+				"description": "Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with \"encoding\": \"base64\".",
 				"summary": "Create an artifact",
 				"requestBody": {
 					"content": {
@@ -18464,7 +18464,7 @@
 						}
 					}
 				},
-				"description": "Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with \"encoding\": \"base64\".",
+				"description": "Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with \"encoding\": \"base64\".",
 				"summary": "Create an artifact version",
 				"requestBody": {
 					"content": {
@@ -18529,7 +18529,8 @@
 					"endpoint": "createVersion"
 				},
 				"x-checkfu-mcp": {
-					"name": "artifacts_createArtifactVersion"
+					"name": "artifacts_createArtifactVersion",
+					"destructive": false
 				},
 				"x-checkfu-cli": {
 					"groupDescription": "Create and read artifact versions",
@@ -19909,7 +19910,8 @@
 					"endpoint": "createLink"
 				},
 				"x-checkfu-mcp": {
-					"name": "artifacts_createArtifactLink"
+					"name": "artifacts_createArtifactLink",
+					"destructive": false
 				},
 				"x-checkfu-cli": {
 					"examples": [

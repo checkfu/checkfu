@@ -41,11 +41,6 @@ export const publicationLabel = (
 		? undefined
 		: `Published · ${publication.version === null ? "latest" : `v${publication.version}`}`
 
-export const linkForVersion = <Link extends { readonly version: number }>(
-	link: Link | null,
-	version: number,
-): Link | null => (link !== null && link.version === version ? link : null)
-
 export const byteSize = (bytes: number): string => {
 	let value = bytes
 	let unit = 0

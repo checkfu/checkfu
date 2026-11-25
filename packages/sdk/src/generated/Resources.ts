@@ -515,7 +515,7 @@ export class EffectArtifactsVersionsResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	/** Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
@@ -698,7 +698,7 @@ export class EffectArtifactsResource {
 		this.versions = new EffectArtifactsVersionsResource(runtime)
 	}
 
-	/** Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	/** Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
 	create(
 		params: EndpointBody<"artifacts", "create">,
 		options: WithResponseRequestOptions,
@@ -2180,7 +2180,7 @@ export class ArtifactsVersionsResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	/** Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
@@ -2248,7 +2248,7 @@ export class ArtifactsResource {
 		this.versions = new ArtifactsVersionsResource(runtime)
 	}
 
-	/** Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	/** Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
 	create(
 		params: EndpointBody<"artifacts", "create">,
 		options?: PromiseRequestOptions,

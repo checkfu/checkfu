@@ -11,8 +11,8 @@ import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { customDomains } from "./CustomDomain.ts"
+import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
-import { ARTIFACT_RECONCILE_CRON, reconcileArtifactWrites } from "./Artifacts/ArtifactReconcile.ts"
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "./Artifacts/ResolvePublication.ts"
 import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
@@ -51,20 +51,27 @@ const PiHarnessExecutorLive = Layer.effect(
 	}),
 )
 
+const ArtifactStoreLive = ArtifactStoreR2.pipe(
+	Layer.provide(ArtifactObjectsLive),
+	Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
+)
+
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(PiDurableHarnessLive),
+		Layer.provide(ArtifactBytesLive),
 		Layer.provide(D1ListingStore),
 		Layer.provide(Cloudflare.D1.QueryDatabaseBinding),
 	),
-).pipe(Layer.provide(PiHarnessExecutorLive), Layer.provide(PlacedDurableObjects))
+).pipe(
+	Layer.provide(PiHarnessExecutorLive),
+	Layer.provide(PlacedDurableObjects),
+	Layer.provide(ArtifactStoreLive),
+)
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
-	ArtifactStoreR2.pipe(
-		Layer.provide(ArtifactObjectsLive),
-		Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
-	),
+	ArtifactStoreLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
@@ -95,14 +102,11 @@ export default ApiWorker.make(
 			return yield* Effect.die(new Error("ApiWorker requires an owning instance Scope."))
 		}
 		const services = yield* Layer.buildWithScope(ApiWorkerLive, scope)
-		yield* Cloudflare.Workers.cron(ARTIFACT_RECONCILE_CRON, () =>
-			reconcileArtifactWrites.pipe(Effect.provide(services)),
-		)
 		const handler = yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
 			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),
 		})
-	}).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),
+	}),
 )

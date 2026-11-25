@@ -7,9 +7,11 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 	action: (...args: Args) => Promise<Result>,
 	{
 		invalidates,
+		refreshes,
 		then,
 	}: {
 		readonly invalidates?: ReadonlyArray<QueryKey>
+		readonly refreshes?: ReadonlyArray<QueryKey>
 		readonly then?: (result: Result, ...args: Args) => void
 	} = {},
 ) {
@@ -17,9 +19,12 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 	const mutation = useMutation({
 		mutationFn: (args: Args) => action(...args),
 		onSettled: () =>
-			Promise.all(
-				(invalidates ?? []).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-			),
+			Promise.all([
+				...(invalidates ?? []).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+				...(refreshes ?? []).map((queryKey) =>
+					queryClient.invalidateQueries({ queryKey, refetchType: "all" }),
+				),
+			]),
 	})
 	return {
 		run: (...args: Args): void => {

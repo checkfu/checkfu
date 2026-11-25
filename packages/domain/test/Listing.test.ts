@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -34,7 +35,10 @@ const HarnessStubLayer = Harness.toLayer(
 )
 
 const CheckfuInMemory = Checkfu.layer(
-	CheckfuHandlersLive.pipe(Layer.provide([HarnessStubLayer, ListingStore.memory])),
+	CheckfuHandlersLive.pipe(
+		Layer.provide(ArtifactBytesKept),
+		Layer.provide([HarnessStubLayer, ListingStore.memory]),
+	),
 ).pipe(Layer.provide(Domain.InMemory))
 
 describe("ListResources", () => {
@@ -106,18 +110,19 @@ describe("ListResources", () => {
 				session_id: SessionId.make("sess_list_3"),
 			})
 			for (const n of [1, 2, 3]) {
+				const artifact_id = ArtifactId.make(`art_list_${n}`)
+				yield* domain.ReserveArtifact({ artifact_id })
 				yield* domain.CreateArtifact({
-					artifact_id: ArtifactId.make(`art_list_${n}`),
+					artifact_id,
 					name: `Artifact ${n}`,
 					manifest: "m".repeat(64),
 					file_count: 1,
 					total_bytes: 1,
-					fence: 0,
+					reservation: 1,
 				})
 			}
 			const deletedArtifact = yield* domain.DeleteArtifact({
 				artifact_id: ArtifactId.make("art_list_2"),
-				fence: 0,
 			})
 			const atLeast = [
 				archivedAgent,

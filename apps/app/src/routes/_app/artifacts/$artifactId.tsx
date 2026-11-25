@@ -11,9 +11,7 @@ export const Route = createFileRoute("/_app/artifacts/$artifactId")({
 			context.queryClient.ensureQueryData(artifactQuery(params.artifactId)),
 			deps.version === undefined
 				? undefined
-				: context.queryClient.ensureQueryData(
-						artifactVersionQuery(params.artifactId, deps.version),
-					),
+				: context.queryClient.prefetchQuery(artifactVersionQuery(params.artifactId, deps.version)),
 		]),
 	component: ArtifactPage,
 })

@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import { Agent } from "../src/Agent/Agent.aggregate.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
@@ -62,7 +63,10 @@ import {
 } from "../src/Session/AdmitSession.command.ts"
 
 const story = Story.make(Checkfu, {
-	layer: CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory)),
+	layer: CheckfuHandlersLive.pipe(
+		Layer.provide(ArtifactBytesKept),
+		Layer.provide(ListingStore.memory),
+	),
 	stub: [Harness],
 })
 
@@ -88,7 +92,10 @@ describe("Checkfu unified hosted model stories", () => {
 		Effect.scoped(
 			Layer.build(
 				Checkfu.layer(
-					CheckfuHandlersLive.pipe(Layer.provide([HarnessStubLayer, ListingStore.memory])),
+					CheckfuHandlersLive.pipe(
+						Layer.provide(ArtifactBytesKept),
+						Layer.provide([HarnessStubLayer, ListingStore.memory]),
+					),
 				),
 			),
 		).pipe(Effect.provide(Domain.InMemory)),
