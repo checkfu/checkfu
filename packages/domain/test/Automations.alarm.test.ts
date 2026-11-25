@@ -117,6 +117,7 @@ describe("Automation alarms", () => {
 				new UpdateAutomation({
 					automation_id: id,
 					expected_revision: 1,
+					changed: true,
 					reschedule: true,
 					agent_changed: false,
 					environment_changed: false,

@@ -567,6 +567,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						new UpdateAutomation({
 							automation_id: automationRef.id,
 							expected_revision: 1,
+							changed: true,
 							reschedule: true,
 							agent_changed: true,
 							environment_changed: false,

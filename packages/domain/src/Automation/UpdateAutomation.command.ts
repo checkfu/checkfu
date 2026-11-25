@@ -49,8 +49,8 @@ export class AutomationRevisionConflict extends Domain.Rejection(
 ) {}
 
 /**
- * Replaces the automation's configuration with one built on `expected_revision`. The three flags
- * say what differs from that revision's configuration; since the command is refused unless that
+ * Replaces the automation's configuration with one built on `expected_revision`. The flags say
+ * what differs from that revision's configuration (`changed`: anything at all); since the command is refused unless that
  * revision is still current, they hold for the configuration it replaces. Only the API handler sends
  * it, and the domain Api does not serve it.
  */
@@ -61,6 +61,7 @@ export class UpdateAutomation extends Domain.Command("UpdateAutomation", {
 		...AutomationConfiguration,
 		agent_id: BoundedAgentId,
 		environment_id: BoundedEnvironmentId,
+		changed: Schema.Boolean,
 		reschedule: Schema.Boolean,
 		agent_changed: Schema.Boolean,
 		environment_changed: Schema.Boolean,

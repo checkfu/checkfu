@@ -141,20 +141,23 @@ const admit = (overrides: Partial<typeof config> = {}, id = automation.id) =>
 		environment_id: BoundedEnvironmentId.make(overrides.environment_id ?? config.environment_id),
 	})
 
-const update = (changes: Partial<typeof config>, expected_revision = 1) => {
-	const next = { ...config, ...changes }
+const update = (changes: Partial<typeof config>, expected_revision = 1, base = config) => {
+	const next = { ...base, ...changes }
 	return new UpdateAutomation({
 		automation_id: automation.id,
 		expected_revision,
 		...next,
 		agent_id: BoundedAgentId.make(next.agent_id),
 		environment_id: BoundedEnvironmentId.make(next.environment_id),
-		reschedule: !sameSchedule(next.schedule, config.schedule),
+		changed: Object.keys(changes).some(
+			(key) => next[key as keyof typeof next] !== base[key as keyof typeof base],
+		),
+		reschedule: !sameSchedule(next.schedule, base.schedule),
 		agent_changed: [
-			next.agent_id === config.agent_id,
-			next.agent_version === config.agent_version,
+			next.agent_id === base.agent_id,
+			next.agent_version === base.agent_version,
 		].includes(false),
-		environment_changed: next.environment_id !== config.environment_id,
+		environment_changed: next.environment_id !== base.environment_id,
 	})
 }
 
@@ -422,6 +425,33 @@ describe("Checkfu automations", () => {
 				}),
 			),
 		),
+	)
+
+	it.effect(
+		"records nothing for an unchanged configuration, but still refuses a stale revision or an archived automation",
+		() =>
+			story(
+				...created(),
+				Story.when(update({ name: config.name })),
+				Story.then(automation),
+				Story.when(update({ name: "Renamed" })),
+				Story.then(automation, updated({ name: "Renamed" }, { activation: 0, rescheduled: false })),
+				Story.when(update({ name: "Renamed" }, 2, { ...config, name: "Renamed" })),
+				Story.then(automation),
+				Story.when(update({ name: config.name }, 1)),
+				Story.rejected(
+					new AutomationRevisionConflict({
+						automation_id: automation.id,
+						expected_revision: 1,
+						current_revision: 2,
+					}),
+				),
+				Story.when(new ArchiveAutomation({ automation_id: automation.id })),
+				Story.then(automation, new AutomationArchived()),
+				Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
+				Story.when(update({ name: "Renamed" }, 2)),
+				Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
+			),
 	)
 
 	it.effect("follows the agent's latest version unless a version is pinned", () => {

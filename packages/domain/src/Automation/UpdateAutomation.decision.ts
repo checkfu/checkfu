@@ -35,6 +35,9 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 				current_revision: current.revision,
 			})
 		}
+		if (!cmd.changed) {
+			return []
+		}
 		if (!isUsableSchedule(cmd.schedule.expression, cmd.schedule.timezone)) {
 			return new AutomationScheduleUnusable(cmd.schedule)
 		}

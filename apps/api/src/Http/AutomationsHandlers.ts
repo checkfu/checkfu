@@ -268,28 +268,26 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						const agent_changed =
 							next.agent_id !== current.agent_id || next.agent_version !== current.agent_version
 						const environment_changed = next.environment_id !== current.environment_id
-						const unchanged = [
-							!reschedule,
-							!agent_changed,
-							!environment_changed,
-							next.name === current.name,
-							next.description === current.description,
-							next.text === current.text,
-						].every(Boolean)
-						if (unchanged) {
-							return { unchanged: current }
-						}
+						const changed = [
+							reschedule,
+							agent_changed,
+							environment_changed,
+							next.name !== current.name,
+							next.description !== current.description,
+							next.text !== current.text,
+						].includes(true)
 						const receipt = yield* updates.send(
 							new UpdateAutomation({
 								automation_id: id,
 								expected_revision: current.revision,
 								...next,
+								changed,
 								reschedule,
 								agent_changed,
 								environment_changed,
 							}),
 						)
-						return { committed: commitForStream(receipt.commits, `Automation/${id}`) }
+						return commitForStream(receipt.commits, `Automation/${id}`)
 					})
 					const attempt = (
 						retries: number,
@@ -301,13 +299,10 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 										.waitFor(ref, { revision: { gte: conflict.current_revision } }, { timeout })
 										.pipe(Effect.andThen(attempt(retries - 1))),
 						)
-					const outcome = yield* attempt(UPDATE_RETRIES)
-					if ("unchanged" in outcome) {
-						return yield* present(outcome.unchanged)
-					}
-					return outcome.committed === undefined
+					const committed = yield* attempt(UPDATE_RETRIES)
+					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }
-						: yield* after(id, outcome.committed)
+						: yield* after(id, committed)
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>

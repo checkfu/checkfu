@@ -9,6 +9,7 @@ import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { AutomationReadWaitTimeout } from "../src/Http/AutomationsHandlers.ts"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
 import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import * as Domain from "@alchemy.run/domain"
@@ -758,6 +759,54 @@ describe("Automations API", () => {
 				expect([renamed.status, rescheduled.status]).toEqual([200, 200])
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
 				expect(fetched.body).toMatchObject({ name: "Renamed", schedule: afternoon })
+			}),
+		))
+
+	it("applies an update the view has not caught up with, and refuses an unchanged update to an archived automation", () =>
+		run(() =>
+			Effect.gen(function* () {
+				const views = yield* AutomationView
+				let stale: AutomationSnapshot | undefined
+				const lagging = {
+					...views,
+					get: (
+						ref: Parameters<typeof views.get>[0],
+						options?: Parameters<typeof views.get>[1],
+					) => {
+						const once = stale
+						stale = undefined
+						return once === undefined ? views.get(ref, options) : Effect.succeedSome(once)
+					},
+				} as unknown as typeof views
+				const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+					Effect.provideService(AutomationView, lagging),
+				)
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "A",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const ref = Automation.ref(AutomationId.make(id))
+				const before = Option.getOrNull(yield* Effect.orDie(views.get(ref)))
+				yield* call(apiFetch, "POST", `/v1/automations/${id}`, { name: "B" })
+
+				stale = before ?? undefined
+				const back = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "A",
+				})
+				expect([back.status, back.body.name]).toEqual([200, "A"])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body.name).toBe("A")
+
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/archive`)
+				const archived = yield* call<ErrorBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "A",
+				})
+				expect([archived.status, archived.body.error.type]).toEqual([409, "conflict_error"])
 			}),
 		))
 
