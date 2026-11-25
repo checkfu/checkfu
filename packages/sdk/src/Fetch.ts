@@ -118,11 +118,26 @@ const bindingOf = (operationId: string): Binding => {
 	return binding
 }
 
+const undeclaredIn = <Value>(
+	supplied: Readonly<Record<string, Value>> | undefined,
+	declared: ReadonlyArray<string>,
+): ReadonlyArray<string> => Object.keys(supplied ?? {}).filter((name) => !declared.includes(name))
+
 const urlOf = (binding: Binding, input: RawInput): string => {
-	const declared: ReadonlyArray<string> = binding.queryParams
-	const undeclared = Object.keys(input.query ?? {}).filter((name) => !declared.includes(name))
-	if (undeclared.length > 0) {
-		throw new Error(`${binding.operationId} takes no query parameter ${undeclared.join(", ")}.`)
+	const extraPath = undeclaredIn(input.path, binding.pathParams)
+	if (extraPath.length > 0) {
+		throw new Error(`${binding.operationId} takes no path parameter ${extraPath.join(", ")}.`)
+	}
+	const extraQuery = undeclaredIn(input.query, binding.queryParams)
+	if (extraQuery.length > 0) {
+		throw new Error(`${binding.operationId} takes no query parameter ${extraQuery.join(", ")}.`)
+	}
+	const requiredQuery: ReadonlyArray<string> = binding.requiredQueryParams
+	const missingQuery = requiredQuery.filter(
+		(name) => input.query?.[name] === undefined || input.query[name] === null,
+	)
+	if (missingQuery.length > 0) {
+		throw new Error(`Missing ${missingQuery.join(", ")} for ${binding.operationId}.`)
 	}
 	const path = binding.pathParams.reduce<string>((url, name) => {
 		const value = input.path?.[name]

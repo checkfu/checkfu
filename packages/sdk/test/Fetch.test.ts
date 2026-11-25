@@ -48,7 +48,7 @@ interface LooseInput {
 	readonly path?: Readonly<Record<string, string>>
 	readonly body?: { readonly name: string }
 	readonly idempotencyKey?: string
-	readonly query?: Readonly<Record<string, string>>
+	readonly query?: Readonly<Record<string, string | null>>
 }
 
 const untyped = (request: ReturnType<typeof createFetchClient>) =>
@@ -88,7 +88,7 @@ describe("the fetch client", () => {
 		const request = untyped(createFetchClient({ fetch }))
 		await expect(request("sessions.retrieve")).rejects.toThrow("Missing session_id")
 		await expect(request("sessions.retrieve", { path: { sesion_id: "sess_1" } })).rejects.toThrow(
-			"Missing session_id",
+			"sessions.retrieve takes no path parameter sesion_id.",
 		)
 		expect(sent).toEqual([])
 	})
@@ -238,6 +238,42 @@ describe("the fetch client", () => {
 		expect(sent).toEqual([])
 	})
 
+	it("refuses a path parameter the operation does not take, so a mutation never widens its scope", async () => {
+		const { sent, fetch } = recording(
+			200,
+			JSON.stringify({ id: "art_1", type: "artifact_deleted" }),
+		)
+		const versioned = { artifact_id: "art_1", version: 2 }
+		await expect(
+			createFetchClient({ fetch })("artifacts.delete", { path: versioned }),
+		).rejects.toThrow("artifacts.delete takes no path parameter version.")
+		expect(sent).toEqual([])
+	})
+
+	it("refuses a missing or null required query parameter in both the client and the URL builder", async () => {
+		expect(
+			SDK_OPERATION_BINDINGS.filter((binding) => binding.requiredQueryParams.length > 0).map(
+				(binding) => [binding.operationId, binding.requiredQueryParams],
+			),
+		).toEqual([["artifacts.versions.file", ["path"]]])
+		const loose = operationUrl as (operationId: string, input: LooseInput) => string
+		const path = { artifact_id: "art_1", version: "1" }
+		expect(() => loose("artifacts.versions.file", { path })).toThrow(
+			"Missing path for artifacts.versions.file.",
+		)
+		const { sent, fetch } = recording(200, "{}")
+		await expect(
+			untyped(createFetchClient({ fetch }))("artifacts.versions.file", {
+				path,
+				query: { path: null },
+			}),
+		).rejects.toThrow("Missing path for artifacts.versions.file.")
+		expect(sent).toEqual([])
+		expect(loose("artifacts.versions.file", { path, query: { path: "index.html" } })).toBe(
+			"/v1/artifacts/art_1/versions/1/file?path=index.html",
+		)
+	})
+
 	it("offers the event stream only as a URL, since its reply is not JSON", () => {
 		expectTypeOf<
 			"sessions.events.stream" extends JsonOperationId ? true : false
@@ -346,9 +382,10 @@ describe("the fetch client", () => {
 	it("fills every placeholder of every generated operation from its listed path parameters", () => {
 		for (const binding of SDK_OPERATION_BINDINGS) {
 			const path = Object.fromEntries(binding.pathParams.map((name) => [name, "x"]))
+			const query = Object.fromEntries(binding.requiredQueryParams.map((name) => [name, "x"]))
 			const url = (operationUrl as (operationId: string, input: LooseInput) => string)(
 				binding.operationId,
-				{ path },
+				{ path, query },
 			)
 			expect([binding.operationId, url.includes("{")]).toEqual([binding.operationId, false])
 		}

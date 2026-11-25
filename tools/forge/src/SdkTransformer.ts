@@ -50,6 +50,7 @@ const generateOperationBindingsFile = (
 		out("readonly path: string")
 		out("readonly pathParams: ReadonlyArray<string>")
 		out("readonly queryParams: ReadonlyArray<string>")
+		out("readonly requiredQueryParams: ReadonlyArray<string>")
 		out("readonly kind: SdkOperationKind")
 		out("readonly retrySafety: SdkRetrySafety")
 		out("readonly supportsIdempotencyKey: boolean")
@@ -74,6 +75,13 @@ const generateOperationBindingsFile = (
 				out("path: ", JSON.stringify(op.path), ",")
 				out("pathParams: ", JSON.stringify(op.pathParams.map((param) => param.wireName)), ",")
 				out("queryParams: ", JSON.stringify(op.queryParams.map((param) => param.wireName)), ",")
+				out(
+					"requiredQueryParams: ",
+					JSON.stringify(
+						op.queryParams.filter((param) => param.required).map((param) => param.wireName),
+					),
+					",",
+				)
 				out("kind: ", JSON.stringify(op.kind), ",")
 				out("retrySafety: ", JSON.stringify(op.retrySafety), ",")
 				out("supportsIdempotencyKey: ", op.supportsIdempotencyKey, ",")
