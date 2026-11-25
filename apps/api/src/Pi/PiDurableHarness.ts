@@ -16,6 +16,8 @@ import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
 import * as Cause from "effect/Cause"
+import { memoryStoresOf, repositoriesOf } from "@checkfu/domain/Session/SessionResource"
+import type { MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -172,20 +174,44 @@ const checkoutLabel = ({ checkout }: RepositoryMount): string =>
 			? `branch ${checkout.name}`
 			: `commit ${checkout.sha}`
 
+const describeStore = (store: MemoryStoreResource): string =>
+	[
+		`- ${store.mount_path} (${store.access === "read_only" ? "read-only" : "read and write"}): ${store.name}.`,
+		store.description,
+		store.instructions ?? "",
+	]
+		.filter((part) => part.length > 0)
+		.join(" ")
+
 export const describeMounts = (
 	system: string | null,
 	repositories: ReadonlyArray<RepositoryMount>,
-): string | null =>
-	repositories.length === 0
-		? system
-		: [
-				...(system === null || system.length === 0 ? [] : [system, ""]),
-				"Repositories mounted in your workspace:",
-				...repositories.map(
-					(repository) =>
-						`- ${repository.mount_path}: ${repository.url} (${checkoutLabel(repository)})`,
-				),
-			].join("\n")
+	stores: ReadonlyArray<MemoryStoreResource> = [],
+): string | null => {
+	const sections = [
+		...(system === null || system.length === 0 ? [] : [system]),
+		...(repositories.length === 0
+			? []
+			: [
+					[
+						"Repositories mounted in your workspace:",
+						...repositories.map(
+							(repository) =>
+								`- ${repository.mount_path}: ${repository.url} (${checkoutLabel(repository)})`,
+						),
+					].join("\n"),
+				]),
+		...(stores.length === 0
+			? []
+			: [
+					[
+						"Memory stores mounted in your workspace. Each is a directory of files that outlasts this session; what you write there is saved as you write it:",
+						...stores.map(describeStore),
+					].join("\n"),
+				]),
+	]
+	return repositories.length === 0 && stores.length === 0 ? system : sections.join("\n\n")
+}
 
 const allowedHostsOf = (config: EnvironmentConfig | null): ReadonlyArray<string> | null =>
 	config === null
@@ -265,7 +291,8 @@ export const PiDurableHarnessLive = boundedHarness(
 					}
 
 					const token = { turn: args.turn }
-					const repositories = args.resources
+					const repositories = repositoriesOf(args.resources)
+					const stores = memoryStoresOf(args.resources)
 					if (repositories.length > 0) {
 						const entered = yield* withRetry(executor.enterWorkspace(args.session_id, token)).pipe(
 							Effect.tapError((error) =>
@@ -304,7 +331,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							})
 						}
 					}
-					const system = describeMounts(version.system, repositories)
+					const system = describeMounts(version.system, repositories, stores)
 
 					const request: PiTurnRequest = {
 						operationId,

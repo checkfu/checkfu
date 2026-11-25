@@ -47,8 +47,20 @@ export const MemoryAccess = Effect.gen(function* () {
 	const views = yield* MemoryView
 	const writeMemory = yield* WriteMemoryDecision
 
-	const currentIndex = (storeId: MemoryStoreId) =>
+	const currentIndex = (
+		storeId: MemoryStoreId,
+		after: ReadonlyArray<{ readonly stream: string; readonly version: number }> = [],
+	) =>
 		Effect.gen(function* () {
+			yield* Effect.forEach(after, (receipt) =>
+				index
+					.get(MemoryStore.ref(storeId), { atLeast: receipt })
+					.pipe(
+						Effect.catchIf(Predicate.isTagged("ConsistencyTimeout"), () =>
+							Effect.fail(new MemoryViewLagging()),
+						),
+					),
+			)
 			const { layout_version } = yield* stores.get(storeId)
 			return layout_version === 0
 				? { entries: [], layout_version }

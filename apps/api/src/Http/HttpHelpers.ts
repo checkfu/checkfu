@@ -263,21 +263,6 @@ export const idempotentCommandId = (
 
 export const IDEMPOTENCY_KEY_REUSED = "Idempotency-Key was already used for a different request."
 
-export const measureContent = (digest: Digest.Digest["Service"], content: string) => {
-	const bytes = utf8Encoder.encode(content)
-	return Effect.map(digest.digestHex(Digest.sha256, bytes), (content_sha256) => ({
-		content_sha256,
-		content_size_bytes: bytes.length,
-	}))
-}
-
-export const memoryIdOf = (
-	digest: Digest.Digest["Service"],
-	memoryStoreId: string,
-	path: string,
-): Effect.Effect<string> =>
-	Effect.map(sha256Json(digest, [memoryStoreId, path]), (hash) => `mem_${hash.slice(0, 32)}`)
-
 export const createCommandId = (
 	digest: Digest.Digest["Service"],
 	resource: PendingResourceType,

@@ -47,7 +47,11 @@ import {
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
 	GitHubRepositoryResource,
+	MAX_SESSION_MEMORY_STORES,
 	MAX_SESSION_REPOSITORIES,
+	MemoryAccess,
+	MemoryInstructions,
+	MemoryStoreResource,
 	MemoryContent,
 	MemoryId,
 	MemoryIndexEntry,
@@ -487,8 +491,26 @@ export const GitHubRepositoryParams = Schema.Struct({
 	),
 })
 
-const CreateSessionResources = Schema.Array(GitHubRepositoryParams).check(
-	Schema.isMaxLength(MAX_SESSION_REPOSITORIES),
+export const MemoryStoreParams = Schema.Struct({
+	type: Schema.Literal("memory_store"),
+	memory_store_id: ResourceId.annotate({ description: "Memory store to mount" }),
+	access: Schema.optionalKey(
+		MemoryAccess.annotate({
+			description: "read_write (default) saves the session's changes; read_only does not",
+		}),
+	),
+	instructions: Schema.optionalKey(
+		Schema.NullOr(MemoryInstructions).annotate({
+			description: "How this session should use the store. Shown to the agent.",
+		}),
+	),
+})
+
+const CreateSessionResource = Schema.Union([GitHubRepositoryParams, MemoryStoreParams])
+export type CreateSessionResource = typeof CreateSessionResource.Type
+
+const CreateSessionResources = Schema.Array(CreateSessionResource).check(
+	Schema.isMaxLength(MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES),
 )
 
 const CreateSessionCommonFields = {
@@ -501,7 +523,7 @@ const CreateSessionCommonFields = {
 	),
 	resources: Schema.optionalKey(
 		CreateSessionResources.annotate({
-			description: "Repositories to mount in the session's workspace",
+			description: "Repositories and memory stores to mount in the session's workspace",
 		}),
 	),
 }
@@ -636,11 +658,15 @@ export const EnvironmentDeleted = Schema.Struct({
 })
 export type EnvironmentDeleted = typeof EnvironmentDeleted.Type
 
-export const SessionResourceItem = Schema.Struct({
-	...GitHubRepositoryResource.fields,
+const resourceTimestamps = {
 	created_at: Schema.DateTimeUtc,
 	updated_at: Schema.DateTimeUtc,
-})
+}
+
+export const SessionResourceItem = Schema.Union([
+	Schema.Struct({ ...GitHubRepositoryResource.fields, ...resourceTimestamps }),
+	Schema.Struct({ ...MemoryStoreResource.fields, ...resourceTimestamps }),
+])
 export type SessionResourceItem = typeof SessionResourceItem.Type
 
 export const UpdateSessionResourceBody = Schema.Struct({

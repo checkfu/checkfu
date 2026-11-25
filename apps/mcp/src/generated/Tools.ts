@@ -2367,77 +2367,117 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								resources: {
 									type: "array",
 									items: {
-										type: "object",
-										properties: {
-											type: {
-												type: "string",
-												enum: ["github_repository"],
-											},
-											url: {
-												type: "string",
-												maxLength: 1024,
-												pattern:
-													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
-											},
-											checkout: {
-												anyOf: [
-													{
-														type: "object",
-														properties: {
-															type: {
-																type: "string",
-																enum: ["branch"],
-															},
-															name: {
-																type: "string",
-																minLength: 1,
-																maxLength: 255,
-															},
-														},
-														required: ["type", "name"],
-														additionalProperties: false,
+										anyOf: [
+											{
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["github_repository"],
 													},
-													{
-														type: "object",
-														properties: {
-															type: {
-																type: "string",
-																enum: ["commit"],
-															},
-															sha: {
-																type: "string",
-																pattern: "^[0-9a-f]{40}$",
-															},
-														},
-														required: ["type", "sha"],
-														additionalProperties: false,
+													url: {
+														type: "string",
+														maxLength: 1024,
+														pattern:
+															"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
 													},
-													{
-														type: "null",
-													},
-												],
-												description:
-													"Branch or commit to check out. Defaults to the default branch.",
-											},
-											mount_path: {
-												type: "string",
-												maxLength: 1024,
-												pattern:
-													"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
-												allOf: [
-													{
-														pattern: "^\\/workspace\\/\\S+$",
+													checkout: {
+														anyOf: [
+															{
+																type: "object",
+																properties: {
+																	type: {
+																		type: "string",
+																		enum: ["branch"],
+																	},
+																	name: {
+																		type: "string",
+																		minLength: 1,
+																		maxLength: 255,
+																	},
+																},
+																required: ["type", "name"],
+																additionalProperties: false,
+															},
+															{
+																type: "object",
+																properties: {
+																	type: {
+																		type: "string",
+																		enum: ["commit"],
+																	},
+																	sha: {
+																		type: "string",
+																		pattern: "^[0-9a-f]{40}$",
+																	},
+																},
+																required: ["type", "sha"],
+																additionalProperties: false,
+															},
+															{
+																type: "null",
+															},
+														],
 														description:
-															"Where the repository is cloned. Defaults to /workspace/<repository>.",
+															"Branch or commit to check out. Defaults to the default branch.",
 													},
-												],
+													mount_path: {
+														type: "string",
+														maxLength: 1024,
+														pattern:
+															"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+														allOf: [
+															{
+																pattern: "^\\/workspace\\/\\S+$",
+																description:
+																	"Where the repository is cloned. Defaults to /workspace/<repository>.",
+															},
+														],
+													},
+												},
+												required: ["type", "url"],
+												additionalProperties: false,
 											},
-										},
-										required: ["type", "url"],
-										additionalProperties: false,
+											{
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["memory_store"],
+													},
+													memory_store_id: {
+														type: "string",
+														minLength: 1,
+														maxLength: 256,
+														description: "Memory store to mount",
+													},
+													access: {
+														type: "string",
+														enum: ["read_write", "read_only"],
+														description:
+															"read_write (default) saves the session's changes; read_only does not",
+													},
+													instructions: {
+														anyOf: [
+															{
+																type: "string",
+																maxLength: 4096,
+															},
+															{
+																type: "null",
+															},
+														],
+														description:
+															"How this session should use the store. Shown to the agent.",
+													},
+												},
+												required: ["type", "memory_store_id"],
+												additionalProperties: false,
+											},
+										],
 									},
-									maxItems: 8,
-									description: "Repositories to mount in the session's workspace",
+									maxItems: 16,
+									description: "Repositories and memory stores to mount in the session's workspace",
 								},
 							},
 							required: ["agent", "environment_id"],
@@ -2506,77 +2546,117 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								resources: {
 									type: "array",
 									items: {
-										type: "object",
-										properties: {
-											type: {
-												type: "string",
-												enum: ["github_repository"],
-											},
-											url: {
-												type: "string",
-												maxLength: 1024,
-												pattern:
-													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
-											},
-											checkout: {
-												anyOf: [
-													{
-														type: "object",
-														properties: {
-															type: {
-																type: "string",
-																enum: ["branch"],
-															},
-															name: {
-																type: "string",
-																minLength: 1,
-																maxLength: 255,
-															},
-														},
-														required: ["type", "name"],
-														additionalProperties: false,
+										anyOf: [
+											{
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["github_repository"],
 													},
-													{
-														type: "object",
-														properties: {
-															type: {
-																type: "string",
-																enum: ["commit"],
-															},
-															sha: {
-																type: "string",
-																pattern: "^[0-9a-f]{40}$",
-															},
-														},
-														required: ["type", "sha"],
-														additionalProperties: false,
+													url: {
+														type: "string",
+														maxLength: 1024,
+														pattern:
+															"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
 													},
-													{
-														type: "null",
-													},
-												],
-												description:
-													"Branch or commit to check out. Defaults to the default branch.",
-											},
-											mount_path: {
-												type: "string",
-												maxLength: 1024,
-												pattern:
-													"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
-												allOf: [
-													{
-														pattern: "^\\/workspace\\/\\S+$",
+													checkout: {
+														anyOf: [
+															{
+																type: "object",
+																properties: {
+																	type: {
+																		type: "string",
+																		enum: ["branch"],
+																	},
+																	name: {
+																		type: "string",
+																		minLength: 1,
+																		maxLength: 255,
+																	},
+																},
+																required: ["type", "name"],
+																additionalProperties: false,
+															},
+															{
+																type: "object",
+																properties: {
+																	type: {
+																		type: "string",
+																		enum: ["commit"],
+																	},
+																	sha: {
+																		type: "string",
+																		pattern: "^[0-9a-f]{40}$",
+																	},
+																},
+																required: ["type", "sha"],
+																additionalProperties: false,
+															},
+															{
+																type: "null",
+															},
+														],
 														description:
-															"Where the repository is cloned. Defaults to /workspace/<repository>.",
+															"Branch or commit to check out. Defaults to the default branch.",
 													},
-												],
+													mount_path: {
+														type: "string",
+														maxLength: 1024,
+														pattern:
+															"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+														allOf: [
+															{
+																pattern: "^\\/workspace\\/\\S+$",
+																description:
+																	"Where the repository is cloned. Defaults to /workspace/<repository>.",
+															},
+														],
+													},
+												},
+												required: ["type", "url"],
+												additionalProperties: false,
 											},
-										},
-										required: ["type", "url"],
-										additionalProperties: false,
+											{
+												type: "object",
+												properties: {
+													type: {
+														type: "string",
+														enum: ["memory_store"],
+													},
+													memory_store_id: {
+														type: "string",
+														minLength: 1,
+														maxLength: 256,
+														description: "Memory store to mount",
+													},
+													access: {
+														type: "string",
+														enum: ["read_write", "read_only"],
+														description:
+															"read_write (default) saves the session's changes; read_only does not",
+													},
+													instructions: {
+														anyOf: [
+															{
+																type: "string",
+																maxLength: 4096,
+															},
+															{
+																type: "null",
+															},
+														],
+														description:
+															"How this session should use the store. Shown to the agent.",
+													},
+												},
+												required: ["type", "memory_store_id"],
+												additionalProperties: false,
+											},
+										],
 									},
-									maxItems: 8,
-									description: "Repositories to mount in the session's workspace",
+									maxItems: 16,
+									description: "Repositories and memory stores to mount in the session's workspace",
 								},
 							},
 							required: ["agent_id", "environment_id"],

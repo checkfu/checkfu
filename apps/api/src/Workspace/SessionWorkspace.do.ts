@@ -4,6 +4,9 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import { createRepositoryFetch, githubBaseUrl, makeGitCalls } from "./Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
+import { ApiWorker } from "../Api.ts"
+import { makeMemoryMount } from "./MemoryMount.ts"
+import { makeSessionMemory } from "./SessionMemory.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
@@ -33,6 +36,8 @@ const refusedPreparation = (resourceId: string, message: string): WorkspacePrepa
 
 const INTERRUPTED: WorkspacePreparation = { ok: false, interrupted: true }
 
+const MEMORY_ROOT = "/mnt/memory"
+
 const failed = (text: string): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],
 	isError: true,
@@ -48,12 +53,27 @@ const messageOf = (error: unknown): string =>
 export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>()(
 	"SessionWorkspace",
 	Effect.map(
-		Effect.all({ state: Cloudflare.DurableObjectState, baseUrl: githubBaseUrl }),
-		({ state, baseUrl }) =>
+		Effect.all({
+			state: Cloudflare.DurableObjectState,
+			baseUrl: githubBaseUrl,
+			api: Cloudflare.Workers.bindWorker(Cloudflare.Worker.ref(ApiWorker)),
+			services: Effect.context<never>(),
+		}),
+		({ state, baseUrl, api, services }) =>
 			Effect.promise(async () => {
 				const { storage } = state.raw
 				const mounted = (): ReadonlyArray<MountedRepository> =>
 					storage.kv.get<ReadonlyArray<MountedRepository>>(REPOSITORIES) ?? []
+				const sessionId = state.raw.id.name ?? ""
+				const call = Effect.runPromiseWith(services)
+				const memory = makeSessionMemory({
+					mounts: () => call(api.memoryMounts(sessionId)),
+					list: (name, after) => call(api.memoryList(sessionId, name, after)),
+					read: (name, path) => call(api.memoryRead(sessionId, name, path)),
+					write: (name, path, content, exclusive) =>
+						call(api.memoryWrite(sessionId, name, path, content, exclusive)),
+					remove: (name, path, expected) => call(api.memoryRemove(sessionId, name, path, expected)),
+				})
 				const gitCalls = makeGitCalls()
 				let turnScope = new AbortController()
 				const open = async () => {
@@ -64,6 +84,9 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 					])
 					const { fs, git } = new Workspace({
 						storage,
+						mounts: {
+							[MEMORY_ROOT]: makeMemoryMount(memory),
+						},
 						git: createGitClient({
 							fetch: createRepositoryFetch({
 								signal: gitCalls.signal,
@@ -160,7 +183,9 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						return gitAnswer(stdout, stderr, exitCode)
 					} catch (error) {
 						return failed(
-							signal.aborted ? "git was stopped: its turn was interrupted." : messageOf(error),
+							signal?.aborted === true
+								? "git was stopped: its turn was interrupted."
+								: messageOf(error),
 						)
 					}
 				}

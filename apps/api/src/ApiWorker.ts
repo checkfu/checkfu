@@ -10,13 +10,13 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
+import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
 import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "./Artifacts/ResolvePublication.ts"
 import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
-import { ApiWorker } from "./Api.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
@@ -24,6 +24,7 @@ import { apiWorkerCustomProvidersProps } from "./Pi/PiCatalog.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
+import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -100,8 +101,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
-	Digest.layerWebCrypto,
-).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
+).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,
@@ -127,10 +127,19 @@ export default ApiWorker.make(
 		}
 		const services = yield* Layer.buildWithScope(ApiWorkerLive, scope)
 		const handler = yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
+		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
 			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),
+			memoryMounts: (sessionId) => Effect.orDie(memory.memoryMounts(sessionId)),
+			memoryList: (sessionId, name, after) =>
+				Effect.orDie(memory.memoryList(sessionId, name, after)),
+			memoryRead: (sessionId, name, path) => Effect.orDie(memory.memoryRead(sessionId, name, path)),
+			memoryWrite: (sessionId, name, path, content, exclusive) =>
+				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, exclusive)),
+			memoryRemove: (sessionId, name, path, expected) =>
+				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected)),
 		})
 	}),
 )

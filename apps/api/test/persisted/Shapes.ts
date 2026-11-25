@@ -6,12 +6,12 @@ import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
-import { ApiCalls } from "../../src/Api.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
 import { ArtifactMarks } from "../../src/Artifacts/ArtifactOwnership.ts"
 import { ArtifactLinkClaims } from "../../src/Content/ArtifactLink.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
+import { ApiCalls } from "../../src/Api.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
 import { CANCELLED_OPS_TABLE } from "../../src/Pi/TurnFence.ts"
 
@@ -459,10 +459,12 @@ const SIGNED_LINKS: ReadonlyArray<PersistedShape> = [
 ]
 
 const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMap(
-	([method, { args, result, error }]): ReadonlyArray<PersistedShape> => [
-		{ id: `api-call:Api.${method}/args`, kind: "api-call", schema: args },
-		{ id: `api-call:Api.${method}/result`, kind: "api-call", schema: result },
-		{ id: `api-call:Api.${method}/error`, kind: "api-call", schema: error },
+	([method, call]): ReadonlyArray<PersistedShape> => [
+		{ id: `api-call:Api.${method}/args`, kind: "api-call", schema: call.args },
+		{ id: `api-call:Api.${method}/result`, kind: "api-call", schema: call.result },
+		...("error" in call
+			? [{ id: `api-call:Api.${method}/error`, kind: "api-call" as const, schema: call.error }]
+			: []),
 	],
 )
 
