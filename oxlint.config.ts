@@ -7,6 +7,13 @@ import type { OxlintConfig } from "oxlint"
 // entry and from nothing else.
 const OWNED = [
 	{
+		owner: "packages/ui/src/use-mount-effect.ts",
+		message:
+			"Do not use useEffect. Derive values during render, act in event handlers, reset state with a key, or sync with something outside React on mount through useMountEffect from @checkfu/ui/use-mount-effect.",
+		imports: [{ name: "react", importNames: ["useEffect"] }],
+		properties: ["useEffect"],
+	},
+	{
 		owner: "apps/api/src/Pi/PiDocRegistry.ts",
 		message:
 			"Declare Checkfu Pi documents and document families in apps/api/src/Pi/PiDocRegistry.ts so they are covered by Persisted.lock.json.",

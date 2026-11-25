@@ -1,5 +1,6 @@
 import { MoonIcon, SunIcon } from "lucide-react"
-import * as React from "react"
+import { useSyncExternalStore } from "react"
+import type * as React from "react"
 import { Button } from "./button.tsx"
 import { STORAGE_KEY } from "./theme-script.ts"
 
@@ -24,7 +25,7 @@ const apply = (theme: Theme): void => {
 }
 
 export function ThemeToggle(): React.JSX.Element {
-	const theme = React.useSyncExternalStore(subscribe, read, () => "light" as const)
+	const theme = useSyncExternalStore(subscribe, read, () => "light" as const)
 	const next = theme === "dark" ? "light" : "dark"
 	return (
 		<Button

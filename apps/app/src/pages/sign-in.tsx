@@ -3,7 +3,8 @@ import { Field } from "@checkfu/ui/field"
 import { Input } from "@checkfu/ui/input"
 import { Logo } from "@checkfu/ui/logo"
 import { useNavigate } from "@tanstack/react-router"
-import * as React from "react"
+import { useState } from "react"
+import type * as React from "react"
 import { signIn } from "../api.ts"
 
 const MESSAGES = {
@@ -13,9 +14,9 @@ const MESSAGES = {
 
 export function SignInPage(): React.JSX.Element {
 	const navigate = useNavigate()
-	const [key, setKey] = React.useState("")
-	const [pending, setPending] = React.useState(false)
-	const [error, setError] = React.useState<string>()
+	const [key, setKey] = useState("")
+	const [pending, setPending] = useState(false)
+	const [error, setError] = useState<string>()
 	const submit = (event: React.FormEvent): void => {
 		event.preventDefault()
 		setPending(true)

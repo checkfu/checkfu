@@ -8,7 +8,8 @@ import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
 import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
-import * as React from "react"
+import { useState } from "react"
+import type * as React from "react"
 import { checkfu } from "../api.ts"
 import { Status } from "../status.tsx"
 import { useAction } from "../use-action.ts"
@@ -92,9 +93,9 @@ export function SessionsPage(): React.JSX.Element {
 export function NewSessionPage(): React.JSX.Element {
 	const { agents, environments } = create.useLoaderData()
 	const navigate = useNavigate()
-	const [agentId, setAgentId] = React.useState(agents[0]?.id ?? "")
-	const [environmentId, setEnvironmentId] = React.useState(environments[0]?.id ?? "")
-	const [title, setTitle] = React.useState("")
+	const [agentId, setAgentId] = useState(agents[0]?.id ?? "")
+	const [environmentId, setEnvironmentId] = useState(environments[0]?.id ?? "")
+	const [title, setTitle] = useState("")
 	const start = useAction(async () => {
 		const session = await checkfu.sessions.create({
 			agent: agentId,
@@ -168,7 +169,7 @@ export function SessionPage(): React.JSX.Element {
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const router = useRouter()
 	const { events, status, error } = useSessionEvents(session.id, session.status)
-	const [text, setText] = React.useState("")
+	const [text, setText] = useState("")
 	const send = useAction(async (message: string) => {
 		await checkfu.sessions.send(session.id, {
 			events: [{ type: "user.message", content: [{ type: "text", text: message }] }],

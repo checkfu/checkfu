@@ -8,9 +8,10 @@ import { DataTable } from "@checkfu/ui/table"
 import type { JsonAgent } from "@checkfu/sdk/client"
 import { getRouteApi, Link, useNavigate, useRouter } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
-import * as React from "react"
+import { useState } from "react"
+import type * as React from "react"
 import { checkfu } from "../api.ts"
-import { lifecycle, Status } from "../status.tsx"
+import { LifecycleStatus } from "../status.tsx"
 import { useAction } from "../use-action.ts"
 
 const list = getRouteApi("/_app/agents/")
@@ -70,7 +71,7 @@ export function AgentsPage(): React.JSX.Element {
 					{
 						key: "status",
 						header: "Status",
-						cell: (agent) => <Status status={lifecycle(agent)} />,
+						cell: (agent) => <LifecycleStatus resource={agent} />,
 					},
 					{
 						key: "updated",
@@ -116,7 +117,7 @@ function AgentForm({
 	readonly onSubmit: (draft: AgentDraft) => Promise<void>
 	readonly onCancel?: () => void
 }): React.JSX.Element {
-	const [draft, setDraft] = React.useState(initial)
+	const [draft, setDraft] = useState(initial)
 	const action = useAction(onSubmit)
 	const set =
 		(field: keyof AgentDraft) =>
@@ -177,7 +178,7 @@ export function NewAgentPage(): React.JSX.Element {
 export function AgentPage(): React.JSX.Element {
 	const agent = detail.useLoaderData()
 	const router = useRouter()
-	const [editing, setEditing] = React.useState(false)
+	const [editing, setEditing] = useState(false)
 	const archive = useAction(async () => {
 		await checkfu.agents.archive(agent.id)
 		await router.invalidate()
@@ -189,7 +190,7 @@ export function AgentPage(): React.JSX.Element {
 				title={agent.name}
 				id={agent.id}
 				breadcrumb={<Link to="/agents">Agents</Link>}
-				accessory={<Status status={lifecycle(agent)} />}
+				accessory={<LifecycleStatus resource={agent} />}
 				description={agent.description ?? undefined}
 				actions={
 					archived || editing ? undefined : (
