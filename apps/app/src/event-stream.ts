@@ -34,13 +34,13 @@ export const follow = ({
 	open,
 	cursor,
 	receive,
-	stillOpen,
+	mayRetry,
 	connection,
 }: {
 	readonly open: (after: number) => Source
 	readonly cursor: () => number
 	readonly receive: (event: JsonSessionEvent) => void
-	readonly stillOpen: () => Promise<boolean>
+	readonly mayRetry: () => Promise<boolean>
 	readonly connection: (state: Connection) => void
 }): (() => void) => {
 	let source: Source | undefined
@@ -67,8 +67,8 @@ export const follow = ({
 	const closed = () => {
 		source?.close()
 		interrupted()
-		stillOpen().then(
-			(open) => (open && !stopped ? reconnect() : stop()),
+		mayRetry().then(
+			(allowed) => (allowed && !stopped ? reconnect() : stop()),
 			() => (stopped ? undefined : reconnect()),
 		)
 	}

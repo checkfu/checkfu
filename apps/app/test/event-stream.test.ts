@@ -39,7 +39,7 @@ const message = (seq: number): JsonSessionEvent => ({
 	content: [{ type: "text", text: `message ${seq}` }],
 })
 
-const harness = (stillOpen: () => Promise<boolean>) => {
+const harness = (mayRetry: () => Promise<boolean>) => {
 	const sources: Array<{ readonly after: number; readonly source: FakeSource }> = []
 	const received: Array<number> = []
 	const states: Array<Connection> = []
@@ -55,7 +55,7 @@ const harness = (stillOpen: () => Promise<boolean>) => {
 			received.push(event.seq)
 			newest = event.seq
 		},
-		stillOpen,
+		mayRetry,
 		connection: (state) => states.push(state),
 	})
 	const latest = () => sources.at(-1)?.source ?? new FakeSource()
@@ -98,16 +98,35 @@ describe("following a session's events", () => {
 		expect(stream.sources).toHaveLength(2)
 	})
 
-	it("stops for good once the session is archived or the user is signed out", async () => {
+	it("stops for good once the user is signed out", async () => {
 		const stream = harness(() => Promise.resolve(false))
 		stream.latest().failed()
 		await vi.advanceTimersByTimeAsync(60_000)
 		expect(stream.sources).toHaveLength(1)
 	})
 
+	it("reads through to the archive event after a drop, instead of stopping at the old cursor", async () => {
+		const stream = harness(() => Promise.resolve(true))
+		stream.latest().opened()
+		stream.latest().failed()
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(stream.sources.map((each) => each.after)).toEqual([7, 7])
+		stream.latest().opened()
+		stream.latest().send(message(8))
+		stream.latest().send({
+			id: "evt_9",
+			seq: 9,
+			type: "session.archived",
+			created_at: "2026-11-24T00:00:00.000Z",
+		})
+		await vi.advanceTimersByTimeAsync(60_000)
+		expect(stream.received).toEqual([8, 9])
+		expect(stream.sources).toHaveLength(2)
+	})
+
 	it("stops after the archive event without asking again", async () => {
-		const stillOpen = vi.fn(() => Promise.resolve(true))
-		const stream = harness(stillOpen)
+		const mayRetry = vi.fn(() => Promise.resolve(true))
+		const stream = harness(mayRetry)
 		stream.latest().opened()
 		stream.latest().send({
 			id: "evt_9",
@@ -118,7 +137,7 @@ describe("following a session's events", () => {
 		expect(stream.latest().closed).toBe(true)
 		await vi.advanceTimersByTimeAsync(60_000)
 		expect(stream.sources).toHaveLength(1)
-		expect(stillOpen).not.toHaveBeenCalled()
+		expect(mayRetry).not.toHaveBeenCalled()
 		expect(stream.received).toEqual([9])
 	})
 

@@ -48,13 +48,18 @@ export function useSessionEvents({
 	const refresh = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const events = transcriptEvents(eventsOf(history.data), tail)
 	useMountEffect(() => {
-		const receive = (event: JsonSessionEvent) => {
-			batch.add([event])
-			if (CHANGES_SNAPSHOT.has(event.type) && refresh.current === undefined) {
+		const resync = () => {
+			if (refresh.current === undefined) {
 				refresh.current = setTimeout(() => {
 					refresh.current = undefined
 					onSnapshotChange()
 				}, REFRESH_MS)
+			}
+		}
+		const receive = (event: JsonSessionEvent) => {
+			batch.add([event])
+			if (CHANGES_SNAPSHOT.has(event.type)) {
+				resync()
 			}
 		}
 		const stop = isFinal(events)
@@ -68,12 +73,17 @@ export function useSessionEvents({
 							batch.newestSeq(),
 						),
 					receive,
-					stillOpen: () =>
+					mayRetry: () =>
 						queryClient.fetchQuery({ ...sessionQuery(session.id), staleTime: 0 }).then(
-							(current) => current.archived_at === null,
+							() => true,
 							(error: unknown) => (isSignedOut(error) ? false : Promise.reject(error)),
 						),
-					connection: setConnection,
+					connection: (state) => {
+						setConnection(state)
+						if (state === "live") {
+							resync()
+						}
+					},
 				})
 		return () => {
 			stop()

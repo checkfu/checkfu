@@ -204,7 +204,7 @@ export function NewSessionPage(): React.JSX.Element {
 			return session
 		},
 		{
-			invalidates: [["sessions"], ["agents"], ["environments"]],
+			invalidates: [["sessions"]],
 			then: (session) => {
 				if (session !== undefined) {
 					void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })

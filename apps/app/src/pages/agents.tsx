@@ -183,12 +183,46 @@ export function AgentPage(): React.JSX.Element {
 	return <AgentView key={agent.id} agent={agent} />
 }
 
-function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
-	const [edit, setEdit] = useState<{ readonly base: JsonAgent; readonly draft: AgentDraft } | null>(
-		null,
+interface Edit {
+	readonly base: JsonAgent
+	readonly draft: AgentDraft
+}
+
+const editNotice = (
+	agent: JsonAgent,
+	edit: Edit,
+	apply: (draft: AgentDraft) => void,
+): React.ReactNode => {
+	if (agent.archived_at !== null) {
+		return (
+			<Callout>
+				This agent was archived while you were editing, so it can no longer be updated. Your draft
+				is still here to copy.
+			</Callout>
+		)
+	}
+	if (agent.version <= edit.base.version) {
+		return undefined
+	}
+	const { draft, overlapping } = rebase(edit.base, edit.draft, agent)
+	return (
+		<Callout>
+			<p>
+				This agent was saved as v{agent.version} while you were editing v{edit.base.version}. Your
+				edits are kept.
+				{overlapping.length === 0
+					? " None of them touch the fields that changed."
+					: ` Yours will replace the newer ${overlapping.map((field) => FIELD_LABELS[field]).join(", ")}.`}
+			</p>
+			<Button size="sm" variant="outline" className="mt-2" onClick={() => apply(draft)}>
+				Apply my edits to v{agent.version}
+			</Button>
+		</Callout>
 	)
-	const behind = edit !== null && agent.version > edit.base.version
-	const update = edit === null ? null : rebase(edit.base, edit.draft, agent)
+}
+
+function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
+	const [edit, setEdit] = useState<Edit | null>(null)
 	const archive = useAction(
 		async () => {
 			await checkfu.agents.archive(agent.id)
@@ -249,27 +283,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 					draft={edit.draft}
 					onChange={(draft) => setEdit({ ...edit, draft })}
 					submitLabel="Save new version"
-					notice={
-						behind && update !== null ? (
-							<Callout>
-								<p>
-									This agent was saved as v{agent.version} while you were editing v
-									{edit.base.version}. Your edits are kept.
-									{update.overlapping.length === 0
-										? " None of them touch the fields that changed."
-										: ` Yours will replace the newer ${update.overlapping.map((field) => FIELD_LABELS[field]).join(", ")}.`}
-								</p>
-								<Button
-									size="sm"
-									variant="outline"
-									className="mt-2"
-									onClick={() => setEdit({ base: agent, draft: update.draft })}
-								>
-									Apply my edits to v{agent.version}
-								</Button>
-							</Callout>
-						) : undefined
-					}
+					notice={editNotice(agent, edit, (draft) => setEdit({ base: agent, draft }))}
 					onCancel={() => setEdit(null)}
 					onSubmit={async (draft) => {
 						const changes = changesFrom(edit.base, draft)
