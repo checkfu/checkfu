@@ -63,6 +63,12 @@ import type {
 
 const ISO_NOW = "2026-11-23T18:00:00.000Z"
 
+const expectNotCallable =
+	<Fn>(_fn: Fn) =>
+	<Args extends ReadonlyArray<unknown>>(
+		..._check: Fn extends (...args: Args) => void ? [never] : []
+	): void => {}
+
 const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
 	new Request(input, init)
 
@@ -450,6 +456,8 @@ describe("@checkfu/sdk", () => {
 						expect(!isPendingResource(archived) && archived.archived_at !== null).toBe(true)
 
 						const requestsBefore = seen.length
+						expectNotCallable(client.agents.archive)<[number]>()
+						expectNotCallable(client.agents.retrieve)<[]>()
 						const looseAgents = client.agents as unknown as {
 							archive(id: unknown): ReturnType<typeof client.agents.archive>
 							retrieve(): ReturnType<typeof client.agents.retrieve>
@@ -2525,6 +2533,7 @@ describe("@checkfu/sdk", () => {
 						fetch: automationFetch,
 					})
 					try {
+						expectNotCallable(unkeyed.automations.create)<[typeof body]>()
 						const looseAutomations = unkeyed.automations as unknown as {
 							create(payload: typeof body): ReturnType<typeof unkeyed.automations.create>
 						}

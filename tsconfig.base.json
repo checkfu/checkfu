@@ -28,8 +28,8 @@
 					"missingEffectContext": "error",
 					"missingEffectError": "error",
 					"missingLayerContext": "error",
-					"leakingRequirements": "off",
-					"anyUnknownInErrorContext": "off",
+					"leakingRequirements": "error",
+					"anyUnknownInErrorContext": "error",
 					"missingReturnYieldStar": "error",
 					"missingStarInYieldEffectGen": "error",
 					"classSelfMismatch": "error",
@@ -66,7 +66,28 @@
 					"promiseRaceInEffect": "error",
 					"unstableApiUsage": "off",
 					"experimentalApiUsage": "off"
-				}
+				},
+				"overrides": [
+					{
+						"include": ["**/apps/api/src/Http/Listing.ts"],
+						"options": {
+							"diagnosticSeverity": {
+								"anyUnknownInErrorContext": "off"
+							}
+						}
+					},
+					{
+						"include": [
+							"**/packages/domain/src/Listing/ListingStore.ts",
+							"**/packages/sdk/src/Api.ts"
+						],
+						"options": {
+							"diagnosticSeverity": {
+								"leakingRequirements": "off"
+							}
+						}
+					}
+				]
 			}
 		]
 	}

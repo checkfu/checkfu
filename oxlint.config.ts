@@ -89,7 +89,15 @@ export default defineConfig({
 		"effecttsgo/service-not-as-class": "error",
 		"effecttsgo/unsafe-effect-type-assertion": "error",
 		"effecttsgo/unstable-api-usage": "off",
-		"@typescript-eslint/ban-ts-comment": "error",
+		"@typescript-eslint/ban-ts-comment": [
+			"error",
+			{
+				"ts-expect-error": true,
+				"ts-ignore": true,
+				"ts-nocheck": true,
+				"ts-check": false,
+			},
+		],
 		"no-warning-comments": [
 			"error",
 			{ terms: ["oxlint-disable", "eslint-disable"], location: "anywhere" },
