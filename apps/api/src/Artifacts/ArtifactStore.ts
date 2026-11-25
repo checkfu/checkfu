@@ -1,10 +1,13 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Config from "effect/Config"
 import { SourceError } from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { JURISDICTION_ENV, placement } from "../Placement.ts"
+import { JURISDICTION_ENV, placement, storageScope } from "../Placement.ts"
+import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import type { ArtifactManifest, BuiltArtifactVersion } from "./ArtifactFiles.ts"
 
 export class ArtifactStoreError extends Schema.TaggedError<
@@ -82,6 +85,10 @@ export interface ArtifactStoreService {
 		artifactId: string,
 		sha256: string,
 	) => Effect.Effect<Uint8Array | null, ArtifactStoreError>
+	readonly hasBlob: (
+		artifactId: string,
+		sha256: string,
+	) => Effect.Effect<boolean, ArtifactStoreError>
 	readonly markDeleting: (artifactId: string) => Effect.Effect<void, ArtifactStoreError>
 	readonly purge: (artifactId: string) => Effect.Effect<void, ArtifactStoreError>
 	readonly unconfirmedWrites: (
@@ -94,6 +101,15 @@ export interface ArtifactStoreService {
 
 export class ArtifactStore extends Context.Service<ArtifactStore, ArtifactStoreService>()(
 	"@checkfu/api/ArtifactStore",
+) {}
+
+export type ArtifactReaderService = Pick<
+	ArtifactStoreService,
+	"getManifest" | "getBlob" | "hasBlob"
+>
+
+export class ArtifactReader extends Context.Service<ArtifactReader, ArtifactReaderService>()(
+	"@checkfu/api/ArtifactReader",
 ) {}
 
 export const artifactPrefix = (scope: string, artifactId: string) =>
@@ -166,3 +182,54 @@ export const deleteUntilEmpty = <E, R>(
 			yield* remove(keys)
 		}
 	})
+
+const decodeManifest = Schema.decodeUnknownEffect(ArtifactManifestJson)
+
+type Run = <A, E>(
+	effect: Effect.Effect<A, E, RuntimeContext>,
+) => Effect.Effect<A, ArtifactStoreError>
+
+const runWith =
+	(runtime: RuntimeContext["Service"]): Run =>
+	(effect) =>
+		effect.pipe(
+			Effect.mapError((cause) => new ArtifactStoreError({ cause })),
+			Effect.provideService(RuntimeContext, runtime),
+		)
+
+export const artifactReads = (
+	scope: string,
+	bucket: Pick<Cloudflare.R2.ReadBucketClient, "get" | "head">,
+	run: Run,
+): ArtifactReaderService => ({
+	getManifest: (artifactId, manifestHash) =>
+		run(
+			Effect.gen(function* () {
+				const object = yield* bucket.get(artifactManifestKey(scope, artifactId, manifestHash))
+				return object === null ? null : yield* decodeManifest(yield* object.text())
+			}),
+		),
+	getBlob: (artifactId, sha256) =>
+		run(
+			Effect.gen(function* () {
+				const object = yield* bucket.get(artifactBlobKey(scope, artifactId, sha256))
+				return object === null ? null : yield* object.bytes()
+			}),
+		),
+	hasBlob: (artifactId, sha256) =>
+		run(
+			Effect.map(
+				bucket.head(artifactBlobKey(scope, artifactId, sha256)),
+				(object) => object !== null,
+			),
+		),
+})
+
+export const ArtifactReaderR2 = Layer.effect(
+	ArtifactReader,
+	Effect.gen(function* () {
+		const bucket = yield* Cloudflare.R2.ReadBucket(yield* ArtifactBucket)
+		const scope = yield* Effect.orDie(storageScope)
+		return artifactReads(scope, bucket, runWith(yield* Cloudflare.Worker))
+	}),
+)

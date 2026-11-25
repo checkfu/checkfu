@@ -89,6 +89,7 @@ import {
 	TEST_API_KEY,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
 describe("Agent and environment lifecycle, versioning, and projection consistency", () => {
@@ -1550,6 +1551,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				}),
 			),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1687,6 +1689,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			const layer = CheckfuLive.pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
+				Layer.provideMerge(ArtifactLinksTest),
 				Layer.provideMerge(
 					Layer.succeed(HarnessLimits, {
 						attempts: 3,

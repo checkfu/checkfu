@@ -6,9 +6,11 @@ import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
+import { ApiCalls } from "../../src/Api.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
 import { ARTIFACT_LEDGER_SCHEMA } from "../../src/Artifacts/ArtifactLedgerSql.ts"
 import { ArtifactWriteMarker } from "../../src/Artifacts/ArtifactStore.ts"
+import { ArtifactLinkClaims } from "../../src/Content/ArtifactLink.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
@@ -31,6 +33,8 @@ export type PersistedKind =
 	| "session-table"
 	| "artifact-object"
 	| "artifact-table"
+	| "signed-link"
+	| "api-call"
 
 export const RULES: Readonly<Record<PersistedKind, string>> = {
 	event:
@@ -58,6 +62,10 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"Artifact manifests and the reconciler's records stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
 	"artifact-table":
 		"The table already exists in every artifact owner object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table or index as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
+	"signed-link":
+		"A viewing link keeps working across deploys until it expires, up to seven days after it was made. Keep the claims of links the last build signed readable until every one of them has expired.",
+	"api-call":
+		"The content Worker and the API Worker deploy separately, so each side meets the other's previous build. The lock proves only that this build reads the shape the last one sent. That the last build tolerates this one is yours to check: add an argument or field only as optional, and start sending it one release after the reader ships.",
 	"harness-call":
 		"The API Worker and the harness Worker deploy separately, and a running object can keep its old code for the whole code-update delay, so each side meets the other's previous build. The lock proves only that this build reads the shape the last one sent. That the last build tolerates this one is yours to check: add a field only as optional, and start sending it one release after the reader ships.",
 }
@@ -472,6 +480,18 @@ const ARTIFACT_TABLES: ReadonlyArray<PersistedShape> = Object.entries(ARTIFACT_L
 	}),
 )
 
+const SIGNED_LINKS: ReadonlyArray<PersistedShape> = [
+	{ id: "signed-link:ArtifactLink/claims", kind: "signed-link", schema: ArtifactLinkClaims },
+]
+
+const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMap(
+	([method, { args, result, error }]): ReadonlyArray<PersistedShape> => [
+		{ id: `api-call:Api.${method}/args`, kind: "api-call", schema: args },
+		{ id: `api-call:Api.${method}/result`, kind: "api-call", schema: result },
+		{ id: `api-call:Api.${method}/error`, kind: "api-call", schema: error },
+	],
+)
+
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
 	...SAGA_STEPS,
@@ -480,6 +500,8 @@ export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...SESSION_TABLES,
 	...ARTIFACT_OBJECTS,
 	...ARTIFACT_TABLES,
+	...SIGNED_LINKS,
+	...API_CALLS,
 ]
 
 export const registryProblems = (
@@ -514,6 +536,8 @@ export const registryProblems = (
 		"session-table",
 		"artifact-object",
 		"artifact-table",
+		"signed-link",
+		"api-call",
 	] as const) {
 		if (!shapes.some((shape) => shape.kind === kind)) {
 			problems.push(`no ${kind} shape was found`)

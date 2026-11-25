@@ -365,6 +365,10 @@ export const MAX_ARTIFACT_BODY_BYTES =
 	MAX_ARTIFACT_FILES * (MAX_ARTIFACT_PATH_LENGTH * 6 + 512) +
 	16 * 1024
 
+export const MIN_LINK_TTL_SECONDS = 60
+export const DEFAULT_LINK_TTL_SECONDS = 60 * 60
+export const MAX_LINK_TTL_SECONDS = 7 * 24 * 60 * 60
+
 export const ArtifactId = Schema.String.check(Schema.isMinLength(1)).pipe(
 	Schema.brand("ArtifactId"),
 )

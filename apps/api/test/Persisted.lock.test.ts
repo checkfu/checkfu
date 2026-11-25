@@ -8,10 +8,16 @@ import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/Versioned
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { DocumentId, JsonObject } from "@earendil-works/pi-durable"
 import { expect, it } from "@effect/vitest"
+import * as Mac from "effect/crypto/Mac"
+import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
+import * as Base64Url from "effect/encoding/Base64Url"
+import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { ARTIFACT_LEDGER_SCHEMA } from "../src/Artifacts/ArtifactLedgerSql.ts"
+import { ArtifactLinkClaims, linkKey, signLink } from "../src/Content/ArtifactLink.ts"
 import { createPiModels } from "../src/Pi/PiModels.ts"
 import { CHECKFU_PI_DOCS, SettledUsage, SettledUsageState } from "../src/Pi/PiTurnUsage.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
@@ -446,6 +452,70 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(altered.length).toBe(1)
 			expect(altered[0]).toContain("artifact owner object")
 		}),
+	)
+
+	it.effect("locks viewing link claims and every call the content Worker makes to the API", () =>
+		Effect.gen(function* () {
+			const idsOf = (kind: PersistedShape["kind"]) =>
+				persistedShapes
+					.filter((shape) => shape.kind === kind)
+					.map((shape) => shape.id)
+					.toSorted()
+			expect(idsOf("signed-link")).toEqual(["signed-link:ArtifactLink/claims"])
+			expect(idsOf("api-call")).toEqual([
+				"api-call:Api.resolveArtifactVersion/args",
+				"api-call:Api.resolveArtifactVersion/error",
+				"api-call:Api.resolveArtifactVersion/result",
+			])
+			const claims = "signed-link:ArtifactLink/claims"
+			const signed = lockWith({ [claims]: ["default.art_1.1.1800000000"] })
+			expect(yield* lockProblems(signed)).toEqual([])
+			const shape = persistedShapes.find((candidate) => candidate.id === claims)
+			const mac = yield* Mac.Mac
+			const key = yield* Effect.orDie(linkKey("lock"))
+			for (const sample of yield* Effect.orDie(sampleEncoded(shape as PersistedShape))) {
+				const decoded = yield* Effect.orDie(Schema.decodeUnknownEffect(ArtifactLinkClaims)(sample))
+				const [carried = ""] = (yield* signLink(mac, key, decoded)).split(".")
+				expect(Result.getOrUndefined(Base64Url.decodeString(carried))).toBe(sample)
+			}
+			const reshaped = yield* lockProblems(
+				signed,
+				replacing(
+					claims,
+					Schema.Struct({
+						scope: Schema.String,
+						artifactId: Schema.String,
+						manifest: Schema.String,
+					}),
+				),
+			)
+			expect(reshaped.length).toBe(1)
+			expect(reshaped[0]).toContain(claims)
+			expect(reshaped[0]).toContain("viewing link")
+			const args = "api-call:Api.resolveArtifactVersion/args"
+			const sent = lockWith({ [args]: [["art_1", 2]] })
+			expect(yield* lockProblems(sent)).toEqual([])
+			const changed = yield* lockProblems(
+				sent,
+				replacing(args, Schema.Tuple([Schema.Struct({ artifactId: Schema.String })])),
+			)
+			expect(changed.length).toBe(1)
+			expect(changed[0]).toContain("content Worker and the API Worker")
+			const error = "api-call:Api.resolveArtifactVersion/error"
+			const failed = lockWith({
+				[error]: [{ _tag: "ArtifactVersionNotReady", artifactId: "art_1", version: 2 }],
+			})
+			expect(yield* lockProblems(failed)).toEqual([])
+			const refailed = yield* lockProblems(
+				failed,
+				replacing(
+					error,
+					Schema.TaggedStruct("ArtifactVersionNotReady", { artifact_id: Schema.String }),
+				),
+			)
+			expect(refailed.length).toBe(1)
+			expect(refailed[0]).toContain(error)
+		}).pipe(Effect.provide(Mac.layerWebCrypto.pipe(Layer.provide(SecureRandom.layerWebCrypto)))),
 	)
 
 	it.effect("lets a view change shape only when its version increased", () =>

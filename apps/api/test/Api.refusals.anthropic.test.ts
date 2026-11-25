@@ -31,6 +31,7 @@ import {
 	sendRequest,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
+import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
 describe("Anthropic Messages refusals and stream errors", () => {
@@ -193,6 +194,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		const layer = CheckfuLive.pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -464,6 +466,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			),
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
+			Layer.provideMerge(ArtifactLinksTest),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1068,6 +1071,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(normalizedExecutor),
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
+				Layer.provideMerge(ArtifactLinksTest),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
@@ -1280,6 +1284,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(unnormalizedExecutor),
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
+				Layer.provideMerge(ArtifactLinksTest),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(

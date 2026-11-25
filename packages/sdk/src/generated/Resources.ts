@@ -119,6 +119,12 @@ export interface CheckfuOperations {
 		EndpointBody<"artifacts", "getFile">,
 		EndpointSuccess<"artifacts", "getFile">
 	>
+	readonly "artifacts.versions.link": OperationShape<
+		EndpointParams<"artifacts", "createLink">,
+		EndpointQuery<"artifacts", "createLink">,
+		EndpointBody<"artifacts", "createLink">,
+		EndpointSuccess<"artifacts", "createLink">
+	>
 	readonly "artifacts.versions.retrieve": OperationShape<
 		EndpointParams<"artifacts", "getVersion">,
 		EndpointQuery<"artifacts", "getVersion">,
@@ -578,6 +584,50 @@ export class EffectArtifactsVersionsResource {
 								query: {
 									path: params["path"],
 								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Create a link that opens one artifact version in a browser until it expires; anyone holding the link can view it */
+	link(
+		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
+		version: PathParam<"artifacts", "createLink", "version">,
+		params: EndpointBody<"artifacts", "createLink">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "createLink">>, CheckfuSdkError>
+	link(
+		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
+		version: PathParam<"artifacts", "createLink", "version">,
+		params: EndpointBody<"artifacts", "createLink">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "createLink">, CheckfuSdkError>
+	link(
+		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
+		version: PathParam<"artifacts", "createLink", "version">,
+		params: EndpointBody<"artifacts", "createLink">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"artifacts", "createLink">
+		| WithResponse<EndpointSuccess<"artifacts", "createLink">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "createLink", { artifact_id: artifactId, version }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.artifacts.versions.link",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.artifacts.createLink({
+								params: pathParams,
+								payload: params,
 								responseMode: "decoded-and-response",
 							}),
 					),
@@ -2058,6 +2108,21 @@ export class ArtifactsVersionsResource {
 	): APIPromise<EndpointJsonSuccess<"artifacts", "getFile">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsVersionsResource(effectRuntime).file(artifactId, version, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Create a link that opens one artifact version in a browser until it expires; anyone holding the link can view it */
+	link(
+		artifactId: PathParam<"artifacts", "createLink", "artifact_id">,
+		version: PathParam<"artifacts", "createLink", "version">,
+		params: EndpointBody<"artifacts", "createLink">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "createLink">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsVersionsResource(effectRuntime).link(artifactId, version, params, {
 				...effectOpts,
 				withResponse: true,
 			}),

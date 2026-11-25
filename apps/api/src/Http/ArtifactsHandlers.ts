@@ -12,6 +12,7 @@ import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Clock from "effect/Clock"
 import * as DateTime from "effect/DateTime"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -26,6 +27,8 @@ import type {
 } from "../Artifacts/ArtifactFiles.ts"
 import { ArtifactStore, ArtifactStoreError } from "../Artifacts/ArtifactStore.ts"
 import type { ArtifactWriteCheck, StagedWrite } from "../Artifacts/ArtifactStore.ts"
+import { DEFAULT_LINK_TTL_SECONDS } from "../Content/ArtifactLink.ts"
+import { ArtifactLinks } from "../Content/ArtifactLinks.ts"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
@@ -110,6 +113,7 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		const artifacts = yield* Artifact
 		const versionViews = yield* ArtifactVersionView
 		const store = yield* ArtifactStore
+		const links = yield* ArtifactLinks
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
@@ -357,6 +361,26 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				Effect.gen(function* () {
 					const { found, manifest } = yield* loadVersion(params.artifact_id, params.version)
 					return versionResource(params.artifact_id, found, manifest)
+				}).pipe(handled),
+			)
+			.handle("createLink", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const id = params.artifact_id
+					const { version } = params
+					if (version > (yield* requireActive(id)).version) {
+						return yield* reject(404, `Artifact ${id} has no version ${version}.`)
+					}
+					const expiresAt =
+						Math.floor((yield* Clock.currentTimeMillis) / 1000) +
+						(payload.expires_in ?? DEFAULT_LINK_TTL_SECONDS)
+					const url = yield* links.mint({ artifactId: id, version, expiresAt })
+					return {
+						type: "artifact_link" as const,
+						artifact_id: id,
+						version,
+						url,
+						expires_at: DateTime.makeUnsafe(expiresAt * 1000),
+					}
 				}).pipe(handled),
 			)
 			.handle("getFile", ({ params, query }) =>

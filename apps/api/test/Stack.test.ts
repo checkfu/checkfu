@@ -25,6 +25,7 @@ import stack, {
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
 import { PI_HARNESS_WORKER_PROPS } from "../src/Pi/PiHarnessWorker.ts"
 import { ARTIFACT_BUCKET_PROPS, artifactBucketProps } from "../src/Artifacts/ArtifactStore.ts"
+import { CONTENT_WORKER_PROPS } from "../src/Content/ContentWorker.ts"
 import { JURISDICTION_ENV } from "../src/Placement.ts"
 
 const RemovalPolicyName = Schema.Literals(["retain", "destroy", "protect"])
@@ -60,6 +61,12 @@ describe("Alchemy stack and worker entry", () => {
 				expect(PI_HARNESS_WORKER_PROPS.workersDev).toBe(false)
 				expect(PI_HARNESS_WORKER_PROPS.observability).toEqual({
 					enabled: true,
+					issues: { enabled: true },
+				})
+				expect(CONTENT_WORKER_PROPS.compatibility.date).toBe(API_WORKER_PROPS.compatibility.date)
+				expect(CONTENT_WORKER_PROPS.observability).toEqual({
+					enabled: true,
+					logs: { enabled: true, invocationLogs: false },
 					issues: { enabled: true },
 				})
 				expect(CLOUDFLARE_STATE_OBSERVABILITY).toEqual({

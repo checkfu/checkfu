@@ -929,6 +929,12 @@ describe("Artifacts API", () => {
 					(yield* callViewless("GET", `/v1/artifacts/${artifact.id}/versions/2/file?path=c.txt`))
 						.status,
 				).toBe(200)
+				const link = yield* callViewless(
+					"POST",
+					`/v1/artifacts/${artifact.id}/versions/1/links`,
+					{},
+				)
+				expect(link.status).toBe(201)
 				expect(viewReads()).toBe(0)
 				const older = yield* call("GET", `/v1/artifacts/${artifact.id}/versions/1`)
 				expect(older.status).toBe(200)
