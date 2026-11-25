@@ -6,10 +6,14 @@ import * as Schema from "effect/Schema"
 import { isPendingResource } from "./Api.ts"
 import type {
 	Agent,
+	Artifact,
+	ArtifactVersion,
 	Automation,
 	Environment,
 	ListSessionEventsResponse,
 	PendingAgent,
+	PendingArtifact,
+	PendingArtifactVersion,
 	PendingAutomation,
 	PendingEnvironment,
 	PendingMemory,
@@ -91,6 +95,8 @@ export type JsonSession = IsoDateTimes<Session>
 export type JsonAutomation = IsoDateTimes<Automation>
 export type JsonMemoryStore = IsoDateTimes<MemoryStoreSnapshot>
 export type JsonMemory = IsoDateTimes<MemorySnapshot>
+export type JsonArtifact = IsoDateTimes<Artifact>
+export type JsonArtifactVersion = IsoDateTimes<ArtifactVersion>
 export type JsonSessionEvent = IsoDateTimes<SessionEvent>
 export type JsonListSessionEventsResponse = IsoDateTimes<ListSessionEventsResponse>
 export type EventsPage = CursorPage<JsonSessionEvent>
@@ -326,6 +332,14 @@ export class Checkfu extends PromiseResources {
 		result: JsonMemory | PendingMemory,
 		options?: PromiseWaitForPendingOptions<JsonMemory>,
 	): Promise<JsonMemory>
+	waitForPending(
+		result: JsonArtifact | PendingArtifact,
+		options?: PromiseWaitForPendingOptions<JsonArtifact>,
+	): Promise<JsonArtifact>
+	waitForPending(
+		result: JsonArtifactVersion | PendingArtifactVersion,
+		options?: PromiseWaitForPendingOptions<JsonArtifactVersion>,
+	): Promise<JsonArtifactVersion>
 	async waitForPending(
 		result:
 			| JsonAgent
@@ -339,12 +353,30 @@ export class Checkfu extends PromiseResources {
 			| JsonMemoryStore
 			| PendingMemoryStore
 			| JsonMemory
-			| PendingMemory,
+			| PendingMemory
+			| JsonArtifact
+			| PendingArtifact
+			| JsonArtifactVersion
+			| PendingArtifactVersion,
 		options?: PromiseWaitForPendingOptions<
-			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory
+			| JsonAgent
+			| JsonEnvironment
+			| JsonSession
+			| JsonAutomation
+			| JsonMemoryStore
+			| JsonMemory
+			| JsonArtifact
+			| JsonArtifactVersion
 		>,
 	): Promise<
-		JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory
+		| JsonAgent
+		| JsonEnvironment
+		| JsonSession
+		| JsonAutomation
+		| JsonMemoryStore
+		| JsonMemory
+		| JsonArtifact
+		| JsonArtifactVersion
 	> {
 		if (!isPendingResource(result)) {
 			return result
@@ -361,7 +393,14 @@ export class Checkfu extends PromiseResources {
 			...(requestOptions === undefined ? {} : { requestOptions }),
 		}
 		const effect: Effect.Effect<
-			JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory,
+			| JsonAgent
+			| JsonEnvironment
+			| JsonSession
+			| JsonAutomation
+			| JsonMemoryStore
+			| JsonMemory
+			| JsonArtifact
+			| JsonArtifactVersion,
 			CheckfuSdkError,
 			CheckfuClient
 		> = Effect.flatMap(
@@ -369,7 +408,14 @@ export class Checkfu extends PromiseResources {
 			(
 				client,
 			): Effect.Effect<
-				JsonAgent | JsonEnvironment | JsonSession | JsonAutomation | JsonMemoryStore | JsonMemory,
+				| JsonAgent
+				| JsonEnvironment
+				| JsonSession
+				| JsonAutomation
+				| JsonMemoryStore
+				| JsonMemory
+				| JsonArtifact
+				| JsonArtifactVersion,
 				CheckfuSdkError
 			> => {
 				const until = options?.until
@@ -434,6 +480,34 @@ export class Checkfu extends PromiseResources {
 							}),
 							toIsoJson,
 						)
+					case "artifact":
+						return Effect.map(
+							client.waitForPending(result, {
+								...baseEffectOpts,
+								...(until === undefined
+									? {}
+									: { until: (resource: Artifact) => until(toIsoJson(resource)) }),
+							}),
+							toIsoJson,
+						)
+					case "artifact_version":
+						return Effect.map(
+							client.waitForPending(result, {
+								...baseEffectOpts,
+								...(until === undefined
+									? {}
+									: { until: (resource: ArtifactVersion) => until(toIsoJson(resource)) }),
+							}),
+							toIsoJson,
+						)
+					default: {
+						const unknown: { readonly type: unknown } = result
+						return Effect.fail(
+							new CheckfuConfigError({
+								message: `waitForPending cannot wait for a pending ${String(unknown.type)}.`,
+							}),
+						)
+					}
 				}
 			},
 		)

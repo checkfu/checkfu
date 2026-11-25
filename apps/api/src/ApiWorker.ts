@@ -11,6 +11,8 @@ import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
 import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
+import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObjects.do.ts"
+import { ARTIFACT_RECONCILE_CRON, reconcileArtifactWrites } from "./Artifacts/ArtifactReconcile.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
@@ -75,6 +77,10 @@ const HarnessLive = PiDurableHarnessLive.pipe(
 
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
+	ArtifactStoreR2.pipe(
+		Layer.provide(ArtifactObjectsLive),
+		Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
+	),
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
@@ -108,6 +114,9 @@ export default ApiWorker.make(
 			return yield* Effect.die(new Error("ApiWorker requires an owning instance Scope."))
 		}
 		const services = yield* Layer.buildWithScope(ApiWorkerLive, scope)
+		yield* Cloudflare.Workers.cron(ARTIFACT_RECONCILE_CRON, () =>
+			reconcileArtifactWrites.pipe(Effect.provide(services)),
+		)
 		const handler = yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
 		// The session workspaces in the harness Worker reach their memory stores through these.
 		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
@@ -121,5 +130,5 @@ export default ApiWorker.make(
 			memoryRemove: (sessionId, name, path, expected) =>
 				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected)),
 		})
-	}),
+	}).pipe(Effect.provide(Cloudflare.Workers.CronEventSourceLive)),
 )

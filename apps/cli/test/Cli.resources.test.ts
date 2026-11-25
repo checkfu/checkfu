@@ -2,6 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
+import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "@checkfu/sdk/Schemas"
+import { MAX_INPUT_BYTES } from "../src/Input.ts"
 import { TEST_API_KEY, makeTestServer } from "./helpers/CliHarness.ts"
 import type { CliRunResult } from "./helpers/CliHarness.ts"
 
@@ -790,6 +792,278 @@ describe("CLI help, errors, and resource commands", () => {
 					expect((JSON.parse(validFileRes.stdout) as { system: string }).system).toBe(
 						"Be concise: café 🚀",
 					)
+				}),
+			),
+		)
+	})
+
+	it("reads an artifact upload from stdin up to the API's limit and keeps other commands at 2 MiB", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const megabyte = "x".repeat(MAX_ARTIFACT_FILE_BYTES)
+					const upload = JSON.stringify({
+						name: "Two files",
+						files: [
+							{ path: "a.txt", content: megabyte },
+							{ path: "b.txt", content: megabyte },
+						],
+					})
+					expect(upload.length).toBeGreaterThan(MAX_INPUT_BYTES)
+					const created = yield* cli.run(["artifacts", "create"], { stdin: upload })
+					expect(created.stderr).toBe("")
+					expect(created.exitCode).toBe(0)
+					const artifact = JSON.parse(created.stdout) as { id: string; total_bytes: number }
+					expect(artifact.total_bytes).toBe(2 * MAX_ARTIFACT_FILE_BYTES)
+
+					const added = yield* cli.run(
+						["artifacts:versions", "create", "--artifact-id", artifact.id],
+						{ stdin: JSON.stringify({ version: 1, files: JSON.parse(upload).files }) },
+					)
+					expect(added.exitCode).toBe(0)
+					expect((JSON.parse(added.stdout) as { version: number }).version).toBe(2)
+					expect(
+						yield* untilListed(
+							cli.run(["artifacts", "list", "--order", "desc", "--limit", "5"]),
+							artifact.id,
+						),
+					).toEqual([artifact.id])
+
+					let requests = 0
+					const tooLarge = yield* cli.run(["agents", "create"], {
+						stdin: JSON.stringify({
+							name: "Big",
+							model: "gpt-6.2-sol",
+							system: "x".repeat(3 * 1024 * 1024),
+						}),
+						interceptFetch: async (next, request) => {
+							requests += 1
+							return next(request)
+						},
+					})
+					expect(tooLarge.exitCode).toBe(1)
+					expect(tooLarge.stdout).toBe("")
+					expect(tooLarge.stderr).toContain(`stdin payload exceeds ${MAX_INPUT_BYTES} byte limit`)
+					expect(requests).toBe(0)
+				}),
+			),
+		)
+	})
+
+	it("reads one artifact file, an array of files, or a whole body from stdin", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					type Artifact = {
+						id: string
+						name: string
+						version: number
+						files: Array<{ path: string }>
+					}
+
+					const single = yield* cli.run(["artifacts", "create", "--name", "Report"], {
+						stdin: JSON.stringify({ path: "a.txt", content: "a" }),
+					})
+					expect(single.stderr).toBe("")
+					expect(single.exitCode).toBe(0)
+					const artifact = JSON.parse(single.stdout) as Artifact
+					expect(artifact.name).toBe("Report")
+					expect(artifact.files.map((file) => file.path)).toEqual(["a.txt"])
+
+					const singleYaml = yield* cli.run(
+						[
+							"artifacts:versions",
+							"create",
+							"--artifact-id",
+							artifact.id,
+							"--current-version",
+							"1",
+						],
+						{ stdin: "path: b.txt\ncontent: b\n" },
+					)
+					expect(singleYaml.exitCode).toBe(0)
+					expect(
+						(JSON.parse(singleYaml.stdout) as Artifact).files.map((file) => file.path),
+					).toEqual(["b.txt"])
+
+					const array = yield* cli.run(["artifacts", "create", "--name", "Pair"], {
+						stdin: JSON.stringify([
+							{ path: "a.txt", content: "a" },
+							{ path: "b.txt", content: "b" },
+						]),
+					})
+					expect(array.exitCode).toBe(0)
+					expect((JSON.parse(array.stdout) as Artifact).files.map((file) => file.path)).toEqual([
+						"a.txt",
+						"b.txt",
+					])
+
+					const whole = yield* cli.run(["artifacts", "create"], {
+						stdin: JSON.stringify({ name: "Whole", files: [{ path: "c.txt", content: "c" }] }),
+					})
+					expect(whole.exitCode).toBe(0)
+					expect((JSON.parse(whole.stdout) as Artifact).name).toBe("Whole")
+
+					const wholeVersion = yield* cli.run(
+						["artifacts:versions", "create", "--artifact-id", artifact.id],
+						{ stdin: JSON.stringify({ version: 2, files: [{ path: "d.txt", content: "d" }] }) },
+					)
+					expect(wholeVersion.exitCode).toBe(0)
+					expect((JSON.parse(wholeVersion.stdout) as Artifact).version).toBe(3)
+
+					let requests = 0
+					const countRequests = async (
+						next: (request: Request) => Promise<Response>,
+						request: Request,
+					) => {
+						requests += 1
+						return next(request)
+					}
+					const scalar = yield* cli.run(["artifacts", "create", "--name", "Scalar"], {
+						stdin: "just text\n",
+						interceptFetch: countRequests,
+					})
+					expect(scalar.exitCode).toBe(1)
+					expect(scalar.stdout).toBe("")
+					expect(scalar.stderr).toContain(
+						"Expected stdin to be { files: [...] }, an array, or a single item object.",
+					)
+
+					const mixed = yield* cli.run(["artifacts", "create"], {
+						stdin: JSON.stringify({ name: "Mixed", path: "a.txt", content: "a" }),
+						interceptFetch: countRequests,
+					})
+					expect(mixed.exitCode).toBe(1)
+					expect(mixed.stdout).toBe("")
+					expect(mixed.stderr).toContain("Invalid artifacts create payload")
+
+					const badItem = yield* cli.run(["artifacts", "create", "--name", "Bad"], {
+						stdin: JSON.stringify({ type: "user.message", content: "a" }),
+						interceptFetch: countRequests,
+					})
+					expect(badItem.exitCode).toBe(1)
+					expect(badItem.stdout).toBe("")
+					expect(badItem.stderr).toContain("Invalid artifacts create payload")
+					expect(requests).toBe(0)
+				}),
+			),
+		)
+	})
+
+	it("reads a --file @path up to the artifact input bound and keeps other commands at 2 MiB", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const record = JSON.stringify({
+						path: "newlines.txt",
+						content: "\n".repeat(MAX_ARTIFACT_FILE_BYTES),
+					})
+					expect(record.length).toBeGreaterThan(MAX_INPUT_BYTES)
+
+					const created = yield* cli.run(
+						["artifacts", "create", "--name", "Newlines", "--file", "@big.json"],
+						{ files: { "big.json": record } },
+					)
+					expect(created.stderr).toBe("")
+					expect(created.exitCode).toBe(0)
+					expect((JSON.parse(created.stdout) as { total_bytes: number }).total_bytes).toBe(
+						MAX_ARTIFACT_FILE_BYTES,
+					)
+
+					let requests = 0
+					const event = JSON.stringify({
+						type: "user.message",
+						content: [{ type: "text", text: "x".repeat(3 * 1024 * 1024) }],
+					})
+					const tooLarge = yield* cli.run(
+						["sessions:events", "send", "--session-id", "sess_1", "--event", "@big.json"],
+						{
+							files: { "big.json": event },
+							interceptFetch: async (next, request) => {
+								requests += 1
+								return next(request)
+							},
+						},
+					)
+					expect(tooLarge.exitCode).toBe(1)
+					expect(tooLarge.stdout).toBe("")
+					expect(tooLarge.stderr).toContain(
+						`File "big.json" exceeds ${MAX_INPUT_BYTES} byte limit.`,
+					)
+					expect(requests).toBe(0)
+				}),
+			),
+		)
+	})
+
+	it("counts every --file @path of one request against a single artifact input budget", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const small = yield* cli.run(
+						["artifacts", "create", "--name", "Pair", "--file", "@a.json", "--file", "@b.json"],
+						{
+							files: {
+								"a.json": JSON.stringify({ path: "a.txt", content: "a" }),
+								"b.json": JSON.stringify({ path: "b.txt", content: "b" }),
+							},
+						},
+					)
+					expect(small.stderr).toBe("")
+					expect(small.exitCode).toBe(0)
+
+					const half = JSON.stringify({
+						path: "half.txt",
+						content: "x".repeat(MAX_ARTIFACT_BODY_BYTES / 2),
+					})
+					expect(half.length).toBeLessThan(MAX_ARTIFACT_BODY_BYTES)
+					let requests = 0
+					const read: Array<string> = []
+					const tooLarge = yield* cli.run(
+						["artifacts", "create", "--name", "Big", "--file", "@a.json", "--file", "@b.json"],
+						{
+							files: { "a.json": half, "b.json": half },
+							onRead: (filePath) => read.push(filePath),
+							interceptFetch: async (next, request) => {
+								requests += 1
+								return next(request)
+							},
+						},
+					)
+					expect(tooLarge.exitCode).toBe(1)
+					expect(tooLarge.stderr).toContain(
+						`File "b.json" exceeds ${MAX_ARTIFACT_BODY_BYTES} byte limit`,
+					)
+					expect(read).toEqual(["a.json"])
+					expect(requests).toBe(0)
+				}),
+			),
+		)
+	})
+
+	it("refuses artifacts:versions file without --path before sending a request", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					let requests = 0
+					const missing = yield* cli.run(
+						["artifacts:versions", "file", "--artifact-id", "art_1", "--current-version", "1"],
+						{
+							interceptFetch: async (next, request) => {
+								requests += 1
+								return next(request)
+							},
+						},
+					)
+					expect(missing.exitCode).toBe(1)
+					expect(missing.stdout).toBe("")
+					expect(missing.stderr).toContain("--path")
+					expect(requests).toBe(0)
 				}),
 			),
 		)

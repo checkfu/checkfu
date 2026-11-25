@@ -102,6 +102,7 @@
       "name": "@checkfu/mcp",
       "version": "0.0.0",
       "dependencies": {
+        "@checkfu/sdk": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

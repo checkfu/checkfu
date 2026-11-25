@@ -6,6 +6,9 @@ import * as Schema from "effect/Schema"
 import { Agent } from "../Agent/Agent.aggregate.ts"
 import { AgentArchived } from "../Agent/ArchiveAgent.command.ts"
 import { AgentCreated } from "../Agent/CreateAgent.command.ts"
+import { Artifact } from "../Artifact/Artifact.aggregate.ts"
+import { ArtifactCreated } from "../Artifact/CreateArtifact.command.ts"
+import { ArtifactDeleted } from "../Artifact/DeleteArtifact.command.ts"
 import { EnvironmentArchived } from "../Environment/ArchiveEnvironment.command.ts"
 import { EnvironmentCreated } from "../Environment/CreateEnvironment.command.ts"
 import { EnvironmentDeleted } from "../Environment/DeleteEnvironment.command.ts"
@@ -23,13 +26,14 @@ import type { ListingChange } from "./ListingStore.ts"
 export class Listing extends Domain.Projection(
 	"Listing",
 	{
-		from: [Agent, Environment, Session, MemoryStore],
+		from: [Agent, Environment, Session, MemoryStore, Artifact],
 		key: Schema.String,
 		keyOf: {
 			Agent: ({ source }) => source.id,
 			Environment: ({ source }) => source.id,
 			Session: ({ source }) => source.id,
 			MemoryStore: ({ source }) => source.id,
+			Artifact: ({ source }) => source.id,
 		},
 		on: [
 			AgentCreated,
@@ -42,11 +46,13 @@ export class Listing extends Domain.Projection(
 			MemoryStoreCreated,
 			MemoryStoreArchived,
 			MemoryStoreDeleted,
+			ArtifactCreated,
+			ArtifactDeleted,
 		],
 	},
 	{
 		description:
-			"Every agent, environment, session and memory store, in creation order, with its status.",
+			"Every agent, environment, session, memory store and artifact, in creation order, with its status.",
 	},
 ) {}
 
@@ -77,6 +83,10 @@ const changeOf = ({
 			return { kind: "memory_store", id, created_at, agent_id: null, status: ARCHIVED }
 		case "memory_store.deleted":
 			return { kind: "memory_store", id, created_at, agent_id: null, status: DELETED }
+		case "artifact.created":
+			return { kind: "artifact", id, created_at, agent_id: null, status: LISTED }
+		case "artifact.deleted":
+			return { kind: "artifact", id, created_at, agent_id: null, status: DELETED }
 	}
 }
 

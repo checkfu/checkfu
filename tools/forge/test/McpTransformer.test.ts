@@ -101,6 +101,7 @@ describe("MCP tool projection", () => {
 			tools.filter((tool) => tool.idempotent && !tool.readOnly).map((tool) => tool.name),
 		).toEqual([
 			"agents_archiveAgent",
+			"artifacts_deleteArtifact",
 			"automations_archiveAutomation",
 			"automations_createAutomation",
 			"environments_archiveEnvironment",
@@ -116,6 +117,7 @@ describe("MCP tool projection", () => {
 			tools.filter((tool) => !tool.readOnly && !tool.destructive).map((tool) => tool.name),
 		).toEqual([
 			"agents_createAgent",
+			"artifacts_createArtifact",
 			"automations_createAutomation",
 			"environments_createEnvironment",
 			"memoryStores_createMemory",
@@ -249,22 +251,6 @@ describe("MCP tool projection", () => {
 			).toThrow(message)
 		}
 
-		expect(() =>
-			project(
-				withOperation("/v1/agents/{agent_id}", "get", {
-					...exposed,
-					parameters: [
-						{
-							name: "agent_id",
-							in: "path",
-							required: true,
-							schema: { type: "string", pattern: "^agent_" },
-						},
-					],
-				}),
-			),
-		).toThrow(/a path parameter with its own pattern is not supported/)
-
 		const spec = JSON.parse(withOperation("/v1/agents", "get", exposed)) as {
 			paths: Record<string, Record<string, Json>>
 		}
@@ -293,6 +279,59 @@ describe("MCP tool projection", () => {
 			}),
 		).find((tool) => tool.name === "agents_searchAgents")
 		expect(mandatory?.inputSchema["required"]).toEqual(["idempotency_key"])
+	})
+
+	it("keeps a path parameter's own pattern beside the path-segment rule", () => {
+		const segment = String.raw`^(?:[^/\\.][^/\\]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)$`
+		const [tool] = project(
+			withOperation("/v1/agents/{agent_id}", "get", {
+				...searchAgents,
+				"x-checkfu-mcp": { name: "agents_getAgent" },
+				parameters: [
+					{
+						name: "agent_id",
+						in: "path",
+						required: true,
+						schema: { type: "string", pattern: "^agent_" },
+					},
+				],
+			}),
+		).filter((projected) => projected.name === "agents_getAgent")
+		expect(tool?.inputSchema["properties"]).toMatchObject({
+			path: {
+				properties: {
+					agent_id: { type: "string", pattern: segment, allOf: [{ pattern: "^agent_" }] },
+				},
+			},
+		})
+
+		expect(() =>
+			project(
+				withOperation("/v1/agents/{agent_id}", "get", {
+					...searchAgents,
+					"x-checkfu-mcp": { name: "agents_getAgent" },
+					parameters: [
+						{
+							name: "agent_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", allOf: [{ pattern: "^agent_" }] },
+						},
+					],
+				}),
+			),
+		).toThrow(/a path parameter with allOf is not supported/)
+
+		const version = project(exportDeterministicOpenApiJson()).find(
+			(projected) => projected.name === "artifacts_getArtifactVersion",
+		)
+		expect(version?.inputSchema["properties"]).toMatchObject({
+			path: {
+				properties: {
+					version: { pattern: segment, allOf: [{ pattern: String.raw`^[1-9]\d{0,8}$` }] },
+				},
+			},
+		})
 	})
 
 	it("refuses a request body on GET", () => {

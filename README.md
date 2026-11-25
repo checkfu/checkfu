@@ -83,6 +83,26 @@ In another terminal (requires `curl` and `jq`), set `CHECKFU_API_KEY` to match `
 )
 ```
 
+## Artifacts
+
+An artifact is a named set of files with immutable, numbered versions. Files are stored in R2; each new version replaces the whole set, and older versions stay readable.
+
+```sh
+ARTIFACT_ID=$(curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/artifacts" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Report","files":[{"path":"index.html","content":"<h1>Hello</h1>"}]}' \
+  | jq -er '.id // error(tojson)')
+
+curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/artifacts/$ARTIFACT_ID/versions" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" -H "Content-Type: application/json" \
+  -d '{"version":1,"files":[{"path":"index.html","content":"<h1>Hello again</h1>"}]}' | jq .
+
+curl -sS --fail-with-body "$CHECKFU_URL/v1/artifacts/$ARTIFACT_ID/versions/1/file?path=index.html" \
+  -H "Authorization: Bearer $CHECKFU_API_KEY" | jq -r .content
+```
+
+Send binary files with `"encoding":"base64"`. A version holds up to 64 files, 1 MiB each and 4 MiB in total. The JSON request body of an upload may be at most 12,828,672 bytes, three times the decoded limit plus room for paths; content that JSON escapes heavily, such as control characters, can exceed that and is refused with 413, so send it as base64, which costs 4/3 of its size. The CLI and the MCP server accept uploads of the same size. `GET /v1/artifacts` lists artifacts in creation order, each with the files of its latest version, paged like the other lists; deleted artifacts never appear. Deploying needs R2 enabled on the Cloudflare account.
+
 ## SDK
 
 `@checkfu/sdk` ([packages/sdk/README.md](packages/sdk/README.md)) provides an Effect-native client (`CheckfuClient` service + `Layer`s + `Stream`s + `Data.TaggedError`s) and a thin Promise / `AsyncIterable` facade (`new Checkfu(...)`) sharing the single-source `CheckfuApi` contract with the server and CLI.
@@ -182,7 +202,7 @@ Attach stores when you create a session. Each is mounted in the workspace as a d
 
 ## Commands
 
-- `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
+- `bun checkfu --help` — run the Checkfu CLI from this checkout, and only from a **checkout you trust** (`deploy`, `login`, `logout`, `destroy`, `agents`, `environments`, `sessions`, `sessions:events`, `artifacts`, `artifacts:versions`, `automations`, `automations:runs`). Without `--base-url`, `CHECKFU_API_URL`, or `CHECKFU_URL` it targets the saved deployment, then `http://localhost:1337`; the saved API key is only ever sent to the URL it was saved with.
   - The `checkfu` script starts Bun with `--no-env-file` and the CLI's own `bunfig.toml`, so plain `bun checkfu …` never loads the checkout's `.env` files or a `bunfig.toml` preload into the CLI, and a key in `.env` is not used as if you had exported it. That holds only when nothing in front of the script loads one: `bun --env-file=.env checkfu …`, or any wrapper that sets variables, hands them to the CLI as ordinary environment, which the CLI cannot tell apart from exported values. Alchemy and every other tool you start in the checkout still load `.env` files as Bun normally does. The CLI refuses to start any other way, for example with extra flags passed through `BUN_OPTIONS`.
   - Bun's script runner stays in front of the CLI. On macOS and Linux it passes on Ctrl-C, `SIGTERM` and `SIGHUP`, but not `SIGKILL`, so to force-stop `bun checkfu` there, kill its process group. On Windows there are no signals to pass on: stopping the runner can leave the CLI running, so a supervisor on Windows should start the standalone binary itself. Anything supervised or long-lived is better run with the standalone binary on any platform, since it is one process. The runner also forwards each Ctrl-C a second time, so in `sessions connect` one press interrupts the turn and then disconnects straight away instead of asking for a second press. The standalone binary below has no runner and asks.
   - Outside this checkout, or without Bun on `PATH`, use the standalone binary below and call it by its full path. It is compiled never to load a `.env` or a `bunfig.toml` from the directory it runs in.

@@ -140,6 +140,24 @@ describe("@checkfu/sdk live API integration", () => {
 							)
 							expect(Array.from(listedEnvironments, (entry) => entry.id)).toEqual([env.id])
 
+							const artifact = yield* client.waitForPending(
+								yield* client.artifacts.create({
+									name: "sdk-artifact",
+									files: [{ path: "index.html", content: "<h1>Hi</h1>" }],
+								}),
+							)
+							const listedArtifacts = yield* Stream.runCollect(
+								client.artifacts.listStream({ limit: 1, order: "desc" }),
+							).pipe(
+								Effect.repeat({
+									schedule: Schedule.spaced("5 millis"),
+									times: 400,
+									until: (entries) => entries.length === 1,
+								}),
+							)
+							expect(Array.from(listedArtifacts, (entry) => entry.name)).toEqual(["sdk-artifact"])
+							expect(Array.from(listedArtifacts, (entry) => entry.id)).toEqual([artifact.id])
+
 							// Automation create, run on request, run list, archive
 							const automation = yield* client.automations.create(
 								{

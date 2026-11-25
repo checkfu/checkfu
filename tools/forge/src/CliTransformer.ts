@@ -42,6 +42,7 @@ interface CliExtension {
 	readonly repeatArrayField?: RepeatArraySpec
 	readonly intQueryParams?: Readonly<Record<string, IntQuerySpec>>
 	readonly examples?: ReadonlyArray<ExampleSpec>
+	readonly maxInputBytes?: number
 }
 
 interface FlagSpec {
@@ -136,6 +137,9 @@ const readCliExtension = (method: Method): CliExtension => {
 		...(repeatArrayField !== undefined ? { repeatArrayField } : {}),
 		...(intQueryParams !== undefined ? { intQueryParams } : {}),
 		...(examples !== undefined ? { examples } : {}),
+		...(typeof raw["maxInputBytes"] === "number" && Number.isSafeInteger(raw["maxInputBytes"])
+			? { maxInputBytes: raw["maxInputBytes"] }
+			: {}),
 	}
 }
 
@@ -278,7 +282,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				wireName: field.wireName,
 				location: "query",
 				kind: "int",
-				required: false,
+				required: field.required,
 				description: field.description || `Query parameter ${field.wireName}`,
 				...(intSpec?.metavar !== undefined ? { metavar: intSpec.metavar } : {}),
 				...(intSpec?.min !== undefined ? { min: intSpec.min } : {}),
@@ -291,7 +295,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				wireName: field.wireName,
 				location: "query",
 				kind: "literals",
-				required: false,
+				required: field.required,
 				description: field.description || `Query parameter ${field.wireName}`,
 				literals,
 			})
@@ -302,7 +306,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				wireName: field.wireName,
 				location: "query",
 				kind: "boolean",
-				required: false,
+				required: field.required,
 				description: field.description || `Query parameter ${field.wireName}`,
 			})
 		} else {
@@ -312,7 +316,7 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 				wireName: field.wireName,
 				location: "query",
 				kind: "string",
-				required: false,
+				required: field.required,
 				description: field.description || `Query parameter ${field.wireName}`,
 			})
 		}
@@ -519,6 +523,13 @@ export const generateCliFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => 
 				out("apiGroup: ", JSON.stringify(endpointRef.group), ",")
 				out("apiEndpoint: ", JSON.stringify(endpointRef.endpoint), ",")
 				out("hasBody: ", method.body !== undefined, ",")
+				if (cliExt.maxInputBytes !== undefined) {
+					out(
+						"maxInputBytes: ",
+						cliExt.maxInputBytes.toLocaleString("en-US").replaceAll(",", "_"),
+						",",
+					)
+				}
 				out("flags: ", JSON.stringify(flagSpecsJson), ",")
 			})
 			out("}")

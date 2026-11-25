@@ -26,6 +26,9 @@ import { AutomationDirectory } from "../src/Automation/AutomationDirectory.view.
 import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
 import { isUsableSchedule, upcomingOccurrences } from "../src/Automation/Schedule.ts"
+import { Artifact } from "../src/Artifact/Artifact.aggregate.ts"
+import { ArtifactVersionView } from "../src/Artifact/ArtifactVersionView.view.ts"
+import { ArtifactView } from "../src/Artifact/ArtifactView.view.ts"
 import { ArchiveEnvironment } from "../src/Environment/ArchiveEnvironment.command.ts"
 import { CreateEnvironment } from "../src/Environment/CreateEnvironment.command.ts"
 import { DeleteEnvironment } from "../src/Environment/DeleteEnvironment.command.ts"
@@ -121,6 +124,15 @@ const STANDING = {
 	"Session.AbandonedTurnEnds": "proved",
 	"Session.AgentMessageEndsTheTurn": "proved",
 	"Session.OpenModelRequestClosedBeforeLeavingRunning": "proved",
+	"Artifact.StatusIsKnown": "proved",
+	"Artifact.CreatedExactlyWhenVersioned": "proved",
+	"Artifact.CreatedArtifactNeverReturnsToUninitialized": "proved",
+	"Artifact.DeletedStaysDeleted": "proved",
+	"Artifact.NameNeverChangesOnceCreated": "proved",
+	"Artifact.VersionGrowsByOneOrNotAtAll": "proved",
+	"Artifact.AddedVersionRecordsItsManifest": "proved",
+	"Artifact.FenceNeverDecreasesAndOnlyFencingMovesIt": "proved",
+	"Artifact.DeleteLandsOnlyAtTheCurrentFence": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
 	"Automation.ReportedNeverExceedsRuns": "proved",
@@ -184,6 +196,8 @@ const STANDING = {
 	"Checkfu.MemoryViewsMatchMemories": "checked",
 	"Checkfu.TheIndexListsEachStoresPresentMemories": "checked",
 	"Checkfu.MemoryStoreViewsMatchStores": "checked",
+	"Checkfu.ArtifactViewMatchesArtifact": "checked",
+	"Checkfu.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -254,6 +268,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"DeleteMemoryStore",
 			"WriteMemory",
 			"DeleteMemory",
+			"CreateArtifact",
+			"AddArtifactVersion",
+			"DeleteArtifact",
+			"FenceArtifactWrites",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
 		expect(hostedCommands).not.toContain("CreateAutomation")
@@ -270,6 +288,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"MemoryStoreView",
 			"MemoryView",
 			"MemoryIndex",
+			"ArtifactView",
+			"ArtifactVersionView",
 		])
 		const report = await Effect.runPromise(
 			Verify.model(Checkfu, {
@@ -501,6 +521,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							MemoryStoreView: yield* readView(MemoryStoreView),
 							MemoryView: yield* readView(MemoryView),
 							MemoryIndex: yield* readView(MemoryIndex),
+							Artifact: yield* readAggregate(Artifact),
+							ArtifactView: yield* readView(ArtifactView),
+							ArtifactVersionView: yield* readView(ArtifactVersionView),
 						}
 					})
 
@@ -655,6 +678,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				MemoryViewsMatchMemories: true,
 				TheIndexListsEachStoresPresentMemories: true,
 				MemoryStoreViewsMatchStores: true,
+				ArtifactViewMatchesArtifact: true,
+				EveryArtifactVersionIsWithinItsArtifactsHead: true,
 			})
 		}
 
@@ -811,6 +836,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			MemoryViewsMatchMemories: true,
 			TheIndexListsEachStoresPresentMemories: true,
 			MemoryStoreViewsMatchStores: true,
+			ArtifactViewMatchesArtifact: true,
+			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -830,6 +857,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			MemoryViewsMatchMemories: true,
 			TheIndexListsEachStoresPresentMemories: true,
 			MemoryStoreViewsMatchStores: true,
+			ArtifactViewMatchesArtifact: true,
+			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
 		// A pinned session reads its version's row, so a wrong historical row must be caught
 		// even when the row is present and the head is right.
@@ -875,6 +904,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			MemoryViewsMatchMemories: true,
 			TheIndexListsEachStoresPresentMemories: true,
 			MemoryStoreViewsMatchStores: true,
+			ArtifactViewMatchesArtifact: true,
+			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -892,6 +923,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			MemoryViewsMatchMemories: true,
 			TheIndexListsEachStoresPresentMemories: true,
 			MemoryStoreViewsMatchStores: true,
+			ArtifactViewMatchesArtifact: true,
+			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -914,6 +947,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			MemoryViewsMatchMemories: true,
 			TheIndexListsEachStoresPresentMemories: true,
 			MemoryStoreViewsMatchStores: true,
+			ArtifactViewMatchesArtifact: true,
+			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
 
 		// A session's mounts are what it was admitted with, in the view the API reads and in

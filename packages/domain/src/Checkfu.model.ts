@@ -24,6 +24,9 @@ import {
 	StartAutomationRun,
 	StartAutomationRunLive,
 } from "./Automation/StartAutomationRun.policy.ts"
+import { Artifact } from "./Artifact/Artifact.aggregate.ts"
+import { ArtifactVersionView } from "./Artifact/ArtifactVersionView.view.ts"
+import { ArtifactView } from "./Artifact/ArtifactView.view.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
@@ -52,7 +55,16 @@ import { SessionsHandlersLive } from "./Sessions.model.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [Agent, Environment, Session, Automation, AutomationCapacity, MemoryStore, Memory],
+	aggregates: [
+		Agent,
+		Environment,
+		Session,
+		Automation,
+		AutomationCapacity,
+		MemoryStore,
+		Memory,
+		Artifact,
+	],
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
@@ -74,6 +86,8 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		MemoryStoreView,
 		MemoryView,
 		MemoryIndex,
+		ArtifactView,
+		ArtifactVersionView,
 	],
 	policies: [
 		StartTurn,
@@ -423,6 +437,39 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					),
 				),
 			].every((ok) => ok),
+		ArtifactViewMatchesArtifact: (m) =>
+			[
+				m.Artifact.every((a) => {
+					const view = m.ArtifactView.find((v) => v.id === a.id)
+					if (a.state.status === "" || a.state.status === "deleted") {
+						return view === undefined
+					}
+					if (view === undefined) {
+						return false
+					}
+					return [
+						view.state.id === a.id,
+						view.state.version === a.state.version,
+						view.state.name === a.state.name,
+						view.state.manifest === a.state.manifest,
+					].every((ok) => ok)
+				}),
+				m.ArtifactView.every((v) =>
+					m.Artifact.some((a) => [a.id === v.id, a.state.status === "active"].every((ok) => ok)),
+				),
+			].every((ok) => ok),
+		EveryArtifactVersionIsWithinItsArtifactsHead: (m) =>
+			m.ArtifactVersionView.every((v) =>
+				m.Artifact.some((a) =>
+					[
+						a.id === v.state.artifact_id,
+						v.id === `${a.id}@${v.state.version}`,
+						a.state.status !== "",
+						v.state.version <= a.state.version,
+						v.state.version !== a.state.version || v.state.manifest === a.state.manifest,
+					].every((ok) => ok),
+				),
+			),
 	},
 	relations: {
 		APresentMemoryIsInAStoreThatWasCreated: Domain.Relation({
@@ -471,6 +518,10 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"DeleteMemoryStore",
 		"WriteMemory",
 		"DeleteMemory",
+		"CreateArtifact",
+		"AddArtifactVersion",
+		"DeleteArtifact",
+		"FenceArtifactWrites",
 	],
 	views: [
 		"AgentView",
@@ -483,6 +534,8 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"MemoryStoreView",
 		"MemoryView",
 		"MemoryIndex",
+		"ArtifactView",
+		"ArtifactVersionView",
 	],
 	queries: ["ListResources"],
 }) {}

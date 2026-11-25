@@ -82,6 +82,48 @@ export interface CheckfuOperations {
 		EndpointBody<"agents", "update">,
 		EndpointSuccess<"agents", "update">
 	>
+	readonly "artifacts.create": OperationShape<
+		EndpointParams<"artifacts", "create">,
+		EndpointQuery<"artifacts", "create">,
+		EndpointBody<"artifacts", "create">,
+		EndpointSuccess<"artifacts", "create">
+	>
+	readonly "artifacts.delete": OperationShape<
+		EndpointParams<"artifacts", "delete">,
+		EndpointQuery<"artifacts", "delete">,
+		EndpointBody<"artifacts", "delete">,
+		EndpointSuccess<"artifacts", "delete">
+	>
+	readonly "artifacts.list": OperationShape<
+		EndpointParams<"artifacts", "list">,
+		RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		EndpointBody<"artifacts", "list">,
+		EndpointSuccess<"artifacts", "list">
+	>
+	readonly "artifacts.retrieve": OperationShape<
+		EndpointParams<"artifacts", "get">,
+		EndpointQuery<"artifacts", "get">,
+		EndpointBody<"artifacts", "get">,
+		EndpointSuccess<"artifacts", "get">
+	>
+	readonly "artifacts.versions.create": OperationShape<
+		EndpointParams<"artifacts", "createVersion">,
+		EndpointQuery<"artifacts", "createVersion">,
+		EndpointBody<"artifacts", "createVersion">,
+		EndpointSuccess<"artifacts", "createVersion">
+	>
+	readonly "artifacts.versions.file": OperationShape<
+		EndpointParams<"artifacts", "getFile">,
+		RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
+		EndpointBody<"artifacts", "getFile">,
+		EndpointSuccess<"artifacts", "getFile">
+	>
+	readonly "artifacts.versions.retrieve": OperationShape<
+		EndpointParams<"artifacts", "getVersion">,
+		EndpointQuery<"artifacts", "getVersion">,
+		EndpointBody<"artifacts", "getVersion">,
+		EndpointSuccess<"artifacts", "getVersion">
+	>
 	readonly "automations.archive": OperationShape<
 		EndpointParams<"automations", "archive">,
 		EndpointQuery<"automations", "archive">,
@@ -513,6 +555,327 @@ export class EffectAgentsResource {
 					),
 					pendingUpdateReadiness(params, "agents.update"),
 				),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectArtifactsVersionsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	create(
+		artifactId: string,
+		params: EndpointBody<"artifacts", "createVersion">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "createVersion">>, CheckfuSdkError>
+	create(
+		artifactId: string,
+		params: EndpointBody<"artifacts", "createVersion">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "createVersion">, CheckfuSdkError>
+	create(
+		artifactId: string,
+		params: EndpointBody<"artifacts", "createVersion">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"artifacts", "createVersion">
+		| WithResponse<EndpointSuccess<"artifacts", "createVersion">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "createVersion", { artifact_id: artifactId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.artifacts.versions.create",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.artifacts.createVersion({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "artifacts.versions.create" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve one file of an artifact version; content is text when it is valid UTF-8 and base64 otherwise */
+	file(
+		artifactId: string,
+		version: string,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "getFile">>, CheckfuSdkError>
+	file(
+		artifactId: string,
+		version: string,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "getFile">, CheckfuSdkError>
+	file(
+		artifactId: string,
+		version: string,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"artifacts", "getFile"> | WithResponse<EndpointSuccess<"artifacts", "getFile">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "getFile", { artifact_id: artifactId, version }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.artifacts.versions.file",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.artifacts.getFile({
+								params: pathParams,
+								query: {
+									path: params["path"],
+								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve one version of an artifact and its file list */
+	retrieve(
+		artifactId: string,
+		version: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "getVersion">>, CheckfuSdkError>
+	retrieve(
+		artifactId: string,
+		version: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "getVersion">, CheckfuSdkError>
+	retrieve(
+		artifactId: string,
+		version: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"artifacts", "getVersion">
+		| WithResponse<EndpointSuccess<"artifacts", "getVersion">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "getVersion", { artifact_id: artifactId, version }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.artifacts.versions.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.artifacts.getVersion({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectArtifactsResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly versions: EffectArtifactsVersionsResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.versions = new EffectArtifactsVersionsResource(runtime)
+	}
+
+	/** Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	create(
+		params: EndpointBody<"artifacts", "create">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "create">>, CheckfuSdkError>
+	create(
+		params: EndpointBody<"artifacts", "create">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "create">, CheckfuSdkError>
+	create(
+		params: EndpointBody<"artifacts", "create">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"artifacts", "create"> | WithResponse<EndpointSuccess<"artifacts", "create">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+				withPendingReadiness(
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.artifacts.create",
+						key !== undefined ? "idempotent" : "pre-commit-only",
+						withResolvedIdempotencyKey(options, key),
+						() =>
+							this.#runtime.raw.artifacts.create({
+								headers: key === undefined ? {} : { "idempotency-key": key },
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+					{ kind: "create" },
+				),
+			),
+			options,
+		)
+	}
+
+	/** Delete an artifact and every stored version of its files */
+	delete(
+		artifactId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "delete">>, CheckfuSdkError>
+	delete(
+		artifactId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "delete">, CheckfuSdkError>
+	delete(
+		artifactId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"artifacts", "delete"> | WithResponse<EndpointSuccess<"artifacts", "delete">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "delete", { artifact_id: artifactId }),
+				(pathParams) =>
+					executeWithRetries(this.#runtime, "checkfu.artifacts.delete", "idempotent", options, () =>
+						this.#runtime.raw.artifacts.delete({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "list">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"artifacts", "list"> | WithResponse<EndpointSuccess<"artifacts", "list">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.artifacts.list", "idempotent", options, () =>
+				this.#runtime.raw.artifacts.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"artifacts", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Retrieve an artifact and the files of its latest version */
+	retrieve(
+		artifactId: string,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"artifacts", "get">>, CheckfuSdkError>
+	retrieve(
+		artifactId: string,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"artifacts", "get">, CheckfuSdkError>
+	retrieve(
+		artifactId: string,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"artifacts", "get"> | WithResponse<EndpointSuccess<"artifacts", "get">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("artifacts", "get", { artifact_id: artifactId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.artifacts.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.artifacts.get({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
 			),
 			options,
 		)
@@ -2209,6 +2572,7 @@ export class EffectSessionsResource {
 
 export class EffectResources {
 	readonly agents: EffectAgentsResource
+	readonly artifacts: EffectArtifactsResource
 	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
 	readonly memoryStores: EffectMemoryStoresResource
@@ -2216,6 +2580,7 @@ export class EffectResources {
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.agents = new EffectAgentsResource(runtime)
+		this.artifacts = new EffectArtifactsResource(runtime)
 		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
 		this.memoryStores = new EffectMemoryStoresResource(runtime)
@@ -2298,6 +2663,130 @@ export class AgentsResource {
 	): APIPromise<EndpointJsonSuccess<"agents", "update">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectAgentsResource(effectRuntime).update(agentId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class ArtifactsVersionsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	create(
+		artifactId: string,
+		params: EndpointBody<"artifacts", "createVersion">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "createVersion">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsVersionsResource(effectRuntime).create(artifactId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve one file of an artifact version; content is text when it is valid UTF-8 and base64 otherwise */
+	file(
+		artifactId: string,
+		version: string,
+		params: RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "getFile">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsVersionsResource(effectRuntime).file(artifactId, version, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve one version of an artifact and its file list */
+	retrieve(
+		artifactId: string,
+		version: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "getVersion">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsVersionsResource(effectRuntime).retrieve(artifactId, version, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class ArtifactsResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly versions: ArtifactsVersionsResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.versions = new ArtifactsVersionsResource(runtime)
+	}
+
+	/** Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64". */
+	create(
+		params: EndpointBody<"artifacts", "create">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "create">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsResource(effectRuntime).create(params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Delete an artifact and every stored version of its files */
+	delete(
+		artifactId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "delete">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsResource(effectRuntime).delete(artifactId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"artifacts", "list">>, string>,
+		ItemOf<EndpointJsonSuccess<"artifacts", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectArtifactsResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
+	/** Retrieve an artifact and the files of its latest version */
+	retrieve(
+		artifactId: string,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"artifacts", "get">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectArtifactsResource(effectRuntime).retrieve(artifactId, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -2920,6 +3409,7 @@ export class SessionsResource {
 
 export class PromiseResources {
 	readonly agents: AgentsResource
+	readonly artifacts: ArtifactsResource
 	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
 	readonly memoryStores: MemoryStoresResource
@@ -2927,6 +3417,7 @@ export class PromiseResources {
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.agents = new AgentsResource(runtime)
+		this.artifacts = new ArtifactsResource(runtime)
 		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
 		this.memoryStores = new MemoryStoresResource(runtime)

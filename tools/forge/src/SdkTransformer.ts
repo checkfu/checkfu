@@ -10,6 +10,9 @@ import type {
 
 const RESERVED_ARG_NAMES = new Set(["params", "body", "query", "options", "pathParams", "key"])
 
+const pathArgProperty = (pa: { readonly argName: string; readonly wireName: string }): string =>
+	pa.wireName === pa.argName ? pa.argName : `${JSON.stringify(pa.wireName)}: ${pa.argName}`
+
 const safeParamArgName = (param: SurfaceParam): string =>
 	RESERVED_ARG_NAMES.has(param.camelName) ? `${param.camelName}Param` : param.camelName
 
@@ -227,11 +230,7 @@ const generateResourcesFile = (
 					if (pathArgs.length === 0) {
 						out("{},")
 					} else {
-						out(
-							"{ ",
-							pathArgs.map((pa) => `${JSON.stringify(pa.wireName)}: ${pa.argName}`).join(", "),
-							" },",
-						)
+						out("{ ", pathArgs.map(pathArgProperty).join(", "), " },")
 					}
 					if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 						out("params,")
@@ -385,12 +384,17 @@ const generateResourcesFile = (
 								return `${qVar}?.[${keyJson}] === undefined ? {} : { ${keyJson}: ${qVar}[${keyJson}] }`
 							}
 							const [only, ...others] = op.queryParams
-							if (only !== undefined && others.length === 0) {
+							if (only !== undefined && others.length === 0 && !only.required) {
 								out("query: ", present(only.wireName), ",")
 							} else {
 								out("query: {")
 								out.indent(() => {
 									for (const qp of op.queryParams) {
+										if (qp.required) {
+											const keyJson = JSON.stringify(qp.wireName)
+											out(keyJson, ": ", qVar, "[", keyJson, "],")
+											continue
+										}
 										out("...(", present(qp.wireName), "),")
 									}
 								})
@@ -470,7 +474,7 @@ const generateResourcesFile = (
 						", ",
 						e,
 						", { ",
-						pathArgs.map((pa) => `${JSON.stringify(pa.wireName)}: ${pa.argName}`).join(", "),
+						pathArgs.map(pathArgProperty).join(", "),
 						" }), (pathParams) =>",
 					)
 					out.indent(() => emitWithIdempotency())

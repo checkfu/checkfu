@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect"
 import * as Hex from "effect/encoding/Hex"
 import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware"
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage"
+import * as HttpServerError from "effect/http/HttpServerError"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
@@ -25,8 +26,10 @@ import * as References from "effect/References"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import { optionalSecret } from "../Secrets.ts"
+import { MAX_ARTIFACT_BODY_BYTES } from "../Artifacts/ArtifactFiles.ts"
 import {
 	AgentBodyLimit,
+	ArtifactBodyLimit,
 	Authentication,
 	EventBatchBodyLimit,
 	MemoryBodyLimit,
@@ -409,6 +412,22 @@ export const EventBatchBodyLimitLive = Layer.succeed(EventBatchBodyLimit, (httpE
 		httpEffect,
 		HttpIncomingMessage.MaxBodySize,
 		ByteSize.bytes(MAX_EVENTS_BODY_BYTES),
+	),
+)
+export const ARTIFACT_BODY_TOO_LARGE_MESSAGE =
+	'Request body is too large. Send large or heavily escaped file content with "encoding": "base64".'
+
+const isBodyTooLarge = (defect: unknown): boolean =>
+	HttpServerError.isHttpServerError(defect) &&
+	defect.reason._tag === "RequestParseError" &&
+	defect.reason.reason === "BodyTooLarge"
+
+export const ArtifactBodyLimitLive = Layer.succeed(ArtifactBodyLimit, (httpEffect) =>
+	httpEffect.pipe(
+		Effect.catchDefect((defect) =>
+			isBodyTooLarge(defect) ? reject(413, ARTIFACT_BODY_TOO_LARGE_MESSAGE) : Effect.die(defect),
+		),
+		Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_ARTIFACT_BODY_BYTES)),
 	),
 )
 

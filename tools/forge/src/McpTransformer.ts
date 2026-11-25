@@ -218,14 +218,21 @@ const projectOperation = (
 	const properties: Record<string, Json> = {}
 	const required: Array<string> = []
 	if (pathParameters.length > 0) {
-		if (pathParameters.some((parameter) => parameter.schema["pattern"] !== undefined)) {
-			throw new Error(`${label}: a path parameter with its own pattern is not supported.`)
+		if (pathParameters.some((parameter) => parameter.schema["allOf"] !== undefined)) {
+			throw new Error(`${label}: a path parameter with allOf is not supported.`)
 		}
 		properties["path"] = parameterObject(
-			pathParameters.map((parameter) => ({
-				...parameter,
-				schema: { ...parameter.schema, pattern: PATH_SEGMENT_PATTERN },
-			})),
+			pathParameters.map((parameter) => {
+				const { pattern, ...schema } = parameter.schema
+				return {
+					...parameter,
+					schema: {
+						...schema,
+						pattern: PATH_SEGMENT_PATTERN,
+						...(pattern === undefined ? {} : { allOf: [{ pattern }] }),
+					},
+				}
+			}),
 		)
 		required.push("path")
 	}

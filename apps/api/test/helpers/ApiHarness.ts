@@ -44,6 +44,7 @@ import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
 import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
 import type { SessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
+import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
@@ -456,7 +457,8 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
-	const base = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
+	const artifactStore = makeArtifactStoreMemory()
+	const base = Layer.mergeAll(CheckfuLive, PiProviderLive, artifactStore.layer).pipe(
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
@@ -491,6 +493,7 @@ export const makePiDurableTestLayer = (
 		tokenDeliveries,
 		workspaceFiles,
 		memoryFiles,
+		artifactStore,
 	}
 }
 

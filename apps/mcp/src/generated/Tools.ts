@@ -287,6 +287,364 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "artifacts_createArtifact",
+		title: "Create an artifact",
+		description:
+			'Create an artifact from a set of files (version 1). The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64".',
+		method: "POST",
+		path: "/v1/artifacts",
+		readOnly: false,
+		idempotent: false,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				body: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Human-readable artifact name",
+						},
+						files: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									path: {
+										type: "string",
+										minLength: 1,
+										maxLength: 512,
+										pattern:
+											"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+										description:
+											"Relative path inside the artifact, for example index.html or assets/app.js",
+									},
+									content: {
+										type: "string",
+										description: "File content: text, or base64 when encoding is base64",
+									},
+									encoding: {
+										type: "string",
+										enum: ["utf8", "base64"],
+										description: "How content is encoded (default utf8)",
+									},
+									content_type: {
+										type: "string",
+										minLength: 3,
+										maxLength: 128,
+										pattern:
+											"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+										description: "Media type; inferred from the path extension when omitted",
+									},
+								},
+								required: ["path", "content"],
+								additionalProperties: false,
+							},
+							minItems: 1,
+							maxItems: 64,
+							description: "Every file of the version; a new version replaces the whole set",
+						},
+					},
+					required: ["name", "files"],
+					additionalProperties: false,
+				},
+				idempotency_key: {
+					type: "string",
+					pattern: "^[!-~](?:[\\t -~]*[!-~])?$",
+					minLength: 1,
+					maxLength: 128,
+					description:
+						"Stable retry key of printable ASCII characters; reuse the same key and request body for every retry.",
+				},
+			},
+			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_createArtifactVersion",
+		title: "Create an artifact version",
+		description:
+			'Add a new immutable version to an artifact. The JSON request body may be at most 12828672 bytes, three times the decoded limit plus room for paths; send large or heavily escaped file content with "encoding": "base64".',
+		method: "POST",
+		path: "/v1/artifacts/{artifact_id}/versions",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						version: {
+							type: "integer",
+							minimum: 1,
+							maximum: 9007199254740991,
+							description: "Current artifact version for optimistic concurrency",
+						},
+						files: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									path: {
+										type: "string",
+										minLength: 1,
+										maxLength: 512,
+										pattern:
+											"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+										description:
+											"Relative path inside the artifact, for example index.html or assets/app.js",
+									},
+									content: {
+										type: "string",
+										description: "File content: text, or base64 when encoding is base64",
+									},
+									encoding: {
+										type: "string",
+										enum: ["utf8", "base64"],
+										description: "How content is encoded (default utf8)",
+									},
+									content_type: {
+										type: "string",
+										minLength: 3,
+										maxLength: 128,
+										pattern:
+											"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+										description: "Media type; inferred from the path extension when omitted",
+									},
+								},
+								required: ["path", "content"],
+								additionalProperties: false,
+							},
+							minItems: 1,
+							maxItems: 64,
+							description: "Every file of the version; a new version replaces the whole set",
+						},
+					},
+					required: ["version", "files"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_deleteArtifact",
+		title: "Delete an artifact",
+		description: "Delete an artifact and every stored version of its files",
+		method: "DELETE",
+		path: "/v1/artifacts/{artifact_id}",
+		readOnly: false,
+		idempotent: true,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_getArtifact",
+		title: "Retrieve an artifact",
+		description: "Retrieve an artifact and the files of its latest version",
+		method: "GET",
+		path: "/v1/artifacts/{artifact_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["artifact_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_getArtifactFile",
+		title: "Retrieve an artifact file",
+		description:
+			"Retrieve one file of an artifact version; content is text when it is valid UTF-8 and base64 otherwise",
+		method: "GET",
+		path: "/v1/artifacts/{artifact_id}/versions/{version}/file",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						version: {
+							type: "string",
+							description: "Artifact version number",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							allOf: [
+								{
+									pattern: "^[1-9]\\d{0,8}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "version"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						path: {
+							type: "string",
+							minLength: 1,
+							maxLength: 512,
+							pattern:
+								"^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+							description: "Path of the file inside the version",
+						},
+					},
+					required: ["path"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "query"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_getArtifactVersion",
+		title: "Retrieve an artifact version",
+		description: "Retrieve one version of an artifact and its file list",
+		method: "GET",
+		path: "/v1/artifacts/{artifact_id}/versions/{version}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						artifact_id: {
+							type: "string",
+							minLength: 1,
+							description: "Artifact ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						version: {
+							type: "string",
+							description: "Artifact version number",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							allOf: [
+								{
+									pattern: "^[1-9]\\d{0,8}$",
+								},
+							],
+						},
+					},
+					required: ["artifact_id", "version"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "artifacts_listArtifacts",
+		title: "List artifacts",
+		description:
+			"List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+		method: "GET",
+		path: "/v1/artifacts",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "automations_archiveAutomation",
 		title: "Archive an automation",
 		description: "Archive an automation so it never runs again",

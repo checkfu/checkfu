@@ -5,12 +5,14 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { expectTypeOf } from "vitest"
 import {
+	DEFAULT_STORAGE_SCOPE,
 	JURISDICTION_ENV,
 	Jurisdiction,
 	LOCATION_HINT_ENV,
 	LocationHint,
 	placedStub,
 	placement,
+	storageScope,
 } from "../src/Placement.ts"
 
 // The Worker runtime reads its bindings the same way, so an empty binding arrives as "".
@@ -81,4 +83,17 @@ describe("Durable Object placement", () => {
 		placedStub(placed.namespace, { jurisdiction: "eu", locationHint: "weur" })("a")
 		expect(placed.calls).toEqual(["eu:a:weur"])
 	})
+
+	it.effect("scopes storage by the jurisdiction, and by one fixed word outside any", () =>
+		Effect.gen(function* () {
+			const scopeOf = (env: Record<string, string>) =>
+				storageScope.parse(ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true }))
+			expect(yield* scopeOf({})).toBe(DEFAULT_STORAGE_SCOPE)
+			expect(yield* scopeOf({ [JURISDICTION_ENV]: "" })).toBe(DEFAULT_STORAGE_SCOPE)
+			for (const jurisdiction of Jurisdiction.literals) {
+				expect(yield* scopeOf({ [JURISDICTION_ENV]: jurisdiction })).toBe(jurisdiction)
+			}
+			expect(Jurisdiction.literals).not.toContain(DEFAULT_STORAGE_SCOPE)
+		}),
+	)
 })

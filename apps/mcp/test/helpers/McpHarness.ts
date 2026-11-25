@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
@@ -46,6 +47,7 @@ export const makeTestServer = Effect.gen(function* () {
 			CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
 		),
 		HarnessLive,
+		makeArtifactStoreMemory().layer,
 	).pipe(
 		Layer.provide(Domain.InMemory),
 		Layer.provideMerge(Digest.layerWebCrypto),

@@ -51,6 +51,14 @@ export const placement: Config.Config<Placement> = Config.all({
 	})),
 )
 
+// Names the jurisdiction in storage keys, so objects placed apart never share stored bytes.
+export const DEFAULT_STORAGE_SCOPE = "default"
+
+export const storageScopeOf = ({ jurisdiction }: Placement): string =>
+	jurisdiction ?? DEFAULT_STORAGE_SCOPE
+
+export const storageScope: Config.Config<string> = Config.map(placement, storageScopeOf)
+
 export const placedStub =
 	<Shape>(namespace: Cloudflare.DurableObject<Shape>, { jurisdiction, locationHint }: Placement) =>
 	(name: string): Cloudflare.DurableObjectStub<Shape> => {

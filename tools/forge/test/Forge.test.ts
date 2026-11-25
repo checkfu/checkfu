@@ -41,6 +41,38 @@ describe("Cloudflare Forge pipeline", () => {
 			{ group: "agents", name: "list", httpMethod: "GET", path: "/v1/agents" },
 			{ group: "agents", name: "retrieve", httpMethod: "GET", path: "/v1/agents/{agent_id}" },
 			{ group: "agents", name: "update", httpMethod: "POST", path: "/v1/agents/{agent_id}" },
+			{ group: "artifacts", name: "create", httpMethod: "POST", path: "/v1/artifacts" },
+			{
+				group: "artifacts",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/artifacts/{artifact_id}",
+			},
+			{ group: "artifacts", name: "list", httpMethod: "GET", path: "/v1/artifacts" },
+			{
+				group: "artifacts",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/artifacts/{artifact_id}",
+			},
+			{
+				group: "artifacts:versions",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/artifacts/{artifact_id}/versions",
+			},
+			{
+				group: "artifacts:versions",
+				name: "file",
+				httpMethod: "GET",
+				path: "/v1/artifacts/{artifact_id}/versions/{version}/file",
+			},
+			{
+				group: "artifacts:versions",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/artifacts/{artifact_id}/versions/{version}",
+			},
 			{
 				group: "automations",
 				name: "archive",
@@ -327,6 +359,72 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(bindingsFile?.content).toContain('cliCommand: "agents list"')
 	})
 
+	it("makes a required query parameter a required CLI flag and carries a command's input bound", () => {
+		const spec = JSON.parse(exportDeterministicOpenApiJson()) as {
+			paths: Record<string, Record<string, Json>>
+		}
+		spec.paths["/v1/agents/lookup"] = {
+			get: {
+				operationId: "agents.lookup",
+				summary: "Look up an agent",
+				description: "Look up an agent by name",
+				"x-forge-group-name": "agents",
+				"x-forge-method-name": "lookup",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "lookup" },
+				"x-checkfu-cli": { maxInputBytes: 12_345 },
+				parameters: [
+					{ name: "name", in: "query", required: true, schema: { type: "string" } },
+					{ name: "limit", in: "query", required: true, schema: { type: "integer" } },
+					{ name: "order", in: "query", required: false, schema: { type: "string" } },
+				],
+				responses: {
+					"200": {
+						description: "Success",
+						content: { "application/json": { schema: { type: "object" } } },
+					},
+				},
+			},
+		}
+
+		using forge = parse(JSON.stringify(spec))
+		const commands = generateCliFiles(forge).find((f) => f.path === "Commands.ts")?.content ?? ""
+		const start = commands.indexOf("const agentsLookupCommandSpec")
+		const lookup = commands.slice(
+			start,
+			commands.indexOf("\n\nconst ", commands.indexOf("const agentsLookupCommand =")),
+		)
+		expect(lookup).toContain("maxInputBytes: 12_345,")
+		expect(lookup).toContain(
+			'"flagName":"name","wireName":"name","location":"query","kind":"string","required":true',
+		)
+		expect(lookup).toContain(
+			'"flagName":"limit","wireName":"limit","location":"query","kind":"int","required":true',
+		)
+		expect(lookup).toContain(
+			'"flagName":"order","wireName":"order","location":"query","kind":"string","required":false',
+		)
+		expect(lookup.split("FlagOptional")).toHaveLength(2)
+		expect(lookup).toMatch(/order: FlagString\("order"\)\.pipe\([^)]*\),\s*FlagOptional,/)
+
+		const agentsCreate = commands.slice(
+			commands.indexOf("const agentsCreateCommandSpec"),
+			commands.indexOf("const agentsCreateCommand ="),
+		)
+		expect(agentsCreate).not.toContain("maxInputBytes")
+		const fileStart = commands.indexOf("const artifactsVersionsFileCommandSpec")
+		const fileCommand = commands.slice(
+			fileStart,
+			commands.indexOf(
+				"\n\nconst ",
+				commands.indexOf("const artifactsVersionsFileCommand =", fileStart),
+			),
+		)
+		expect(fileCommand).toContain(
+			'"flagName":"path","wireName":"path","location":"query","kind":"string","required":true',
+		)
+		expect(fileCommand).not.toContain("FlagOptional")
+	})
+
 	it("maintains 100% 1:1 operation parity across OpenAPI, SDK bindings, and generated CLI commands", () => {
 		interface OpenApiOperationDoc {
 			readonly "x-forge-skip"?: boolean
@@ -503,7 +601,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(40)
+		expect(inspectedMethods.length).toBe(47)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

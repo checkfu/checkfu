@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { createHash, createHmac } from "node:crypto"
 import type { ChildProcess } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -43,6 +44,61 @@ interface SessionEventItem {
 	readonly is_error?: boolean
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
 	readonly stop_reason?: { readonly type: string }
+}
+
+const LOCAL_R2_ACCESS_KEY = "alchemy-local-r2"
+const LOCAL_R2_SECRET_KEY = "alchemy-local-r2-secret"
+
+const sha256Hex = (data: string) => createHash("sha256").update(data).digest("hex")
+const hmac = (key: string | Buffer, data: string) => createHmac("sha256", key).update(data).digest()
+
+const localR2 = (baseUrl: string, method: string, bucket: string, key: string, body = "") => {
+	const url = new URL(`${baseUrl}/cdn-cgi/local/r2/s3/${bucket}/${key}`)
+	const amzDate = new Date()
+		.toISOString()
+		.replaceAll(/[-:]/gu, "")
+		.replace(/\.\d{3}/u, "")
+	const day = amzDate.slice(0, 8)
+	const payloadHash = sha256Hex(body)
+	const signedHeaders = "host;x-amz-content-sha256;x-amz-date"
+	const canonical = [
+		method,
+		url.pathname,
+		"",
+		`host:${url.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`,
+		signedHeaders,
+		payloadHash,
+	].join("\n")
+	const scope = `${day}/auto/s3/aws4_request`
+	const toSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonical)].join("\n")
+	const signingKey = ["auto", "s3", "aws4_request"].reduce<Buffer>(
+		(key, part) => hmac(key, part),
+		hmac(`AWS4${LOCAL_R2_SECRET_KEY}`, day),
+	)
+	const signature = hmac(signingKey, toSign).toString("hex")
+	return fetch(url, {
+		method,
+		headers: {
+			"x-amz-content-sha256": payloadHash,
+			"x-amz-date": amzDate,
+			authorization: `AWS4-HMAC-SHA256 Credential=${LOCAL_R2_ACCESS_KEY}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+		},
+		...(method === "PUT" ? { body } : {}),
+	})
+}
+
+const artifactBucketName = (stage: string): string => {
+	const saved = JSON.parse(
+		readFileSync(
+			join(REPO_ROOT, ".alchemy", "state", "Checkfu", stage, "ArtifactBucket.json"),
+			"utf8",
+		),
+	) as { readonly attr?: { readonly bucketName?: unknown } }
+	const name = saved.attr?.bucketName
+	if (typeof name !== "string") {
+		throw new Error(`No bucket name in the ArtifactBucket state: ${JSON.stringify(saved)}`)
+	}
+	return name
 }
 
 const sleep = (ms: number): Promise<void> =>
@@ -319,6 +375,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	let stopWorker: (() => Promise<void>) | undefined
 	let haltWorker: (() => Promise<void>) | undefined
 	let workerLogs: ReadonlyArray<string> = []
+	let workerStage: string
 	let agentId: string
 	let environmentId: string
 
@@ -479,6 +536,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		stopWorker = worker.stop
 		haltWorker = worker.halt
 		workerLogs = worker.logs
+		workerStage = worker.stage
 
 		const createdAgent = await createResource<{ readonly id: string }>(
 			"/v1/agents",
@@ -1423,5 +1481,135 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(logged).toContain("Workspace discarded")
 		expect(logged).toContain(session.id)
 		expect(logged).not.toContain("Workspace not discarded")
+	}, 30_000)
+
+	it("stores artifact versions in R2, reads them back, and removes them on delete", async () => {
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe]).toString("base64")
+		const created = await apiJson<{
+			readonly id: string
+			readonly version: number
+			readonly files: ReadonlyArray<{
+				readonly path: string
+				readonly content_type: string
+				readonly sha256: string
+			}>
+		}>("/v1/artifacts", {
+			method: "POST",
+			body: {
+				name: "Workerd Artifact",
+				files: [
+					{ path: "index.html", content: "<h1>one</h1>" },
+					{ path: "img/dot.png", content: png, encoding: "base64" },
+				],
+			},
+		})
+		expect(created.status).toBe(201)
+		expect(created.body.version).toBe(1)
+		expect(created.body.files).toMatchObject([
+			{ path: "img/dot.png", content_type: "image/png" },
+			{ path: "index.html", content_type: "text/html" },
+		])
+		const id = created.body.id
+		const bucket = artifactBucketName(workerStage)
+		const storedBlob = () =>
+			localR2(
+				baseUrl,
+				"GET",
+				bucket,
+				`artifacts/default/${id}/blobs/${created.body.files[0]?.sha256 ?? ""}`,
+			)
+		expect((await storedBlob()).status).toBe(200)
+
+		const addVersion = (version: number, files: ReadonlyArray<Record<string, string>>) =>
+			apiJson<{ readonly version: number }>(`/v1/artifacts/${id}/versions`, {
+				method: "POST",
+				body: { version, files },
+			})
+		const dot = { path: "img/dot.png", content: png, encoding: "base64" }
+		const added = await addVersion(1, [{ path: "index.html", content: "<h1>two</h1>" }, dot])
+		expect(added.status).toBe(201)
+		expect(added.body.version).toBe(2)
+		const third = await addVersion(2, [{ path: "about.html", content: "<h1>three</h1>" }, dot])
+		expect(third.status).toBe(201)
+		expect(third.body.version).toBe(3)
+
+		const racing = await Promise.all(
+			["left", "right"].map((side) =>
+				addVersion(3, [{ path: `${side}.html`, content: side }, dot]),
+			),
+		)
+		expect(racing.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([201, 409])
+		const winner = racing[0]?.status === 201 ? "left" : "right"
+		const loser = winner === "left" ? "right" : "left"
+
+		const file = (version: number, path: string) =>
+			apiJson<{ readonly encoding: string; readonly content: string }>(
+				`/v1/artifacts/${id}/versions/${version}/file?path=${encodeURIComponent(path)}`,
+			)
+		expect((await file(1, "index.html")).body).toMatchObject({
+			encoding: "utf8",
+			content: "<h1>one</h1>",
+		})
+		for (const version of [1, 2, 3, 4]) {
+			expect((await file(version, "img/dot.png")).body).toMatchObject({
+				encoding: "base64",
+				content: png,
+			})
+		}
+		expect((await file(2, "index.html")).body).toMatchObject({ content: "<h1>two</h1>" })
+		expect((await file(3, "about.html")).body).toMatchObject({ content: "<h1>three</h1>" })
+		expect((await file(3, "index.html")).status).toBe(404)
+		expect((await file(4, `${winner}.html`)).body).toMatchObject({ content: winner })
+		expect((await file(4, `${loser}.html`)).status).toBe(404)
+		expect((await apiFetch(`/v1/artifacts/${id}/versions/5`)).status).toBe(404)
+
+		const head = await apiJson<{ readonly version: number; readonly file_count: number }>(
+			`/v1/artifacts/${id}`,
+		)
+		expect(head.body).toMatchObject({ version: 4, file_count: 2 })
+		const listedArtifactIds = async () => {
+			const res = await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+				"/v1/artifacts?limit=100",
+			)
+			expect(res.status).toBe(200)
+			return res.body.data.map((artifact) => artifact.id)
+		}
+		const deadline = Date.now() + 20_000
+		while (!(await listedArtifactIds()).includes(id) && Date.now() < deadline) {
+			await sleep(200)
+		}
+		expect(await listedArtifactIds()).toContain(id)
+
+		const deleted = await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })
+		expect(deleted.status).toBe(200)
+		const gone = Date.now() + 20_000
+		while ((await listedArtifactIds()).includes(id) && Date.now() < gone) {
+			await sleep(200)
+		}
+		expect(await listedArtifactIds()).not.toContain(id)
+		expect((await apiFetch(`/v1/artifacts/${id}`)).status).toBe(404)
+		expect((await file(1, "index.html")).status).toBe(404)
+		expect((await storedBlob()).status).toBe(404)
+		expect((await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })).status).toBe(200)
+	}, 60_000)
+
+	it("lists an unconfirmed-write marker from the real bucket and leaves a young one alone", async () => {
+		const bucket = artifactBucketName(workerStage)
+		const key = "reconcile/default/art_workerd_marker/write_young"
+		const marker = JSON.stringify({
+			artifact_id: "art_workerd_marker",
+			write_id: "write_young",
+			check: { kind: "create", manifest: "0".repeat(64) },
+		})
+		const put = await localR2(baseUrl, "PUT", bucket, key, marker)
+		expect(put.status, await put.text()).toBe(200)
+		const fired = await fetch(
+			`${baseUrl}/cdn-cgi/handler/scheduled?cron=${encodeURIComponent("*/15 * * * *")}`,
+		)
+		expect(fired.status, await fired.text()).toBe(200)
+		const kept = await localR2(baseUrl, "GET", bucket, key)
+		expect(kept.status).toBe(200)
+		expect(await kept.text()).toBe(marker)
+		expect(workerLogs.join("")).not.toContain("Artifact write reconciliation failed")
 	}, 30_000)
 })

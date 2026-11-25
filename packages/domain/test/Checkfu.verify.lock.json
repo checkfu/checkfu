@@ -405,6 +405,50 @@
 			"WriteMemory.ANewPathCommitsOnlyAtTheLayoutItWasCheckedAgainst": {
 				"kind": "transition",
 				"source": "({ before, command }) =>\n\t\t\t[\n\t\t\t\tbefore.memory.status === \"present\",\n\t\t\t\tbefore.store.layout_version === command.layout_version,\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"\", s.status === \"active\", s.status === \"deleted\"].some((ok) => ok)"
+			},
+			"Artifact.CreatedExactlyWhenVersioned": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.version === 0, s.name === \"\", s.manifest === \"\"].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.version >= 1, s.name !== \"\", s.manifest !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.CreatedArtifactNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Artifact.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"deleted\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === \"deleted\",\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.manifest === before.manifest,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.NameNeverChangesOnceCreated": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.name === before.name].some((ok) => ok)"
+			},
+			"Artifact.VersionGrowsByOneOrNotAtAll": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tbefore.status === \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.status === \"\", after.version === 0].every((ok) => ok),\n\t\t\t\t\t\t[after.status === \"active\", after.version === 1].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.status !== \"\",\n\t\t\t\t\tafter.status !== \"\",\n\t\t\t\t\t[\n\t\t\t\t\t\t[after.version === before.version, after.manifest === before.manifest].every(\n\t\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t\t),\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\t\t\tafter.status === \"active\",\n\t\t\t\t\t\t\tafter.version === before.version + 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.AddedVersionRecordsItsManifest": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"AddArtifactVersion\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.version === before.version,\n\t\t\t\t[\n\t\t\t\t\tbefore.version === command.expected_version,\n\t\t\t\t\tafter.manifest === command.manifest,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+			},
+			"Checkfu.ArtifactViewMatchesArtifact": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Artifact.every((a) => {\n\t\t\t\t\tconst view = m.ArtifactView.find((v) => v.id === a.id)\n\t\t\t\t\tif (a.state.status === \"\" || a.state.status === \"deleted\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === a.id,\n\t\t\t\t\t\tview.state.version === a.state.version,\n\t\t\t\t\t\tview.state.name === a.state.name,\n\t\t\t\t\t\tview.state.manifest === a.state.manifest,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.ArtifactView.every((v) =>\n\t\t\t\t\tm.Artifact.some((a) => [a.id === v.id, a.state.status === \"active\"].every((ok) => ok)),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Checkfu.EveryArtifactVersionIsWithinItsArtifactsHead": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.ArtifactVersionView.every((v) =>\n\t\t\t\tm.Artifact.some((a) =>\n\t\t\t\t\t[\n\t\t\t\t\t\ta.id === v.state.artifact_id,\n\t\t\t\t\t\tv.id === `${a.id}@${v.state.version}`,\n\t\t\t\t\t\ta.state.status !== \"\",\n\t\t\t\t\t\tv.state.version <= a.state.version,\n\t\t\t\t\t\tv.state.version !== a.state.version || v.state.manifest === a.state.manifest,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t),\n\t\t\t)"
+			},
+			"Artifact.FenceNeverDecreasesAndOnlyFencingMovesIt": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.fence === before.fence,\n\t\t\t\t[command._tag === \"FenceArtifactWrites\", after.fence === before.fence + 1].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.DeleteLandsOnlyAtTheCurrentFence": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"DeleteArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [after.status === before.status, command.fence === before.fence].some((ok) => ok)\n\t\t}"
 			}
 		}
 	}

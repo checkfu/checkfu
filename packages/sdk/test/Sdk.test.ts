@@ -51,7 +51,15 @@ import {
 	normalizeApiUrl,
 	streamApiSse,
 } from "../src/index.ts"
-import type { BodyOf, JsonResultOf, JsonSessionEvent, Op, ResultOf } from "../src/index.ts"
+import type {
+	BodyOf,
+	JsonResultOf,
+	JsonSessionEvent,
+	Op,
+	PendingArtifact,
+	PendingArtifactVersion,
+	ResultOf,
+} from "../src/index.ts"
 
 const ISO_NOW = "2026-11-23T18:00:00.000Z"
 
@@ -171,6 +179,37 @@ const sampleSession = (overrides?: {
 	created_at: ISO_NOW,
 	updated_at: ISO_NOW,
 	archived_at: null,
+	...overrides,
+})
+
+const sampleArtifactFiles = [
+	{ path: "index.html", sha256: "a".repeat(64), size: 14, content_type: "text/html" },
+]
+
+const sampleArtifact = (overrides?: { readonly id?: string; readonly version?: number }) => ({
+	id: "art_1",
+	type: "artifact" as const,
+	name: "Report",
+	version: 1,
+	file_count: 1,
+	total_bytes: 14,
+	files: sampleArtifactFiles,
+	created_at: ISO_NOW,
+	updated_at: ISO_NOW,
+	...overrides,
+})
+
+const sampleArtifactVersion = (overrides?: {
+	readonly artifact_id?: string
+	readonly version?: number
+}) => ({
+	type: "artifact_version" as const,
+	artifact_id: "art_1",
+	version: 1,
+	file_count: 1,
+	total_bytes: 14,
+	files: sampleArtifactFiles,
+	created_at: ISO_NOW,
 	...overrides,
 })
 
@@ -789,6 +828,194 @@ describe("@checkfu/sdk", () => {
 						expect(polls).toBe(3)
 					}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
 				}),
+		)
+
+		it.live(
+			"waitForPending resolves a pending artifact and reads a pending version at its committed number",
+			() =>
+				Effect.gen(function* () {
+					const reads: Array<string> = []
+					let artifactPolls = 0
+					let versionPolls = 0
+					const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+						const req = toWebRequest(input, init)
+						const url = new URL(req.url)
+						if (req.method === "POST" && url.pathname === "/v1/artifacts") {
+							return jsonResponse({ id: "art_pending", type: "artifact", pending: true }, 202)
+						}
+						if (req.method === "POST" && url.pathname === "/v1/artifacts/art_pending/versions") {
+							return jsonResponse(
+								{ id: "art_pending", type: "artifact_version", version: 2, pending: true },
+								202,
+							)
+						}
+						reads.push(url.pathname)
+						if (req.method === "GET" && url.pathname === "/v1/artifacts/art_pending") {
+							artifactPolls += 1
+							return artifactPolls === 1
+								? jsonResponse(apiErrorBody("service_unavailable", "projection warming"), 503)
+								: jsonResponse(sampleArtifact({ id: "art_pending" }))
+						}
+						if (req.method === "GET" && url.pathname === "/v1/artifacts/art_pending/versions/2") {
+							versionPolls += 1
+							return versionPolls === 1
+								? jsonResponse(apiErrorBody("not_found_error", "not yet"), 404)
+								: jsonResponse(sampleArtifactVersion({ artifact_id: "art_pending", version: 2 }))
+						}
+						return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+					}) as typeof globalThis.fetch
+					const pollOpts = {
+						initialDelay: "1 millis" as const,
+						maxDelay: "2 millis" as const,
+						timeout: "2 seconds" as const,
+						requestOptions: { maxRetries: 0 },
+					}
+
+					yield* Effect.gen(function* () {
+						const client = yield* CheckfuClient
+						const created = yield* client.artifacts.create({
+							name: "Report",
+							files: [{ path: "index.html", content: "<h1>Hello</h1>" }],
+						})
+						expect(isPendingResource(created)).toBe(true)
+						const artifact = yield* client.waitForPending(created, pollOpts)
+						expect(artifact.id).toBe("art_pending")
+						expect(artifactPolls).toBe(2)
+
+						const added = yield* client.artifacts.versions.create("art_pending", {
+							version: 1,
+							files: [{ path: "index.html", content: "<h1>Again</h1>" }],
+						})
+						expect(isPendingResource(added) && added.version).toBe(2)
+						const version = yield* client.waitForPending(added, pollOpts)
+						expect(version.version).toBe(2)
+						expect(versionPolls).toBe(2)
+
+						// A copied receipt still names its version, so it needs no `until`.
+						const copied = yield* client.waitForPending({ ...added }, pollOpts)
+						expect(copied.version).toBe(2)
+					}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
+
+					artifactPolls = 0
+					versionPolls = 0
+					yield* Effect.promise(async () => {
+						const promiseClient = new Checkfu({
+							apiKey: "ck_test_key",
+							baseUrl: "http://localhost:1337",
+							maxRetries: 0,
+							fetch: mockFetch,
+						})
+						try {
+							const created = await promiseClient.artifacts.create({
+								name: "Report",
+								files: [{ path: "index.html", content: "<h1>Hello</h1>" }],
+							})
+							const artifact = await promiseClient.waitForPending(created, pollOpts)
+							expect(artifact.created_at).toBe(ISO_NOW)
+							const added = await promiseClient.artifacts.versions.create("art_pending", {
+								version: 1,
+								files: [{ path: "index.html", content: "<h1>Again</h1>" }],
+							})
+							const version = await promiseClient.waitForPending(added, pollOpts)
+							expect(version.version).toBe(2)
+							expect(version.created_at).toBe(ISO_NOW)
+						} finally {
+							await promiseClient.close()
+						}
+					})
+					expect(new Set(reads)).toEqual(
+						new Set(["/v1/artifacts/art_pending", "/v1/artifacts/art_pending/versions/2"]),
+					)
+				}),
+		)
+
+		it.live("waitForPending times out on artifacts and refuses receipts it cannot resolve", () =>
+			Effect.gen(function* () {
+				let fetches = 0
+				const unavailable = (async () => {
+					fetches += 1
+					return jsonResponse(apiErrorBody("service_unavailable", "projection warming"), 503)
+				}) as typeof globalThis.fetch
+				const pollOpts = {
+					initialDelay: "1 millis" as const,
+					maxDelay: "5 millis" as const,
+					timeout: "40 millis" as const,
+					requestOptions: { maxRetries: 0 },
+				}
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const artifactTimeout = yield* Effect.flip(
+						client.waitForPending(
+							attachPendingReadiness(
+								{ id: "art_slow", type: "artifact" as const, pending: true as const },
+								{ kind: "create" },
+							),
+							pollOpts,
+						),
+					)
+					expect(artifactTimeout._tag).toBe("APIConnectionTimeoutError")
+					expect(artifactTimeout.message).toContain('pending artifact "art_slow"')
+
+					const versionTimeout = yield* Effect.flip(
+						client.waitForPending(
+							{ id: "art_slow", type: "artifact_version", version: 3, pending: true },
+							pollOpts,
+						),
+					)
+					expect(versionTimeout._tag).toBe("APIConnectionTimeoutError")
+					expect(versionTimeout.message).toContain('pending artifact_version "art_slow"')
+
+					const polled = fetches
+					const wrongType = yield* Effect.flip(
+						client.waitForPending(
+							{ id: "art_1", type: "artifact_file", pending: true } as unknown as PendingArtifact,
+							pollOpts,
+						),
+					)
+					expect(wrongType._tag).toBe("CheckfuConfigError")
+					expect(wrongType.message).toContain("artifact_file")
+
+					const noVersion = yield* Effect.flip(
+						client.waitForPending(
+							{
+								id: "art_1",
+								type: "artifact_version",
+								pending: true,
+							} as unknown as PendingArtifactVersion,
+							pollOpts,
+						),
+					)
+					expect(noVersion._tag).toBe("CheckfuConfigError")
+					expect(noVersion.message).toContain("version")
+					expect(fetches).toBe(polled)
+				}).pipe(Effect.provide(makeEffectLayer(unavailable, { maxRetries: 0 })))
+
+				const promiseClient = new Checkfu({
+					apiKey: "ck_test_key",
+					baseUrl: "http://localhost:1337",
+					maxRetries: 0,
+					fetch: unavailable,
+				})
+				yield* Effect.promise(async () => {
+					try {
+						await expect(
+							promiseClient.waitForPending(
+								{ id: "art_slow", type: "artifact_version", version: 3, pending: true },
+								pollOpts,
+							),
+						).rejects.toThrow(APIConnectionTimeoutError)
+						await expect(
+							promiseClient.waitForPending(
+								{ id: "art_1", type: "artifact_file", pending: true } as unknown as PendingArtifact,
+								pollOpts,
+							),
+						).rejects.toThrow(CheckfuConfigError)
+					} finally {
+						await promiseClient.close()
+					}
+				})
+			}),
 		)
 	})
 
@@ -2712,6 +2939,13 @@ describe("@checkfu/sdk", () => {
 						const copyErr = yield* Effect.flip(client.waitForPending(copied, pollOpts))
 						expect(copyErr._tag).toBe("CheckfuConfigError")
 						expect(copyErr.message).toContain("until")
+						expect(getPolls).toBe(0)
+
+						// A copied receipt that happens to carry a version is still not self-identifying.
+						const versioned = { ...pendingArchive, version: 7 }
+						const versionedErr = yield* Effect.flip(client.waitForPending(versioned, pollOpts))
+						expect(versionedErr._tag).toBe("CheckfuConfigError")
+						expect(versionedErr.message).toContain("until")
 						expect(getPolls).toBe(0)
 
 						const cloneErr = yield* Effect.flip(client.waitForPending(cloned, pollOpts))
