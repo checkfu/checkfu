@@ -722,6 +722,120 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(turn2Request?.userTexts).toEqual([queuedPrompt])
 	}, 30_000)
 
+	it("streams committed events over SSE as they happen, resumes from a cursor and ends on archive", async () => {
+		fakeOpenAI.setHandler(() => ({
+			kind: "reply",
+			text: "Streamed.",
+			inputTokens: 5,
+			outputTokens: 3,
+		}))
+		const session = await createSession()
+		const streamPath = `/v1/sessions/${session.id}/events/stream`
+
+		const openStream = async (lastEventId?: string) => {
+			const res = await fetch(`${baseUrl}${streamPath}`, {
+				headers: {
+					...AUTH_HEADERS,
+					...(lastEventId === undefined ? {} : { "last-event-id": lastEventId }),
+				},
+			})
+			const reader = res.body?.getReader()
+			const decoder = new TextDecoder()
+			let buffer = ""
+			const next = async (): Promise<{ id: string; event: string } | null> => {
+				while (reader !== undefined) {
+					const boundary = buffer.indexOf("\n\n")
+					if (boundary >= 0) {
+						const block = buffer.slice(0, boundary)
+						buffer = buffer.slice(boundary + 2)
+						const field = (name: string) =>
+							block
+								.split("\n")
+								.find((line) => line.startsWith(`${name}: `))
+								?.slice(name.length + 2)
+						const id = field("id")
+						const event = field("event")
+						if (id !== undefined && event !== undefined) {
+							return { id, event }
+						}
+						continue
+					}
+					const chunk = await reader.read()
+					if (chunk.done) {
+						return null
+					}
+					buffer += decoder.decode(chunk.value, { stream: true })
+				}
+				return null
+			}
+			const until = async (type: string, timeoutMs = 15_000) => {
+				const frames: Array<{ id: string; event: string }> = []
+				const read = (async () => {
+					for (;;) {
+						const frame = await next()
+						if (frame === null) {
+							throw new Error(`SSE ended before ${type}: ${JSON.stringify(frames)}`)
+						}
+						frames.push(frame)
+						if (frame.event === type) {
+							return frames
+						}
+					}
+				})()
+				return Promise.race([
+					read,
+					sleep(timeoutMs).then(() => {
+						throw new Error(`Timed out waiting for ${type}: ${JSON.stringify(frames)}`)
+					}),
+				])
+			}
+			return { res, next, until, cancel: () => reader?.cancel() }
+		}
+
+		const live = await openStream()
+		expect(live.res.status).toBe(200)
+		expect(live.res.headers.get("content-type")).toBe("text/event-stream; charset=utf-8")
+		await sleep(500)
+
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: "stream me" }] }] },
+		})
+		expect(sent.status).toBe(200)
+		const turn = await live.until("session.status_idle")
+		expect(turn.map((frame) => frame.event)).toEqual([
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+		])
+		expect(turn.map((frame) => Number(frame.id))).toEqual([1, 2, 3, 4, 5, 6])
+		await live.cancel()
+
+		const resumed = await openStream("2")
+		expect(resumed.res.status).toBe(200)
+		const rest = await resumed.until("session.status_idle")
+		expect(rest.map((frame) => frame.id)).toEqual(["3", "4", "5", "6"])
+
+		// A cursor past the session's head reads nothing, and the stream still ends on archive.
+		const ahead = await openStream("100")
+		expect(ahead.res.status).toBe(200)
+
+		const archiveRes = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect([200, 202]).toContain(archiveRes.status)
+		const ending = await resumed.until("session.archived")
+		expect(ending.at(-1)?.event).toBe("session.archived")
+		expect(await resumed.next()).toBeNull()
+		expect(
+			await Promise.race([ahead.next(), sleep(15_000).then(() => "still open after archive")]),
+		).toBeNull()
+
+		const caughtUp = await openStream(ending.at(-1)?.id)
+		expect(caughtUp.res.status).toBe(204)
+	}, 60_000)
+
 	it("stops a running turn when the session is archived", async () => {
 		const holdPrompt = "hold-for-archive"
 

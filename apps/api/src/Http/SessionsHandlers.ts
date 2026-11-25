@@ -1,4 +1,5 @@
 import type * as Domain from "@alchemy.run/domain"
+import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import {
 	AgentVersionByNumberView,
@@ -52,6 +53,7 @@ import {
 	toApiError,
 } from "./HttpHelpers.ts"
 import { makeLister } from "./Listing.ts"
+import { ViewEventsOverObjectSockets, objectSocketChanges } from "./ObjectSocketEvents.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
 export const DEFAULT_SSE_KEEPALIVE_INTERVAL: Duration.Input = "15 seconds"
@@ -245,6 +247,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
 		const sseMaxConnectionDuration = yield* SseMaxConnectionDuration
 		const list = yield* makeLister
+		const overObjectSockets = yield* ViewEventsOverObjectSockets
+		const connectSessionView = overObjectSockets
+			? (yield* Model.Internals).views.get(SessionView.viewName)?.connect
+			: undefined
+		if (overObjectSockets && connectSessionView === undefined) {
+			return yield* Effect.die(new Error("SessionView is not pushed over object sockets."))
+		}
 
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
@@ -604,7 +613,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handleRaw("streamEvents", ({ params, query, request }) =>
 				Effect.gen(function* () {
 					const id = params.session_id
-					const snapshot = yield* existing(id)
+					const ref = Session.ref(id)
+					// One view read answers both whether the session exists and where its log ends. Only a
+					// session the view has not projected yet needs the aggregate and a second read.
+					const projected = yield* sessionViews.snapshot(ref)
+					const head =
+						projected.state !== null
+							? projected
+							: yield* Effect.andThen(existing(id), sessionViews.snapshot(ref))
 					const header = request.headers["last-event-id"]
 					const rawCursor = header !== undefined && header.length > 0 ? header : query.after
 					const after =
@@ -613,71 +629,61 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							: yield* decodeCursor(rawCursor).pipe(
 									Effect.catch(() => reject(400, "Cursor must be a non-negative integer.")),
 								)
-					const ref = Session.ref(id)
-					let initialHead = 0
-					if (snapshot.archived_at !== null) {
-						const latest = yield* sessionViews.snapshot(ref)
-						if (latest.cursor <= (after ?? 0)) {
-							return HttpServerResponse.empty({ status: 204 })
-						}
-						initialHead = latest.cursor
+					const from = after ?? 0
+					if (head.state !== null && head.state.archived_at !== null && head.cursor <= from) {
+						return HttpServerResponse.empty({ status: 204 })
 					}
-					// Poll `snapshot` (one view RPC) to observe both the latest emitted seq and
-					// archival state, fetching bounded event pages only when events exist past
-					// `state.cursor`. Back off while caught up, and drain busy sessions without sleeping.
-					const events = Stream.paginate(
-						{ cursor: after ?? 0, delayMs: 0, knownHead: initialHead },
-						(state) =>
-							Effect.gen(function* () {
-								if (state.delayMs > 0) {
-									yield* Effect.sleep(Duration.millis(state.delayMs))
-								}
-								let knownHead = state.knownHead
-								if (state.cursor >= knownHead) {
-									const latest = yield* sessionViews.snapshot(ref)
-									knownHead = latest.cursor
-									if (knownHead <= state.cursor) {
-										if (latest.state !== null && latest.state.archived_at !== null) {
-											return [[], Option.none()] as const
-										}
-										return [
-											[],
-											Option.some({
-												cursor: state.cursor,
-												delayMs: Math.min(1000, Math.max(300, state.delayMs * 2)),
-												knownHead,
-											}),
-										] as const
-									}
-								}
-								const page = yield* sessionViews.list(ref, {
-									after: state.cursor,
-									take: SSE_CATCHUP_PAGE_SIZE,
-									order: "asc",
-								})
-								const last = page.entries.at(-1)
-								if (last === undefined) {
-									return [
-										page.entries,
-										Option.some({
-											cursor: state.cursor,
-											delayMs: Math.min(1000, Math.max(300, state.delayMs * 2)),
-											knownHead: state.cursor,
-										}),
-									] as const
-								}
-								return [
-									page.entries,
-									Option.some({
-										cursor: last.envelope.seq,
-										delayMs: 0,
-										knownHead: Math.max(knownHead, last.envelope.seq),
+					let cursor = Math.min(from, head.cursor)
+					// Every read of the log is a bounded page from the cursor. Catch-up reads until a page
+					// comes back empty: a client still reading the last page lets events pile up, and
+					// reading again before the live read starts keeps its first delivery to what arrived
+					// during that one read. A cursor at the head needs no page: the snapshot just read is
+					// that read. Live reads follow the view's own continuation, since a commit after a read
+					// sends another head.
+					const pagesAfterCursor = (until: "empty" | "last page") =>
+						Stream.suspend(() =>
+							Stream.paginate(cursor, (seq: number) =>
+								Effect.map(
+									sessionViews.list(ref, {
+										after: seq,
+										take: SSE_CATCHUP_PAGE_SIZE,
+										order: "asc",
 									}),
-								] as const
-							}),
-					)
-					const frames = events.pipe(
+									(page) =>
+										[
+											page.entries,
+											until === "empty"
+												? Option.map(
+														Option.fromUndefinedOr(page.entries.at(-1)),
+														(last) => last.envelope.seq,
+													)
+												: Option.fromNullOr(page.cursor),
+										] as const,
+								),
+							),
+						).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
+					const catchUp = cursor < head.cursor ? pagesAfterCursor("empty") : Stream.empty
+					// On Cloudflare the view object sends the session's head once on connect and once per
+					// commit, and what is new is read in pages: no read is ever larger than a page, however
+					// late the socket opened. Heads that arrive during a read fold into the newest. Pages
+					// start past what the client asked for and are read only when the head moved past them;
+					// a session archived at or below that point has nothing left to send.
+					const live: Stream.Stream<SessionEventEntry> =
+						connectSessionView === undefined
+							? Stream.suspend(() => sessionViews.events(ref, { after: cursor }))
+							: Stream.suspend(() => {
+									cursor = Math.max(cursor, from)
+									return objectSocketChanges(connectSessionView, id).pipe(
+										Stream.buffer({ capacity: 1, strategy: "sliding" }),
+										Stream.takeWhile((latest) => !(latest.archived && latest.seq <= cursor)),
+										Stream.flatMap((latest) =>
+											latest.seq > cursor ? pagesAfterCursor("last page") : Stream.empty,
+										),
+									)
+								})
+					const frames = Stream.concat(catchUp, live).pipe(
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
+						Stream.filter((entry) => entry.envelope.seq > from),
 						Stream.map((entry) => {
 							const payload = serializeSessionEvent(entry)
 							return Sse.encoder.write({
