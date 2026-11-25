@@ -15,6 +15,9 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
 import { Route as AppAgentsNewRouteImport } from './routes/_app/agents/new'
+import { Route as AppAutomationsIndexRouteImport } from './routes/_app/automations/index'
+import { Route as AppAutomationsAutomationIdRouteImport } from './routes/_app/automations/$automationId'
+import { Route as AppAutomationsNewRouteImport } from './routes/_app/automations/new'
 import { Route as AppEnvironmentsIndexRouteImport } from './routes/_app/environments/index'
 import { Route as AppEnvironmentsEnvironmentIdRouteImport } from './routes/_app/environments/$environmentId'
 import { Route as AppEnvironmentsNewRouteImport } from './routes/_app/environments/new'
@@ -49,6 +52,22 @@ const AppAgentsAgentIdRoute = AppAgentsAgentIdRouteImport.update({
 const AppAgentsNewRoute = AppAgentsNewRouteImport.update({
   id: '/agents/new',
   path: '/agents/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAutomationsIndexRoute = AppAutomationsIndexRouteImport.update({
+  id: '/automations/',
+  path: '/automations/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAutomationsAutomationIdRoute =
+  AppAutomationsAutomationIdRouteImport.update({
+    id: '/automations/$automationId',
+    path: '/automations/$automationId',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppAutomationsNewRoute = AppAutomationsNewRouteImport.update({
+  id: '/automations/new',
+  path: '/automations/new',
   getParentRoute: () => AppRoute,
 } as any)
 const AppEnvironmentsIndexRoute = AppEnvironmentsIndexRouteImport.update({
@@ -88,11 +107,14 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/agents/new': typeof AppAgentsNewRoute
+  '/automations/$automationId': typeof AppAutomationsAutomationIdRoute
+  '/automations/new': typeof AppAutomationsNewRoute
   '/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
   '/environments/new': typeof AppEnvironmentsNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
   '/agents/': typeof AppAgentsIndexRoute
+  '/automations/': typeof AppAutomationsIndexRoute
   '/environments/': typeof AppEnvironmentsIndexRoute
   '/sessions/': typeof AppSessionsIndexRoute
 }
@@ -101,11 +123,14 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/agents/new': typeof AppAgentsNewRoute
+  '/automations/$automationId': typeof AppAutomationsAutomationIdRoute
+  '/automations/new': typeof AppAutomationsNewRoute
   '/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
   '/environments/new': typeof AppEnvironmentsNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/automations': typeof AppAutomationsIndexRoute
   '/environments': typeof AppEnvironmentsIndexRoute
   '/sessions': typeof AppSessionsIndexRoute
 }
@@ -116,11 +141,14 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/_app/agents/new': typeof AppAgentsNewRoute
+  '/_app/automations/$automationId': typeof AppAutomationsAutomationIdRoute
+  '/_app/automations/new': typeof AppAutomationsNewRoute
   '/_app/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
   '/_app/environments/new': typeof AppEnvironmentsNewRoute
   '/_app/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/_app/sessions/new': typeof AppSessionsNewRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/automations/': typeof AppAutomationsIndexRoute
   '/_app/environments/': typeof AppEnvironmentsIndexRoute
   '/_app/sessions/': typeof AppSessionsIndexRoute
 }
@@ -131,11 +159,14 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/agents/$agentId'
     | '/agents/new'
+    | '/automations/$automationId'
+    | '/automations/new'
     | '/environments/$environmentId'
     | '/environments/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
     | '/agents/'
+    | '/automations/'
     | '/environments/'
     | '/sessions/'
   fileRoutesByTo: FileRoutesByTo
@@ -144,11 +175,14 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/agents/new'
+    | '/automations/$automationId'
+    | '/automations/new'
     | '/environments/$environmentId'
     | '/environments/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
     | '/agents'
+    | '/automations'
     | '/environments'
     | '/sessions'
   id:
@@ -158,11 +192,14 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/agents/$agentId'
     | '/_app/agents/new'
+    | '/_app/automations/$automationId'
+    | '/_app/automations/new'
     | '/_app/environments/$environmentId'
     | '/_app/environments/new'
     | '/_app/sessions/$sessionId'
     | '/_app/sessions/new'
     | '/_app/agents/'
+    | '/_app/automations/'
     | '/_app/environments/'
     | '/_app/sessions/'
   fileRoutesById: FileRoutesById
@@ -216,6 +253,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAgentsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/automations/': {
+      id: '/_app/automations/'
+      path: '/automations'
+      fullPath: '/automations/'
+      preLoaderRoute: typeof AppAutomationsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/automations/$automationId': {
+      id: '/_app/automations/$automationId'
+      path: '/automations/$automationId'
+      fullPath: '/automations/$automationId'
+      preLoaderRoute: typeof AppAutomationsAutomationIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/automations/new': {
+      id: '/_app/automations/new'
+      path: '/automations/new'
+      fullPath: '/automations/new'
+      preLoaderRoute: typeof AppAutomationsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/environments/': {
       id: '/_app/environments/'
       path: '/environments'
@@ -265,11 +323,14 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppAgentsAgentIdRoute: typeof AppAgentsAgentIdRoute
   AppAgentsNewRoute: typeof AppAgentsNewRoute
+  AppAutomationsAutomationIdRoute: typeof AppAutomationsAutomationIdRoute
+  AppAutomationsNewRoute: typeof AppAutomationsNewRoute
   AppEnvironmentsEnvironmentIdRoute: typeof AppEnvironmentsEnvironmentIdRoute
   AppEnvironmentsNewRoute: typeof AppEnvironmentsNewRoute
   AppSessionsSessionIdRoute: typeof AppSessionsSessionIdRoute
   AppSessionsNewRoute: typeof AppSessionsNewRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
+  AppAutomationsIndexRoute: typeof AppAutomationsIndexRoute
   AppEnvironmentsIndexRoute: typeof AppEnvironmentsIndexRoute
   AppSessionsIndexRoute: typeof AppSessionsIndexRoute
 }
@@ -278,11 +339,14 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppAgentsAgentIdRoute: AppAgentsAgentIdRoute,
   AppAgentsNewRoute: AppAgentsNewRoute,
+  AppAutomationsAutomationIdRoute: AppAutomationsAutomationIdRoute,
+  AppAutomationsNewRoute: AppAutomationsNewRoute,
   AppEnvironmentsEnvironmentIdRoute: AppEnvironmentsEnvironmentIdRoute,
   AppEnvironmentsNewRoute: AppEnvironmentsNewRoute,
   AppSessionsSessionIdRoute: AppSessionsSessionIdRoute,
   AppSessionsNewRoute: AppSessionsNewRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
+  AppAutomationsIndexRoute: AppAutomationsIndexRoute,
   AppEnvironmentsIndexRoute: AppEnvironmentsIndexRoute,
   AppSessionsIndexRoute: AppSessionsIndexRoute,
 }

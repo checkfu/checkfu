@@ -1,11 +1,31 @@
 import type {
+	AutomationRun,
+	AutomationRunQueued,
 	CreateAgentBody,
+	CreateAutomationBody,
 	CreateEnvironmentBody,
 	CreateSessionBody,
 	SendSessionEventsBody,
 	UpdateAgentBody,
+	UpdateAutomationBody,
 } from "@checkfu/sdk/Api"
-import type { JsonAgent, JsonEnvironment, JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
+import { showsChanges } from "./automation-draft.ts"
+import type {
+	IsoDateTimes,
+	JsonAgent,
+	JsonAutomation,
+	JsonEnvironment,
+	JsonSession,
+	JsonSessionEvent,
+} from "@checkfu/sdk/client"
+
+export type JsonAutomationRun = IsoDateTimes<AutomationRun>
+
+export interface RunPage {
+	readonly data: ReadonlyArray<JsonAutomationRun>
+	readonly has_more: boolean
+	readonly next_cursor: number | null
+}
 
 export class ApiError extends Error {
 	readonly status: number
@@ -153,9 +173,59 @@ const resource = <T, Create, Update extends { readonly version: number } = never
 		),
 })
 
+const automations = "/v1/automations"
+const automationPath = (id: string, action = "") =>
+	`${automations}/${encodeURIComponent(id)}${action}`
+const automationAction = async (
+	id: string,
+	action: string,
+	done: (automation: JsonAutomation) => boolean,
+) =>
+	settled(
+		automations,
+		await call<JsonAutomation | Pending>("POST", automationPath(id, action)),
+		done,
+	)
+
 export const checkfu = {
 	agents: resource<JsonAgent, CreateAgentBody, UpdateAgentBody>("/v1/agents"),
 	environments: resource<JsonEnvironment, CreateEnvironmentBody>("/v1/environments"),
+	automations: {
+		...resource<JsonAutomation, CreateAutomationBody>(automations),
+		update: async (id: string, body: UpdateAutomationBody) =>
+			settled(
+				automations,
+				await call<JsonAutomation | Pending>("POST", automationPath(id), body),
+				(saved) => showsChanges(saved, body),
+			),
+		pause: (id: string) =>
+			automationAction(id, "/pause", (automation) => automation.status !== "active"),
+		unpause: (id: string) =>
+			automationAction(id, "/unpause", (automation) => automation.status !== "paused"),
+		/**
+		 * Starts a run and resolves once that run is listed, started or failed. The run is accepted
+		 * once the POST answers, so a run still not listed after the wait is reported as queued
+		 * (`listed: null`), never as a failed request a second click would repeat.
+		 */
+		run: async (
+			id: string,
+		): Promise<{ readonly run: number; readonly listed: JsonAutomationRun | null }> => {
+			const queued = await call<AutomationRunQueued>("POST", automationPath(id, "/run"))
+			const listed = await settled<JsonAutomationRun>(automationPath(id, "/runs"), {
+				id: String(queued.run),
+				pending: true,
+			}).catch(() => null)
+			return { run: queued.run, listed }
+		},
+		runs: (id: string, before?: number, signal?: AbortSignal) =>
+			call<RunPage>(
+				"GET",
+				`${automationPath(id, "/runs")}?order=desc&limit=20${before === undefined ? "" : `&after=${before}`}`,
+				undefined,
+				undefined,
+				signal,
+			),
+	},
 	sessions: {
 		...resource<JsonSession, CreateSessionBody>("/v1/sessions"),
 		send: (id: string, body: SendSessionEventsBody, idempotencyKey: string) =>

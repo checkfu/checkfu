@@ -42,6 +42,26 @@ export const environmentChoices = infiniteQueryOptions({
 	getNextPageParam: (page) => page.next_cursor ?? undefined,
 })
 
+export const automationsPage = (after?: string) =>
+	queryOptions({
+		queryKey: ["automations", "page", after ?? null],
+		queryFn: ({ signal }) => checkfu.automations.list(after, signal),
+	})
+
+export const automationQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["automations", "one", id],
+		queryFn: ({ signal }) => checkfu.automations.retrieve(id, signal),
+	})
+
+export const automationRunsQuery = (id: string) =>
+	infiniteQueryOptions({
+		queryKey: ["automations", "runs", id],
+		queryFn: ({ pageParam, signal }) => checkfu.automations.runs(id, pageParam, signal),
+		initialPageParam: undefined as number | undefined,
+		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
+	})
+
 export const sessionsPage = (after?: string) =>
 	queryOptions({
 		queryKey: ["sessions", "page", after ?? null],
