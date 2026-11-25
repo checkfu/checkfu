@@ -43,6 +43,17 @@ export type ProviderAuthSpec =
 	| {
 			readonly kind: "none"
 	  }
+	| {
+			readonly kind: "cloudflare_ai_gateway"
+			readonly apiKeyEnv: string
+			readonly accountIdEnv: string
+			readonly gatewayIdEnv: string
+	  }
+	| {
+			readonly kind: "cloudflare_workers_ai"
+			readonly apiKeyEnv: string
+			readonly accountIdEnv: string
+	  }
 
 export interface ProviderModelDefaults {
 	readonly contextWindow?: number

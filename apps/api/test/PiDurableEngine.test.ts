@@ -36,11 +36,14 @@ import {
 import type { PiDurableBackend } from "../src/Pi/PiDurableEngine.ts"
 import type { PiTurnRequest } from "../src/Pi/PiTurn.ts"
 import {
+	CLOUDFLARE_AI_GATEWAY_BASE_URL_ENV,
+	CLOUDFLARE_WORKERS_AI_BASE_URL_ENV,
 	DEFAULT_ANTHROPIC_BASE_URL,
 	DEFAULT_OPENAI_BASE_URL,
 	LOCAL_DEV_SIGNAL_ENV,
 	LOCAL_DEV_SIGNAL_VALUE,
 	OPENAI_BASE_URL_ENV,
+	OPENROUTER_BASE_URL_ENV,
 	createNoRedirectProviderFetch,
 	createPiModels,
 	parseLoopbackBaseUrl,
@@ -140,6 +143,168 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 					)
 					expect(providerError(unsupportedModelErr).error_type).toBe("unknown_model_error")
 					expect(providerError(unsupportedModelErr).terminal).toBe(true)
+
+					// OpenRouter and Cloudflare AI Gateway agents validate cleanly and report missing credentials.
+					const openRouterRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "OpenRouter Agent", model: "openrouter/google/gemini-2.5-pro" },
+					})
+					expect(openRouterRes.status).toBe(201)
+					const openRouterAgent = (yield* Effect.promise(() => openRouterRes.json())) as {
+						id: string
+					}
+					const missingOpenRouter = yield* Effect.flip(
+						provider.runTurn({
+							session_id: SessionId.make("sess_openrouter_missing"),
+							agent_id: openRouterAgent.id,
+							agent_version: 1,
+							environment_id: env.id,
+							turn: 1,
+							input: ["Hi"],
+						}),
+					)
+					expect(providerError(missingOpenRouter).error_type).toBe("missing_api_key_error")
+					expect(providerError(missingOpenRouter).message).toContain("OPENROUTER_API_KEY")
+
+					const gatewayRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "Gateway Agent", model: "cloudflare-ai-gateway/claude-sonnet-5-5" },
+					})
+					expect(gatewayRes.status).toBe(201)
+					const gatewayAgent = (yield* Effect.promise(() => gatewayRes.json())) as { id: string }
+					const missingGateway = yield* Effect.flip(
+						provider.runTurn({
+							session_id: SessionId.make("sess_gateway_missing"),
+							agent_id: gatewayAgent.id,
+							agent_version: 1,
+							environment_id: env.id,
+							turn: 1,
+							input: ["Hi"],
+						}),
+					)
+					expect(providerError(missingGateway).error_type).toBe("missing_api_key_error")
+					expect(providerError(missingGateway).message).toContain("CLOUDFLARE_GATEWAY_ID")
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("runs turns end to end on OpenRouter and Cloudflare AI Gateway agents", async () => {
+		const seenModels: Array<{
+			readonly provider: string
+			readonly modelId: string
+			readonly api: string
+		}> = []
+		const { layer, closeAll } = makePiDurableTestLayer(
+			async (model) => {
+				seenModels.push({ provider: model.provider, modelId: model.id, api: model.api })
+				return makeAssistantReply(model, null, `reply from ${model.provider}/${model.id}`, 10, 5)
+			},
+			{
+				CHECKFU_API_KEY: TEST_API_KEY,
+				OPENROUTER_API_KEY: "sk-or-v1-test",
+				CLOUDFLARE_AI_API_KEY: "cf-key-test",
+				CLOUDFLARE_ACCOUNT_ID: "acct-test",
+				CLOUDFLARE_GATEWAY_ID: "gw-test",
+			},
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const provider = yield* Harness
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Multi-provider Env" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+
+					const orAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "OR Agent", model: "openrouter/anthropic/claude-sonnet-5.5" },
+					})
+					expect(orAgentRes.status).toBe(201)
+					const orAgent = (yield* Effect.promise(() => orAgentRes.json())) as { id: string }
+					const orReply = yield* provider.runTurn({
+						session_id: SessionId.make("sess_or"),
+						agent_id: orAgent.id,
+						agent_version: 1,
+						environment_id: env.id,
+						turn: 1,
+						input: ["Hello OpenRouter"],
+					})
+					expect(orReply.text).toBe("reply from openrouter/anthropic/claude-sonnet-5.5")
+
+					const gwAgentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "GW Agent", model: "cloudflare-ai-gateway/anthropic/claude-sonnet-5-5" },
+					})
+					expect(gwAgentRes.status).toBe(201)
+					const gwAgent = (yield* Effect.promise(() => gwAgentRes.json())) as { id: string }
+					const gwReply = yield* provider.runTurn({
+						session_id: SessionId.make("sess_gw"),
+						agent_id: gwAgent.id,
+						agent_version: 1,
+						environment_id: env.id,
+						turn: 1,
+						input: ["Hello Gateway"],
+					})
+					expect(gwReply.text).toBe("reply from cloudflare-ai-gateway/claude-sonnet-5-5")
+
+					const gwFineTuneRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: {
+							name: "GW Fine-tune Agent",
+							model: "cloudflare-ai-gateway/openai/ft:gpt-4o-mini:org:pilot:id",
+						},
+					})
+					expect(gwFineTuneRes.status).toBe(201)
+					const gwFineTuneAgent = (yield* Effect.promise(() => gwFineTuneRes.json())) as {
+						id: string
+					}
+					const gwFineTuneReply = yield* provider.runTurn({
+						session_id: SessionId.make("sess_gw_ft"),
+						agent_id: gwFineTuneAgent.id,
+						agent_version: 1,
+						environment_id: env.id,
+						turn: 1,
+						input: ["Hello Fine-tune"],
+					})
+					expect(gwFineTuneReply.text).toBe(
+						"reply from cloudflare-ai-gateway/ft:gpt-4o-mini:org:pilot:id",
+					)
+
+					expect(seenModels).toEqual([
+						{
+							provider: "openrouter",
+							modelId: "anthropic/claude-sonnet-5.5",
+							api: "anthropic-messages",
+						},
+						{
+							provider: "cloudflare-ai-gateway",
+							modelId: "claude-sonnet-5-5",
+							api: "anthropic-messages",
+						},
+						{
+							provider: "cloudflare-ai-gateway",
+							modelId: "ft:gpt-4o-mini:org:pilot:id",
+							api: "openai-responses",
+						},
+					])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -1818,7 +1983,12 @@ describe("turn engine", () => {
 			),
 		)
 		expect(devStageResult).toEqual({ openai: "http://127.0.0.1:4321/v1" })
-		expect(readKeys).toEqual([OPENAI_BASE_URL_ENV])
+		expect(readKeys).toEqual([
+			OPENAI_BASE_URL_ENV,
+			OPENROUTER_BASE_URL_ENV,
+			CLOUDFLARE_AI_GATEWAY_BASE_URL_ENV,
+			CLOUDFLARE_WORKERS_AI_BASE_URL_ENV,
+		])
 		expect(boundSignals).toEqual([LOCAL_DEV_SIGNAL_ENV])
 
 		const overridden = createPiModels(

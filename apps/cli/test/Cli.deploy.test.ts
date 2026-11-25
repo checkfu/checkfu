@@ -141,6 +141,7 @@ describe("dotenv helpers", () => {
 
 	it("infers the provider from the key prefix", () => {
 		expect(providerForKey("sk-ant-api03-x").env).toBe("ANTHROPIC_API_KEY")
+		expect(providerForKey("sk-or-v1-x").env).toBe("OPENROUTER_API_KEY")
 		expect(providerForKey("sk-proj-x").env).toBe("OPENAI_API_KEY")
 	})
 })
@@ -277,7 +278,8 @@ describe("checkfu deploy", () => {
 				{
 					files: checkout,
 					env: { CHECKFU_CONFIG_DIR: "/config", CHECKFU_API_KEY: TEST_API_KEY },
-					message: "ANTHROPIC_API_KEY or OPENAI_API_KEY",
+					message:
+						"ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_GATEWAY_ID",
 				},
 				{
 					files: {
@@ -617,6 +619,105 @@ describe("checkfu deploy", () => {
 			expect(result.errorMessage).toContain("did not accept its API key within")
 			expect(files[RECORD_FILE]).toBe(record("live"))
 			expect(files[CONFIG_FILE]).toBeUndefined()
+		}),
+	)
+
+	it.live("deploys with OpenRouter or Cloudflare AI Gateway credentials", () =>
+		Effect.gen(function* () {
+			const cli = yield* makeTestServer()
+
+			// 1. OpenRouter key exported in shell
+			const orFiles = virtualFiles(checkout)
+			const orResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					OPENROUTER_API_KEY: "sk-or-v1-test",
+				},
+				files: orFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(orResult.errorMessage).toBeUndefined()
+			expect(orFiles[ENV_FILE]).toBe(
+				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENROUTER_API_KEY=sk-or-v1-test\n`,
+			)
+			expect(orResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model openrouter/anthropic/claude-sonnet-5.5`,
+			)
+
+			// 2. Cloudflare AI Gateway with zero-token native AI binding (CLOUDFLARE_GATEWAY_ID only)
+			const gwFiles = virtualFiles(checkout)
+			const gwResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CLOUDFLARE_GATEWAY_ID: "my-gateway",
+				},
+				files: gwFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(gwResult.errorMessage).toBeUndefined()
+			expect(gwFiles[ENV_FILE]).toBe(
+				`CHECKFU_API_KEY=${TEST_API_KEY}\nCLOUDFLARE_GATEWAY_ID=my-gateway\n`,
+			)
+			expect(gwResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model cloudflare-ai-gateway/claude-sonnet-5-5`,
+			)
+
+			// 3. Deployment credentials (CLOUDFLARE_API_KEY) are never copied into .env as inference tokens
+			const globalKeyFiles = virtualFiles(checkout)
+			const globalKeyResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					OPENAI_API_KEY: "sk-proj-x",
+					CLOUDFLARE_API_KEY: "global-deploy-secret",
+					CLOUDFLARE_EMAIL: "ops@example.com",
+					CLOUDFLARE_ACCOUNT_ID: ACCOUNT,
+				},
+				files: globalKeyFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(globalKeyResult.errorMessage).toBeUndefined()
+			expect(globalKeyFiles[ENV_FILE]).toBe(
+				`CHECKFU_API_KEY=${TEST_API_KEY}\nOPENAI_API_KEY=sk-proj-x\n`,
+			)
+			expect(globalKeyFiles[ENV_FILE]).not.toContain("global-deploy-secret")
+
+			// 4. CLOUDFLARE_GATEWAY_ID + CLOUDFLARE_AI_API_KEY without CLOUDFLARE_ACCOUNT_ID fails fast
+			//    because neither HTTPS transport nor native AI binding can run on the harness.
+			const brokenGwCalls: Array<ReadonlyArray<string>> = []
+			const brokenGwResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CLOUDFLARE_GATEWAY_ID: "my-gateway",
+					CLOUDFLARE_AI_API_KEY: "cf-ai-token",
+				},
+				files: virtualFiles(checkout),
+				spawn: fakeAlchemy(brokenGwCalls),
+			})
+			expect(brokenGwResult.exitCode).toBe(1)
+			expect(brokenGwResult.errorMessage).toContain("CLOUDFLARE_ACCOUNT_ID")
+			expect(brokenGwCalls.filter((call) => call[0] !== "query")).toEqual([])
+
+			// 5. CLOUDFLARE_GATEWAY_ID + CLOUDFLARE_AI_API_KEY + CLOUDFLARE_ACCOUNT_ID deploys HTTPS gateway
+			const httpsGwFiles = virtualFiles(checkout)
+			const httpsGwResult = yield* cli.run(["deploy", "--yes"], {
+				env: {
+					CHECKFU_CONFIG_DIR: "/config",
+					CHECKFU_API_KEY: TEST_API_KEY,
+					CLOUDFLARE_GATEWAY_ID: "my-gateway",
+					CLOUDFLARE_AI_API_KEY: "cf-ai-token",
+					CLOUDFLARE_ACCOUNT_ID: ACCOUNT,
+				},
+				files: httpsGwFiles,
+				spawn: fakeAlchemy([]),
+			})
+			expect(httpsGwResult.errorMessage).toBeUndefined()
+			expect(httpsGwResult.stderr).toContain(
+				`${COMMAND} agents create --name Assistant --model cloudflare-ai-gateway/claude-sonnet-5-5`,
+			)
 		}),
 	)
 

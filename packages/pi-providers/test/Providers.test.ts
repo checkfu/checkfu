@@ -1,18 +1,52 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai"
-import { createProvider } from "@earendil-works/pi-ai/models"
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai"
+import { CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL } from "@earendil-works/pi-ai/api/cloudflare-ai-binding"
+import { createModels, createProvider, hasApi } from "@earendil-works/pi-ai/models"
+import {
+	ANTHROPIC_CLASSIFIER_MODELS,
+	ANTHROPIC_IMAGE_MODELS,
+	ANTHROPIC_MODELS,
+} from "@earendil-works/pi-ai/providers/anthropic.models"
+import {
+	CLOUDFLARE_AI_GATEWAY_CLASSIFIER_MODELS,
+	CLOUDFLARE_AI_GATEWAY_IMAGE_MODELS,
+	CLOUDFLARE_AI_GATEWAY_MODELS,
+} from "@earendil-works/pi-ai/providers/cloudflare-ai-gateway.models"
+import {
+	CLOUDFLARE_WORKERS_AI_CLASSIFIER_MODELS,
+	CLOUDFLARE_WORKERS_AI_IMAGE_MODELS,
+	CLOUDFLARE_WORKERS_AI_MODELS,
+} from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models"
+import {
+	OPENAI_CLASSIFIER_MODELS,
+	OPENAI_IMAGE_MODELS,
+	OPENAI_MODELS,
+} from "@earendil-works/pi-ai/providers/openai.models"
+import {
+	OPENROUTER_CLASSIFIER_MODELS,
+	OPENROUTER_IMAGE_MODELS,
+	OPENROUTER_MODELS,
+} from "@earendil-works/pi-ai/providers/openrouter.models"
 import { describe, expect, it } from "vitest"
 import {
 	BUILTIN_PROVIDERS,
+	CLOUDFLARE_AI_API_KEY_ENV,
 	DEFAULT_MIN_CONTEXT_WINDOW,
 	MAX_MODEL_ID_LENGTH,
 	checkProviderCredentials,
 	defineProvider,
+	getCloudflareAiGatewayCatalogIndex,
+	getCloudflareWorkersAiCatalogIndex,
+	getKnownNonChatModelIds,
+	getOpenRouterCatalogEntry,
+	getOpenRouterCatalogIndex,
 	inferProviderForApiKey,
 	parseLoopbackBaseUrl,
 	parseProviderBaseUrl,
 	providerRequiredSecretEnvs,
 	resolveModelSpecifier,
+	shouldBindCloudflareAiGateway,
 } from "../src/Catalog.ts"
+import { hydrateIndexedModel } from "../src/CatalogCapabilities.ts"
 import {
 	DEFAULT_REFUSAL_TEXT,
 	OPENAI_COMPLETIONS_CONTENT_FILTER_ERROR,
@@ -26,6 +60,7 @@ import {
 	createOpenAICompletionsWire,
 	createOpenAIResponsesWire,
 	createProviderModels,
+	withDynamicModelLookup,
 } from "../src/Runtime.ts"
 
 describe("@checkfu/pi-providers catalog & registry", () => {
@@ -122,10 +157,413 @@ describe("@checkfu/pi-providers catalog & registry", () => {
 		expect(providerRequiredSecretEnvs(BUILTIN_PROVIDERS)).toEqual([
 			"OPENAI_API_KEY",
 			"ANTHROPIC_API_KEY",
+			"OPENROUTER_API_KEY",
+			CLOUDFLARE_AI_API_KEY_ENV,
 		])
+		expect(providerRequiredSecretEnvs(BUILTIN_PROVIDERS)).not.toContain("CLOUDFLARE_API_KEY")
 		expect(inferProviderForApiKey("sk-ant-api03-123")?.id).toBe("anthropic")
+		expect(inferProviderForApiKey("sk-or-v1-abc")?.id).toBe("openrouter")
 		expect(inferProviderForApiKey("sk-proj-123")?.id).toBe("openai")
 		expect(inferProviderForApiKey("unknown-prefix")).toBeUndefined()
+		expect(shouldBindCloudflareAiGateway({ CLOUDFLARE_GATEWAY_ID: "gw" })).toBe(true)
+		expect(
+			shouldBindCloudflareAiGateway({
+				CLOUDFLARE_GATEWAY_ID: "gw",
+				CLOUDFLARE_AI_API_KEY: "token",
+			}),
+		).toBe(false)
+		expect(shouldBindCloudflareAiGateway({})).toBe(false)
+	})
+
+	it("keeps compact catalog indexes, capabilities, and non-chat exclusions in sync with pi-ai", () => {
+		const assertCatalogParity = (
+			providerId: string,
+			rawCatalog: Readonly<Record<string, Model<Api>>>,
+			index: ReturnType<typeof getOpenRouterCatalogIndex>,
+		) => {
+			const chatModels = Object.values(rawCatalog).filter(
+				(model) =>
+					(model.type === "chat" || model.type === undefined) &&
+					(hasApi(model, "openai-completions") ||
+						hasApi(model, "anthropic-messages") ||
+						hasApi(model, "openai-responses")),
+			)
+			expect(
+				index.size,
+				`${providerId}: run bun packages/pi-providers/scripts/sync-catalog-index.ts`,
+			).toBe(chatModels.length)
+			for (const model of chatModels) {
+				const entry = index.get(model.id)
+				expect(entry, `${providerId} missing ${model.id}`).toBeDefined()
+				const hydrated = hydrateIndexedModel(entry!, {
+					provider: providerId,
+					baseUrl: model.baseUrl,
+				})
+				expect(hydrated.api).toBe(model.api)
+				expect(hydrated.contextWindow).toBe(model.contextWindow)
+				expect(hydrated.maxTokens).toBe(model.maxTokens)
+				expect(hydrated.reasoning).toBe(model.reasoning)
+				expect(hydrated.input).toEqual(model.input)
+				expect(hydrated.cost).toEqual(model.cost)
+				expect(hydrated.thinkingLevelMap).toEqual(model.thinkingLevelMap)
+				expect(hydrated.compat).toEqual(model.compat)
+				expect(hydrated.inputLimits).toEqual(model.inputLimits)
+			}
+		}
+
+		assertCatalogParity("openrouter", OPENROUTER_MODELS, getOpenRouterCatalogIndex())
+		assertCatalogParity(
+			"cloudflare-ai-gateway",
+			CLOUDFLARE_AI_GATEWAY_MODELS,
+			getCloudflareAiGatewayCatalogIndex(),
+		)
+		assertCatalogParity(
+			"cloudflare-workers-ai",
+			CLOUDFLARE_WORKERS_AI_MODELS,
+			getCloudflareWorkersAiCatalogIndex(),
+		)
+
+		const stripVariant = (id: string): string => {
+			const colonIndex = id.indexOf(":")
+			return colonIndex === -1 ? id : id.slice(0, colonIndex)
+		}
+
+		const assertNonChatParity = (
+			providerId: string,
+			chatCatalog: Readonly<Record<string, { readonly id: string }>>,
+			otherCatalogs: ReadonlyArray<Readonly<Record<string, { readonly id: string }>>>,
+			options?: {
+				readonly openRouterPrefix?: string
+				readonly indexVariantBaseIds?: boolean
+				readonly allowSuperset?: boolean
+			},
+		) => {
+			const chatIds = new Set(Object.values(chatCatalog).map((model) => model.id))
+			const chatBaseIds = new Set(Object.values(chatCatalog).map((model) => stripVariant(model.id)))
+			const expected = new Set<string>()
+			const record = (id: string) => {
+				if (!chatIds.has(id)) {
+					expected.add(id)
+				}
+				if (options?.indexVariantBaseIds) {
+					const baseId = stripVariant(id)
+					if (baseId !== id && !chatIds.has(baseId) && !chatBaseIds.has(baseId)) {
+						expected.add(baseId)
+					}
+				}
+			}
+			for (const catalog of otherCatalogs) {
+				for (const model of Object.values(catalog)) {
+					record(model.id)
+				}
+			}
+			if (options?.openRouterPrefix !== undefined) {
+				const openRouterNonChatCatalogs: ReadonlyArray<
+					Readonly<Record<string, { readonly id: string }>>
+				> = [OPENROUTER_IMAGE_MODELS, OPENROUTER_CLASSIFIER_MODELS]
+				for (const catalog of openRouterNonChatCatalogs) {
+					for (const model of Object.values(catalog)) {
+						if (model.id.startsWith(options.openRouterPrefix)) {
+							const stripped = model.id.slice(options.openRouterPrefix.length)
+							record(stripped)
+							const base = stripVariant(stripped)
+							if (base !== stripped) {
+								record(base)
+							}
+						}
+					}
+				}
+			}
+			const actual = getKnownNonChatModelIds(providerId) ?? new Set<string>()
+			if (options?.allowSuperset) {
+				for (const id of expected) {
+					expect(
+						actual.has(id),
+						`${providerId} missing non-chat model ${id}: run bun packages/pi-providers/scripts/sync-catalog-index.ts`,
+					).toBe(true)
+				}
+				for (const id of actual) {
+					expect(
+						chatIds.has(id),
+						`${providerId} non-chat index must not exclude chat model ${id}`,
+					).toBe(false)
+				}
+				return
+			}
+			expect(
+				[...actual].toSorted(),
+				`${providerId} non-chat mismatch: run bun packages/pi-providers/scripts/sync-catalog-index.ts`,
+			).toEqual([...expected].toSorted())
+		}
+
+		assertNonChatParity("openai", OPENAI_MODELS, [OPENAI_IMAGE_MODELS, OPENAI_CLASSIFIER_MODELS], {
+			openRouterPrefix: "openai/",
+		})
+		expect(getKnownNonChatModelIds("openai")?.has("gpt-image-1")).toBe(true)
+		assertNonChatParity(
+			"anthropic",
+			ANTHROPIC_MODELS,
+			[ANTHROPIC_IMAGE_MODELS, ANTHROPIC_CLASSIFIER_MODELS],
+			{ openRouterPrefix: "anthropic/" },
+		)
+		assertNonChatParity(
+			"openrouter",
+			OPENROUTER_MODELS,
+			[OPENROUTER_IMAGE_MODELS, OPENROUTER_CLASSIFIER_MODELS],
+			{ indexVariantBaseIds: true, allowSuperset: true },
+		)
+		expect(getKnownNonChatModelIds("openrouter")?.has("qwen/qwen3-embedding-8b")).toBe(true)
+		expect(getKnownNonChatModelIds("openrouter")?.has("google/gemini-embedding-001")).toBe(true)
+		expect(getKnownNonChatModelIds("openrouter")?.has("mistralai/mistral-embed-2312")).toBe(true)
+		assertNonChatParity("cloudflare-ai-gateway", CLOUDFLARE_AI_GATEWAY_MODELS, [
+			CLOUDFLARE_AI_GATEWAY_IMAGE_MODELS,
+			CLOUDFLARE_AI_GATEWAY_CLASSIFIER_MODELS,
+		])
+		assertNonChatParity(
+			"cloudflare-workers-ai",
+			CLOUDFLARE_WORKERS_AI_MODELS,
+			[CLOUDFLARE_WORKERS_AI_IMAGE_MODELS, CLOUDFLARE_WORKERS_AI_CLASSIFIER_MODELS],
+			{ allowSuperset: true },
+		)
+		expect(
+			getKnownNonChatModelIds("cloudflare-workers-ai")?.has("@cf/google/embeddinggemma-300m"),
+		).toBe(true)
+		expect(getKnownNonChatModelIds("cloudflare-workers-ai")?.has("@cf/microsoft/resnet-50")).toBe(
+			true,
+		)
+		expect(getKnownNonChatModelIds("cloudflare-workers-ai")?.has("@cf/meta/llama-guard-3-8b")).toBe(
+			true,
+		)
+	})
+
+	it("resolves OpenRouter, Cloudflare AI Gateway, and Workers AI specifiers", () => {
+		expect(resolveModelSpecifier("openrouter/anthropic/claude-sonnet-5.5")).toEqual({
+			provider: "openrouter",
+			modelId: "anthropic/claude-sonnet-5.5",
+			cataloged: true,
+		})
+		expect(resolveModelSpecifier("openrouter/google/gemini-2.5-pro")).toEqual({
+			provider: "openrouter",
+			modelId: "google/gemini-2.5-pro",
+			cataloged: true,
+		})
+		// Unlisted OpenRouter :variant suffixes inherit base capabilities while reporting cataloged: false.
+		expect(getOpenRouterCatalogEntry("google/gemini-2.5-pro:nitro")).toBeUndefined()
+		expect(resolveModelSpecifier("openrouter/google/gemini-2.5-pro:nitro")).toEqual({
+			provider: "openrouter",
+			modelId: "google/gemini-2.5-pro:nitro",
+			cataloged: false,
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openrouter/google/gemini-2.5-pro:nitro"),
+		).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "openrouter/google/gemini-2.5-pro:nitro",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("openrouter/openai/computer-use-preview")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/computer-use-preview")).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openai/computer-use-preview-2025-03-11"),
+		).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/computer-use-preview")).toBeNull()
+		// Chat Completions-only OpenAI models are rejected on Gateway native openai-responses routes,
+		// while remaining supported on OpenRouter's openai-completions route.
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-audio-1.5")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/gpt-audio-1.5")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-4o-search-preview")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/openai/gpt-audio")).toEqual({
+			provider: "openrouter",
+			modelId: "openai/gpt-audio",
+			cataloged: true,
+		})
+		expect(resolveModelSpecifier("openrouter/openai/gpt-audio-1.5")).toEqual({
+			provider: "openrouter",
+			modelId: "openai/gpt-audio-1.5",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("openrouter/new-vendor/brand-new-model")).toEqual({
+			provider: "openrouter",
+			modelId: "new-vendor/brand-new-model",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("openrouter/openai/gpt-4")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/qwen/qwen3-14b")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/qwen/qwen3-14b:free")).toBeNull()
+		// Non-chat-only OpenRouter (including families cataloged only under a :variant) and native
+		// OpenAI image models are excluded before Day-1 synthesis.
+		expect(resolveModelSpecifier("openrouter/black-forest-labs/flux.2-pro")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/black-forest-labs/flux.2-pro:free")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/perplexity/pplx-decider-v1.3:free")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/perplexity/pplx-decider-v1.3")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/perplexity/pplx-decider-v1.3:nitro")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/recraft/recraft-v4.1-flash-v2")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/recraft/recraft-v4.1-flash-v2:nitro")).toBeNull()
+		expect(resolveModelSpecifier("openai/gpt-image-1")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-image-1")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/text-embedding-3-small")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/whisper-1")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/whisper-1")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/openai/text-embedding-3-small")).toBeNull()
+		expect(resolveModelSpecifier("openrouter/openai/whisper-1")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/baai/bge-base-en-v1.5")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/openai/whisper")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/google/embeddinggemma-300m")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/microsoft/resnet-50")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/facebook/bart-large-cnn")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-guard-3-8b")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/leonardo/phoenix-1.0")).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/baai/bge-base-en-v1.5"),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/google/embeddinggemma-300m"),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/microsoft/resnet-50"),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/meta/llama-guard-3-8b"),
+		).toBeNull()
+		// Legacy small-context Workers AI models are excluded before Day-1 128k synthesis.
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-2-7b-chat-int8")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-3-8b-instruct")).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/qwen/qwen2.5-coder-32b-instruct"),
+		).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-3.2-1b-instruct")).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/meta/llama-2-7b-chat-int8"),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/meta/llama-3-8b-instruct"),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-2-7b-chat-int8", {
+				minContextWindow: 2048,
+			}),
+		).toEqual({
+			provider: "cloudflare-workers-ai",
+			modelId: "@cf/meta/llama-2-7b-chat-int8",
+			cataloged: false,
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/deepseek-ai/deepseek-r1-distill-qwen-32b"),
+		).toEqual({
+			provider: "cloudflare-workers-ai",
+			modelId: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+			cataloged: false,
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", {
+				minContextWindow: 100_000,
+			}),
+		).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/gpt-image-1")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/ft:gpt-4:org:pilot:id")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-4-0613")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/gpt-4-0613")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-3.5-turbo-0125")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-4-32k-0613")).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openrouter/perplexity/pplx-decider-v1.3"),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openrouter/perplexity/pplx-decider-v1.3:nitro"),
+		).toBeNull()
+
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/claude-sonnet-5-5")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "claude-sonnet-5-5",
+			cataloged: true,
+		})
+		// Explicit upstream prefixes are preserved until transport and wire model ID are chosen.
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/anthropic/claude-sonnet-5-5")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "anthropic/claude-sonnet-5-5",
+			cataloged: true,
+		})
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-6.2-sol")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "openai/gpt-6.2-sol",
+			cataloged: true,
+		})
+		// Gateway's own 128k limit for gpt-5 takes precedence over OpenAI's 400k limit.
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-5", { minContextWindow: 200_000 }),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/gpt-5", { minContextWindow: 200_000 }),
+		).toBeNull()
+		expect(resolveModelSpecifier("openai/gpt-5", { minContextWindow: 200_000 })).toEqual({
+			provider: "openai",
+			modelId: "gpt-5",
+			cataloged: true,
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openai/ft:gpt-4o-mini:org:pilot:id"),
+		).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "openai/ft:gpt-4o-mini:org:pilot:id",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/gpt-4")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/anthropic/")).toBeNull()
+		// Nested slashes are rejected on explicit native OpenAI/Anthropic gateway routes,
+		// while remaining allowed on the /compat route.
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openai/team/model")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/anthropic/team/model")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/dynamic/team/route")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "dynamic/team/route",
+			cataloged: false,
+		})
+		// OpenRouter limits and non-chat exclusions apply on the Gateway /compat route too.
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/qwen/qwen3-14b")).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/qwen/qwen3-14b:free")).toBeNull()
+		expect(
+			resolveModelSpecifier("cloudflare-ai-gateway/openrouter/black-forest-labs/flux.2-pro"),
+		).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/google/gemini-2.5-pro")).toEqual(
+			{
+				provider: "cloudflare-ai-gateway",
+				modelId: "openrouter/google/gemini-2.5-pro",
+				cataloged: true,
+			},
+		)
+		expect(
+			resolveModelSpecifier(
+				"cloudflare-ai-gateway/workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+			),
+		).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+			cataloged: true,
+		})
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/dynamic/my-route")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "dynamic/my-route",
+			cataloged: false,
+		})
+		expect(
+			resolveModelSpecifier(
+				"cloudflare-ai-gateway/workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+			),
+		).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/workers-ai/@cf/cloudflare/clef")).toBeNull()
+
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/deepseek-ai/deepseek-v4.1-flash-1017"),
+		).toEqual({
+			provider: "cloudflare-workers-ai",
+			modelId: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+			cataloged: true,
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+		).toBeNull()
+		expect(resolveModelSpecifier("cloudflare-workers-ai/@cf/cloudflare/clef")).toBeNull()
 	})
 
 	it("validates HTTPS base URLs and blocks private/loopback targets outside local dev", () => {
@@ -490,6 +928,1783 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 		expect(observedRefusalDelta).toBe(true)
 		expect(transportErrorResult.stopReason).toBe("error")
 		expect(isRefusalAssistantMessage(transportErrorResult)).toBe(false)
+	})
+
+	it("routes OpenRouter Claude models to Anthropic Messages and other models to OpenAI Completions", async () => {
+		const models = createProviderModels({
+			env: { OPENROUTER_API_KEY: "sk-or-v1-test" },
+		})
+		const claude = models.getModel("openrouter", "anthropic/claude-sonnet-5.5")
+		expect(claude).toMatchObject({
+			id: "anthropic/claude-sonnet-5.5",
+			provider: "openrouter",
+			api: "anthropic-messages",
+			baseUrl: "https://openrouter.ai/api",
+			contextWindow: 1_000_000,
+		})
+		const claudeBatch = models.getModel("openrouter", "anthropic/claude-sonnet-5.5:batch")
+		expect(claudeBatch).toMatchObject({
+			id: "anthropic/claude-sonnet-5.5:batch",
+			provider: "openrouter",
+			api: "openai-completions",
+			baseUrl: "https://openrouter.ai/api/v1",
+			compat: { thinkingFormat: "openrouter", cacheControlFormat: "anthropic" },
+		})
+		const gemini = models.getModel("openrouter", "google/gemini-2.5-pro")
+		expect(gemini).toMatchObject({
+			id: "google/gemini-2.5-pro",
+			provider: "openrouter",
+			api: "openai-completions",
+			baseUrl: "https://openrouter.ai/api/v1",
+			contextWindow: 1_048_576,
+			reasoning: true,
+			thinkingLevelMap: { off: null },
+			compat: { thinkingFormat: "openrouter", supportsStrictMode: true },
+		})
+		expect(models.getModel("openrouter", "new-vendor/brand-new-model")?.reasoning).toBe(false)
+		expect(models.getModelOfType("chat", "openrouter", "anthropic/claude-sonnet-5.5")).toEqual(
+			claude,
+		)
+		expect(models.getModel("openrouter", "openai/gpt-4")).toBeUndefined()
+		expect(models.getModel("openrouter", "qwen/qwen3-14b")).toBeUndefined()
+		expect(models.getModelOfType("chat", "openrouter", "qwen/qwen3-14b")).toBeUndefined()
+		expect(models.getModel("openrouter", "black-forest-labs/flux.2-pro")).toBeUndefined()
+
+		const seenRequests: Array<{
+			readonly url: string
+			readonly auth: string | null
+			readonly hasReasoning: boolean
+		}> = []
+		const sseBody = [
+			`data: ${JSON.stringify({
+				id: "chatcmpl_or",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "google/gemini-2.5-pro",
+				choices: [
+					{
+						index: 0,
+						delta: { role: "assistant", content: "Hello from OpenRouter" },
+						finish_reason: null,
+					},
+				],
+			})}\n\n`,
+			`data: ${JSON.stringify({
+				id: "chatcmpl_or",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "google/gemini-2.5-pro",
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			})}\n\n`,
+			"data: [DONE]\n\n",
+		].join("")
+		const result = await models.complete(
+			gemini!,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (input, init) => {
+					const headers = new Headers(init?.headers)
+					const body =
+						typeof init?.body === "string"
+							? (JSON.parse(init.body) as { readonly reasoning?: unknown })
+							: {}
+					seenRequests.push({
+						url: String(input),
+						auth: headers.get("authorization"),
+						hasReasoning: body.reasoning !== undefined,
+					})
+					return new Response(sseBody, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(result.stopReason).toBe("stop")
+		expect(result.content).toEqual([{ type: "text", text: "Hello from OpenRouter" }])
+		// google/gemini-2.5-pro sets thinkingLevelMap.off = null, so default turns must NOT
+		// send `reasoning: { effort: "none" }`.
+		expect(seenRequests).toEqual([
+			{
+				url: "https://openrouter.ai/api/v1/chat/completions",
+				auth: "Bearer sk-or-v1-test",
+				hasReasoning: false,
+			},
+		])
+		// Listing methods expose eligible indexed OpenRouter models filtered by minContextWindow.
+		const availableOpenRouterIds = (await models.getAvailable("openrouter")).map((m) => m.id)
+		expect(availableOpenRouterIds).toContain("anthropic/claude-sonnet-5.5")
+		expect(availableOpenRouterIds).toContain("google/gemini-2.5-pro")
+		expect(availableOpenRouterIds).not.toContain("qwen/qwen3-14b")
+
+		// OpenRouter wire guards pin both anthropic-messages and openai-completions streams to
+		// the active registry's configured endpoint so retained local-override models cannot
+		// redirect production keys and transcripts to an old origin or wrong route path.
+		const localOrModels = createProviderModels({
+			env: { OPENROUTER_API_KEY: "sk-or-local" },
+			baseUrlOverrides: { openrouter: "http://127.0.0.1:18999/v1" },
+		})
+		const retainedLocalOrClaude = localOrModels.getModel(
+			"openrouter",
+			"anthropic/claude-sonnet-5.5",
+		)!
+		const retainedLocalOrGemini = localOrModels.getModel("openrouter", "google/gemini-2.5-pro")!
+		let openRouterLeakedFetches = 0
+		const leakCountingFetch: typeof fetch = async () => {
+			openRouterLeakedFetches += 1
+			return new Response(sseBody, { status: 200 })
+		}
+		const rejectedOrAnthropic = await models.complete(
+			retainedLocalOrClaude,
+			{ messages: [{ role: "user", content: "secret", timestamp: 0 }] },
+			{ fetch: leakCountingFetch },
+		)
+		expect(rejectedOrAnthropic.stopReason).toBe("error")
+		expect(rejectedOrAnthropic.errorMessage).toMatch(/disallowed origin/i)
+		const rejectedOrCompletions = await models.complete(
+			retainedLocalOrGemini,
+			{ messages: [{ role: "user", content: "secret", timestamp: 0 }] },
+			{ fetch: leakCountingFetch },
+		)
+		expect(rejectedOrCompletions.stopReason).toBe("error")
+		expect(rejectedOrCompletions.errorMessage).toMatch(/disallowed origin/i)
+		const rejectedReverseOr = await localOrModels.complete(
+			gemini!,
+			{ messages: [{ role: "user", content: "secret", timestamp: 0 }] },
+			{ fetch: leakCountingFetch },
+		)
+		expect(rejectedReverseOr.stopReason).toBe("error")
+		expect(rejectedReverseOr.errorMessage).toMatch(/disallowed origin/i)
+		const rejectedSwappedPath = await models.complete(
+			{ ...claude!, baseUrl: "https://openrouter.ai/api/v1" },
+			{ messages: [{ role: "user", content: "secret", timestamp: 0 }] },
+			{ fetch: leakCountingFetch },
+		)
+		expect(rejectedSwappedPath.stopReason).toBe("error")
+		expect(rejectedSwappedPath.errorMessage).toMatch(/mismatched endpoint/i)
+		expect(openRouterLeakedFetches).toBe(0)
+
+		// OpenRouter suppresses native OpenAI and Anthropic SDK env headers on both codecs.
+		const savedOrSdkEnv = {
+			OPENAI_CUSTOM_HEADERS: process.env["OPENAI_CUSTOM_HEADERS"],
+			OPENAI_ORG_ID: process.env["OPENAI_ORG_ID"],
+			ANTHROPIC_CUSTOM_HEADERS: process.env["ANTHROPIC_CUSTOM_HEADERS"],
+		}
+		process.env["OPENAI_CUSTOM_HEADERS"] = "X-Native-OAI-Leak: should-not-send"
+		process.env["OPENAI_ORG_ID"] = "org-should-not-send"
+		process.env["ANTHROPIC_CUSTOM_HEADERS"] = "X-Native-Anth-Leak: should-not-send"
+		try {
+			let orCompHeaders: Headers | undefined
+			await models.complete(
+				gemini!,
+				{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+				{
+					fetch: async (_input, init) => {
+						orCompHeaders = new Headers(init?.headers)
+						return new Response(sseBody, {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+					},
+				},
+			)
+			expect(orCompHeaders?.get("x-native-oai-leak")).toBeNull()
+			expect(orCompHeaders?.get("openai-organization")).toBeNull()
+
+			let orAnthHeaders: Headers | undefined
+			const orAnthSse = [
+				`event: message_start\ndata: ${JSON.stringify({
+					type: "message_start",
+					message: {
+						id: "msg_or",
+						type: "message",
+						role: "assistant",
+						model: "anthropic/claude-sonnet-5.5",
+						content: [],
+						stop_reason: null,
+						stop_sequence: null,
+						usage: { input_tokens: 1, output_tokens: 0 },
+					},
+				})}\n\n`,
+				`event: message_delta\ndata: ${JSON.stringify({
+					type: "message_delta",
+					delta: { stop_reason: "end_turn" },
+					usage: { output_tokens: 1 },
+				})}\n\n`,
+				`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+			].join("")
+			await models.complete(
+				claude!,
+				{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+				{
+					fetch: async (_input, init) => {
+						orAnthHeaders = new Headers(init?.headers)
+						return new Response(orAnthSse, {
+							status: 200,
+							headers: { "content-type": "text/event-stream" },
+						})
+					},
+				},
+			)
+			expect(orAnthHeaders?.get("x-native-anth-leak")).toBeNull()
+		} finally {
+			for (const [key, value] of Object.entries(savedOrSdkEnv)) {
+				if (value === undefined) {
+					delete process.env[key]
+				} else {
+					process.env[key] = value
+				}
+			}
+		}
+	})
+
+	it("routes Cloudflare AI Gateway over HTTPS and zero-token native AI binding", async () => {
+		// 1. HTTPS transport with explicit CLOUDFLARE_AI_API_KEY + CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_GATEWAY_ID
+		const httpsModels = createProviderModels({
+			env: {
+				CLOUDFLARE_AI_API_KEY: "cf-secret-token",
+				CLOUDFLARE_ACCOUNT_ID: "acct-123",
+				CLOUDFLARE_GATEWAY_ID: "gw-main",
+			},
+		})
+		const httpsAnthropic = httpsModels.getModel("cloudflare-ai-gateway", "claude-sonnet-5-5")
+		const httpsExplicitAnthropic = httpsModels.getModel(
+			"cloudflare-ai-gateway",
+			"anthropic/claude-sonnet-5-5",
+		)
+		const httpsOpenAI = httpsModels.getModel("cloudflare-ai-gateway", "gpt-6.2-sol")
+		const httpsFineTune = httpsModels.getModel(
+			"cloudflare-ai-gateway",
+			"openai/ft:gpt-4o-mini:org:pilot:id",
+		)
+		const httpsCompat = httpsModels.getModel("cloudflare-ai-gateway", "dynamic/my-route")
+		expect(httpsAnthropic).toMatchObject({
+			id: "claude-sonnet-5-5",
+			api: "anthropic-messages",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/anthropic",
+		})
+		expect(httpsExplicitAnthropic).toMatchObject({
+			id: "claude-sonnet-5-5",
+			api: "anthropic-messages",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/anthropic",
+		})
+		expect(httpsOpenAI).toMatchObject({
+			id: "gpt-6.2-sol",
+			api: "openai-responses",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/openai",
+		})
+		expect(httpsFineTune).toMatchObject({
+			id: "ft:gpt-4o-mini:org:pilot:id",
+			api: "openai-responses",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/openai",
+			reasoning: false,
+			contextWindow: 128_000,
+			maxTokens: 16_384,
+		})
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openai/ft:o4-mini:org:pilot:id"),
+		).toMatchObject({
+			id: "ft:o4-mini:org:pilot:id",
+			api: "openai-responses",
+			reasoning: true,
+			contextWindow: 200_000,
+		})
+		// Unknown unlisted Gateway models omit reasoning controls instead of assuming support.
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-future-2027")?.reasoning).toBe(
+			false,
+		)
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openai/ft:gpt-4:org:pilot:id"),
+		).toBeUndefined()
+		expect(httpsModels.getModel("openai", "gpt-image-1")).toBeUndefined()
+		expect(httpsModels.getModel("openai", "gpt-image-1-2025-04-23")).toBeUndefined()
+		expect(resolveModelSpecifier("openai/gpt-image-1-2025-04-23")).toBeNull()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-image-1")).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-image-1-2025-04-23"),
+		).toBeUndefined()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-image-1")).toBeUndefined()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-image-1-2025-04-23")).toBeUndefined()
+
+		// Dated snapshots on Gateway routes inherit Gateway/base limits and refuse undersized bases.
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-4-turbo-2024-04-09"),
+		).toMatchObject({
+			id: "gpt-4-turbo-2024-04-09",
+			api: "openai-responses",
+			reasoning: false,
+			contextWindow: 128_000,
+			maxTokens: 4096,
+		})
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-4-turbo-2024-04-09")).toMatchObject({
+			id: "gpt-4-turbo-2024-04-09",
+			api: "openai-responses",
+			reasoning: false,
+			contextWindow: 128_000,
+			maxTokens: 4096,
+		})
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-5-2025-08-07")).toMatchObject({
+			id: "gpt-5-2025-08-07",
+			api: "openai-responses",
+			contextWindow: 128_000,
+		})
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-4-2024-04-09")).toBeUndefined()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-4-2024-04-09")).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "anthropic/claude-sonnet-4-6-20260301"),
+		).toMatchObject({
+			id: "claude-sonnet-4-6-20260301",
+			api: "anthropic-messages",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/anthropic",
+		})
+
+		// Verify completeSimple on a non-reasoning fine-tune omits `reasoning` from the request body.
+		let fineTuneBody: { readonly reasoning?: unknown } | undefined
+		const responsesSse = [
+			`event: response.completed\ndata: ${JSON.stringify({
+				type: "response.completed",
+				response: {
+					id: "resp_ft_1",
+					object: "response",
+					status: "completed",
+					model: "ft:gpt-4o-mini:org:pilot:id",
+					output: [
+						{
+							id: "msg_1",
+							type: "message",
+							role: "assistant",
+							status: "completed",
+							content: [{ type: "output_text", text: "Fine-tuned reply", annotations: [] }],
+						},
+					],
+					usage: { input_tokens: 10, output_tokens: 4, total_tokens: 14 },
+				},
+			})}\n\n`,
+		].join("")
+		const fineTuneResult = await httpsModels.completeSimple(
+			httpsFineTune!,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (_input, init) => {
+					if (typeof init?.body === "string") {
+						fineTuneBody = JSON.parse(init.body) as { readonly reasoning?: unknown }
+					}
+					return new Response(responsesSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(fineTuneResult.stopReason).toBe("stop")
+		expect(fineTuneBody?.reasoning).toBeUndefined()
+
+		// Listing methods expose eligible Gateway models with real catalog limits & pricing.
+		const availableGatewayModels = await httpsModels.getAvailable("cloudflare-ai-gateway")
+		expect(availableGatewayModels.some((m) => m.id === "claude-sonnet-5-5")).toBe(true)
+		const gatewayGpt5 = availableGatewayModels.find((m) => m.id === "gpt-5")
+		expect(gatewayGpt5?.contextWindow).toBe(128_000)
+		expect(gatewayGpt5?.cost.input).toBeGreaterThan(0)
+		expect(
+			availableGatewayModels.some(
+				(m) => m.id === "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+			),
+		).toBe(false)
+		expect(httpsCompat).toMatchObject({
+			id: "dynamic/my-route",
+			api: "openai-completions",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/compat",
+		})
+		// Gateway catalog limits take precedence over direct OpenAI upstream limits (128k vs 400k).
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-5")?.contextWindow).toBe(
+			128_000,
+		)
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-5")?.contextWindow).toBe(128_000)
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/gpt-audio-1.5")).toBeUndefined()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "gpt-audio-1.5")).toBeUndefined()
+
+		// Delegated Gateway /compat models preserve downstream replay requirements (such as
+		// requiresReasoningContentOnAssistantMessages for DeepSeek V4) alongside Gateway settings.
+		const gwDeepSeek = httpsModels.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/deepseek/deepseek-v4-flash",
+		)
+		expect(gwDeepSeek?.api).toBe("openai-completions")
+		expect(gwDeepSeek).toMatchObject({
+			compat: {
+				requiresReasoningContentOnAssistantMessages: true,
+				supportsStore: false,
+				supportsReasoningEffort: false,
+				maxTokensField: "max_tokens",
+			},
+		})
+		let gwFollowUpMessages: ReadonlyArray<{
+			readonly role?: string
+			readonly reasoning_content?: string
+		}> = []
+		const deepSeekSse = [
+			`data: ${JSON.stringify({
+				id: "chatcmpl_ds",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "openrouter/deepseek/deepseek-v4-flash",
+				choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+			})}\n\n`,
+			"data: [DONE]\n\n",
+		].join("")
+		await httpsModels.completeSimple(
+			gwDeepSeek!,
+			{
+				messages: [
+					{ role: "user", content: "first turn", timestamp: 0 },
+					{
+						role: "assistant",
+						content: [{ type: "text", text: "first reply without thinking block" }],
+						api: "openai-completions",
+						provider: "cloudflare-ai-gateway",
+						model: "openrouter/deepseek/deepseek-v4-flash",
+						usage: {
+							input: 1,
+							output: 1,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 2,
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+						},
+						stopReason: "stop",
+						timestamp: 1,
+					},
+					{ role: "user", content: "second turn", timestamp: 2 },
+				],
+			},
+			{
+				fetch: async (_input, init) => {
+					if (typeof init?.body === "string") {
+						const parsed = JSON.parse(init.body) as {
+							readonly messages?: ReadonlyArray<{
+								readonly role?: string
+								readonly reasoning_content?: string
+							}>
+						}
+						gwFollowUpMessages = parsed.messages ?? []
+					}
+					return new Response(deepSeekSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		const assistantTurn = gwFollowUpMessages.find((msg) => msg.role === "assistant")
+		expect(assistantTurn).toBeDefined()
+		expect(assistantTurn).toHaveProperty("reasoning_content")
+		const strictGwModels = createProviderModels({
+			env: {
+				CLOUDFLARE_AI_API_KEY: "cf-secret-token",
+				CLOUDFLARE_ACCOUNT_ID: "acct-123",
+				CLOUDFLARE_GATEWAY_ID: "gw-main",
+			},
+			minContextWindow: 200_000,
+		})
+		expect(strictGwModels.getModel("cloudflare-ai-gateway", "openai/gpt-5")).toBeUndefined()
+		expect(strictGwModels.getModel("cloudflare-ai-gateway", "gpt-5")).toBeUndefined()
+
+		// OpenRouter limits, invalid native slashes, and non-chat exclusions apply on Gateway routes.
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openrouter/qwen/qwen3-14b"),
+		).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openrouter/qwen/qwen3-14b:free"),
+		).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openrouter/google/gemini-2.5-pro"),
+		).toMatchObject({
+			id: "openrouter/google/gemini-2.5-pro",
+			api: "openai-completions",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/compat",
+			contextWindow: 1_048_576,
+		})
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "openai/team/model")).toBeUndefined()
+		expect(httpsModels.getModel("cloudflare-ai-gateway", "anthropic/team/model")).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "workers-ai/@cf/cloudflare/clef"),
+		).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "openrouter/black-forest-labs/flux.2-pro"),
+		).toBeUndefined()
+		const httpsHeadersSeen: Array<{
+			readonly url: string
+			readonly cfAuth: string | null
+			readonly authorization: string | null
+			readonly xApiKey: string | null
+		}> = []
+		const compatSse = [
+			`data: ${JSON.stringify({
+				id: "chatcmpl_cf",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "dynamic/my-route",
+				choices: [
+					{
+						index: 0,
+						delta: { role: "assistant", content: "Via Gateway HTTPS" },
+						finish_reason: null,
+					},
+				],
+			})}\n\n`,
+			`data: ${JSON.stringify({
+				id: "chatcmpl_cf",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "dynamic/my-route",
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			})}\n\n`,
+			"data: [DONE]\n\n",
+		].join("")
+		const httpsResult = await httpsModels.complete(
+			httpsCompat!,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (input, init) => {
+					const headers = new Headers(init?.headers)
+					httpsHeadersSeen.push({
+						url: String(input),
+						cfAuth: headers.get("cf-aig-authorization"),
+						authorization: headers.get("authorization"),
+						xApiKey: headers.get("x-api-key"),
+					})
+					return new Response(compatSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(httpsResult.stopReason).toBe("stop")
+		expect(httpsHeadersSeen).toEqual([
+			{
+				url: "https://gateway.ai.cloudflare.com/v1/acct-123/gw-main/compat/chat/completions",
+				cfAuth: "Bearer cf-secret-token",
+				authorization: null,
+				xApiKey: null,
+			},
+		])
+
+		// 2. Zero-token native Cloudflare Worker AI binding transport
+		const bindingCalls: Array<{
+			readonly url: string
+			readonly cfAuth: string | null
+			readonly authorization: string | null
+		}> = []
+		const fakeAiBinding = {
+			fetch: async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+				const headers = new Headers(init?.headers)
+				bindingCalls.push({
+					url: String(input),
+					cfAuth: headers.get("cf-aig-authorization"),
+					authorization: headers.get("authorization"),
+				})
+				return new Response(compatSse, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				})
+			},
+		}
+		const gatewaySpec = BUILTIN_PROVIDERS.find((p) => p.id === "cloudflare-ai-gateway")!
+		expect(
+			checkProviderCredentials(gatewaySpec, {
+				env: { CLOUDFLARE_GATEWAY_ID: "gw-binding" },
+				aiBinding: fakeAiBinding,
+			}),
+		).toEqual({ ok: true })
+		expect(
+			checkProviderCredentials(gatewaySpec, {
+				env: { CLOUDFLARE_GATEWAY_ID: "gw-binding" },
+			}),
+		).toMatchObject({ ok: false, missing: ["CLOUDFLARE_ACCOUNT_ID", CLOUDFLARE_AI_API_KEY_ENV] })
+		// When CLOUDFLARE_AI_API_KEY is set, HTTPS mode is selected (never binding fallback), so
+		// missing CLOUDFLARE_ACCOUNT_ID fails both preflight credential checks and runtime dispatch.
+		expect(
+			checkProviderCredentials(gatewaySpec, {
+				env: { CLOUDFLARE_GATEWAY_ID: "gw-binding", CLOUDFLARE_AI_API_KEY: "cf-tok" },
+				aiBinding: fakeAiBinding,
+			}),
+		).toMatchObject({ ok: false, missing: ["CLOUDFLARE_ACCOUNT_ID"] })
+		expect(
+			checkProviderCredentials(gatewaySpec, {
+				env: {},
+				aiBinding: fakeAiBinding,
+			}),
+		).toMatchObject({ ok: false, missing: ["CLOUDFLARE_GATEWAY_ID"] })
+		const partialHttpsModels = createProviderModels({
+			env: { CLOUDFLARE_GATEWAY_ID: "gw-binding", CLOUDFLARE_AI_API_KEY: "cf-tok" },
+			aiBinding: fakeAiBinding,
+		})
+		const partialHttpsModel = partialHttpsModels.getModel(
+			"cloudflare-ai-gateway",
+			"dynamic/my-route",
+		)!
+		const hitsBeforePartial = bindingCalls.length
+		const partialHttpsResult = await partialHttpsModels.complete(partialHttpsModel, {
+			messages: [{ role: "user", content: "hi", timestamp: 0 }],
+		})
+		expect(partialHttpsResult.stopReason).toBe("error")
+		expect(partialHttpsResult.errorMessage).toMatch(/not configured/i)
+		expect(bindingCalls.length).toBe(hitsBeforePartial)
+
+		const bindingModels = createProviderModels({
+			env: { CLOUDFLARE_GATEWAY_ID: "gw-binding" },
+			aiBinding: fakeAiBinding,
+		})
+		const bindingModel = bindingModels.getModel("cloudflare-ai-gateway", "dynamic/my-route")
+		expect(bindingModel?.baseUrl).toBe(
+			"https://workers-binding.ai/ai-gateway/gateways/gw-binding/compat",
+		)
+		const bindingResult = await bindingModels.complete(bindingModel!, {
+			messages: [{ role: "user", content: "hi", timestamp: 0 }],
+		})
+		expect(bindingResult.stopReason).toBe("stop")
+		expect(bindingCalls).toEqual([
+			{
+				url: "https://workers-binding.ai/ai-gateway/gateways/gw-binding/compat/chat/completions",
+				cfAuth: "Bearer cloudflare-gateway-binding",
+				authorization: null,
+			},
+		])
+
+		// 3. Cloudflare Workers AI direct endpoint
+		const workersAiModels = createProviderModels({
+			env: {
+				CLOUDFLARE_AI_API_KEY: "cf-workers-key",
+				CLOUDFLARE_ACCOUNT_ID: "acct-999",
+			},
+		})
+		const deepseek = workersAiModels.getModel(
+			"cloudflare-workers-ai",
+			"@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+		)
+		expect(deepseek).toMatchObject({
+			api: "openai-completions",
+			provider: "cloudflare-workers-ai",
+			baseUrl: "https://api.cloudflare.com/client/v4/accounts/acct-999/ai/v1",
+		})
+		expect(
+			workersAiModels.getModel("cloudflare-workers-ai", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
+		).toBeUndefined()
+		expect(workersAiModels.getModel("cloudflare-workers-ai", "@cf/cloudflare/clef")).toBeUndefined()
+		expect(
+			workersAiModels.getModel("cloudflare-workers-ai", "@cf/google/embeddinggemma-300m"),
+		).toBeUndefined()
+		expect(
+			workersAiModels.getModel("cloudflare-workers-ai", "@cf/microsoft/resnet-50"),
+		).toBeUndefined()
+		expect(
+			workersAiModels.getModel("cloudflare-workers-ai", "@cf/meta/llama-2-7b-chat-int8"),
+		).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "workers-ai/@cf/google/embeddinggemma-300m"),
+		).toBeUndefined()
+		expect(
+			httpsModels.getModel("cloudflare-ai-gateway", "workers-ai/@cf/meta/llama-2-7b-chat-int8"),
+		).toBeUndefined()
+		const lowFloorWorkers = createProviderModels({
+			env: { CLOUDFLARE_AI_API_KEY: "cf-workers-key", CLOUDFLARE_ACCOUNT_ID: "acct-999" },
+			minContextWindow: 2048,
+		})
+		expect(
+			lowFloorWorkers.getModel("cloudflare-workers-ai", "@cf/meta/llama-2-7b-chat-int8"),
+		).toMatchObject({
+			contextWindow: 4096,
+			maxTokens: 4096,
+			reasoning: false,
+		})
+		expect(
+			workersAiModels.getModel(
+				"cloudflare-workers-ai",
+				"@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+			),
+		).toMatchObject({
+			contextWindow: 80_000,
+		})
+
+		// 4. Per-request Cloudflare overrides resolve route, transport, and credentials together
+		//    even from an initially empty registry or when overriding a configured gateway/binding.
+		const emptyRegistry = createProviderModels({ env: {} })
+		const emptyGwModel = emptyRegistry.getModel("cloudflare-ai-gateway", "dynamic/my-route")!
+		const reqOverrideCalls: Array<{
+			readonly url: string
+			readonly cfAuth: string | null
+			readonly authorization: string | null
+		}> = []
+		await emptyRegistry.completeSimple(
+			emptyGwModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				apiKey: "req-gw-token",
+				env: { CLOUDFLARE_ACCOUNT_ID: "req-acct", CLOUDFLARE_GATEWAY_ID: "req-gw" },
+				fetch: async (input, init) => {
+					const headers = new Headers(init?.headers)
+					reqOverrideCalls.push({
+						url: String(input),
+						cfAuth: headers.get("cf-aig-authorization"),
+						authorization: headers.get("authorization"),
+					})
+					return new Response(compatSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(reqOverrideCalls).toEqual([
+			{
+				url: "https://gateway.ai.cloudflare.com/v1/req-acct/req-gw/compat/chat/completions",
+				cfAuth: "Bearer req-gw-token",
+				authorization: null,
+			},
+		])
+
+		// Overriding a binding-configured Gateway with per-request HTTPS credentials switches
+		// both destination URL and transport away from the binding.
+		let bindingTouchedOnHttpsOverride = false
+		const spyBinding = {
+			fetch: async () => {
+				bindingTouchedOnHttpsOverride = true
+				return new Response(compatSse, { status: 200 })
+			},
+		}
+		const boundRegistry = createProviderModels({
+			env: { CLOUDFLARE_GATEWAY_ID: "old-bind-gw" },
+			aiBinding: spyBinding,
+		})
+		const boundModel = boundRegistry.getModel("cloudflare-ai-gateway", "dynamic/my-route")!
+		let overrideUrl = ""
+		let overrideCfAuth: string | null = null
+		await boundRegistry.completeSimple(
+			boundModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				apiKey: "override-https-token",
+				env: { CLOUDFLARE_ACCOUNT_ID: "override-acct", CLOUDFLARE_GATEWAY_ID: "override-gw" },
+				fetch: async (input, init) => {
+					overrideUrl = String(input)
+					overrideCfAuth = new Headers(init?.headers).get("cf-aig-authorization")
+					return new Response(compatSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(bindingTouchedOnHttpsOverride).toBe(false)
+		expect(overrideUrl).toBe(
+			"https://gateway.ai.cloudflare.com/v1/override-acct/override-gw/compat/chat/completions",
+		)
+		expect(overrideCfAuth).toBe("Bearer override-https-token")
+
+		// Per-request Workers AI override replaces account ID on the wire even from an empty registry.
+		const emptyWorkersModel = emptyRegistry.getModel(
+			"cloudflare-workers-ai",
+			"@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+		)!
+		let workersOverrideUrl = ""
+		let workersOverrideAuth: string | null = null
+		await emptyRegistry.completeSimple(
+			emptyWorkersModel,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				apiKey: "wa-req-key",
+				env: { CLOUDFLARE_ACCOUNT_ID: "wa-req-acct" },
+				fetch: async (input, init) => {
+					workersOverrideUrl = String(input)
+					workersOverrideAuth = new Headers(init?.headers).get("authorization")
+					return new Response(compatSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(workersOverrideUrl).toBe(
+			"https://api.cloudflare.com/client/v4/accounts/wa-req-acct/ai/v1/chat/completions",
+		)
+		expect(workersOverrideAuth).toBe("Bearer wa-req-key")
+
+		// Two registries share immutable hydrated OpenRouter models across sessions.
+		const orSessionA = createProviderModels({ env: { OPENROUTER_API_KEY: "sk-or-a" } })
+		const orSessionB = createProviderModels({ env: { OPENROUTER_API_KEY: "sk-or-b" } })
+		expect(orSessionA.getModels("openrouter")[0]).toBe(orSessionB.getModels("openrouter")[0])
+
+		// Dynamic lookup enforces spec.formats against the resolved plan's wire format, matching listing.
+		const openRouterSpec = BUILTIN_PROVIDERS.find((provider) => provider.id === "openrouter")!
+		const completionsOnlyOpenRouter = createProviderModels({
+			env: { OPENROUTER_API_KEY: "sk-or-only" },
+		})
+		completionsOnlyOpenRouter.setProvider(
+			buildPiProvider(
+				{
+					...openRouterSpec,
+					defaultFormat: "openai-completions",
+					formats: ["openai-completions"],
+				},
+				{ env: { OPENROUTER_API_KEY: "sk-or-only" } },
+			),
+		)
+		expect(
+			completionsOnlyOpenRouter.getModel("openrouter", "anthropic/claude-sonnet-5.5"),
+		).toBeUndefined()
+		expect(
+			completionsOnlyOpenRouter.getModel("openrouter", "anthropic/claude-future-7"),
+		).toBeUndefined()
+		expect(
+			completionsOnlyOpenRouter.getModel("openrouter", "anthropic/claude-sonnet-5.5:nitro")?.api,
+		).toBe("openai-completions")
+		expect(completionsOnlyOpenRouter.getModel("openrouter", "openai/gpt-4o-mini")?.api).toBe(
+			"openai-completions",
+		)
+
+		// Upstream-only OpenRouter matches (with or without a :variant suffix, including Claude
+		// fallbacks) preserve upstream capabilities while reporting cataloged: false and honoring
+		// allowUnlistedModels: false on both direct OpenRouter and Gateway routes.
+		expect(getOpenRouterCatalogEntry("openai/o1")).toBeUndefined()
+		expect(getOpenRouterCatalogEntry("anthropic/claude-sonnet-4-5")).toBeUndefined()
+		expect(resolveModelSpecifier("openrouter/openai/o1")).toEqual({
+			provider: "openrouter",
+			modelId: "openai/o1",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("openrouter/openai/o1:nitro")).toEqual({
+			provider: "openrouter",
+			modelId: "openai/o1:nitro",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("openrouter/anthropic/claude-sonnet-4-5")).toEqual({
+			provider: "openrouter",
+			modelId: "anthropic/claude-sonnet-4-5",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/openai/o1")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "openrouter/openai/o1",
+			cataloged: false,
+		})
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/openrouter/openai/o1:nitro")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "openrouter/openai/o1:nitro",
+			cataloged: false,
+		})
+		const orO1 = orSessionA.getModel("openrouter", "openai/o1")
+		expect(orO1).toMatchObject({
+			id: "openai/o1",
+			contextWindow: 200_000,
+			reasoning: true,
+		})
+		const lockedOpenRouter = createProviderModels({ env: { OPENROUTER_API_KEY: "sk-or-lock" } })
+		lockedOpenRouter.setProvider(
+			buildPiProvider(
+				{ ...openRouterSpec, allowUnlistedModels: false },
+				{ env: { OPENROUTER_API_KEY: "sk-or-lock" } },
+			),
+		)
+		expect(lockedOpenRouter.getModel("openrouter", "anthropic/claude-sonnet-5.5")).toBeDefined()
+		expect(lockedOpenRouter.getModel("openrouter", "openai/o1")).toBeUndefined()
+		expect(lockedOpenRouter.getModel("openrouter", "openai/o1:nitro")).toBeUndefined()
+		expect(lockedOpenRouter.getModel("openrouter", "anthropic/claude-sonnet-4-5")).toBeUndefined()
+		const gwSpec = BUILTIN_PROVIDERS.find((provider) => provider.id === "cloudflare-ai-gateway")!
+		const lockedGw = createProviderModels({
+			env: {
+				CLOUDFLARE_GATEWAY_ID: "gw-1",
+				CLOUDFLARE_AI_API_KEY: "k",
+				CLOUDFLARE_ACCOUNT_ID: "a",
+			},
+		})
+		lockedGw.setProvider(
+			buildPiProvider(
+				{ ...gwSpec, allowUnlistedModels: false },
+				{
+					env: {
+						CLOUDFLARE_GATEWAY_ID: "gw-1",
+						CLOUDFLARE_AI_API_KEY: "k",
+						CLOUDFLARE_ACCOUNT_ID: "a",
+					},
+				},
+			),
+		)
+		expect(lockedGw.getModel("cloudflare-ai-gateway", "openrouter/openai/o1")).toBeUndefined()
+		expect(lockedGw.getModel("cloudflare-ai-gateway", "openrouter/openai/o1:nitro")).toBeUndefined()
+
+		// Cloudflare AI Gateway (HTTPS + binding) and Workers AI resolve configured secretHeaders,
+		// fail auth when a required secret header is missing, and preserve Cloudflare auth-header precedence.
+		const workersAiSpec = BUILTIN_PROVIDERS.find(
+			(provider) => provider.id === "cloudflare-workers-ai",
+		)!
+		const gwWithSecrets = defineProvider({
+			...gwSpec,
+			headers: { "x-cf-route": "primary" },
+			secretHeaders: {
+				"x-cf-edge-token": "CF_EDGE_SECRET",
+				"cf-aig-authorization": "EVIL_OVERRIDE",
+			},
+		})
+		const workersWithSecrets = defineProvider({
+			...workersAiSpec,
+			headers: { "x-workers-route": "edge" },
+			secretHeaders: {
+				"x-cf-edge-token": "CF_EDGE_SECRET",
+				Authorization: "EVIL_OVERRIDE",
+			},
+		})
+		const missingSecretEnv = {
+			CLOUDFLARE_GATEWAY_ID: "gw-sec",
+			CLOUDFLARE_ACCOUNT_ID: "acct-sec",
+			CLOUDFLARE_AI_API_KEY: "cf-real-key",
+			EVIL_OVERRIDE: "Bearer evil",
+		}
+		expect(checkProviderCredentials(gwWithSecrets, { env: missingSecretEnv }).ok).toBe(false)
+		expect(checkProviderCredentials(workersWithSecrets, { env: missingSecretEnv }).ok).toBe(false)
+		const cfSecretMissingRegistry = createProviderModels({ env: {} })
+		cfSecretMissingRegistry.setProvider(buildPiProvider(gwWithSecrets, { env: missingSecretEnv }))
+		cfSecretMissingRegistry.setProvider(
+			buildPiProvider(workersWithSecrets, { env: missingSecretEnv }),
+		)
+		expect(await cfSecretMissingRegistry.checkAuth("cloudflare-ai-gateway")).toBeUndefined()
+		expect(await cfSecretMissingRegistry.checkAuth("cloudflare-workers-ai")).toBeUndefined()
+		const cfSecretBindingMissingRegistry = createProviderModels({ env: {} })
+		cfSecretBindingMissingRegistry.setProvider(
+			buildPiProvider(gwWithSecrets, {
+				env: { CLOUDFLARE_GATEWAY_ID: "gw-sec", EVIL_OVERRIDE: "Bearer evil" },
+				aiBinding: { fetch: async () => new Response(compatSse, { status: 200 }) },
+			}),
+		)
+		expect(await cfSecretBindingMissingRegistry.checkAuth("cloudflare-ai-gateway")).toBeUndefined()
+
+		const fullSecretEnv = { ...missingSecretEnv, CF_EDGE_SECRET: "edge-token-123" }
+		const cfSecretFullRegistry = createProviderModels({ env: {} })
+		cfSecretFullRegistry.setProvider(buildPiProvider(gwWithSecrets, { env: fullSecretEnv }))
+		cfSecretFullRegistry.setProvider(buildPiProvider(workersWithSecrets, { env: fullSecretEnv }))
+		const gwEligibleModel = cfSecretFullRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct",
+		)
+		expect(gwEligibleModel).toBeDefined()
+		const gwHttpsAuth = await cfSecretFullRegistry.getAuth(gwEligibleModel!)
+		expect(gwHttpsAuth?.auth.headers).toMatchObject({
+			"cf-aig-authorization": "Bearer cf-real-key",
+			"x-cf-edge-token": "edge-token-123",
+			"x-cf-route": "primary",
+		})
+		const workersEligibleModel = cfSecretFullRegistry.getModel(
+			"cloudflare-workers-ai",
+			"@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+		)
+		expect(workersEligibleModel).toBeDefined()
+		const workersSecretAuth = await cfSecretFullRegistry.getAuth(workersEligibleModel!)
+		expect(workersSecretAuth?.auth.apiKey).toBe("cf-real-key")
+		expect(workersSecretAuth?.auth.headers).toMatchObject({
+			Authorization: "Bearer cf-real-key",
+			"x-cf-edge-token": "edge-token-123",
+			"x-workers-route": "edge",
+		})
+		const cfSecretBindingFullRegistry = createProviderModels({ env: {} })
+		cfSecretBindingFullRegistry.setProvider(
+			buildPiProvider(gwWithSecrets, {
+				env: {
+					CLOUDFLARE_GATEWAY_ID: "gw-sec",
+					CF_EDGE_SECRET: "edge-token-123",
+					EVIL_OVERRIDE: "Bearer evil",
+				},
+				aiBinding: { fetch: async () => new Response(compatSse, { status: 200 }) },
+			}),
+		)
+		const gwBindingEligibleModel = cfSecretBindingFullRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"workers-ai/@cf/meta/llama-4-scout-17b-16e-instruct",
+		)
+		expect(gwBindingEligibleModel).toBeDefined()
+		const gwBindingAuth = await cfSecretBindingFullRegistry.getAuth(gwBindingEligibleModel!)
+		expect(gwBindingAuth?.auth.headers).toMatchObject({
+			"cf-aig-authorization": `Bearer ${CLOUDFLARE_GATEWAY_BINDING_AUTH_SENTINEL}`,
+			"x-cf-edge-token": "edge-token-123",
+			"x-cf-route": "primary",
+		})
+
+		// Custom provider IDs using cloudflare_workers_ai or cloudflare_ai_gateway auth select
+		// Cloudflare's origin guards by auth kind so per-request credentials & account IDs work.
+		const customWorkersSpec = defineProvider({
+			id: "my-workers-ai",
+			name: "My Workers AI",
+			source: "custom",
+			defaultFormat: "openai-completions",
+			formats: ["openai-completions"],
+			auth: {
+				kind: "cloudflare_workers_ai",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+			},
+		})
+		const customWorkersRegistry = createProviderModels({
+			env: {},
+			customProviders: [customWorkersSpec],
+		})
+		const customWorkersModel = customWorkersRegistry.getModel(
+			"my-workers-ai",
+			"@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+		)
+		expect(customWorkersModel).toBeDefined()
+		let customWorkersUrl = ""
+		const customWorkersRes = await customWorkersRegistry.completeSimple(
+			customWorkersModel!,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				apiKey: "custom-wa-key",
+				env: { MY_CF_ACCOUNT_ID: "custom-acct-77" },
+				fetch: async (input) => {
+					customWorkersUrl = String(input)
+					return new Response(compatSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(customWorkersRes.stopReason).toBe("stop")
+		expect(customWorkersUrl).toBe(
+			"https://api.cloudflare.com/client/v4/accounts/custom-acct-77/ai/v1/chat/completions",
+		)
+
+		// Externally created providers (e.g. Pi's createProvider) are strictly static-only under
+		// withDynamicModelLookup: registered eligible chat models are preserved, while unlisted
+		// IDs, aliases, prefixed Gateway aliases, and non-chat models never trigger synthesis.
+		const basePreloaded = createModels()
+		basePreloaded.setProvider(
+			createProvider({
+				id: "openai",
+				name: "OpenAI Preloaded Proxy",
+				baseUrl: "https://preloaded-proxy.example/v1",
+				api: { "openai-responses": createOpenAIResponsesWire() },
+				auth: {
+					apiKey: {
+						name: "Preloaded Key",
+						login: () => Promise.reject(new Error("unsupported")),
+						resolve: () => Promise.resolve({ auth: { apiKey: "sk-preloaded" }, source: "test" }),
+					},
+				},
+				models: [
+					{
+						id: "gpt-4o-mini",
+						name: "Proxy GPT-4o mini",
+						api: "openai-responses",
+						provider: "openai",
+						baseUrl: "https://preloaded-proxy.example/v1",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 128_000,
+						maxTokens: 4096,
+					},
+					{
+						id: "tiny-preloaded",
+						name: "Tiny Preloaded",
+						api: "openai-responses",
+						provider: "openai",
+						baseUrl: "https://preloaded-proxy.example/v1",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 8192,
+						maxTokens: 1024,
+					},
+					{
+						id: "gpt-4o",
+						name: "Capped Proxy GPT-4o",
+						api: "openai-responses",
+						provider: "openai",
+						baseUrl: "https://preloaded-proxy.example/v1",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 32_000,
+						maxTokens: 4096,
+					},
+					{
+						type: "image",
+						id: "private-image-gen-v1",
+						name: "Private Image Gen",
+						api: "openrouter-images",
+						provider: "openai",
+						baseUrl: "https://preloaded-proxy.example/v1",
+						input: ["text"],
+						output: ["image"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					},
+				],
+			}),
+		)
+		basePreloaded.setProvider(
+			createProvider({
+				id: "cloudflare-ai-gateway",
+				name: "Pinned Gateway A",
+				api: { "openai-responses": createOpenAIResponsesWire() },
+				auth: {
+					apiKey: {
+						name: "Gateway A Key",
+						login: () => Promise.reject(new Error("unsupported")),
+						resolve: () => Promise.resolve({ auth: { apiKey: "cf-gw-a" }, source: "test" }),
+					},
+				},
+				models: [
+					{
+						id: "gpt-4o",
+						name: "Capped GW GPT-4o",
+						api: "openai-responses",
+						provider: "cloudflare-ai-gateway",
+						baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-A/gw-A/openai",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 32_000,
+						maxTokens: 4096,
+					},
+				],
+			}),
+		)
+		const wrappedPreloaded = withDynamicModelLookup(basePreloaded, {
+			env: { CLOUDFLARE_ACCOUNT_ID: "acct-B", CLOUDFLARE_GATEWAY_ID: "gw-B" },
+		})
+		expect(wrappedPreloaded.getModel("openai", "gpt-4o-mini")).toMatchObject({
+			id: "gpt-4o-mini",
+			baseUrl: "https://preloaded-proxy.example/v1",
+			maxTokens: 4096,
+		})
+		expect(wrappedPreloaded.getModel("openai", "tiny-preloaded")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("openai", "gpt-4o")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("openai", "gpt-4o-mini-2024-07-18")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("openai", "ft:gpt-4o-mini:org:pilot:id")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("openai", "gpt-future-2027")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("openai", "private-image-gen-v1")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("openai", "private-image-gen-v1-2026-01-01")).toBeUndefined()
+		expect(wrappedPreloaded.getModelOfType("image", "openai", "private-image-gen-v1")?.id).toBe(
+			"private-image-gen-v1",
+		)
+		expect(wrappedPreloaded.getModel("cloudflare-ai-gateway", "gpt-4o")).toBeUndefined()
+		expect(wrappedPreloaded.getModel("cloudflare-ai-gateway", "openai/gpt-4o")).toBeUndefined()
+		expect(
+			wrappedPreloaded.getModel(
+				"cloudflare-ai-gateway",
+				"workers-ai/@cf/meta/llama-3.2-3b-instruct",
+			),
+		).toBeUndefined()
+
+		// Dynamic lookup with custom wire formats or scripted streams uses buildPiProvider,
+		// preserving exact ProviderSpec rules, Responses-only format gating, and Gateway wire IDs.
+		const openAiSpec = BUILTIN_PROVIDERS.find((provider) => provider.id === "openai")!
+		const completionsOpenAiRegistry = createProviderModels({ env: {} })
+		completionsOpenAiRegistry.setProvider(
+			buildPiProvider(
+				{
+					...openAiSpec,
+					baseUrl: "https://completions-proxy.example/v1",
+					defaultFormat: "openai-completions",
+					formats: ["openai-completions"],
+				},
+				{ env: { OPENAI_API_KEY: "sk-proxy" } },
+			),
+		)
+		expect(completionsOpenAiRegistry.getModel("openai", "gpt-future-2027")).toMatchObject({
+			id: "gpt-future-2027",
+			api: "openai-completions",
+			baseUrl: "https://completions-proxy.example/v1",
+		})
+		expect(completionsOpenAiRegistry.getModel("openai", "gpt-4o-search-preview")).toMatchObject({
+			id: "gpt-4o-search-preview",
+			api: "openai-completions",
+			baseUrl: "https://completions-proxy.example/v1",
+		})
+		expect(completionsOpenAiRegistry.getModel("openai", "gpt-audio-1.5")).toMatchObject({
+			id: "gpt-audio-1.5",
+			api: "openai-completions",
+			baseUrl: "https://completions-proxy.example/v1",
+		})
+		expect(completionsOpenAiRegistry.getModel("openai", "text-embedding-3-small")).toBeUndefined()
+		expect(completionsOpenAiRegistry.getModel("openai", "whisper-1")).toBeUndefined()
+		expect(completionsOpenAiRegistry.getModel("openai", "gpt-image-1")).toBeUndefined()
+		expect(completionsOpenAiRegistry.getModel("openai", "o1")).toBeUndefined()
+
+		const scriptedBase = createModels()
+		const dummyStreams = createOpenAICompletionsWire()
+		scriptedBase.setProvider(
+			buildPiProvider(
+				gwSpec,
+				{ env: { CLOUDFLARE_ACCOUNT_ID: "acct-scripted", CLOUDFLARE_GATEWAY_ID: "gw-scripted" } },
+				{
+					streams: dummyStreams,
+					auth: {
+						apiKey: {
+							name: "Scripted GW",
+							login: () => Promise.reject(new Error("unsupported")),
+							resolve: () => Promise.resolve({ auth: { apiKey: "cf-scripted" }, source: "test" }),
+						},
+					},
+				},
+			),
+		)
+		const wrappedScripted = withDynamicModelLookup(scriptedBase, { env: {} })
+		expect(
+			wrappedScripted.getModel("cloudflare-ai-gateway", "openai/gpt-4o-2024-11-20"),
+		).toMatchObject({
+			id: "gpt-4o-2024-11-20",
+			api: "openai-responses",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-scripted/gw-scripted/openai",
+		})
+		expect(
+			wrappedScripted.getModel("cloudflare-ai-gateway", "anthropic/claude-sonnet-5-5-20260301"),
+		).toMatchObject({
+			id: "claude-sonnet-5-5-20260301",
+			api: "anthropic-messages",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct-scripted/gw-scripted/anthropic",
+		})
+
+		// Custom provider IDs using cloudflare_ai_gateway auth route by resolved wire format
+		// (/anthropic, /openai, /compat) instead of posting native codecs to /compat.
+		const customAnthGwSpec = defineProvider({
+			id: "my-anthropic-gw",
+			name: "My Anthropic Gateway",
+			source: "custom",
+			defaultFormat: "anthropic-messages",
+			formats: ["anthropic-messages"],
+			auth: {
+				kind: "cloudflare_ai_gateway",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+				gatewayIdEnv: "MY_CF_GATEWAY_ID",
+			},
+		})
+		const customOpenAiGwSpec = defineProvider({
+			id: "my-openai-gw",
+			name: "My OpenAI Gateway",
+			source: "custom",
+			defaultFormat: "openai-responses",
+			formats: ["openai-responses"],
+			auth: {
+				kind: "cloudflare_ai_gateway",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+				gatewayIdEnv: "MY_CF_GATEWAY_ID",
+			},
+		})
+		const customGwRegistry = createProviderModels({
+			env: {
+				MY_CF_AI_KEY: "cf-custom-gw-key",
+				MY_CF_ACCOUNT_ID: "custom-acct-88",
+				MY_CF_GATEWAY_ID: "custom-gw-88",
+			},
+			customProviders: [customAnthGwSpec, customOpenAiGwSpec],
+		})
+		const customAnthGwModel = customGwRegistry.getModel("my-anthropic-gw", "claude-sonnet-5-5")
+		expect(customAnthGwModel).toMatchObject({
+			id: "claude-sonnet-5-5",
+			api: "anthropic-messages",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/custom-acct-88/custom-gw-88/anthropic",
+		})
+		const customGwAnthSse = [
+			`event: message_start\ndata: ${JSON.stringify({
+				type: "message_start",
+				message: {
+					id: "msg_custom_gw",
+					type: "message",
+					role: "assistant",
+					model: "claude-sonnet-5-5",
+					content: [],
+					stop_reason: null,
+					stop_sequence: null,
+					usage: { input_tokens: 1, output_tokens: 0 },
+				},
+			})}\n\n`,
+			`event: message_delta\ndata: ${JSON.stringify({
+				type: "message_delta",
+				delta: { stop_reason: "end_turn" },
+				usage: { output_tokens: 1 },
+			})}\n\n`,
+			`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+		].join("")
+		let customAnthGwUrl = ""
+		const customAnthGwRes = await customGwRegistry.completeSimple(
+			customAnthGwModel!,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (input) => {
+					customAnthGwUrl = String(input)
+					return new Response(customGwAnthSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(customAnthGwRes.stopReason).toBe("stop")
+		const parsedCustomAnthGwUrl = new URL(customAnthGwUrl)
+		expect(parsedCustomAnthGwUrl.origin).toBe("https://gateway.ai.cloudflare.com")
+		expect(parsedCustomAnthGwUrl.pathname).toBe(
+			"/v1/custom-acct-88/custom-gw-88/anthropic/v1/messages",
+		)
+
+		const customOpenAiGwModel = customGwRegistry.getModel("my-openai-gw", "gpt-6.2-sol")
+		expect(customOpenAiGwModel).toMatchObject({
+			id: "gpt-6.2-sol",
+			api: "openai-responses",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/custom-acct-88/custom-gw-88/openai",
+		})
+		let customOpenAiGwUrl = ""
+		const customOpenAiGwRes = await customGwRegistry.completeSimple(
+			customOpenAiGwModel!,
+			{ messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+			{
+				fetch: async (input) => {
+					customOpenAiGwUrl = String(input)
+					return new Response(responsesSse, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
+				},
+			},
+		)
+		expect(customOpenAiGwRes.stopReason).toBe("stop")
+		expect(customOpenAiGwUrl).toBe(
+			"https://gateway.ai.cloudflare.com/v1/custom-acct-88/custom-gw-88/openai/responses",
+		)
+
+		// Cloudflare AI Gateway /compat requires a provider-qualified upstream target
+		// (`<upstream>/<model>`) and rejects unroutable bare IDs and malformed slashes.
+		const gatewayRoutingRegistry = createProviderModels({ env: {} })
+		for (const unroutable of [
+			"cloudflare-ai-gateway/mistral-large-latest",
+			"cloudflare-ai-gateway/gemini-2.5-pro",
+			"cloudflare-ai-gateway/deepseek-chat",
+			"cloudflare-ai-gateway//mistral-large-latest",
+			"cloudflare-ai-gateway/mistral//mistral-large-latest",
+		]) {
+			expect(resolveModelSpecifier(unroutable), unroutable).toBeNull()
+			expect(
+				gatewayRoutingRegistry.getModel(
+					"cloudflare-ai-gateway",
+					unroutable.slice("cloudflare-ai-gateway/".length),
+				),
+				unroutable,
+			).toBeUndefined()
+		}
+		expect(resolveModelSpecifier("cloudflare-ai-gateway/mistral/mistral-large-latest")).toEqual({
+			provider: "cloudflare-ai-gateway",
+			modelId: "mistral/mistral-large-latest",
+			cataloged: false,
+		})
+		expect(
+			gatewayRoutingRegistry.getModel("cloudflare-ai-gateway", "google-ai-studio/gemini-3-pro"),
+		).toMatchObject({
+			id: "google-ai-studio/gemini-3-pro",
+			api: "openai-completions",
+		})
+		expect(
+			gatewayRoutingRegistry.getModel("cloudflare-ai-gateway", "claude-future-7"),
+		).toMatchObject({
+			id: "claude-future-7",
+			api: "anthropic-messages",
+		})
+		expect(
+			gatewayRoutingRegistry.getModel("cloudflare-ai-gateway", "gpt-future-2027"),
+		).toMatchObject({
+			id: "gpt-future-2027",
+			api: "openai-responses",
+		})
+
+		// Custom Cloudflare auth providers reject static baseUrl declarations during validation.
+		const invalidStaticGwSpec = defineProvider({
+			id: "bad-static-gw",
+			name: "Bad Static Gateway",
+			source: "custom",
+			baseUrl: "https://proxy.example/v1",
+			defaultFormat: "openai-completions",
+			formats: ["openai-completions"],
+			auth: {
+				kind: "cloudflare_ai_gateway",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+				gatewayIdEnv: "MY_CF_GATEWAY_ID",
+			},
+		})
+		const invalidStaticWorkersSpec = defineProvider({
+			id: "bad-static-workers",
+			name: "Bad Static Workers AI",
+			source: "custom",
+			baseUrl: "https://proxy.example/v1",
+			defaultFormat: "openai-completions",
+			formats: ["openai-completions"],
+			auth: {
+				kind: "cloudflare_workers_ai",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+			},
+		})
+		expect(() => createProviderModels({ env: {}, customProviders: [invalidStaticGwSpec] })).toThrow(
+			/static baseUrl/i,
+		)
+		expect(() =>
+			createProviderModels({ env: {}, customProviders: [invalidStaticWorkersSpec] }),
+		).toThrow(/static baseUrl/i)
+		expect(() =>
+			resolveModelSpecifier("bad-static-gw/m1", { customProviders: [invalidStaticGwSpec] }),
+		).toThrow(/static baseUrl/i)
+
+		// Direct Workers AI specs reject wire formats incompatible with /ai/v1 Chat Completions.
+		const invalidWorkersFormatSpec = defineProvider({
+			id: "bad-workers-anth",
+			name: "Bad Workers Anthropic",
+			source: "custom",
+			defaultFormat: "anthropic-messages",
+			formats: ["anthropic-messages"],
+			auth: {
+				kind: "cloudflare_workers_ai",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+			},
+		})
+		const invalidWorkersMixedFormatSpec = defineProvider({
+			id: "bad-workers-mixed",
+			name: "Bad Workers Mixed",
+			source: "custom",
+			defaultFormat: "openai-completions",
+			formats: ["openai-completions", "openai-responses"],
+			auth: {
+				kind: "cloudflare_workers_ai",
+				apiKeyEnv: "MY_CF_AI_KEY",
+				accountIdEnv: "MY_CF_ACCOUNT_ID",
+			},
+		})
+		expect(() =>
+			createProviderModels({ env: {}, customProviders: [invalidWorkersFormatSpec] }),
+		).toThrow(/openai-completions/i)
+		expect(() =>
+			resolveModelSpecifier("bad-workers-anth/m1", {
+				customProviders: [invalidWorkersFormatSpec],
+			}),
+		).toThrow(/openai-completions/i)
+		expect(() =>
+			createProviderModels({ env: {}, customProviders: [invalidWorkersMixedFormatSpec] }),
+		).toThrow(/openai-completions/i)
+
+		// OpenRouter embedding models (both indexed and Day-1 patterns) are excluded from chat
+		// resolution on both direct OpenRouter and Gateway /compat routes.
+		const embeddingCheckRegistry = createProviderModels({ env: {} })
+		for (const embeddingSpec of [
+			"openrouter/qwen/qwen3-embedding-8b",
+			"openrouter/qwen/qwen3-embedding-8b:free",
+			"cloudflare-ai-gateway/openrouter/qwen/qwen3-embedding-8b",
+			"cloudflare-ai-gateway/openrouter/qwen/qwen3-embedding-8b:free",
+			"openrouter/google/gemini-embedding-001",
+			"cloudflare-ai-gateway/openrouter/google/gemini-embedding-001",
+			"openrouter/mistralai/mistral-embed-2312",
+			"cloudflare-ai-gateway/openrouter/mistralai/mistral-embed-2312",
+			"openrouter/baai/bge-m3",
+			"openrouter/new-vendor/future-embedding-2027",
+			"cloudflare-ai-gateway/openrouter/new-vendor/future-embedding-2027",
+		]) {
+			expect(resolveModelSpecifier(embeddingSpec), embeddingSpec).toBeNull()
+			const slash = embeddingSpec.indexOf("/")
+			expect(
+				embeddingCheckRegistry.getModel(
+					embeddingSpec.slice(0, slash),
+					embeddingSpec.slice(slash + 1),
+				),
+				embeddingSpec,
+			).toBeUndefined()
+		}
+
+		// OpenRouter and Gateway Anthropic snapshots never inherit direct-Anthropic-only beta flags
+		// (supportsMidConvoToolChanges, supportsMidConvoSystemMessages, supportsStrictTools, etc.).
+		const proxyCompatRegistry = createProviderModels({ env: {} })
+		const catalogedOrSonnet = proxyCompatRegistry.getModel(
+			"openrouter",
+			"anthropic/claude-sonnet-5.5",
+		)
+		const snapshotOrSonnet = proxyCompatRegistry.getModel(
+			"openrouter",
+			"anthropic/claude-sonnet-5.5-20260301",
+		)
+		expect(catalogedOrSonnet !== undefined && hasApi(catalogedOrSonnet, "anthropic-messages")).toBe(
+			true,
+		)
+		expect(snapshotOrSonnet !== undefined && hasApi(snapshotOrSonnet, "anthropic-messages")).toBe(
+			true,
+		)
+		if (
+			catalogedOrSonnet !== undefined &&
+			hasApi(catalogedOrSonnet, "anthropic-messages") &&
+			snapshotOrSonnet !== undefined &&
+			hasApi(snapshotOrSonnet, "anthropic-messages")
+		) {
+			expect(snapshotOrSonnet.contextWindow).toBe(catalogedOrSonnet.contextWindow)
+			expect(snapshotOrSonnet.maxTokens).toBe(catalogedOrSonnet.maxTokens)
+			expect(snapshotOrSonnet.compat).toEqual(catalogedOrSonnet.compat)
+			expect(snapshotOrSonnet.compat?.supportsMidConvoToolChanges).toBeUndefined()
+			expect(snapshotOrSonnet.compat?.supportsMidConvoSystemMessages).toBeUndefined()
+			expect(snapshotOrSonnet.compat?.supportsStrictTools).toBeUndefined()
+			expect(snapshotOrSonnet.compat?.allowedFallbackModels).toBeUndefined()
+		}
+		const snapshotGwSonnet = proxyCompatRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"claude-sonnet-5-5-20260301",
+		)
+		expect(snapshotGwSonnet !== undefined && hasApi(snapshotGwSonnet, "anthropic-messages")).toBe(
+			true,
+		)
+		if (snapshotGwSonnet !== undefined && hasApi(snapshotGwSonnet, "anthropic-messages")) {
+			expect(snapshotGwSonnet.compat?.sendSessionAffinityHeaders).toBe(true)
+			expect(snapshotGwSonnet.compat?.supportsMidConvoToolChanges).toBeUndefined()
+			expect(snapshotGwSonnet.compat?.supportsMidConvoSystemMessages).toBeUndefined()
+			expect(snapshotGwSonnet.compat?.supportsStrictTools).toBeUndefined()
+			expect(snapshotGwSonnet.compat?.allowedFallbackModels).toBeUndefined()
+		}
+		const snapshotGwOpenAi = proxyCompatRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"gpt-6.2-sol-2026-04-01",
+		)
+		expect(snapshotGwOpenAi !== undefined && hasApi(snapshotGwOpenAi, "openai-responses")).toBe(
+			true,
+		)
+		if (snapshotGwOpenAi !== undefined && hasApi(snapshotGwOpenAi, "openai-responses")) {
+			expect(snapshotGwOpenAi.compat?.supportsStrictMode).toBe(true)
+			expect(snapshotGwOpenAi.compat?.supportsAdditionalTools).toBeUndefined()
+			expect(snapshotGwOpenAi.compat?.supportsToolSearch).toBeUndefined()
+			expect(snapshotGwOpenAi.compat?.supportsMidConvoSystemMessages).toBeUndefined()
+		}
+
+		// OpenRouter snapshots resolve against OpenRouter's own catalog first across native,
+		// :variant, and Gateway routes so limits stay consistent (1M vs direct Anthropic's 200k).
+		const orSnapshotDirect = proxyCompatRegistry.getModel(
+			"openrouter",
+			"anthropic/claude-sonnet-4.5-20250929",
+		)
+		const orSnapshotNitro = proxyCompatRegistry.getModel(
+			"openrouter",
+			"anthropic/claude-sonnet-4.5-20250929:nitro",
+		)
+		const orSnapshotFree = proxyCompatRegistry.getModel(
+			"openrouter",
+			"anthropic/claude-sonnet-4.5-20250929:free",
+		)
+		const gwOrSnapshot = proxyCompatRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/anthropic/claude-sonnet-4.5-20250929",
+		)
+		const gwOrSnapshotNitro = proxyCompatRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/anthropic/claude-sonnet-4.5-20250929:nitro",
+		)
+		const gwOrSnapshotFree = proxyCompatRegistry.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/anthropic/claude-sonnet-4.5-20250929:free",
+		)
+		expect(orSnapshotDirect).toMatchObject({
+			id: "anthropic/claude-sonnet-4.5-20250929",
+			api: "anthropic-messages",
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+		})
+		expect(orSnapshotNitro).toMatchObject({
+			id: "anthropic/claude-sonnet-4.5-20250929:nitro",
+			api: "openai-completions",
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+		})
+		expect(orSnapshotFree).toMatchObject({
+			id: "anthropic/claude-sonnet-4.5-20250929:free",
+			api: "openai-completions",
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		})
+		expect(gwOrSnapshot).toMatchObject({
+			id: "openrouter/anthropic/claude-sonnet-4.5-20250929",
+			api: "openai-completions",
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+		})
+		expect(gwOrSnapshotNitro).toMatchObject({
+			id: "openrouter/anthropic/claude-sonnet-4.5-20250929:nitro",
+			api: "openai-completions",
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+		})
+		expect(gwOrSnapshotFree).toMatchObject({
+			id: "openrouter/anthropic/claude-sonnet-4.5-20250929:free",
+			api: "openai-completions",
+			contextWindow: 1_000_000,
+			maxTokens: 64_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		})
+		for (const spec of [
+			"openrouter/anthropic/claude-sonnet-4.5-20250929",
+			"openrouter/anthropic/claude-sonnet-4.5-20250929:nitro",
+			"cloudflare-ai-gateway/openrouter/anthropic/claude-sonnet-4.5-20250929",
+			"cloudflare-ai-gateway/openrouter/anthropic/claude-sonnet-4.5-20250929:nitro",
+		]) {
+			const slash = spec.indexOf("/")
+			expect(resolveModelSpecifier(spec, { minContextWindow: 500_000 }), spec).toEqual({
+				provider: spec.slice(0, slash),
+				modelId: spec.slice(slash + 1),
+				cataloged: false,
+			})
+		}
+
+		// Known Workers AI fallback models expose Cloudflare's published context windows and
+		// per-model reasoning/input capabilities through both direct and Gateway lookup.
+		const workersFallbackDefault = createProviderModels({ env: {} })
+		expect(
+			workersFallbackDefault.getModel("cloudflare-workers-ai", "@cf/meta/llama-3.2-3b-instruct"),
+		).toMatchObject({
+			id: "@cf/meta/llama-3.2-3b-instruct",
+			contextWindow: 80_000,
+			reasoning: false,
+			input: ["text"],
+		})
+		expect(
+			workersFallbackDefault.getModel(
+				"cloudflare-ai-gateway",
+				"workers-ai/@cf/meta/llama-3.2-3b-instruct",
+			),
+		).toMatchObject({
+			id: "workers-ai/@cf/meta/llama-3.2-3b-instruct",
+			contextWindow: 80_000,
+			reasoning: false,
+			input: ["text"],
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/meta/llama-3.2-3b-instruct", {
+				minContextWindow: 100_000,
+			}),
+		).toBeNull()
+		expect(
+			workersFallbackDefault.getModel(
+				"cloudflare-workers-ai",
+				"@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+			),
+		).toMatchObject({
+			id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+			contextWindow: 80_000,
+			reasoning: true,
+			input: ["text"],
+		})
+		expect(
+			workersFallbackDefault.getModel(
+				"cloudflare-ai-gateway",
+				"workers-ai/@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+			),
+		).toMatchObject({
+			id: "workers-ai/@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+			contextWindow: 80_000,
+			reasoning: true,
+			input: ["text"],
+		})
+		expect(
+			workersFallbackDefault.getModel("cloudflare-workers-ai", "@cf/google/gemma-3-12b-it"),
+		).toMatchObject({
+			id: "@cf/google/gemma-3-12b-it",
+			contextWindow: 80_000,
+			reasoning: false,
+			input: ["text", "image"],
+		})
+		expect(
+			workersFallbackDefault.getModel(
+				"cloudflare-ai-gateway",
+				"workers-ai/@cf/google/gemma-3-12b-it",
+			),
+		).toMatchObject({
+			id: "workers-ai/@cf/google/gemma-3-12b-it",
+			contextWindow: 80_000,
+			reasoning: false,
+			input: ["text", "image"],
+		})
+		expect(
+			resolveModelSpecifier("cloudflare-workers-ai/@cf/mistral/mistral-7b-instruct-v0.2-lora", {
+				minContextWindow: 16_000,
+			}),
+		).toBeNull()
+		expect(
+			resolveModelSpecifier(
+				"cloudflare-ai-gateway/workers-ai/@cf/mistral/mistral-7b-instruct-v0.2-lora",
+				{ minContextWindow: 16_000 },
+			),
+		).toBeNull()
+		const workersFallbackLowFloor = createProviderModels({ env: {}, minContextWindow: 8192 })
+		expect(
+			workersFallbackLowFloor.getModel(
+				"cloudflare-workers-ai",
+				"@cf/mistral/mistral-7b-instruct-v0.2-lora",
+			),
+		).toMatchObject({
+			id: "@cf/mistral/mistral-7b-instruct-v0.2-lora",
+			contextWindow: 15_000,
+			reasoning: false,
+			input: ["text"],
+		})
+		expect(
+			workersFallbackLowFloor.getModel(
+				"cloudflare-ai-gateway",
+				"workers-ai/@cf/mistral/mistral-7b-instruct-v0.2-lora",
+			),
+		).toMatchObject({
+			id: "workers-ai/@cf/mistral/mistral-7b-instruct-v0.2-lora",
+			contextWindow: 15_000,
+			reasoning: false,
+			input: ["text"],
+		})
+
+		// Unlisted OpenRouter :free variants zero out paid base-model pricing (including tiers)
+		// while preserving base capabilities across both direct OpenRouter and Gateway /compat.
+		expect(getOpenRouterCatalogEntry("google/gemini-2.5-pro:free")).toBeUndefined()
+		const paidGemini = workersFallbackDefault.getModel("openrouter", "google/gemini-2.5-pro")
+		const freeGemini = workersFallbackDefault.getModel("openrouter", "google/gemini-2.5-pro:free")
+		const nitroGemini = workersFallbackDefault.getModel("openrouter", "google/gemini-2.5-pro:nitro")
+		const gwFreeGemini = workersFallbackDefault.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/google/gemini-2.5-pro:free",
+		)
+		expect(paidGemini?.cost.input).toBeGreaterThan(0)
+		expect(nitroGemini?.cost.input).toBe(paidGemini?.cost.input)
+		expect(freeGemini).toMatchObject({
+			id: "google/gemini-2.5-pro:free",
+			contextWindow: paidGemini?.contextWindow,
+			maxTokens: paidGemini?.maxTokens,
+			reasoning: paidGemini?.reasoning,
+			input: paidGemini?.input,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		})
+		expect(freeGemini?.cost.tiers).toBeUndefined()
+		expect(gwFreeGemini).toMatchObject({
+			id: "openrouter/google/gemini-2.5-pro:free",
+			contextWindow: paidGemini?.contextWindow,
+			maxTokens: paidGemini?.maxTokens,
+			reasoning: paidGemini?.reasoning,
+			input: paidGemini?.input,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		})
+		expect(gwFreeGemini?.cost.tiers).toBeUndefined()
+		const freeUpstreamO1 = workersFallbackDefault.getModel("openrouter", "openai/o1:free")
+		const gwFreeUpstreamO1 = workersFallbackDefault.getModel(
+			"cloudflare-ai-gateway",
+			"openrouter/openai/o1:free",
+		)
+		expect(freeUpstreamO1).toMatchObject({
+			id: "openai/o1:free",
+			contextWindow: 200_000,
+			reasoning: true,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		})
+		expect(gwFreeUpstreamO1).toMatchObject({
+			id: "openrouter/openai/o1:free",
+			contextWindow: 200_000,
+			reasoning: true,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		})
 	})
 
 	it("blocks HTTP redirects and cross-origin requests", async () => {
@@ -1768,19 +3983,7 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			createProviderModels({ env: {}, customProviders: [mismatchedFormatSpec] }),
 		).toThrow(/defaultFormat "openai-responses" must be listed in formats/)
 
-		for (const unsupportedAuth of [
-			{
-				kind: "cloudflare_workers_ai",
-				apiKeyEnv: "CLOUDFLARE_AI_API_KEY",
-				accountIdEnv: "CLOUDFLARE_ACCOUNT_ID",
-			},
-			{
-				kind: "cloudflare_ai_gateway",
-				apiKeyEnv: "CLOUDFLARE_AI_API_KEY",
-				accountIdEnv: "CLOUDFLARE_ACCOUNT_ID",
-				gatewayIdEnv: "CLOUDFLARE_GATEWAY_ID",
-			},
-		]) {
+		for (const unsupportedAuth of [{ kind: "unsupported_oauth" }]) {
 			const unsupportedSpec = {
 				id: `unsupported-${unsupportedAuth.kind}`,
 				name: "Unsupported Auth",
@@ -1792,12 +3995,7 @@ describe("@checkfu/pi-providers runtime & wire-format hardening", () => {
 			} as unknown as (typeof BUILTIN_PROVIDERS)[number]
 			expect(
 				checkProviderCredentials(unsupportedSpec, {
-					env: {
-						CLOUDFLARE_AI_API_KEY: "tok",
-						CLOUDFLARE_ACCOUNT_ID: "acct",
-						CLOUDFLARE_GATEWAY_ID: "gw",
-					},
-					aiBinding: { fetch: async () => new Response("ok") },
+					env: {},
 				}),
 			).toEqual({
 				ok: false,

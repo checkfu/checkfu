@@ -1,8 +1,10 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
+import type { CloudflareAiBindingLike } from "@checkfu/pi-providers/catalog"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
@@ -10,6 +12,7 @@ import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./Pi
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import {
 	createPiModels,
+	extractAiBinding,
 	providerApiKeys,
 	providerBaseUrls,
 	toProviderRuntimeConfig,
@@ -33,11 +36,12 @@ export const makePiHarnessBackend = (
 	fence: SqliteTurnFence,
 	apiKeys: ProviderApiKeysInput,
 	reset: () => void,
+	options?: { readonly aiBinding?: CloudflareAiBindingLike | null },
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
-	const runtimeConfig = toProviderRuntimeConfig(apiKeys)
+	const runtimeConfig = toProviderRuntimeConfig(apiKeys, undefined, options)
 
 	return {
 		withLock,
@@ -97,11 +101,13 @@ export const PiSessionLive = PiSession.make(
 	Effect.map(
 		Effect.all({
 			state: Cloudflare.DurableObjectState,
+			workerEnv: Effect.serviceOption(Cloudflare.Workers.WorkerEnvironment),
 			apiKeys: providerApiKeys,
 			baseUrls: providerBaseUrls,
 		}),
-		({ state, apiKeys, baseUrls }) =>
+		({ state, workerEnv, apiKeys, baseUrls }) =>
 			Effect.promise(async () => {
+				const aiBinding = extractAiBinding(Option.getOrUndefined(workerEnv))
 				const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
 					import("agents/lifecycle"),
 					import("agents/harness/pi"),
@@ -109,7 +115,7 @@ export const PiSessionLive = PiSession.make(
 
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
-						const models = createPiModels(apiKeys, baseUrls)
+						const models = createPiModels(apiKeys, baseUrls, { aiBinding })
 						return Harness.open(
 							storage,
 							{
@@ -127,9 +133,15 @@ export const PiSessionLive = PiSession.make(
 				const fence = new SqliteTurnFence({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 				})
-				const backend = makePiHarnessBackend(harness, fence, apiKeys, () => {
-					rawCtx.abort("A turn did not stop when aborted")
-				})
+				const backend = makePiHarnessBackend(
+					harness,
+					fence,
+					apiKeys,
+					() => {
+						rawCtx.abort("A turn did not stop when aborted")
+					},
+					{ aiBinding },
+				)
 
 				return {
 					alarm: () => Effect.promise(() => lifecycle.alarm()),
