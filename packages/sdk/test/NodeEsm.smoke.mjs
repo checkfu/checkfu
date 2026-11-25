@@ -28,6 +28,7 @@ const client = new Checkfu({
 				id: "agent_node_smoke",
 				type: "agent",
 				mcp_servers: [],
+				tools: [],
 				version: 1,
 				name: "Node Smoke",
 				model: { id: "gpt-6.2-sol" },

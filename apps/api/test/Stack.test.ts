@@ -81,7 +81,7 @@ describe("Alchemy stack and worker entry", () => {
 					logs: { enabled: true, invocationLogs: false },
 				})
 				expect(stack).toBeDefined()
-				expect(AgentView.definition.version).toBe(2)
+				expect(AgentView.definition.version).toBe(3)
 
 				const devStateLayer = stack.state.pipe(
 					Layer.provide(

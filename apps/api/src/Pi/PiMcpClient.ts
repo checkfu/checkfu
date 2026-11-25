@@ -136,6 +136,9 @@ export const listMcpTools = (
 				description: tool.description ?? "",
 				inputSchema: tool.inputSchema,
 				...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
+				...(typeof tool.annotations?.readOnlyHint === "boolean"
+					? { annotations: { readOnlyHint: tool.annotations.readOnlyHint } }
+					: {}),
 			})),
 		),
 	)

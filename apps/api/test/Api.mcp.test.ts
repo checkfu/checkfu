@@ -508,7 +508,7 @@ describe("MCP tool registry", () => {
 		expect(modelNameOf(registry, long)).not.toBe(modelNameOf(registry, `${long}2`))
 
 		const alias = modelNameOf(registry, long)
-		expect(registry.toolOf(alias)).toEqual({ server: "docs", tool: long })
+		expect(registry.toolOf(alias)).toEqual({ server: "docs", tool: long, permission: "ask" })
 		const called: Array<string> = []
 		const extension = mcpExtension(
 			binding,
@@ -543,7 +543,7 @@ describe("MCP tool registry", () => {
 		})
 		for (const tool of ["find-item", "find_item"]) {
 			const name = modelNameOf(registry, tool)
-			expect(registry.toolOf(name)).toEqual({ server: "docs", tool })
+			expect(registry.toolOf(name)).toEqual({ server: "docs", tool, permission: "ask" })
 			await extension.tools
 				?.find((offered) => offered.name === name)
 				?.execute({}, {} as never, {} as never)
@@ -597,6 +597,71 @@ describe("MCP tool registry", () => {
 				expect(byTool(assignToolNames(tools.toReversed()))).toEqual(byTool(named))
 			}),
 		)
+	})
+
+	it("lets every custom tool keep its name, and gives way to it whatever else is offered", () => {
+		const custom = fc.record({
+			prefix: fc.constant(""),
+			name: fc.oneof(
+				fc.constantFrom("find-item", "find_item", "mcp-_docs__find", "lookup"),
+				fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/u).filter((name) => !name.startsWith("mcp__")),
+			),
+			kept: fc.constant(true),
+		})
+		const server = fc.record({
+			prefix: fc.constantFrom("mcp__docs__", "mcp__my-docs__"),
+			name: fc.oneof(
+				fc.constantFrom("find", "find-item", "find_item", "x".repeat(300)),
+				fc.string({ maxLength: 12 }),
+			),
+		})
+		fc.assert(
+			fc.property(
+				fc.uniqueArray(custom, {
+					maxLength: 8,
+					selector: (tool) => toCodemodeIdentifier(tool.name),
+				}),
+				fc.array(server, { maxLength: 16 }),
+				(customs, servers) => {
+					const named = assignToolNames([...servers, ...customs])
+					const kept = named.filter((names) => names.kept === true)
+					expect(kept.map((names) => names.model).toSorted()).toEqual(
+						customs.map((tool) => tool.name).toSorted(),
+					)
+					for (const names of kept) {
+						expect(names.public).toBe(names.name)
+					}
+					expect(new Set(named.map((names) => names.model)).size).toBe(named.length)
+					expect(new Set(named.map((names) => names.script)).size).toBe(named.length)
+					const byTool = (all: ReadonlyArray<ToolNames>) =>
+						new Map(all.map((names) => [JSON.stringify([names.prefix, names.name]), names]))
+					expect(byTool(assignToolNames([...customs, ...servers].toReversed()))).toEqual(
+						byTool(named),
+					)
+				},
+			),
+		)
+	})
+
+	it("names a server's tool apart from a custom tool a script would spell the same", () => {
+		const tools = { status: "listed" as const, tools: [descriptor("find")] }
+		const plain = mcpRegistry([{ binding, tools }])
+		expect([...plain.byName.keys()]).toEqual(["mcp__docs__find"])
+		const beside = mcpRegistry(
+			[{ binding, tools }],
+			[
+				{
+					type: "custom",
+					name: "mcp-_docs__find",
+					description: "The caller's own",
+					input_schema: { type: "object" },
+				},
+			],
+		)
+		const [name] = [...beside.byName.keys()]
+		expect(name).not.toBe("mcp__docs__find")
+		expect(toCodemodeIdentifier(name ?? "")).not.toBe(toCodemodeIdentifier("mcp-_docs__find"))
+		expect(beside.toolOf(name ?? "")).toMatchObject({ server: "docs", tool: "find" })
 	})
 
 	it("gives the model a result that came only as a structured value, and a script the value itself", async () => {

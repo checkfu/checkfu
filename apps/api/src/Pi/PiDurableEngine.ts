@@ -1,11 +1,12 @@
 import { boundToolEvents } from "@checkfu/domain/Session/ToolEventBounds"
-import type { McpToolOf } from "@checkfu/domain/Session/ToolEventBounds"
+import type { McpToolOf, TurnCalls } from "@checkfu/domain/Session/ToolEventBounds"
 import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import {
 	AssistantEntry,
 	CompactionEntry,
+	LiveDoc,
 	ROOT_CONVERSATION_ID,
 	ResetEntry,
 	ToolResultEntry,
@@ -19,6 +20,8 @@ import type {
 	EntryId,
 	EntryRecord,
 	Harness,
+	SignalResult,
+	SignalToken,
 	TaskId,
 } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
@@ -27,9 +30,11 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
+import { deliverAnswer, parkedActions, waitedOnAnAnswer } from "./PiActions.ts"
+import type { ActionAnswer, ParkedAction } from "./PiActions.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
 import { rejectionIn } from "./PiRejection.ts"
-import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
+import { beginTurnUsage, pauseTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
 import { turnOfOperation } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
@@ -50,7 +55,14 @@ export interface PiDurableBackend {
 		{ readonly status: "done" } | { readonly status: "unanswered"; readonly reason?: string }
 	>
 	readonly abort: (operationId: string) => Effect.Effect<boolean>
+	readonly signal: <T>(
+		taskId: TaskId,
+		token: SignalToken<T>,
+		key: string,
+		value: T,
+	) => Promise<SignalResult>
 	readonly reset: Effect.Effect<never>
+	readonly turnCalls?: (turn: number) => TurnCalls
 	readonly publishMcp?: (request: PiTurnRequest) => Promise<boolean>
 	readonly discoverMcp?: (request: PiTurnRequest, signal: AbortSignal) => Promise<void>
 	readonly untilCancelled?: <A>(
@@ -158,6 +170,7 @@ export const readTurnToolEvents = async (
 	operationId: string,
 	turn: number,
 	mcpToolOf?: McpToolOf,
+	calls?: TurnCalls,
 ): Promise<Array<ToolEvent>> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input" || record.entry === undefined) {
@@ -171,7 +184,7 @@ export const readTurnToolEvents = async (
 	if (head === undefined) {
 		return []
 	}
-	const bounds = boundToolEvents(turn, mcpToolOf)
+	const bounds = boundToolEvents(turn, mcpToolOf, calls)
 	const askedBy = new Map<string, TaskId | undefined>()
 	const visit = (entry: EntryRecord) => {
 		for (const message of entry.model ?? []) {
@@ -204,6 +217,7 @@ export const readTurnToolEvents = async (
 						? { truncated: true as const }
 						: {}),
 					...(rejected === undefined ? {} : { rejected }),
+					...(waitedOnAnAnswer(message.details) ? { use_published: true as const } : {}),
 				})
 			}
 		}
@@ -350,6 +364,85 @@ const finalizeSettledTurn = async (
 		}
 	}
 }
+
+export const abortOperation = async (pi: Harness, operationId: string): Promise<boolean> => {
+	const record = await submissionOf(pi, operationId)
+	if (record === undefined || record.status === "done" || record.status === "unanswered") {
+		return true
+	}
+	const outcome = await pi.abortSubmission(record.id, BACKGROUND_CONTEXT, ROOT_CONVERSATION_ID)
+	if (outcome !== "already_placed") {
+		return outcome === "aborted"
+	}
+	const live = await pi.snapshot(LiveDoc, ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
+	const run = live?.run
+	if (run !== undefined && run.inputs.includes(record.id)) {
+		await pi.abortTask(run.taskId, BACKGROUND_CONTEXT)
+	}
+	return true
+}
+
+type Settled =
+	| { readonly status: "done" }
+	| { readonly status: "unanswered"; readonly reason?: string }
+
+const PAUSE_POLL_MS = 100
+
+const settleOrPause = async (
+	backend: PiDurableBackend,
+	operationId: string,
+	signal: AbortSignal,
+): Promise<
+	Settled | { readonly status: "paused"; readonly calls: ReadonlyArray<ParkedAction> }
+> => {
+	const stop = new AbortController()
+	const stopWaiting = () => stop.abort()
+	signal.addEventListener("abort", stopWaiting, { once: true })
+	const settled = backend.wait(operationId, stop.signal)
+	settled.catch(() => undefined)
+	try {
+		while (true) {
+			const tick = new Promise<undefined>((resolve) => {
+				setTimeout(resolve, PAUSE_POLL_MS)
+			})
+			const winner = await Promise.race([settled, tick])
+			if (winner !== undefined) {
+				return winner
+			}
+			if (signal.aborted) {
+				return await settled
+			}
+			const pi = await backend.pi()
+			const record = await submissionOf(pi, operationId)
+			const turn = turnOfOperation(operationId)
+			if (record?.type === "input" && record.status === "placed" && turn !== undefined) {
+				const calls = await parkedActions(pi, turn)
+				if (calls !== undefined) {
+					stop.abort()
+					return { status: "paused", calls }
+				}
+			}
+		}
+	} finally {
+		signal.removeEventListener("abort", stopWaiting)
+	}
+}
+
+export const pausePiDurableTurn = (
+	backend: PiDurableBackend,
+	operationId: string,
+	pause: string,
+): Effect.Effect<ModelUsage> =>
+	backend.withLock(
+		Effect.promise(async () => pauseTurnUsage(await backend.pi(), operationId, pause)),
+	)
+
+export const answerPiDurableCall = (
+	backend: PiDurableBackend,
+	tool_use_id: string,
+	answer: ActionAnswer,
+): Effect.Effect<"delivered" | "gone"> =>
+	Effect.promise(async () => deliverAnswer(await backend.pi(), backend.signal, tool_use_id, answer))
 
 export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortGrace", {
 	defaultValue: () => "10 seconds",
@@ -501,9 +594,7 @@ const admitPiTurnUnderWay = (
 const resolveSettledPiTurn = (
 	backend: PiDurableBackend,
 	operationId: string,
-	settled:
-		| { readonly status: "done" }
-		| { readonly status: "unanswered"; readonly reason?: string },
+	settled: Settled | { readonly status: "paused"; readonly calls: ReadonlyArray<ParkedAction> },
 	providerForLog: string,
 ): Effect.Effect<PiTurnOutcome> =>
 	Effect.uninterruptible(
@@ -514,8 +605,21 @@ const resolveSettledPiTurn = (
 				turn === undefined
 					? []
 					: yield* Effect.promise(() =>
-							readTurnToolEvents(pi, operationId, turn, backend.mcpToolOf),
+							readTurnToolEvents(
+								pi,
+								operationId,
+								turn,
+								backend.mcpToolOf,
+								backend.turnCalls?.(turn),
+							),
 						)
+			if (settled.status === "paused") {
+				return {
+					ok: "paused" as const,
+					calls: settled.calls,
+					...(tool_events.length === 0 ? {} : { tool_events }),
+				}
+			}
 			const outcome = yield* settledOutcome(pi, operationId, settled, providerForLog)
 			return tool_events.length === 0 ? outcome : { ...outcome, tool_events }
 		}),
@@ -597,7 +701,7 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	if (probe === "cancelled") {
 		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
-	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))
+	const settled = yield* Effect.promise((signal) => settleOrPause(backend, operationId, signal))
 	return yield* resolveSettledPiTurn(backend, operationId, settled, "unknown")
 })
 
@@ -628,6 +732,6 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
 
-	const settled = yield* Effect.promise((signal) => backend.wait(operationId, signal))
+	const settled = yield* Effect.promise((signal) => settleOrPause(backend, operationId, signal))
 	return yield* resolveSettledPiTurn(backend, operationId, settled, request.provider)
 })

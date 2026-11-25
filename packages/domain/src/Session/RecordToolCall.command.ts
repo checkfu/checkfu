@@ -3,11 +3,13 @@ import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import {
+	ActionInput,
 	NonEmptyString,
 	PositiveInt,
 	SessionEventFields,
 	ToolCall,
 	ToolInput,
+	ToolResult,
 } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
@@ -24,13 +26,18 @@ export class AgentToolResult extends Domain.Event(
 
 export class AgentMcpToolUse extends Domain.Event("agent.mcp_tool_use", {
 	...SessionEventFields["agent.mcp_tool_use"],
-	input: ToolInput,
+	input: ActionInput,
 }) {}
 
 export class AgentMcpToolResult extends Domain.Event(
 	"agent.mcp_tool_result",
 	SessionEventFields["agent.mcp_tool_result"],
 ) {}
+
+export class AgentCustomToolUse extends Domain.Event("agent.custom_tool_use", {
+	...SessionEventFields["agent.custom_tool_use"],
+	input: ActionInput,
+}) {}
 
 export class RecordToolCall extends Domain.Command("RecordToolCall", {
 	input: {
@@ -40,5 +47,16 @@ export class RecordToolCall extends Domain.Command("RecordToolCall", {
 		call: ToolCall,
 	},
 	events: [AgentToolUse, AgentToolResult, AgentMcpToolUse, AgentMcpToolResult],
+	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, UnknownModelRequest],
+}) {}
+
+export class RecordToolResult extends Domain.Command("RecordToolResult", {
+	input: {
+		session_id: SessionId,
+		turn: PositiveInt,
+		model_request_start_id: NonEmptyString,
+		result: ToolResult,
+	},
+	events: [AgentToolResult, AgentMcpToolResult],
 	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, UnknownModelRequest],
 }) {}

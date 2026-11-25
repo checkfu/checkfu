@@ -6,6 +6,9 @@ import type {
 } from "@checkfu/pi-providers/catalog"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
+import { decodeAgentTools } from "@checkfu/domain/Mcp/McpServers"
+import type { AgentTool, CustomTool } from "@checkfu/domain/Mcp/McpServers"
+import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import type { PiHarness } from "agents/harness/pi"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -22,7 +25,15 @@ import {
 	withScriptBounds,
 } from "./PiCodemode.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
-import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
+import { actionsExtension, customToolsExtension } from "./PiActions.ts"
+import {
+	abortOperation,
+	abortPiDurableTurn,
+	answerPiDurableCall,
+	pausePiDurableTurn,
+	recoverPiDurableTurn,
+	runPiDurableTurn,
+} from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import { toProviderRuntimeConfig } from "./PiModels.ts"
 import type { ProviderApiKeysInput } from "./PiModels.ts"
@@ -30,7 +41,8 @@ import { PiProviderRuntime, loadEnvPiProviderRuntime } from "./PiProviderRuntime
 import type { SessionMcp } from "./PiMcpSession.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import { MCP_TURN_KEY } from "./PiTurn.ts"
-import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import type { PiActionAnswer, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import { turnCallLog } from "./PiTurnCalls.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
 export {
@@ -55,6 +67,7 @@ class PiSessionHost {
 }
 
 const ADMITTED_TURN = "workspace-turn"
+const AGENT_TOOLS = "agent-tools"
 
 export const makePiHarnessBackend = (
 	harness: PiHarness,
@@ -126,6 +139,7 @@ export const makePiHarnessBackend = (
 					? { status: "unanswered" }
 					: { status: "unanswered", reason: result.reason }
 		},
+		signal: (taskId, token, key, value) => harness.signal(taskId, token, key, value),
 		abort: (operationId) =>
 			Effect.uninterruptible(
 				Effect.suspend(() => {
@@ -135,7 +149,7 @@ export const makePiHarnessBackend = (
 					}
 					return withLock(
 						Effect.promise(async () => {
-							await harness.abort({ operationId })
+							await abortOperation(await harness.pi(), operationId)
 							return true
 						}),
 					)
@@ -149,6 +163,11 @@ export interface PiSessionShape {
 	readonly recoverTurn: (operationId: string) => Effect.Effect<PiTurnOutcome | null>
 	readonly runTurn: (request: PiTurnRequest) => Effect.Effect<PiTurnOutcome>
 	readonly abortTurn: (operationId: string) => Effect.Effect<boolean>
+	readonly pauseUsage: (operationId: string, pause: string) => Effect.Effect<ModelUsage>
+	readonly answerCall: (
+		toolUseId: string,
+		answer: typeof PiActionAnswer.Type,
+	) => Effect.Effect<"delivered" | "gone">
 }
 
 export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShape>()("PiSession") {}
@@ -201,6 +220,22 @@ export const PiSessionLive = PiSession.make(
 				const writeScriptOutput = (path: string, content: string | Uint8Array) =>
 					runPromise(workspace().writeScriptOutput(path, content, { turn: admittedTurn() }))
 				const outputEnv = scriptOutputEnv(writeScriptOutput)
+				const turnCalls = turnCallLog({
+					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
+				})
+				let declared: ReadonlyArray<AgentTool> | undefined
+				const agentTools = (): ReadonlyArray<AgentTool> => {
+					declared ??= decodeAgentTools(rawCtx.storage.kv.get<string>(AGENT_TOOLS))
+					return declared
+				}
+				const keepAgentTools = (text: string): boolean => {
+					if (rawCtx.storage.kv.get<string>(AGENT_TOOLS) !== undefined) {
+						return false
+					}
+					rawCtx.storage.kv.put(AGENT_TOOLS, text)
+					declared = undefined
+					return true
+				}
 				const connectionStub = placedStub(connections, where)
 				let mcp: SessionMcp | undefined
 				const loadMcp = async (): Promise<SessionMcp> => {
@@ -221,6 +256,7 @@ export const PiSessionLive = PiSession.make(
 							}
 						}, sessionId),
 						admittedTurn,
+						agentTools,
 					})
 					return mcp
 				}
@@ -248,9 +284,19 @@ export const PiSessionLive = PiSession.make(
 					for (const extension of withToolSurface(sandbox, [
 						workspaceTools,
 						...(mcp?.extensions() ?? []),
+						customToolsExtension(
+							agentTools().filter((tool): tool is CustomTool => tool.type === "custom"),
+						),
 					])) {
 						registry.install(extension)
 					}
+					registry.install(
+						actionsExtension(
+							(name) => mcp?.toolOf(name),
+							{ admit: (taskId) => turnCalls(admittedTurn()).admit(taskId) },
+							(name) => agentTools().some((tool) => tool.type === "custom" && tool.name === name),
+						),
+					)
 				}
 
 				// PiHarness calls this factory again when it reopens after a storage error.
@@ -296,12 +342,17 @@ export const PiSessionLive = PiSession.make(
 				)
 				const backend: PiDurableBackend = {
 					...harnessBackend,
+					turnCalls,
 					publishMcp: async (request) => {
-						if (request.mcp === undefined) {
-							return false
+						const session = request.mcp === undefined ? undefined : await loadMcp()
+						const published =
+							session !== undefined &&
+							request.mcp !== undefined &&
+							session.publish(request.turn, request.mcp)
+						if (request.tools !== undefined && keepAgentTools(request.tools)) {
+							installTools()
 						}
-						const session = await loadMcp()
-						return session.publish(request.turn, request.mcp) && session.undiscovered()
+						return published && session !== undefined && session.undiscovered()
 					},
 					discoverMcp: async (request, signal) => {
 						await mcp?.discover(request.turn, signal)
@@ -315,6 +366,8 @@ export const PiSessionLive = PiSession.make(
 					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
 					runTurn: (request) => runPiDurableTurn(backend, request),
 					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
+					pauseUsage: (operationId, pause) => pausePiDurableTurn(backend, operationId, pause),
+					answerCall: (toolUseId, answer) => answerPiDurableCall(backend, toolUseId, answer),
 				}
 			}),
 	),

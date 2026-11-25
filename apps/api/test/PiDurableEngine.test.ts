@@ -2279,9 +2279,19 @@ describe("turn engine", () => {
 		const harnessAborts: Array<string> = []
 		const harnessBackend = makePiHarnessBackend(
 			{
-				abort: async ({ operationId }: { readonly operationId: string }) => {
-					harnessAborts.push(operationId)
-				},
+				pi: async () => ({
+					commit: async <T>(
+						change: (tx: {
+							submissionByRequest: (conversation: string, operationId: string) => undefined
+						}) => T,
+					): Promise<T> =>
+						change({
+							submissionByRequest: (_conversation, operationId) => {
+								harnessAborts.push(operationId)
+								return undefined
+							},
+						}),
+				}),
 			} as unknown as Parameters<typeof makePiHarnessBackend>[0],
 			{
 				markCancelled: (operationId: string) => {
@@ -2784,7 +2794,7 @@ describe("turn engine", () => {
 			makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "never", 1, 1)),
 		)
 		const harnessBackend = makePiHarnessBackend(
-			{ abort: async () => undefined } as unknown as Parameters<typeof makePiHarnessBackend>[0],
+			{ pi: () => inner.pi() } as unknown as Parameters<typeof makePiHarnessBackend>[0],
 			{
 				markCancelled: (operationId: string) => {
 					cancelled.add(operationId)
@@ -2929,7 +2939,7 @@ describe("turn engine", () => {
 			const [originalResult, recoveredResult] = await Promise.all([originalTurn, recovery])
 			expect(originalResult).toMatchObject({ ok: true })
 			expect(recoveredResult).not.toBeNull()
-			expect(recoveredResult?.ok ? recoveredResult.reply.text : null).toBe(
+			expect(recoveredResult?.ok === true ? recoveredResult.reply.text : null).toBe(
 				"Committed after disconnect",
 			)
 		} finally {

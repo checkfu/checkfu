@@ -2,7 +2,11 @@ import * as Domain from "@alchemy.run/domain"
 import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { SessionOutputsUnpublished } from "../src/Session/SessionOutputs.external.ts"
-import { decodeMcpServerCredentials, decodeMcpServers } from "../src/Mcp/McpServers.ts"
+import {
+	decodeAgentTools,
+	decodeMcpServerCredentials,
+	decodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
 import * as Verify from "@alchemy.run/domain/Verify"
@@ -47,6 +51,7 @@ import { ArchiveSession } from "../src/Session/ArchiveSession.command.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
 import { SendUserMessage } from "../src/Session/SendUserMessage.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
+import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
@@ -131,6 +136,33 @@ const STANDING = {
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.OpeningTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
+	"Session.APausedTurnHoldsNoModelRequest": "proved",
+	"Session.APausedTurnWaitsOnACall": "proved",
+	"Session.APausedTurnAskedWhatItWaitsOn": "proved",
+	"Session.AnInterruptedTurnIsNotPaused": "proved",
+	"Session.OnlyAPauseMakesATurnWait": "proved",
+	"Session.APausedTurnTakesNoUserMessage": "proved",
+	"Session.APausedTurnIsNotAbandoned": "proved",
+	"Session.APauseKeepsTheTurn": "proved",
+	"Session.AContinuationKeepsTheTurn": "proved",
+	"Session.APausedTurnGoesOnOnceAnswered": "proved",
+	"Session.AnInterruptEndsAPausedTurn": "proved",
+	"Session.AnInterruptedTurnNeitherWaitsNorGoesOn": "proved",
+	"Session.AnInterruptedTurnStaysInterrupted": "proved",
+	"Session.ADeadlineAbandonsOnlyItsOwnSegment": "proved",
+	"Session.AnEndedTurnStartsTheQueuedOne": "proved",
+	"Session.AStopNamesTheUnansweredCalls": "proved",
+	"ToolConfirmation.OnlyADenialCarriesAMessage": "proved",
+	"ToolConfirmation.OnlyAReturnedResultIsAnError": "proved",
+	"ToolConfirmation.ARequestedCallHasATurn": "proved",
+	"ToolConfirmation.ASettledCallNeverChanges": "proved",
+	"ToolConfirmation.ACallKeepsItsSessionTurnAndKind": "proved",
+	"ToolConfirmation.ACallIsAnsweredWithWhatItAwaits": "proved",
+	"RequestToolAction.ARequestWaitsInItsOwnTurn": "proved",
+	"ConfirmTool.OnlyAPendingCallOfTheRunningTurnIsConfirmed": "proved",
+	"ConfirmTool.AnAnswerKeepsTheTurn": "proved",
+	"ReturnCustomToolResult.OnlyAPendingCallOfTheRunningTurnGetsAResult": "proved",
+	"ReturnCustomToolResult.AResultKeepsTheTurn": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
 	"Automation.ReportedNeverExceedsRuns": "proved",
@@ -154,6 +186,7 @@ const STANDING = {
 	"AutomationCapacity.ReservedSlotsStayWithinTheLimit": "proved",
 	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
 	"CreateAgent.NewAgentKeepsItsDeclaredServers": "proved",
+	"CreateAgent.NewAgentKeepsItsDeclaredTools": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
@@ -233,6 +266,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"AdmitSession",
 			"SendUserMessage",
 			"SendUserInterrupt",
+			"ConfirmTool",
+			"ReturnCustomToolResult",
 			"ArchiveSession",
 			"ClaimIdempotencyKey",
 			"AdmitAutomation",
@@ -278,6 +313,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					upcomingOccurrences,
 					decodeMcpServers,
 					decodeMcpServerCredentials,
+					decodeAgentTools,
+					addToolUseId,
+					removeToolUseId,
 				],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
@@ -306,7 +344,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				`${outcome.aggregate === undefined ? "" : `${outcome.aggregate}.`}${outcome.command} ${outcome.kind === "records" ? "→" : "✗"} ${outcome.tag}`,
 		)
 		expect(exploredOutcomes).toContain("Session.ClaimIdempotencyKey → idempotency_key.claimed")
-	}, 600_000)
+	}, 1_200_000)
 
 	it("preserves all cross-domain Checkfu invariants after post-admission UpdateAgent, ArchiveAgent, ArchiveEnvironment, DeleteEnvironment, and ArchiveSession mutations", async () => {
 		const platform = InMemory.make({ manual: true })

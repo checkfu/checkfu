@@ -4,13 +4,23 @@ import {
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
-import { bindMcpServers } from "@checkfu/domain/Mcp/McpServers"
+import { bindMcpServers, encodeAgentTools } from "@checkfu/domain/Mcp/McpServers"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
-import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import type {
+	HarnessReply,
+	HarnessUnavailable,
+	TurnFailed,
+	TurnPaused,
+} from "@checkfu/domain/Session/Harness.external"
 import { recordToolEvents } from "@checkfu/domain/Session/RecordToolEvents"
+import { RequestToolAction } from "@checkfu/domain/Session/RequestToolAction.command"
+import { RequestToolActionDecision } from "@checkfu/domain/Session/RequestToolAction.decision"
+import { segmentKey } from "@checkfu/domain/Session/RunTurn.saga"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
+import { ToolConfirmation } from "@checkfu/domain/Session/ToolConfirmation.aggregate"
+import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
-import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -25,7 +35,7 @@ import {
 	supportedProvidersDescription,
 } from "./PiCatalog.ts"
 import { turnOperationId } from "./PiTurn.ts"
-import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import type { PiActionAnswer, PiParkedCall, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import type { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -64,6 +74,16 @@ export interface PiTurnExecutorService {
 		turn: number,
 		paths: ReadonlyArray<string>,
 	) => Effect.Effect<ReadonlyArray<OutputBytes> | null, HarnessCallFailed>
+	readonly pauseUsage: (
+		conversation: string,
+		operationId: string,
+		pause: string,
+	) => Effect.Effect<ModelUsage, HarnessCallFailed>
+	readonly answerCall: (
+		conversation: string,
+		toolUseId: string,
+		answer: typeof PiActionAnswer.Type,
+	) => Effect.Effect<"delivered" | "gone", HarnessCallFailed>
 	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
 }
 
@@ -94,17 +114,14 @@ const withRetry = <A>(call: Effect.Effect<A, HarnessCallFailed>) =>
 		})
 	})
 
-export const recordSettledToolEvents = (
-	args: { readonly session_id: SessionId; readonly turn: number },
-	events: ReadonlyArray<ToolEvent>,
-) =>
+export const retryRecording = <A, E, R>(write: Effect.Effect<A, E, R>, session_id: SessionId) =>
 	Effect.gen(function* () {
 		const { baseDelay } = yield* HarnessLimits
-		yield* recordToolEvents({ ...args, events }).pipe(
+		return yield* write.pipe(
 			Effect.catchDefect((defect) =>
 				Effect.andThen(
-					Effect.logWarning("Tool events not recorded yet", args.session_id, defect),
-					Effect.fail({ _tag: "NotRecorded" as const }),
+					Effect.logWarning("Tool events not recorded yet", session_id, defect),
+					Effect.fail({ _tag: "NotRecorded" as const, defect }),
 				),
 			),
 			Effect.retry({
@@ -112,10 +129,21 @@ export const recordSettledToolEvents = (
 					Schedule.exponential(baseDelay),
 					Schedule.spaced(RECORD_RETRY_CAP),
 				]).pipe(Schedule.jittered),
+				while: (error) => isNotRecorded(error),
 			}),
-			Effect.orDie,
+			Effect.catchIf(isNotRecorded, ({ defect }) => Effect.die(defect)),
 		)
 	})
+
+const isNotRecorded = (
+	error: unknown,
+): error is { readonly _tag: "NotRecorded"; readonly defect: unknown } =>
+	typeof error === "object" && error !== null && "_tag" in error && error._tag === "NotRecorded"
+
+export const recordSettledToolEvents = (
+	args: { readonly session_id: SessionId; readonly turn: number; readonly segment?: number },
+	events: ReadonlyArray<ToolEvent>,
+) => retryRecording(recordToolEvents({ ...args, events }), args.session_id)
 
 export class PiTurnExecutor extends Context.Service<PiTurnExecutor, PiTurnExecutorService>()(
 	"@checkfu/api/PiTurnExecutor",
@@ -139,6 +167,8 @@ const settleTimeout = Effect.gen(function* () {
 	)
 })
 
+type TurnOutcomeError = Extract<PiTurnOutcome, { readonly ok: false }>["error"]
+
 const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<string> =>
 	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
 		turnOperationId(lastReplyTurn + 1 + i),
@@ -152,32 +182,139 @@ export const PiDurableHarnessLive = boundedHarness(
 		const sessions = yield* Session
 		const environments = yield* Environment
 		const sessionViews = yield* SessionView
+		const confirmations = yield* ToolConfirmation
+		const requestAction = yield* RequestToolActionDecision
+
+		type TurnArgs = {
+			readonly session_id: SessionId
+			readonly turn: number
+			readonly segment?: number
+		}
+
+		const record = (args: TurnArgs, events: ReadonlyArray<ToolEvent>) =>
+			recordSettledToolEvents(
+				{
+					session_id: args.session_id,
+					turn: args.turn,
+					...(args.segment === undefined ? {} : { segment: args.segment }),
+				},
+				events,
+			).pipe(Effect.provideService(Session, sessions))
+
+		const waitOn = (args: TurnArgs, calls: ReadonlyArray<PiParkedCall>) =>
+			Effect.gen(function* () {
+				const segment = args.segment ?? 1
+				const requestId = `${segmentKey(args.session_id, args.turn, segment)}:req:${segment}`
+				const answers: Array<{
+					readonly tool_use_id: string
+					readonly answer: typeof PiActionAnswer.Type
+				}> = []
+				for (const call of calls) {
+					const confirmation_id = toolConfirmationId(args.session_id, call.tool_use_id)
+					yield* retryRecording(
+						requestAction
+							.send(
+								new RequestToolAction({
+									session_id: args.session_id,
+									confirmation_id,
+									turn: args.turn,
+									model_request_start_id: requestId,
+									tool_use_id: call.tool_use_id,
+									name: call.name,
+									input: call.input,
+									awaits: call.awaits,
+									mcp_server_name: call.mcp_server_name,
+								}),
+								{ commandId: `action:${args.session_id}:${call.tool_use_id}` },
+							)
+							.pipe(
+								Effect.catchTag(
+									["UnknownModelRequest", "SessionNotFound", "SessionNotRunning", "StaleTurn"],
+									() => Effect.void,
+								),
+							),
+						args.session_id,
+					)
+					const state = yield* confirmations.get(confirmation_id)
+					if (state.status === "allowed" || state.status === "denied") {
+						answers.push({
+							tool_use_id: call.tool_use_id,
+							answer: {
+								type: "confirmation",
+								allow: state.status === "allowed",
+								deny_message: state.deny_message,
+							},
+						})
+					} else if (state.status === "returned") {
+						answers.push({
+							tool_use_id: call.tool_use_id,
+							answer: { type: "result", text: state.result_text, is_error: state.result_is_error },
+						})
+					}
+				}
+				return answers
+			})
 
 		const settled = (
-			args: { readonly session_id: SessionId; readonly turn: number },
+			args: TurnArgs & { readonly conversation: string; readonly operationId: string },
 			outcome: PiTurnOutcome,
-		) =>
-			Effect.andThen(
-				recordSettledToolEvents(args, outcome.tool_events ?? []).pipe(
-					Effect.provideService(Session, sessions),
-				),
-				outcome.ok ? Effect.succeed(outcome.reply) : Effect.fail(outcome.error),
-			)
+			again: Effect.Effect<PiTurnOutcome, HarnessUnavailable>,
+		): Effect.Effect<HarnessReply, TurnOutcomeError | HarnessUnavailable | TurnPaused> =>
+			Effect.gen(function* () {
+				if (outcome.ok === true) {
+					yield* record(args, outcome.tool_events ?? [])
+					return outcome.reply
+				}
+				if (outcome.ok === false) {
+					yield* record(args, outcome.tool_events ?? [])
+					return yield* Effect.fail(outcome.error)
+				}
+				yield* record(args, outcome.tool_events ?? [])
+				const answers = yield* waitOn(args, outcome.calls)
+				if (answers.length > 0) {
+					yield* Effect.forEach(
+						answers,
+						({ tool_use_id, answer }) =>
+							withRetry(executor.answerCall(args.conversation, tool_use_id, answer)),
+						{ discard: true },
+					).pipe(Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })))
+					return yield* settled(args, yield* again, again)
+				}
+				const pause = outcome.calls.map((call) => call.tool_use_id).join(",")
+				const model_usage = yield* withRetry(
+					executor.pauseUsage(args.conversation, args.operationId, pause),
+				).pipe(Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })))
+				return yield* Effect.fail<TurnPaused>({ _tag: "TurnPaused", model_usage })
+			})
 
 		return {
 			runTurn: (args) => {
 				const conversation = conversationName(args.session_id)
 				const settle = Effect.gen(function* () {
 					const operationId = turnOperationId(args.turn)
+					const turnArgs = {
+						session_id: args.session_id,
+						turn: args.turn,
+						...(args.segment === undefined ? {} : { segment: args.segment }),
+						conversation,
+						operationId,
+					}
 
-					const recovered = yield* withRetry(executor.recoverTurn(conversation, operationId)).pipe(
+					const recover = withRetry(executor.recoverTurn(conversation, operationId)).pipe(
 						Effect.tapError((error) =>
 							Effect.logError("Harness unreachable", conversation, error.cause),
 						),
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
+					const again = recover.pipe(
+						Effect.filterOrFail(
+							(outcome): outcome is PiTurnOutcome => outcome !== null,
+							(): HarnessUnavailable => ({ _tag: "HarnessUnavailable" }),
+						),
+					)
+					const recovered = yield* recover
 					if (recovered !== null) {
-						return yield* settled(args, recovered)
+						return yield* settled(turnArgs, recovered, again)
 					}
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
@@ -246,6 +383,8 @@ export const PiDurableHarnessLive = boundedHarness(
 											?.networking ?? null,
 								}
 
+					const tools = version.tools.length === 0 ? undefined : encodeAgentTools(version.tools)
+
 					const request: PiTurnRequest = {
 						operationId,
 						turn: args.turn,
@@ -254,6 +393,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						system: version.system,
 						text: userText,
 						...(mcp === undefined ? {} : { mcp }),
+						...(tools === undefined ? {} : { tools }),
 						...(args.last_reply_turn === undefined
 							? {}
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
@@ -279,7 +419,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
 
-					return yield* settled(args, outcome)
+					return yield* settled(turnArgs, outcome, again)
 				})
 				return Effect.flatMap(settleTimeout, (duration) =>
 					Effect.timeoutOrElse(settle, {
@@ -317,10 +457,21 @@ export const PiDurableHarnessLive = boundedHarness(
 )
 
 export const makePiTurnExecutorLayer = (
-	turns: Omit<PiTurnExecutorService, "discardWorkspace" | "listOutputs" | "readOutputs">,
+	turns: Omit<
+		PiTurnExecutorService,
+		"discardWorkspace" | "listOutputs" | "readOutputs" | "pauseUsage" | "answerCall"
+	> &
+		Partial<Pick<PiTurnExecutorService, "pauseUsage" | "answerCall">>,
 	workspaces: Pick<PiTurnExecutorService, "discardWorkspace" | "listOutputs" | "readOutputs"> = {
 		discardWorkspace: () => Effect.void,
 		listOutputs: () => Effect.succeed({ ok: true, files: [] }),
 		readOutputs: () => Effect.succeed([]),
 	},
-) => Layer.succeed(PiTurnExecutor, { ...turns, ...workspaces })
+) =>
+	Layer.succeed(PiTurnExecutor, {
+		pauseUsage: () =>
+			Effect.fail(new HarnessCallFailed({ cause: "No turn of this harness pauses" })),
+		answerCall: () => Effect.succeed("gone" as const),
+		...turns,
+		...workspaces,
+	})

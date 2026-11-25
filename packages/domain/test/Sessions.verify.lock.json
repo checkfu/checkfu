@@ -48,7 +48,7 @@
 			},
 			"Sessions.EveryTurnSettles": {
 				"kind": "eventually",
-				"source": "(m) => m.Session.every((s) => s.state._tag !== \"Running\")"
+				"source": "(m) => m.Session.every((s) => s.state._tag !== \"Running\" || s.state.paused)"
 			},
 			"Session.PendingUserMessagesWithinBounds": {
 				"kind": "invariant",
@@ -84,7 +84,7 @@
 			},
 			"Sessions.SessionViewMatchesSession": {
 				"kind": "model invariant",
-				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Session.every((s) => {\n\t\t\t\t\tconst view = m.SessionView.find((v) => v.id === s.id)\n\t\t\t\t\tif (s.state._tag === \"Uninitialized\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Idle\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\t\tview.state.status === \"idle\",\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\t!view.state.archived_at,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Running\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\t\tview.state.status === \"running\",\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\t!view.state.archived_at,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\tview.state.status === \"terminated\",\n\t\t\t\t\t\t!!view.state.archived_at === s.state.archived,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.SessionView.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Session.every((s) => {\n\t\t\t\t\tconst view = m.SessionView.find((v) => v.id === s.id)\n\t\t\t\t\tif (s.state._tag === \"Uninitialized\") {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Idle\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\t\tview.state.status === \"idle\",\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\t!view.state.archived_at,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\tif (s.state._tag === \"Running\") {\n\t\t\t\t\t\treturn [\n\t\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\t\tview.state.status === (s.state.paused ? \"idle\" : \"running\"),\n\t\t\t\t\t\t\tview.state.turn === s.state.turn,\n\t\t\t\t\t\t\t!view.state.archived_at,\n\t\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === s.id,\n\t\t\t\t\t\tview.state.status === \"terminated\",\n\t\t\t\t\t\t!!view.state.archived_at === s.state.archived,\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.SessionView.every((v) =>\n\t\t\t\t\tm.Session.some((s) =>\n\t\t\t\t\t\t[s.id === v.id, s.state._tag !== \"Uninitialized\"].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
 			},
 			"Sessions.TurnInputMatchesSession": {
 				"kind": "model invariant",
@@ -109,6 +109,114 @@
 			"Session.AgentMessageEndsTheTurn": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"agent.message\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\t(after._tag === \"Idle\" ||\n\t\t\t\t\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1))),\n\t\t\t)"
+			},
+			"Session.APausedTurnHoldsNoModelRequest": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || !s.paused || s.open_model_request_id === null"
+			},
+			"Session.APausedTurnWaitsOnACall": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || !s.paused || s.awaiting_calls >= 1"
+			},
+			"Session.APausedTurnAskedWhatItWaitsOn": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\ts._tag !== \"Running\" || !s.paused || s.asked_calls >= 1"
+			},
+			"Session.OnlyAPauseMakesATurnWait": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\t!after.paused ||\n\t\t\t(before._tag === \"Running\" && before.turn === after.turn && before.paused) ||\n\t\t\tevents.some((event) => event._tag === \"turn.awaiting\")"
+			},
+			"Session.APausedTurnTakesNoUserMessage": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tevents.every((event) => event._tag !== \"user.message\")"
+			},
+			"Session.APausedTurnIsNotAbandoned": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tevents.every((event) => event._tag !== \"turn.abandoned\")"
+			},
+			"Session.APauseKeepsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.awaiting\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tafter._tag === \"Running\" &&\n\t\t\t\t\t\tafter.turn === before.turn &&\n\t\t\t\t\t\tafter.paused),\n\t\t\t)"
+			},
+			"Session.AContinuationKeepsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"turn.continued\" ||\n\t\t\t\t\t(before._tag === \"Running\" &&\n\t\t\t\t\t\tafter._tag === \"Running\" &&\n\t\t\t\t\t\tafter.turn === before.turn &&\n\t\t\t\t\t\t!after.paused),\n\t\t\t)"
+			},
+			"Session.APausedTurnGoesOnOnceAnswered": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.awaiting_calls >= 1 ||\n\t\t\t(!after.paused && events.some((event) => event._tag === \"turn.continued\"))"
+			},
+			"Session.AnInterruptEndsAPausedTurn": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.paused ||\n\t\t\tcommand._tag !== \"SendUserInterrupt\" ||\n\t\t\tafter._tag === \"Idle\" ||\n\t\t\t(after._tag === \"Running\" && after.turn === before.turn + 1)"
+			},
+			"ToolConfirmation.OnlyADenialCarriesAMessage": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"denied\", s.deny_message === \"\"].some((ok) => ok)"
+			},
+			"ToolConfirmation.OnlyAReturnedResultIsAnError": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"returned\", !s.result_is_error].some((ok) => ok)"
+			},
+			"ToolConfirmation.ARequestedCallHasATurn": {
+				"kind": "invariant",
+				"source": "(s) => [s.status === \"\", s.turn >= 1].some((ok) => ok)"
+			},
+			"ToolConfirmation.ASettledCallNeverChanges": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tbefore.status === \"pending\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.deny_message === before.deny_message,\n\t\t\t\t\tafter.result_text === before.result_text,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"ToolConfirmation.ACallKeepsItsSessionTurnAndKind": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\t[\n\t\t\t\t\tafter.session_id === before.session_id,\n\t\t\t\t\tafter.tool_use_id === before.tool_use_id,\n\t\t\t\t\tafter.turn === before.turn,\n\t\t\t\t\tafter.awaits === before.awaits,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"ToolConfirmation.ACallIsAnsweredWithWhatItAwaits": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.status === after.status ||\n\t\t\tafter.status === \"pending\" ||\n\t\t\t(((after.status !== \"allowed\" && after.status !== \"denied\") ||\n\t\t\t\tbefore.awaits === \"confirmation\") &&\n\t\t\t\t(after.status !== \"returned\" || before.awaits === \"result\"))"
+			},
+			"RequestToolAction.ARequestWaitsInItsOwnTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.call.status !== \"\" ||\n\t\t\tafter.call.status === \"\" ||\n\t\t\t(before.session._tag === \"Running\" &&\n\t\t\t\tafter.session._tag === \"Running\" &&\n\t\t\t\tafter.call.turn === before.session.turn &&\n\t\t\t\tafter.session.awaiting_calls === before.session.awaiting_calls + 1)"
+			},
+			"ConfirmTool.OnlyAPendingCallOfTheRunningTurnIsConfirmed": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.call.status === \"pending\" &&\n\t\t\tbefore.call.awaits === \"confirmation\" &&\n\t\t\tbefore.session._tag === \"Running\" &&\n\t\t\tbefore.call.turn === before.session.turn &&\n\t\t\t(after.call.status === \"allowed\" || after.call.status === \"denied\")"
+			},
+			"ConfirmTool.AnAnswerKeepsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Running\" ||\n\t\t\t(after.session._tag === \"Running\" && after.session.turn === before.session.turn)"
+			},
+			"ReturnCustomToolResult.OnlyAPendingCallOfTheRunningTurnGetsAResult": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.call.status === \"pending\" &&\n\t\t\tbefore.call.awaits === \"result\" &&\n\t\t\tbefore.session._tag === \"Running\" &&\n\t\t\tbefore.call.turn === before.session.turn &&\n\t\t\tafter.call.status === \"returned\""
+			},
+			"ReturnCustomToolResult.AResultKeepsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.session._tag !== \"Running\" ||\n\t\t\t(after.session._tag === \"Running\" && after.session.turn === before.session.turn)"
+			},
+			"Session.AnInterruptedTurnIsNotPaused": {
+				"kind": "invariant",
+				"source": "(s) => s._tag !== \"Running\" || !s.interrupted || !s.paused"
+			},
+			"Session.AnInterruptedTurnNeitherWaitsNorGoesOn": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.interrupted ||\n\t\t\tevents.every((event) => event._tag !== \"turn.awaiting\" && event._tag !== \"turn.continued\")"
+			},
+			"Session.AnInterruptedTurnStaysInterrupted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\t!before.interrupted ||\n\t\t\tafter._tag !== \"Running\" ||\n\t\t\tafter.turn !== before.turn ||\n\t\t\tafter.interrupted"
+			},
+			"Session.ADeadlineAbandonsOnlyItsOwnSegment": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"AbandonTurn\" ||\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tevents.length === 0 ||\n\t\t\t(command.segment ?? 1) ===\n\t\t\t\t(before.open_model_request_id === null && !before.paused\n\t\t\t\t\t? before.model_requests_started + 1\n\t\t\t\t\t: before.model_requests_started)"
+			},
+			"Session.AnEndedTurnStartsTheQueuedOne": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tbefore._tag !== \"Running\" ||\n\t\t\tbefore.pending_user_messages === 0 ||\n\t\t\tafter._tag !== \"Idle\" ||\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"session.status_idle\" ||\n\t\t\t\t\t(event.stop_reason.type !== \"end_turn\" &&\n\t\t\t\t\t\tevent.stop_reason.type !== \"retries_exhausted\" &&\n\t\t\t\t\t\tevent.stop_reason.type !== \"interrupted\"),\n\t\t\t)"
+			},
+			"Session.AStopNamesTheUnansweredCalls": {
+				"kind": "transition",
+				"source": "({ before, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\t(event._tag !== \"session.status_idle\" && event._tag !== \"session.status_terminated\") ||\n\t\t\t\t\tevent.event_ids === (before._tag === \"Running\" ? before.awaiting_ids : NO_TOOL_USE_IDS),\n\t\t\t)"
 			}
 		}
 	}

@@ -157,6 +157,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent,
 					new AgentCreated({
 						mcp_servers: "[]",
+						tools: "[]",
 						version: 1,
 						version_id: v1,
 						name: "Verified Agent",
@@ -182,6 +183,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent,
 					new AgentUpdated({
 						mcp_servers: "[]",
+						tools: "[]",
 						version: 2,
 						version_id: v2,
 						name: "Verified Agent v2",
@@ -460,7 +462,7 @@ describe("Checkfu unified hosted model stories", () => {
 						model_usage: { input_tokens: 10, output_tokens: 5 },
 						is_error: false,
 					}),
-					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1, event_ids: "[]" }),
 				),
 				Story.call(SessionOutputs.publish, {
 					session_id: sessionV1.id,

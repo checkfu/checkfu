@@ -49,11 +49,34 @@ export interface TranscriptToolResult {
 	readonly is_error: boolean
 	readonly truncated?: true
 	readonly rejected?: ToolRejection
+	readonly use_published?: true
 }
 
-export type McpToolOf = (
-	name: string,
-) => { readonly server: string; readonly tool: string } | undefined
+export type McpToolOf = (name: string) =>
+	| {
+			readonly server: string
+			readonly tool: string
+			readonly permission?: "allow" | "ask"
+	  }
+	| undefined
+
+export interface TurnCalls {
+	readonly admit: (taskId: number) => boolean
+	readonly admitted: () => ReadonlyArray<number>
+}
+
+export const turnCalls = (): TurnCalls => {
+	const places = new Set<number>()
+	return {
+		admit: (taskId) => {
+			if (!places.has(taskId) && places.size < MAX_TOOL_CALLS_PER_TURN) {
+				places.add(taskId)
+			}
+			return places.has(taskId)
+		},
+		admitted: () => [...places],
+	}
+}
 
 export interface ToolEventBounds {
 	readonly round: () => void
@@ -75,10 +98,12 @@ const asObject = (input: Schema.Json): Schema.JsonObject =>
 export const boundToolEvents = (
 	turn: number,
 	mcpToolOf: McpToolOf = () => undefined,
+	calls: TurnCalls = turnCalls(),
 ): ToolEventBounds => {
 	let budget = MAX_TURN_TOOL_TEXT_LENGTH
-	let published = 0
 	const pending = new Map<string, { readonly slot: number; readonly call: TranscriptToolUse }>()
+	const settled = new Set<number>()
+	let placed: ReadonlyArray<number> | undefined
 	const slots: Array<ReadonlyArray<ToolEvent>> = []
 	const ambiguous = new Map<string, number>()
 	return {
@@ -110,14 +135,15 @@ export const boundToolEvents = (
 				return
 			}
 			pending.delete(result.id)
-			if (published >= MAX_TOOL_CALLS_PER_TURN) {
+			const waited = result.use_published === true
+			if (!waited && !calls.admit(result.task_id)) {
 				return
 			}
-			published += 1
+			settled.add(result.task_id)
 			const { slot, call } = reserved
 			const input = asObject(call.input)
 			const size = JSON.stringify(input).length
-			const fits = size <= Math.min(MAX_TOOL_INPUT_JSON_LENGTH, budget)
+			const fits = !waited && size <= Math.min(MAX_TOOL_INPUT_JSON_LENGTH, budget)
 			budget -= fits ? size : 0
 			let room = Math.min(MAX_TOOL_RESULT_TEXT_LENGTH, budget)
 			let truncated = result.truncated === true
@@ -133,27 +159,40 @@ export const boundToolEvents = (
 			}
 			const tool_use_id = toolUseId(turn, result.task_id)
 			const mcp = mcpToolOf(call.name)
-			slots[slot] = [
-				{
-					type: "tool_use",
-					tool_use_id,
-					name: clampName(mcp?.tool ?? call.name),
-					input: fits ? input : {},
-					...(fits && call.truncated !== true ? {} : { truncated: true as const }),
-					...(mcp === undefined ? {} : { mcp_server_name: mcp.server }),
-				},
-				{
-					type: "tool_result",
-					tool_use_id,
-					content,
-					is_error: result.is_error,
-					...(truncated ? { truncated: true as const } : {}),
-					...(result.rejected === undefined ? {} : { rejected: result.rejected }),
-					...(mcp === undefined ? {} : { mcp: true as const }),
-				},
-			]
+			const resultEvent: ToolEvent = {
+				type: "tool_result",
+				tool_use_id,
+				content,
+				is_error: result.is_error,
+				...(truncated ? { truncated: true as const } : {}),
+				...(result.rejected === undefined ? {} : { rejected: result.rejected }),
+				...(mcp === undefined ? {} : { mcp: true as const }),
+			}
+			slots[slot] = waited
+				? [resultEvent]
+				: [
+						{
+							type: "tool_use",
+							tool_use_id,
+							name: clampName(mcp?.tool ?? call.name),
+							input: fits ? input : {},
+							...(fits && call.truncated !== true ? {} : { truncated: true as const }),
+							...(mcp === undefined ? {} : { mcp_server_name: mcp.server }),
+							...(mcp?.permission === "allow" ? { evaluated_permission: "allow" as const } : {}),
+						},
+						resultEvent,
+					]
 		},
-		complete: () => published >= MAX_TOOL_CALLS_PER_TURN,
+		complete: () => {
+			if (pending.size > 0) {
+				return false
+			}
+			if (placed === undefined) {
+				const places = calls.admitted()
+				placed = places.length >= MAX_TOOL_CALLS_PER_TURN ? places : undefined
+			}
+			return placed !== undefined && placed.every((taskId) => settled.has(taskId))
+		},
 		events: () => slots.flat(),
 	}
 }

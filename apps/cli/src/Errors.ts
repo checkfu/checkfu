@@ -40,6 +40,11 @@ export const configError = (message: string): CliFailure => new CliFailure({ mes
 export const networkFailure = (message: string): CliFailure =>
 	new CliFailure({ message, exitCode: 1 })
 
+export const ACTION_REQUIRED_EXIT_CODE = 3
+
+export const actionRequired = (message: string): CliFailure =>
+	new CliFailure({ message, exitCode: ACTION_REQUIRED_EXIT_CODE })
+
 export const apiFailure = (status: number, type: string, message: string): CliFailure =>
 	new CliFailure({ message: `API error (${status} ${type}): ${message}`, exitCode: 1 })
 

@@ -1,7 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
 import { AgentModel, NonEmptyString, PositiveInt } from "./AgentTypes.ts"
-import { McpServers, decodeMcpServers } from "../Mcp/McpServers.ts"
+import { AgentTools, McpServers, decodeAgentTools, decodeMcpServers } from "../Mcp/McpServers.ts"
 import { Agent } from "./Agent.aggregate.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentVersionId } from "./AgentVersion.id.ts"
@@ -24,12 +24,13 @@ export const AgentVersionSnapshot = Schema.Struct({
 	system: Schema.NullOr(Schema.String),
 	description: Schema.NullOr(Schema.String),
 	mcp_servers: McpServers,
+	tools: AgentTools,
 	created_at: Schema.DateTimeUtc,
 })
 export type AgentVersionSnapshot = typeof AgentVersionSnapshot.Type
 
 export class AgentVersionByNumberView extends Domain.View("AgentVersionByNumberView", {
-	version: 3,
+	version: 4,
 	from: [Agent],
 	key: AgentVersionLookupId,
 	keyOf: {
@@ -51,6 +52,7 @@ export class AgentVersionByNumberView extends Domain.View("AgentVersionByNumberV
 				system: e.system,
 				description: e.description,
 				mcp_servers: decodeMcpServers(e.mcp_servers),
+				tools: decodeAgentTools(e.tools),
 				created_at: ctx.at,
 			},
 		"agent.updated": (state, e, ctx) =>
@@ -64,6 +66,7 @@ export class AgentVersionByNumberView extends Domain.View("AgentVersionByNumberV
 				system: e.system,
 				description: e.description,
 				mcp_servers: decodeMcpServers(e.mcp_servers),
+				tools: decodeAgentTools(e.tools),
 				created_at: ctx.at,
 			},
 		"agent.archived": (state) => state,
