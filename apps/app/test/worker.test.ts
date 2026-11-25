@@ -207,6 +207,13 @@ describe("app worker", () => {
 		expect(seen).toHaveLength(0)
 	})
 
+	it("accepts a configured key whose form encoding is three times its length", async () => {
+		const longKey = "+".repeat(1500)
+		const { env } = makeEnv(longKey)
+		const response = await worker.fetch(signIn(longKey), env)
+		expect(response.status).toBe(204)
+	})
+
 	it("reads at most a small form-encoded body before checking a key", async () => {
 		const { env, seen } = makeEnv()
 		const post = (body: BodyInit, contentType: string) =>

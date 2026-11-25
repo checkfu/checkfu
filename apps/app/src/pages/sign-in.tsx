@@ -37,7 +37,7 @@ export function SignInPage(): React.JSX.Element {
 				<Logo className="h-6 w-auto" />
 				<Field
 					label="API key"
-					description="The CHECKFU_API_KEY of this deployment. It is kept in an HttpOnly cookie."
+					description="The CHECKFU_API_KEY of this deployment. The dashboard checks it and keeps it on the server. Your browser only keeps a signed session that expires in seven days."
 					error={error}
 				>
 					<Input

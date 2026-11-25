@@ -6,7 +6,7 @@ interface Env {
 
 const COOKIE = "__Host-checkfu_session"
 const SESSION_SECONDS = 60 * 60 * 24 * 7
-const MAX_SIGN_IN_BYTES = 4096
+const MIN_SIGN_IN_BYTES = 4096
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 const localHost = (url: URL): string | undefined =>
@@ -88,7 +88,10 @@ const sameKey = async (submitted: string, apiKey: string): Promise<boolean> => {
 	return crypto.subtle.verify("HMAC", key, expected, utf8.encode(`sign-in:${submitted}`))
 }
 
-const boundedText = async (request: Request): Promise<string | undefined> => {
+const signInLimit = (apiKey: string): number =>
+	Math.max(MIN_SIGN_IN_BYTES, "key=".length + 3 * utf8.encode(apiKey).byteLength)
+
+const boundedText = async (request: Request, limit: number): Promise<string | undefined> => {
 	if (request.body === null) {
 		return ""
 	}
@@ -107,7 +110,7 @@ const boundedText = async (request: Request): Promise<string | undefined> => {
 			return new TextDecoder().decode(bytes)
 		}
 		size += value.byteLength
-		if (size > MAX_SIGN_IN_BYTES) {
+		if (size > limit) {
 			await reader.cancel()
 			return undefined
 		}
@@ -122,7 +125,7 @@ const signIn = async (request: Request, env: Env, now: number): Promise<Response
 	if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
 		return new Response(null, { status: 415 })
 	}
-	const body = await boundedText(request)
+	const body = await boundedText(request, signInLimit(env.CHECKFU_API_KEY))
 	if (body === undefined) {
 		return new Response(null, { status: 413 })
 	}

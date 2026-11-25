@@ -31,7 +31,16 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 				</Bubble>
 			)
 		case "agent.message":
-			return <Bubble from="Agent">{text(event.content)}</Bubble>
+			return (
+				<Bubble from="Agent">
+					{text(event.content)}
+					{event.truncated === true ? (
+						<span className="mt-2 block text-control text-muted-foreground">
+							Checkfu shortened this reply: the rest was too long to store.
+						</span>
+					) : null}
+				</Bubble>
+			)
 		case "agent.thinking":
 			return event.thinking === "" ? null : (
 				<details className="text-control text-muted-foreground">

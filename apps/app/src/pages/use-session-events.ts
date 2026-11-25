@@ -31,8 +31,14 @@ const EVENT_TYPES: Record<SessionEventType, true> = {
 	"session.archived": true,
 }
 
-const isTransition = (event: JsonSessionEvent): boolean =>
-	event.type === "session.status_idle" || event.type === "session.archived"
+const CHANGES_SNAPSHOT: ReadonlySet<SessionEventType> = new Set([
+	"span.model_request_end",
+	"session.status_idle",
+	"session.status_terminated",
+	"session.archived",
+])
+
+const changesSnapshot = (event: JsonSessionEvent): boolean => CHANGES_SNAPSHOT.has(event.type)
 
 const readAfter = async (
 	sessionId: string,
@@ -80,7 +86,7 @@ export function useSessionEvents({
 		)
 	const intake = (incoming: ReadonlyArray<JsonSessionEvent>) => {
 		batch.add(incoming)
-		if (incoming.some(isTransition) && refresh.current === undefined) {
+		if (incoming.some(changesSnapshot) && refresh.current === undefined) {
 			refresh.current = setTimeout(() => {
 				refresh.current = undefined
 				onTransition()
