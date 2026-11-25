@@ -5,19 +5,15 @@ import { MemoryId } from "@checkfu/domain/Memory/Memory.id"
 import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
 import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { MAX_MEMORY_CONTENT_BYTES, MemoryPath } from "@checkfu/domain/Memory/MemoryTypes"
-import type { WritePrecondition } from "@checkfu/domain/Memory/MemoryTypes"
-import { Session } from "@checkfu/domain/Session/Session.aggregate"
-import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { memoryStoresOf } from "@checkfu/domain/Session/SessionResource"
 import type { MemoryStoreResource } from "@checkfu/domain/Session/SessionResource"
-import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Digest from "effect/crypto/Digest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { MemoryAccess } from "./MemoryAccess.ts"
 import { measureContent, memoryIdOf } from "./MemoryIdentity.ts"
+import { SessionResources } from "./SessionResources.ts"
 import type {
 	MemoryErrorCode,
 	MemoryFileInfo,
@@ -39,9 +35,6 @@ const accessOf = (store: MemoryStoreResource, status: string): MemoryMountInfo["
 
 const isLive = (status: string) => status === "active" || status === "archived"
 
-// One change of one session: a retry of it is answered with the first answer.
-const commandId = (sessionId: string, mutationId: string) => `memory:${sessionId}:${mutationId}`
-
 const rejection = (tag: string, path: string): MemoryOutcome => {
 	switch (tag) {
 		case "MemoryStoreNotFound":
@@ -56,40 +49,32 @@ const rejection = (tag: string, path: string): MemoryOutcome => {
 		case "MemoryNotFound":
 			return refused("ENOENT", `No memory at ${path}.`)
 		case "MemoryAlreadyExists":
-			return refused(
-				"EEXIST",
-				`${path} is already a memory this session has not read. Read it first, then write.`,
-			)
+			return refused("EEXIST", `${path} is already a memory.`)
 		case "MemoryViewLagging":
 		case "MemoryLayoutChanged":
 			return refused("EIO", "The memory store is busy. Try again.")
 		default:
-			return refused(
-				"EEXIST",
-				`${path} changed since this session last read it. Read it again, then write.`,
-			)
+			return refused("EEXIST", `${path} changed while it was being moved.`)
 	}
 }
 
 /**
  * Serves the memory stores attached to a session to its workspace, through the same rules the
- * HTTP API uses. Every call names the session; the stores and their access come from it.
+ * HTTP API uses. Every call names the session; the stores and their access come from it. The last
+ * write to a memory wins, as in a shared filesystem.
  */
 export const SessionMemoryAccess = Effect.gen(function* () {
 	const access = yield* MemoryAccess
 	const stores = yield* MemoryStore
 	const memories = yield* Memory
-	const sessions = yield* SessionView
+	const resourcesOf = yield* SessionResources
 	const deleteMemory = yield* DeleteMemoryDecision
 	const digest = yield* Digest.Digest
 
 	const statusOf = (store: MemoryStoreResource) =>
 		Effect.map(stores.get(MemoryStoreId.make(store.memory_store_id)), (state) => state.status)
 
-	const attached = (sessionId: string) =>
-		Effect.map(sessions.get(Session.ref(SessionId.make(sessionId))), (found) =>
-			memoryStoresOf(Option.match(found, { onNone: () => [], onSome: (s) => s?.resources ?? [] })),
-		)
+	const attached = (sessionId: string) => Effect.map(resourcesOf(sessionId), memoryStoresOf)
 
 	const storeNamed = (sessionId: string, name: string) =>
 		Effect.map(attached(sessionId), (all) =>
@@ -155,8 +140,7 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 			name: string,
 			path: string,
 			content: string,
-			precondition: WritePrecondition,
-			mutationId: string,
+			exclusive: boolean,
 		) =>
 			Effect.gen(function* () {
 				const storeId = yield* writable(sessionId, name)
@@ -180,22 +164,15 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 						path,
 						content,
 						...measured,
-						precondition,
+						precondition: exclusive ? { type: "absent" } : { type: "none" },
 						sessionId,
-						commandId: commandId(sessionId, mutationId),
 					})
 					.pipe(
 						Effect.as<MemoryOutcome>({ ok: true, content_sha256: measured.content_sha256 }),
 						Effect.catch((error) => Effect.succeed(rejection(error._tag, path))),
 					)
 			}),
-		memoryRemove: (
-			sessionId: string,
-			name: string,
-			path: string,
-			expected: string | null,
-			mutationId: string,
-		) =>
+		memoryRemove: (sessionId: string, name: string, path: string, expected: string | null) =>
 			Effect.gen(function* () {
 				const storeId = yield* writable(sessionId, name)
 				if (typeof storeId !== "string") {
@@ -208,10 +185,9 @@ export const SessionMemoryAccess = Effect.gen(function* () {
 						new DeleteMemory({
 							memory_id: memoryId,
 							memory_store_id: storeId,
-							expected_content_sha256: removed.length === 0 ? null : removed,
+							expected_content_sha256: expected,
 							session_id: sessionId,
 						}),
-						{ commandId: commandId(sessionId, mutationId) },
 					)
 					.pipe(
 						Effect.as<MemoryOutcome>({ ok: true, content_sha256: removed }),

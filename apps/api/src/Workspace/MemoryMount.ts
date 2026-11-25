@@ -1,5 +1,4 @@
 import type { PassthroughDirent, PassthroughMount, PassthroughStat } from "@cloudflare/computer"
-import type { WritePrecondition } from "@checkfu/sdk/Schemas"
 import type {
 	MemoryFileInfo,
 	MemoryMountInfo,
@@ -8,8 +7,9 @@ import type {
 } from "./SessionMemory.ts"
 
 // /mnt/memory as the workspace's filesystem sees it: one directory per attached store, served live
-// from the store. Every write is a store write, so nothing is copied in or saved out. Directories
-// are implicit, as in the store: one exists while a memory is below it.
+// from the store. Every write is a store write, so nothing is copied in or saved out, and as in any
+// shared filesystem the last write to a memory wins. Directories are implicit, as in the store: one
+// exists while a memory is below it.
 
 type FsCode =
 	| "EROFS"
@@ -44,13 +44,6 @@ const decode = (bytes: ArrayBuffer, rel: string): string => {
 	} catch {
 		throw failure("EINVAL", `A memory holds UTF-8 text; ${rel} is not.`)
 	}
-}
-
-/** The content hash this workspace last read or wrote at each path: what a write replaces. */
-export interface SeenHashes {
-	readonly get: (key: string) => string | undefined
-	readonly set: (key: string, sha: string) => void
-	readonly delete: (key: string) => void
 }
 
 interface Located {
@@ -98,13 +91,7 @@ const nested = (
 	return [...entries.values()].sort((a, b) => a.name.split("/").length - b.name.split("/").length)
 }
 
-const key = (at: Located) => `${at.mount.name}:${at.path}`
-
-export const makeMemoryMount = (
-	memory: SessionMemory,
-	seen: SeenHashes,
-	mutationId: () => string,
-): PassthroughMount => {
+export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 	const locate = async (rel: string): Promise<Located | undefined> => {
 		const [name, ...rest] = rel.split("/")
 		const mount = (await memory.mounts()).find((mounted) => mounted.name === name)
@@ -122,33 +109,12 @@ export const makeMemoryMount = (
 		}
 		return at
 	}
-	// Only what the agent reads is recorded: a check that a path exists is not a read, and must not
-	// take the place of the content the agent last saw.
-	const peek = (at: Located) => memory.read(at.mount.name, at.path)
-	const read = async (at: Located) => {
-		const found = await peek(at)
-		if (found !== null) {
-			seen.set(key(at), found.content_sha256)
-		}
-		return found
-	}
-	const write = async (at: Located, content: string, precondition: WritePrecondition) => {
-		const sha = refuse(
-			await memory.write(at.mount.name, at.path, content, precondition, mutationId()),
-		)
-		seen.set(key(at), sha)
+	const read = (at: Located) => memory.read(at.mount.name, at.path)
+	const write = async (at: Located, content: string, exclusive: boolean) => {
+		refuse(await memory.write(at.mount.name, at.path, content, exclusive))
 	}
 	const remove = async (at: Located, expected: string | null) => {
-		refuse(await memory.remove(at.mount.name, at.path, expected, mutationId()))
-		seen.delete(key(at))
-	}
-	// A write replaces what this workspace last read there. Where it has read nothing, it replaces
-	// nothing: a memory another writer put there meanwhile is not overwritten unseen.
-	const preconditionOf = (at: Located, exclusive: boolean): WritePrecondition => {
-		const last = seen.get(key(at))
-		return exclusive || last === undefined
-			? { type: "absent" }
-			: { type: "content_sha256", content_sha256: last }
+		refuse(await memory.remove(at.mount.name, at.path, expected))
 	}
 
 	return {
@@ -167,7 +133,7 @@ export const makeMemoryMount = (
 				return dirStat(at.mount)
 			}
 			// A file is asked of the store itself, so one just written by anyone is found.
-			const file = await peek(at)
+			const file = await read(at)
 			if (file !== null) {
 				return fileStat(at.mount, encoder.encode(file.content).byteLength, file.updated_at)
 			}
@@ -231,12 +197,12 @@ export const makeMemoryMount = (
 				throw failure("EISDIR", `Is a directory: ${rel}`)
 			}
 			const bytes = await new Response(body).arrayBuffer()
-			await write(at, decode(bytes, rel), preconditionOf(at, options.exclusive === true))
+			await write(at, decode(bytes, rel), options.exclusive === true)
 			return fileStat(at.mount, bytes.byteLength, Date.now())
 		},
 		mkdir: async (rel) => {
 			const at = await writable(rel)
-			if (at.path !== "" && (await peek(at)) !== null) {
+			if (at.path !== "" && (await read(at)) !== null) {
 				throw failure("EEXIST", `A memory is there: ${rel}`)
 			}
 		},
@@ -245,8 +211,8 @@ export const makeMemoryMount = (
 			if (at.path === "") {
 				throw failure("EBUSY", `An attached memory store cannot be removed: ${rel}`)
 			}
-			if ((await peek(at)) !== null) {
-				await remove(at, seen.get(key(at)) ?? null)
+			if ((await read(at)) !== null) {
+				await remove(at, null)
 				return
 			}
 			const files = below(await memory.list(at.mount.name), at.path)
@@ -257,8 +223,7 @@ export const makeMemoryMount = (
 				throw failure("ENOTEMPTY", `Directory not empty: ${rel}`)
 			}
 			for (const file of files) {
-				const each = { mount: at.mount, path: file.path }
-				await remove(each, seen.get(key(each)) ?? null)
+				await remove({ mount: at.mount, path: file.path }, null)
 			}
 		},
 		rename: async (from, to) => {
@@ -270,23 +235,18 @@ export const makeMemoryMount = (
 			if (source.mount.name === target.mount.name && source.path === target.path) {
 				return
 			}
-			const file = await peek(source)
+			const file = await read(source)
+			// Planned from paths alone: each file is read only when its turn to move comes.
 			const moves =
 				file !== null
-					? [{ from: source, to: target, found: file }]
-					: await Promise.all(
-							below(await memory.list(source.mount.name), source.path).map(async (entry) => {
-								const at = { mount: source.mount, path: entry.path }
-								return {
-									from: at,
-									to: {
-										mount: target.mount,
-										path: `${target.path}${entry.path.slice(source.path.length)}`,
-									},
-									found: await peek(at),
-								}
-							}),
-						)
+					? [{ from: source, to: target }]
+					: below(await memory.list(source.mount.name), source.path).map((entry) => ({
+							from: { mount: source.mount, path: entry.path },
+							to: {
+								mount: target.mount,
+								path: `${target.path}${entry.path.slice(source.path.length)}`,
+							},
+						}))
 			if (moves.length === 0) {
 				throw failure("ENOENT", `No such file or directory: ${from}`)
 			}
@@ -297,15 +257,15 @@ export const makeMemoryMount = (
 			) {
 				throw failure("EINVAL", `A directory cannot be moved into itself: ${from} to ${to}`)
 			}
-			// Each file is written at its new path before it leaves its old one, so a refused write
-			// leaves it where it was.
-			// A source changed by another writer while it moves stays where it is.
+			// Each file is written at its new path before it leaves its old one, and leaves it only if it
+			// did not change while it moved, so a refused step leaves it where it was.
 			for (const move of moves) {
-				if (move.found === null) {
+				const found = await read(move.from)
+				if (found === null) {
 					throw failure("ENOENT", `No such file: ${move.from.path}`)
 				}
-				await write(move.to, move.found.content, preconditionOf(move.to, false))
-				await remove(move.from, move.found.content_sha256)
+				await write(move.to, found.content, false)
+				await remove(move.from, found.content_sha256)
 			}
 		},
 	}

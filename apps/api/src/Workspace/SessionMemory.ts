@@ -1,9 +1,9 @@
-import { WritePrecondition } from "@checkfu/sdk/Schemas"
 import * as Schema from "effect/Schema"
 
 // What a session's workspace may do with the memory stores attached to its session, as the API
-// Worker answers it. Each call names the session, so nothing is held between calls but the hashes
-// the workspace last read.
+// Worker answers it. Each call names the session, so nothing is held between calls. As in a shared
+// filesystem, the last write to a memory wins; the HTTP API's preconditions are for callers who
+// want to guard a change.
 
 // Sizes in bytes and times in epoch milliseconds.
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
@@ -50,8 +50,6 @@ export type MemoryOutcome = typeof MemoryOutcome.Type
 const Session = Schema.String
 const StoreName = Schema.String
 const Path = Schema.String
-/** Names one change, so a retry of it is not made twice. */
-const MutationId = Schema.String
 
 /** The calls the harness Worker makes into the API Worker. */
 export const SessionMemoryCalls = {
@@ -61,12 +59,14 @@ export const SessionMemoryCalls = {
 		args: Schema.Tuple([Session, StoreName, Path]),
 		result: Schema.NullOr(MemoryContent),
 	},
+	/** The last argument creates only: a memory already at the path is left as it is. */
 	memoryWrite: {
-		args: Schema.Tuple([Session, StoreName, Path, Schema.String, WritePrecondition, MutationId]),
+		args: Schema.Tuple([Session, StoreName, Path, Schema.String, Schema.Boolean]),
 		result: MemoryOutcome,
 	},
+	/** The last argument, when not null, removes the memory only if it still has that content. */
 	memoryRemove: {
-		args: Schema.Tuple([Session, StoreName, Path, Schema.NullOr(Schema.String), MutationId]),
+		args: Schema.Tuple([Session, StoreName, Path, Schema.NullOr(Schema.String)]),
 		result: MemoryOutcome,
 	},
 }
@@ -78,19 +78,13 @@ export interface SessionMemory {
 	readonly list: (name: string) => Promise<ReadonlyArray<MemoryFileInfo>>
 	/** The memory as committed, or null when it is not there. */
 	readonly read: (name: string, path: string) => Promise<MemoryContent | null>
-	/** Refused (EEXIST) when the memory is not as `precondition` expects. */
+	/** `exclusive` refuses (EEXIST) when a memory is already there. */
 	readonly write: (
 		name: string,
 		path: string,
 		content: string,
-		precondition: WritePrecondition,
-		mutationId: string,
+		exclusive: boolean,
 	) => Promise<MemoryOutcome>
-	/** `expected` is the content the session last read there, or null to remove whatever is. */
-	readonly remove: (
-		name: string,
-		path: string,
-		expected: string | null,
-		mutationId: string,
-	) => Promise<MemoryOutcome>
+	/** `expected` removes the memory only if it still has that content; null removes whatever is. */
+	readonly remove: (name: string, path: string, expected: string | null) => Promise<MemoryOutcome>
 }

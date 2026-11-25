@@ -329,35 +329,17 @@ export const makePiDurableTestLayer = (
 			mounts: () => run((access) => access.memoryMounts(sessionId)),
 			list: (name) => run((access) => access.memoryList(sessionId, name)),
 			read: (name, path) => run((access) => access.memoryRead(sessionId, name, path)),
-			write: (name, path, content, precondition, mutationId) =>
-				run((access) =>
-					access.memoryWrite(sessionId, name, path, content, precondition, mutationId),
-				),
-			remove: (name, path, expected, mutationId) =>
-				run((access) => access.memoryRemove(sessionId, name, path, expected, mutationId)),
+			write: (name, path, content, exclusive) =>
+				run((access) => access.memoryWrite(sessionId, name, path, content, exclusive)),
+			remove: (name, path, expected) =>
+				run((access) => access.memoryRemove(sessionId, name, path, expected)),
 		}
 	}
-	// Each session's workspace keeps what it last read for as long as the session's tests run.
-	const seenBySession = new Map<string, Map<string, string>>()
 	const memoryMounts = new Map<string, ReturnType<typeof makeMemoryMount>>()
 	const memoryFiles = (sessionId: string) => {
 		let mount = memoryMounts.get(sessionId)
 		if (mount === undefined) {
-			const seen = seenBySession.get(sessionId) ?? new Map<string, string>()
-			seenBySession.set(sessionId, seen)
-			mount = makeMemoryMount(
-				sessionMemoryOf(sessionId),
-				{
-					get: (key) => seen.get(key),
-					set: (key, sha) => {
-						seen.set(key, sha)
-					},
-					delete: (key) => {
-						seen.delete(key)
-					},
-				},
-				() => crypto.randomUUID(),
-			)
+			mount = makeMemoryMount(sessionMemoryOf(sessionId))
 			memoryMounts.set(sessionId, mount)
 		}
 		const served = mount

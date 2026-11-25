@@ -1,14 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { makeMemoryMount } from "../src/Workspace/MemoryMount.ts"
-import type { SeenHashes } from "../src/Workspace/MemoryMount.ts"
 import type { MemoryOutcome, SessionMemory } from "../src/Workspace/SessionMemory.ts"
 
-// One store held in a map, served the way the API serves a session's stores: a write or remove
-// is refused when the store does not hold what its precondition expects.
+// One store held in a map, served the way the API serves a session's stores. Each call is
+// recorded, so a test can see what was asked of the store and in what order.
 const fakeMemory = (
 	files: Map<string, string>,
 	access: "read_write" | "read_only" = "read_write",
-	mutations: Array<string> = [],
+	calls: Array<string> = [],
 ) => {
 	const sha = (content: string) => `sha:${content}`
 	const ok = (content: string): MemoryOutcome => ({ ok: true, content_sha256: sha(content) })
@@ -20,28 +19,22 @@ const fakeMemory = (
 				[...files].map(([path, content]) => ({ path, size: content.length, updated_at: 1 })),
 			),
 		read: (_name, path) => {
+			calls.push(`read ${path}`)
 			const content = files.get(path)
 			return Promise.resolve(
 				content === undefined ? null : { content, content_sha256: sha(content), updated_at: 1 },
 			)
 		},
-		write: (_name, path, content, precondition, mutationId) => {
-			mutations.push(mutationId)
-			const now = files.get(path)
-			const holds =
-				precondition.type === "none" ||
-				(precondition.type === "absent" && now === undefined) ||
-				(precondition.type === "content_sha256" &&
-					now !== undefined &&
-					sha(now) === precondition.content_sha256)
-			if (!holds) {
+		write: (_name, path, content, exclusive) => {
+			calls.push(`write ${path}`)
+			if (exclusive && files.has(path)) {
 				return Promise.resolve(changed)
 			}
 			files.set(path, content)
 			return Promise.resolve(ok(content))
 		},
-		remove: (_name, path, expected, mutationId) => {
-			mutations.push(mutationId)
+		remove: (_name, path, expected) => {
+			calls.push(`remove ${path}`)
 			const now = files.get(path)
 			if (now === undefined || (expected !== null && sha(now) !== expected)) {
 				return Promise.resolve(changed)
@@ -53,32 +46,10 @@ const fakeMemory = (
 	return memory
 }
 
-const mapSeen = (seen = new Map<string, string>()): SeenHashes => ({
-	get: (key) => seen.get(key),
-	set: (key, value) => {
-		seen.set(key, value)
-	},
-	delete: (key) => {
-		seen.delete(key)
-	},
-})
-
-let counter = 0
-const nextId = () => `m${++counter}`
-
 const mountOver = (
 	files: Map<string, string>,
-	options: {
-		readonly access?: "read_write" | "read_only"
-		readonly seen?: SeenHashes
-		readonly mutations?: Array<string>
-	} = {},
-) =>
-	makeMemoryMount(
-		fakeMemory(files, options.access, options.mutations),
-		options.seen ?? mapSeen(),
-		nextId,
-	)
+	options: { readonly access?: "read_write" | "read_only"; readonly calls?: Array<string> } = {},
+) => makeMemoryMount(fakeMemory(files, options.access, options.calls))
 
 const code = (operation: Promise<unknown> | undefined) =>
 	(operation ?? Promise.resolve()).then(
@@ -181,32 +152,32 @@ describe("memory mount", () => {
 		expect(files.has("/image.png")).toBe(false)
 	})
 
-	it("replaces only what it read, also after a restart, and checking a path is not reading it", async () => {
+	it("lets the last write win, and moves a directory one file at a time", async () => {
 		const files = new Map([["/a.md", "first"]])
-		const stored = new Map<string, string>()
-		const before = mountOver(files, { seen: mapSeen(stored) })
-		await text(before, "notes/a.md")
-		// Another writer changes it; the workspace object restarts, keeping what it stores.
+		const calls: Array<string> = []
+		const mount = mountOver(files, { calls })
+		await text(mount, "notes/a.md")
 		files.set("/a.md", "theirs")
-		const after = mountOver(files, { seen: mapSeen(stored) })
-		await after.stat("notes/a.md")
-		expect(await code(after.writeFile?.("notes/a.md", body("mine"), {}))).toBe("EEXIST")
-		expect(files.get("/a.md")).toBe("theirs")
-		await text(after, "notes/a.md")
-		expect(await code(after.writeFile?.("notes/a.md", body("mine"), {}))).toBe("ok")
-		// A memory it never read is not overwritten unseen either.
-		files.set("/b.md", "someone's")
-		expect(await code(after.writeFile?.("notes/b.md", body("mine"), {}))).toBe("EEXIST")
-	})
+		expect(await code(mount.writeFile?.("notes/a.md", body("mine"), {}))).toBe("ok")
+		expect(files.get("/a.md")).toBe("mine")
+		// An exclusive create still refuses a memory that is there.
+		expect(await code(mount.writeFile?.("notes/a.md", body("again"), { exclusive: true }))).toBe(
+			"EEXIST",
+		)
 
-	it("names every change with its own id, so the same content twice is two writes", async () => {
-		const mutations: Array<string> = []
-		const files = new Map<string, string>()
-		const mount = mountOver(files, { mutations })
-		for (const content of ["A", "B", "A", "B"]) {
-			expect(await code(mount.writeFile?.("notes/x.md", body(content), {}))).toBe("ok")
-		}
-		expect(files.get("/x.md")).toBe("B")
-		expect(new Set(mutations).size).toBe(4)
+		files.set("/dir/x.md", "X.")
+		files.set("/dir/y.md", "Y.")
+		calls.length = 0
+		expect(await code(mount.rename?.("notes/dir", "notes/moved", {}))).toBe("ok")
+		// Each file is read when it moves, not all of them first.
+		expect(calls).toEqual([
+			"read /dir",
+			"read /dir/x.md",
+			"write /moved/x.md",
+			"remove /dir/x.md",
+			"read /dir/y.md",
+			"write /moved/y.md",
+			"remove /dir/y.md",
+		])
 	})
 })

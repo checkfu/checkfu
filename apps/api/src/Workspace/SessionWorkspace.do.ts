@@ -5,7 +5,6 @@ import { createRepositoryFetch, githubBaseUrl } from "./Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
-import type { SeenHashes } from "./MemoryMount.ts"
 import type { SessionMemory } from "./SessionMemory.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
@@ -36,8 +35,6 @@ const refusedPreparation = (resourceId: string, message: string): WorkspacePrepa
 })
 
 const MEMORY_ROOT = "/mnt/memory"
-
-const seenKey = (key: string) => `memory-seen:${key}`
 
 const failed = (text: string): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],
@@ -82,21 +79,14 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 					mounts: () => call(api.memoryMounts(sessionId)),
 					list: (name) => call(api.memoryList(sessionId, name)),
 					read: (name, path) => call(api.memoryRead(sessionId, name, path)),
-					write: (name, path, content, precondition, mutationId) =>
-						call(api.memoryWrite(sessionId, name, path, content, precondition, mutationId)),
-					remove: (name, path, expected, mutationId) =>
-						call(api.memoryRemove(sessionId, name, path, expected, mutationId)),
-				}
-				// Kept with the files, so a restarted object still knows what it last read.
-				const seen: SeenHashes = {
-					get: (key) => storage.kv.get<string>(seenKey(key)),
-					set: (key, sha) => storage.kv.put(seenKey(key), sha),
-					delete: (key) => storage.kv.delete(seenKey(key)),
+					write: (name, path, content, exclusive) =>
+						call(api.memoryWrite(sessionId, name, path, content, exclusive)),
+					remove: (name, path, expected) => call(api.memoryRemove(sessionId, name, path, expected)),
 				}
 				const { fs, git } = new Workspace({
 					storage,
 					mounts: {
-						[MEMORY_ROOT]: makeMemoryMount(memory, seen, () => crypto.randomUUID()),
+						[MEMORY_ROOT]: makeMemoryMount(memory),
 					},
 					git: createGitClient({
 						fetch: createRepositoryFetch({

@@ -630,26 +630,23 @@ describe("Memory stores in a session", () => {
 				// Nothing waits for the turn to end.
 				expect(savedDuringTurn).toEqual({ "/new/idea.md": "Ship it.", "/style.md": "Spaces." })
 
-				// Another writer changes a memory after the session read it: the session's write is
-				// refused instead of silently undoing the other one, and a fresh read lets it write.
+				// Another writer changes a memory after the session read it: as in a shared filesystem,
+				// the session's later write wins; a caller that must not lose a change uses the HTTP
+				// API's preconditions.
 				const memories = yield* json<{ data: ReadonlyArray<ListedMemory> }>(
 					yield* request(apiFetch, "GET", `/v1/memory_stores/${store.id}/memories`),
 				)
 				const style = memories.data.find((entry) => entry.path === "/style.md")
 				const stylePath = `/v1/memory_stores/${store.id}/memories/${style?.id}`
-				let refused = ""
-				let reread: string | null = null
+				let written = ""
 				onTurn(async () => {
 					await files.read(`${MOUNT}/style.md`)
 					await runPromise(request(apiFetch, "POST", stylePath, { content: "Other writer." }))
-					refused = await outcome(files.write(`${MOUNT}/style.md`, "Session edit."))
-					reread = await files.read(`${MOUNT}/style.md`)
-					await files.write(`${MOUNT}/style.md`, `${reread ?? ""} And the session's.`)
+					written = await outcome(files.write(`${MOUNT}/style.md`, "Session edit."))
 				})
 				yield* sendAndSettle(apiFetch, session.id, ["Again."], 2)
-				expect(refused).toBe("EEXIST")
-				expect(reread).toBe("Other writer.")
-				expect((yield* stored)["/style.md"]).toBe("Other writer. And the session's.")
+				expect(written).toBe("ok")
+				expect((yield* stored)["/style.md"]).toBe("Session edit.")
 			}),
 		))
 
@@ -742,7 +739,7 @@ describe("Memory stores in a session", () => {
 			}),
 		))
 
-	it("refuses to delete a memory another writer changed since the session read it", () =>
+	it("deletes a memory as its last change, whatever another writer did to it before", () =>
 		withSessions((apiFetch, { memoryFiles, onTurn }) =>
 			Effect.gen(function* () {
 				const { store, createSession, stored } = yield* setUp(apiFetch, { "/idea.md": "Ship it." })
@@ -762,8 +759,8 @@ describe("Memory stores in a session", () => {
 					removed = await outcome(files.remove(`${MOUNT}/idea.md`))
 				})
 				yield* sendAndSettle(apiFetch, session.id, ["Drop the idea."], 1)
-				expect(removed).toBe("EEXIST")
-				expect(yield* stored).toEqual({ "/idea.md": "Ship it twice." })
+				expect(removed).toBe("ok")
+				expect(yield* stored).toEqual({})
 			}),
 		))
 

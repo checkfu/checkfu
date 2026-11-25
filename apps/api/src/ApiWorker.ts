@@ -116,10 +116,10 @@ export default ApiWorker.make(
 			memoryMounts: (sessionId) => Effect.orDie(memory.memoryMounts(sessionId)),
 			memoryList: (sessionId, name) => Effect.orDie(memory.memoryList(sessionId, name)),
 			memoryRead: (sessionId, name, path) => Effect.orDie(memory.memoryRead(sessionId, name, path)),
-			memoryWrite: (sessionId, name, path, content, precondition, mutationId) =>
-				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, precondition, mutationId)),
-			memoryRemove: (sessionId, name, path, expected, mutationId) =>
-				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected, mutationId)),
+			memoryWrite: (sessionId, name, path, content, exclusive) =>
+				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, exclusive)),
+			memoryRemove: (sessionId, name, path, expected) =>
+				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected)),
 		})
 	}),
 )

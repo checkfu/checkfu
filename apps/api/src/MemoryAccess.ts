@@ -43,8 +43,6 @@ export interface MemoryWrite {
 	readonly content_size_bytes: number
 	readonly precondition: WritePrecondition
 	readonly sessionId: string | null
-	/** Names this one write, so a retry of it is not written twice. */
-	readonly commandId?: string
 }
 
 export const MemoryAccess = Effect.gen(function* () {
@@ -92,11 +90,6 @@ export const MemoryAccess = Effect.gen(function* () {
 					layout_version: current.layout_version,
 					session_id: request.sessionId,
 				}),
-				// Each layout it is checked at is its own attempt, so a retry is not answered with the
-				// refusal of the one before.
-				...(request.commandId === undefined
-					? []
-					: [{ commandId: `${request.commandId}@${current.layout_version}` }]),
 			)
 		}).pipe(
 			Effect.retry({
