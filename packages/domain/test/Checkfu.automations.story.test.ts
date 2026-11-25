@@ -1,4 +1,5 @@
 import { Story } from "@alchemy.run/domain/Story"
+import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -85,7 +86,10 @@ import { SessionId } from "../src/Session/Session.id.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 
 const story = Story.make(Checkfu, {
-	layer: CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory)),
+	layer: CheckfuHandlersLive.pipe(
+		Layer.provide(ArtifactBytesKept),
+		Layer.provide(ListingStore.memory),
+	),
 	stub: [Harness],
 })
 

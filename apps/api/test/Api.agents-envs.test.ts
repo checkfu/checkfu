@@ -1,4 +1,5 @@
 import * as v8 from "node:v8"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import * as Domain from "@alchemy.run/domain"
 import * as DurableObjects from "@alchemy.run/domain/DurableObjects"
 import { MAX_MODEL_ID_LENGTH } from "@checkfu/pi-providers/catalog"
@@ -1513,6 +1514,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(Layer.fresh(PiDurableHarnessLive)),
 			),
@@ -1655,6 +1657,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 
 			const CheckfuLive = Checkfu.layer(
 				CheckfuHandlersLive.pipe(
+					Layer.provide(ArtifactBytesKept),
 					Layer.provide(ListingStore.memory),
 					Layer.provide(Layer.fresh(PiDurableHarnessLive)),
 				),

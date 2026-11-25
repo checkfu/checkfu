@@ -15,7 +15,6 @@ import {
 	ArtifactVersionView,
 	artifactVersionLookupKey,
 } from "../src/Artifact/ArtifactVersionView.view.ts"
-import { ArtifactView } from "../src/Artifact/ArtifactView.view.ts"
 import {
 	ArtifactIdempotencyKeyClaimed,
 	ClaimArtifactIdempotencyKey,
@@ -25,17 +24,18 @@ import {
 	ArtifactCreated,
 	CreateArtifact,
 } from "../src/Artifact/CreateArtifact.command.ts"
-import { ArtifactWriteFenced } from "../src/Artifact/ArtifactWriteFenced.rejection.ts"
+import { ArtifactReservationLapsed } from "../src/Artifact/ArtifactReservationLapsed.rejection.ts"
 import { ArtifactDeleted, DeleteArtifact } from "../src/Artifact/DeleteArtifact.command.ts"
 import {
-	ArtifactWritesFenced,
-	FenceArtifactWrites,
-} from "../src/Artifact/FenceArtifactWrites.command.ts"
+	ArtifactReservationExpired,
+	ExpireArtifactReservation,
+} from "../src/Artifact/ExpireArtifactReservation.command.ts"
 import {
 	ArtifactPublished,
 	ArtifactVersionNotFound,
 	PublishArtifact,
 } from "../src/Artifact/PublishArtifact.command.ts"
+import { ArtifactReserved, ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import {
 	ArtifactUnpublished,
 	UnpublishArtifact,
@@ -61,7 +61,10 @@ describe("Artifacts", () => {
 		const artifact = Artifact.ref("art_001")
 		return story(
 			Story.clock(t0),
-			Story.state(artifact, { status: "", version: 0, name: "", manifest: "", fence: 0 }),
+			Story.state(artifact, { status: "", version: 0, name: "", manifest: "", open_write: "" }),
+			Story.when(new ReserveArtifact({ artifact_id: artifact.id, write_id: "w1" })),
+			Story.then(artifact, new ArtifactReserved({ write_id: "w1" })),
+			Story.state(artifact, { status: "", open_write: "w1" }),
 			Story.when(
 				new CreateArtifact({
 					artifact_id: artifact.id,
@@ -69,7 +72,7 @@ describe("Artifacts", () => {
 					manifest: manifestA,
 					file_count: 2,
 					total_bytes: 1024,
-					fence: 0,
+					write_id: "w1",
 				}),
 			),
 			Story.then(
@@ -88,20 +91,9 @@ describe("Artifacts", () => {
 				version: 1,
 				name: "Report",
 				manifest: manifestA,
-				fence: 0,
+				open_write: "",
 				created_at: DateTime.toEpochMillis(t0),
 				updated_at: DateTime.toEpochMillis(t0),
-			}),
-			Story.view(ArtifactView, artifact, {
-				id: artifact.id,
-				type: "artifact",
-				name: "Report",
-				version: 1,
-				manifest: manifestA,
-				file_count: 2,
-				total_bytes: 1024,
-				created_at: t0,
-				updated_at: t0,
 			}),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
 				artifact_id: artifact.id,
@@ -121,7 +113,6 @@ describe("Artifacts", () => {
 					manifest: manifestB,
 					file_count: 3,
 					total_bytes: 0,
-					fence: 0,
 				}),
 			),
 			Story.then(
@@ -139,20 +130,8 @@ describe("Artifacts", () => {
 				version: 2,
 				name: "Report",
 				manifest: manifestB,
-				fence: 0,
 				created_at: DateTime.toEpochMillis(t0),
 				updated_at: DateTime.toEpochMillis(t1),
-			}),
-			Story.view(ArtifactView, artifact, {
-				id: artifact.id,
-				type: "artifact",
-				name: "Report",
-				version: 2,
-				manifest: manifestB,
-				file_count: 3,
-				total_bytes: 0,
-				created_at: t0,
-				updated_at: t1,
 			}),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
 				artifact_id: artifact.id,
@@ -225,14 +204,12 @@ describe("Artifacts", () => {
 						manifest: manifestA,
 						file_count: 1,
 						total_bytes: 1,
-						fence: 0,
 					}),
 				),
 				Story.rejected(new ArtifactNotFound({ artifact_id: missing.id })),
-				Story.when(new DeleteArtifact({ artifact_id: missing.id, fence: 0 })),
+				Story.when(new DeleteArtifact({ artifact_id: missing.id })),
 				Story.rejected(new ArtifactNotFound({ artifact_id: missing.id })),
-				Story.state(missing, { status: "", version: 0, name: "", manifest: "", fence: 0 }),
-				Story.view(ArtifactView, missing, Story.none),
+				Story.state(missing, { status: "", version: 0, name: "", manifest: "" }),
 				Story.given(
 					artifact,
 					new ArtifactCreated({
@@ -250,7 +227,7 @@ describe("Artifacts", () => {
 						manifest: manifestB,
 						file_count: 1,
 						total_bytes: 1,
-						fence: 0,
+						write_id: "w1",
 					}),
 				),
 				Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
@@ -261,7 +238,6 @@ describe("Artifacts", () => {
 						manifest: manifestB,
 						file_count: 1,
 						total_bytes: 1,
-						fence: 0,
 					}),
 				),
 				Story.rejected(
@@ -276,7 +252,6 @@ describe("Artifacts", () => {
 					version: 1,
 					name: "Site",
 					manifest: manifestA,
-					fence: 0,
 				}),
 				Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), Story.none),
 			)
@@ -305,7 +280,6 @@ describe("Artifacts", () => {
 					manifest: manifestB,
 					file_count: 1,
 					total_bytes: 6,
-					fence: 0,
 				}),
 			),
 			Story.then(
@@ -319,16 +293,14 @@ describe("Artifacts", () => {
 			),
 			Story.replied({ version: 2 }),
 			Story.clock(t2),
-			Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 0 })),
+			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact, new ArtifactDeleted()),
 			Story.state(artifact, {
 				status: "deleted",
 				version: 2,
 				name: "Draft",
 				manifest: manifestB,
-				fence: 0,
 			}),
-			Story.view(ArtifactView, artifact, Story.none),
 			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 1), {
 				artifact_id: artifact.id,
 				version: 1,
@@ -341,7 +313,7 @@ describe("Artifacts", () => {
 				manifest: manifestB,
 				created_at: t1,
 			}),
-			Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 0 })),
+			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
 			Story.when(
 				new AddArtifactVersion({
@@ -350,7 +322,6 @@ describe("Artifacts", () => {
 					manifest: manifestC,
 					file_count: 1,
 					total_bytes: 7,
-					fence: 0,
 				}),
 			),
 			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
@@ -361,7 +332,7 @@ describe("Artifacts", () => {
 					manifest: manifestC,
 					file_count: 1,
 					total_bytes: 7,
-					fence: 0,
+					write_id: "w1",
 				}),
 			),
 			Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
@@ -370,129 +341,69 @@ describe("Artifacts", () => {
 				version: 2,
 				name: "Draft",
 				manifest: manifestB,
-				fence: 0,
 			}),
 		)
 	})
 
-	it.effect("refuses writes and deletes that carry a fence the artifact has moved past", () => {
-		const artifact = Artifact.ref("art_fenced")
-		const create = (fence: number) =>
-			new CreateArtifact({
-				artifact_id: artifact.id,
-				name: "Fenced",
-				manifest: manifestA,
-				file_count: 1,
-				total_bytes: 1,
-				fence,
-			})
-		const addVersion = (fence: number) =>
-			new AddArtifactVersion({
-				artifact_id: artifact.id,
-				expected_version: 1,
-				manifest: manifestB,
-				file_count: 1,
-				total_bytes: 2,
-				fence,
-			})
-		return story(
-			Story.clock(t0),
-			Story.when(new FenceArtifactWrites({ artifact_id: artifact.id })),
-			Story.then(artifact, new ArtifactWritesFenced({ fence: 1 })),
-			Story.replied({ fence: 1 }),
-			Story.state(artifact, { status: "", version: 0, name: "", manifest: "", fence: 1 }),
-			Story.view(ArtifactView, artifact, Story.none),
-			Story.when(create(0)),
-			Story.rejected(new ArtifactWriteFenced({ artifact_id: artifact.id })),
-			Story.state(artifact, { status: "", version: 0, name: "", manifest: "", fence: 1 }),
-			Story.when(create(1)),
-			Story.then(
-				artifact,
-				new ArtifactCreated({
-					version: 1,
-					name: "Fenced",
+	it.effect(
+		"creates only under the write it reserved, and lets no create land once that expires",
+		() => {
+			const artifact = Artifact.ref("art_reserved")
+			const create = (write_id: string) =>
+				new CreateArtifact({
+					artifact_id: artifact.id,
+					name: "Reserved",
 					manifest: manifestA,
 					file_count: 1,
 					total_bytes: 1,
-				}),
-			),
-			Story.replied({ version: 1 }),
-			Story.state(artifact, {
-				status: "active",
-				version: 1,
-				name: "Fenced",
-				manifest: manifestA,
-				fence: 1,
-			}),
-			Story.when(create(2)),
-			Story.rejected(new ArtifactWriteFenced({ artifact_id: artifact.id })),
-			Story.when(new FenceArtifactWrites({ artifact_id: artifact.id })),
-			Story.then(artifact, new ArtifactWritesFenced({ fence: 2 })),
-			Story.replied({ fence: 2 }),
-			Story.view(ArtifactView, artifact, { version: 1, manifest: manifestA }),
-			Story.when(addVersion(1)),
-			Story.rejected(new ArtifactWriteFenced({ artifact_id: artifact.id })),
-			Story.state(artifact, {
-				status: "active",
-				version: 1,
-				name: "Fenced",
-				manifest: manifestA,
-				fence: 2,
-			}),
-			Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 2), Story.none),
-			Story.when(addVersion(2)),
-			Story.then(
-				artifact,
-				new ArtifactVersionAdded({
-					version: 2,
-					manifest: manifestB,
-					file_count: 1,
-					total_bytes: 2,
-				}),
-			),
-			Story.replied({ version: 2 }),
-			Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 1 })),
-			Story.rejected(new ArtifactWriteFenced({ artifact_id: artifact.id })),
-			Story.state(artifact, {
-				status: "active",
-				version: 2,
-				name: "Fenced",
-				manifest: manifestB,
-				fence: 2,
-			}),
-			Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 2 })),
-			Story.then(artifact, new ArtifactDeleted()),
-		)
-	})
-
-	it.effect("records nothing when fencing a deleted artifact", () => {
-		const artifact = Artifact.ref("art_fenced_deleted")
-		return story(
-			Story.clock(t0),
-			Story.given(
-				artifact,
-				new ArtifactCreated({
-					version: 1,
-					name: "Gone",
-					manifest: manifestA,
-					file_count: 1,
-					total_bytes: 1,
-				}),
-				new ArtifactWritesFenced({ fence: 1 }),
-				new ArtifactDeleted(),
-			),
-			Story.when(new FenceArtifactWrites({ artifact_id: artifact.id })),
-			Story.then(artifact),
-			Story.replied({ fence: 1 }),
-			Story.state(artifact, {
-				status: "deleted",
-				version: 1,
-				name: "Gone",
-				manifest: manifestA,
-				fence: 1,
-			}),
-		)
-	})
+					write_id,
+				})
+			const reserve = (write_id: string) =>
+				new ReserveArtifact({ artifact_id: artifact.id, write_id })
+			const expire = (write_id: string) =>
+				new ExpireArtifactReservation({ artifact_id: artifact.id, write_id })
+			return story(
+				Story.clock(t0),
+				Story.when(create("w1")),
+				Story.rejected(new ArtifactReservationLapsed({ artifact_id: artifact.id })),
+				Story.when(reserve("w1")),
+				Story.then(artifact, new ArtifactReserved({ write_id: "w1" })),
+				Story.when(reserve("w1")),
+				Story.then(artifact),
+				Story.when(reserve("w2")),
+				Story.then(artifact, new ArtifactReserved({ write_id: "w2" })),
+				Story.when(create("w1")),
+				Story.rejected(new ArtifactReservationLapsed({ artifact_id: artifact.id })),
+				Story.when(expire("w1")),
+				Story.then(artifact),
+				Story.state(artifact, { status: "", open_write: "w2" }),
+				Story.when(expire("w2")),
+				Story.then(artifact, new ArtifactReservationExpired({ write_id: "w2" })),
+				Story.state(artifact, { status: "", open_write: "" }),
+				Story.when(create("w2")),
+				Story.rejected(new ArtifactReservationLapsed({ artifact_id: artifact.id })),
+				Story.when(reserve("w3")),
+				Story.then(artifact, new ArtifactReserved({ write_id: "w3" })),
+				Story.when(create("w3")),
+				Story.then(
+					artifact,
+					new ArtifactCreated({
+						version: 1,
+						name: "Reserved",
+						manifest: manifestA,
+						file_count: 1,
+						total_bytes: 1,
+					}),
+				),
+				Story.state(artifact, { status: "active", open_write: "" }),
+				Story.when(expire("w3")),
+				Story.then(artifact),
+				Story.when(reserve("w4")),
+				Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
+				Story.state(artifact, { status: "active", open_write: "" }),
+			)
+		},
+	)
 
 	it.effect("publishes with a fresh token, keeps it on republish and never takes another", () => {
 		const artifact = Artifact.ref("art_pub")
@@ -552,7 +463,7 @@ describe("Artifacts", () => {
 				pinned_version: 1,
 				published_at: millis(t2),
 			}),
-			Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 0 })),
+			Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 			Story.then(artifact, new ArtifactDeleted()),
 			Story.when(publish("third", 0)),
 			Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),
@@ -592,7 +503,7 @@ describe("Artifacts", () => {
 				Story.then(artifact),
 				Story.when(claim("fp_b"), { commandId: "publication:key-2" }),
 				Story.then(artifact, new ArtifactIdempotencyKeyClaimed({ fingerprint: "fp_b" })),
-				Story.when(new DeleteArtifact({ artifact_id: artifact.id, fence: 0 })),
+				Story.when(new DeleteArtifact({ artifact_id: artifact.id })),
 				Story.then(artifact, new ArtifactDeleted()),
 				Story.when(claim("fp_c"), { commandId: "publication:key-3" }),
 				Story.rejected(new ArtifactNotFound({ artifact_id: artifact.id })),

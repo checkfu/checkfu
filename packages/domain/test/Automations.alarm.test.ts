@@ -1,4 +1,5 @@
 import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
+import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
@@ -137,9 +138,12 @@ describe("Automation alarms", () => {
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
-				Checkfu.layer(CheckfuHandlersLive.pipe(Layer.provide([harness, ListingStore.memory]))).pipe(
-					Layer.provide(platform.layer),
-				),
+				Checkfu.layer(
+					CheckfuHandlersLive.pipe(
+						Layer.provide(ArtifactBytesKept),
+						Layer.provide([harness, ListingStore.memory]),
+					),
+				).pipe(Layer.provide(platform.layer)),
 			),
 		)
 	})

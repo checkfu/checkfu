@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { createRegistry } from "@earendil-works/pi-durable"
@@ -349,6 +350,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),
@@ -1659,6 +1661,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			})
 			const unnormalizedLayer = Checkfu.layer(
 				CheckfuHandlersLive.pipe(
+					Layer.provide(ArtifactBytesKept),
 					Layer.provide(ListingStore.memory),
 					Layer.provide(PiDurableHarnessLive),
 				),

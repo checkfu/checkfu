@@ -13,28 +13,19 @@ import {
 } from "../src/Artifacts/ArtifactFiles.ts"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactVersionView } from "@checkfu/domain/Artifact/ArtifactVersionView.view"
-import { ArtifactView } from "@checkfu/domain/Artifact/ArtifactView.view"
+import { ExpireArtifactReservation } from "@checkfu/domain/Artifact/ExpireArtifactReservation.command"
+import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import * as Digest from "effect/crypto/Digest"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import type { ArtifactFileInput, BuiltArtifactVersion } from "../src/Artifacts/ArtifactFiles.ts"
-import { ARTIFACT_WRITE_GRACE_MS } from "../src/Artifacts/ArtifactOwnership.ts"
 import {
-	ARTIFACT_RECONCILE_PAGE,
-	reconcileArtifactWrites,
-} from "../src/Artifacts/ArtifactReconcile.ts"
-import {
-	ARTIFACT_DELETE_PREFIX,
 	ArtifactStore,
 	artifactBlobKey,
-	artifactManifestKey,
-	artifactMarkerKey,
 	artifactPrefix,
-	artifactReconcileCursorKey,
 	deleteUntilEmpty,
-	parseArtifactMarkerKey,
 } from "../src/Artifacts/ArtifactStore.ts"
-import type { ArtifactStoreService, ArtifactWriteCheck } from "../src/Artifacts/ArtifactStore.ts"
+import type { ArtifactStoreService } from "../src/Artifacts/ArtifactStore.ts"
 import { ARTIFACT_BODY_TOO_LARGE_MESSAGE, MAX_REQUEST_BODY_BYTES } from "../src/Http/HttpHelpers.ts"
 import { keyedArtifactId } from "../src/Http/ArtifactsHandlers.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
@@ -129,11 +120,8 @@ const withApi = <A>(
 		) => Effect.Effect<Response>
 		readonly holdSend: (command: string) => Effect.Effect<Gate>
 		readonly deleteSteeredSend: (path: string) => Effect.Effect<Response>
-		readonly reconcile: Effect.Effect<void>
-		readonly reconcileWithoutVersionRows: Effect.Effect<void>
-		readonly reconcileBeforeFence: (run: Effect.Effect<void>) => Effect.Effect<void>
-		readonly reconcileAfterListing: (run: Effect.Effect<void>) => Effect.Effect<void>
-		readonly reconcileIn: (scope: string) => Effect.Effect<void>
+		readonly openWrite: (artifactId: string) => Effect.Effect<string>
+		readonly expire: (artifactId: string, writeId: string) => Effect.Effect<void>
 		readonly service: ArtifactStoreService
 		readonly serviceIn: (scope: string) => Effect.Effect<ArtifactStoreService>
 		readonly build: (files: ReadonlyArray<ArtifactFileInput>) => Effect.Effect<BuiltArtifactVersion>
@@ -154,7 +142,6 @@ const withApi = <A>(
 					get: () => Effect.succeedNone,
 				}),
 			)
-			const heads = yield* ArtifactView
 			let viewReads = 0
 			const touched = () =>
 				Effect.suspend(() => {
@@ -162,13 +149,6 @@ const withApi = <A>(
 					return Effect.die(new Error("a head read touched a view"))
 				})
 			const viewless = yield* makeApiHandler.pipe(
-				Effect.provideService(ArtifactView, {
-					...heads,
-					get: touched,
-					snapshot: touched,
-					waitFor: touched,
-					list: touched,
-				}),
 				Effect.provideService(ArtifactVersionView, {
 					...versionViews,
 					get: touched,
@@ -224,42 +204,7 @@ const withApi = <A>(
 						),
 				}),
 			)
-			const reconcileServices =
-				yield* Effect.context<Effect.Services<typeof reconcileArtifactWrites>>()
-			const reconcile = Effect.provide(reconcileArtifactWrites, reconcileServices)
-			const reconcileBeforeFence = (run: Effect.Effect<void>) =>
-				reconcileArtifactWrites.pipe(
-					Effect.provideService(Artifact, {
-						...aggregates,
-						send: (command, options) =>
-							command._tag === "FenceArtifactWrites"
-								? Effect.andThen(run, aggregates.send(command, options))
-								: aggregates.send(command, options),
-					}),
-					Effect.provide(reconcileServices),
-				)
-			const reconcileWithoutVersionRows = reconcileArtifactWrites.pipe(
-				Effect.provideService(ArtifactVersionView, {
-					...versionViews,
-					get: () => Effect.succeedNone,
-				}),
-				Effect.provide(reconcileServices),
-			)
-			const reconcileIn = (scope: string) =>
-				reconcileArtifactWrites.pipe(
-					Effect.provide(artifactStore.layerIn(scope)),
-					Effect.provide(reconcileServices),
-				)
 			const service = yield* ArtifactStore
-			const reconcileAfterListing = (run: Effect.Effect<void>) =>
-				reconcileArtifactWrites.pipe(
-					Effect.provideService(ArtifactStore, {
-						...service,
-						unconfirmedWrites: (startAfter, limit) =>
-							Effect.tap(service.unconfirmedWrites(startAfter, limit), () => run),
-					}),
-					Effect.provide(reconcileServices),
-				)
 			const serviceIn = (scope: string) =>
 				Effect.provide(Effect.service(ArtifactStore), artifactStore.layerIn(scope))
 			let steer: (call: number) => "real" | "die" | "stale" = () => "real"
@@ -322,11 +267,20 @@ const withApi = <A>(
 							release: Deferred.succeed(released, undefined),
 						}
 					}),
-				reconcile,
-				reconcileWithoutVersionRows,
-				reconcileBeforeFence,
-				reconcileAfterListing,
-				reconcileIn,
+				openWrite: (artifactId) =>
+					Effect.map(
+						Effect.orDie(artifacts.get(ArtifactId.make(artifactId))),
+						(state) => state.open_write,
+					),
+				expire: (artifactId, writeId) =>
+					Effect.orDie(
+						artifacts.send(
+							new ExpireArtifactReservation({
+								artifact_id: ArtifactId.make(artifactId),
+								write_id: writeId,
+							}),
+						),
+					),
 				serviceIn,
 				callLostReply: (path, body) =>
 					sendRequest(lostReply.fetch, { method: "POST", path, headers: AUTH_HEADERS, body }),
@@ -391,6 +345,26 @@ const withApi = <A>(
 }
 
 const json = <T>(response: Response) => Effect.promise(() => response.json() as Promise<T>)
+
+const artifactIdsIn = (store: { readonly objects: ReadonlyMap<string, unknown> }) => [
+	...new Set(
+		[...store.objects.keys()].flatMap((key) => {
+			const [root, scope, id] = key.split("/")
+			return root === "artifacts" && scope === SCOPE && id !== undefined ? [id] : []
+		}),
+	),
+]
+
+const eventually = (check: Effect.Effect<boolean>, what: string) =>
+	Effect.gen(function* () {
+		for (let attempt = 0; attempt < 300; attempt++) {
+			if (yield* check) {
+				return
+			}
+			yield* Effect.sleep("10 millis")
+		}
+		return yield* Effect.die(new Error(`timed out waiting until ${what}`))
+	})
 
 describe("Artifacts API", () => {
 	it("infers a content type from the file name, wherever the file sits", () =>
@@ -1011,8 +985,8 @@ describe("Artifacts API", () => {
 			}),
 		))
 
-	it("removes the partial upload of a create that storage refused part-way", () =>
-		withApi(({ call, store }) =>
+	it("releases the partial upload of a create that storage refused part-way once its reservation expires", () =>
+		withApi(({ call, store, expire, openWrite }) =>
 			Effect.gen(function* () {
 				store.setFailManifest(true)
 				const failed = yield* call("POST", "/v1/artifacts", {
@@ -1023,15 +997,15 @@ describe("Artifacts API", () => {
 					],
 				})
 				expect(failed.status).toBe(503)
-				expect([...store.objects.keys()]).toEqual([])
 				store.setFailManifest(false)
-				const [ledger, ...others] = store.ledgers.values()
+				const [id, ...others] = artifactIdsIn(store)
 				expect(others).toEqual([])
-				expect(ledger?.isEmpty()).toBe(false)
-				store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-				yield* store.runDueAlarms
-				expect(ledger?.isEmpty()).toBe(true)
-				expect([...store.alarms.keys()]).toEqual([])
+				expect(store.objects.size).toBe(2)
+				yield* expire(id ?? "", yield* openWrite(id ?? ""))
+				yield* eventually(
+					Effect.sync(() => store.objects.size === 0),
+					"the partial upload is released",
+				)
 			}),
 		))
 
@@ -1212,8 +1186,8 @@ describe("Artifacts API", () => {
 			}),
 		))
 
-	it("keeps the files, deletes, and reconciliation of each jurisdiction apart", () =>
-		withApi(({ call, store, build, reconcile, reconcileIn, serviceIn }) =>
+	it("keeps the files and deletes of each jurisdiction apart", () =>
+		withApi(({ call, store, build, serviceIn }) =>
 			Effect.gen(function* () {
 				const files = [{ path: "a.txt", content: "a" }]
 				const { id } = yield* json<ArtifactBody>(
@@ -1221,7 +1195,7 @@ describe("Artifacts API", () => {
 				)
 				const eu = yield* serviceIn("eu")
 				const built = yield* build(files)
-				yield* Effect.orDie(eu.putVersion(id, built))
+				yield* Effect.orDie(eu.stage(id, built, null))
 				const keysIn = (scope: string) =>
 					[...store.objects.keys()]
 						.flatMap((key) =>
@@ -1239,27 +1213,6 @@ describe("Artifacts API", () => {
 				expect(keysIn("eu")).toEqual(euKeys)
 				const [blob] = built.blobs
 				expect(yield* Effect.orDie(eu.getBlob(id, blob?.sha256 ?? ""))).toEqual(blob?.bytes)
-
-				const markerIn = (scope: string, writeId: string) => {
-					const key = artifactMarkerKey(scope, id, writeId)
-					store.upload(
-						key,
-						JSON.stringify({
-							artifact_id: id,
-							write_id: writeId,
-							check: { kind: "create", manifest: built.manifest_hash },
-						}),
-					)
-					return key
-				}
-				markerIn(SCOPE, "w_here")
-				const there = markerIn("eu", "w_there")
-				store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-				yield* reconcile
-				expect(store.markers()).toEqual([there])
-				yield* reconcileIn("eu")
-				expect(store.markers()).toEqual([])
-				expect(keysIn("eu")).toEqual(euKeys)
 			}),
 		))
 
@@ -1291,8 +1244,8 @@ describe("Artifacts API", () => {
 			}),
 		))
 
-	it("keeps the winner's bytes and reclaims the loser's when two writers race for a version", () =>
-		withApi(({ call, store, build }) =>
+	it("commits the winner's version and serves nothing of the loser's when two writers race", () =>
+		withApi(({ call, store }) =>
 			Effect.gen(function* () {
 				const shared = { path: "shared.txt", content: "shared" }
 				const { id } = yield* json<ArtifactBody>(
@@ -1301,56 +1254,34 @@ describe("Artifacts API", () => {
 						files: [shared, { path: "one.txt", content: "one" }],
 					}),
 				)
-				const before = [...store.objects.keys()]
-				const winnerFiles = [shared, { path: "b.txt", content: "winner" }]
-				const loserFiles = [shared, { path: "a.txt", content: "loser" }]
 				let winner: Response | undefined
 				store.setBeforePut(
 					Effect.gen(function* () {
 						store.setBeforePut(Effect.void)
 						winner = yield* call("POST", `/v1/artifacts/${id}/versions`, {
 							version: 1,
-							files: winnerFiles,
+							files: [shared, { path: "b.txt", content: "winner" }],
 						})
 					}),
 				)
 				const loser = yield* call("POST", `/v1/artifacts/${id}/versions`, {
 					version: 1,
-					files: loserFiles,
+					files: [shared, { path: "a.txt", content: "loser" }],
 				})
 				expect(winner?.status).toBe(201)
 				expect(loser.status).toBe(409)
-
-				const won = yield* build(winnerFiles)
-				const lost = yield* build(loserFiles)
-				const loserOnly = lost.blobs.find(
-					(blob) => !won.blobs.some((kept) => kept.sha256 === blob.sha256),
-				)
-				expect([...store.objects.keys()].sort()).toEqual(
-					[
-						...before,
-						artifactManifestKey(SCOPE, id, won.manifest_hash),
-						...won.blobs
-							.map((blob) => artifactBlobKey(SCOPE, id, blob.sha256))
-							.filter((key) => !before.includes(key)),
-					].sort(),
-				)
-				expect(store.objects.has(artifactManifestKey(SCOPE, id, lost.manifest_hash))).toBe(false)
-				expect(store.objects.has(artifactBlobKey(SCOPE, id, loserOnly?.sha256 ?? ""))).toBe(false)
-
 				const read = (version: number, path: string) =>
-					Effect.flatMap(
-						call("GET", `/v1/artifacts/${id}/versions/${version}/file?path=${path}`),
-						json<FileBody>,
-					)
-				expect((yield* read(1, "shared.txt")).content).toBe("shared")
-				expect((yield* read(1, "one.txt")).content).toBe("one")
-				expect((yield* read(2, "shared.txt")).content).toBe("shared")
-				expect((yield* read(2, "b.txt")).content).toBe("winner")
+					call("GET", `/v1/artifacts/${id}/versions/${version}/file?path=${path}`)
+				expect((yield* json<FileBody>(yield* read(1, "one.txt"))).content).toBe("one")
+				expect((yield* json<FileBody>(yield* read(2, "shared.txt"))).content).toBe("shared")
+				expect((yield* json<FileBody>(yield* read(2, "b.txt"))).content).toBe("winner")
+				expect((yield* read(2, "a.txt")).status).toBe(404)
+				expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
+				expect(store.objects.size).toBe(0)
 			}),
 		))
 
-	it("leaves no new bytes behind when a version's upload fails part-way", () =>
+	it("keeps the head version intact when a version's upload fails part-way", () =>
 		withApi(({ call, store }) =>
 			Effect.gen(function* () {
 				const { id } = yield* json<ArtifactBody>(
@@ -1359,7 +1290,6 @@ describe("Artifacts API", () => {
 						files: [{ path: "a.txt", content: "a" }],
 					}),
 				)
-				const before = [...store.objects.keys()].sort()
 				store.setFailManifest(true)
 				const failed = yield* call("POST", `/v1/artifacts/${id}/versions`, {
 					version: 1,
@@ -1370,13 +1300,15 @@ describe("Artifacts API", () => {
 				})
 				store.setFailManifest(false)
 				expect(failed.status).toBe(503)
-				expect([...store.objects.keys()].sort()).toEqual(before)
+				expect((yield* json<ArtifactBody>(yield* call("GET", `/v1/artifacts/${id}`))).version).toBe(
+					1,
+				)
 				const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
 				expect((yield* json<FileBody>(file)).content).toBe("a")
 			}),
 		))
 
-	it("reclaims a failed keyed create without deleting what a concurrent replay of the key needs", () =>
+	it("finishes a keyed create on retry after its first attempt failed part-way", () =>
 		withApi(({ call, store, statusForKey }) =>
 			Effect.gen(function* () {
 				const body = {
@@ -1386,38 +1318,16 @@ describe("Artifacts API", () => {
 						{ path: "b.txt", content: "b" },
 					],
 				}
+				const headers = { "idempotency-key": "partial" }
 				store.setFailManifest(true)
-				const partial = yield* call("POST", "/v1/artifacts", body, { "idempotency-key": "partial" })
-				expect(partial.status).toBe(503)
-				expect([...store.objects.keys()]).toEqual([])
+				expect((yield* call("POST", "/v1/artifacts", body, headers)).status).toBe(503)
 				expect(yield* statusForKey("partial")).toBe("")
-
-				const headers = { "idempotency-key": "replayed" }
-				const staged = yield* Deferred.make<void>()
-				let replay: Fiber.Fiber<Response> | undefined
-				store.setBeforeDelete(
-					Effect.gen(function* () {
-						store.setBeforeDelete(Effect.void)
-						store.setFailManifest(false)
-						store.setAfterStage(
-							Effect.andThen(
-								Deferred.succeed(staged, undefined),
-								Effect.sync(() => store.setAfterStage(Effect.void)),
-							),
-						)
-						replay = yield* Effect.forkDetach(call("POST", "/v1/artifacts", body, headers))
-						yield* Deferred.await(staged).pipe(Effect.timeout("200 millis"), Effect.ignore)
-					}),
-				)
-				const failed = yield* call("POST", "/v1/artifacts", body, headers)
-				expect(failed.status).toBe(503)
-				expect(replay).toBeDefined()
-				const replayed = yield* Fiber.join(replay ?? (yield* Effect.die("no replay")))
-				expect(replayed.status).toBe(201)
-				const { id } = yield* json<ArtifactBody>(replayed)
+				store.setFailManifest(false)
+				const retried = yield* call("POST", "/v1/artifacts", body, headers)
+				expect(retried.status).toBe(201)
+				const { id } = yield* json<ArtifactBody>(retried)
 				for (const file of body.files) {
 					const read = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=${file.path}`)
-					expect(read.status).toBe(200)
 					expect((yield* json<FileBody>(read)).content).toBe(file.content)
 				}
 			}),
@@ -1447,7 +1357,7 @@ describe("Artifacts API", () => {
 			}),
 		))
 
-	it("reclaims a write that was staged and never committed once the grace period passes", () =>
+	it("keeps the files of a version that never committed until the artifact is deleted", () =>
 		withApi(({ call, store, service, build }) =>
 			Effect.gen(function* () {
 				const { id } = yield* json<ArtifactBody>(
@@ -1456,43 +1366,22 @@ describe("Artifacts API", () => {
 						files: [{ path: "a.txt", content: "a" }],
 					}),
 				)
-				const before = [...store.objects.keys()].sort()
-				const crashed = yield* Effect.orDie(
+				const before = store.objects.size
+				yield* Effect.orDie(
 					service.stage(
 						id,
 						yield* build([
 							{ path: "a.txt", content: "a" },
 							{ path: "c.txt", content: "crashed" },
 						]),
+						null,
 					),
 				)
-				expect(store.objects.size).toBe(before.length + 2)
-				store.advanceClock(ARTIFACT_WRITE_GRACE_MS - 1)
-				yield* store.runDueAlarms
-				expect(store.objects.size).toBe(before.length + 2)
-				store.advanceClock(1)
-				yield* store.runDueAlarms
-				expect([...store.objects.keys()].sort()).toEqual(before)
-				expect(Exit.isFailure(yield* Effect.exit(crashed.markCommitted(null)))).toBe(true)
+				expect(store.objects.size).toBe(before + 2)
 				const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
 				expect((yield* json<FileBody>(file)).content).toBe("a")
-
-				store.setAfterStage(
-					Effect.sync(() => {
-						store.setAfterStage(Effect.void)
-						store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					}),
-				)
-				const late = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-					version: 1,
-					files: [{ path: "a.txt", content: "late" }],
-				})
-				expect(late.status).toBe(503)
-				expect((yield* json<ArtifactBody>(yield* call("GET", `/v1/artifacts/${id}`))).version).toBe(
-					1,
-				)
-				yield* store.runDueAlarms
-				expect([...store.objects.keys()].sort()).toEqual(before)
+				expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
+				expect(store.objects.size).toBe(0)
 			}),
 		))
 
@@ -1630,691 +1519,117 @@ describe("Artifacts API", () => {
 			}),
 		))
 
-	describe("writes whose command outcome was never learned", () => {
+	describe("creates and deletes whose request did not finish", () => {
 		const files = [
 			{ path: "a.txt", content: "a" },
 			{ path: "b.txt", content: "b" },
 		]
-		const artifactOf = (markers: ReadonlyArray<string>) =>
-			parseArtifactMarkerKey(SCOPE, markers[0] ?? "")?.artifact_id ?? ""
 
-		it("leaves no marker after a create and a version that succeed", () =>
-			withApi(({ call, store }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					expect(
-						(yield* call("POST", `/v1/artifacts/${id}/versions`, {
-							version: 1,
-							files: [{ path: "c.txt", content: "c" }],
-						})).status,
-					).toBe(201)
-					expect(store.markers()).toEqual([])
-				}),
-			))
-
-		it("reclaims an unkeyed create that never landed, but only after the grace period", () =>
-			withApi(({ store, steerSends, sentCommandIds, callSteeredSend, reconcile }) =>
+		it("releases the files of a create that never landed once its reservation expires", () =>
+			withApi(({ callSteeredSend, steerSends, store, openWrite, expire }) =>
 				Effect.gen(function* () {
 					steerSends((command) => (command === "CreateArtifact" ? "lost" : "real"))
 					expect((yield* callSteeredSend("/v1/artifacts", { name: "A", files })).status).toBe(500)
-					expect(sentCommandIds[0]).toMatch(/^create-artifact:/u)
-					const stored = [...store.objects.keys()].sort()
-					expect(stored).toHaveLength(4)
-					expect(store.markers()).toHaveLength(1)
-
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS - 1)
-					yield* reconcile
-					expect([...store.objects.keys()].sort()).toEqual(stored)
-
-					store.advanceClock(1)
-					yield* reconcile
-					expect([...store.objects.keys()]).toEqual([])
+					const [id] = artifactIdsIn(store)
+					const writeId = yield* openWrite(id ?? "")
+					expect(writeId).not.toBe("")
+					expect(store.objects.size).toBe(3)
+					yield* expire(id ?? "", writeId)
+					yield* eventually(
+						Effect.sync(() => store.objects.size === 0),
+						"the files are released",
+					)
+					expect(yield* openWrite(id ?? "")).toBe("")
 				}),
 			))
 
-		it("keeps an unkeyed create that landed although its reply was lost", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile }) =>
+		it("keeps a create that landed although its reply was lost", () =>
+			withApi(({ call, callSteeredSend, steerSends, store, expire }) =>
 				Effect.gen(function* () {
 					steerSends((command) => (command === "CreateArtifact" ? "landed" : "real"))
 					expect((yield* callSteeredSend("/v1/artifacts", { name: "A", files })).status).toBe(500)
-					const id = artifactOf(store.markers())
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					for (const file of files) {
-						const read = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=${file.path}`)
-						expect((yield* json<FileBody>(read)).content).toBe(file.content)
-					}
+					const [id] = artifactIdsIn(store)
+					const writes = [...store.marks.values()].map((marks) => marks.reservation)
+					yield* expire(id ?? "", writes[0] ?? "")
+					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
+					expect((yield* json<FileBody>(file)).content).toBe("b")
+					expect(store.objects.size).toBe(3)
 				}),
 			))
 
-		it("reclaims a version that never landed and keeps one that did", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile }) =>
+		it("refuses a create that stalls past its reservation, and a retry with the same key succeeds", () =>
+			withApi(({ call, callSteeredSend, holdSend, store, openWrite, expire, statusForKey }) =>
 				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					const before = [...store.objects.keys()].sort()
-					const addVersion = (content: string) =>
-						callSteeredSend(`/v1/artifacts/${id}/versions`, {
-							version: 1,
-							files: [files[0], { path: "c.txt", content }],
-						})
-					steerSends((command) => (command === "AddArtifactVersion" ? "lost" : "real"))
-					expect((yield* addVersion("lost")).status).toBe(500)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect([...store.objects.keys()].sort()).toEqual(before)
-					const first = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
-					expect((yield* json<FileBody>(first)).content).toBe("b")
-
-					steerSends((command) => (command === "AddArtifactVersion" ? "landed" : "real"))
-					expect((yield* addVersion("landed")).status).toBe(500)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					const second = yield* call("GET", `/v1/artifacts/${id}/versions/2/file?path=c.txt`)
-					expect((yield* json<FileBody>(second)).content).toBe("landed")
-				}),
-			))
-
-		it("keeps a keyed create whose replay succeeded before reconciliation", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile }) =>
-				Effect.gen(function* () {
-					const headers = { "idempotency-key": "lost-then-replayed" }
-					steerSends((command) => (command === "CreateArtifact" ? "lost" : "real"))
-					expect(
-						(yield* callSteeredSend("/v1/artifacts", { name: "A", files }, headers)).status,
-					).toBe(500)
-					const replayed = yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)
-					expect(replayed.status).toBe(201)
-					const { id } = yield* json<ArtifactBody>(replayed)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					for (const file of files) {
-						const read = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=${file.path}`)
-						expect((yield* json<FileBody>(read)).content).toBe(file.content)
-					}
-				}),
-			))
-
-		it("keeps a landed version that later versions overtook before reconciliation", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					steerSends((command) => (command === "AddArtifactVersion" ? "landed" : "real"))
-					expect(
-						(yield* callSteeredSend(`/v1/artifacts/${id}/versions`, {
-							version: 1,
-							files: [{ path: "c.txt", content: "landed" }],
-						})).status,
-					).toBe(500)
-					for (const version of [2, 3]) {
-						const added = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-							version,
-							files: [{ path: `v${version + 1}.txt`, content: String(version + 1) }],
-						})
-						expect(added.status).toBe(201)
-					}
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					const kept = yield* call("GET", `/v1/artifacts/${id}/versions/2/file?path=c.txt`)
-					expect(kept.status).toBe(200)
-					expect((yield* json<FileBody>(kept)).content).toBe("landed")
-				}),
-			))
-
-		it("keeps a landed keyed create that a later version overtook before reconciliation", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile }) =>
-				Effect.gen(function* () {
-					const headers = { "idempotency-key": "landed-then-overtaken" }
-					steerSends((command) => (command === "CreateArtifact" ? "landed" : "real"))
-					expect(
-						(yield* callSteeredSend("/v1/artifacts", { name: "A", files }, headers)).status,
-					).toBe(500)
-					const id = artifactOf(store.markers())
-					const added = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: [{ path: "z.txt", content: "z" }],
-					})
-					expect(added.status).toBe(201)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					for (const file of files) {
-						const read = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=${file.path}`)
-						expect(read.status).toBe(200)
-						expect((yield* json<FileBody>(read)).content).toBe(file.content)
-					}
-				}),
-			))
-
-		it("waits on an overtaken write while its version row is missing, then settles it", () =>
-			withApi(
-				({ call, store, steerSends, callSteeredSend, reconcile, reconcileWithoutVersionRows }) =>
-					Effect.gen(function* () {
-						const { id } = yield* json<ArtifactBody>(
-							yield* call("POST", "/v1/artifacts", { name: "A", files }),
-						)
-						steerSends((command) => (command === "AddArtifactVersion" ? "landed" : "real"))
-						expect(
-							(yield* callSteeredSend(`/v1/artifacts/${id}/versions`, {
-								version: 1,
-								files: [{ path: "c.txt", content: "landed" }],
-							})).status,
-						).toBe(500)
-						const added = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-							version: 2,
-							files: [{ path: "d.txt", content: "d" }],
-						})
-						expect(added.status).toBe(201)
-						const stored = [...store.objects.keys()].sort()
-						const markers = store.markers()
-						expect(markers).toHaveLength(1)
-						store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-						yield* reconcileWithoutVersionRows
-						expect([...store.objects.keys()].sort()).toEqual(stored)
-						expect(store.markers()).toEqual(markers)
-						yield* reconcile
-						expect(store.markers()).toEqual([])
-						const kept = yield* call("GET", `/v1/artifacts/${id}/versions/2/file?path=c.txt`)
-						expect((yield* json<FileBody>(kept)).content).toBe("landed")
-					}),
-			))
-	})
-
-	describe("writes whose command stalls past reconciliation", () => {
-		const files = [
-			{ path: "a.txt", content: "a" },
-			{ path: "b.txt", content: "b" },
-		]
-		const INTERRUPTED = "The write was interrupted; retry the request."
-		const markedArtifact = (markers: ReadonlyArray<string>) =>
-			parseArtifactMarkerKey(SCOPE, markers[0] ?? "")?.artifact_id ?? ""
-
-		const everyFileReadable = (
-			call: (method: string, path: string) => Effect.Effect<Response>,
-			id: string,
-		) =>
-			Effect.gen(function* () {
-				const head = yield* json<ArtifactBody>(yield* call("GET", `/v1/artifacts/${id}`))
-				for (let version = 1; version <= head.version; version++) {
-					const found = yield* json<VersionBody>(
-						yield* call("GET", `/v1/artifacts/${id}/versions/${version}`),
-					)
-					for (const file of found.files) {
-						const read = yield* call(
-							"GET",
-							`/v1/artifacts/${id}/versions/${version}/file?path=${file.path}`,
-						)
-						expect(read.status, `${version} ${file.path}`).toBe(200)
-					}
-				}
-				return head.version
-			})
-
-		it("fences a stalled create, reclaims its files, and refuses the create when it resumes", () =>
-			withApi(({ call, store, holdSend, callSteeredSend, reconcile }) =>
-				Effect.gen(function* () {
-					const gate = yield* holdSend("CreateArtifact")
-					const stalled = yield* Effect.forkChild(
-						callSteeredSend("/v1/artifacts", { name: "A", files }),
-					)
-					yield* gate.reached
-					const id = markedArtifact(store.markers())
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					expect(
-						[...store.objects.keys()].filter((key) => key.startsWith(artifactPrefix(SCOPE, id))),
-					).toEqual([])
-					yield* gate.release
-					const refused = yield* Fiber.join(stalled)
-					expect(refused.status).toBe(503)
-					expect((yield* json<ErrorBody>(refused)).error.message).toBe(INTERRUPTED)
-					expect((yield* call("GET", `/v1/artifacts/${id}`)).status).toBe(404)
-					expect(
-						[...store.objects.keys()].filter((key) => key.startsWith(artifactPrefix(SCOPE, id))),
-					).toEqual([])
-				}),
-			))
-
-		it("fences a stalled version, reclaims its files, and refuses the version when it resumes", () =>
-			withApi(({ call, store, holdSend, callSteeredSend, reconcile }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					const before = [...store.objects.keys()].sort()
-					const gate = yield* holdSend("AddArtifactVersion")
-					const stalled = yield* Effect.forkChild(
-						callSteeredSend(`/v1/artifacts/${id}/versions`, {
-							version: 1,
-							files: [{ path: "c.txt", content: "stalled" }],
-						}),
-					)
-					yield* gate.reached
-					expect(store.markers()).toHaveLength(1)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					expect([...store.objects.keys()].sort()).toEqual(before)
-					yield* gate.release
-					const refused = yield* Fiber.join(stalled)
-					expect(refused.status).toBe(503)
-					expect((yield* json<ErrorBody>(refused)).error.message).toBe(INTERRUPTED)
-					expect([...store.objects.keys()].sort()).toEqual(before)
-					expect((yield* call("GET", `/v1/artifacts/${id}/versions/2`)).status).toBe(404)
-					expect(yield* everyFileReadable(call, id)).toBe(1)
-					const retried = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: [{ path: "c.txt", content: "retried" }],
-					})
-					expect(retried.status).toBe(201)
-					expect(yield* everyFileReadable(call, id)).toBe(2)
-				}),
-			))
-
-		it("confirms a create that lands between reconciliation's first read and its fence", () =>
-			withApi(({ call, store, holdSend, steerSends, callSteeredSend, reconcileBeforeFence }) =>
-				Effect.gen(function* () {
-					steerSends((command) => (command === "CreateArtifact" ? "landed" : "real"))
-					const gate = yield* holdSend("CreateArtifact")
-					const stalled = yield* Effect.forkChild(
-						callSteeredSend("/v1/artifacts", { name: "A", files }),
-					)
-					yield* gate.reached
-					const id = markedArtifact(store.markers())
-					const stored = [...store.objects.keys()].filter((key) => key.startsWith("artifacts/"))
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcileBeforeFence(
-						Effect.gen(function* () {
-							yield* gate.release
-							expect((yield* Fiber.join(stalled)).status).toBe(500)
-						}),
-					)
-					expect(store.markers()).toEqual([])
-					expect([...store.objects.keys()].filter((key) => key.startsWith("artifacts/"))).toEqual(
-						stored,
-					)
-					expect(yield* everyFileReadable(call, id)).toBe(1)
-				}),
-			))
-
-		it("lets a keyed create whose first attempt was fenced succeed on retry with the same key", () =>
-			withApi(({ call, store, holdSend, callSteeredSend, reconcile, statusForKey }) =>
-				Effect.gen(function* () {
-					const headers = { "idempotency-key": "fenced-then-retried" }
-					const gate = yield* holdSend("CreateArtifact")
-					const stalled = yield* Effect.forkChild(
+					const headers = { "idempotency-key": "stalled-then-retried" }
+					const held = yield* holdSend("CreateArtifact")
+					const stalled = yield* Effect.forkDetach(
 						callSteeredSend("/v1/artifacts", { name: "A", files }, headers),
 					)
-					yield* gate.reached
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					yield* gate.release
+					yield* held.reached
+					const [id] = artifactIdsIn(store)
+					yield* expire(id ?? "", yield* openWrite(id ?? ""))
+					yield* eventually(
+						Effect.sync(() => store.objects.size === 0),
+						"the files are released",
+					)
+					yield* held.release
 					expect((yield* Fiber.join(stalled)).status).toBe(503)
-					expect(yield* statusForKey("fenced-then-retried")).toBe("")
+					expect(yield* statusForKey("stalled-then-retried")).toBe("")
 					const retried = yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)
 					expect(retried.status).toBe(201)
-					const { id } = yield* json<ArtifactBody>(retried)
-					expect(yield* statusForKey("fenced-then-retried")).toBe("active")
-					expect(yield* everyFileReadable(call, id)).toBe(1)
-					expect(store.markers()).toEqual([])
+					expect(yield* statusForKey("stalled-then-retried")).toBe("active")
+					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
+					expect((yield* json<FileBody>(file)).content).toBe("a")
 				}),
 			))
 
-		it("abandons a write whose version another write took, without refusing a live upload", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile, build }) =>
+		it("keeps a retry's files when the reservation of an earlier attempt expires after it", () =>
+			withApi(({ call, callSteeredSend, steerSends, store, openWrite, expire }) =>
 				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					steerSends((command) => (command === "AddArtifactVersion" ? "lost" : "real"))
-					const lostFiles = [{ path: "lost.txt", content: "lost" }]
-					const lost = yield* callSteeredSend(`/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: lostFiles,
-					})
-					expect(lost.status).toBe(500)
-					steerSends(() => "real")
-					const won = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: [{ path: "won.txt", content: "won" }],
-					})
-					expect(won.status).toBe(201)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					store.setAfterStage(
-						Effect.andThen(
-							Effect.sync(() => store.setAfterStage(Effect.void)),
-							reconcile,
-						),
-					)
-					const live = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-						version: 2,
-						files: [{ path: "live.txt", content: "live" }],
-					})
-					expect(live.status).toBe(201)
-					expect(store.markers()).toEqual([])
-					const [blob] = (yield* build(lostFiles)).blobs
-					expect(store.objects.has(artifactBlobKey(SCOPE, id, blob?.sha256 ?? ""))).toBe(false)
-					expect(yield* everyFileReadable(call, id)).toBe(3)
-				}),
-			))
-
-		it("refuses a live writer whose fence a reconciliation moved, reclaims its files, and lets it retry", () =>
-			withApi(({ call, store, steerSends, callSteeredSend, reconcile, build }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					const before = [...store.objects.keys()].filter((key) => key.startsWith("artifacts/"))
-					steerSends((command) => (command === "AddArtifactVersion" ? "lost" : "real"))
-					const lost = yield* callSteeredSend(`/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: [{ path: "lost.txt", content: "lost" }],
-					})
-					expect(lost.status).toBe(500)
-					steerSends(() => "real")
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					const live = [{ path: "live.txt", content: "live" }]
-					store.setAfterStage(
-						Effect.andThen(
-							Effect.sync(() => store.setAfterStage(Effect.void)),
-							reconcile,
-						),
-					)
-					const refused = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: live,
-					})
-					expect(refused.status).toBe(503)
-					expect((yield* json<ErrorBody>(refused)).error.message).toBe(INTERRUPTED)
-					const [blob] = (yield* build(live)).blobs
-					expect(store.objects.has(artifactBlobKey(SCOPE, id, blob?.sha256 ?? ""))).toBe(false)
+					const headers = { "idempotency-key": "expired-under-a-retry" }
+					steerSends((command) => (command === "CreateArtifact" ? "lost" : "real"))
 					expect(
-						[...store.objects.keys()].filter((key) => key.startsWith("artifacts/")).sort(),
-					).toEqual(before.sort())
-					expect(store.markers()).toEqual([])
-					const retried = yield* call("POST", `/v1/artifacts/${id}/versions`, {
-						version: 1,
-						files: live,
-					})
-					expect(retried.status).toBe(201)
-					expect(yield* everyFileReadable(call, id)).toBe(2)
+						(yield* callSteeredSend("/v1/artifacts", { name: "A", files }, headers)).status,
+					).toBe(500)
+					const [id] = artifactIdsIn(store)
+					const first = yield* openWrite(id ?? "")
+					expect((yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)).status).toBe(
+						201,
+					)
+					yield* expire(id ?? "", first)
+					yield* Effect.sleep("50 millis")
+					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
+					expect((yield* json<FileBody>(file)).content).toBe("b")
 				}),
 			))
-	})
 
-	describe("deletes whose purge did not finish", () => {
-		const files = [{ path: "a.txt", content: "a" }]
-		const ownedBy = (store: { readonly objects: Map<string, Uint8Array> }, id: string) =>
-			[...store.objects.keys()].filter((key) => key.startsWith(artifactPrefix(SCOPE, id)))
-		const INTERRUPTED = "The write was interrupted; retry the request."
-
-		it("purges a deleted artifact's files once the grace passes, retrying a purge that fails", () =>
-			withApi(({ call, store, reconcile }) =>
+		it("purges a deleted artifact's files although the delete request died after it committed", () =>
+			withApi(({ call, deleteSteeredSend, steerSends, store }) =>
 				Effect.gen(function* () {
 					const { id } = yield* json<ArtifactBody>(
 						yield* call("POST", "/v1/artifacts", { name: "A", files }),
 					)
-					store.setFailing(true)
-					expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(503)
-					store.setFailing(false)
-					expect((yield* call("GET", `/v1/artifacts/${id}`)).status).toBe(200)
-
-					store.setBeforeDelete(Effect.sync(() => store.setFailing(true)))
-					expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(503)
-					store.setBeforeDelete(Effect.void)
-					store.setFailing(false)
+					expect(store.objects.size).toBe(3)
+					steerSends((command) => (command === "DeleteArtifact" ? "landed" : "real"))
+					expect((yield* deleteSteeredSend(`/v1/artifacts/${id}`)).status).toBe(500)
+					yield* eventually(
+						Effect.sync(() => store.objects.size === 0),
+						"the files are purged",
+					)
 					expect((yield* call("GET", `/v1/artifacts/${id}`)).status).toBe(404)
-					expect(ownedBy(store, id)).toHaveLength(2)
-					expect(
-						store.markers().map((key) => parseArtifactMarkerKey(SCOPE, key)?.write_id.slice(0, 7)),
-					).toEqual([ARTIFACT_DELETE_PREFIX])
-
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS - 1)
-					yield* reconcile
-					expect(ownedBy(store, id)).toHaveLength(2)
-
-					store.advanceClock(1)
-					store.setBeforeDelete(Effect.sync(() => store.setFailing(true)))
-					yield* reconcile
-					store.setBeforeDelete(Effect.void)
-					store.setFailing(false)
-					expect(ownedBy(store, id)).toHaveLength(2)
-					expect(store.markers()).toHaveLength(1)
-
-					yield* reconcile
-					expect(ownedBy(store, id)).toEqual([])
-					expect(store.markers()).toEqual([])
-					expect(store.ledgers.get(artifactPrefix(SCOPE, id))?.isEmpty()).toBe(true)
 				}),
 			))
 
-		it("fences off a delete whose request died before its command, and removes its marker", () =>
-			withApi(({ call, store, steerSends, deleteSteeredSend, reconcile }) =>
+		it("refuses files staged into an artifact after its purge", () =>
+			withApi(({ call, service, build, store }) =>
 				Effect.gen(function* () {
 					const { id } = yield* json<ArtifactBody>(
 						yield* call("POST", "/v1/artifacts", { name: "A", files }),
 					)
-					const kept = ownedBy(store, id)
-					steerSends((command) => (command === "DeleteArtifact" ? "lost" : "real"))
-					expect((yield* deleteSteeredSend(`/v1/artifacts/${id}`)).status).toBe(500)
-					steerSends(() => "real")
-					const dead = store.markers()
-					expect(dead).toHaveLength(1)
-
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS - 1)
-					yield* reconcile
-					expect(store.markers()).toEqual(dead)
-
-					store.advanceClock(1)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					expect(ownedBy(store, id)).toEqual(kept)
-					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
-					expect((yield* json<FileBody>(file)).content).toBe("a")
-
 					expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
-					expect(ownedBy(store, id)).toEqual([])
-					expect(store.markers()).toEqual([])
-				}),
-			))
-
-		it("refuses a delete that stalls past a reconciliation's fence and keeps the artifact", () =>
-			withApi(({ call, store, holdSend, deleteSteeredSend, reconcile }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					const kept = ownedBy(store, id)
-					const gate = yield* holdSend("DeleteArtifact")
-					const stalled = yield* Effect.forkDetach(deleteSteeredSend(`/v1/artifacts/${id}`))
-					yield* gate.reached
-					expect(store.markers()).toHaveLength(1)
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-
-					yield* gate.release
-					const refused = yield* Fiber.join(stalled)
-					expect(refused.status).toBe(503)
-					expect((yield* json<ErrorBody>(refused)).error.message).toBe(INTERRUPTED)
-					expect((yield* call("GET", `/v1/artifacts/${id}`)).status).toBe(200)
-					expect(ownedBy(store, id)).toEqual(kept)
-					expect(store.markers()).toEqual([])
-				}),
-			))
-
-		it("refuses a retry that read the fence before a reconciliation moved it, then deletes on the next", () =>
-			withApi(({ call, store, steerSends, deleteSteeredSend, holdSend, reconcileAfterListing }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					steerSends((command) => (command === "DeleteArtifact" ? "lost" : "real"))
-					expect((yield* deleteSteeredSend(`/v1/artifacts/${id}`)).status).toBe(500)
-					steerSends(() => "real")
-					const dead = store.markers()
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-
-					const gate = yield* holdSend("DeleteArtifact")
-					let retry: Fiber.Fiber<Response> | undefined
-					yield* reconcileAfterListing(
-						Effect.gen(function* () {
-							retry = yield* Effect.forkDetach(deleteSteeredSend(`/v1/artifacts/${id}`))
-							yield* gate.reached
-						}),
-					)
-					const fresh = store.markers()
-					expect(fresh).toHaveLength(1)
-					expect(fresh).not.toEqual(dead)
-
-					yield* gate.release
-					const refused = yield* Fiber.join(retry ?? (yield* Effect.die("no retry")))
-					expect(refused.status).toBe(503)
-					expect((yield* json<ErrorBody>(refused)).error.message).toBe(INTERRUPTED)
-					expect(ownedBy(store, id)).toHaveLength(2)
-
-					expect((yield* call("DELETE", `/v1/artifacts/${id}`)).status).toBe(200)
-					expect(ownedBy(store, id)).toEqual([])
-					expect(store.markers()).toEqual([])
-				}),
-			))
-
-		it("purges a delete that lands between reconciliation's first read and its fence", () =>
-			withApi(({ call, store, holdSend, deleteSteeredSend, reconcileBeforeFence }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					const gate = yield* holdSend("DeleteArtifact")
-					const stalled = yield* Effect.forkDetach(deleteSteeredSend(`/v1/artifacts/${id}`))
-					yield* gate.reached
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					store.setBeforeDelete(Effect.sync(() => store.setFailing(true)))
-					yield* reconcileBeforeFence(
-						Effect.gen(function* () {
-							yield* gate.release
-							expect((yield* Fiber.join(stalled)).status).toBe(503)
-							store.setBeforeDelete(Effect.void)
-							store.setFailing(false)
-							expect((yield* call("GET", `/v1/artifacts/${id}`)).status).toBe(404)
-							expect(ownedBy(store, id)).toHaveLength(2)
-						}),
-					)
-					expect(ownedBy(store, id)).toEqual([])
-					expect(store.markers()).toEqual([])
-				}),
-			))
-
-		it("removes the marker of a delete that never landed and keeps one whose artifact is unknown", () =>
-			withApi(({ call, store, reconcile }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", { name: "A", files }),
-					)
-					const kept = ownedBy(store, id)
-					const unknown = artifactMarkerKey(SCOPE, "art_unknown", `${ARTIFACT_DELETE_PREFIX}a`)
-					store.upload(artifactMarkerKey(SCOPE, id, `${ARTIFACT_DELETE_PREFIX}b`), "")
-					store.upload(unknown, "")
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcile
-					expect(store.markers()).toEqual([unknown])
-					expect(ownedBy(store, id)).toEqual(kept)
-					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=a.txt`)
-					expect((yield* json<FileBody>(file)).content).toBe("a")
-				}),
-			))
-	})
-
-	describe("the reconciliation scan cursor", () => {
-		const marker = (artifactId: string, writeId: string, check: ArtifactWriteCheck) =>
-			JSON.stringify({ artifact_id: artifactId, write_id: writeId, check })
-		const keyOf = (artifactId: string, writeId: string) =>
-			artifactMarkerKey(SCOPE, artifactId, writeId)
-		const cursorOf = (store: { readonly objects: Map<string, Uint8Array> }) => {
-			const bytes = store.objects.get(artifactReconcileCursorKey(SCOPE))
-			return bytes === undefined ? null : new TextDecoder().decode(bytes)
-		}
-
-		it("gets past markers that keep waiting, and wraps to the start at the end", () =>
-			withApi(({ call, store, reconcile, reconcileWithoutVersionRows }) =>
-				Effect.gen(function* () {
-					const { id } = yield* json<ArtifactBody>(
-						yield* call("POST", "/v1/artifacts", {
-							name: "A",
-							files: [{ path: "a.txt", content: "1" }],
-						}),
-					)
-					for (const version of [1, 2]) {
-						yield* call("POST", `/v1/artifacts/${id}/versions`, {
-							version,
-							files: [{ path: "a.txt", content: String(version + 1) }],
-						})
-					}
-					const writeIds = Array.from(
-						{ length: 250 },
-						(_, index) => `w${String(index).padStart(3, "0")}`,
-					)
-					for (const [index, writeId] of writeIds.entries()) {
-						store.upload(
-							keyOf(id, writeId),
-							marker(id, writeId, {
-								kind: "version",
-								manifest: "x".repeat(64),
-								expected_version: index < 200 ? 1 : 3,
-							}),
-						)
-					}
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					yield* reconcileWithoutVersionRows
-					expect(store.markers()).toHaveLength(250)
-					expect(cursorOf(store)).toBe(keyOf(id, "w199"))
-					yield* reconcileWithoutVersionRows
-					expect(store.markers().sort()).toEqual(
-						writeIds.slice(0, 200).map((writeId) => keyOf(id, writeId)),
-					)
-					expect(cursorOf(store)).toBeNull()
-					yield* reconcile
-					expect(store.markers()).toEqual([])
-					expect(cursorOf(store)).toBeNull()
-				}),
-			))
-
-		it("does not let a page of young markers hide an old one behind them", () =>
-			withApi(({ store, reconcile }) =>
-				Effect.gen(function* () {
-					const old = keyOf("art_zzz_old", "w_old")
-					store.upload(old, marker("art_zzz_old", "w_old", { kind: "create", manifest: "x" }))
-					store.advanceClock(ARTIFACT_WRITE_GRACE_MS)
-					const young = Array.from({ length: ARTIFACT_RECONCILE_PAGE }, (_, index) =>
-						keyOf("art_young", `w${String(index).padStart(4, "0")}`),
-					)
-					for (const key of young) {
-						const parsed = parseArtifactMarkerKey(SCOPE, key)
-						store.upload(
-							key,
-							marker(parsed?.artifact_id ?? "", parsed?.write_id ?? "", {
-								kind: "create",
-								manifest: "x",
-							}),
-						)
-					}
-					yield* reconcile
-					expect(store.markers()).toContain(old)
-					expect(cursorOf(store)).toBe(young.at(-1))
-					yield* reconcile
-					expect(store.markers()).not.toContain(old)
-					expect(store.markers()).toHaveLength(ARTIFACT_RECONCILE_PAGE)
-					expect(cursorOf(store)).toBeNull()
+					const late = yield* Effect.exit(service.stage(id, yield* build(files), null))
+					expect(Exit.isFailure(late)).toBe(true)
+					expect(store.objects.size).toBe(0)
 				}),
 			))
 	})

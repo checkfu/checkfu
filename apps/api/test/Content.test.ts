@@ -413,44 +413,34 @@ describe("Artifact viewing links", () => {
 			}),
 		))
 
-	it("stops serving a deleted artifact at once although its files outlive a failed purge", () =>
+	it("stops serving a deleted artifact at once, and purges its files once storage recovers", () =>
 		withContent(({ api, open, store }) =>
 			Effect.gen(function* () {
 				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "one" }])
 				const link = yield* createLink(api, id)
-				store.setFailing(true)
-				expect((yield* api("DELETE", `/v1/artifacts/${id}`)).status).toBe(503)
-				store.setFailing(false)
-				expect((yield* open(link.url)).status).toBe(200)
-
 				store.setBeforeDelete(Effect.sync(() => store.setFailing(true)))
 				expect((yield* api("DELETE", `/v1/artifacts/${id}`)).status).toBe(503)
 				store.setBeforeDelete(Effect.void)
-				store.setFailing(false)
-				expect([...store.objects.keys()].some((key) => key.includes("/manifests/"))).toBe(true)
 				const gone = yield* open(link.url)
 				expect(gone.status).toBe(404)
 				expectSandboxed(gone, "deleted")
+				store.setFailing(false)
+				for (let attempt = 0; attempt < 300 && store.objects.size > 0; attempt++) {
+					yield* Effect.sleep("10 millis")
+				}
+				expect(store.objects.size).toBe(0)
 			}),
 		))
 
 	it("stops serving the moment a delete commits, though its reply is lost and nothing else ran", () =>
-		withContent(({ api, open, store, artifacts }) =>
+		withContent(({ api, open, artifacts }) =>
 			Effect.gen(function* () {
 				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "one" }])
 				const link = yield* createLink(api, id)
 				const artifactId = ArtifactId.make(id)
-				const { fence } = yield* Effect.orDie(artifacts.get(artifactId))
-				const objects = [...store.objects.keys()]
-
-				const refused = yield* Effect.exit(
-					artifacts.send(new DeleteArtifact({ artifact_id: artifactId, fence: fence + 1 })),
-				)
-				expect(refused._tag).toBe("Failure")
 				expect((yield* open(link.url)).status).toBe(200)
 
-				yield* Effect.orDie(artifacts.send(new DeleteArtifact({ artifact_id: artifactId, fence })))
-				expect([...store.objects.keys()]).toEqual(objects)
+				yield* Effect.orDie(artifacts.send(new DeleteArtifact({ artifact_id: artifactId })))
 				const gone = yield* open(link.url)
 				expect(gone.status).toBe(404)
 				expectSandboxed(gone, "committed delete")

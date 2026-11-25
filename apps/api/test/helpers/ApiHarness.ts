@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { ArtifactBytesLive } from "../../src/Artifacts/ArtifactBytesLive.ts"
 import * as Domain from "@alchemy.run/domain"
 import { allProviders } from "@checkfu/pi-providers/catalog"
 import { buildPiProvider, withDynamicModelLookup } from "@checkfu/pi-providers/runtime"
@@ -274,10 +275,12 @@ export const makePiDurableTestLayer = (
 		},
 	)
 
+	const artifactStore = makeArtifactStoreMemory()
 	const CheckfuLive = Checkfu.layer(
 		CheckfuHandlersLive.pipe(
 			Layer.provide(ListingStore.memory),
 			Layer.provide(PiDurableHarnessLive),
+			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
 		),
 	).pipe(Layer.provide(executorLayer))
 	const PiProviderLive = PiDurableHarnessLive.pipe(
@@ -301,7 +304,6 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
-	const artifactStore = makeArtifactStoreMemory()
 	const layer = Layer.mergeAll(
 		CheckfuLive,
 		PiProviderLive,

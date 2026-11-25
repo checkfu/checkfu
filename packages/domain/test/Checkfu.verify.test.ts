@@ -1,4 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
+import { ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
+import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import * as Model from "@alchemy.run/domain/Model"
 import * as Verify from "@alchemy.run/domain/Verify"
@@ -33,7 +35,6 @@ import { Artifact } from "../src/Artifact/Artifact.aggregate.ts"
 import { ArtifactId } from "../src/Artifact/Artifact.id.ts"
 import { CreateArtifact } from "../src/Artifact/CreateArtifact.command.ts"
 import { ArtifactVersionView } from "../src/Artifact/ArtifactVersionView.view.ts"
-import { ArtifactView } from "../src/Artifact/ArtifactView.view.ts"
 import { ArchiveEnvironment } from "../src/Environment/ArchiveEnvironment.command.ts"
 import { CreateEnvironment } from "../src/Environment/CreateEnvironment.command.ts"
 import { DeleteEnvironment } from "../src/Environment/DeleteEnvironment.command.ts"
@@ -115,15 +116,16 @@ const STANDING = {
 	"Artifact.NameNeverChangesOnceCreated": "proved",
 	"Artifact.VersionGrowsByOneOrNotAtAll": "proved",
 	"Artifact.AddedVersionRecordsItsManifest": "proved",
-	"Artifact.FenceNeverDecreasesAndOnlyFencingMovesIt": "proved",
-	"Artifact.DeleteLandsOnlyAtTheCurrentFence": "proved",
 	"Artifact.PublishedOnlyOnceCreated": "proved",
 	"Artifact.UnpublishedHoldsNoSettings": "proved",
 	"Artifact.PinnedVersionWithinHead": "proved",
+	"Artifact.AWriteIsOpenOnlyBeforeCreation": "proved",
 	"Artifact.ATokenIsOnlyOpenedOrDropped": "proved",
 	"Artifact.UnpublishDropsTheToken": "proved",
 	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
 	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
+	"Artifact.OnlyReservingOpensAWrite": "proved",
+	"Artifact.CreatingTakesTheOpenWrite": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
@@ -169,7 +171,6 @@ const STANDING = {
 	"Checkfu.AutomationViewsMatchAutomations": "checked",
 	"Checkfu.AutomationViewRevisionMatchesAutomation": "checked",
 	"Checkfu.ReservedSlotsEqualLiveAutomations": "checked",
-	"Checkfu.ArtifactViewMatchesArtifact": "checked",
 	"Checkfu.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
 	"Checkfu.EveryArtifactVersionIsRecorded": "checked",
 	"Checkfu.ASessionIsAdmitted": "reached",
@@ -233,10 +234,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"UnpauseAutomation",
 			"ArchiveAutomation",
 			"RunAutomation",
+			"ReserveArtifact",
 			"CreateArtifact",
 			"AddArtifactVersion",
 			"DeleteArtifact",
-			"FenceArtifactWrites",
 			"PublishArtifact",
 			"UnpublishArtifact",
 			"ClaimArtifactIdempotencyKey",
@@ -252,7 +253,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"SessionView",
 			"AutomationView",
 			"AutomationRunView",
-			"ArtifactView",
 			"ArtifactVersionView",
 		])
 		const report = await Effect.runPromise(
@@ -300,7 +300,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const observedAggregateIds = new Map<string, Set<string>>()
 		const observedViewKeys = new Map<string, Set<string>>()
 		const layer = Checkfu.layer(
-			CheckfuHandlersLive.pipe(Layer.provide([HarnessStubLayer, ListingStore.memory])),
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
+				Layer.provide([HarnessStubLayer, ListingStore.memory]),
+			),
 		).pipe(
 			Layer.updateService(Domain.Platform, (base) =>
 				Domain.Platform.of({
@@ -485,7 +488,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							AutomationView: yield* readView(AutomationView),
 							AutomationRunView: yield* readView(AutomationRunView),
 							Artifact: yield* readAggregate(Artifact),
-							ArtifactView: yield* readView(ArtifactView),
 							ArtifactVersionView: yield* readView(ArtifactVersionView),
 						}
 					})
@@ -614,6 +616,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					const updatedAutomationWorld = yield* recordStep("automation-updated")
 
 					const artifactId = ArtifactId.make("art_post_admission")
+					yield* artifacts.send(new ReserveArtifact({ artifact_id: artifactId, write_id: "w1" }))
 					yield* artifacts.send(
 						new CreateArtifact({
 							artifact_id: artifactId,
@@ -621,7 +624,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							manifest: "m1",
 							file_count: 1,
 							total_bytes: 1,
-							fence: 0,
+							write_id: "w1",
 						}),
 					)
 					yield* artifacts.send(
@@ -631,7 +634,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							manifest: "m2",
 							file_count: 1,
 							total_bytes: 2,
-							fence: 0,
 						}),
 					)
 					const artifactWorld = yield* recordStep("artifact-created-and-versioned")
@@ -674,7 +676,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				HostedViewsMatchAggregates: true,
 				EnvironmentViewConfigMatchesEnvironment: true,
 				AutomationViewsMatchAutomations: true,
-				ArtifactViewMatchesArtifact: true,
 				EveryArtifactVersionIsWithinItsArtifactsHead: true,
 				AutomationViewRevisionMatchesAutomation: true,
 				EveryArtifactVersionIsRecorded: true,
@@ -871,7 +872,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
@@ -890,7 +890,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
@@ -934,7 +933,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
@@ -951,7 +949,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: true,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
@@ -973,7 +970,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			HostedViewsMatchAggregates: false,
 			EnvironmentViewConfigMatchesEnvironment: true,
 			AutomationViewsMatchAutomations: true,
-			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,

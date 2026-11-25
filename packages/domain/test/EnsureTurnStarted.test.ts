@@ -1,4 +1,7 @@
 import * as InMemory from "@alchemy.run/domain/InMemory"
+import { ExpireArtifactReservationsLive } from "../src/Artifact/ExpireArtifactReservations.policy.ts"
+import { ReleaseArtifactBytesLive } from "../src/Artifact/ReleaseArtifactBytes.policy.ts"
+import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -137,6 +140,8 @@ const handlersOf =
 			ArmAutomationLive,
 			StartAutomationRunLive,
 			FreeAutomationSlotLive,
+			ExpireArtifactReservationsLive,
+			ReleaseArtifactBytesLive,
 			ListingLive,
 			ListResourcesLive,
 		)
@@ -187,7 +192,9 @@ const run = <A, E, R>(
 		Effect.scoped,
 		Effect.provide(
 			Checkfu.layer(
-				handlers(platform).pipe(Layer.provide([harness(platform), ListingStore.memory])),
+				handlers(platform).pipe(
+					Layer.provide([harness(platform), ListingStore.memory, ArtifactBytesKept]),
+				),
 			).pipe(Layer.provide(platform.layer)),
 		),
 	)

@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { AgentVersionByNumberView } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
@@ -204,6 +205,7 @@ describe("interrupted turns and turn recovery", () => {
 		})
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),
@@ -353,6 +355,7 @@ describe("interrupted turns and turn recovery", () => {
 		)
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),
@@ -539,6 +542,7 @@ describe("interrupted turns and turn recovery", () => {
 		})
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),
@@ -637,6 +641,7 @@ describe("interrupted turns and turn recovery", () => {
 		})
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
+				Layer.provide(ArtifactBytesKept),
 				Layer.provide(ListingStore.memory),
 				Layer.provide(PiDurableHarnessLive),
 			),

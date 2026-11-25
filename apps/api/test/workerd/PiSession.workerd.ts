@@ -15,8 +15,6 @@ import {
 	STARTUP_HELP,
 	measureBundle,
 } from "./BundleBudget.ts"
-import { ARTIFACT_RECONCILE_CRON } from "../../src/Artifacts/ArtifactReconcile.ts"
-import { artifactReconcileCursorKey } from "../../src/Artifacts/ArtifactStore.ts"
 import { removeStage } from "./StageCleanup.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
@@ -380,7 +378,6 @@ describe("PiSession real Durable Object under workerd", () => {
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
-	let workerLogs: ReadonlyArray<string> = []
 	let workerStage: string
 	let agentId: string
 	let environmentId: string
@@ -510,7 +507,6 @@ describe("PiSession real Durable Object under workerd", () => {
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
-		workerLogs = worker.logs
 		workerStage = worker.stage
 
 		const createdAgent = await createResource<{ readonly id: string }>(
@@ -1301,34 +1297,6 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect((await storedBlob()).status).toBe(404)
 		expect((await apiFetch(`/v1/artifacts/${id}`, { method: "DELETE" })).status).toBe(200)
 	}, 60_000)
-
-	it("runs the reconcile cron against the real bucket: clears its cursor and leaves a young marker alone", async () => {
-		const bucket = artifactBucketName(workerStage)
-		const key = "reconcile/default/art_workerd_marker/write_young"
-		const marker = JSON.stringify({
-			artifact_id: "art_workerd_marker",
-			write_id: "write_young",
-			check: { kind: "create", manifest: "0".repeat(64) },
-		})
-		const put = await localR2(baseUrl, "PUT", bucket, key, marker)
-		expect(put.status, await put.text()).toBe(200)
-		const cursorKey = artifactReconcileCursorKey("default")
-		const seeded = await localR2(baseUrl, "PUT", bucket, cursorKey, "reconcile/default/")
-		expect(seeded.status, await seeded.text()).toBe(200)
-		const fired = await fetch(
-			`${baseUrl}/cdn-cgi/handler/scheduled?cron=${encodeURIComponent(ARTIFACT_RECONCILE_CRON)}`,
-		)
-		expect(fired.status, await fired.text()).toBe(200)
-		await expect
-			.poll(async () => (await localR2(baseUrl, "GET", bucket, cursorKey)).status, {
-				timeout: 10_000,
-			})
-			.toBe(404)
-		const kept = await localR2(baseUrl, "GET", bucket, key)
-		expect(kept.status).toBe(200)
-		expect(await kept.text()).toBe(marker)
-		expect(workerLogs.join("")).not.toContain("Artifact write reconciliation failed")
-	}, 30_000)
 
 	it("opens an artifact through a viewing link on the content origin until it is deleted", async () => {
 		const created = await apiJson<{ readonly id: string }>("/v1/artifacts", {

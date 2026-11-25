@@ -8,8 +8,7 @@ import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { ApiCalls } from "../../src/Api.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
-import { ARTIFACT_LEDGER_SCHEMA } from "../../src/Artifacts/ArtifactLedgerSql.ts"
-import { ArtifactWriteMarker } from "../../src/Artifacts/ArtifactStore.ts"
+import { ArtifactMarks } from "../../src/Artifacts/ArtifactOwnership.ts"
 import { ArtifactLinkClaims } from "../../src/Content/ArtifactLink.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
@@ -32,7 +31,7 @@ export type PersistedKind =
 	| "harness-call"
 	| "session-table"
 	| "artifact-object"
-	| "artifact-table"
+	| "artifact-marks"
 	| "signed-link"
 	| "api-call"
 
@@ -59,9 +58,9 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 	"session-table":
 		"The table already exists in every session object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"artifact-object":
-		"Artifact manifests and the reconciler's records stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
-	"artifact-table":
-		"The table already exists in every artifact owner object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table or index as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
+		"Artifact manifests stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
+	"artifact-marks":
+		"Every artifact owner object keeps its marks in storage across deploys, and a later build reads them back. Add a field only with a decoding default; for any other change, store it under a new key and keep reading the old one.",
 	"signed-link":
 		"A viewing link keeps working across deploys until it expires, up to seven days after it was made. Keep the claims of links the last build signed readable until every one of them has expired.",
 	"api-call":
@@ -449,17 +448,11 @@ const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
 
 const ARTIFACT_OBJECTS: ReadonlyArray<PersistedShape> = [
 	{ id: "artifact-object:manifest", kind: "artifact-object", schema: ArtifactManifest },
-	{ id: "artifact-object:reconcile-marker", kind: "artifact-object", schema: ArtifactWriteMarker },
-	{ id: "artifact-object:reconcile-cursor", kind: "artifact-object", schema: Schema.String },
 ]
 
-const ARTIFACT_TABLES: ReadonlyArray<PersistedShape> = Object.entries(ARTIFACT_LEDGER_SCHEMA).map(
-	([name, statement]): PersistedShape => ({
-		id: `artifact-table:${name}`,
-		kind: "artifact-table",
-		schema: Schema.Literal(statement),
-	}),
-)
+const ARTIFACT_MARKS: ReadonlyArray<PersistedShape> = [
+	{ id: "artifact-marks:ArtifactObjects/marks", kind: "artifact-marks", schema: ArtifactMarks },
+]
 
 const SIGNED_LINKS: ReadonlyArray<PersistedShape> = [
 	{ id: "signed-link:ArtifactLink/claims", kind: "signed-link", schema: ArtifactLinkClaims },
@@ -480,7 +473,7 @@ export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...HARNESS_CALLS,
 	...SESSION_TABLES,
 	...ARTIFACT_OBJECTS,
-	...ARTIFACT_TABLES,
+	...ARTIFACT_MARKS,
 	...SIGNED_LINKS,
 	...API_CALLS,
 ]
@@ -516,7 +509,7 @@ export const registryProblems = (
 		"harness-call",
 		"session-table",
 		"artifact-object",
-		"artifact-table",
+		"artifact-marks",
 		"signed-link",
 		"api-call",
 	] as const) {
