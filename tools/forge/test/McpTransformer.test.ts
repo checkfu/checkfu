@@ -104,6 +104,8 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
+			"memoryStores_archiveMemoryStore",
+			"memoryStores_deleteMemoryStore",
 			"sessions_archiveSession",
 		])
 		expect(tools.filter((tool) => tool.readOnly && !tool.idempotent)).toEqual([])
@@ -115,6 +117,8 @@ describe("MCP tool projection", () => {
 			"artifacts_createArtifact",
 			"automations_createAutomation",
 			"environments_createEnvironment",
+			"memoryStores_createMemory",
+			"memoryStores_createMemoryStore",
 			"sessions_createSession",
 		])
 		expect(tools.filter((tool) => tool.readOnly && tool.destructive)).toEqual([])

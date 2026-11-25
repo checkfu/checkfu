@@ -513,3 +513,99 @@ export const ArtifactFile = Schema.Struct({
 	content_type: Schema.String,
 })
 export type ArtifactFile = typeof ArtifactFile.Type
+
+export const MemoryStoreId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+).pipe(Schema.brand("MemoryStoreId"))
+export type MemoryStoreId = typeof MemoryStoreId.Type
+
+export const MemoryId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+).pipe(Schema.brand("MemoryId"))
+export type MemoryId = typeof MemoryId.Type
+
+export const MAX_MEMORIES_PER_STORE = 1000
+export const MAX_MEMORY_CONTENT_BYTES = 100_000
+export const MAX_MEMORY_PATH_LENGTH = 256
+export const MAX_MEMORY_STORE_NAME_LENGTH = 256
+export const MAX_MEMORY_STORE_DESCRIPTION_LENGTH = 1024
+
+export const MemoryStoreName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_MEMORY_STORE_NAME_LENGTH),
+)
+export const MemoryStoreDescription = Schema.String.check(
+	Schema.isMaxCodePoints(MAX_MEMORY_STORE_DESCRIPTION_LENGTH),
+)
+
+export const MemoryPath = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_PATH_LENGTH),
+	Schema.isPattern(ABSOLUTE_PATH, { expected: "an absolute path such as /notes/todo.md" }),
+)
+export type MemoryPath = typeof MemoryPath.Type
+
+export const RecordedMemoryPath = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MEMORY_PATH_LENGTH),
+)
+export const RecordedSha256 = Schema.String.check(Schema.isMinLength(64), Schema.isMaxLength(64))
+
+const isWellFormedText = Schema.makeFilter((text: string) => text.isWellFormed(), {
+	expected: "well-formed Unicode text (no unpaired surrogates)",
+})
+
+export const MemoryContent = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_CONTENT_BYTES),
+	isWellFormedText,
+)
+
+export const ContentSha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
+
+export const MemorySize = NonNegativeInt.check(Schema.isLessThanOrEqualTo(MAX_MEMORY_CONTENT_BYTES))
+
+export const MemoryOperation = Schema.Literals(["created", "modified"])
+
+export const WritePrecondition = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("none") }),
+	Schema.Struct({ type: Schema.Literal("absent") }),
+	Schema.Struct({ type: Schema.Literal("present") }),
+	Schema.Struct({ type: Schema.Literal("content_sha256"), content_sha256: RecordedSha256 }),
+])
+export type WritePrecondition = typeof WritePrecondition.Type
+
+export const MemoryStoreSnapshot = Schema.Struct({
+	id: MemoryStoreId,
+	type: Schema.Literal("memory_store"),
+	name: MemoryStoreName,
+	description: MemoryStoreDescription,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type MemoryStoreSnapshot = typeof MemoryStoreSnapshot.Type
+
+export const MemorySnapshot = Schema.Struct({
+	id: MemoryId,
+	type: Schema.Literal("memory"),
+	memory_store_id: MemoryStoreId,
+	path: RecordedMemoryPath,
+	content: MemoryContent,
+	content_sha256: RecordedSha256,
+	content_size_bytes: MemorySize,
+	version: PositiveInt,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type MemorySnapshot = typeof MemorySnapshot.Type
+
+export const MemoryIndexEntry = Schema.Struct({
+	id: MemoryId,
+	path: RecordedMemoryPath,
+	content_sha256: RecordedSha256,
+	content_size_bytes: MemorySize,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type MemoryIndexEntry = typeof MemoryIndexEntry.Type
