@@ -74,6 +74,32 @@ export const sessionQuery = (id: string) =>
 		queryFn: ({ signal }) => checkfu.sessions.retrieve(id, signal),
 	})
 
+export const artifactsPage = (after?: string) =>
+	queryOptions({
+		queryKey: ["artifacts", "page", after ?? null],
+		queryFn: ({ signal }) => checkfu.artifacts.list(after, signal),
+	})
+
+export const artifactQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["artifacts", "one", id],
+		queryFn: ({ signal }) => checkfu.artifacts.retrieve(id, signal),
+	})
+
+export const artifactVersionQuery = (id: string, version: number) =>
+	queryOptions({
+		queryKey: ["artifact-versions", id, version],
+		queryFn: ({ signal }) => checkfu.artifacts.version(id, version, signal),
+		staleTime: Number.POSITIVE_INFINITY,
+	})
+
+export const artifactFileQuery = (id: string, version: number, path: string) =>
+	queryOptions({
+		queryKey: ["artifact-files", id, version, path],
+		queryFn: ({ signal }) => checkfu.artifacts.file(id, version, path, signal),
+		staleTime: Number.POSITIVE_INFINITY,
+	})
+
 export const transcriptQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["transcripts", id],

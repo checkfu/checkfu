@@ -205,7 +205,7 @@ Checkfu is built out of four main layers:
 ## Interfaces
 
 - **TypeScript SDK (`@checkfu/sdk`).** Workspace package at [`packages/sdk`](packages/sdk/README.md) providing both an Effect client (`CheckfuClient` + `Layer` + `Stream` + `Data.TaggedError`) and a Promise / `AsyncIterable` client (`new Checkfu()`), with retries, auto `Idempotency-Key` headers, SSE streaming, and cursor pagination. External apps in any language can also call `/v1/*` or generate clients from `GET /openapi.json`.
-- **Web Dashboard.** Printed by `deploy` as `Dashboard` (`http://app-1340.localhost:1340` locally). Sign in with `CHECKFU_API_KEY` to manage sessions, agents, environments, and automations, and stream active transcripts.
+- **Web Dashboard.** Printed by `deploy` as `Dashboard` (`http://app-1340.localhost:1340` locally). Sign in with `CHECKFU_API_KEY` to manage sessions, agents, environments, automations, and artifacts (read files version by version, create viewing links, publish, unpublish, and delete), and stream active transcripts.
 - **CLI (`checkfu`).** Run `bun checkfu --help` in a trusted checkout, or compile a standalone binary with `bun run checkfu:build` (`apps/cli/dist/checkfu`). Supports `--format` (`auto`, `json`, `jsonl`, `yaml`, `pretty`, `raw`) and GJSON `--transform` queries across `agents`, `environments`, `sessions`, `sessions:events`, `sessions:resources`, `sessions:outputs`, `memory-stores`, `memory-stores:memories`, `artifacts`, `artifacts:versions`, `vaults`, `vaults:credentials`, `automations`, and `automations:runs`.
 - **MCP Server.** `McpWorker` speaks MCP `2026-07-28` and exposes one tool per API operation, omitting credential create/update (`x-checkfu-mcp: false`) so secrets never pass through a calling model's context:
 
