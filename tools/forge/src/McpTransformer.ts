@@ -76,7 +76,12 @@ const rewriteRefs = (value: Json, referenced: Set<string>): Json => {
 	return out
 }
 
-const withDefinitions = (schema: JsonRecord, components: JsonRecord, label: string): JsonRecord => {
+const withDefinitions = (
+	schema: JsonRecord,
+	components: JsonRecord,
+	label: string,
+	prepare: (component: Json) => Json,
+): JsonRecord => {
 	const referenced = new Set<string>()
 	const rewritten = rewriteRefs(schema, referenced)
 	const definitions: Record<string, Json> = {}
@@ -85,7 +90,7 @@ const withDefinitions = (schema: JsonRecord, components: JsonRecord, label: stri
 		if (component === undefined) {
 			throw new Error(`${label}: unresolved schema reference ${SCHEMA_REF_PREFIX}${name}.`)
 		}
-		definitions[name] = rewriteRefs(component, referenced)
+		definitions[name] = rewriteRefs(prepare(component), referenced)
 	}
 	if (!isJsonRecord(rewritten)) {
 		throw new Error(`${label}: input schema is not an object.`)
@@ -93,17 +98,48 @@ const withDefinitions = (schema: JsonRecord, components: JsonRecord, label: stri
 	return referenced.size === 0 ? rewritten : { ...rewritten, $defs: definitions }
 }
 
-const withoutSecrets = (value: Json, label: string): Json => {
+const isSecret = (
+	schema: Json | undefined,
+	components: JsonRecord,
+	seen: ReadonlySet<string>,
+): boolean => {
+	if (!isJsonRecord(schema)) {
+		return false
+	}
+	if (schema["format"] === "password") {
+		return true
+	}
+	const composed = ["anyOf", "oneOf", "allOf", "items", "additionalProperties"].flatMap((key) => {
+		const members = schema[key]
+		return Array.isArray(members)
+			? members.map((member: Json): Json => member)
+			: isJsonRecord(members)
+				? [members]
+				: []
+	})
+	if (composed.some((member: Json) => isSecret(member, components, seen))) {
+		return true
+	}
+	const ref = schema["$ref"]
+	return (
+		typeof ref === "string" &&
+		ref.startsWith(SCHEMA_REF_PREFIX) &&
+		!seen.has(ref) &&
+		isSecret(components[ref.slice(SCHEMA_REF_PREFIX.length)], components, new Set([...seen, ref]))
+	)
+}
+
+const withoutSecrets = (value: Json, components: JsonRecord, label: string): Json => {
 	if (Array.isArray(value)) {
-		return value.map((item: Json) => withoutSecrets(item, label))
+		return value.map((item: Json) => withoutSecrets(item, components, label))
 	}
 	if (!isJsonRecord(value)) {
 		return value
 	}
 	const properties = value["properties"]
 	const secrets = isJsonRecord(properties)
-		? Object.keys(properties).filter(
-				(name) => recordAt(properties, name)?.["format"] === "password",
+		? Object.keys(properties).filter((name) =>
+				isSecret(recordAt(properties, name), components, new Set()),
 			)
 		: []
 	const required = value["required"]
@@ -113,16 +149,22 @@ const withoutSecrets = (value: Json, label: string): Json => {
 			`${label}: MCP tools cannot take the secret ${JSON.stringify(demanded)}, which this operation requires. Set "${MCP_EXTENSION}" to false for this operation.`,
 		)
 	}
+	const extra = value["additionalProperties"]
+	if (secrets.length > 0 && extra !== false) {
+		throw new Error(
+			`${label}: MCP tools cannot leave out the secret ${JSON.stringify(secrets[0])} from an object that accepts other keys, because the key would still be accepted. Close the object or set "${MCP_EXTENSION}" to false for this operation.`,
+		)
+	}
 	return Object.fromEntries(
 		Object.entries(value).map(([key, child]): [string, Json] => [
 			key,
 			key === "properties" && isJsonRecord(child)
 				? Object.fromEntries(
 						Object.entries(child).flatMap(([name, schema]): Array<[string, Json]> =>
-							secrets.includes(name) ? [] : [[name, withoutSecrets(schema, label)]],
+							secrets.includes(name) ? [] : [[name, withoutSecrets(schema, components, label)]],
 						),
 					)
-				: withoutSecrets(child, label),
+				: withoutSecrets(child, components, label),
 		]),
 	)
 }
@@ -322,13 +364,16 @@ const projectOperation = (
 		}
 	}
 
-	const inputSchema = withoutSecrets(
-		withDefinitions(
-			{ type: "object", properties, required, additionalProperties: false },
-			components,
-			label,
-		),
+	const unsecret = withoutSecrets(
+		{ type: "object", properties, required, additionalProperties: false },
+		components,
 		label,
+	)
+	if (!isJsonRecord(unsecret)) {
+		throw new Error(`${label}: input schema is not an object.`)
+	}
+	const inputSchema = withDefinitions(unsecret, components, label, (component) =>
+		withoutSecrets(component, components, label),
 	)
 	if (!isJsonRecord(inputSchema)) {
 		throw new Error(`${label}: input schema is not an object.`)

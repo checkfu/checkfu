@@ -5,9 +5,11 @@ import { runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import {
 	MAX_INLINE_IMAGE_BYTES,
+	MAX_GIT_OUTPUT_CHARACTERS,
 	WORKSPACE_TOOL_OPTIONS,
 	asLiteral,
 	boundWorkspaceResult,
+	gitAnswer,
 	workspaceExtension,
 	workspaceOutputLimits,
 	workspaceToolDeclarations,
@@ -196,5 +198,17 @@ describe("workspace tool output", () => {
 		expect(asLiteral(grep)).toEqual({ ...grep, arguments: { ...grep.arguments, regex: false } })
 		const read = { id: "r", name: "read", arguments: { path: "/workspace/a", regex: true } }
 		expect(asLiteral(read)).toBe(read)
+	})
+
+	it("cuts git output too long to return, and keeps how git ended", () => {
+		const long = "d".repeat(MAX_GIT_OUTPUT_CHARACTERS * 4)
+		const cut = gitAnswer(long, "", 0)
+		expect([cut.isError, textOf(cut).length < long.length]).toEqual([false, true])
+		expect(textOf(cut)).toContain(`git printed ${long.length} characters`)
+		expect(gitAnswer("", "fatal: nope\n", 128)).toEqual({
+			content: [{ type: "text", text: "fatal: nope\n" }],
+			isError: true,
+		})
+		expect(textOf(gitAnswer("", "", 0))).toBe("exit code 0")
 	})
 })

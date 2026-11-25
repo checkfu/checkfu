@@ -19,8 +19,8 @@ import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
+import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import {
@@ -78,6 +78,10 @@ export interface WorkspaceExecutorService {
 		resourceId: string,
 		token: string,
 		replace: boolean,
+	) => Effect.Effect<void, HarnessCallFailed>
+	readonly interruptWorkspace: (
+		sessionId: string,
+		token: TurnToken,
 	) => Effect.Effect<void, HarnessCallFailed>
 	readonly discardWorkspace: (sessionId: string) => Effect.Effect<void, HarnessCallFailed>
 }
@@ -261,18 +265,17 @@ export const PiDurableHarnessLive = boundedHarness(
 					}
 
 					const token = { turn: args.turn }
-					const entered = yield* withRetry(executor.enterWorkspace(args.session_id, token)).pipe(
-						Effect.tapError((error) =>
-							Effect.logError("Workspace unreachable", args.session_id, error.cause),
-						),
-						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
-					)
-					if (!entered) {
-						return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
-					}
-
 					const repositories = args.resources
 					if (repositories.length > 0) {
+						const entered = yield* withRetry(executor.enterWorkspace(args.session_id, token)).pipe(
+							Effect.tapError((error) =>
+								Effect.logError("Workspace unreachable", args.session_id, error.cause),
+							),
+							Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+						)
+						if (!entered) {
+							return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
+						}
 						const prepared = yield* withRetry(
 							executor.prepareWorkspace(
 								args.session_id,
@@ -288,6 +291,9 @@ export const PiDurableHarnessLive = boundedHarness(
 							),
 							Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 						)
+						if (!prepared.ok && "interrupted" in prepared) {
+							return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
+						}
 						if (!prepared.ok) {
 							const failed = repositories.find(({ id }) => id === prepared.resource_id)
 							return yield* Effect.fail<TurnFailed>({
@@ -348,8 +354,14 @@ export const PiDurableHarnessLive = boundedHarness(
 			interrupt: (args) =>
 				Effect.gen(function* () {
 					const { interruptTimeout } = yield* HarnessLimits
-					yield* withRetry(
-						executor.abortTurn(conversationName(args.session_id), turnOperationId(args.turn)),
+					yield* Effect.all(
+						[
+							withRetry(
+								executor.abortTurn(conversationName(args.session_id), turnOperationId(args.turn)),
+							),
+							withRetry(executor.interruptWorkspace(args.session_id, { turn: args.turn })),
+						],
+						{ concurrency: "unbounded", discard: true },
 					).pipe(Effect.timeout(interruptTimeout))
 				}).pipe(
 					Effect.tapError((error) =>
@@ -387,6 +399,7 @@ const NO_WORKSPACES: WorkspaceExecutorService = {
 	enterWorkspace: () => Effect.succeed(true),
 	prepareWorkspace: () => Effect.succeed({ ok: true }),
 	storeRepositoryToken: () => Effect.void,
+	interruptWorkspace: () => Effect.void,
 	discardWorkspace: () => Effect.void,
 }
 

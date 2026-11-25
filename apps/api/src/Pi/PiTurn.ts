@@ -75,5 +75,6 @@ export const PiHarnessCalls = {
 		args: Schema.Tuple([Schema.String, Schema.String, Schema.String, Schema.Boolean]),
 		result: Schema.Void,
 	},
+	interruptWorkspace: { args: Schema.Tuple([Schema.String, TurnToken]), result: Schema.Void },
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 } as const

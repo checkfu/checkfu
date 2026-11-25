@@ -331,10 +331,14 @@ export const makePiDurableTestLayer = (
 					preparedWorkspaces.push({ sessionId, repositories, allowedHosts })
 					return preparations.shift() ?? { ok: true }
 				}),
+			interruptWorkspace: (sessionId, token) =>
+				Effect.sync(() => {
+					workspaceCalls.push(`interrupt ${sessionId} ${token.turn}`)
+				}),
 			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
 				Effect.suspend(() => {
 					tokenDeliveries.push(token)
-					return unreachable.has(sessionId)
+					return unreachable.has(sessionId) || unreachable.has("*")
 						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
 						: Effect.void
 				}).pipe(

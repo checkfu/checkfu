@@ -1892,7 +1892,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												type: "string",
 												maxLength: 1024,
 												pattern:
-													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
+													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
 											},
 											checkout: {
 												anyOf: [
@@ -1941,7 +1941,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 													"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 												allOf: [
 													{
-														pattern: "^\\/workspace\\/.",
+														pattern: "^\\/workspace\\/\\S+$",
 														description:
 															"Where the repository is cloned. Defaults to /workspace/<repository>.",
 													},
@@ -2031,7 +2031,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 												type: "string",
 												maxLength: 1024,
 												pattern:
-													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
+													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
 											},
 											checkout: {
 												anyOf: [
@@ -2080,7 +2080,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 													"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 												allOf: [
 													{
-														pattern: "^\\/workspace\\/.",
+														pattern: "^\\/workspace\\/\\S+$",
 														description:
 															"Where the repository is cloned. Defaults to /workspace/<repository>.",
 													},

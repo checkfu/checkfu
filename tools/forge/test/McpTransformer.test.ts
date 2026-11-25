@@ -483,6 +483,148 @@ describe("MCP tool projection", () => {
 				),
 			),
 		).toThrow(/POST \/v1\/agents\/search: MCP tools cannot take the secret "token"/)
+		const withSecretComponent = (schema: Json) => {
+			const spec = JSON.parse(withOperation("/v1/agents/search", "post", body(schema))) as {
+				components: { schemas: Record<string, Json> }
+			}
+			spec.components.schemas["Token"] = { $ref: "#/components/schemas/TokenText" }
+			spec.components.schemas["TokenText"] = secret
+			return JSON.stringify(spec)
+		}
+		const referenced = project(
+			withSecretComponent({
+				type: "object",
+				properties: { name: { type: "string" }, token: { $ref: "#/components/schemas/Token" } },
+				required: ["name"],
+				additionalProperties: false,
+			}),
+		).find((candidate) => candidate.name === "agents_searchAgents")
+		expect(JSON.stringify(referenced?.inputSchema)).not.toContain("token")
+		expect(JSON.stringify(referenced?.inputSchema)).not.toContain("TokenText")
+		expect(() =>
+			project(
+				withSecretComponent({
+					type: "object",
+					properties: { token: { $ref: "#/components/schemas/Token" } },
+					required: ["token"],
+				}),
+			),
+		).toThrow(/MCP tools cannot take the secret "token"/)
+		const withObjectComponent = (credentials: Json) => {
+			const spec = JSON.parse(
+				withOperation(
+					"/v1/agents/search",
+					"post",
+					body({
+						type: "object",
+						properties: {
+							name: { type: "string" },
+							sources: { type: "array", items: { $ref: "#/components/schemas/Credentials" } },
+						},
+						required: ["name"],
+						additionalProperties: false,
+					}),
+				),
+			) as { components: { schemas: Record<string, Json> } }
+			spec.components.schemas["Credentials"] = credentials
+			return JSON.stringify(spec)
+		}
+		const inObject = project(
+			withObjectComponent({
+				type: "object",
+				properties: { url: { type: "string" }, secret_token: secret },
+				required: ["url"],
+				additionalProperties: false,
+			}),
+		).find((candidate) => candidate.name === "agents_searchAgents")
+		expect(JSON.stringify(inObject?.inputSchema)).toContain("Credentials")
+		expect(JSON.stringify(inObject?.inputSchema)).not.toContain("secret_token")
+		expect(() =>
+			project(
+				withObjectComponent({
+					type: "object",
+					properties: { url: { type: "string" }, secret_token: secret },
+					required: ["url", "secret_token"],
+				}),
+			),
+		).toThrow(/MCP tools cannot take the secret "secret_token"/)
+		const nullable = { anyOf: [secret, { type: "null" }] }
+		const composed = project(
+			withOperation(
+				"/v1/agents/search",
+				"post",
+				body({
+					type: "object",
+					properties: { name: { type: "string" }, maybe_token: nullable },
+					required: ["name"],
+					additionalProperties: false,
+				}),
+			),
+		).find((candidate) => candidate.name === "agents_searchAgents")
+		expect(JSON.stringify(composed?.inputSchema)).not.toContain("maybe_token")
+		expect(() =>
+			project(
+				withOperation(
+					"/v1/agents/search",
+					"post",
+					body({
+						type: "object",
+						properties: { maybe_token: nullable },
+						required: ["maybe_token"],
+					}),
+				),
+			),
+		).toThrow(/MCP tools cannot take the secret "maybe_token"/)
+		const listed = { type: "array", items: secret }
+		const collected = project(
+			withOperation(
+				"/v1/agents/search",
+				"post",
+				body({
+					type: "object",
+					properties: {
+						name: { type: "string" },
+						tokens: listed,
+						by_host: { type: "object", additionalProperties: secret },
+					},
+					required: ["name"],
+					additionalProperties: false,
+				}),
+			),
+		).find((candidate) => candidate.name === "agents_searchAgents")
+		expect(JSON.stringify(collected?.inputSchema)).not.toContain("tokens")
+		expect(JSON.stringify(collected?.inputSchema)).not.toContain("by_host")
+		expect(() =>
+			project(
+				withOperation(
+					"/v1/agents/search",
+					"post",
+					body({ type: "object", properties: { tokens: listed }, required: ["tokens"] }),
+				),
+			),
+		).toThrow(/MCP tools cannot take the secret "tokens"/)
+		expect(() =>
+			project(
+				withOperation(
+					"/v1/agents/search",
+					"post",
+					body({
+						type: "object",
+						properties: { name: { type: "string" }, token: secret },
+						additionalProperties: { type: "string" },
+					}),
+				),
+			),
+		).toThrow(/cannot leave out the secret "token" from an object that accepts other keys/)
+		expect(() =>
+			project(
+				withOperation(
+					"/v1/agents/search",
+					"post",
+					body({ type: "object", properties: { name: { type: "string" }, token: secret } }),
+				),
+			),
+		).toThrow(/cannot leave out the secret "token" from an object that accepts other keys/)
 		const created = project(exportDeterministicOpenApiJson()).find(
 			(candidate) => candidate.name === "sessions_createSession",
 		)

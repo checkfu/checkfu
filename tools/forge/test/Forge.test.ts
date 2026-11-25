@@ -251,6 +251,7 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(cliCommands).toContain('FlagInt("current-version")')
 		expect(cliCommands).toContain('"flagName":"current-version","wireName":"version"')
 		expect(cliCommands).not.toContain('FlagInt("version")')
+		expect(cliCommands).not.toContain('FlagString("authorization-token")')
 	})
 
 	it("bypasses OpenApi.fromApi caching so nondeterministic OpenAPI generation is detected", () => {

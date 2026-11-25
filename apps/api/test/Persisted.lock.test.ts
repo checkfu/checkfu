@@ -379,6 +379,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					"abortTurn",
 					"discardWorkspace",
 					"enterWorkspace",
+					"interruptWorkspace",
 					"prepareWorkspace",
 					"recoverTurn",
 					"runTurn",
@@ -516,14 +517,14 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("lets a view change shape only when its version increased", () =>
 		Effect.gen(function* () {
-			const id = "view:Checkfu.TurnInput@v3"
+			const id = "view:Checkfu.TurnInput@v4"
 			expect(persistedShapes.map((shape) => shape.id)).toContain(id)
 			const earlier = viewShapeId("Checkfu", "TurnInput", 0)
-			const later = viewShapeId("Checkfu", "TurnInput", 4)
+			const later = viewShapeId("Checkfu", "TurnInput", 5)
 
 			expect(yield* lockProblems(lockWith({ [earlier]: [{ shape: "of v0" }] }))).toEqual([])
 
-			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v4" }] }))
+			const downgraded = yield* lockProblems(lockWith({ [later]: [{ shape: "of v5" }] }))
 			expect(downgraded.length).toBe(1)
 			expect(downgraded[0]).toContain("only ever increases")
 
@@ -571,7 +572,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 
 	it.effect("blocks a view version bump whose new state breaks queued policy deliveries", () =>
 		Effect.gen(function* () {
-			const viewId = "view:Checkfu.TurnInput@v3"
+			const viewId = "view:Checkfu.TurnInput@v4"
 			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
 			expect(persistedShapes.map((shape) => shape.id)).toEqual(
 				expect.arrayContaining([viewId, startDeliveryId]),
@@ -585,7 +586,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					if (shape.id === viewId) {
 						return {
 							...shape,
-							id: viewShapeId("Checkfu", "TurnInput", 4),
+							id: viewShapeId("Checkfu", "TurnInput", 5),
 							schema: nextState as unknown as PersistedShape["schema"],
 						}
 					}

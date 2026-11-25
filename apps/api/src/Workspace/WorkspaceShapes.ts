@@ -15,5 +15,6 @@ export type RepositoryMount = typeof RepositoryMount.Type
 export const WorkspacePreparation = Schema.Union([
 	Schema.Struct({ ok: Schema.Literal(true) }),
 	Schema.Struct({ ok: Schema.Literal(false), resource_id: Schema.String, message: Schema.String }),
+	Schema.Struct({ ok: Schema.Literal(false), interrupted: Schema.Literal(true) }),
 ])
 export type WorkspacePreparation = typeof WorkspacePreparation.Type

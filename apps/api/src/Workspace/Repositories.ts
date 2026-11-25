@@ -39,6 +39,27 @@ const capped = (response: Response): Response => {
 	)
 }
 
+export const makeGitCalls = () => {
+	let current: AbortSignal | undefined
+	let queue: Promise<unknown> = Promise.resolve()
+	return {
+		signal: (): AbortSignal | undefined => current,
+		run: <A>(signal: AbortSignal, work: () => Promise<A>): Promise<A> => {
+			const next = queue.then(async () => {
+				signal.throwIfAborted()
+				current = signal
+				try {
+					return await work()
+				} finally {
+					current = undefined
+				}
+			})
+			queue = next.catch(() => undefined)
+			return next
+		},
+	}
+}
+
 export const createRepositoryFetch =
 	(options: {
 		readonly repositories: () => ReadonlyArray<Pick<RepositoryMount, "id" | "url">>
@@ -46,8 +67,11 @@ export const createRepositoryFetch =
 		readonly allowedHosts: () => ReadonlyArray<string> | null
 		readonly baseUrl: string | null
 		readonly fetch: typeof fetch
+		readonly signal?: () => AbortSignal | undefined
 	}): typeof fetch =>
 	async (input, init) => {
+		const call = options.signal?.()
+		call?.throwIfAborted()
 		const href =
 			URL.parse(typeof input === "string" ? input : "href" in input ? input.href : "")?.href ?? null
 		const repository =
@@ -57,12 +81,12 @@ export const createRepositoryFetch =
 						.repositories()
 						.find(({ url }) => href.startsWith(`${url}/`) || href.startsWith(`${url}.git/`))
 		if (href === null || repository === undefined) {
-			return new Response(NOT_MOUNTED, { status: 403 })
+			throw new Error(NOT_MOUNTED)
 		}
 		const host = new URL(href).hostname
 		const allowed = options.allowedHosts()
 		if (allowed !== null && !allowed.some((entry) => entry.toLowerCase() === host)) {
-			return new Response(notAllowed(host), { status: 403 })
+			throw new Error(notAllowed(host))
 		}
 		const headers = new Headers(init?.headers)
 		headers.delete("authorization")
@@ -80,6 +104,7 @@ export const createRepositoryFetch =
 					signal: AbortSignal.any([
 						AbortSignal.timeout(GIT_REQUEST_TIMEOUT_MS),
 						...(init?.signal ? [init.signal] : []),
+						...(call === undefined ? [] : [call]),
 					]),
 				},
 			),

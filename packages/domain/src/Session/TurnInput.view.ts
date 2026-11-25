@@ -23,7 +23,7 @@ export const TurnInputState = Schema.Struct({
 export type TurnInputState = typeof TurnInputState.Type
 
 export class TurnInput extends Domain.View("TurnInput", {
-	version: 3,
+	version: 4,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(TurnInputState),

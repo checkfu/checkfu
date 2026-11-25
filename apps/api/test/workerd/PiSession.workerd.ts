@@ -1173,6 +1173,87 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(reply?.content?.[0]?.text).toBe(`Log: ${pinned} Pinned\n`)
 	}, 120_000)
 
+	it("tells the session why a repository was not reached, when its host is not allowed", async () => {
+		fakeOpenAI.setHandler(() => ({ kind: "reply", text: "unused" }))
+		const fenced = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Workerd Fenced Env",
+			config: {
+				type: "cloud",
+				networking: {
+					type: "limited",
+					allowed_hosts: ["example.com"],
+					allow_mcp_servers: false,
+					allow_package_managers: false,
+				},
+			},
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: fenced.id,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: "Look." }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 120_000)
+		const failure = (await listAllEvents(session.id)).find((e) => e.type === "session.error")
+		expect(JSON.stringify(failure)).toContain("allowed_hosts")
+	}, 180_000)
+
+	it("checks out the branch it was asked for when a tag has the same name", async () => {
+		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
+		const tip = fakeGitHub.git("acme/api", "rev-parse", "main").trim()
+		const onBranch = fakeGitHub
+			.git("acme/api", "commit-tree", tree, "-p", tip, "-m", "On the branch")
+			.trim()
+		const onTag = fakeGitHub
+			.git("acme/api", "commit-tree", tree, "-p", tip, "-m", "On the tag")
+			.trim()
+		fakeGitHub.git("acme/api", "update-ref", "refs/heads/release", onBranch)
+		fakeGitHub.git("acme/api", "update-ref", "refs/tags/release", onTag)
+		const repo = "/workspace/release"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["log", "-1", "--format=%H %s"], cwd: repo },
+					}
+				: { kind: "reply", text: `Log: ${req.toolOutputs[0] ?? ""}` },
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					mount_path: repo,
+					authorization_token: TEST_GITHUB_TOKEN,
+					checkout: { type: "branch", name: "release" },
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [{ type: "user.message", content: [{ type: "text", text: "Show the tip." }] }],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 60_000)
+		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe(`Log: ${onBranch} On the branch\n`)
+	}, 120_000)
+
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
 		const queuedPrompt = "queued-after-interrupt"

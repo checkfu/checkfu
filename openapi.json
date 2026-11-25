@@ -6426,7 +6426,7 @@
 													"url": {
 														"type": "string",
 														"maxLength": 1024,
-														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 													},
 													"mount_path": {
 														"type": "string",
@@ -6434,7 +6434,7 @@
 														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 														"allOf": [
 															{
-																"pattern": "^\\/workspace\\/."
+																"pattern": "^\\/workspace\\/\\S+$"
 															}
 														]
 													},
@@ -7025,13 +7025,19 @@
 														"url": {
 															"type": "string",
 															"maxLength": 1024,
-															"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+															"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 														},
 														"authorization_token": {
 															"type": "string",
 															"format": "password",
-															"minLength": 1,
-															"maxLength": 4096
+															"allOf": [
+																{
+																	"minLength": 1,
+																	"x-forge-sensitive": true
+																}
+															],
+															"maxLength": 4096,
+															"description": "GitHub token used to clone and push. Never returned."
 														},
 														"checkout": {
 															"anyOf": [
@@ -7078,7 +7084,7 @@
 															"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 															"allOf": [
 																{
-																	"pattern": "^\\/workspace\\/.",
+																	"pattern": "^\\/workspace\\/\\S+$",
 																	"description": "Where the repository is cloned. Defaults to /workspace/<repository>."
 																}
 															]
@@ -7166,13 +7172,19 @@
 														"url": {
 															"type": "string",
 															"maxLength": 1024,
-															"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+															"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 														},
 														"authorization_token": {
 															"type": "string",
 															"format": "password",
-															"minLength": 1,
-															"maxLength": 4096
+															"allOf": [
+																{
+																	"minLength": 1,
+																	"x-forge-sensitive": true
+																}
+															],
+															"maxLength": 4096,
+															"description": "GitHub token used to clone and push. Never returned."
 														},
 														"checkout": {
 															"anyOf": [
@@ -7219,7 +7231,7 @@
 															"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 															"allOf": [
 																{
-																	"pattern": "^\\/workspace\\/.",
+																	"pattern": "^\\/workspace\\/\\S+$",
 																	"description": "Where the repository is cloned. Defaults to /workspace/<repository>."
 																}
 															]
@@ -7434,7 +7446,7 @@
 																"url": {
 																	"type": "string",
 																	"maxLength": 1024,
-																	"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+																	"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 																},
 																"mount_path": {
 																	"type": "string",
@@ -7442,7 +7454,7 @@
 																	"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 																	"allOf": [
 																		{
-																			"pattern": "^\\/workspace\\/."
+																			"pattern": "^\\/workspace\\/\\S+$"
 																		}
 																	]
 																},
@@ -8010,7 +8022,7 @@
 													"url": {
 														"type": "string",
 														"maxLength": 1024,
-														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 													},
 													"mount_path": {
 														"type": "string",
@@ -8018,7 +8030,7 @@
 														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 														"allOf": [
 															{
-																"pattern": "^\\/workspace\\/."
+																"pattern": "^\\/workspace\\/\\S+$"
 															}
 														]
 													},
@@ -8557,7 +8569,7 @@
 													"url": {
 														"type": "string",
 														"maxLength": 1024,
-														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 													},
 													"mount_path": {
 														"type": "string",
@@ -8565,7 +8577,7 @@
 														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 														"allOf": [
 															{
-																"pattern": "^\\/workspace\\/."
+																"pattern": "^\\/workspace\\/\\S+$"
 															}
 														]
 													},
@@ -10525,7 +10537,7 @@
 													"url": {
 														"type": "string",
 														"maxLength": 1024,
-														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 													},
 													"mount_path": {
 														"type": "string",
@@ -10533,7 +10545,7 @@
 														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 														"allOf": [
 															{
-																"pattern": "^\\/workspace\\/."
+																"pattern": "^\\/workspace\\/\\S+$"
 															}
 														]
 													},
@@ -10989,7 +11001,7 @@
 										"url": {
 											"type": "string",
 											"maxLength": 1024,
-											"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+											"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 										},
 										"mount_path": {
 											"type": "string",
@@ -10997,7 +11009,7 @@
 											"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 											"allOf": [
 												{
-													"pattern": "^\\/workspace\\/."
+													"pattern": "^\\/workspace\\/\\S+$"
 												}
 											]
 										},
@@ -11443,7 +11455,7 @@
 										"url": {
 											"type": "string",
 											"maxLength": 1024,
-											"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+											"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
 										},
 										"mount_path": {
 											"type": "string",
@@ -11451,7 +11463,7 @@
 											"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
 											"allOf": [
 												{
-													"pattern": "^\\/workspace\\/."
+													"pattern": "^\\/workspace\\/\\S+$"
 												}
 											]
 										},
@@ -11931,8 +11943,14 @@
 									"authorization_token": {
 										"type": "string",
 										"format": "password",
-										"minLength": 1,
-										"maxLength": 4096
+										"allOf": [
+											{
+												"minLength": 1,
+												"x-forge-sensitive": true
+											}
+										],
+										"maxLength": 4096,
+										"description": "New GitHub token for the repository. Never returned."
 									}
 								},
 								"required": ["authorization_token"],

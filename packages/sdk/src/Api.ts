@@ -52,7 +52,7 @@ import {
 	PublicationAddress,
 	RepositoryCheckout,
 	RepositoryMountPath,
-	RepositoryToken,
+	RepositoryTokenText,
 	RepositoryUrl,
 	ResourceId,
 	Timezone,
@@ -418,7 +418,7 @@ export const GitHubRepositoryParams = Schema.Struct({
 		description: "Repository URL, https://github.com/<owner>/<repository>",
 	}),
 	authorization_token: Schema.optionalKey(
-		RepositoryToken.annotate({
+		RepositoryTokenText.annotate({
 			description: "GitHub token used to clone and push. Never returned.",
 		}),
 	),
@@ -591,7 +591,7 @@ export const SessionResourceItem = Schema.Struct({
 export type SessionResourceItem = typeof SessionResourceItem.Type
 
 export const UpdateSessionResourceBody = Schema.Struct({
-	authorization_token: RepositoryToken.annotate({
+	authorization_token: RepositoryTokenText.annotate({
 		description: "New GitHub token for the repository. Never returned.",
 	}),
 })

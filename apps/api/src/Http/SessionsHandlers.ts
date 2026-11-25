@@ -28,6 +28,7 @@ import * as Sse from "effect/encoding/Sse"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
@@ -438,12 +439,28 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						.pipe(
 							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
 						)
-					yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
+					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
 						return resource.authorization_token === undefined || stored === undefined
-							? Effect.void
-							: storeToken(id, stored.id, resource.authorization_token, false)
+							? Effect.succeed([])
+							: harness
+									.storeRepositoryToken({
+										session_id: id,
+										resource_id: stored.id,
+										authorization_token: Redacted.make(resource.authorization_token),
+										replace: false,
+									})
+									.pipe(
+										Effect.as([]),
+										Effect.catchTag("HarnessUnavailable", () => Effect.succeed([stored.id])),
+									)
 					})
+					if (unstored.flat().length > 0) {
+						return yield* reject(
+							503,
+							`The tokens for resources ${unstored.flat().join(", ")} of session ${id} could not be stored. Send each again with POST /v1/sessions/${id}/resources/{resource_id}.`,
+						)
+					}
 					const pinnedVersion = receipt.reply.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
 						agentId,
@@ -530,7 +547,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (session.status === "terminated") {
 						return yield* reject(409, `Session ${session.id} is terminated.`)
 					}
-					yield* storeToken(session.id, resource.id, payload.authorization_token, true)
+					yield* storeToken(
+						session.id,
+						resource.id,
+						Redacted.make(payload.authorization_token),
+						true,
+					)
 					if ((yield* sessions.get(session.id))._tag === "Terminated") {
 						return yield* reject(409, `Session ${session.id} is terminated.`)
 					}

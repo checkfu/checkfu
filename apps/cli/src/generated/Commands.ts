@@ -2292,14 +2292,6 @@ const sessionsResourcesUpdateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "string",
 			required: true,
 		},
-		{
-			propName: "authorizationToken",
-			flagName: "authorization-token",
-			wireName: "authorization_token",
-			location: "body",
-			kind: "string",
-			required: false,
-		},
 	],
 }
 
@@ -2313,10 +2305,6 @@ const sessionsResourcesUpdateCommand = CommandMake(
 		resourceId: FlagString("resource-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Session resource ID"),
-		),
-		authorizationToken: FlagString("authorization-token").pipe(
-			FlagWithDescription("Body field authorization_token"),
-			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(sessionsResourcesUpdateCommandSpec, flags),

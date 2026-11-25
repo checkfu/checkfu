@@ -322,6 +322,9 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	}
 
 	for (const field of bodyFields) {
+		if (field.sensitive) {
+			continue
+		}
 		const repeat = cliExt.repeatArrayField
 		if (repeat !== undefined && repeat.field === field.wireName) {
 			const repeatMax = repeat.max ?? extractArrayMaxItems(field.type)

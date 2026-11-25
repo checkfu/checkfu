@@ -115,6 +115,28 @@ const DECLARATIONS_ONLY = {
 	},
 }
 
+export const MAX_GIT_OUTPUT_CHARACTERS = 256 * 1024
+
+export const gitAnswer = (
+	stdout: string,
+	stderr: string,
+	exitCode: number,
+): WorkspaceToolResult => {
+	const output = `${stdout}${stderr}`
+	return {
+		content: [
+			{
+				type: "text",
+				text:
+					output.length > MAX_GIT_OUTPUT_CHARACTERS
+						? `${output.slice(0, MAX_GIT_OUTPUT_CHARACTERS)}\n[git printed ${output.length} characters; the first ${MAX_GIT_OUTPUT_CHARACTERS} are shown.]`
+						: output || `exit code ${exitCode}`,
+			},
+		],
+		isError: exitCode !== 0,
+	}
+}
+
 export const asLiteral = (call: WorkspaceToolCall): WorkspaceToolCall =>
 	call.name === "grep" && Predicate.isObject(call.arguments)
 		? { ...call, arguments: { ...call.arguments, regex: false } }

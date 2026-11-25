@@ -278,13 +278,13 @@ export const MountPath = Schema.String.check(
 )
 
 export const RepositoryMountPath = MountPath.check(
-	Schema.isPattern(/^\/workspace\/./u, {
-		expected: `a path inside ${REPOSITORY_MOUNT_ROOT}`,
+	Schema.isPattern(/^\/workspace\/\S+$/u, {
+		expected: `a path inside ${REPOSITORY_MOUNT_ROOT}, without spaces or line breaks`,
 	}),
 )
 
 const REPOSITORY_URL =
-	/^https:\/\/github\.com\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/u
+	/^https:\/\/github\.com\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/u
 
 const isRepositoryName = (url: string): boolean => {
 	const name = url.slice(url.lastIndexOf("/") + 1)
@@ -303,18 +303,32 @@ export const RepositoryUrl = Schema.String.check(
 
 export const MAX_REPOSITORY_TOKEN_LENGTH = 4096
 
-export const RepositoryToken = Schema.Redacted(
-	Schema.String.annotate({ format: "password" }).check(
-		Schema.isMinLength(1),
-		Schema.isMaxLength(MAX_REPOSITORY_TOKEN_LENGTH),
-	),
+export const RepositoryTokenText = Schema.String.annotate({ format: "password" }).check(
+	Schema.isMinLength(1, { toJsonSchema: () => ({ minLength: 1, "x-forge-sensitive": true }) }),
+	Schema.isMaxLength(MAX_REPOSITORY_TOKEN_LENGTH),
 )
+export const RepositoryToken = Schema.Redacted(RepositoryTokenText)
 export type RepositoryToken = typeof RepositoryToken.Type
+
+const isBranchName = (name: string): boolean =>
+	Array.from({ length: name.length }, (_, index) => name.charCodeAt(index)).every(
+		(code) => code > 0x20 && code !== 0x7f && !"~^:?*[\\".includes(String.fromCharCode(code)),
+	) &&
+	!/\s/u.test(name) &&
+	!name.includes("..") &&
+	!name.includes("@{") &&
+	name !== "@" &&
+	!name.endsWith(".") &&
+	name.split("/").every((part) => part !== "" && !part.startsWith(".") && !part.endsWith(".lock"))
 
 export const RepositoryCheckout = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("branch"),
-		name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_BRANCH_NAME_LENGTH)),
+		name: Schema.String.check(
+			Schema.isMinLength(1),
+			Schema.isMaxLength(MAX_BRANCH_NAME_LENGTH),
+			Schema.makeFilter(isBranchName, { expected: "a git branch name" }),
+		),
 	}),
 	Schema.Struct({
 		type: Schema.Literal("commit"),
