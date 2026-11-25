@@ -393,6 +393,30 @@ export const ArtifactFilesInput = Schema.Array(ArtifactFileInput).check(
 	Schema.isMaxLength(MAX_ARTIFACT_FILES),
 )
 
+export const ArtifactKeptFileInput = Schema.Struct({
+	path: ArtifactPath.annotate({
+		description: "Relative path inside the artifact, for example index.html or assets/app.js",
+	}),
+	sha256: Sha256Hex.annotate({
+		description:
+			"sha256 of a file in the version being replaced, to keep its bytes without sending them again",
+	}),
+	content_type: Schema.optionalKey(
+		ArtifactContentType.annotate({
+			description: "Media type; inferred from the path extension when omitted",
+		}),
+	),
+})
+export type ArtifactKeptFileInput = typeof ArtifactKeptFileInput.Type
+
+export const ArtifactVersionFileInput = Schema.Union([ArtifactFileInput, ArtifactKeptFileInput])
+export type ArtifactVersionFileInput = typeof ArtifactVersionFileInput.Type
+
+export const ArtifactVersionFilesInput = Schema.Array(ArtifactVersionFileInput).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_ARTIFACT_FILES),
+)
+
 export const ArtifactFile = Schema.Struct({
 	path: ArtifactPath,
 	sha256: Sha256Hex,

@@ -57,7 +57,9 @@ const WellFormedString = Schema.String.check(
 )
 
 const Envelope = Schema.Struct({
-	path: Schema.optionalKey(Schema.Record(Schema.String, WellFormedString)),
+	path: Schema.optionalKey(
+		Schema.Record(Schema.String, Schema.Union([WellFormedString, Schema.Int])),
+	),
 	query: Schema.optionalKey(
 		Schema.Record(Schema.String, Schema.Union([WellFormedString, Schema.Finite, Schema.Boolean])),
 	),
@@ -105,7 +107,8 @@ export const makeToolHandler = (client: HttpClient.HttpClient, tool: GeneratedTo
 				Effect.mapError((error) => toolError("invalid_request_error", error.message)),
 			)
 			const path = Object.entries(args.path ?? {}).reduce(
-				(resolved, [name, value]) => resolved.replace(`{${name}}`, () => encodeURIComponent(value)),
+				(resolved, [name, value]) =>
+					resolved.replace(`{${name}}`, () => encodeURIComponent(String(value))),
 				tool.path,
 			)
 			const request = HttpClientRequest.make(tool.method)(path).pipe(

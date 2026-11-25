@@ -152,7 +152,7 @@ describe("List endpoints", () => {
 			}),
 		))
 
-	it("lists artifacts in creation order with their latest files, never the deleted ones", () =>
+	it("lists artifacts in creation order with their latest size, never the deleted ones", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
 				expect(yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts")).toEqual({
@@ -177,7 +177,8 @@ describe("List endpoints", () => {
 				const page = yield* listed(apiFetch, "/v1/artifacts", 2)
 				expect(idsOf(page)).toEqual([ids[0], ids[2]])
 				const fetched = yield* call<Resource>(apiFetch, "GET", `/v1/artifacts/${ids[2]}`)
-				expect(page.body.data[1]).toEqual(fetched.body)
+				const { files: _files, ...summary } = fetched.body as Resource & { readonly files: unknown }
+				expect(page.body.data[1]).toEqual(summary)
 				expect(fetched.body).toMatchObject({ version: 2, files: [{ path: "next.html" }] })
 
 				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/artifacts?order=desc&limit=1")

@@ -8,6 +8,23 @@ import * as Schema from "effect/Schema"
 import { buildSurfaceCatalog, isJsonArray } from "./SurfaceCatalog.ts"
 import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
+const NOT_DIGITS = ["", "a", "-1", "+1", "1.5", "1e3", " 1", "1 "]
+
+const digitsOnly = (pattern: Json | undefined) => {
+	if (typeof pattern !== "string") {
+		return undefined
+	}
+	const accepts = (value: string) => new RegExp(pattern, "u").test(value)
+	if (!accepts("1") || NOT_DIGITS.some(accepts)) {
+		return undefined
+	}
+	let digits = 1
+	while (digits < 15 && accepts("9".repeat(digits + 1))) {
+		digits += 1
+	}
+	return { minimum: accepts("0") ? 0 : 1, maximum: 10 ** digits - 1 }
+}
+
 type JsonRecord = Readonly<Record<string, Json>>
 
 interface McpTool {
@@ -216,6 +233,18 @@ const projectOperation = (
 			pathParameters.map((parameter) => {
 				const own = parameter.schema["pattern"]
 				const clauses = parameter.schema["allOf"]
+				const integer = digitsOnly(own)
+				if (integer !== undefined) {
+					const description = parameter.schema["description"]
+					return {
+						...parameter,
+						schema: {
+							type: "integer",
+							...integer,
+							...(description === undefined ? {} : { description }),
+						},
+					}
+				}
 				return {
 					...parameter,
 					schema: {

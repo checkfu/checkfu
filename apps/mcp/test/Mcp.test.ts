@@ -395,7 +395,7 @@ describe("Checkfu MCP server", () => {
 			const session = { path: { session_id: "sess_1" } }
 			const automation = { path: { automation_id: "auto_1" } }
 			const artifact = { path: { artifact_id: "art_1" } }
-			const artifactVersion = { path: { artifact_id: "art_1", version: "1" } }
+			const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
 			const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
 			const calls = {
 				agents_archiveAgent: agent,
@@ -408,7 +408,7 @@ describe("Checkfu MCP server", () => {
 				artifacts_createArtifactVersion: { ...artifact, body: { version: 1, files } },
 				artifacts_deleteArtifact: artifact,
 				artifacts_getArtifact: artifact,
-				artifacts_getArtifactFile: { ...artifactVersion, query: { path: "index.html" } },
+				artifacts_getArtifactFile: { ...artifactVersion, query: { file: "index.html" } },
 				artifacts_getArtifactVersion: artifactVersion,
 				artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
 				artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
@@ -427,7 +427,7 @@ describe("Checkfu MCP server", () => {
 					idempotency_key: "create-morning-report",
 				},
 				automations_getAutomation: automation,
-				automations_getRun: { path: { automation_id: "auto_1", run: "1" } },
+				automations_getRun: { path: { automation_id: "auto_1", run: 1 } },
 				automations_listAutomations: { query: { limit: "5" } },
 				automations_listRuns: { ...automation, query: { limit: "5" } },
 				automations_pauseAutomation: automation,
@@ -580,10 +580,16 @@ describe("Checkfu MCP server", () => {
 					Object.values(
 						Schema.decodeUnknownSync(
 							Schema.Struct({
-								properties: Schema.Record(Schema.String, Schema.Struct({ pattern: Schema.String })),
+								properties: Schema.Record(
+									Schema.String,
+									Schema.Union([
+										Schema.Struct({ type: Schema.Literal("string"), pattern: Schema.String }),
+										Schema.Struct({ type: Schema.Literal("integer") }),
+									]),
+								),
 							}),
 						)(schema).properties,
-					),
+					).flatMap((parameter) => (parameter.type === "string" ? [parameter] : [])),
 			}),
 		)
 		expect(pathParameters.length).toBeGreaterThan(0)
@@ -593,25 +599,11 @@ describe("Checkfu MCP server", () => {
 		expect(JSON.stringify(GENERATED_TOOLS)).not.toMatch(/\(\?<?[=!]/)
 	})
 
-	it("accepts exactly the artifact version numbers the API accepts", () => {
-		const apiAccepts = (value: string) =>
-			Option.isSome(Schema.decodeOption(ArtifactVersionFromString)(value))
-		const values = [
-			"1",
-			"9",
-			"10",
-			"999999999",
-			"0",
-			"01",
-			"-1",
-			"1.5",
-			" 1",
-			"1 ",
-			"latest",
-			"1000000000",
-			"1/2",
-			".",
-		]
+	it("accepts exactly the artifact version numbers the API accepts, as integers", () => {
+		const apiAccepts = (value: unknown) =>
+			typeof value === "number" &&
+			Option.isSome(Schema.decodeOption(ArtifactVersionFromString)(String(value)))
+		const values = [1, 9, 10, 999_999_999, 0, -1, 1.5, 1_000_000_000, "1", "latest"]
 		const tools = GENERATED_TOOLS.filter((tool) => tool.path.includes("{version}"))
 		expect(tools.map((tool) => tool.name).sort()).toEqual([
 			"artifacts_createArtifactLink",
@@ -625,8 +617,8 @@ describe("Checkfu MCP server", () => {
 			)
 			expect([tool.name, disagreements]).toEqual([tool.name, []])
 		}
-		expect(["1", "999999999"].every(apiAccepts)).toBe(true)
-		expect(["0", "01", "latest", "1000000000"].some(apiAccepts)).toBe(false)
+		expect([1, 999_999_999].every(apiAccepts)).toBe(true)
+		expect([0, 1.5, 1_000_000_000, "1"].some(apiAccepts)).toBe(false)
 	})
 
 	it("publishes the artifact file path and content-type rules the API applies", () => {
@@ -659,32 +651,34 @@ describe("Checkfu MCP server", () => {
 				],
 			},
 		}
-		const FileProperties = Schema.Struct({
+		const FileShape = Schema.Struct({
+			properties: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown)),
+		})
+		const FileItems = Schema.Struct({
 			properties: Schema.Struct({
 				body: Schema.Struct({
 					properties: Schema.Struct({
 						files: Schema.Struct({
-							items: Schema.Struct({
-								properties: Schema.Record(
-									Schema.String,
-									Schema.Record(Schema.String, Schema.Unknown),
-								),
-							}),
+							items: Schema.Union([FileShape, Schema.Struct({ anyOf: Schema.Array(FileShape) })]),
 						}),
 					}),
 				}),
 			}),
 		})
 		const uploads = GENERATED_TOOLS.flatMap((tool) =>
-			Option.match(Schema.decodeUnknownOption(FileProperties)(tool.inputSchema), {
+			Option.match(Schema.decodeUnknownOption(FileItems)(tool.inputSchema), {
 				onNone: () => [],
-				onSome: (schema) => [
-					[tool.name, schema.properties.body.properties.files.items.properties] as const,
-				],
+				onSome: (schema) => {
+					const items = schema.properties.body.properties.files.items
+					return ("anyOf" in items ? items.anyOf : [items]).map(
+						(shape) => [tool.name, shape.properties] as const,
+					)
+				},
 			}),
 		)
 		expect(uploads.map(([name]) => name)).toEqual([
 			"artifacts_createArtifact",
+			"artifacts_createArtifactVersion",
 			"artifacts_createArtifactVersion",
 		])
 		for (const [name, properties] of uploads) {

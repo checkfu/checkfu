@@ -291,7 +291,7 @@ describe("MCP tool projection", () => {
 		expect(mandatory?.inputSchema["required"]).toEqual(["idempotency_key"])
 	})
 
-	it("keeps a path parameter's own pattern beside the path-segment rule", () => {
+	it("keeps a path parameter's own pattern beside the path-segment rule, and publishes a digits-only one as an integer", () => {
 		const segment = String.raw`^(?:[^/\\.][^/\\]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)$`
 		const [tool] = project(
 			withOperation("/v1/agents/{agent_id}", "get", {
@@ -321,7 +321,7 @@ describe("MCP tool projection", () => {
 		expect(version?.inputSchema["properties"]).toMatchObject({
 			path: {
 				properties: {
-					version: { pattern: segment, allOf: [{ pattern: String.raw`^[1-9]\d{0,8}$` }] },
+					version: { type: "integer", minimum: 1, maximum: 999_999_999 },
 				},
 			},
 		})

@@ -3,7 +3,7 @@ import {
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_TOTAL_BYTES,
 } from "@checkfu/sdk/Schemas"
-import type { ArtifactFileInput } from "@checkfu/sdk/Schemas"
+import type { ArtifactFileInput, ArtifactVersionFileInput } from "@checkfu/sdk/Schemas"
 import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
@@ -17,7 +17,10 @@ export {
 	ArtifactFile,
 	ArtifactFileInput,
 	ArtifactFilesInput,
+	ArtifactKeptFileInput,
 	ArtifactPath,
+	ArtifactVersionFileInput,
+	ArtifactVersionFilesInput,
 	MAX_ARTIFACT_BODY_BYTES,
 	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
 	MAX_ARTIFACT_FILES,
@@ -57,7 +60,7 @@ export interface BuiltArtifactVersion {
 
 const utf8Encoder = new TextEncoder()
 
-const contentTypeOf = (file: ArtifactFileInput): string =>
+const contentTypeOf = (file: ArtifactVersionFileInput): string =>
 	file.content_type ??
 	Option.getOrElse(Mime.getType(`./${file.path}`), () => DEFAULT_ARTIFACT_CONTENT_TYPE)
 
@@ -97,7 +100,8 @@ const fileUnderAnother = (paths: ReadonlySet<string>): string | undefined => {
 
 export const buildArtifactVersion = (
 	digest: Digest.Digest["Service"],
-	files: ReadonlyArray<ArtifactFileInput>,
+	files: ReadonlyArray<ArtifactVersionFileInput>,
+	kept: ReadonlyMap<string, number> = new Map(),
 ): Effect.Effect<BuiltArtifactVersion, InvalidArtifactFiles> =>
 	Effect.gen(function* () {
 		const seen = new Set<string>()
@@ -111,6 +115,30 @@ export const buildArtifactVersion = (
 				})
 			}
 			seen.add(file.path)
+			if ("sha256" in file) {
+				const size = kept.get(file.sha256)
+				if (size === undefined) {
+					return yield* new InvalidArtifactFiles({
+						message:
+							kept.size === 0
+								? `File "${file.path}" keeps a stored file by sha256, but there is no earlier version to keep it from; send its content.`
+								: `File "${file.path}" keeps sha256 ${file.sha256}, which the version being replaced does not hold; send its content.`,
+					})
+				}
+				totalBytes += size
+				if (totalBytes > MAX_ARTIFACT_TOTAL_BYTES) {
+					return yield* new InvalidArtifactFiles({
+						message: `Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
+					})
+				}
+				entries.push({
+					path: file.path,
+					sha256: file.sha256,
+					size,
+					content_type: contentTypeOf(file),
+				})
+				continue
+			}
 			const bytes = yield* decodeContent(file)
 			if (bytes.byteLength > MAX_ARTIFACT_FILE_BYTES) {
 				return yield* new InvalidArtifactFiles({

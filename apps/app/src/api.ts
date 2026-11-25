@@ -230,7 +230,7 @@ export const checkfu = {
 		file: (artifact_id: string, version: number, path: string, signal?: AbortSignal) =>
 			request("artifacts.versions.file", {
 				path: { artifact_id, version },
-				query: { path },
+				query: { file: path },
 				...withSignal(signal),
 			}),
 		link: (artifact_id: string, version: number, body: CreateArtifactLinkBody) =>

@@ -25,8 +25,8 @@ import * as Option from "effect/Option"
 import { PublicationAddress } from "@checkfu/sdk/Schemas"
 import { buildArtifactVersion } from "../Artifacts/ArtifactFiles.ts"
 import type {
-	ArtifactFileInput,
 	ArtifactManifest,
+	ArtifactVersionFileInput,
 	BuiltArtifactVersion,
 } from "../Artifacts/ArtifactFiles.ts"
 import { ArtifactStore } from "../Artifacts/ArtifactStore.ts"
@@ -119,6 +119,34 @@ const artifactResource = (
 	updated_at: DateTime.makeUnsafe(state.updated_at),
 })
 
+const keptFrom = <E, R>(
+	files: ReadonlyArray<ArtifactVersionFileInput>,
+	replaced: Effect.Effect<ArtifactManifest, E, R>,
+) =>
+	files.some((file) => "sha256" in file)
+		? Effect.map(
+				replaced,
+				(manifest): ReadonlyMap<string, number> =>
+					new Map(manifest.files.map((file) => [file.sha256, file.size])),
+			)
+		: Effect.succeed<ReadonlyMap<string, number>>(new Map())
+
+const artifactSummary = (
+	id: ArtifactId,
+	state: ArtifactState,
+	publication: Publication | null,
+) => ({
+	id,
+	type: "artifact" as const,
+	name: state.name,
+	version: state.version,
+	file_count: state.file_count,
+	total_bytes: state.total_bytes,
+	publication,
+	created_at: DateTime.makeUnsafe(state.created_at),
+	updated_at: DateTime.makeUnsafe(state.updated_at),
+})
+
 const versionResource = (id: ArtifactId, found: LocatedVersion, manifest: ArtifactManifest) => ({
 	type: "artifact_version" as const,
 	artifact_id: id,
@@ -139,8 +167,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
 
-		const build = (files: ReadonlyArray<ArtifactFileInput>) =>
-			buildArtifactVersion(digest, files).pipe(
+		const build = (
+			files: ReadonlyArray<ArtifactVersionFileInput>,
+			kept?: ReadonlyMap<string, number>,
+		) =>
+			buildArtifactVersion(digest, files, kept).pipe(
 				Effect.catchTag("InvalidArtifactFiles", (error) => reject(400, error.message)),
 			)
 
@@ -329,7 +360,13 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				}).pipe(handled),
 			)
 			.handle("list", ({ query }) =>
-				list("artifact", query, (id) => retrieve(ArtifactId.make(id))).pipe(handled),
+				list("artifact", query, (id) =>
+					Effect.gen(function* () {
+						const artifactId = ArtifactId.make(id)
+						const state = yield* requireActive(artifactId)
+						return artifactSummary(artifactId, state, yield* publicationOf(artifactId, state))
+					}),
+				).pipe(handled),
 			)
 			.handle("get", ({ params }) => retrieve(params.artifact_id).pipe(handled))
 			.handle("publish", ({ params, payload, headers }) =>
@@ -390,7 +427,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const state = yield* requireActive(id)
 					if (state.version !== payload.version) {
 						if (state.version === payload.version + 1) {
-							const resent = yield* buildArtifactVersion(digest, payload.files).pipe(
+							const replaced = yield* keptFrom(
+								payload.files,
+								Effect.map(loadVersion(id, payload.version), ({ manifest }) => manifest),
+							)
+							const resent = yield* buildArtifactVersion(digest, payload.files, replaced).pipe(
 								Effect.asSome,
 								Effect.catchTag("InvalidArtifactFiles", () => Effect.succeedNone),
 							)
@@ -408,7 +449,10 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							`Artifact ${id} is at version ${state.version}, not ${payload.version}.`,
 						)
 					}
-					const built = yield* build(payload.files)
+					const built = yield* build(
+						payload.files,
+						yield* keptFrom(payload.files, loadManifest(id, state.manifest)),
+					)
 					yield* stage(id, built, null)
 					const receipt = yield* artifacts.send(
 						new AddArtifactVersion({
@@ -466,11 +510,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				Effect.gen(function* () {
 					const id = params.artifact_id
 					const { manifest } = yield* loadVersion(id, params.version)
-					const file = manifest.files.find((entry) => entry.path === query.path)
+					const file = manifest.files.find((entry) => entry.path === query.file)
 					if (file === undefined) {
 						return yield* reject(
 							404,
-							`Artifact ${id} version ${params.version} has no file "${query.path}".`,
+							`Artifact ${id} version ${params.version} has no file "${query.file}".`,
 						)
 					}
 					const bytes =

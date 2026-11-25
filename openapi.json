@@ -16630,34 +16630,6 @@
 														"minimum": 0,
 														"maximum": 9007199254740991
 													},
-													"files": {
-														"type": "array",
-														"items": {
-															"type": "object",
-															"properties": {
-																"path": {
-																	"type": "string",
-																	"minLength": 1,
-																	"maxLength": 512,
-																	"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$"
-																},
-																"sha256": {
-																	"type": "string",
-																	"pattern": "^[0-9a-f]{64}$"
-																},
-																"size": {
-																	"type": "integer",
-																	"minimum": 0,
-																	"maximum": 9007199254740991
-																},
-																"content_type": {
-																	"type": "string"
-																}
-															},
-															"required": ["path", "sha256", "size", "content_type"],
-															"additionalProperties": false
-														}
-													},
 													"publication": {
 														"anyOf": [
 															{
@@ -16710,7 +16682,6 @@
 													"version",
 													"file_count",
 													"total_bytes",
-													"files",
 													"publication",
 													"created_at",
 													"updated_at"
@@ -17056,7 +17027,7 @@
 						}
 					}
 				},
-				"description": "List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+				"description": "List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear.",
 				"summary": "List artifacts",
 				"x-forge-group-name": "artifacts",
 				"x-forge-method-name": "list",
@@ -18481,38 +18452,68 @@
 									"files": {
 										"type": "array",
 										"items": {
-											"type": "object",
-											"properties": {
-												"path": {
-													"type": "string",
-													"minLength": 1,
-													"maxLength": 512,
-													"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
-													"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+														},
+														"content": {
+															"type": "string",
+															"description": "File content: text, or base64 when encoding is base64"
+														},
+														"encoding": {
+															"type": "string",
+															"enum": ["utf8", "base64"],
+															"description": "How content is encoded (default utf8)"
+														},
+														"content_type": {
+															"type": "string",
+															"minLength": 3,
+															"maxLength": 128,
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+															"description": "Media type; inferred from the path extension when omitted"
+														}
+													},
+													"required": ["path", "content"],
+													"additionalProperties": false
 												},
-												"content": {
-													"type": "string",
-													"description": "File content: text, or base64 when encoding is base64"
-												},
-												"encoding": {
-													"type": "string",
-													"enum": ["utf8", "base64"],
-													"description": "How content is encoded (default utf8)"
-												},
-												"content_type": {
-													"type": "string",
-													"minLength": 3,
-													"maxLength": 128,
-													"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
-													"description": "Media type; inferred from the path extension when omitted"
+												{
+													"type": "object",
+													"properties": {
+														"path": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 512,
+															"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+															"description": "Relative path inside the artifact, for example index.html or assets/app.js"
+														},
+														"sha256": {
+															"type": "string",
+															"pattern": "^[0-9a-f]{64}$",
+															"description": "sha256 of a file in the version being replaced, to keep its bytes without sending them again"
+														},
+														"content_type": {
+															"type": "string",
+															"minLength": 3,
+															"maxLength": 128,
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(?:; ?[ -~]+)?$",
+															"description": "Media type; inferred from the path extension when omitted"
+														}
+													},
+													"required": ["path", "sha256"],
+													"additionalProperties": false
 												}
-											},
-											"required": ["path", "content"],
-											"additionalProperties": false
+											]
 										},
 										"minItems": 1,
 										"maxItems": 64,
-										"description": "Every file of the version; a new version replaces the whole set"
+										"description": "Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again"
 									}
 								},
 								"required": ["version", "files"],
@@ -18538,7 +18539,7 @@
 					"repeatArrayField": {
 						"field": "files",
 						"flag": "file",
-						"description": "File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)"
+						"description": "File as JSON, YAML, or @file with path and content (optional encoding and content_type), or path and the sha256 of a file to keep from the version being replaced (repeatable)"
 					}
 				}
 			}
@@ -19008,14 +19009,14 @@
 						"required": true
 					},
 					{
-						"name": "path",
+						"name": "file",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"minLength": 1,
 							"maxLength": 512,
 							"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
-							"description": "Path of the file inside the version"
+							"description": "Path of the file inside the version, for example index.html"
 						},
 						"required": true
 					}

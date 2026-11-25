@@ -481,7 +481,7 @@ const artifactsListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List artifacts in creation order, oldest first by default, each with the files of its latest version. Deleted artifacts never appear.",
+		"List artifacts in creation order, oldest first by default, each with the size of its latest version but not its files; retrieve an artifact for those. Deleted artifacts never appear.",
 	),
 )
 
@@ -675,7 +675,7 @@ const artifactsVersionsCreateCommand = CommandMake(
 		files: FlagString("file").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"File as JSON, YAML, or @file with path, content, and optional encoding and content_type (repeatable)",
+				"File as JSON, YAML, or @file with path and content (optional encoding and content_type), or path and the sha256 of a file to keep from the version being replaced (repeatable)",
 			),
 			FlagBetween(0, 64),
 		),
@@ -710,9 +710,9 @@ const artifactsVersionsFileCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "path",
-			flagName: "path",
-			wireName: "path",
+			propName: "file",
+			flagName: "file",
+			wireName: "file",
 			location: "query",
 			kind: "string",
 			required: true,
@@ -731,7 +731,9 @@ const artifactsVersionsFileCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Artifact version number"),
 		),
-		path: FlagString("path").pipe(FlagWithDescription("Path of the file inside the version")),
+		file: FlagString("file").pipe(
+			FlagWithDescription("Path of the file inside the version, for example index.html"),
+		),
 	},
 	(flags) => invokeGeneratedOperation(artifactsVersionsFileCommandSpec, flags),
 ).pipe(
