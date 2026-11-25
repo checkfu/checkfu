@@ -697,6 +697,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/automations/{automation_id}/pause",
 						"/v1/automations/{automation_id}/run",
 						"/v1/automations/{automation_id}/runs",
+						"/v1/automations/{automation_id}/runs/{run}",
 						"/v1/automations/{automation_id}/unpause",
 						"/v1/environments",
 						"/v1/environments/{environment_id}",

@@ -59,6 +59,7 @@ interface RunBody {
 	readonly run: number
 	readonly status: string
 	readonly trigger: { readonly type: string }
+	readonly agent: { readonly id: string; readonly version: number | null }
 	readonly session_id: string | null
 	readonly error: { readonly type: string; readonly message: string } | null
 }
@@ -259,9 +260,23 @@ describe("Automations API", () => {
 					run: 1,
 					status: "started",
 					trigger: { type: "manual" },
+					agent: { id: agentId, version: 1 },
 					session_id: `sess_${id}_1`,
 					error: null,
 				})
+				const one = yield* call<RunBody>(apiFetch, "GET", `/v1/automations/${id}/runs/1`)
+				expect([one.status, one.body]).toEqual([200, recorded])
+				for (const [path, status] of [
+					[`/v1/automations/${id}/runs/2`, 404],
+					[`/v1/automations/auto_missing/runs/1`, 404],
+					[`/v1/automations/${id}/runs/0`, 400],
+					[`/v1/automations/${id}/runs/1.5`, 400],
+					[`/v1/automations/${id}/runs/1.00000000000000001`, 400],
+					[`/v1/automations/${id}/runs/01`, 400],
+				] as const) {
+					const missing = yield* call<ErrorBody>(apiFetch, "GET", path)
+					expect([path, missing.status]).toEqual([path, status])
+				}
 				yield* waitForSession(
 					apiFetch,
 					`sess_${id}_1`,
@@ -291,6 +306,8 @@ describe("Automations API", () => {
 
 				yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
 				const afterSecond = yield* settledRuns(apiFetch, id, 2)
+				const second = yield* call<RunBody>(apiFetch, "GET", `/v1/automations/${id}/runs/2`)
+				expect([second.status, second.body]).toEqual([200, afterSecond.body.data[1]])
 				expect(afterSecond.body.data.map((entry) => [entry.run, entry.session_id])).toEqual([
 					[1, `sess_${id}_1`],
 					[2, `sess_${id}_2`],
@@ -923,6 +940,7 @@ describe("Automations API", () => {
 				expect(runs.body.data[0]).toMatchObject({
 					run: 1,
 					status: "failed",
+					agent: { id: agentId, version: null },
 					session_id: null,
 					error: { type: "agent_unavailable" },
 				})

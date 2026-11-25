@@ -165,6 +165,7 @@ describe("Checkfu MCP server", () => {
 				"automations_archiveAutomation",
 				"automations_createAutomation",
 				"automations_getAutomation",
+				"automations_getRun",
 				"automations_listAutomations",
 				"automations_listRuns",
 				"automations_pauseAutomation",
@@ -207,6 +208,7 @@ describe("Checkfu MCP server", () => {
 				automations_archiveAutomation: "writes, destructive, repeatable",
 				automations_createAutomation: "writes, additive, repeatable",
 				automations_getAutomation: "read-only, additive, repeatable",
+				automations_getRun: "read-only, additive, repeatable",
 				automations_listAutomations: "read-only, additive, repeatable",
 				automations_listRuns: "read-only, additive, repeatable",
 				automations_pauseAutomation: "writes, destructive, not repeatable",
@@ -290,6 +292,13 @@ describe("Checkfu MCP server", () => {
 				const refused = yield* callError(client, "agents_getAgent", { path: { agent_id } })
 				expect([agent_id, refused.error.type]).toEqual([agent_id, "invalid_request_error"])
 				expect(refused.error.message).toContain('["path"]["agent_id"]')
+			}
+			for (const run of ["0", "01", "1.5", "a/b"]) {
+				const refused = yield* callError(client, "automations_getRun", {
+					path: { automation_id: "auto_1", run },
+				})
+				expect([run, refused.error.type]).toEqual([run, "invalid_request_error"])
+				expect(refused.error.message).toContain('["path"]["run"]')
 			}
 			const illFormed = yield* callError(client, "agents_getAgent", {
 				path: { agent_id: "agent_\uD800" },
@@ -377,6 +386,7 @@ describe("Checkfu MCP server", () => {
 					idempotency_key: "create-morning-report",
 				},
 				automations_getAutomation: automation,
+				automations_getRun: { path: { automation_id: "auto_1", run: "1" } },
 				automations_listAutomations: { query: { limit: "5" } },
 				automations_listRuns: { ...automation, query: { limit: "5" } },
 				automations_pauseAutomation: automation,

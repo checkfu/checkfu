@@ -876,6 +876,50 @@ const automationsRunsListCommand = CommandMake(
 	),
 )
 
+const automationsRunsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations:runs retrieve",
+	apiGroup: "automations",
+	apiEndpoint: "getRun",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "run",
+			flagName: "run",
+			wireName: "run",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationsRunsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+		run: FlagString("run").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Run number: a whole number from 1, written in decimal"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsRunsRetrieveCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Retrieve one run of an automation by its run number, once it has started or failed",
+	),
+)
+
 const environmentsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "environments archive",
 	apiGroup: "environments",
@@ -1668,6 +1712,7 @@ export const buildGeneratedResourceCommands = <
 			CommandWithDescription("Manage automations:runs"),
 			CommandWithSubcommands([
 				automationsRunsListCommand,
+				automationsRunsRetrieveCommand,
 				...(extras?.["automations:runs"] ?? ([] as const)),
 			]),
 		),

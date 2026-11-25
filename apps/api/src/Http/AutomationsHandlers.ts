@@ -90,6 +90,10 @@ const automationRunResource = (
 					type: "schedule" as const,
 					scheduled_at: DateTime.makeUnsafe(entry.event.scheduled_at),
 				},
+	agent:
+		entry.event.agent_id === null
+			? null
+			: { id: entry.event.agent_id, version: entry.event.agent_version },
 	session_id: entry.event._tag === "automation.run_started" ? entry.event.session_id : null,
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,
@@ -371,6 +375,21 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						has_more: page.cursor !== null,
 						next_cursor: page.cursor,
 					}
+				}).pipe(handled),
+			)
+			.handle("getRun", ({ params }) =>
+				Effect.gen(function* () {
+					const id = params.automation_id
+					yield* committed(id)
+					const page = yield* automationRuns.list(Automation.ref(id), {
+						after: params.run - 1,
+						take: 1,
+					})
+					const entry = page.entries[0]
+					if (entry === undefined || entry.event.run !== params.run) {
+						return yield* reject(404, `Run ${params.run} of automation ${id} not found.`)
+					}
+					return automationRunResource(id, entry)
 				}).pipe(handled),
 			)
 	}),

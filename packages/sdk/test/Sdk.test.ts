@@ -408,6 +408,18 @@ describe("@checkfu/sdk", () => {
 						const archived = yield* client.agents.archive("agent_1")
 						expect(!isPendingResource(archived) && archived.archived_at !== null).toBe(true)
 
+						const requestsBefore = seen.length
+						const numericId = yield* Effect.flip(
+							// @ts-expect-error -- boundary: a JavaScript caller can pass a number for a string id
+							client.agents.archive(123),
+						)
+						const missingId = yield* Effect.flip(
+							// @ts-expect-error -- boundary: a JavaScript caller can leave out the id
+							client.agents.retrieve(),
+						)
+						expect([numericId._tag, missingId._tag]).toEqual(["BadRequestError", "BadRequestError"])
+						expect(seen.length).toBe(requestsBefore)
+
 						const deleted = yield* client.environments.delete("env_1")
 						expect(deleted).toEqual({ id: "env_1", type: "environment_deleted" })
 

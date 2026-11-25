@@ -537,6 +537,12 @@ export const AutomationRunResource = Schema.Struct({
 		Schema.Struct({ type: Schema.Literal("schedule"), scheduled_at: Schema.DateTimeUtc }),
 		Schema.Struct({ type: Schema.Literal("manual") }),
 	]),
+	agent: Schema.NullOr(
+		Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
+	).annotate({
+		description:
+			"The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent.",
+	}),
 	session_id: Schema.NullOr(Schema.String),
 	error: Schema.NullOr(AutomationRunError),
 	created_at: Schema.DateTimeUtc,
@@ -761,6 +767,28 @@ const ListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|1
 		}),
 	)
 
+const booleanQuery = (description: string) =>
+	Schema.Literals(["true", "false"])
+		.annotate({ description })
+		.pipe(
+			Schema.decodeTo(Schema.Boolean, {
+				decode: SchemaGetter.transform((value) => value === "true"),
+				encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
+			}),
+		)
+
+const RunNumberFromString = Schema.String.check(Schema.isPattern(/^[1-9]\d{0,14}$/u))
+	.annotate({ description: "Run number: a whole number from 1, written in decimal" })
+	.pipe(
+		Schema.decodeTo(
+			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999_999_999 })),
+			{
+				decode: SchemaGetter.transform(Number),
+				encode: SchemaGetter.transform(String),
+			},
+		),
+	)
+
 const resourceListQuery = {
 	after: Schema.optionalKey(ResourceListCursor),
 	limit: Schema.optionalKey(ListLimitFromString),
@@ -770,14 +798,7 @@ const resourceListQuery = {
 		}),
 	),
 	include_archived: Schema.optionalKey(
-		Schema.Literals(["true", "false"])
-			.annotate({ description: "Include archived results: true or false (default false)" })
-			.pipe(
-				Schema.decodeTo(Schema.Boolean, {
-					decode: SchemaGetter.transform((value) => value === "true"),
-					encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
-				}),
-			),
+		booleanQuery("Include archived results: true or false (default false)"),
 	),
 }
 
@@ -1444,6 +1465,24 @@ const Automations = HttpApiGroup.make("automations")
 						limit: { min: 1, max: 100, metavar: "N" },
 					},
 				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getRun", "/v1/automations/:automation_id/runs/:run", {
+			params: { ...automationParams, run: RunNumberFromString },
+			success: AutomationRunResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve an automation run")
+			.annotate(
+				OpenApi.Description,
+				"Retrieve one run of an automation by its run number, once it has started or failed",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automations.runs",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "getRun" },
+				"x-checkfu-mcp": { name: "automations_getRun" },
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage automations")

@@ -5,7 +5,7 @@ import {
 	importInputSchema,
 } from "@checkfu/mcp/GeneratedRuntime"
 import * as Schema from "effect/Schema"
-import { buildSurfaceCatalog } from "./SurfaceCatalog.ts"
+import { buildSurfaceCatalog, isJsonArray } from "./SurfaceCatalog.ts"
 import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
 type JsonRecord = Readonly<Record<string, Json>>
@@ -218,14 +218,23 @@ const projectOperation = (
 	const properties: Record<string, Json> = {}
 	const required: Array<string> = []
 	if (pathParameters.length > 0) {
-		if (pathParameters.some((parameter) => parameter.schema["pattern"] !== undefined)) {
-			throw new Error(`${label}: a path parameter with its own pattern is not supported.`)
-		}
 		properties["path"] = parameterObject(
-			pathParameters.map((parameter) => ({
-				...parameter,
-				schema: { ...parameter.schema, pattern: PATH_SEGMENT_PATTERN },
-			})),
+			pathParameters.map((parameter) => {
+				const own = parameter.schema["pattern"]
+				const clauses = parameter.schema["allOf"]
+				// One segment always; a parameter's own pattern too, kept beside its other clauses,
+				// since a schema has one `pattern`.
+				return {
+					...parameter,
+					schema: {
+						...parameter.schema,
+						pattern: PATH_SEGMENT_PATTERN,
+						...(own === undefined
+							? {}
+							: { allOf: [...(isJsonArray(clauses) ? clauses : []), { pattern: own }] }),
+					},
+				}
+			}),
 		)
 		required.push("path")
 	}

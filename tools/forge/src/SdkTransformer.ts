@@ -104,6 +104,7 @@ const generateResourcesFile = (
 	const EndpointBody = runtimeMod.ident("EndpointBody").ty()
 	const EndpointJsonSuccess = runtimeMod.ident("EndpointJsonSuccess").ty()
 	const EndpointParams = runtimeMod.ident("EndpointParams").ty()
+	const PathParam = runtimeMod.ident("PathParam").ty()
 	const EndpointQuery = runtimeMod.ident("EndpointQuery").ty()
 	const EndpointSseEvent = runtimeMod.ident("EndpointSseEvent").ty()
 	const EndpointSuccess = runtimeMod.ident("EndpointSuccess").ty()
@@ -200,7 +201,7 @@ const generateResourcesFile = (
 			out(op.methodName, "(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 					if (op.sse?.cursorParam !== undefined) {
@@ -227,11 +228,7 @@ const generateResourcesFile = (
 					if (pathArgs.length === 0) {
 						out("{},")
 					} else {
-						out(
-							"{ ",
-							pathArgs.map((pa) => `${JSON.stringify(pa.wireName)}: ${pa.argName}`).join(", "),
-							" },",
-						)
+						out("{ ", pathArgs.map(pathArgEntry).join(", "), " },")
 					}
 					if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 						out("params,")
@@ -253,7 +250,7 @@ const generateResourcesFile = (
 
 		const emitSignatureArgs = (mode: "withResponse" | "default" | "impl"): void => {
 			for (const pa of pathArgs) {
-				out(pa.argName, ": string,")
+				out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 			}
 			if (hasBodyOnly) {
 				const opt = !op.bodyRequired && mode !== "withResponse" ? "?" : ""
@@ -473,7 +470,7 @@ const generateResourcesFile = (
 						", ",
 						e,
 						", { ",
-						pathArgs.map((pa) => `${JSON.stringify(pa.wireName)}: ${pa.argName}`).join(", "),
+						pathArgs.map(pathArgEntry).join(", "),
 						" }), (pathParams) =>",
 					)
 					out.indent(() => emitWithIdempotency())
@@ -499,7 +496,7 @@ const generateResourcesFile = (
 			out(op.methodName, "Pages(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
 				out("options?: ", RequestOptions, ",")
@@ -537,7 +534,7 @@ const generateResourcesFile = (
 			out(op.methodName, "Stream(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
 				out("options?: ", RequestOptions, ",")
@@ -601,7 +598,7 @@ const generateResourcesFile = (
 			out(op.methodName, "(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				if (op.queryParams.length > 0 || op.sse?.cursorParam !== undefined) {
 					if (op.sse?.cursorParam !== undefined) {
@@ -667,7 +664,7 @@ const generateResourcesFile = (
 			out(op.methodName, "(")
 			out.indent(() => {
 				for (const pa of pathArgs) {
-					out(pa.argName, ": string,")
+					out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 				}
 				out("params?: ", RelaxOptionalProps, "<", EndpointQuery, "<", g, ", ", e, ">>,")
 				out("options?: ", PromiseRequestOptions, ",")
@@ -737,7 +734,7 @@ const generateResourcesFile = (
 		out(op.methodName, "(")
 		out.indent(() => {
 			for (const pa of pathArgs) {
-				out(pa.argName, ": string,")
+				out(pa.argName, ": ", PathParam, "<", g, ", ", e, ", ", JSON.stringify(pa.wireName), ">,")
 			}
 			if (hasBodyOnly) {
 				out("params", op.bodyRequired ? "" : "?", ": ", EndpointBody, "<", g, ", ", e, ">,")
@@ -934,6 +931,9 @@ const generateResourcesFile = (
 		content: cleanGeneratedHeader(out.content),
 	}
 }
+
+const pathArgEntry = (pa: { readonly wireName: string; readonly argName: string }): string =>
+	pa.wireName === pa.argName ? pa.argName : `${JSON.stringify(pa.wireName)}: ${pa.argName}`
 
 export const generateSdkFiles = (forge: Forge): ReadonlyArray<GeneratedFile> => {
 	const catalog = buildSurfaceCatalog(forge)

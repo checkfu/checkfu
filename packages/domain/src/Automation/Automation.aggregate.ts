@@ -269,6 +269,8 @@ export class Automation extends Domain.Aggregate("Automation", {
 							session_id: sessionIdOfNextRun(ctx.id, state.reported),
 							trigger: cmd.trigger,
 							scheduled_at: cmd.scheduled_at,
+							agent_id: cmd.agent_id,
+							agent_version: cmd.agent_version,
 						}),
 					]
 				: [],
@@ -280,6 +282,8 @@ export class Automation extends Domain.Aggregate("Automation", {
 				run: cmd.run,
 				trigger: cmd.trigger,
 				scheduled_at: cmd.scheduled_at,
+				agent_id: cmd.agent_id,
+				agent_version: cmd.agent_version,
 				error: { type: cmd.error_type, message: cmd.message },
 			})
 			return [cmd.unrecoverable, state.status === "active", cmd.revision === state.revision].every(

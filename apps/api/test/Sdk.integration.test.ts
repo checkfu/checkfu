@@ -188,6 +188,8 @@ describe("@checkfu/sdk live API integration", () => {
 								client.automations.runs.listStream(automation.id, { limit: 1, order: "desc" }),
 							)
 							expect(Array.from(pagedNewestFirst, (entry) => entry.run)).toEqual([3, 2, 1])
+							const third = yield* client.automations.runs.retrieve(automation.id, queued.run + 2)
+							expect(third.run).toBe(3)
 							const listedAutomations = yield* Stream.runCollect(
 								client.automations.listStream({ limit: 1 }),
 							)
@@ -416,6 +418,15 @@ describe("@checkfu/sdk live API integration", () => {
 								}
 								await expect.poll(() => runNumbers(), { timeout: 5000 }).toEqual([1, 2, 3])
 								expect(await runNumbers("desc")).toEqual([3, 2, 1])
+								const firstRun = await client.automations.run(automation.id)
+								await expect
+									.poll(() =>
+										client.automations.runs.retrieve(automation.id, firstRun.run).then(
+											(entry) => entry.run,
+											() => null,
+										),
+									)
+									.toBe(firstRun.run)
 								const listedIds: Array<string> = []
 								for await (const entry of client.automations.list({ limit: 1 })) {
 									listedIds.push(entry.id)

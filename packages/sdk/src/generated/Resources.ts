@@ -44,6 +44,7 @@ import type {
 	IsoDateTimes,
 	ItemOf,
 	OperationShape,
+	PathParam,
 	RelaxOptionalProps,
 	RequestOptions,
 	SessionEventsStreamOptions,
@@ -135,6 +136,12 @@ export interface CheckfuOperations {
 		RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		EndpointBody<"automations", "listRuns">,
 		EndpointSuccess<"automations", "listRuns">
+	>
+	readonly "automations.runs.retrieve": OperationShape<
+		EndpointParams<"automations", "getRun">,
+		EndpointQuery<"automations", "getRun">,
+		EndpointBody<"automations", "getRun">,
+		EndpointSuccess<"automations", "getRun">
 	>
 	readonly "environments.archive": OperationShape<
 		EndpointParams<"environments", "archive">,
@@ -228,15 +235,15 @@ export class EffectAgentsResource {
 
 	/** Archive an agent */
 	archive(
-		agentId: string,
+		agentId: PathParam<"agents", "archive", "agent_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"agents", "archive">>, CheckfuSdkError>
 	archive(
-		agentId: string,
+		agentId: PathParam<"agents", "archive", "agent_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"agents", "archive">, CheckfuSdkError>
 	archive(
-		agentId: string,
+		agentId: PathParam<"agents", "archive", "agent_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"agents", "archive"> | WithResponse<EndpointSuccess<"agents", "archive">>,
@@ -372,15 +379,15 @@ export class EffectAgentsResource {
 
 	/** Retrieve an agent by ID */
 	retrieve(
-		agentId: string,
+		agentId: PathParam<"agents", "get", "agent_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"agents", "get">>, CheckfuSdkError>
 	retrieve(
-		agentId: string,
+		agentId: PathParam<"agents", "get", "agent_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"agents", "get">, CheckfuSdkError>
 	retrieve(
-		agentId: string,
+		agentId: PathParam<"agents", "get", "agent_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"agents", "get"> | WithResponse<EndpointSuccess<"agents", "get">>,
@@ -401,17 +408,17 @@ export class EffectAgentsResource {
 
 	/** Update an agent (creates a new agent version) */
 	update(
-		agentId: string,
+		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"agents", "update">>, CheckfuSdkError>
 	update(
-		agentId: string,
+		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"agents", "update">, CheckfuSdkError>
 	update(
-		agentId: string,
+		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
 		options?: AnyRequestOptions,
 	): Effect<
@@ -450,17 +457,17 @@ export class EffectAutomationsRunsResource {
 
 	/** List the runs of an automation that have started or failed, oldest first by default */
 	list(
-		automationId: string,
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">> | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError>
 	list(
-		automationId: string,
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError>
 	list(
-		automationId: string,
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		options?: AnyRequestOptions,
 	): Effect<
@@ -495,7 +502,7 @@ export class EffectAutomationsRunsResource {
 
 	/** Auto-paginate pages for List the runs of an automation that have started or failed, oldest first by default */
 	listPages(
-		automationId: string,
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError> {
@@ -516,7 +523,7 @@ export class EffectAutomationsRunsResource {
 
 	/** Auto-paginate items for List the runs of an automation that have started or failed, oldest first by default */
 	listStream(
-		automationId: string,
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError> {
@@ -534,6 +541,46 @@ export class EffectAutomationsRunsResource {
 			params?.order ?? "asc",
 		)
 	}
+
+	/** Retrieve one run of an automation by its run number, once it has started or failed */
+	retrieve(
+		automationId: PathParam<"automations", "getRun", "automation_id">,
+		run: PathParam<"automations", "getRun", "run">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "getRun">>, CheckfuSdkError>
+	retrieve(
+		automationId: PathParam<"automations", "getRun", "automation_id">,
+		run: PathParam<"automations", "getRun", "run">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "getRun">, CheckfuSdkError>
+	retrieve(
+		automationId: PathParam<"automations", "getRun", "automation_id">,
+		run: PathParam<"automations", "getRun", "run">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "getRun">
+		| WithResponse<EndpointSuccess<"automations", "getRun">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "getRun", { automation_id: automationId, run }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automations.runs.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.automations.getRun({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
 }
 
 export class EffectAutomationsResource {
@@ -547,15 +594,15 @@ export class EffectAutomationsResource {
 
 	/** Archive an automation so it never runs again */
 	archive(
-		automationId: string,
+		automationId: PathParam<"automations", "archive", "automation_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "archive">>, CheckfuSdkError>
 	archive(
-		automationId: string,
+		automationId: PathParam<"automations", "archive", "automation_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "archive">, CheckfuSdkError>
 	archive(
-		automationId: string,
+		automationId: PathParam<"automations", "archive", "automation_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"automations", "archive">
@@ -699,15 +746,15 @@ export class EffectAutomationsResource {
 
 	/** Stop an automation's schedule until it is unpaused; it can still be run on request */
 	pause(
-		automationId: string,
+		automationId: PathParam<"automations", "pause", "automation_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "pause">>, CheckfuSdkError>
 	pause(
-		automationId: string,
+		automationId: PathParam<"automations", "pause", "automation_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "pause">, CheckfuSdkError>
 	pause(
-		automationId: string,
+		automationId: PathParam<"automations", "pause", "automation_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"automations", "pause"> | WithResponse<EndpointSuccess<"automations", "pause">>,
@@ -738,15 +785,15 @@ export class EffectAutomationsResource {
 
 	/** Retrieve an automation by ID */
 	retrieve(
-		automationId: string,
+		automationId: PathParam<"automations", "get", "automation_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "get">>, CheckfuSdkError>
 	retrieve(
-		automationId: string,
+		automationId: PathParam<"automations", "get", "automation_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "get">, CheckfuSdkError>
 	retrieve(
-		automationId: string,
+		automationId: PathParam<"automations", "get", "automation_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"automations", "get"> | WithResponse<EndpointSuccess<"automations", "get">>,
@@ -774,15 +821,15 @@ export class EffectAutomationsResource {
 
 	/** Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to */
 	run(
-		automationId: string,
+		automationId: PathParam<"automations", "run", "automation_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "run">>, CheckfuSdkError>
 	run(
-		automationId: string,
+		automationId: PathParam<"automations", "run", "automation_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "run">, CheckfuSdkError>
 	run(
-		automationId: string,
+		automationId: PathParam<"automations", "run", "automation_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"automations", "run"> | WithResponse<EndpointSuccess<"automations", "run">>,
@@ -810,15 +857,15 @@ export class EffectAutomationsResource {
 
 	/** Resume an automation's schedule from now, without running the occurrences it missed */
 	unpause(
-		automationId: string,
+		automationId: PathParam<"automations", "unpause", "automation_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "unpause">>, CheckfuSdkError>
 	unpause(
-		automationId: string,
+		automationId: PathParam<"automations", "unpause", "automation_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "unpause">, CheckfuSdkError>
 	unpause(
-		automationId: string,
+		automationId: PathParam<"automations", "unpause", "automation_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"automations", "unpause">
@@ -850,17 +897,17 @@ export class EffectAutomationsResource {
 
 	/** Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated. */
 	update(
-		automationId: string,
+		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "update">>, CheckfuSdkError>
 	update(
-		automationId: string,
+		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "update">, CheckfuSdkError>
 	update(
-		automationId: string,
+		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
 		options?: AnyRequestOptions,
 	): Effect<
@@ -902,15 +949,15 @@ export class EffectEnvironmentsResource {
 
 	/** Archive an environment */
 	archive(
-		environmentId: string,
+		environmentId: PathParam<"environments", "archive", "environment_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"environments", "archive">>, CheckfuSdkError>
 	archive(
-		environmentId: string,
+		environmentId: PathParam<"environments", "archive", "environment_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"environments", "archive">, CheckfuSdkError>
 	archive(
-		environmentId: string,
+		environmentId: PathParam<"environments", "archive", "environment_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"environments", "archive">
@@ -981,15 +1028,15 @@ export class EffectEnvironmentsResource {
 
 	/** Delete an environment */
 	delete(
-		environmentId: string,
+		environmentId: PathParam<"environments", "delete", "environment_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"environments", "delete">>, CheckfuSdkError>
 	delete(
-		environmentId: string,
+		environmentId: PathParam<"environments", "delete", "environment_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"environments", "delete">, CheckfuSdkError>
 	delete(
-		environmentId: string,
+		environmentId: PathParam<"environments", "delete", "environment_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"environments", "delete">
@@ -1090,15 +1137,15 @@ export class EffectEnvironmentsResource {
 
 	/** Retrieve an environment by ID */
 	retrieve(
-		environmentId: string,
+		environmentId: PathParam<"environments", "get", "environment_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"environments", "get">>, CheckfuSdkError>
 	retrieve(
-		environmentId: string,
+		environmentId: PathParam<"environments", "get", "environment_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"environments", "get">, CheckfuSdkError>
 	retrieve(
-		environmentId: string,
+		environmentId: PathParam<"environments", "get", "environment_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"environments", "get"> | WithResponse<EndpointSuccess<"environments", "get">>,
@@ -1126,17 +1173,17 @@ export class EffectEnvironmentsResource {
 
 	/** Update an environment */
 	update(
-		environmentId: string,
+		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"environments", "update">>, CheckfuSdkError>
 	update(
-		environmentId: string,
+		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"environments", "update">, CheckfuSdkError>
 	update(
-		environmentId: string,
+		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
 		options?: AnyRequestOptions,
 	): Effect<
@@ -1178,17 +1225,17 @@ export class EffectSessionsEventsResource {
 
 	/** List historical events for a session */
 	list(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">> | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError>
 	list(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"sessions", "listEvents">, CheckfuSdkError>
 	list(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		options?: AnyRequestOptions,
 	): Effect<
@@ -1223,7 +1270,7 @@ export class EffectSessionsEventsResource {
 
 	/** Auto-paginate pages for List historical events for a session */
 	listPages(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"sessions", "listEvents">, CheckfuSdkError> {
@@ -1244,7 +1291,7 @@ export class EffectSessionsEventsResource {
 
 	/** Auto-paginate items for List historical events for a session */
 	listStream(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError> {
@@ -1265,17 +1312,17 @@ export class EffectSessionsEventsResource {
 
 	/** Send user events to a session */
 	send(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "sendEvents">>, CheckfuSdkError>
 	send(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"sessions", "sendEvents">, CheckfuSdkError>
 	send(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
 		options?: AnyRequestOptions,
 	): Effect<
@@ -1309,7 +1356,7 @@ export class EffectSessionsEventsResource {
 
 	/** Stream live session events over Server-Sent Events */
 	stream(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
 		params?: { readonly after?: number | undefined },
 		options?: SessionEventsStreamOptions,
 	): Stream<EndpointSseEvent<"sessions", "streamEvents">, CheckfuSdkError> {
@@ -1335,15 +1382,15 @@ export class EffectSessionsResource {
 
 	/** Archive a session */
 	archive(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "archive", "session_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "archive">>, CheckfuSdkError>
 	archive(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "archive", "session_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"sessions", "archive">, CheckfuSdkError>
 	archive(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "archive", "session_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"sessions", "archive"> | WithResponse<EndpointSuccess<"sessions", "archive">>,
@@ -1485,15 +1532,15 @@ export class EffectSessionsResource {
 
 	/** Retrieve a session by ID */
 	retrieve(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "get", "session_id">,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"sessions", "get">>, CheckfuSdkError>
 	retrieve(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "get", "session_id">,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"sessions", "get">, CheckfuSdkError>
 	retrieve(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "get", "session_id">,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"sessions", "get"> | WithResponse<EndpointSuccess<"sessions", "get">>,
@@ -1543,7 +1590,7 @@ export class AgentsResource {
 
 	/** Archive an agent */
 	archive(
-		agentId: string,
+		agentId: PathParam<"agents", "archive", "agent_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"agents", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1590,7 +1637,7 @@ export class AgentsResource {
 
 	/** Retrieve an agent by ID */
 	retrieve(
-		agentId: string,
+		agentId: PathParam<"agents", "get", "agent_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"agents", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1603,7 +1650,7 @@ export class AgentsResource {
 
 	/** Update an agent (creates a new agent version) */
 	update(
-		agentId: string,
+		agentId: PathParam<"agents", "update", "agent_id">,
 		params: EndpointBody<"agents", "update">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"agents", "update">> {
@@ -1625,7 +1672,7 @@ export class AutomationsRunsResource {
 
 	/** List the runs of an automation that have started or failed, oldest first by default */
 	list(
-		automationId: string,
+		automationId: PathParam<"automations", "listRuns", "automation_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
@@ -1648,6 +1695,20 @@ export class AutomationsRunsResource {
 				),
 		)
 	}
+
+	/** Retrieve one run of an automation by its run number, once it has started or failed */
+	retrieve(
+		automationId: PathParam<"automations", "getRun", "automation_id">,
+		run: PathParam<"automations", "getRun", "run">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "getRun">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationsRunsResource(effectRuntime).retrieve(automationId, run, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
 }
 
 export class AutomationsResource {
@@ -1661,7 +1722,7 @@ export class AutomationsResource {
 
 	/** Archive an automation so it never runs again */
 	archive(
-		automationId: string,
+		automationId: PathParam<"automations", "archive", "automation_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1712,7 +1773,7 @@ export class AutomationsResource {
 
 	/** Stop an automation's schedule until it is unpaused; it can still be run on request */
 	pause(
-		automationId: string,
+		automationId: PathParam<"automations", "pause", "automation_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "pause">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1725,7 +1786,7 @@ export class AutomationsResource {
 
 	/** Retrieve an automation by ID */
 	retrieve(
-		automationId: string,
+		automationId: PathParam<"automations", "get", "automation_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1738,7 +1799,7 @@ export class AutomationsResource {
 
 	/** Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to */
 	run(
-		automationId: string,
+		automationId: PathParam<"automations", "run", "automation_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "run">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1751,7 +1812,7 @@ export class AutomationsResource {
 
 	/** Resume an automation's schedule from now, without running the occurrences it missed */
 	unpause(
-		automationId: string,
+		automationId: PathParam<"automations", "unpause", "automation_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "unpause">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1764,7 +1825,7 @@ export class AutomationsResource {
 
 	/** Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated. */
 	update(
-		automationId: string,
+		automationId: PathParam<"automations", "update", "automation_id">,
 		params: EndpointBody<"automations", "update">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "update">> {
@@ -1786,7 +1847,7 @@ export class EnvironmentsResource {
 
 	/** Archive an environment */
 	archive(
-		environmentId: string,
+		environmentId: PathParam<"environments", "archive", "environment_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"environments", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1812,7 +1873,7 @@ export class EnvironmentsResource {
 
 	/** Delete an environment */
 	delete(
-		environmentId: string,
+		environmentId: PathParam<"environments", "delete", "environment_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"environments", "delete">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1849,7 +1910,7 @@ export class EnvironmentsResource {
 
 	/** Retrieve an environment by ID */
 	retrieve(
-		environmentId: string,
+		environmentId: PathParam<"environments", "get", "environment_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"environments", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1862,7 +1923,7 @@ export class EnvironmentsResource {
 
 	/** Update an environment */
 	update(
-		environmentId: string,
+		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"environments", "update">> {
@@ -1884,7 +1945,7 @@ export class SessionsEventsResource {
 
 	/** List historical events for a session */
 	list(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
@@ -1910,7 +1971,7 @@ export class SessionsEventsResource {
 
 	/** Send user events to a session */
 	send(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "sendEvents", "session_id">,
 		params: EndpointBody<"sessions", "sendEvents">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"sessions", "sendEvents">> {
@@ -1924,7 +1985,7 @@ export class SessionsEventsResource {
 
 	/** Stream live session events over Server-Sent Events */
 	stream(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
 		params?: { readonly after?: number | undefined },
 		options?: PromiseStreamOptions,
 	): EventStreamPromise<IsoDateTimes<EndpointSseEvent<"sessions", "streamEvents">>> {
@@ -1945,7 +2006,7 @@ export class SessionsResource {
 
 	/** Archive a session */
 	archive(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "archive", "session_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"sessions", "archive">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
@@ -1995,7 +2056,7 @@ export class SessionsResource {
 
 	/** Retrieve a session by ID */
 	retrieve(
-		sessionId: string,
+		sessionId: PathParam<"sessions", "get", "session_id">,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"sessions", "get">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
