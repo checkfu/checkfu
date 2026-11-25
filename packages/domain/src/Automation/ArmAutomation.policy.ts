@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import { AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { SCHEDULE_EXHAUSTED } from "./AutomationTypes.ts"
@@ -16,7 +17,7 @@ import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 export const NEXT_FIRING = "next-firing"
 
 export class ArmAutomation extends Domain.Policy("ArmAutomation", {
-	from: AutomationView,
+	from: Automation,
 	on: [
 		AutomationCreated,
 		AutomationUnpaused,
@@ -30,7 +31,15 @@ export class ArmAutomation extends Domain.Policy("ArmAutomation", {
 export const ArmAutomationLive = ArmAutomation.toLayer(
 	Effect.gen(function* () {
 		const automations = yield* Automation
-		return Effect.fn(function* ({ source, state, event }) {
+		const views = yield* AutomationView
+		return Effect.fn(function* ({ source, event, envelope }) {
+			const state = Option.getOrNull(
+				yield* Effect.orDie(
+					views.get(source, {
+						atLeast: { stream: `Automation/${source.id}`, version: envelope.seq },
+					}),
+				),
+			)
 			if (state === null) {
 				return
 			}

@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import { BoundedAgentId, BoundedEnvironmentId } from "../Session/AdmitSession.command.ts"
 import { Automation } from "./Automation.aggregate.ts"
 import { AutomationView } from "./AutomationView.view.ts"
@@ -26,7 +27,7 @@ const refused = (error_type: string, message: string, unrecoverable: boolean) =>
 })
 
 export class StartAutomationRun extends Domain.Policy("StartAutomationRun", {
-	from: AutomationView,
+	from: Automation,
 	on: [AutomationFired],
 }) {}
 
@@ -34,7 +35,15 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 	Effect.gen(function* () {
 		const automations = yield* Automation
 		const opening = yield* OpenAutomationSessionDecision
-		return Effect.fn(function* ({ source, state, event }) {
+		const views = yield* AutomationView
+		return Effect.fn(function* ({ source, event, envelope }) {
+			const state = Option.getOrNull(
+				yield* Effect.orDie(
+					views.get(source, {
+						atLeast: { stream: `Automation/${source.id}`, version: envelope.seq },
+					}),
+				),
+			)
 			if (state === null) {
 				return
 			}

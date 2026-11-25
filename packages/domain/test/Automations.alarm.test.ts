@@ -30,7 +30,20 @@ describe("Automation alarms", () => {
 		const id = AutomationId.make("auto_alarm")
 		return Effect.gen(function* () {
 			const automations = yield* Automation
-			const settle = platform.control.drain
+			const settle = Effect.gen(function* () {
+				for (let i = 0; i < 1000; i++) {
+					yield* platform.control.drain
+					yield* Effect.yieldNow
+					if (yield* platform.control.idle) {
+						yield* Effect.yieldNow
+						yield* platform.control.drain
+						if (yield* platform.control.idle) {
+							return
+						}
+					}
+				}
+				return yield* Effect.die(new Error("the platform did not settle"))
+			})
 			const cancelAgain = Effect.flip(automations.unschedule(id, NEXT_FIRING)).pipe(
 				Effect.map((error) => error._tag),
 			)
@@ -84,7 +97,20 @@ describe("Automation alarms", () => {
 		return Effect.gen(function* () {
 			const domain = yield* CheckfuDomainApi.clientInProcess
 			const automations = yield* Automation
-			const settle = platform.control.drain
+			const settle = Effect.gen(function* () {
+				for (let i = 0; i < 1000; i++) {
+					yield* platform.control.drain
+					yield* Effect.yieldNow
+					if (yield* platform.control.idle) {
+						yield* Effect.yieldNow
+						yield* platform.control.drain
+						if (yield* platform.control.idle) {
+							return
+						}
+					}
+				}
+				return yield* Effect.die(new Error("the platform did not settle"))
+			})
 			yield* domain.CreateAgent({
 				agent_id: AgentId.make("agent_alarm"),
 				version_id: AgentVersionId.make("aver_alarm"),
