@@ -1,13 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import {
+	MAX_SESSION_MEMORY_STORES,
 	MAX_SESSION_REPOSITORIES,
+	MemoryMountPath,
 	MountPath,
 	RepositoryCheckout,
 	RepositoryMountPath,
 	RepositoryToken,
 	RepositoryUrl,
 	SessionResources,
+	memoryMountPath,
 	mountsOverlap,
 } from "../src/Session/SessionResource.ts"
 
@@ -130,5 +133,49 @@ describe("session resources", () => {
 			)
 		expect(valid(many(MAX_SESSION_REPOSITORIES))).toBe(true)
 		expect(valid(many(MAX_SESSION_REPOSITORIES + 1))).toBe(false)
+	})
+
+	it("mounts a memory store under /mnt/memory at its name, made into one path segment", () => {
+		expect(memoryMountPath("Team Notes", "memstore_1")).toBe("/mnt/memory/team-notes")
+		expect(memoryMountPath("  User's Preferences (2026)!  ", "memstore_1")).toBe(
+			"/mnt/memory/user-s-preferences-2026",
+		)
+		expect(memoryMountPath("Résumé Notes", "memstore_1")).toBe("/mnt/memory/résumé-notes")
+		expect(memoryMountPath("../../etc", "memstore_1")).toBe("/mnt/memory/etc")
+		expect(memoryMountPath("!!!", "memstore_1")).toBe("/mnt/memory/memstore_1")
+		const valid = accepts(MemoryMountPath)
+		expect(valid("/mnt/memory/team-notes")).toBe(true)
+		for (const path of ["/mnt/memory", "/mnt/memory/a/b", "/mnt/other/a", "/workspace/a"]) {
+			expect([path, valid(path)]).toEqual([path, false])
+		}
+	})
+
+	it("admits up to 8 memory stores beside 8 repositories, each store once", () => {
+		const valid = accepts(SessionResources)
+		const store = (index: number, memory_store_id = `memstore_${index}`) => ({
+			id: `sesrsc_m${index}`,
+			type: "memory_store" as const,
+			memory_store_id,
+			access: "read_write" as const,
+			instructions: null,
+			name: `Store ${index}`,
+			description: "",
+			mount_path: `/mnt/memory/store-${index}`,
+		})
+		const repositories = Array.from({ length: MAX_SESSION_REPOSITORIES }, (_, index) =>
+			repository(
+				`sesrsc_r${index}`,
+				`https://github.com/acme/repo-${index}`,
+				`/workspace/repo-${index}`,
+			),
+		)
+		const stores = (count: number) => Array.from({ length: count }, (_, index) => store(index))
+		expect(valid([...repositories, ...stores(MAX_SESSION_MEMORY_STORES)])).toBe(true)
+		expect(valid(stores(MAX_SESSION_MEMORY_STORES + 1))).toBe(false)
+		expect(valid([store(1), store(2, "memstore_1")])).toBe(false)
+		expect(valid([store(1), { ...store(2), mount_path: "/mnt/memory/store-1" }])).toBe(false)
+		expect(valid([{ ...store(1), access: "write_only" }])).toBe(false)
+		expect(valid([{ ...store(1), instructions: "x".repeat(4097) }])).toBe(false)
+		expect(valid([{ ...store(1), mount_path: "/workspace/store-1" }])).toBe(false)
 	})
 })

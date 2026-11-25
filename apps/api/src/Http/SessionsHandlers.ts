@@ -10,6 +10,8 @@ import {
 import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomationSession.command"
 import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
+import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
@@ -29,7 +31,7 @@ import {
 	ResourceId,
 	decodeToolUseIds,
 } from "@checkfu/domain/Session/SessionTypes"
-import { SessionResources } from "@checkfu/domain/Session/SessionResource"
+import { SessionResources, memoryMountPath } from "@checkfu/domain/Session/SessionResource"
 import type { RepositoryToken, SessionResourceId } from "@checkfu/domain/Session/SessionResource"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
@@ -80,7 +82,12 @@ import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
-import type { ClientEventId, SendSessionEventReceipt, SessionResourceItem } from "./Api.ts"
+import type {
+	ClientEventId,
+	CreateSessionResource,
+	SendSessionEventReceipt,
+	SessionResourceItem,
+} from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	archiveAndRead,
@@ -323,6 +330,21 @@ export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): S
 	}
 }
 
+const askedResource = (resource: CreateSessionResource) =>
+	resource.type === "github_repository"
+		? {
+				type: resource.type,
+				url: resource.url,
+				mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+				checkout: resource.checkout ?? null,
+			}
+		: {
+				type: resource.type,
+				memory_store_id: resource.memory_store_id,
+				access: resource.access ?? "read_write",
+				instructions: resource.instructions ?? null,
+			}
+
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
@@ -332,6 +354,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const memoryStores = yield* MemoryStore
 		const harness = yield* Harness
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
@@ -515,6 +538,34 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					),
 				)
 
+		const requestedResource = Effect.fn(function* (resource: CreateSessionResource) {
+			if (resource.type === "github_repository") {
+				return {
+					type: resource.type,
+					url: resource.url,
+					mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+					checkout: resource.checkout ?? null,
+				}
+			}
+			const storeId = MemoryStoreId.make(resource.memory_store_id)
+			const store = yield* memoryStores.get(storeId)
+			if (store.status === "" || store.status === "deleted") {
+				return yield* reject(404, `Memory store ${storeId} not found.`)
+			}
+			if (store.status !== "active") {
+				return yield* reject(409, `Memory store ${storeId} is archived.`)
+			}
+			return {
+				type: resource.type,
+				memory_store_id: storeId,
+				access: resource.access ?? "read_write",
+				instructions: resource.instructions ?? null,
+				name: store.name,
+				description: store.description,
+				mount_path: memoryMountPath(store.name, storeId),
+			}
+		})
+
 		const existingResource = (sessionId: SessionId, resourceId: SessionResourceId) =>
 			Effect.gen(function* () {
 				const session = yield* existing(sessionId)
@@ -557,12 +608,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										),
 									),
 								)
-					const requested = (payload.resources ?? []).map((resource) => ({
-						type: resource.type,
-						url: resource.url,
-						mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
-						checkout: resource.checkout ?? null,
-					}))
+					const asked = (payload.resources ?? []).map(askedResource)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
 						prefix: "sess",
@@ -575,7 +621,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
 							vault_ids: payload.vault_ids,
 							mcp_server_credentials: payload.mcp_server_credentials,
-							...(requested.length === 0 ? {} : { resources: requested }),
+							...(asked.length === 0 ? {} : { resources: asked }),
 						},
 					})
 					const id = SessionId.make(identity.id)
@@ -584,22 +630,34 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
 							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
 							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
-					const resources = yield* decodeResources(
-						yield* Effect.forEach(requested, (resource, index) =>
-							Effect.map(
-								idempotencyKey === undefined
-									? randomId(random, "sesrsc")
-									: idempotentId(digest, "sesrsc", [
-											"create",
-											"session",
-											"resource",
-											idempotencyKey,
-											index,
-										]),
-								(resourceId) => ({ id: resourceId, ...resource }),
+					const prior =
+						idempotencyKey === undefined || (yield* sessions.get(id))._tag === "Uninitialized"
+							? undefined
+							: yield* existing(id).pipe(orPending(id, "session"))
+					if (prior !== undefined && isPending(prior)) {
+						return prior
+					}
+					const admitted = prior?.resources
+					const resources =
+						admitted ??
+						(yield* decodeResources(
+							yield* Effect.forEach(
+								yield* Effect.forEach(payload.resources ?? [], requestedResource),
+								(resource, index) =>
+									Effect.map(
+										idempotencyKey === undefined
+											? randomId(random, "sesrsc")
+											: idempotentId(digest, "sesrsc", [
+													"create",
+													"session",
+													"resource",
+													idempotencyKey,
+													index,
+												]),
+										(resourceId) => ({ id: resourceId, ...resource }),
+									),
 							),
-						),
-					).pipe(Effect.catchTag("SchemaError", (error) => reject(400, error.message)))
+						).pipe(Effect.catchTag("SchemaError", (error) => reject(400, error.message))))
 					const admission = {
 						session_id: id,
 						agent_id: agentId,
@@ -622,7 +680,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
 					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
-						return resource.authorization_token === undefined || stored === undefined
+						return resource.type !== "github_repository" ||
+							resource.authorization_token === undefined ||
+							stored === undefined
 							? Effect.succeed([])
 							: harness
 									.storeRepositoryToken({
@@ -747,6 +807,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						params.session_id,
 						params.resource_id,
 					)
+					if (resource.type !== "github_repository") {
+						return yield* reject(400, `Resource ${resource.id} is not a repository.`)
+					}
 					if (session.status === "terminated") {
 						return yield* reject(409, `Session ${session.id} is terminated.`)
 					}

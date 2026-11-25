@@ -67,6 +67,15 @@ import {
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
+import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
+import { makeSessionMemory } from "../../src/Workspace/SessionMemory.ts"
+import type {
+	PendingReceiptStore,
+	PendingReceipts,
+	SessionMemory,
+	SessionMemoryCalls,
+} from "../../src/Workspace/SessionMemory.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
@@ -233,6 +242,8 @@ export const checkfuWithHarness = <E, R>(
 		PiDurableHarnessLive.pipe(Layer.provide(executor), Layer.provide(hosted)),
 	)
 }
+
+const memoryRel = (path: string) => path.slice("/mnt/memory/".length)
 
 export const makePiDurableTestLayer = (
 	handler: (
@@ -504,6 +515,74 @@ export const makePiDurableTestLayer = (
 	const preparations: Array<WorkspacePreparation> = []
 	const beforeTokenStored: Array<() => Promise<Response>> = []
 	const tokenDeliveries: Array<string> = []
+	let memoryCalls:
+		| {
+				readonly access: Effect.Success<typeof SessionMemoryAccess>
+				readonly run: <A>(effect: Effect.Effect<A>) => Promise<A>
+		  }
+		| undefined
+	const memoryCallsLive = Layer.effectDiscard(
+		Effect.gen(function* () {
+			const access = yield* SessionMemoryAccess
+			const services = yield* Effect.context<never>()
+			memoryCalls = { access, run: (effect) => Effect.runPromiseWith(services)(effect) }
+		}),
+	)
+	const run = <A, E>(
+		effect: (access: Effect.Success<typeof SessionMemoryAccess>) => Effect.Effect<A, E>,
+	) => {
+		if (memoryCalls === undefined) {
+			throw new Error("The test layer is not built yet.")
+		}
+		return memoryCalls.run(Effect.orDie(effect(memoryCalls.access)))
+	}
+	const heldReceipts = new Map<string, PendingReceipts>()
+	const receiptsOf = (sessionId: string): PendingReceiptStore => ({
+		get: () => heldReceipts.get(sessionId),
+		put: (pending) => {
+			heldReceipts.set(sessionId, pending)
+		},
+	})
+	const sessionMemoryCalls = (sessionId: string): SessionMemoryCalls => ({
+		mounts: () => run((access) => access.memoryMounts(sessionId)),
+		list: (name, after) => run((access) => access.memoryList(sessionId, name, after)),
+		read: (name, path) => run((access) => access.memoryRead(sessionId, name, path)),
+		write: (name, path, content, exclusive) =>
+			run((access) => access.memoryWrite(sessionId, name, path, content, exclusive)),
+		remove: (name, path, expected) =>
+			run((access) => access.memoryRemove(sessionId, name, path, expected)),
+	})
+	const sessionMemoryOf = (sessionId: string): SessionMemory =>
+		makeSessionMemory(sessionMemoryCalls(sessionId), receiptsOf(sessionId))
+	const memoryMounts = new Map<string, ReturnType<typeof makeMemoryMount>>()
+	const memoryFiles = (sessionId: string) => {
+		let mount = memoryMounts.get(sessionId)
+		if (mount === undefined) {
+			mount = makeMemoryMount(sessionMemoryOf(sessionId))
+			memoryMounts.set(sessionId, mount)
+		}
+		const served = mount
+		return {
+			write: async (path: string, content: string) => {
+				await served.writeFile?.(memoryRel(path), new Blob([content]).stream(), {})
+			},
+			remove: async (path: string, recursive = false) => {
+				await served.rm?.(memoryRel(path), { recursive })
+			},
+			rename: async (from: string, to: string) => {
+				await served.rename?.(memoryRel(from), memoryRel(to), {})
+			},
+			read: async (path: string) => {
+				const read = await served.readFile(memoryRel(path))
+				return read === null ? null : await new Response(read.body).text()
+			},
+			list: async () =>
+				((await served.readdir("", { recursive: true })) ?? [])
+					.filter((entry) => entry.type === "file")
+					.map((entry) => `/mnt/memory/${entry.name}`)
+					.toSorted(),
+		}
+	}
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -645,7 +724,7 @@ export const makePiDurableTestLayer = (
 	const CustomToolFaultsLive = Layer.succeed(CustomToolFaults, (tools, taken) =>
 		Effect.succeed(customToolFaults(tools, taken)),
 	)
-	const layer = Layer.mergeAll(
+	const base = Layer.mergeAll(
 		CheckfuLive,
 		PiProviderLive,
 		CustomToolFaultsLive,
@@ -668,6 +747,7 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 		Layer.provideMerge(TestRuntimeContext),
 	)
+	const layer = memoryCallsLive.pipe(Layer.provideMerge(base))
 
 	const restartPi = async (sessionId: string) => {
 		const serving = await objects.get(sessionId)
@@ -709,6 +789,8 @@ export const makePiDurableTestLayer = (
 		preparations,
 		beforeTokenStored,
 		tokenDeliveries,
+		memoryFiles,
+		sessionMemoryCalls,
 	}
 }
 
