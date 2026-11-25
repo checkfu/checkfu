@@ -708,6 +708,7 @@ describe("interrupted turns and turn recovery", () => {
 								agent_id: agent.id,
 								agent_version: 1,
 								environment_id: env.id,
+								resources: [],
 								turn: 1,
 								input: ["hello"],
 							}),
