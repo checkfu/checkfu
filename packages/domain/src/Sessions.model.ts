@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
+import { DiscardWorkspace, DiscardWorkspaceLive } from "./Session/DiscardWorkspace.policy.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
@@ -10,7 +11,7 @@ import { TurnInput } from "./Session/TurnInput.view.ts"
 export class Sessions extends Domain.Model("Sessions", {
 	aggregates: [Session],
 	views: [SessionView, TurnInput],
-	policies: [StartTurn, StopModelRequest],
+	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
 	sagas: [RunTurn],
 	invariants: {
 		SessionViewMatchesSession: (m) =>
@@ -113,4 +114,9 @@ export class SessionsApi extends Domain.Api("SessionsApi", {
 	views: ["SessionView"],
 }) {}
 
-export const SessionsHandlersLive = Layer.mergeAll(StartTurnLive, StopModelRequestLive, RunTurnLive)
+export const SessionsHandlersLive = Layer.mergeAll(
+	StartTurnLive,
+	StopModelRequestLive,
+	DiscardWorkspaceLive,
+	RunTurnLive,
+)
