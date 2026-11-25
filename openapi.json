@@ -8536,6 +8536,66 @@
 															"updated_at"
 														],
 														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["artifact"]
+															},
+															"artifact_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"version": {
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
+															},
+															"manifest": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"name": {
+																"type": "string"
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"artifact_id",
+															"version",
+															"manifest",
+															"name",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
 													}
 												]
 											}
@@ -9256,11 +9316,34 @@
 													},
 													"required": ["type", "memory_store_id"],
 													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["artifact"]
+														},
+														"artifact_id": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 256,
+															"description": "Artifact whose files to mount, read-only"
+														},
+														"version": {
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991,
+															"description": "Version to mount (default: the current version)"
+														}
+													},
+													"required": ["type", "artifact_id"],
+													"additionalProperties": false
 												}
 											]
 										},
-										"maxItems": 16,
-										"description": "Repositories and memory stores to mount in the session's workspace"
+										"maxItems": 24,
+										"description": "Repositories, memory stores and artifacts to mount in the session's workspace"
 									}
 								},
 								"required": ["agent", "environment_id"],
@@ -9798,6 +9881,66 @@
 																		"instructions",
 																		"name",
 																		"description",
+																		"mount_path",
+																		"created_at",
+																		"updated_at"
+																	],
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"id": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256
+																		},
+																		"type": {
+																			"type": "string",
+																			"enum": ["artifact"]
+																		},
+																		"artifact_id": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 256
+																		},
+																		"version": {
+																			"type": "integer",
+																			"minimum": 1,
+																			"maximum": 9007199254740991
+																		},
+																		"manifest": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 64
+																		},
+																		"name": {
+																			"type": "string"
+																		},
+																		"mount_path": {
+																			"type": "string",
+																			"maxLength": 1024,
+																			"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																			"allOf": [
+																				{
+																					"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+																				}
+																			]
+																		},
+																		"created_at": {
+																			"type": "string"
+																		},
+																		"updated_at": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"id",
+																		"type",
+																		"artifact_id",
+																		"version",
+																		"manifest",
+																		"name",
 																		"mount_path",
 																		"created_at",
 																		"updated_at"
@@ -10671,6 +10814,66 @@
 															"updated_at"
 														],
 														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["artifact"]
+															},
+															"artifact_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"version": {
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
+															},
+															"manifest": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"name": {
+																"type": "string"
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"artifact_id",
+															"version",
+															"manifest",
+															"name",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
 													}
 												]
 											}
@@ -11505,6 +11708,66 @@
 															"instructions",
 															"name",
 															"description",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["artifact"]
+															},
+															"artifact_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"version": {
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
+															},
+															"manifest": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"name": {
+																"type": "string"
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"artifact_id",
+															"version",
+															"manifest",
+															"name",
 															"mount_path",
 															"created_at",
 															"updated_at"
@@ -14223,6 +14486,66 @@
 															"updated_at"
 														],
 														"additionalProperties": false
+													},
+													{
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"type": {
+																"type": "string",
+																"enum": ["artifact"]
+															},
+															"artifact_id": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 256
+															},
+															"version": {
+																"type": "integer",
+																"minimum": 1,
+																"maximum": 9007199254740991
+															},
+															"manifest": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 64
+															},
+															"name": {
+																"type": "string"
+															},
+															"mount_path": {
+																"type": "string",
+																"maxLength": 1024,
+																"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																"allOf": [
+																	{
+																		"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+																	}
+																]
+															},
+															"created_at": {
+																"type": "string"
+															},
+															"updated_at": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"id",
+															"type",
+															"artifact_id",
+															"version",
+															"manifest",
+															"name",
+															"mount_path",
+															"created_at",
+															"updated_at"
+														],
+														"additionalProperties": false
 													}
 												]
 											}
@@ -14781,6 +15104,66 @@
 												"updated_at"
 											],
 											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"type": {
+													"type": "string",
+													"enum": ["artifact"]
+												},
+												"artifact_id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"version": {
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
+												},
+												"manifest": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												},
+												"name": {
+													"type": "string"
+												},
+												"mount_path": {
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+													"allOf": [
+														{
+															"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+														}
+													]
+												},
+												"created_at": {
+													"type": "string"
+												},
+												"updated_at": {
+													"type": "string"
+												}
+											},
+											"required": [
+												"id",
+												"type",
+												"artifact_id",
+												"version",
+												"manifest",
+												"name",
+												"mount_path",
+												"created_at",
+												"updated_at"
+											],
+											"additionalProperties": false
 										}
 									]
 								}
@@ -15324,6 +15707,66 @@
 												"instructions",
 												"name",
 												"description",
+												"mount_path",
+												"created_at",
+												"updated_at"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"type": {
+													"type": "string",
+													"enum": ["artifact"]
+												},
+												"artifact_id": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"version": {
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 9007199254740991
+												},
+												"manifest": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												},
+												"name": {
+													"type": "string"
+												},
+												"mount_path": {
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+													"allOf": [
+														{
+															"pattern": "^\\/mnt\\/artifacts\\/[^/]+$"
+														}
+													]
+												},
+												"created_at": {
+													"type": "string"
+												},
+												"updated_at": {
+													"type": "string"
+												}
+											},
+											"required": [
+												"id",
+												"type",
+												"artifact_id",
+												"version",
+												"manifest",
+												"name",
 												"mount_path",
 												"created_at",
 												"updated_at"

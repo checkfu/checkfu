@@ -2852,10 +2852,34 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										required: ["type", "memory_store_id"],
 										additionalProperties: false,
 									},
+									{
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["artifact"],
+											},
+											artifact_id: {
+												type: "string",
+												minLength: 1,
+												maxLength: 256,
+												description: "Artifact whose files to mount, read-only",
+											},
+											version: {
+												type: "integer",
+												minimum: 1,
+												maximum: 9007199254740991,
+												description: "Version to mount (default: the current version)",
+											},
+										},
+										required: ["type", "artifact_id"],
+										additionalProperties: false,
+									},
 								],
 							},
-							maxItems: 16,
-							description: "Repositories and memory stores to mount in the session's workspace",
+							maxItems: 24,
+							description:
+								"Repositories, memory stores and artifacts to mount in the session's workspace",
 						},
 					},
 					required: ["agent", "environment_id"],

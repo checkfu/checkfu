@@ -524,13 +524,16 @@ export const MemoryMountPath = MountPath.check(
 	}),
 )
 
-export const memoryMountPath = (name: string, memoryStoreId: string): string => {
+const mountSegment = (name: string, fallback: string): string => {
 	const slug = name
 		.toLowerCase()
 		.replaceAll(/[^\p{L}\p{N}]+/gu, "-")
 		.replaceAll(/^-+|-+$/gu, "")
-	return `${MEMORY_MOUNT_ROOT}/${slug.length === 0 ? memoryStoreId : slug}`
+	return slug.length === 0 ? fallback : slug
 }
+
+export const memoryMountPath = (name: string, memoryStoreId: string): string =>
+	`${MEMORY_MOUNT_ROOT}/${mountSegment(name, memoryStoreId)}`
 
 export const MemoryStoreResource = Schema.Struct({
 	id: SessionResourceId,
@@ -547,7 +550,37 @@ export const MemoryStoreResource = Schema.Struct({
 })
 export type MemoryStoreResource = typeof MemoryStoreResource.Type
 
-export const SessionMount = Schema.Union([GitHubRepositoryResource, MemoryStoreResource])
+export const MAX_SESSION_ARTIFACTS = 8
+export const ARTIFACT_MOUNT_ROOT = "/mnt/artifacts"
+
+export const ArtifactMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/artifacts\/[^/]+$/u, {
+		expected: `a directory directly inside ${ARTIFACT_MOUNT_ROOT}`,
+	}),
+)
+
+export const artifactMountPath = (name: string, artifactId: string): string =>
+	`${ARTIFACT_MOUNT_ROOT}/${mountSegment(name, artifactId)}`
+
+export const ArtifactMount = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("artifact"),
+	artifact_id: Schema.String.check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+	),
+	version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+	manifest: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+	name: Schema.String,
+	mount_path: ArtifactMountPath,
+})
+export type ArtifactMount = typeof ArtifactMount.Type
+
+export const SessionMount = Schema.Union([
+	GitHubRepositoryResource,
+	MemoryStoreResource,
+	ArtifactMount,
+])
 export type SessionMount = typeof SessionMount.Type
 
 export const repositoriesOf = (
@@ -559,6 +592,9 @@ export const memoryStoresOf = (
 	resources: ReadonlyArray<SessionMount>,
 ): ReadonlyArray<MemoryStoreResource> =>
 	resources.filter((resource) => resource.type === "memory_store")
+
+export const artifactsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<ArtifactMount> =>
+	resources.filter((resource) => resource.type === "artifact")
 
 export const mountsOverlap = (a: string, b: string): boolean =>
 	a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
@@ -580,17 +616,21 @@ const mountEachRepositoryOnce = (resources: ReadonlyArray<SessionMount>): boolea
 
 const areWithinLimits = (resources: ReadonlyArray<SessionMount>): boolean =>
 	repositoriesOf(resources).length <= MAX_SESSION_REPOSITORIES &&
-	memoryStoresOf(resources).length <= MAX_SESSION_MEMORY_STORES
+	memoryStoresOf(resources).length <= MAX_SESSION_MEMORY_STORES &&
+	artifactsOf(resources).length <= MAX_SESSION_ARTIFACTS
 
 const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
 	const stores = memoryStoresOf(resources).map((resource) => resource.memory_store_id)
 	return new Set(stores).size === stores.length
 }
 
+export const MAX_SESSION_RESOURCES =
+	MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES + MAX_SESSION_ARTIFACTS
+
 export const SessionMounts = Schema.Array(SessionMount).check(
-	Schema.isMaxLength(MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES),
+	Schema.isMaxLength(MAX_SESSION_RESOURCES),
 	Schema.makeFilter(areWithinLimits, {
-		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories and ${MAX_SESSION_MEMORY_STORES} memory stores`,
+		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories, ${MAX_SESSION_MEMORY_STORES} memory stores and ${MAX_SESSION_ARTIFACTS} artifacts`,
 	}),
 	Schema.makeFilter(attachEachStoreOnce, { expected: "each memory store attached once" }),
 	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),
