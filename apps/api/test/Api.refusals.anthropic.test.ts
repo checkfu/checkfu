@@ -583,212 +583,79 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		}
 	})
 
-	it("treats an Anthropic stream error after a sensitive or refusal delta as a provider error instead of a completed refusal", async () => {
+	it("reports an Anthropic stream that fails after a sensitive or refusal stop reason as the refusal", async () => {
 		const originalFetch = globalThis.fetch
-		const makeFailingStream = (stopReason: "sensitive" | "refusal", withErrorEvent: boolean) =>
-			[
-				`event: message_start\ndata: ${JSON.stringify({
-					type: "message_start",
-					message: {
-						id: "msg_stream_fail",
-						type: "message",
-						role: "assistant",
-						model: "claude-sonnet-4-5",
-						content: [],
-						stop_reason: null,
-						stop_sequence: null,
-						usage: { input_tokens: 10, output_tokens: 0 },
-					},
-				})}\n\n`,
-				`event: message_delta\ndata: ${JSON.stringify({
-					type: "message_delta",
-					delta: { stop_reason: stopReason, stop_sequence: null },
-					usage: { output_tokens: 1 },
-				})}\n\n`,
-				...(withErrorEvent
-					? [
-							`event: error\ndata: ${JSON.stringify({
-								type: "error",
-								error: { type: "overloaded_error", message: "Overloaded" },
-							})}\n\n`,
-						]
-					: []),
-			].join("")
-
-		const realModels = createPiModels({
-			openai: null,
-			anthropic: Redacted.make("sk-ant-test"),
+		const event = <T extends { readonly type: string }>(data: T) =>
+			`event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`
+		const messageStart = event({
+			type: "message_start",
+			message: {
+				id: "msg_stream_fail",
+				type: "message",
+				role: "assistant",
+				model: "claude-sonnet-4-5",
+				content: [],
+				stop_reason: null,
+				stop_sequence: null,
+				usage: { input_tokens: 10, output_tokens: 0 },
+			},
 		})
+		const stopped = (stopReason: string) =>
+			event({
+				type: "message_delta",
+				delta: { stop_reason: stopReason, stop_sequence: null },
+				usage: { output_tokens: 1 },
+			})
+		const overloaded = event({
+			type: "error",
+			error: { type: "overloaded_error", message: "Overloaded after the stop reason" },
+		})
+		const failures = [
+			["an error event", [messageStart, stopped("sensitive"), overloaded]],
+			["a dropped connection", [messageStart, stopped("refusal")]],
+			[
+				"an error event after message_stop",
+				[messageStart, stopped("sensitive"), event({ type: "message_stop" }), overloaded],
+			],
+		] as const
+		const realModels = createPiModels({ openai: null, anthropic: Redacted.make("sk-ant-test") })
 
-		globalThis.fetch = async () =>
-			new Response(makeFailingStream("sensitive", true), {
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			})
-		const backend1 = await createInMemoryPiDurableBackend(realModels)
-		try {
-			const result = await Effect.runPromise(
-				runPiDurableTurn(backend1, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "anthropic",
-					modelId: "claude-sonnet-4-5",
-					system: null,
-					text: "trigger sensitive then overloaded_error",
-				}),
-			)
-			expect(result).toMatchObject({
-				ok: false,
-				error: {
-					error_type: "model_request_failed_error",
-					message: PROVIDER_FAILURE_MESSAGE,
-					terminal: false,
-				},
-			})
-		} finally {
-			globalThis.fetch = originalFetch
-			await backend1.close()
-		}
-
-		globalThis.fetch = async () =>
-			new Response(makeFailingStream("refusal", false), {
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			})
-		const backend2 = await createInMemoryPiDurableBackend(realModels)
-		try {
-			const result = await Effect.runPromise(
-				runPiDurableTurn(backend2, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "anthropic",
-					modelId: "claude-sonnet-4-5",
-					system: null,
-					text: "trigger refusal then disconnect",
-				}),
-			)
-			expect(result).toMatchObject({
-				ok: false,
-				error: {
-					error_type: "model_request_failed_error",
-					message: PROVIDER_FAILURE_MESSAGE,
-					terminal: false,
-				},
-			})
-		} finally {
-			globalThis.fetch = originalFetch
-			await backend2.close()
-		}
-
-		const sentAfterPostStopError: Array<unknown> = []
-		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
-			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
-			sentAfterPostStopError.push(body)
-			const isFailingTurn = JSON.stringify(body).includes("trigger post-stop overloaded_error")
-			const sse = isFailingTurn
-				? [
-						`event: message_start\ndata: ${JSON.stringify({
-							type: "message_start",
-							message: {
-								id: "msg_post_stop_err",
-								type: "message",
-								role: "assistant",
-								model: "claude-sonnet-4-5",
-								content: [],
-								stop_reason: null,
-								stop_sequence: null,
-								usage: { input_tokens: 10, output_tokens: 0 },
-							},
-						})}\n\n`,
-						`event: message_delta\ndata: ${JSON.stringify({
-							type: "message_delta",
-							delta: { stop_reason: "sensitive", stop_sequence: null },
-							usage: { output_tokens: 1 },
-						})}\n\n`,
-						`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
-						`event: error\ndata: ${JSON.stringify({
-							type: "error",
-							error: { type: "overloaded_error", message: "Overloaded after message_stop" },
-						})}\n\n`,
-					].join("")
-				: [
-						`event: message_start\ndata: ${JSON.stringify({
-							type: "message_start",
-							message: {
-								id: "msg_clean_followup",
-								type: "message",
-								role: "assistant",
-								model: "claude-sonnet-4-5",
-								content: [],
-								stop_reason: null,
-								stop_sequence: null,
-								usage: { input_tokens: 8, output_tokens: 0 },
-							},
-						})}\n\n`,
-						`event: content_block_start\ndata: ${JSON.stringify({
-							type: "content_block_start",
-							index: 0,
-							content_block: { type: "text", text: "" },
-						})}\n\n`,
-						`event: content_block_delta\ndata: ${JSON.stringify({
-							type: "content_block_delta",
-							index: 0,
-							delta: { type: "text_delta", text: "Clean reply" },
-						})}\n\n`,
-						`event: content_block_stop\ndata: ${JSON.stringify({
-							type: "content_block_stop",
-							index: 0,
-						})}\n\n`,
-						`event: message_delta\ndata: ${JSON.stringify({
-							type: "message_delta",
-							delta: { stop_reason: "end_turn", stop_sequence: null },
-							usage: { output_tokens: 3 },
-						})}\n\n`,
-						`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
-					].join("")
-			return new Response(sse, {
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			})
-		}
-		const backend3 = await createInMemoryPiDurableBackend(realModels)
-		try {
-			const result1 = await Effect.runPromise(
-				runPiDurableTurn(backend3, {
-					operationId: "turn:1",
-					turn: 1,
-					provider: "anthropic",
-					modelId: "claude-sonnet-4-5",
-					system: null,
-					text: "trigger post-stop overloaded_error",
-				}),
-			)
-			expect(result1).toMatchObject({
-				ok: false,
-				error: {
-					error_type: "model_request_failed_error",
-					message: PROVIDER_FAILURE_MESSAGE,
-					terminal: false,
-				},
-			})
-
-			const result2 = await Effect.runPromise(
-				runPiDurableTurn(backend3, {
-					operationId: "turn:2",
-					turn: 2,
-					provider: "anthropic",
-					modelId: "claude-sonnet-4-5",
-					system: null,
-					text: "fresh prompt",
-				}),
-			)
-			expect(result2).toMatchObject({ ok: true, reply: { text: "Clean reply" } })
-			const lastRequest = sentAfterPostStopError.at(-1)
-			expect(JSON.stringify(lastRequest)).not.toContain("Overloaded after message_stop")
-			expect(JSON.stringify(lastRequest)).not.toContain("trigger post-stop overloaded_error")
-		} finally {
-			globalThis.fetch = originalFetch
-			await backend3.close()
+		for (const [name, stream] of failures) {
+			const sent: Array<string> = []
+			globalThis.fetch = (_input: unknown, init?: RequestInit) => {
+				sent.push(typeof init?.body === "string" ? init.body : "")
+				return Promise.resolve(
+					new Response(sent.length === 1 ? stream.join("") : "", {
+						status: sent.length === 1 ? 200 : 500,
+						headers: { "content-type": "text/event-stream" },
+					}),
+				)
+			}
+			const backend = await createInMemoryPiDurableBackend(realModels)
+			try {
+				const turn = (number: number, text: string) =>
+					Effect.runPromise(
+						runPiDurableTurn(backend, {
+							operationId: `turn:${number}`,
+							turn: number,
+							provider: "anthropic",
+							modelId: "claude-sonnet-4-5",
+							system: null,
+							text,
+						}),
+					)
+				expect([name, await turn(1, "first prompt")]).toMatchObject([
+					name,
+					{ ok: true, reply: { text: DEFAULT_REFUSAL_TEXT, stop_reason: { type: "refusal" } } },
+				])
+				await turn(2, "second prompt")
+				expect(sent[1]).toContain("first prompt")
+				expect(sent[1]).toContain(DEFAULT_REFUSAL_TEXT)
+				expect(sent[1]).not.toContain("Overloaded after the stop reason")
+			} finally {
+				globalThis.fetch = originalFetch
+				await backend.close()
+			}
 		}
 	})
 
