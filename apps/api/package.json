@@ -31,6 +31,7 @@
 		"agents": "catalog:",
 		"alchemy": "catalog:",
 		"effect": "catalog:",
+		"modern-tar": "catalog:",
 		"zod": "catalog:"
 	},
 	"devDependencies": {

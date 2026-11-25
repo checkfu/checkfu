@@ -328,43 +328,41 @@ export const PiDurableHarnessLive = boundedHarness(
 					const repositories = repositoriesOf(args.resources)
 					const stores = memoryStoresOf(args.resources)
 					const artifacts = artifactsOf(args.resources)
-					if (repositories.length > 0) {
-						const entered = yield* withRetry(executor.enterWorkspace(args.session_id, token)).pipe(
-							Effect.tapError((error) =>
-								Effect.logError("Workspace unreachable", args.session_id, error.cause),
+					const entered = yield* withRetry(executor.enterWorkspace(args.session_id, token)).pipe(
+						Effect.tapError((error) =>
+							Effect.logError("Workspace unreachable", args.session_id, error.cause),
+						),
+						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+					)
+					if (!entered) {
+						return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
+					}
+					const prepared = yield* withRetry(
+						executor.prepareWorkspace(
+							args.session_id,
+							token,
+							repositories,
+							allowedHostsOf(
+								(yield* environments.get(EnvironmentId.make(args.environment_id))).config,
 							),
-							Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
-						)
-						if (!entered) {
-							return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
-						}
-						const prepared = yield* withRetry(
-							executor.prepareWorkspace(
-								args.session_id,
-								token,
-								repositories,
-								allowedHostsOf(
-									(yield* environments.get(EnvironmentId.make(args.environment_id))).config,
-								),
-							),
-						).pipe(
-							Effect.tapError((error) =>
-								Effect.logError("Workspace unreachable", args.session_id, error.cause),
-							),
-							Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
-						)
-						if (!prepared.ok && "interrupted" in prepared) {
-							return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
-						}
-						if (!prepared.ok) {
-							const failed = repositories.find(({ id }) => id === prepared.resource_id)
-							return yield* Effect.fail<TurnFailed>({
-								_tag: "TurnFailed",
-								error_type: "repository_unavailable",
-								message: `Could not clone ${failed?.url ?? prepared.resource_id}: ${prepared.message}`,
-								terminal: false,
-							})
-						}
+						),
+					).pipe(
+						Effect.tapError((error) =>
+							Effect.logError("Workspace unreachable", args.session_id, error.cause),
+						),
+						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+					)
+					if (!prepared.ok && "interrupted" in prepared) {
+						return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
+					}
+					if (!prepared.ok) {
+						const failed = repositories.find(({ id }) => id === prepared.resource_id)
+						return yield* Effect.fail<TurnFailed>({
+							_tag: "TurnFailed",
+							error_type: "repository_unavailable",
+							message: `Could not clone ${failed?.url ?? prepared.resource_id}: ${prepared.message}`,
+							terminal: false,
+						})
 					}
 					const skills = skillsOf(args.resources)
 					const system = describeMounts(version.system, repositories, stores, artifacts, skills)

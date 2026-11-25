@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
 	MAX_GIT_RESPONSE_BYTES,
+	createMachineEgress,
 	createRepositoryFetch,
 	makeGitCalls,
 } from "../src/Workspace/Repositories.ts"
@@ -388,7 +389,11 @@ describe("Session resources", () => {
 					)
 					expect(plain.resources).toEqual([])
 					yield* sendAndSettle(apiFetch, plain.id, ["hello"], 1)
-					expect(preparedWorkspaces).toHaveLength(2)
+					expect(preparedWorkspaces.at(-1)).toEqual({
+						sessionId: plain.id,
+						repositories: [],
+						allowedHosts: null,
+					})
 					expect(systems[1]).not.toContain("Repositories mounted")
 
 					const limited = yield* json<{ id: string }>(
@@ -424,7 +429,7 @@ describe("Session resources", () => {
 		}
 	})
 
-	it("gives the workspace to a turn before it clones, stops a turn the workspace refuses or whose preparation was interrupted, and asks nothing of it for a turn with no repositories", async () => {
+	it("gives the workspace to a turn before it clones, stops a turn the workspace refuses or whose preparation was interrupted, and prepares it on a turn with no repositories, for the network its machine may reach", async () => {
 		let modelCalls = 0
 		const { layer, closeAll, workspaceCalls, refusedWorkspaces, preparedWorkspaces, preparations } =
 			makePiDurableTestLayer(async (model) => {
@@ -483,7 +488,10 @@ describe("Session resources", () => {
 						yield* request(apiFetch, "POST", "/v1/sessions", ids),
 					)
 					yield* sendAndSettle(apiFetch, plain.id, ["Just talk."], 1)
-					expect(workspaceCalls.filter((call) => call.includes(plain.id))).toEqual([])
+					expect(workspaceCalls.filter((call) => call.includes(plain.id))).toEqual([
+						`enter ${plain.id} 1`,
+						`prepare ${plain.id} 1`,
+					])
 					expect(modelCalls).toBe(2)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
@@ -814,5 +822,94 @@ describe("repository fetch", () => {
 		await expect((await respondWith(MAX_GIT_RESPONSE_BYTES + 1)).arrayBuffer()).rejects.toThrow(
 			"more than a workspace can take in one git transfer",
 		)
+	})
+})
+
+describe("machine egress", () => {
+	const mounted = [{ id: "sesrsc_api", url: "https://github.com/acme/api" }]
+	const record = (allowed: ReadonlyArray<string> | null, baseUrl: string | null = null) => {
+		const calls: Array<{
+			url: string
+			method: string
+			authorization: string | null
+			redirect: string
+			body: string
+		}> = []
+		const egress = createMachineEgress({
+			allowedHosts: () => allowed,
+			repositories: () => mounted,
+			token: (resourceId) => (resourceId === "sesrsc_api" ? TOKEN : undefined),
+			baseUrl,
+			fetch: async (input) => {
+				const sent = new Request(input)
+				calls.push({
+					url: sent.url,
+					method: sent.method,
+					authorization: sent.headers.get("authorization"),
+					redirect: sent.redirect,
+					body: await sent.text(),
+				})
+				return new Response("ok")
+			},
+		})
+		return { calls, egress }
+	}
+	const basic = `Basic ${btoa(`x-access-token:${TOKEN}`)}`
+
+	it("adds a mounted repository's token in place of whatever the machine sent", async () => {
+		const { calls, egress } = record(null)
+		await egress(
+			new Request("https://github.com/acme/api.git/git-receive-pack", {
+				method: "POST",
+				headers: { authorization: "Basic c2VudC1ieS1hLWNvbW1hbmQ=" },
+				body: "pack",
+			}),
+		)
+		expect(calls).toEqual([
+			{
+				url: "https://github.com/acme/api.git/git-receive-pack",
+				method: "POST",
+				authorization: basic,
+				redirect: "manual",
+				body: "pack",
+			},
+		])
+	})
+
+	it("sends any other request as the machine sent it, with no token of the session's", async () => {
+		const { calls, egress } = record(null)
+		await egress(new Request("https://github.com/acme/other/info/refs"))
+		await egress(
+			new Request("https://registry.npmjs.org/left-pad", {
+				headers: { authorization: "Bearer the-command's-own" },
+			}),
+		)
+		expect(calls.map(({ url, authorization, redirect }) => [url, authorization, redirect])).toEqual(
+			[
+				["https://github.com/acme/other/info/refs", null, "manual"],
+				["https://registry.npmjs.org/left-pad", "Bearer the-command's-own", "manual"],
+			],
+		)
+	})
+
+	it("refuses a host the environment does not allow, without sending anything", async () => {
+		const { calls, egress } = record(["GitHub.com"])
+		const refused = await egress(new Request("https://example.org/"))
+		expect(refused.status).toBe(403)
+		expect(await refused.text()).toContain("allowed_hosts")
+		expect((await egress(new Request("https://github.com/acme/api/info/refs"))).status).toBe(200)
+		expect(calls.map(({ url, authorization }) => [url, authorization])).toEqual([
+			["https://github.com/acme/api/info/refs", basic],
+		])
+	})
+
+	it("reaches a mounted repository at the address local development gives it", async () => {
+		const { calls, egress } = record(null, "http://127.0.0.1:4010")
+		await egress(new Request("https://github.com/acme/api/info/refs?service=git-upload-pack"))
+		await egress(new Request("https://github.com/acme/other/info/refs"))
+		expect(calls.map(({ url }) => url)).toEqual([
+			"http://127.0.0.1:4010/acme/api/info/refs?service=git-upload-pack",
+			"https://github.com/acme/other/info/refs",
+		])
 	})
 })

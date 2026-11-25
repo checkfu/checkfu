@@ -239,6 +239,7 @@ const startAlchemyDev = async (
 				"CHECKFU_API_DOMAIN=none",
 				"CHECKFU_MCP_DOMAIN=none",
 				`CHECKFU_GITHUB_BASE_URL=${gitHubBaseUrl}`,
+				"CHECKFU_MACHINE_IDLE=10 seconds",
 				"",
 			].join("\n"),
 			{ flag: "wx", mode: 0o600 },
@@ -268,6 +269,7 @@ const startAlchemyDev = async (
 	delete childEnv.CHECKFU_API_DOMAIN
 	delete childEnv.CHECKFU_MCP_DOMAIN
 	delete childEnv.CHECKFU_GITHUB_BASE_URL
+	delete childEnv.CHECKFU_MACHINE_IDLE
 	delete childEnv.CHECKFU_LOCAL_DEV
 	delete childEnv.ALCHEMY_STAGE
 	delete childEnv.ALCHEMY_PROFILE
@@ -288,6 +290,8 @@ const startAlchemyDev = async (
 
 	const logs: Array<string> = []
 	let readyUrl: string | null = null
+	let apiUrl: string | null = null
+	let harnessReady = false
 	let resolveReady!: (url: string) => void
 	let rejectReady!: (err: Error) => void
 	const ready = new Promise<string>((res, rej) => {
@@ -302,7 +306,11 @@ const startAlchemyDev = async (
 		const clean = stripAnsi(line)
 		const match = clean.match(/\[ApiWorker\] ready at (http:\/\/[^\s]+)/)
 		if (match?.[1] !== undefined) {
-			readyUrl = match[1].replace(/\/+$/, "")
+			apiUrl = match[1].replace(/\/+$/, "")
+		}
+		harnessReady ||= clean.includes("[PiHarnessWorker] ready at ")
+		if (apiUrl !== null && harnessReady && readyUrl === null) {
+			readyUrl = apiUrl
 			resolveReady(readyUrl)
 		}
 	}
@@ -356,7 +364,7 @@ const startAlchemyDev = async (
 		if (readyUrl === null) {
 			rejectReady(new Error(`Timed out waiting for alchemy dev\n${logs.join("")}`))
 		}
-	}, 45_000)
+	}, 180_000)
 
 	const halt = async () => {
 		clearTimeout(startupTimer)
@@ -411,6 +419,11 @@ const startAlchemyDev = async (
 		throw error
 	}
 }
+
+const userMessage = (text: string) => ({
+	type: "user.message",
+	content: [{ type: "text", text }],
+})
 
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
@@ -572,6 +585,7 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		fakeGitHub = await startFakeGitHubServer([
 			{ name: "acme/api", files: { "README.md": "# Acme API\n" }, token: TEST_GITHUB_TOKEN },
+			{ name: "acme/shell", files: { "README.md": "# Shell\n" }, token: TEST_GITHUB_TOKEN },
 			{ name: "acme/secret", files: { "KEYS.md": "do not read\n" }, token: "ghp_another_token" },
 		])
 
@@ -598,7 +612,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			name: "Workerd Test Env",
 		})
 		environmentId = createdEnv.id
-	}, 90_000)
+	}, 240_000)
 
 	afterAll(async () => {
 		await stopWorker?.()
@@ -921,6 +935,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			"edit",
 			"delete",
 			"git",
+			"bash",
 		])
 		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
 
@@ -1183,6 +1198,318 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(TEST_GITHUB_TOKEN)
 		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(basic)
 	}, 180_000)
+
+	it("starts a machine at the first command, moves the working directory into it, and keeps the token out", async () => {
+		const repo = "/workspace/shell"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Note it.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${repo}/notes.txt`, content: "from the file tool\n" },
+					},
+				],
+				"Run it.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								"cat notes.txt && git status --porcelain && git log --format=%s -1 && echo built > out.txt && node --version",
+							cwd: repo,
+						},
+					},
+				],
+				"Read what it built.": [
+					{ kind: "tool_call", name: "read", arguments: { path: `${repo}/out.txt` } },
+				],
+				"Find the text files.": [
+					{ kind: "tool_call", name: "find", arguments: { path: repo, pattern: "*.txt" } },
+				],
+				"Search for it.": [
+					{ kind: "tool_call", name: "grep", arguments: { path: repo, query: "built" } },
+				],
+				"Write a changelog and see it.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${repo}/CHANGELOG.md`, content: "## 2.0.0\n" },
+					},
+					{ kind: "tool_call", name: "bash", arguments: { command: `cat ${repo}/CHANGELOG.md` } },
+				],
+				"Push it.": [
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["add", "CHANGELOG.md"], cwd: repo },
+					},
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["commit", "-m", "Add changelog"], cwd: repo },
+					},
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: "git push origin main 2>&1 | tail -1", cwd: repo },
+					},
+				],
+				"Look for the token.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: "env; cat .git/config; git config --list", cwd: repo },
+					},
+				],
+				"Leave a mark outside.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: "touch /tmp/outside ~/.outside && echo left" },
+					},
+				],
+				"Is it still there?": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								"cat out.txt; git log --format=%s -1; git status --porcelain; ls /tmp/outside ~/.outside 2>/dev/null | wc -l",
+							cwd: repo,
+						},
+					},
+				],
+				"Fail.": [
+					{ kind: "tool_call", name: "bash", arguments: { command: "echo no >&2; exit 3" } },
+				],
+				"Take too long.": [
+					{ kind: "tool_call", name: "bash", arguments: { command: "sleep 30", timeout: 1 } },
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.at(-1) ?? ""}`,
+				},
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/shell",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		let number = 0
+		const turn = async (text: string) => {
+			number += 1
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 240_000)
+			const replies = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message")
+			return replies.at(-1)?.content?.[0]?.text ?? ""
+		}
+
+		expect(await turn("Note it.")).toContain("Done: ")
+		const ran = await turn("Run it.")
+		expect(ran).toContain("from the file tool\n?? notes.txt\nInitial commit\nv")
+		expect(await turn("Read what it built.")).toContain("built")
+		const found = await turn("Find the text files.")
+		expect(found).toContain(`${repo}/notes.txt`)
+		expect(found).toContain(`${repo}/out.txt`)
+		expect(await turn("Search for it.")).toContain(
+			`"path":"${repo}/out.txt","line":1,"text":"built"`,
+		)
+		expect(await turn("Write a changelog and see it.")).toBe("Done: ## 2.0.0")
+
+		const pushes = fakeGitHub.requests.length
+		await turn("Push it.")
+		expect(
+			fakeGitHub.git("acme/shell", "log", "--format=%s|%an|%ae", "main").trim().split("\n"),
+		).toEqual(["Add changelog|Checkfu|agent@checkfu.com", "Initial commit|Owner|owner@example.com"])
+		const basic = `Basic ${Buffer.from(`x-access-token:${TEST_GITHUB_TOKEN}`).toString("base64")}`
+		const pushed = fakeGitHub.requests.slice(pushes)
+		expect(pushed.length).toBeGreaterThan(0)
+		expect(pushed.map((request) => request.authorization)).toEqual(pushed.map(() => basic))
+		const looked = await turn("Look for the token.")
+		expect(looked).toContain("remote.origin.url=https://github.com/acme/shell")
+		expect(looked).not.toContain(TEST_GITHUB_TOKEN)
+		expect(looked).not.toContain(basic)
+
+		expect(await turn("Fail.")).toBe("Done: no\n[Exit code 3.]")
+		expect(await turn("Take too long.")).toBe("Done: [Stopped after 1 seconds.]")
+
+		expect(await turn("Leave a mark outside.")).toBe("Done: left")
+		const logged = (line: string) =>
+			stripAnsi(workerLogs.join(""))
+				.split("\n")
+				.some((entry) => entry.includes(line) && entry.includes(session.id))
+		const within = async (ms: number, line: string) => {
+			const deadline = Date.now() + ms
+			while (!logged(line) && Date.now() < deadline) {
+				await sleep(250)
+			}
+			return logged(line)
+		}
+		expect(await within(120_000, "Machine asleep")).toBe(true)
+		expect(await turn("Is it still there?")).toBe(
+			"Done: built\nAdd changelog\n?? notes.txt\n?? out.txt\n0",
+		)
+
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+		expect(await within(60_000, "Machine removed")).toBe(true)
+	}, 900_000)
+
+	it("holds a machine to the hosts its environment allows", async () => {
+		const repo = "/workspace/shell"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								"git ls-remote origin HEAD | wc -l; curl -fsS -m 5 -o /dev/null https://example.org 2>/dev/null && echo reached || echo refused",
+							cwd: repo,
+						},
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.at(-1) ?? ""}` },
+		)
+		const limited = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Workerd Limited Env",
+			config: {
+				type: "cloud",
+				networking: {
+					type: "limited",
+					allowed_hosts: ["github.com"],
+					allow_mcp_servers: false,
+					allow_package_managers: false,
+				},
+			},
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: limited.id,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/shell",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: "Reach out." }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		const reply = (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text?.replaceAll(/[ \t]+/gu, "")).toBe("Done:1\nrefused")
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 300_000)
+
+	it("holds the machine already running to a network its environment tightens, from the next request", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const command = { "Start it.": "echo alive > /tmp/alive && echo up" }[req.lastUserText]
+			const reach =
+				"cat /tmp/alive; curl -fsS -m 5 -o /dev/null https://example.org 2>/dev/null && echo reached || echo refused"
+			return req.toolOutputs.length > 0
+				? { kind: "reply", text: `Done: ${req.toolOutputs.at(-1) ?? ""}` }
+				: command !== undefined
+					? { kind: "tool_call", name: "bash", arguments: { command } }
+					: req.lastUserText === "Reach out."
+						? { kind: "tool_call", name: "bash", arguments: { command: reach } }
+						: { kind: "reply", text: "Nothing to run." }
+		})
+		const environment = await createResource<{ readonly id: string; readonly version: number }>(
+			"/v1/environments",
+			{ name: "Workerd Tightened Env" },
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environment.id,
+		})
+		let number = 0
+		const turn = async (text: string) => {
+			number += 1
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 240_000)
+			return (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+				?.content?.[0]?.text
+		}
+		expect(await turn("Start it.")).toBe("Done: up")
+		const tightened = await apiJson(`/v1/environments/${environment.id}`, {
+			method: "POST",
+			body: {
+				version: environment.version,
+				config: {
+					type: "cloud",
+					networking: {
+						type: "limited",
+						allowed_hosts: [],
+						allow_mcp_servers: false,
+						allow_package_managers: false,
+					},
+				},
+			},
+		})
+		expect(tightened.status).toBe(200)
+		const started = Date.now()
+		expect(await turn("Reach out.")).toBe("Done: alive\nrefused")
+		expect(Date.now() - started).toBeLessThan(60_000)
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 600_000)
+
+	it("stops a command when its turn is interrupted, so the next turn is not kept waiting", async () => {
+		const counting = "while true; do date >> /workspace/ticks; sleep 0.2; done"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length > 0
+				? { kind: "reply", text: `Done: ${req.toolOutputs.at(-1) ?? ""}` }
+				: req.lastUserText === "Count."
+					? { kind: "tool_call", name: "bash", arguments: { command: counting, timeout: 600 } }
+					: {
+							kind: "tool_call",
+							name: "bash",
+							arguments: {
+								command:
+									'a=$(wc -l < /workspace/ticks); sleep 1; b=$(wc -l < /workspace/ticks); [ "$a" -gt 0 ] && [ "$a" = "$b" ] && echo stopped',
+							},
+						},
+		)
+		const session = await createSession()
+		const send = (events: ReadonlyArray<unknown>) =>
+			apiJson(`/v1/sessions/${session.id}/events`, { method: "POST", body: { events } })
+		expect((await send([userMessage("Count.")])).status).toBe(200)
+		await fakeOpenAI.waitForRequest((req) => req.lastUserText === "Count.")
+		await sleep(8000)
+		const interruptedAt = Date.now()
+		expect((await send([{ type: "user.interrupt" }])).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 60_000)
+		expect((await send([userMessage("Is it still counting?")])).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2, 60_000)
+		expect(Date.now() - interruptedAt).toBeLessThan(60_000)
+		const reply = (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe("Done: stopped")
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 300_000)
 
 	it("checks out a commit behind the branch tip without fetching the history before it", async () => {
 		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()

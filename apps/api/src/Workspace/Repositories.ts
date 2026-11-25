@@ -39,6 +39,34 @@ const capped = (response: Response): Response => {
 	)
 }
 
+type Mounted = Pick<RepositoryMount, "id" | "url">
+
+const mountedAt = (repositories: ReadonlyArray<Mounted>, href: string): Mounted | undefined =>
+	repositories.find(({ url }) => href.startsWith(`${url}/`) || href.startsWith(`${url}.git/`))
+
+const isAllowed = (allowed: ReadonlyArray<string> | null, host: string): boolean =>
+	allowed === null || allowed.some((entry) => entry.toLowerCase() === host)
+
+const withToken = (sent: HeadersInit | undefined, token: string | undefined): Headers => {
+	const headers = new Headers(sent)
+	headers.delete("authorization")
+	if (token !== undefined) {
+		headers.set("authorization", `Basic ${btoa(`x-access-token:${token}`)}`)
+	}
+	return headers
+}
+
+interface RepositoryAccess {
+	readonly repositories: () => ReadonlyArray<Mounted>
+	readonly token: (resourceId: string) => string | undefined
+	readonly allowedHosts: () => ReadonlyArray<string> | null
+	readonly baseUrl: string | null
+	readonly fetch: typeof fetch
+}
+
+const addressOf = (baseUrl: string | null, href: string): string =>
+	baseUrl === null ? href : `${baseUrl}${href.slice(GITHUB_ORIGIN.length)}`
+
 export const makeGitCalls = () => {
 	let current: AbortSignal | undefined
 	let queue: Promise<unknown> = Promise.resolve()
@@ -61,52 +89,49 @@ export const makeGitCalls = () => {
 }
 
 export const createRepositoryFetch =
-	(options: {
-		readonly repositories: () => ReadonlyArray<Pick<RepositoryMount, "id" | "url">>
-		readonly token: (resourceId: string) => string | undefined
-		readonly allowedHosts: () => ReadonlyArray<string> | null
-		readonly baseUrl: string | null
-		readonly fetch: typeof fetch
-		readonly signal?: () => AbortSignal | undefined
-	}): typeof fetch =>
+	(options: RepositoryAccess & { readonly signal?: () => AbortSignal | undefined }): typeof fetch =>
 	async (input, init) => {
 		const call = options.signal?.()
 		call?.throwIfAborted()
 		const href =
 			URL.parse(typeof input === "string" ? input : "href" in input ? input.href : "")?.href ?? null
-		const repository =
-			href === null
-				? undefined
-				: options
-						.repositories()
-						.find(({ url }) => href.startsWith(`${url}/`) || href.startsWith(`${url}.git/`))
+		const repository = href === null ? undefined : mountedAt(options.repositories(), href)
 		if (href === null || repository === undefined) {
 			throw new Error(NOT_MOUNTED)
 		}
 		const host = new URL(href).hostname
-		const allowed = options.allowedHosts()
-		if (allowed !== null && !allowed.some((entry) => entry.toLowerCase() === host)) {
+		if (!isAllowed(options.allowedHosts(), host)) {
 			throw new Error(notAllowed(host))
 		}
-		const headers = new Headers(init?.headers)
-		headers.delete("authorization")
-		const token = options.token(repository.id)
-		if (token !== undefined) {
-			headers.set("authorization", `Basic ${btoa(`x-access-token:${token}`)}`)
-		}
 		return capped(
-			await options.fetch(
-				options.baseUrl === null ? href : `${options.baseUrl}${href.slice(GITHUB_ORIGIN.length)}`,
-				{
-					...init,
-					headers,
-					redirect: "manual",
-					signal: AbortSignal.any([
-						AbortSignal.timeout(GIT_REQUEST_TIMEOUT_MS),
-						...(init?.signal ? [init.signal] : []),
-						...(call === undefined ? [] : [call]),
-					]),
-				},
-			),
+			await options.fetch(addressOf(options.baseUrl, href), {
+				...init,
+				headers: withToken(init?.headers, options.token(repository.id)),
+				redirect: "manual",
+				signal: AbortSignal.any([
+					AbortSignal.timeout(GIT_REQUEST_TIMEOUT_MS),
+					...(init?.signal ? [init.signal] : []),
+					...(call === undefined ? [] : [call]),
+				]),
+			}),
+		)
+	}
+
+export const createMachineEgress =
+	(options: RepositoryAccess) =>
+	async (request: Request): Promise<Response> => {
+		const { href, hostname } = new URL(request.url)
+		if (!isAllowed(options.allowedHosts(), hostname)) {
+			return new Response(notAllowed(hostname), { status: 403 })
+		}
+		const repository = mountedAt(options.repositories(), href)
+		if (repository === undefined) {
+			return options.fetch(new Request(request, { redirect: "manual" }))
+		}
+		return options.fetch(
+			new Request(new Request(addressOf(options.baseUrl, href), request), {
+				headers: withToken(request.headers, options.token(repository.id)),
+				redirect: "manual",
+			}),
 		)
 	}

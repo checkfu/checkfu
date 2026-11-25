@@ -116,7 +116,7 @@ describe("session workspace", () => {
 			description: name,
 			parameters: { type: "object", properties: {} },
 		})
-		const names = ["read", "ls", "find", "grep", "write", "edit", "delete", "git"]
+		const names = ["read", "ls", "find", "grep", "write", "edit", "delete", "git", "bash"]
 		const { tools } = workspaceExtension(names.map(tool), () =>
 			Promise.resolve({ content: [], isError: false }),
 		)
@@ -129,6 +129,7 @@ describe("session workspace", () => {
 			edit: "unsafe",
 			delete: "unsafe",
 			git: "unsafe",
+			bash: "unsafe",
 		})
 	})
 
@@ -143,6 +144,7 @@ describe("session workspace", () => {
 			"edit",
 			"delete",
 			"git",
+			"bash",
 		])
 		expect(declared.every(({ description }) => description.length > 0)).toBe(true)
 		const grep = declared.find(({ name }) => name === "grep")
@@ -156,8 +158,8 @@ describe("session workspace", () => {
 			"limit",
 			"offset",
 		])
-		expect(JSON.stringify(grep)).not.toContain("regular expression")
 		expect(grep?.description).toContain("matched as written")
+		expect(grep?.description).toContain("run rg with bash")
 	})
 
 	it("sends nothing to the workspace for a call whose turn was interrupted", async () => {
