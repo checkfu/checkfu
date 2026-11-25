@@ -9,6 +9,8 @@ const TONES = new Map<string, Tone>([
 	["paused", "yellow"],
 	["terminated", "gray"],
 	["archived", "gray"],
+	["started", "green"],
+	["failed", "red"],
 ])
 
 export function Status({ status }: { readonly status: string }): React.JSX.Element {

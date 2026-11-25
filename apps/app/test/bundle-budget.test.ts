@@ -79,6 +79,9 @@ const ROUTES = [
 	"src/routes/_app/environments/index.tsx",
 	"src/routes/_app/environments/new.tsx",
 	"src/routes/_app/environments/$environmentId.tsx",
+	"src/routes/_app/automations/index.tsx",
+	"src/routes/_app/automations/new.tsx",
+	"src/routes/_app/automations/$automationId.tsx",
 ]
 
 describe("first view", () => {

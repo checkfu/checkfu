@@ -1,11 +1,30 @@
 import type {
+	AutomationRun,
+	AutomationRunQueued,
 	CreateAgentBody,
+	CreateAutomationBody,
 	CreateEnvironmentBody,
 	CreateSessionBody,
 	SendSessionEventsBody,
 	UpdateAgentBody,
+	UpdateAutomationBody,
 } from "@checkfu/sdk/Api"
-import type { JsonAgent, JsonEnvironment, JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
+import type {
+	IsoDateTimes,
+	JsonAgent,
+	JsonAutomation,
+	JsonEnvironment,
+	JsonSession,
+	JsonSessionEvent,
+} from "@checkfu/sdk/client"
+
+export type JsonAutomationRun = IsoDateTimes<AutomationRun>
+
+export interface RunPage {
+	readonly data: ReadonlyArray<JsonAutomationRun>
+	readonly has_more: boolean
+	readonly next_cursor: number | null
+}
 
 export class ApiError extends Error {
 	readonly status: number
@@ -153,9 +172,41 @@ const resource = <T, Create, Update extends { readonly version: number } = never
 		),
 })
 
+const automations = "/v1/automations"
+const automationPath = (id: string, action = "") =>
+	`${automations}/${encodeURIComponent(id)}${action}`
+const automationAction = async (
+	id: string,
+	action: string,
+	done: (automation: JsonAutomation) => boolean,
+) =>
+	settled(
+		automations,
+		await call<JsonAutomation | Pending>("POST", automationPath(id, action)),
+		done,
+	)
+
 export const checkfu = {
 	agents: resource<JsonAgent, CreateAgentBody, UpdateAgentBody>("/v1/agents"),
 	environments: resource<JsonEnvironment, CreateEnvironmentBody>("/v1/environments"),
+	automations: {
+		...resource<JsonAutomation, CreateAutomationBody>(automations),
+		update: async (id: string, body: UpdateAutomationBody) =>
+			settled(automations, await call<JsonAutomation | Pending>("POST", automationPath(id), body)),
+		pause: (id: string) =>
+			automationAction(id, "/pause", (automation) => automation.status !== "active"),
+		unpause: (id: string) =>
+			automationAction(id, "/unpause", (automation) => automation.status !== "paused"),
+		run: (id: string) => call<AutomationRunQueued>("POST", automationPath(id, "/run")),
+		runs: (id: string, before?: number, signal?: AbortSignal) =>
+			call<RunPage>(
+				"GET",
+				`${automationPath(id, "/runs")}?order=desc&limit=20${before === undefined ? "" : `&after=${before}`}`,
+				undefined,
+				undefined,
+				signal,
+			),
+	},
 	sessions: {
 		...resource<JsonSession, CreateSessionBody>("/v1/sessions"),
 		send: (id: string, body: SendSessionEventsBody, idempotencyKey: string) =>

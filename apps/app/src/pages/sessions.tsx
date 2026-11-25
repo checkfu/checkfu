@@ -2,7 +2,7 @@ import { Button } from "@checkfu/ui/button"
 import { Callout } from "@checkfu/ui/callout"
 import { Field } from "@checkfu/ui/field"
 import { shortId, timeAgo } from "@checkfu/ui/format"
-import { Input, Select, Textarea } from "@checkfu/ui/input"
+import { Input, Textarea } from "@checkfu/ui/input"
 import { PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
@@ -12,7 +12,8 @@ import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
-import { checkfu, errorMessage, isSignedOut } from "../api.ts"
+import { checkfu } from "../api.ts"
+import { choicesOf, OptionPicker } from "../option-picker.tsx"
 import {
 	agentChoices,
 	environmentChoices,
@@ -21,7 +22,6 @@ import {
 	sessionsPage,
 } from "../queries.ts"
 import { selection } from "../selection.ts"
-import type { Selection } from "../selection.ts"
 import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
@@ -101,76 +101,6 @@ export function SessionsPage(): React.JSX.Element {
 			/>
 			<Pager next={page.next_cursor} paged={search.after !== undefined} />
 		</>
-	)
-}
-
-interface Choices<T> {
-	readonly items: ReadonlyArray<T>
-	readonly pending: boolean
-	readonly error: string | undefined
-	readonly more: (() => void) | null
-}
-
-const choicesOf = <T,>(query: {
-	readonly data: { readonly pages: ReadonlyArray<{ readonly data: ReadonlyArray<T> }> }
-	readonly isFetchingNextPage: boolean
-	readonly error: unknown
-	readonly hasNextPage: boolean
-	readonly fetchNextPage: () => Promise<{ readonly isError: boolean }>
-}): Choices<T> => ({
-	items: query.data.pages.flatMap((page) => page.data),
-	pending: query.isFetchingNextPage,
-	error: query.error === null || isSignedOut(query.error) ? undefined : errorMessage(query.error),
-	more: query.hasNextPage ? () => void query.fetchNextPage() : null,
-})
-
-function OptionPicker<T extends { readonly id: string }>({
-	label,
-	noun,
-	placeholder,
-	options,
-	value,
-	onChange,
-	describe,
-}: {
-	readonly label: string
-	readonly noun: string
-	readonly placeholder: string
-	readonly options: Choices<T>
-	readonly value: Selection
-	readonly onChange: (id: string) => void
-	readonly describe: (option: T) => string
-}): React.JSX.Element {
-	return (
-		<div className="space-y-2">
-			<Field
-				label={label}
-				error={
-					value.gone
-						? `The ${label.toLowerCase()} you chose is no longer available. Choose another.`
-						: undefined
-				}
-			>
-				<Select required value={value.id} onChange={(event) => onChange(event.target.value)}>
-					{value.id === "" ? (
-						<option value="" disabled>
-							{placeholder}
-						</option>
-					) : null}
-					{options.items.map((option) => (
-						<option key={option.id} value={option.id}>
-							{describe(option)}
-						</option>
-					))}
-				</Select>
-			</Field>
-			{options.more === null ? null : (
-				<Button variant="ghost" size="sm" disabled={options.pending} onClick={options.more}>
-					Load more {noun}
-				</Button>
-			)}
-			{options.error === undefined ? null : <Callout tone="error">{options.error}</Callout>}
-		</div>
 	)
 }
 

@@ -1,0 +1,531 @@
+import { Button } from "@checkfu/ui/button"
+import { Callout } from "@checkfu/ui/callout"
+import { Field } from "@checkfu/ui/field"
+import { shortId, timeAgo } from "@checkfu/ui/format"
+import { Input, Textarea } from "@checkfu/ui/input"
+import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
+import { DataTable } from "@checkfu/ui/table"
+import type { JsonAutomation } from "@checkfu/sdk/client"
+import { useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
+import { PlusIcon } from "lucide-react"
+import { useState } from "react"
+import type * as React from "react"
+import { checkfu } from "../api.ts"
+import type { JsonAutomationRun } from "../api.ts"
+import {
+	changesOf,
+	createBodyOf,
+	draftOf,
+	emptyDraft,
+	firingLabel,
+	localTimezone,
+	messageOf,
+} from "../automation-draft.ts"
+import type { AutomationDraft } from "../automation-draft.ts"
+import { choicesOf, OptionPicker } from "../option-picker.tsx"
+import type { Choices } from "../option-picker.tsx"
+import { Pager } from "../pager.tsx"
+import {
+	agentChoices,
+	automationQuery,
+	automationRunsQuery,
+	automationsPage,
+	environmentChoices,
+	present,
+} from "../queries.ts"
+import { selection } from "../selection.ts"
+import { Status } from "../status.tsx"
+import { useAction, useSubmissionKey } from "../use-action.ts"
+
+const list = getRouteApi("/_app/automations/")
+const detail = getRouteApi("/_app/automations/$automationId")
+
+export function AutomationsPage(): React.JSX.Element {
+	const search = list.useSearch()
+	const page = useSuspenseQuery(automationsPage(search.after)).data
+	return (
+		<>
+			<PageHeader
+				title="Automations"
+				description="Agents that start a session on a schedule."
+				actions={
+					<Button size="sm" asChild>
+						<Link to="/automations/new">
+							<PlusIcon /> New automation
+						</Link>
+					</Button>
+				}
+			/>
+			<DataTable
+				rows={page.data}
+				rowKey={(automation) => automation.id}
+				empty="No automations yet."
+				columns={[
+					{
+						key: "name",
+						header: "Name",
+						cell: (automation) => (
+							<Link
+								to="/automations/$automationId"
+								params={{ automationId: automation.id }}
+								className="hover:underline"
+							>
+								{automation.name}
+							</Link>
+						),
+					},
+					{
+						key: "schedule",
+						header: "Schedule",
+						cell: (automation) => <Schedule automation={automation} />,
+					},
+					{
+						key: "status",
+						header: "Status",
+						cell: (automation) => <Status status={automation.status} />,
+					},
+					{
+						key: "next",
+						header: "Next run",
+						cell: (automation) => {
+							const next = automation.upcoming_runs_at[0]
+							return next === undefined ? "—" : firingLabel(next, automation.schedule.timezone)
+						},
+						className: "text-muted-foreground",
+					},
+					{
+						key: "last",
+						header: "Last run",
+						cell: (automation) =>
+							automation.last_run_at === null ? "Never" : timeAgo(automation.last_run_at),
+						className: "text-muted-foreground",
+					},
+				]}
+			/>
+			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+		</>
+	)
+}
+
+function Schedule({ automation }: { readonly automation: JsonAutomation }): React.JSX.Element {
+	return (
+		<span>
+			<span className="font-mono">{automation.schedule.expression}</span>{" "}
+			<span className="text-muted-foreground">{automation.schedule.timezone}</span>
+		</span>
+	)
+}
+
+interface Option {
+	readonly id: string
+	readonly label: string
+}
+
+/** The listed options, plus the one already chosen when the list no longer offers it. */
+const withCurrent = (choices: Choices<Option>, current: string, noun: string): Choices<Option> =>
+	current === "" || choices.items.some((option) => option.id === current)
+		? choices
+		: {
+				...choices,
+				items: [{ id: current, label: `Current ${noun} (${shortId(current)})` }, ...choices.items],
+			}
+
+function AutomationForm({
+	draft,
+	onChange,
+	submitLabel,
+	pending,
+	error,
+	onSubmit,
+	onCancel,
+}: {
+	readonly draft: AutomationDraft
+	readonly onChange: (draft: AutomationDraft) => void
+	readonly submitLabel: string
+	readonly pending: boolean
+	readonly error: string | undefined
+	readonly onSubmit: (draft: AutomationDraft) => void
+	readonly onCancel?: () => void
+}): React.JSX.Element {
+	const agentChoicesPage = choicesOf(useSuspenseInfiniteQuery(agentChoices))
+	const environmentChoicesPage = choicesOf(useSuspenseInfiniteQuery(environmentChoices))
+	const agentOptions = withCurrent(
+		{
+			...agentChoicesPage,
+			items: agentChoicesPage.items.map((agent) => ({
+				id: agent.id,
+				label: `${agent.name} (${agent.model.id})`,
+			})),
+		},
+		draft.agentId,
+		"agent",
+	)
+	const environmentOptions = withCurrent(
+		{
+			...environmentChoicesPage,
+			items: environmentChoicesPage.items.map((environment) => ({
+				id: environment.id,
+				label: environment.name,
+			})),
+		},
+		draft.environmentId,
+		"environment",
+	)
+	const agent = selection(agentOptions.items, draft.agentId === "" ? undefined : draft.agentId)
+	const environment = selection(
+		environmentOptions.items,
+		draft.environmentId === "" ? undefined : draft.environmentId,
+	)
+	const set = (changes: Partial<AutomationDraft>) => onChange({ ...draft, ...changes })
+	if (agentOptions.items.length === 0 || environmentOptions.items.length === 0) {
+		return (
+			<Callout>
+				An automation needs an{" "}
+				<Link to="/agents/new" className="underline">
+					agent
+				</Link>{" "}
+				and an{" "}
+				<Link to="/environments/new" className="underline">
+					environment
+				</Link>
+				.
+			</Callout>
+		)
+	}
+	return (
+		<form
+			className="max-w-2xl"
+			onSubmit={(event) => {
+				event.preventDefault()
+				onSubmit({ ...draft, agentId: agent.id, environmentId: environment.id })
+			}}
+		>
+			<fieldset disabled={pending} className="min-w-0 space-y-4">
+				<Field label="Name">
+					<Input
+						required
+						value={draft.name}
+						onChange={(event) => set({ name: event.target.value })}
+					/>
+				</Field>
+				<Field label="Description">
+					<Input
+						value={draft.description}
+						onChange={(event) => set({ description: event.target.value })}
+					/>
+				</Field>
+				<OptionPicker
+					label="Agent"
+					noun="agents"
+					placeholder="Choose an agent"
+					options={agentOptions}
+					value={agent}
+					onChange={(agentId) => set({ agentId })}
+					describe={(option) => option.label}
+				/>
+				<OptionPicker
+					label="Environment"
+					noun="environments"
+					placeholder="Choose an environment"
+					options={environmentOptions}
+					value={environment}
+					onChange={(environmentId) => set({ environmentId })}
+					describe={(option) => option.label}
+				/>
+				<Field label="Message" description="What each run's session starts with.">
+					<Textarea
+						required
+						value={draft.message}
+						onChange={(event) => set({ message: event.target.value })}
+					/>
+				</Field>
+				<div className="grid gap-4 sm:grid-cols-2">
+					<Field
+						label="Schedule"
+						description="A five-field cron expression that names one minute, such as 0 9 * * 1-5."
+					>
+						<Input
+							required
+							className="font-mono"
+							value={draft.expression}
+							onChange={(event) => set({ expression: event.target.value })}
+						/>
+					</Field>
+					<Field label="Timezone" description="An IANA name, such as America/New_York.">
+						<Input
+							required
+							value={draft.timezone}
+							onChange={(event) => set({ timezone: event.target.value })}
+						/>
+					</Field>
+				</div>
+				{error === undefined ? null : <Callout tone="error">{error}</Callout>}
+				<div className="flex gap-2">
+					<Button type="submit" disabled={pending || agent.id === "" || environment.id === ""}>
+						{submitLabel}
+					</Button>
+					{onCancel === undefined ? null : (
+						<Button type="button" variant="outline" onClick={onCancel}>
+							Cancel
+						</Button>
+					)}
+				</div>
+			</fieldset>
+		</form>
+	)
+}
+
+export function NewAutomationPage(): React.JSX.Element {
+	const navigate = useNavigate()
+	const [draft, setDraft] = useState(() => emptyDraft(localTimezone()))
+	const createKey = useSubmissionKey()
+	const create = useAction(
+		async (submitted: AutomationDraft) => {
+			const body = createBodyOf(submitted)
+			const automation = await checkfu.automations.create(body, createKey.keyFor(body))
+			createKey.settle()
+			return automation
+		},
+		{
+			invalidates: [["automations"]],
+			then: (automation) =>
+				void navigate({
+					to: "/automations/$automationId",
+					params: { automationId: automation.id },
+				}),
+		},
+	)
+	return (
+		<>
+			<PageHeader title="New automation" breadcrumb={<Link to="/automations">Automations</Link>} />
+			<AutomationForm
+				draft={draft}
+				onChange={setDraft}
+				submitLabel="Create automation"
+				pending={create.pending}
+				error={create.error}
+				onSubmit={(submitted) => create.run(submitted)}
+			/>
+		</>
+	)
+}
+
+export function AutomationPage(): React.JSX.Element {
+	const { automationId } = detail.useParams()
+	const automation = present(useSuspenseQuery(automationQuery(automationId)))
+	return <AutomationView key={automation.id} automation={automation} />
+}
+
+function AutomationView({
+	automation,
+}: {
+	readonly automation: JsonAutomation
+}): React.JSX.Element {
+	const [draft, setDraft] = useState<AutomationDraft | null>(null)
+	const invalidates = [["automations"]] as const
+	const runNow = useAction(() => checkfu.automations.run(automation.id), { invalidates })
+	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
+	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
+	const archive = useAction(() => checkfu.automations.archive(automation.id), { invalidates })
+	const save = useAction(
+		async (submitted: AutomationDraft) => {
+			const changes = changesOf(automation, submitted)
+			if (Object.keys(changes).length > 0) {
+				await checkfu.automations.update(automation.id, changes)
+			}
+		},
+		{ invalidates, then: () => setDraft(null) },
+	)
+	const archived = automation.status === "archived"
+	const busy = runNow.pending || pause.pending || unpause.pending || archive.pending
+	const error = runNow.error ?? pause.error ?? unpause.error ?? archive.error
+	return (
+		<>
+			<PageHeader
+				title={automation.name}
+				id={automation.id}
+				breadcrumb={<Link to="/automations">Automations</Link>}
+				accessory={<Status status={automation.status} />}
+				description={automation.description ?? undefined}
+				actions={
+					archived || draft !== null ? undefined : (
+						<>
+							<Button size="sm" disabled={busy} onClick={() => runNow.run()}>
+								Run now
+							</Button>
+							{automation.status === "paused" ? (
+								<Button variant="outline" size="sm" disabled={busy} onClick={() => unpause.run()}>
+									Resume
+								</Button>
+							) : (
+								<Button variant="outline" size="sm" disabled={busy} onClick={() => pause.run()}>
+									Pause
+								</Button>
+							)}
+							<Button variant="outline" size="sm" onClick={() => setDraft(draftOf(automation))}>
+								Edit
+							</Button>
+							<Button variant="destructive" size="sm" disabled={busy} onClick={() => archive.run()}>
+								Archive
+							</Button>
+						</>
+					)
+				}
+			/>
+			{error === undefined ? null : <Callout tone="error">{error}</Callout>}
+			{draft === null ? (
+				<>
+					<AutomationDetails automation={automation} />
+					<AutomationRuns automation={automation} />
+				</>
+			) : (
+				<AutomationForm
+					draft={draft}
+					onChange={setDraft}
+					submitLabel="Save"
+					pending={save.pending}
+					error={save.error}
+					onSubmit={(submitted) => save.run(submitted)}
+					onCancel={() => setDraft(null)}
+				/>
+			)}
+		</>
+	)
+}
+
+function AutomationDetails({
+	automation,
+}: {
+	readonly automation: JsonAutomation
+}): React.JSX.Element {
+	const zone = automation.schedule.timezone
+	return (
+		<>
+			{automation.status === "paused" && automation.pause_reason !== "manual" ? (
+				<Callout>
+					This automation paused itself ({automation.pause_reason}). Fix its agent or environment,
+					then resume it.
+				</Callout>
+			) : null}
+			<DescriptionList>
+				<Description label="Agent">
+					<Link
+						to="/agents/$agentId"
+						params={{ agentId: automation.agent.id }}
+						className="hover:underline"
+					>
+						{shortId(automation.agent.id)}
+					</Link>{" "}
+					<span className="text-muted-foreground">
+						{automation.agent.version === null
+							? "latest version"
+							: `pinned to v${automation.agent.version}`}
+					</span>
+				</Description>
+				<Description label="Environment">
+					<Link
+						to="/environments/$environmentId"
+						params={{ environmentId: automation.environment_id }}
+						className="hover:underline"
+					>
+						{shortId(automation.environment_id)}
+					</Link>
+				</Description>
+				<Description label="Schedule">
+					<Schedule automation={automation} />
+				</Description>
+				<Description label="Next runs">
+					{automation.upcoming_runs_at.length === 0 ? (
+						"None"
+					) : (
+						<ul className="space-y-0.5">
+							{automation.upcoming_runs_at.map((at) => (
+								<li key={at}>{firingLabel(at, zone)}</li>
+							))}
+						</ul>
+					)}
+				</Description>
+				<Description label="Runs">{automation.run_count}</Description>
+				<Description label="Last run">
+					{automation.last_run_at === null ? "Never" : timeAgo(automation.last_run_at)}
+				</Description>
+				<Description label="Created">{timeAgo(automation.created_at)}</Description>
+			</DescriptionList>
+			<section className="space-y-2">
+				<h2 className="text-sm font-medium">Message</h2>
+				<pre className="rounded-lg border bg-muted/40 p-4 text-control whitespace-pre-wrap">
+					{messageOf(automation)}
+				</pre>
+			</section>
+		</>
+	)
+}
+
+function AutomationRuns({
+	automation,
+}: {
+	readonly automation: JsonAutomation
+}): React.JSX.Element {
+	const runs = useSuspenseInfiniteQuery({
+		...automationRunsQuery(automation.id),
+		// A run is listed once its session opens or it fails; poll until the newest one shows up.
+		refetchInterval: (query) =>
+			(query.state.data?.pages[0]?.data[0]?.run ?? 0) < automation.run_count ? 1000 : false,
+	})
+	const rows = runs.data.pages.flatMap((page) => page.data)
+	return (
+		<section className="space-y-2">
+			<h2 className="text-sm font-medium">Runs</h2>
+			<DataTable
+				rows={rows}
+				rowKey={(run) => String(run.run)}
+				empty="No runs yet."
+				columns={[
+					{ key: "run", header: "Run", cell: (run) => `#${run.run}` },
+					{
+						key: "trigger",
+						header: "Trigger",
+						cell: (run: JsonAutomationRun) =>
+							run.trigger.type === "manual"
+								? "On request"
+								: `Scheduled for ${firingLabel(run.trigger.scheduled_at, automation.schedule.timezone)}`,
+					},
+					{ key: "status", header: "Status", cell: (run) => <Status status={run.status} /> },
+					{
+						key: "session",
+						header: "Session",
+						cell: (run) =>
+							run.session_id === null ? (
+								<span className="text-muted-foreground">{run.error?.message ?? "—"}</span>
+							) : (
+								<Link
+									to="/sessions/$sessionId"
+									params={{ sessionId: run.session_id }}
+									className="font-mono text-xs hover:underline"
+								>
+									{shortId(run.session_id)}
+								</Link>
+							),
+					},
+					{
+						key: "when",
+						header: "When",
+						cell: (run) => timeAgo(run.created_at),
+						className: "text-muted-foreground",
+					},
+				]}
+			/>
+			{runs.hasNextPage ? (
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={runs.isFetchingNextPage}
+					onClick={() => void runs.fetchNextPage()}
+				>
+					Older runs
+				</Button>
+			) : null}
+		</section>
+	)
+}
