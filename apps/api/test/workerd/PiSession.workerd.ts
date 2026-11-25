@@ -378,6 +378,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
+	let workerLogs: ReadonlyArray<string> = []
 	let workerStage: string
 	let agentId: string
 	let environmentId: string
@@ -507,6 +508,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
+		workerLogs = worker.logs
 		workerStage = worker.stage
 
 		const createdAgent = await createResource<{ readonly id: string }>(
