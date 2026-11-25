@@ -51,7 +51,7 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 		if (environmentRefused !== undefined) {
 			return environmentRefused
 		}
-		const rescheduled = current.status === "active" && cmd.reschedule
+		const rescheduled = [current.status === "active", cmd.reschedule].every((ok) => ok)
 		return [
 			automation.record(
 				new AutomationUpdated({
