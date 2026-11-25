@@ -14,6 +14,7 @@ import type {
 	UpdateAutomationBody,
 } from "@checkfu/sdk/Api"
 import { showsChanges } from "./automation-draft.ts"
+import { parseApiJson } from "./json-boundary.ts"
 import type {
 	IsoDateTimes,
 	JsonAgent,
@@ -94,8 +95,7 @@ const call = async <T>(
 		throw new ApiError(response.status, message)
 	}
 	const text = await response.text()
-	const json: unknown = text === "" ? undefined : JSON.parse(text)
-	return json as T
+	return parseApiJson<T>(text)
 }
 
 const isPending = <T>(value: T | Pending): value is Pending =>

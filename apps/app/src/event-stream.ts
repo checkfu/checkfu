@@ -1,5 +1,6 @@
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
+import { parseEventJson } from "./json-boundary.ts"
 
 export interface Source {
 	readonly readyState: number
@@ -80,7 +81,7 @@ export const follow = ({
 		source = current
 		for (const type of Object.keys(EVENT_TYPES)) {
 			current.addEventListener(type, (message) => {
-				const event = JSON.parse(message.data) as JsonSessionEvent
+				const event = parseEventJson(message.data)
 				receive(event)
 				if (event.type === "session.archived") {
 					stop()

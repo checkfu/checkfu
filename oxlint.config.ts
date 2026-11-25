@@ -204,12 +204,10 @@ export default defineConfig({
 		},
 		{
 			files: [
-				"apps/api/src/D1ListingStore.ts",
-				"apps/app/src/api.ts",
-				"apps/app/src/event-stream.ts",
-				"apps/mcp/src/GeneratedRuntime.ts",
-				"packages/sdk/src/PromiseRuntime.ts",
-				"packages/sdk/src/Runtime.ts",
+				"apps/api/src/D1Jurisdiction.ts",
+				"apps/app/src/json-boundary.ts",
+				"apps/mcp/src/JsonSchemaCodec.ts",
+				"packages/sdk/src/Boundary.ts",
 			],
 			rules: {
 				"typescript/no-unsafe-type-assertion": "off",

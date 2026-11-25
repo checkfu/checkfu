@@ -7,7 +7,9 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as JsonSchema from "effect/JsonSchema"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as SchemaRepresentation from "effect/SchemaRepresentation"
+import { importInputSchema } from "./JsonSchemaCodec.ts"
+
+export { importInputSchema }
 
 export interface GeneratedToolDescriptor {
 	readonly name: string
@@ -49,18 +51,6 @@ export const credentialHeaders = (
 export const IDEMPOTENCY_KEY_PATTERN = String.raw`^[!-~](?:[\t -~]*[!-~])?$`
 
 export const PATH_SEGMENT_PATTERN = String.raw`^(?:[^/\\.][^/\\]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)$`
-
-const decodeDefinitions = Schema.decodeUnknownSync(
-	Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown)),
-)
-
-export const importInputSchema = (inputSchema: JsonSchema.JsonSchema) => {
-	const { $defs, ...schema } = inputSchema
-	return SchemaRepresentation.fromJsonSchemaDocument(
-		{ dialect: "draft-2020-12", schema, definitions: decodeDefinitions($defs ?? {}) },
-		{ patterns: "apply" },
-	) as Schema.Codec<unknown>
-}
 
 const WellFormedString = Schema.String.check(
 	Schema.makeFilter((value) => (value.isWellFormed() ? undefined : "Expected well-formed Unicode")),

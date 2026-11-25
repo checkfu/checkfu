@@ -9,6 +9,7 @@ import {
 import type { ListingOrder } from "@checkfu/domain/Listing/ListingStore"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { toD1Jurisdiction } from "./D1Jurisdiction.ts"
 import { placement } from "./Placement.ts"
 import type { Placement } from "./Placement.ts"
 
@@ -26,7 +27,7 @@ export const listingDatabaseProps = ({
 				...(jurisdiction === undefined
 					? {}
 					: {
-							jurisdiction: jurisdiction as Cloudflare.D1.Jurisdiction,
+							jurisdiction: toD1Jurisdiction(jurisdiction),
 						}),
 			})
 
