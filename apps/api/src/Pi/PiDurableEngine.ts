@@ -1,4 +1,5 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
+import type { ProviderCredentialCheck } from "@checkfu/pi-providers/catalog"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import {
@@ -31,8 +32,11 @@ import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
-	readonly hasApiKey: (provider: string) => boolean
-	readonly missingCredentialsMessage?: (provider: string) => string
+	readonly hasApiKey: (provider: string) => boolean | Promise<boolean>
+	readonly missingCredentialsMessage?: (provider: string) => string | Promise<string>
+	readonly checkCredentials?: (
+		provider: string,
+	) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
 	readonly isCancelled: (operationId: string) => boolean
 	readonly enterWorkspace: (turn: number) => Promise<boolean>
 	readonly pi: () => Promise<Harness>
@@ -278,10 +282,18 @@ const admissionsOf = (backend: PiDurableBackend) => {
 	return created
 }
 
+type AdmitPiTurnResult =
+	| boolean
+	| { readonly _tag: "missing_key"; readonly message: string | undefined }
+
+type AdmitLockOutcome =
+	| AdmitPiTurnResult
+	| { readonly _tag: "waiting"; readonly waitingFor: string }
+
 const admitPiTurn = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<boolean | "missing_key"> =>
+): Effect.Effect<AdmitPiTurnResult> =>
 	Effect.acquireUseRelease(
 		Effect.sync(() => {
 			const done = Deferred.makeUnsafe<void>()
@@ -309,7 +321,7 @@ const admitPiTurn = (
 const admitPiTurnUnderWay = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<boolean | "missing_key"> => {
+): Effect.Effect<AdmitPiTurnResult> => {
 	const operationId = request.operationId
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
@@ -319,8 +331,8 @@ const admitPiTurnUnderWay = (
 		const restoredLimit = yield* RestoredHistoryLimit
 		let finalizedPrevious: string | undefined
 		while (true) {
-			const admitted = yield* backend.withLock(
-				Effect.promise(async () => {
+			const admitted: AdmitLockOutcome = yield* backend.withLock(
+				Effect.promise(async (): Promise<AdmitLockOutcome> => {
 					const pi = await backend.pi()
 					if ((await submissionOf(pi, operationId)) !== undefined) {
 						return true
@@ -328,8 +340,19 @@ const admitPiTurnUnderWay = (
 					if (backend.isCancelled(operationId)) {
 						return false
 					}
-					if (!backend.hasApiKey(request.provider)) {
-						return "missing_key"
+					if (backend.checkCredentials !== undefined) {
+						const check = await backend.checkCredentials(request.provider)
+						if (!check.ok) {
+							return { _tag: "missing_key", message: check.message }
+						}
+					} else if (!(await backend.hasApiKey(request.provider))) {
+						return {
+							_tag: "missing_key",
+							message:
+								backend.missingCredentialsMessage === undefined
+									? undefined
+									: await backend.missingCredentialsMessage(request.provider),
+						}
 					}
 					await backend.ensureRoot(agent)
 					if (backend.isCancelled(operationId)) {
@@ -341,7 +364,7 @@ const admitPiTurnUnderWay = (
 							return false
 						}
 						if (turnState.status === "waiting") {
-							return { waitingFor: turnState.operationId }
+							return { _tag: "waiting", waitingFor: turnState.operationId }
 						}
 						if (turnState.status === "finalize") {
 							await finalizeSettledTurn(pi, turnState.operationId, restoredLimit)
@@ -364,7 +387,10 @@ const admitPiTurnUnderWay = (
 					return true
 				}),
 			)
-			if (typeof admitted !== "object") {
+			if (typeof admitted === "boolean") {
+				return admitted
+			}
+			if (admitted._tag === "missing_key") {
 				return admitted
 			}
 			yield* abortPiDurableTurn(backend, admitted.waitingFor)
@@ -462,10 +488,10 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 ): Effect.fn.Return<PiTurnOutcome> {
 	const operationId = request.operationId
 	const admitted = yield* admitPiTurn(backend, request)
-	if (admitted === "missing_key") {
+	if (typeof admitted === "object") {
 		const fallbackCheck = checkCatalogProviderCredentials(request.provider, { env: {} })
 		const message =
-			backend.missingCredentialsMessage?.(request.provider) ??
+			admitted.message ??
 			(fallbackCheck.ok
 				? `Missing credentials for provider "${request.provider}".`
 				: fallbackCheck.message)
