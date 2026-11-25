@@ -16,3 +16,7 @@ Edge-hardened, extensible provider registry and wire-format runtime for `@earend
 - `openrouter` (`OPENROUTER_API_KEY`, routing Claude models to native Anthropic Messages and other models to OpenAI Chat Completions)
 - `cloudflare-ai-gateway` (`CLOUDFLARE_GATEWAY_ID` + `CLOUDFLARE_AI_API_KEY`/`CLOUDFLARE_ACCOUNT_ID` over HTTPS, or zero-token native Cloudflare Worker `AI` binding passthrough)
 - `cloudflare-workers-ai` (`CLOUDFLARE_AI_API_KEY` + `CLOUDFLARE_ACCOUNT_ID`, OpenAI-compatible Workers AI endpoint)
+
+## Custom format-compatible providers
+
+Any endpoint speaking `openai-responses`, `openai-completions`, or `anthropic-messages` can be declared via `parseCustomProvidersManifest` (from `CHECKFU_PROVIDERS`) with explicit auth (`bearer`, `api_key_header`, or `none`), optional static `headers`, and env-referenced `secret_headers`. Inline secrets are rejected fail-closed, and all referenced secret env vars must live under the dedicated `CHECKFU_PROVIDER_SECRET_*` namespace so unrelated deployment, Worker binding, or built-in credentials can never be referenced.

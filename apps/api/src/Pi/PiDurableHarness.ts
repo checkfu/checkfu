@@ -11,7 +11,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
-import { resolveCatalogModel, supportedProvidersDescription } from "./PiCatalog.ts"
+import {
+	configuredApiCustomProviders,
+	resolveCatalogModel,
+	supportedProvidersDescription,
+} from "./PiCatalog.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -102,6 +106,7 @@ export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const executor = yield* PiTurnExecutor
+		const customProviders = yield* configuredApiCustomProviders
 
 		return {
 			runTurn: (args) => {
@@ -137,12 +142,12 @@ export const PiDurableHarnessLive = boundedHarness(
 						return yield* Effect.fail(missingVersion)
 					}
 
-					const resolved = resolveCatalogModel(version.model.id)
+					const resolved = resolveCatalogModel(version.model.id, customProviders)
 					if (resolved === null) {
 						return yield* Effect.fail<TurnFailed>({
 							_tag: "TurnFailed",
 							error_type: "unknown_model_error",
-							message: `Unsupported model "${version.model.id}". Supported providers: ${supportedProvidersDescription()}.`,
+							message: `Unsupported model "${version.model.id}". Supported providers: ${supportedProvidersDescription(customProviders)}.`,
 							terminal: true,
 						})
 					}

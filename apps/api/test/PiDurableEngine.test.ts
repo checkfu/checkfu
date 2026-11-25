@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import { describe, expect, it, vi } from "@effect/vitest"
 import { AlchemyContext } from "alchemy/AlchemyContext"
-import { RuntimeContext } from "alchemy/RuntimeContext"
+import { RuntimeContext, packEnvValue } from "alchemy/RuntimeContext"
 import type { BaseRuntimeContext } from "alchemy/RuntimeContext"
 import { Stage } from "alchemy/Stage"
 import * as ConfigProvider from "effect/ConfigProvider"
@@ -26,7 +26,20 @@ import {
 	PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
 	PI_HARNESS_SETTINGS,
 } from "../src/Pi/PiContextBudget.ts"
-import { resolveCatalogModel } from "../src/Pi/PiCatalog.ts"
+import {
+	CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+	packAlchemyConfigEnvValue,
+	parseCustomProvidersManifest,
+	serializeCustomProviderCatalog,
+	utf8ByteLength,
+} from "@checkfu/pi-providers/catalog"
+import {
+	CUSTOM_PROVIDERS_ENV,
+	CUSTOM_PROVIDER_CATALOG_ENV,
+	apiWorkerCustomProvidersProps,
+	configuredCustomProviders,
+	resolveCatalogModel,
+} from "../src/Pi/PiCatalog.ts"
 import {
 	AbortGrace,
 	RestoredHistoryLimit,
@@ -47,6 +60,7 @@ import {
 	OPENROUTER_BASE_URL_ENV,
 	createNoRedirectProviderFetch,
 	createPiModels,
+	loadProviderApiKeys,
 	parseLoopbackBaseUrl,
 	providerBaseUrls,
 } from "../src/Pi/PiModels.ts"
@@ -312,6 +326,317 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 		} finally {
 			await closeAll()
 		}
+	})
+
+	it("supports custom format-compatible providers via CHECKFU_PROVIDERS with loopback gated to local dev", async () => {
+		const manifest = JSON.stringify({
+			xai: {
+				name: "xAI",
+				format: "openai-responses",
+				base_url: "https://api.x.ai/v1",
+				api_key_env: "CHECKFU_PROVIDER_SECRET_XAI_API_KEY",
+				secret_headers: { "x-gw-token": "CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN" },
+				default_model: "grok-4",
+			},
+		})
+		const { layer, closeAll } = makePiDurableTestLayer(
+			async (model) =>
+				makeAssistantReply(model, null, `custom reply: ${model.provider}/${model.id}`, 8, 4),
+			{
+				CHECKFU_API_KEY: TEST_API_KEY,
+				[CUSTOM_PROVIDERS_ENV]: manifest,
+				CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-key",
+				CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "xai-gw-secret",
+			},
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const provider = yield* Harness
+					const envRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/environments",
+						headers: AUTH_HEADERS,
+						body: { name: "Custom Env" },
+					})
+					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+
+					const agentRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						body: { name: "xAI Agent", model: "xai/grok-4" },
+					})
+					expect(agentRes.status).toBe(201)
+					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+					const reply = yield* provider.runTurn({
+						session_id: SessionId.make("sess_xai"),
+						agent_id: agent.id,
+						agent_version: 1,
+						environment_id: env.id,
+						turn: 1,
+						input: ["Hello xAI"],
+					})
+					expect(reply.text).toBe("custom reply: xai/grok-4")
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+
+		// Loopback HTTP custom providers are refused outside non-production local dev.
+		const loopbackManifest = JSON.stringify({
+			ollama: {
+				format: "openai-completions",
+				base_url: "http://127.0.0.1:11434/v1",
+				auth: { type: "none" },
+			},
+		})
+		const runCustomConfig = (env: Record<string, string>) =>
+			Effect.runPromiseExit(
+				configuredCustomProviders.pipe(
+					Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
+				),
+			)
+		const deniedWithoutSignal = await runCustomConfig({
+			[CUSTOM_PROVIDERS_ENV]: loopbackManifest,
+		})
+		expect(Exit.isFailure(deniedWithoutSignal)).toBe(true)
+
+		const deniedInProd = await runCustomConfig({
+			ALCHEMY_STAGE: "production",
+			[LOCAL_DEV_SIGNAL_ENV]: LOCAL_DEV_SIGNAL_VALUE,
+			[CUSTOM_PROVIDERS_ENV]: loopbackManifest,
+		})
+		expect(Exit.isFailure(deniedInProd)).toBe(true)
+
+		const allowedInLocalDev = await runCustomConfig({
+			ALCHEMY_STAGE: "dev-local",
+			[LOCAL_DEV_SIGNAL_ENV]: LOCAL_DEV_SIGNAL_VALUE,
+			[CUSTOM_PROVIDERS_ENV]: loopbackManifest,
+		})
+		expect(Exit.isSuccess(allowedInLocalDev)).toBe(true)
+		if (Exit.isSuccess(allowedInLocalDev)) {
+			expect(allowedInLocalDev.value[0]?.id).toBe("ollama")
+		}
+
+		// Plan-time Worker binding size limits reject oversized CHECKFU_PROVIDERS and
+		// CHECKFU_PROVIDER_CATALOG payloads (> 5,120 UTF-8 bytes) before Cloudflare deploy.
+		const runPlan = <A>(
+			effect: Effect.Effect<A, never, AlchemyContext | Stage>,
+			env: Record<string, string>,
+			dev = false,
+		) =>
+			Effect.runPromiseExit(
+				effect.pipe(
+					Effect.provideService(AlchemyContext, {
+						dotAlchemy: ".alchemy",
+						dev,
+						adopt: false,
+					}),
+					Effect.provideService(Stage, dev ? "dev-local" : "live"),
+					Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
+				),
+			)
+
+		const validPlanProps = await runPlan(apiWorkerCustomProvidersProps, {
+			[CUSTOM_PROVIDERS_ENV]: manifest,
+		})
+		expect(Exit.isSuccess(validPlanProps)).toBe(true)
+		expect(packAlchemyConfigEnvValue(manifest)).toBe(packEnvValue(Redacted.make(manifest)))
+
+		// Manifest under 5,120 raw bytes with a tiny API catalog projection, whose Alchemy-packed
+		// Redacted config binding exceeds 5,120 UTF-8 bytes due to JSON wrapper + quote escaping.
+		const packedOverflowManifest = JSON.stringify({
+			acme: {
+				format: "openai-responses",
+				base_url: "https://api.acme.example/v1",
+				auth: { type: "none" },
+				headers: Object.fromEntries(
+					Array.from({ length: 300 }, (_, index) => [`x-h-${String(index).padStart(3, "0")}`, "v"]),
+				),
+			},
+		})
+		expect(utf8ByteLength(packedOverflowManifest)).toBeLessThan(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		expect(
+			utf8ByteLength(
+				serializeCustomProviderCatalog(parseCustomProvidersManifest(packedOverflowManifest)),
+			),
+		).toBeLessThan(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		expect(utf8ByteLength(packEnvValue(Redacted.make(packedOverflowManifest)))).toBeGreaterThan(
+			CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+		)
+		const harnessPackedExit = await runPlan(configuredCustomProviders, {
+			[CUSTOM_PROVIDERS_ENV]: packedOverflowManifest,
+		})
+		expect(Exit.isFailure(harnessPackedExit)).toBe(true)
+		if (Exit.isFailure(harnessPackedExit)) {
+			expect(String(harnessPackedExit.cause)).toContain(CUSTOM_PROVIDERS_ENV)
+			expect(String(harnessPackedExit.cause)).toContain(String(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES))
+		}
+		const apiPackedExit = await runPlan(apiWorkerCustomProvidersProps, {
+			[CUSTOM_PROVIDERS_ENV]: packedOverflowManifest,
+		})
+		expect(Exit.isFailure(apiPackedExit)).toBe(true)
+		if (Exit.isFailure(apiPackedExit)) {
+			expect(String(apiPackedExit.cause)).toContain(CUSTOM_PROVIDERS_ENV)
+			expect(String(apiPackedExit.cause)).toContain(String(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES))
+		}
+
+		// Multi-byte UTF-8 provider name (< 5,120 UTF-16 code units, > 5,120 UTF-8 bytes)
+		const oversizedRawManifest = JSON.stringify({
+			acme: {
+				name: "東".repeat(1750),
+				format: "openai-responses",
+				base_url: "https://api.acme.example/v1",
+				auth: { type: "none" },
+			},
+		})
+		expect(oversizedRawManifest.length).toBeLessThan(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		expect(utf8ByteLength(oversizedRawManifest)).toBeGreaterThan(
+			CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES,
+		)
+		for (const dev of [false, true]) {
+			const harnessRawExit = await runPlan(
+				configuredCustomProviders,
+				{ [CUSTOM_PROVIDERS_ENV]: oversizedRawManifest },
+				dev,
+			)
+			expect(Exit.isFailure(harnessRawExit)).toBe(true)
+			if (Exit.isFailure(harnessRawExit)) {
+				expect(String(harnessRawExit.cause)).toContain(CUSTOM_PROVIDERS_ENV)
+				expect(String(harnessRawExit.cause)).toContain(String(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES))
+			}
+			const apiRawExit = await runPlan(
+				apiWorkerCustomProvidersProps,
+				{ [CUSTOM_PROVIDERS_ENV]: oversizedRawManifest },
+				dev,
+			)
+			expect(Exit.isFailure(apiRawExit)).toBe(true)
+			if (Exit.isFailure(apiRawExit)) {
+				expect(String(apiRawExit.cause)).toContain(CUSTOM_PROVIDERS_ENV)
+				expect(String(apiRawExit.cause)).toContain(String(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES))
+			}
+		}
+
+		// Manifest whose packed CHECKFU_PROVIDERS binding is <= 5,120 bytes while its plain
+		// serialized CHECKFU_PROVIDER_CATALOG projection exceeds 5,120 bytes.
+		const catalogExpansionManifest = JSON.stringify(
+			Object.fromEntries(
+				Array.from({ length: 31 }, (_, index) => [
+					`provider-${String(index).padStart(2, "0")}-${"x".repeat(46)}`,
+					{
+						format: "openai-responses",
+						base_url: "https://a.co",
+						auth: { type: "none" },
+					},
+				]),
+			),
+		)
+		expect(
+			utf8ByteLength(packEnvValue(Redacted.make(catalogExpansionManifest))),
+		).toBeLessThanOrEqual(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		expect(
+			utf8ByteLength(
+				serializeCustomProviderCatalog(parseCustomProvidersManifest(catalogExpansionManifest)),
+			),
+		).toBeGreaterThan(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES)
+		const harnessCatalogExit = await runPlan(configuredCustomProviders, {
+			[CUSTOM_PROVIDERS_ENV]: catalogExpansionManifest,
+		})
+		expect(Exit.isFailure(harnessCatalogExit)).toBe(true)
+		if (Exit.isFailure(harnessCatalogExit)) {
+			expect(String(harnessCatalogExit.cause)).toContain(CUSTOM_PROVIDER_CATALOG_ENV)
+			expect(String(harnessCatalogExit.cause)).toContain(
+				String(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES),
+			)
+		}
+		const apiCatalogExit = await runPlan(apiWorkerCustomProvidersProps, {
+			[CUSTOM_PROVIDERS_ENV]: catalogExpansionManifest,
+		})
+		expect(Exit.isFailure(apiCatalogExit)).toBe(true)
+		if (Exit.isFailure(apiCatalogExit)) {
+			expect(String(apiCatalogExit.cause)).toContain(CUSTOM_PROVIDER_CATALOG_ENV)
+			expect(String(apiCatalogExit.cause)).toContain(String(CLOUDFLARE_WORKER_ENV_VAR_MAX_BYTES))
+		}
+
+		// Direct Alchemy harness planning validates custom provider credentials (presence and HTTP
+		// header sendability) without requiring credentials for unused built-in providers.
+		const plannedCustom = parseCustomProvidersManifest(manifest)
+		const missingSecretPlan = await runPlan(loadProviderApiKeys(plannedCustom), {
+			OPENAI_API_KEY: "sk-unused-builtin",
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-key",
+		})
+		expect(Exit.isFailure(missingSecretPlan)).toBe(true)
+		if (Exit.isFailure(missingSecretPlan)) {
+			expect(String(missingSecretPlan.cause)).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+		}
+
+		const badNewlinePlan = await runPlan(loadProviderApiKeys(plannedCustom), {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-key",
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-line1\ngw-line2",
+		})
+		expect(Exit.isFailure(badNewlinePlan)).toBe(true)
+		if (Exit.isFailure(badNewlinePlan)) {
+			const cause = String(badNewlinePlan.cause)
+			expect(cause).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(cause).toContain("HTTP header")
+			expect(cause).not.toContain("gw-line1")
+		}
+
+		const badSpacedBearerPlan = await runPlan(loadProviderApiKeys(plannedCustom), {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "Bearer xai-space-leak",
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok",
+		})
+		expect(Exit.isFailure(badSpacedBearerPlan)).toBe(true)
+		if (Exit.isFailure(badSpacedBearerPlan)) {
+			const cause = String(badSpacedBearerPlan.cause)
+			expect(cause).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(cause).toContain("HTTP header")
+			expect(cause).not.toContain("xai-space-leak")
+		}
+
+		const validCustomOnlyPlan = await runPlan(loadProviderApiKeys(plannedCustom), {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "k".repeat(5090),
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "Bearer gw-token-ok",
+		})
+		expect(Exit.isSuccess(validCustomOnlyPlan)).toBe(true)
+
+		// Custom secrets whose Alchemy-packed binding exceeds 5,120 UTF-8 bytes fail planning
+		// while reporting only the variable name and size.
+		const oversizedPrimaryPlan = await runPlan(loadProviderApiKeys(plannedCustom), {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "k".repeat(5091),
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "gw-ok",
+		})
+		expect(Exit.isFailure(oversizedPrimaryPlan)).toBe(true)
+		if (Exit.isFailure(oversizedPrimaryPlan)) {
+			const cause = String(oversizedPrimaryPlan.cause)
+			expect(cause).toContain("CHECKFU_PROVIDER_SECRET_XAI_API_KEY")
+			expect(cause).toContain("5121")
+			expect(cause).toContain("5120")
+			expect(cause).not.toContain("kkkkkk")
+		}
+
+		const oversizedHeaderPlan = await runPlan(loadProviderApiKeys(plannedCustom), {
+			CHECKFU_PROVIDER_SECRET_XAI_API_KEY: "xai-secret-key",
+			CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN: "t".repeat(5091),
+		})
+		expect(Exit.isFailure(oversizedHeaderPlan)).toBe(true)
+		if (Exit.isFailure(oversizedHeaderPlan)) {
+			const cause = String(oversizedHeaderPlan.cause)
+			expect(cause).toContain("CHECKFU_PROVIDER_SECRET_XAI_GW_TOKEN")
+			expect(cause).toContain("5121")
+			expect(cause).toContain("5120")
+			expect(cause).not.toContain("tttttt")
+		}
+
+		const runtimeMissingCustom = await Effect.runPromiseExit(
+			loadProviderApiKeys(plannedCustom).pipe(
+				Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({}))),
+			),
+		)
+		expect(Exit.isSuccess(runtimeMissingCustom)).toBe(true)
 	})
 
 	it("maps an assistant response and its settled operation usage", () => {

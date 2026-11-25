@@ -2,11 +2,19 @@ import {
 	CLOUDFLARE_ACCOUNT_ID_ENV,
 	CLOUDFLARE_AI_API_KEY_ENV,
 	CLOUDFLARE_GATEWAY_ID_ENV,
+	CUSTOM_PROVIDERS_ENV,
+	CUSTOM_PROVIDER_CATALOG_ENV,
+	assertCloudflareWorkerEnvByteLimit,
 	checkProviderCredentials,
 	findProvider,
 	inferProviderForApiKey,
+	parseCustomProvidersManifest,
+	providerRequiredSecretEnvs,
+	serializeCustomProviderCatalog,
 	shouldBindCloudflareAiGateway,
+	validateCustomProviderCredentials,
 } from "@checkfu/pi-providers/catalog"
+import type { ProviderSpec } from "@checkfu/pi-providers/catalog"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Prompt from "effect/cli/Prompt"
@@ -43,9 +51,10 @@ export const DEFAULT_STAGE = "live"
 const API_KEY_ENV = "CHECKFU_API_KEY"
 
 export interface ModelProvider {
+	readonly id?: string
 	readonly name: string
 	readonly env: string
-	readonly model: string
+	readonly model?: string
 }
 
 const singleKeyProvider = (id: "anthropic" | "openai" | "openrouter"): ModelProvider => {
@@ -137,29 +146,37 @@ const quoteDotEnvValue = (value: string): string | undefined => {
 		: `${quote}${value}${quote}`
 }
 
-export const setDotEnvValue = (
+const trySetDotEnvValue = (
 	contents: string,
 	name: string,
 	value: string,
-): Effect.Effect<string, CliFailure> =>
+): Effect.Effect<Option.Option<string>> =>
 	Effect.gen(function* () {
-		const unstorable = configError(
-			`${name} contains characters that cannot be stored in .env. Use a value without quotes or line breaks.`,
-		)
 		const quoted = quoteDotEnvValue(value)
 		if (quoted === undefined) {
-			return yield* unstorable
+			return Option.none()
 		}
 		const line = `${name}=${quoted}`
 		const existing = new RegExp(`^[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=.*$`, "m")
 		const updated = existing.test(contents)
 			? contents.replace(existing, () => line)
 			: `${contents}${contents.length === 0 || contents.endsWith("\n") ? "" : "\n"}${line}\n`
-		if ((yield* readDotEnvValue(updated, name)) !== value) {
-			return yield* unstorable
-		}
-		return updated
+		return (yield* readDotEnvValue(updated, name)) === value ? Option.some(updated) : Option.none()
 	})
+
+export const setDotEnvValue = (
+	contents: string,
+	name: string,
+	value: string,
+): Effect.Effect<string, CliFailure> =>
+	trySetDotEnvValue(contents, name, value).pipe(
+		Effect.flatMap(Effect.fromOption),
+		Effect.mapError(() =>
+			configError(
+				`${name} contains characters that cannot be stored in .env. Use a value without quotes or line breaks.`,
+			),
+		),
+	)
 
 const STAGE_NAME = /^[a-z0-9]+[-_a-z0-9]*$/i
 
@@ -303,12 +320,14 @@ const ask = <A>(
 		)
 	}).pipe(Effect.catch((error) => Effect.succeed({ status: "error" as const, message: error })))
 
-const envValue = (name: string): Effect.Effect<string> =>
+const rawEnvValue = (name: string): Effect.Effect<string> =>
 	Config.option(Config.String(name)).pipe(
 		Effect.map(Option.getOrElse(() => "")),
-		Effect.map((value) => value.trim()),
 		Effect.orElseSucceed(() => ""),
 	)
+
+const envValue = (name: string): Effect.Effect<string> =>
+	Effect.map(rawEnvValue(name), (value) => value.trim())
 
 const resolveTarget = (
 	checkout: Checkout,
@@ -452,7 +471,136 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 			provider ??= CLOUDFLARE_AI_GATEWAY_PROVIDER
 		} else if (workersAiCheck.ok) {
 			provider ??= CLOUDFLARE_WORKERS_AI_PROVIDER
-		} else if (provider === undefined) {
+		}
+
+		// Custom format-compatible providers declared via CHECKFU_PROVIDERS (non-secret
+		// manifest + secret env vars bound exclusively to PiHarnessWorker). Parse and
+		// validate before persisting so exported multiline JSON compacts to single-line .env.
+		const customManifestFromFile = yield* readDotEnvValue(original, CUSTOM_PROVIDERS_ENV)
+		let customManifestRaw = customManifestFromFile.trim()
+		let customManifestFromShell = false
+		if (customManifestRaw.length === 0) {
+			const exportedManifest = (yield* envValue(CUSTOM_PROVIDERS_ENV)).trim()
+			if (exportedManifest.length > 0) {
+				customManifestRaw = exportedManifest
+				customManifestFromShell = true
+			}
+		}
+		const customCredentialFailures: Array<string> = []
+		if (customManifestRaw.length > 0) {
+			const customProviders: ReadonlyArray<ProviderSpec> = yield* Effect.try({
+				try: () =>
+					parseCustomProvidersManifest(customManifestRaw, {
+						allowLoopbackHttp: false,
+					}),
+				catch: (error) =>
+					configError(
+						error instanceof Error
+							? error.message
+							: `Invalid ${CUSTOM_PROVIDERS_ENV} configuration.`,
+					),
+			})
+			let deployedManifest = customManifestFromFile
+			if (customManifestFromShell) {
+				deployedManifest = yield* Effect.try({
+					try: () =>
+						// Escape `'` (and Unicode line separators) as standard JSON `\uXXXX`
+						// escapes so single-quoted `.env` storage always succeeds even when
+						// manifest strings contain both apostrophes and backticks.
+						JSON.stringify(JSON.parse(customManifestRaw))
+							.replaceAll("'", String.raw`\u0027`)
+							.replaceAll("\u2028", String.raw`\u2028`)
+							.replaceAll("\u2029", String.raw`\u2029`),
+					catch: (error) =>
+						configError(
+							error instanceof Error
+								? error.message
+								: `Invalid ${CUSTOM_PROVIDERS_ENV} configuration.`,
+						),
+				})
+			}
+			yield* Effect.try({
+				try: () => {
+					assertCloudflareWorkerEnvByteLimit(CUSTOM_PROVIDERS_ENV, deployedManifest, {
+						packedConfigBinding: true,
+					})
+					if (customProviders.length > 0) {
+						assertCloudflareWorkerEnvByteLimit(
+							CUSTOM_PROVIDER_CATALOG_ENV,
+							serializeCustomProviderCatalog(customProviders),
+						)
+					}
+				},
+				catch: (error) =>
+					configError(
+						error instanceof Error
+							? error.message
+							: `${CUSTOM_PROVIDERS_ENV} exceeds Cloudflare Workers' environment variable size limit.`,
+					),
+			})
+			if (customManifestFromShell) {
+				contents = yield* setDotEnvValue(contents, CUSTOM_PROVIDERS_ENV, deployedManifest)
+				yield* writeStderrLine(`Using ${CUSTOM_PROVIDERS_ENV} from your environment.`)
+			}
+			const customSecretEntries: Array<readonly [string, string | undefined]> = []
+			const customSecretsFromShell: Array<readonly [string, string]> = []
+			for (const secretEnv of providerRequiredSecretEnvs(customProviders)) {
+				let value = yield* readDotEnvSecret(original, secretEnv)
+				let fromShell = false
+				if (value.length === 0) {
+					const exported = yield* rawEnvValue(secretEnv)
+					if (exported.length > 0) {
+						value = exported
+						fromShell = true
+					}
+				}
+				customSecretEntries.push([secretEnv, value.length > 0 ? value : undefined])
+				if (fromShell) {
+					customSecretsFromShell.push([secretEnv, value])
+				}
+			}
+			const customEnv = Object.fromEntries(customSecretEntries)
+			const credentialCheck = validateCustomProviderCredentials(customProviders, customEnv)
+			if (credentialCheck.invalidCredentialErrors.length > 0) {
+				return yield* configError(
+					`${credentialCheck.invalidCredentialErrors.join(" ")} Nothing was deployed.`,
+				)
+			}
+			if (credentialCheck.missingCredentialErrors.length > 0) {
+				customCredentialFailures.push(...credentialCheck.missingCredentialErrors)
+			} else {
+				for (const [secretEnv, secretValue] of customSecretsFromShell) {
+					const updated = yield* trySetDotEnvValue(contents, secretEnv, secretValue)
+					if (Option.isSome(updated)) {
+						contents = updated.value
+						yield* writeStderrLine(`Using ${secretEnv} from your environment.`)
+					} else {
+						yield* writeStderrLine(
+							`Using ${secretEnv} from your environment (not saved to .env because .env quoting cannot represent it losslessly; keep it exported on future deploys).`,
+						)
+					}
+				}
+				for (const custom of customProviders) {
+					provider ??= {
+						id: custom.id,
+						name: custom.name,
+						env:
+							custom.auth.kind === "bearer" || custom.auth.kind === "api_key_header"
+								? custom.auth.env
+								: CUSTOM_PROVIDERS_ENV,
+						...(custom.defaultModel === undefined ? {} : { model: custom.defaultModel }),
+					}
+				}
+			}
+		}
+
+		if (customCredentialFailures.length > 0) {
+			return yield* configError(
+				`${customCredentialFailures.join(" ")} Export the missing variable(s) or add them to .env and run \`${retry}\` again.`,
+			)
+		}
+
+		if (provider === undefined) {
 			if (gatewaySynced.value.length > 0 && cloudflareAiKeySynced.value.length > 0) {
 				return yield* configError(
 					`${CLOUDFLARE_GATEWAY_ID_ENV} and ${CLOUDFLARE_AI_API_KEY_ENV} are set without ${CLOUDFLARE_ACCOUNT_ID_ENV}, so neither HTTPS AI Gateway auth nor the native Worker AI binding can be used. Set ${CLOUDFLARE_ACCOUNT_ID_ENV} for HTTPS auth, or unset ${CLOUDFLARE_AI_API_KEY_ENV} to use the native Worker AI binding on deploy.`,
@@ -599,6 +747,11 @@ const waitUntilReady = (url: string, apiKey: string, within: Duration.Input, ret
 		)
 	})
 
+const SAFE_UNQUOTED_SHELL_ARG = /^[A-Za-z0-9._/@:+][A-Za-z0-9._/@:+-]*$/
+
+const formatShellArg = (value: string): string =>
+	SAFE_UNQUOTED_SHELL_ARG.test(value) ? value : `'${value.replaceAll("'", String.raw`'\''`)}'`
+
 export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yesFlag }, (input) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path
@@ -664,7 +817,7 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 				"",
 				"Next, create an agent, an environment, and a session, then connect to it:",
 				"",
-				`  ${COMMAND} agents create --name Assistant --model ${provider.model}`,
+				`  ${COMMAND} agents create --name Assistant --model ${provider.model === undefined ? `${provider.id ?? "<provider>"}/<model-id>` : formatShellArg(provider.model)}`,
 				`  ${COMMAND} environments create --name default`,
 				`  ${COMMAND} sessions create --agent-id <agent-id> --environment-id <environment-id>`,
 				`  ${COMMAND} sessions connect <session-id>`,

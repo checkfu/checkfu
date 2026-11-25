@@ -20,6 +20,7 @@ import { ApiWorker } from "./Api.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
+import { apiWorkerCustomProvidersProps } from "./Pi/PiCatalog.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
@@ -83,7 +84,11 @@ export const API_WORKER_PROPS = {
 } satisfies Cloudflare.WorkerProps
 
 export default ApiWorker.make(
-	Effect.map(customDomains, ({ api }) => ({ ...API_WORKER_PROPS, ...api })),
+	Effect.gen(function* () {
+		const { api } = yield* customDomains
+		const customCatalogProps = yield* apiWorkerCustomProvidersProps
+		return { ...API_WORKER_PROPS, ...api, ...customCatalogProps }
+	}),
 	Effect.gen(function* () {
 		const scope = Option.getOrUndefined(yield* Effect.serviceOption(Scope.Scope))
 		if (scope === undefined) {

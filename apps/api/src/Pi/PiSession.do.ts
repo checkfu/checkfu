@@ -1,22 +1,22 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import type { CloudflareAiBindingLike } from "@checkfu/pi-providers/catalog"
+import type { CloudflareAiBindingLike, ProviderSpec } from "@checkfu/pi-providers/catalog"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
-import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
+import { checkCatalogProviderCredentials, configuredCustomProviders } from "./PiCatalog.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
 import {
 	createPiModels,
 	extractAiBinding,
-	providerApiKeys,
+	loadProviderApiKeys,
 	providerBaseUrls,
 	toProviderRuntimeConfig,
 } from "./PiModels.ts"
@@ -42,18 +42,23 @@ export const makePiHarnessBackend = (
 	apiKeys: ProviderApiKeysInput,
 	reset: () => void,
 	enterWorkspace: (turn: number) => Promise<boolean>,
-	options?: { readonly aiBinding?: CloudflareAiBindingLike | null },
+	options?: {
+		readonly aiBinding?: CloudflareAiBindingLike | null
+		readonly customProviders?: ReadonlyArray<ProviderSpec>
+	},
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
 	const withLock: PiDurableBackend["withLock"] = (effect) =>
 		lock.withPermit(Effect.uninterruptible(effect))
 	const runtimeConfig = toProviderRuntimeConfig(apiKeys, undefined, options)
+	const customProviders = options?.customProviders
 
 	return {
 		withLock,
-		hasApiKey: (provider) => checkCatalogProviderCredentials(provider, runtimeConfig).ok,
+		hasApiKey: (provider) =>
+			checkCatalogProviderCredentials(provider, runtimeConfig, customProviders).ok,
 		missingCredentialsMessage: (provider) => {
-			const check = checkCatalogProviderCredentials(provider, runtimeConfig)
+			const check = checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
 			return check.ok ? `Missing credentials for provider "${provider}".` : check.message
 		},
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
@@ -104,19 +109,24 @@ export interface PiSessionShape {
 
 export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShape>()("PiSession") {}
 
+const piSessionInit = Effect.gen(function* () {
+	const state = yield* Cloudflare.DurableObjectState
+	const workerEnv = yield* Effect.serviceOption(Cloudflare.Workers.WorkerEnvironment)
+	const customProviders = yield* configuredCustomProviders
+	const apiKeys = yield* loadProviderApiKeys(customProviders)
+	const baseUrls = yield* providerBaseUrls
+	const workspaces = yield* SessionWorkspace
+	const where = yield* Effect.orDie(placement)
+	return { state, workerEnv, customProviders, apiKeys, baseUrls, workspaces, where }
+})
+
 export const PiSessionLive = PiSession.make(
 	Effect.map(
-		Effect.all({
-			state: Cloudflare.DurableObjectState,
-			workerEnv: Effect.serviceOption(Cloudflare.Workers.WorkerEnvironment),
-			apiKeys: providerApiKeys,
-			baseUrls: providerBaseUrls,
-			workspaces: SessionWorkspace,
-			where: Effect.orDie(placement),
-		}),
-		({ state, workerEnv, apiKeys, baseUrls, workspaces, where }) =>
+		piSessionInit,
+		({ state, workerEnv, customProviders, apiKeys, baseUrls, workspaces, where }) =>
 			Effect.promise(async () => {
 				const aiBinding = extractAiBinding(Option.getOrUndefined(workerEnv))
+				// Load workerd-only modules after Alchemy has evaluated the stack.
 				const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
 					import("agents/lifecycle"),
 					import("agents/harness/pi"),
@@ -132,9 +142,10 @@ export const PiSessionLive = PiSession.make(
 				const workspaceTools = await workspaceToolDeclarations()
 				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
 
+				// PiHarness calls this factory again when it reopens after a storage error.
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
-						const models = createPiModels(apiKeys, baseUrls, { aiBinding })
+						const models = createPiModels(apiKeys, baseUrls, { aiBinding, customProviders })
 						const registry = createCheckfuRegistry()
 						registry.install(
 							workspaceExtension(workspaceTools, (call, signal) =>
@@ -174,7 +185,7 @@ export const PiSessionLive = PiSession.make(
 						}
 						return entered
 					},
-					{ aiBinding },
+					{ aiBinding, customProviders },
 				)
 
 				return {

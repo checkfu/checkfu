@@ -20,7 +20,7 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
-import { resolveCatalogModel } from "../Pi/PiCatalog.ts"
+import { configuredApiCustomProviders, resolveCatalogModel } from "../Pi/PiCatalog.ts"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
@@ -42,9 +42,11 @@ export const AgentVersionWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
+const defaultIsSupportedModel = (modelId: string) => resolveCatalogModel(modelId) !== null
+
 export const IsSupportedAgentModel = Context.Reference<(modelId: string) => boolean>(
 	"@checkfu/api/IsSupportedAgentModel",
-	{ defaultValue: () => (modelId) => resolveCatalogModel(modelId) !== null },
+	{ defaultValue: () => defaultIsSupportedModel },
 )
 
 const unsupportedModel = (model: AgentModel) =>
@@ -61,7 +63,12 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
-		const isSupportedModel = yield* IsSupportedAgentModel
+		const customProviders = yield* configuredApiCustomProviders
+		const providedIsSupportedModel = yield* IsSupportedAgentModel
+		const isSupportedModel =
+			providedIsSupportedModel === defaultIsSupportedModel
+				? (modelId: string) => resolveCatalogModel(modelId, customProviders) !== null
+				: providedIsSupportedModel
 		const list = yield* makeLister
 
 		const retrieve = (id: AgentId) =>
