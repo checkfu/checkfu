@@ -279,6 +279,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							agent_id: agent.id,
 							agent_version,
 							environment_id: "env_1",
+							resources: [],
 							turn: number,
 							input: [text],
 							last_reply_turn,
@@ -380,6 +381,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						agent_id: agentV1.id,
 						agent_version: 1,
 						environment_id: env.id,
+						resources: [],
 						turn: 1,
 						input: ["New question"],
 					})
@@ -1519,7 +1521,11 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Layer.provide(Layer.fresh(PiDurableHarnessLive)),
 			),
 		).pipe(Layer.provide(executorLayer))
-		const layer = CheckfuLive.pipe(
+		const HarnessLive = PiDurableHarnessLive.pipe(
+			Layer.provide(executorLayer),
+			Layer.provide(CheckfuLive),
+		)
+		const layer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(
 				Layer.succeed(HarnessLimits, {
@@ -1662,7 +1668,11 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					Layer.provide(Layer.fresh(PiDurableHarnessLive)),
 				),
 			).pipe(Layer.provide(executorLayer))
-			const layer = CheckfuLive.pipe(
+			const HarnessLive = PiDurableHarnessLive.pipe(
+				Layer.provide(executorLayer),
+				Layer.provide(CheckfuLive),
+			)
+			const layer = Layer.mergeAll(CheckfuLive, HarnessLive).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
 				Layer.provideMerge(ArtifactLinksTest),

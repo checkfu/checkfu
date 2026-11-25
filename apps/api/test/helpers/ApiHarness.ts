@@ -29,6 +29,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
@@ -48,6 +49,8 @@ import {
 } from "../../src/Pi/PiDurableHarness.ts"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
+import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/Repositories.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
@@ -172,6 +175,23 @@ export const makeScriptedPiModels = (
 	})
 }
 
+export const checkfuWithHarness = <E, R>(
+	executor: Layer.Layer<PiTurnExecutor, E, R>,
+	harness = PiDurableHarnessLive,
+) => {
+	const hosted = Checkfu.layer(
+		CheckfuHandlersLive.pipe(
+			Layer.provide(ArtifactBytesKept),
+			Layer.provide(ListingStore.memory),
+			Layer.provide(harness),
+		),
+	).pipe(Layer.provide(executor))
+	return Layer.mergeAll(
+		hosted,
+		PiDurableHarnessLive.pipe(Layer.provide(executor), Layer.provide(hosted)),
+	)
+}
+
 export const makePiDurableTestLayer = (
 	handler: (
 		model: Model<Api>,
@@ -260,6 +280,17 @@ export const makePiDurableTestLayer = (
 	const unreachable = new Set<string>()
 	const conversations: Array<string> = []
 	const discardedWorkspaces: Array<string> = []
+	const preparedWorkspaces: Array<{
+		readonly sessionId: string
+		readonly repositories: ReadonlyArray<RepositoryMount>
+		readonly allowedHosts: ReadonlyArray<string> | null
+	}> = []
+	const workspaceCalls: Array<string> = []
+	const refusedWorkspaces = new Set<string>()
+	const repositoryTokens = new Map<string, string>()
+	const preparations: Array<WorkspacePreparation> = []
+	const beforeTokenStored: Array<() => Promise<Response>> = []
+	const tokenDeliveries: Array<string> = []
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -289,6 +320,34 @@ export const makePiDurableTestLayer = (
 				),
 		},
 		{
+			enterWorkspace: (sessionId, token) =>
+				Effect.sync(() => {
+					workspaceCalls.push(`enter ${sessionId} ${token.turn}`)
+					return !refusedWorkspaces.has(sessionId)
+				}),
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				Effect.sync(() => {
+					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
+					preparedWorkspaces.push({ sessionId, repositories, allowedHosts })
+					return preparations.shift() ?? { ok: true }
+				}),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				Effect.suspend(() => {
+					tokenDeliveries.push(token)
+					return unreachable.has(sessionId)
+						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+						: Effect.void
+				}).pipe(
+					Effect.andThen(
+						Effect.promise(async () => {
+							await beforeTokenStored.shift()?.()
+							const key = `${sessionId}/${resourceId}`
+							if (replace || !repositoryTokens.has(key)) {
+								repositoryTokens.set(key, token)
+							}
+						}),
+					),
+				),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -367,6 +426,13 @@ export const makePiDurableTestLayer = (
 		resets,
 		artifactStore,
 		discardedWorkspaces,
+		preparedWorkspaces,
+		workspaceCalls,
+		refusedWorkspaces,
+		repositoryTokens,
+		preparations,
+		beforeTokenStored,
+		tokenDeliveries,
 	}
 }
 

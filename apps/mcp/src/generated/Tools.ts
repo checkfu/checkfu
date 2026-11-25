@@ -1879,6 +1879,81 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									],
 									description: "Optional session title",
 								},
+								resources: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["github_repository"],
+											},
+											url: {
+												type: "string",
+												maxLength: 1024,
+												pattern:
+													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
+											},
+											checkout: {
+												anyOf: [
+													{
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["branch"],
+															},
+															name: {
+																type: "string",
+																minLength: 1,
+																maxLength: 255,
+															},
+														},
+														required: ["type", "name"],
+														additionalProperties: false,
+													},
+													{
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["commit"],
+															},
+															sha: {
+																type: "string",
+																pattern: "^[0-9a-f]{40}$",
+															},
+														},
+														required: ["type", "sha"],
+														additionalProperties: false,
+													},
+													{
+														type: "null",
+													},
+												],
+												description:
+													"Branch or commit to check out. Defaults to the default branch.",
+											},
+											mount_path: {
+												type: "string",
+												maxLength: 1024,
+												pattern:
+													"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+												allOf: [
+													{
+														pattern: "^\\/workspace\\/.",
+														description:
+															"Where the repository is cloned. Defaults to /workspace/<repository>.",
+													},
+												],
+											},
+										},
+										required: ["type", "url"],
+										additionalProperties: false,
+									},
+									maxItems: 8,
+									description: "Repositories to mount in the session's workspace",
+								},
 							},
 							required: ["agent", "environment_id"],
 							additionalProperties: false,
@@ -1943,6 +2018,81 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									],
 									description: "Optional session title",
 								},
+								resources: {
+									type: "array",
+									items: {
+										type: "object",
+										properties: {
+											type: {
+												type: "string",
+												enum: ["github_repository"],
+											},
+											url: {
+												type: "string",
+												maxLength: 1024,
+												pattern:
+													"^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$",
+											},
+											checkout: {
+												anyOf: [
+													{
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["branch"],
+															},
+															name: {
+																type: "string",
+																minLength: 1,
+																maxLength: 255,
+															},
+														},
+														required: ["type", "name"],
+														additionalProperties: false,
+													},
+													{
+														type: "object",
+														properties: {
+															type: {
+																type: "string",
+																enum: ["commit"],
+															},
+															sha: {
+																type: "string",
+																pattern: "^[0-9a-f]{40}$",
+															},
+														},
+														required: ["type", "sha"],
+														additionalProperties: false,
+													},
+													{
+														type: "null",
+													},
+												],
+												description:
+													"Branch or commit to check out. Defaults to the default branch.",
+											},
+											mount_path: {
+												type: "string",
+												maxLength: 1024,
+												pattern:
+													"^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+												allOf: [
+													{
+														pattern: "^\\/workspace\\/.",
+														description:
+															"Where the repository is cloned. Defaults to /workspace/<repository>.",
+													},
+												],
+											},
+										},
+										required: ["type", "url"],
+										additionalProperties: false,
+									},
+									maxItems: 8,
+									description: "Repositories to mount in the session's workspace",
+								},
 							},
 							required: ["agent_id", "environment_id"],
 							additionalProperties: false,
@@ -1959,6 +2109,44 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				},
 			},
 			required: ["body"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "sessions_getResource",
+		title: "Retrieve a session resource",
+		description: "Retrieve one resource mounted in a session's workspace",
+		method: "GET",
+		path: "/v1/sessions/{session_id}/resources/{resource_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						session_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Session ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+						resource_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Session resource ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["session_id", "resource_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
 			additionalProperties: false,
 		},
 	},
@@ -2040,6 +2228,37 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						},
 					},
 					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "sessions_listResources",
+		title: "List session resources",
+		description: "List what is mounted in a session's workspace",
+		method: "GET",
+		path: "/v1/sessions/{session_id}/resources",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						session_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Session ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["session_id"],
 					additionalProperties: false,
 				},
 			},

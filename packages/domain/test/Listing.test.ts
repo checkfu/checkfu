@@ -23,6 +23,7 @@ const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
 		discardWorkspace: () => Effect.void,
+		storeRepositoryToken: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
@@ -76,6 +77,7 @@ describe("ListResources", () => {
 					agent_version: null,
 					environment_id: BoundedEnvironmentId.make("env_list_1"),
 					title: null,
+					resources: [],
 				})
 			}
 			const automations = [

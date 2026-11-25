@@ -93,6 +93,40 @@ const withDefinitions = (schema: JsonRecord, components: JsonRecord, label: stri
 	return referenced.size === 0 ? rewritten : { ...rewritten, $defs: definitions }
 }
 
+const withoutSecrets = (value: Json, label: string): Json => {
+	if (Array.isArray(value)) {
+		return value.map((item: Json) => withoutSecrets(item, label))
+	}
+	if (!isJsonRecord(value)) {
+		return value
+	}
+	const properties = value["properties"]
+	const secrets = isJsonRecord(properties)
+		? Object.keys(properties).filter(
+				(name) => recordAt(properties, name)?.["format"] === "password",
+			)
+		: []
+	const required = value["required"]
+	const demanded = secrets.find((name) => Array.isArray(required) && required.includes(name))
+	if (demanded !== undefined) {
+		throw new Error(
+			`${label}: MCP tools cannot take the secret ${JSON.stringify(demanded)}, which this operation requires. Set "${MCP_EXTENSION}" to false for this operation.`,
+		)
+	}
+	return Object.fromEntries(
+		Object.entries(value).map(([key, child]): [string, Json] => [
+			key,
+			key === "properties" && isJsonRecord(child)
+				? Object.fromEntries(
+						Object.entries(child).flatMap(([name, schema]): Array<[string, Json]> =>
+							secrets.includes(name) ? [] : [[name, withoutSecrets(schema, label)]],
+						),
+					)
+				: withoutSecrets(child, label),
+		]),
+	)
+}
+
 interface Parameter {
 	readonly name: string
 	readonly in: string
@@ -288,11 +322,17 @@ const projectOperation = (
 		}
 	}
 
-	const inputSchema = withDefinitions(
-		{ type: "object", properties, required, additionalProperties: false },
-		components,
+	const inputSchema = withoutSecrets(
+		withDefinitions(
+			{ type: "object", properties, required, additionalProperties: false },
+			components,
+			label,
+		),
 		label,
 	)
+	if (!isJsonRecord(inputSchema)) {
+		throw new Error(`${label}: input schema is not an object.`)
+	}
 	try {
 		importInputSchema(inputSchema)
 	} catch (error) {

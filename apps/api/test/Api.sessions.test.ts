@@ -2072,6 +2072,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							agent_version: null,
 							environment_id: "env_1",
 							title: null,
+							resources: [],
 						}),
 					)
 					expect(badAgent._tag).toBe("Failure")
@@ -2084,6 +2085,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							agent_version: null,
 							environment_id: overLimit,
 							title: null,
+							resources: [],
 						}),
 					)
 					expect(badEnv._tag).toBe("Failure")
@@ -2498,6 +2500,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						agent_version: 1,
 						environment_id: "env_1",
 						title: null,
+						resources: [],
 						turn: 1,
 						usage: { input_tokens: 10, output_tokens: 5 },
 						created_at: at,

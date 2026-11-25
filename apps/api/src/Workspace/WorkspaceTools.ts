@@ -1,6 +1,7 @@
 import type { PiTool, PiToolCall, PiToolResult } from "@cloudflare/computer/tools/pi-ai"
 import type { Extension, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 
 export type WorkspaceTool = PiTool
 export type WorkspaceToolCall = Required<PiToolCall>
@@ -11,7 +12,29 @@ export const WORKSPACE_EXTENSION = "checkfu.workspace"
 const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 
 const WORKSPACE_PROMPT =
-	"You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths."
+	"You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths, and the git tool for version control."
+
+export const GIT_TOOL: WorkspaceTool = {
+	name: "git",
+	description:
+		'Run a git command in the workspace. `args` is everything after `git`, one argument per item, for example ["status"] or ["commit", "-m", "Fix the parser"]. `cwd` is the absolute path of the repository to run it in. fetch, pull and push reach only the repositories mounted in this session, and their credentials are supplied for you.',
+	parameters: {
+		type: "object",
+		properties: {
+			args: { type: "array", items: { type: "string" }, minItems: 1 },
+			cwd: { type: "string" },
+		},
+		required: ["args", "cwd"],
+		additionalProperties: false,
+	},
+}
+
+export const decodeGitToolArguments = Schema.decodeUnknownOption(
+	Schema.Struct({
+		args: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+		cwd: Schema.String.check(Schema.isMinLength(1)),
+	}),
+)
 
 export const MAX_INLINE_IMAGE_BYTES = 1024 * 1024
 
@@ -120,9 +143,12 @@ const asDeclared = (tool: WorkspaceTool): WorkspaceTool => {
 
 export const workspaceToolDeclarations = async (): Promise<ReadonlyArray<WorkspaceTool>> => {
 	const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
-	return createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools.map(
-		asDeclared,
-	)
+	return [
+		...createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools.map(
+			asDeclared,
+		),
+		GIT_TOOL,
+	]
 }
 
 const INTERRUPTED: ToolExecutionResult = {

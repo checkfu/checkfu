@@ -12,6 +12,8 @@ import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.com
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
+import { SessionResources } from "@checkfu/domain/Session/SessionResource"
+import type { RepositoryToken, SessionResourceId } from "@checkfu/domain/Session/SessionResource"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
@@ -29,11 +31,12 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
-import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
+import type { ClientEventId, SendSessionEventReceipt, SessionResourceItem } from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
@@ -118,10 +121,21 @@ const eventBatchFingerprint = (
 		),
 	)
 
+const serializeResources = (
+	resources: SessionResources,
+	created_at: DateTime.Utc,
+): ReadonlyArray<SessionResourceItem> =>
+	resources.map((resource) => ({ ...resource, created_at, updated_at: created_at }))
+
 const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnapshot) => ({
 	...snapshot,
 	agent: { id: agent_id, version: agent_version },
+	resources: serializeResources(snapshot.resources, snapshot.created_at),
 })
+
+const decodeResources = Schema.decodeUnknownEffect(SessionResources)
+
+const repositoryName = (url: string): string => url.slice(url.lastIndexOf("/") + 1)
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
 
@@ -234,6 +248,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const admitSession = yield* AdmitSessionDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const harness = yield* Harness
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
@@ -297,6 +312,38 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return serializeSession(snapshot)
 			})
 
+		const storeToken = (
+			sessionId: SessionId,
+			resourceId: SessionResourceId,
+			authorization_token: RepositoryToken,
+			replace: boolean,
+		) =>
+			harness
+				.storeRepositoryToken({
+					session_id: sessionId,
+					resource_id: resourceId,
+					authorization_token,
+					replace,
+				})
+				.pipe(
+					Effect.catchTag("HarnessUnavailable", () =>
+						reject(
+							503,
+							`The token for resource ${resourceId} of session ${sessionId} could not be stored. Send it again with POST /v1/sessions/${sessionId}/resources/${resourceId}.`,
+						),
+					),
+				)
+
+		const existingResource = (sessionId: SessionId, resourceId: SessionResourceId) =>
+			Effect.gen(function* () {
+				const session = yield* existing(sessionId)
+				const resource = session.resources.find(({ id }) => id === resourceId)
+				if (resource === undefined) {
+					return yield* reject(404, `Resource ${resourceId} not found in session ${sessionId}.`)
+				}
+				return { session, resource }
+			})
+
 		return handlers
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
@@ -336,6 +383,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
+					const requested = (payload.resources ?? []).map((resource) => ({
+						type: resource.type,
+						url: resource.url,
+						mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+						checkout: resource.checkout ?? null,
+					}))
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
@@ -348,11 +401,28 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
+								...(requested.length === 0 ? {} : { resources: requested }),
 							}),
 						}
 					} else {
 						id = SessionId.make(yield* randomId(random, "sess"))
 					}
+					const resources = yield* decodeResources(
+						yield* Effect.forEach(requested, (resource, index) =>
+							Effect.map(
+								idempotencyKey === undefined
+									? randomId(random, "sesrsc")
+									: idempotentId(digest, "sesrsc", [
+											"create",
+											"session",
+											"resource",
+											idempotencyKey,
+											index,
+										]),
+								(resourceId) => ({ id: resourceId, ...resource }),
+							),
+						),
+					).pipe(Effect.catchTag("SchemaError", (error) => reject(400, error.message)))
 					const receipt = yield* admitSession
 						.send(
 							new AdmitSession({
@@ -361,12 +431,19 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
+								resources,
 							}),
 							sendOptions,
 						)
 						.pipe(
 							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
 						)
+					yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
+						const stored = resources[index]
+						return resource.authorization_token === undefined || stored === undefined
+							? Effect.void
+							: storeToken(id, stored.id, resource.authorization_token, false)
+					})
 					const pinnedVersion = receipt.reply.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
 						agentId,
@@ -388,18 +465,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					}
 					const snapshot = yield* present(result, 500, "Failed to load created session.")
 					return {
-						id,
-						type: "session" as const,
+						...serializeSession(snapshot),
 						status: "idle" as const,
-						agent: { id: agentId, version: pinnedVersion },
-						environment_id: environmentId,
-						title,
 						turn: 0,
-						usage: {
-							input_tokens: 0,
-							output_tokens: 0,
-						},
-						created_at: snapshot.created_at,
+						usage: { input_tokens: 0, output_tokens: 0 },
 						updated_at: snapshot.created_at,
 						archived_at: null,
 					}
@@ -434,6 +503,39 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return result
 					}
 					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
+				}).pipe(handled),
+			)
+			.handle("listResources", ({ params }) =>
+				Effect.gen(function* () {
+					const session = yield* existing(params.session_id)
+					return { data: serializeResources(session.resources, session.created_at) }
+				}).pipe(handled),
+			)
+			.handle("getResource", ({ params }) =>
+				Effect.gen(function* () {
+					const { session, resource } = yield* existingResource(
+						params.session_id,
+						params.resource_id,
+					)
+					const [item] = serializeResources([resource], session.created_at)
+					return yield* present(Option.fromNullishOr(item), 404, "Resource not found.")
+				}).pipe(handled),
+			)
+			.handle("updateResource", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const { session, resource } = yield* existingResource(
+						params.session_id,
+						params.resource_id,
+					)
+					if (session.status === "terminated") {
+						return yield* reject(409, `Session ${session.id} is terminated.`)
+					}
+					yield* storeToken(session.id, resource.id, payload.authorization_token, true)
+					if ((yield* sessions.get(session.id))._tag === "Terminated") {
+						return yield* reject(409, `Session ${session.id} is terminated.`)
+					}
+					const [item] = serializeResources([resource], session.created_at)
+					return yield* present(Option.fromNullishOr(item), 404, "Resource not found.")
 				}).pipe(handled),
 			)
 			.handle("sendEvents", ({ params, headers, payload }) =>

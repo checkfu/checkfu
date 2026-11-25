@@ -125,6 +125,7 @@ const HarnessNoopLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
 		discardWorkspace: () => Effect.void,
+		storeRepositoryToken: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
@@ -1559,6 +1560,7 @@ describe("Sessions", () => {
 										Effect.succeed({
 											interrupt: () => Effect.void,
 											discardWorkspace: () => Effect.void,
+											storeRepositoryToken: () => Effect.void,
 											runTurn: () => {
 												if (mode === "synchronous throw") {
 													throw new Error("secret adapter failure")
@@ -2672,6 +2674,7 @@ describe("Sessions", () => {
 					agent_id: "agent_001",
 					agent_version: 1,
 					environment_id: "env_001",
+					resources: [],
 					turn: 1,
 					input: ["Hello"],
 				})
@@ -2686,6 +2689,7 @@ describe("Sessions", () => {
 									Effect.succeed({
 										interrupt: () => Effect.void,
 										discardWorkspace: () => Effect.void,
+										storeRepositoryToken: () => Effect.void,
 										runTurn: () => Effect.die("Harness.runTurn must not be called"),
 									}),
 								),
@@ -2747,6 +2751,7 @@ describe("Sessions", () => {
 					agent_id: "agent_001",
 					agent_version: 1,
 					environment_id: "env_001",
+					resources: [],
 					turn: 1,
 					input: ["Hello"],
 				})
@@ -2761,6 +2766,7 @@ describe("Sessions", () => {
 									Effect.succeed({
 										interrupt: () => Effect.void,
 										discardWorkspace: () => Effect.void,
+										storeRepositoryToken: () => Effect.void,
 										runTurn: () => Effect.die("Harness.runTurn must not be called"),
 									}),
 								),
@@ -3448,6 +3454,7 @@ describe("Sessions", () => {
 									Effect.succeed({
 										interrupt: () => Effect.void,
 										discardWorkspace: () => Effect.void,
+										storeRepositoryToken: () => Effect.void,
 										runTurn: () => {
 											callCount += 1
 											if (callCount === 1) {

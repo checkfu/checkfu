@@ -209,6 +209,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							agent_id: "agent_1",
 							agent_version: 1,
 							environment_id: "env_1",
+							resources: [],
 							turn: 1,
 							input: ["hi"],
 							__cause: {
@@ -374,7 +375,15 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.map((shape) => shape.id)
 					.toSorted(),
 			).toEqual(
-				["abortTurn", "discardWorkspace", "recoverTurn", "runTurn"].flatMap((method) => [
+				[
+					"abortTurn",
+					"discardWorkspace",
+					"enterWorkspace",
+					"prepareWorkspace",
+					"recoverTurn",
+					"runTurn",
+					"storeRepositoryToken",
+				].flatMap((method) => [
 					`harness-call:PiHarness.${method}/args`,
 					`harness-call:PiHarness.${method}/result`,
 				]),
@@ -556,6 +565,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				})
 				expect(queued.turn).toBe(2)
 				expect(queued.last_reply_turn).toBeUndefined()
+				expect(queued.resources).toEqual([])
 			}),
 	)
 

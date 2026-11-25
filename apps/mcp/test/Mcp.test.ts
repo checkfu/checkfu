@@ -198,8 +198,10 @@ describe("Checkfu MCP server", () => {
 				"environments_updateEnvironment",
 				"sessions_archiveSession",
 				"sessions_createSession",
+				"sessions_getResource",
 				"sessions_getSession",
 				"sessions_listEvents",
+				"sessions_listResources",
 				"sessions_listSessions",
 				"sessions_sendSessionEvents",
 			])
@@ -251,9 +253,11 @@ describe("Checkfu MCP server", () => {
 				environments_updateEnvironment: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
+				sessions_getResource: "read-only, additive, repeatable",
 				sessions_getSession: "read-only, additive, repeatable",
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
+				sessions_listResources: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
 			})
 		}).pipe(Effect.scoped),
@@ -444,10 +448,22 @@ describe("Checkfu MCP server", () => {
 					environments_updateEnvironment: { ...environment, body: { version: 1, config } },
 					sessions_archiveSession: session,
 					sessions_createSession: {
-						body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
+						body: {
+							agent: { id: "agent_1", version: 1 },
+							environment_id: "env_1",
+							resources: [
+								{
+									type: "github_repository",
+									url: "https://github.com/acme/api",
+									checkout: { type: "branch", name: "main" },
+								},
+							],
+						},
 					},
+					sessions_getResource: { path: { session_id: "sess_1", resource_id: "sesrsc_1" } },
 					sessions_getSession: session,
 					sessions_listEvents: { ...session, query: { limit: "5" } },
+					sessions_listResources: session,
 					sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
 					sessions_sendSessionEvents: {
 						...session,
@@ -847,6 +863,29 @@ describe("Checkfu MCP server", () => {
 				new Request(`${MCP_ORIGIN}/v1/agents`, { headers: { "x-api-key": TEST_API_KEY } }),
 			)
 			expect(unknownWithKey.status).toBe(404)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("takes no repository token: a model would have to write it", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+			const refused = yield* callError(client, "sessions_createSession", {
+				body: {
+					agent: { id: "agent_1", version: 1 },
+					environment_id: "env_1",
+					resources: [
+						{
+							type: "github_repository",
+							url: "https://github.com/acme/api",
+							authorization_token: "ghp_written_by_a_model",
+						},
+					],
+				},
+			})
+			expect(refused.error.type).toBe("invalid_request_error")
+			expect(refused.error.message).toContain("authorization_token")
+			expect(server.apiRequests.length).toBe(0)
 		}).pipe(Effect.scoped),
 	)
 

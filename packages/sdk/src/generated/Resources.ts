@@ -281,6 +281,24 @@ export interface CheckfuOperations {
 		never,
 		EndpointSseEvent<"sessions", "streamEvents">
 	>
+	readonly "sessions.resources.list": OperationShape<
+		EndpointParams<"sessions", "listResources">,
+		EndpointQuery<"sessions", "listResources">,
+		EndpointBody<"sessions", "listResources">,
+		EndpointSuccess<"sessions", "listResources">
+	>
+	readonly "sessions.resources.retrieve": OperationShape<
+		EndpointParams<"sessions", "getResource">,
+		EndpointQuery<"sessions", "getResource">,
+		EndpointBody<"sessions", "getResource">,
+		EndpointSuccess<"sessions", "getResource">
+	>
+	readonly "sessions.resources.update": OperationShape<
+		EndpointParams<"sessions", "updateResource">,
+		EndpointQuery<"sessions", "updateResource">,
+		EndpointBody<"sessions", "updateResource">,
+		EndpointSuccess<"sessions", "updateResource">
+	>
 }
 
 export type CheckfuOperationId = keyof CheckfuOperations
@@ -1879,13 +1897,150 @@ export class EffectSessionsEventsResource {
 	}
 }
 
+export class EffectSessionsResourcesResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List what is mounted in a session's workspace */
+	list(
+		sessionId: PathParam<"sessions", "listResources", "session_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "listResources">>, CheckfuSdkError>
+	list(
+		sessionId: PathParam<"sessions", "listResources", "session_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"sessions", "listResources">, CheckfuSdkError>
+	list(
+		sessionId: PathParam<"sessions", "listResources", "session_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"sessions", "listResources">
+		| WithResponse<EndpointSuccess<"sessions", "listResources">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("sessions", "listResources", { session_id: sessionId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.sessions.resources.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.sessions.listResources({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve one resource mounted in a session's workspace */
+	retrieve(
+		sessionId: PathParam<"sessions", "getResource", "session_id">,
+		resourceId: PathParam<"sessions", "getResource", "resource_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "getResource">>, CheckfuSdkError>
+	retrieve(
+		sessionId: PathParam<"sessions", "getResource", "session_id">,
+		resourceId: PathParam<"sessions", "getResource", "resource_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"sessions", "getResource">, CheckfuSdkError>
+	retrieve(
+		sessionId: PathParam<"sessions", "getResource", "session_id">,
+		resourceId: PathParam<"sessions", "getResource", "resource_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"sessions", "getResource">
+		| WithResponse<EndpointSuccess<"sessions", "getResource">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("sessions", "getResource", {
+					session_id: sessionId,
+					resource_id: resourceId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.sessions.resources.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.sessions.getResource({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Replace the GitHub token a mounted repository clones and pushes with */
+	update(
+		sessionId: PathParam<"sessions", "updateResource", "session_id">,
+		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
+		params: EndpointBody<"sessions", "updateResource">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"sessions", "updateResource">>, CheckfuSdkError>
+	update(
+		sessionId: PathParam<"sessions", "updateResource", "session_id">,
+		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
+		params: EndpointBody<"sessions", "updateResource">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"sessions", "updateResource">, CheckfuSdkError>
+	update(
+		sessionId: PathParam<"sessions", "updateResource", "session_id">,
+		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
+		params: EndpointBody<"sessions", "updateResource">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"sessions", "updateResource">
+		| WithResponse<EndpointSuccess<"sessions", "updateResource">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("sessions", "updateResource", {
+					session_id: sessionId,
+					resource_id: resourceId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.sessions.resources.update",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.sessions.updateResource({
+								params: pathParams,
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+}
+
 export class EffectSessionsResource {
 	readonly #runtime: EffectSdkRuntime
 	readonly events: EffectSessionsEventsResource
+	readonly resources: EffectSessionsResourcesResource
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.#runtime = runtime
 		this.events = new EffectSessionsEventsResource(runtime)
+		this.resources = new EffectSessionsResourcesResource(runtime)
 	}
 
 	/** Archive a session */
@@ -2671,13 +2826,65 @@ export class SessionsEventsResource {
 	}
 }
 
+export class SessionsResourcesResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List what is mounted in a session's workspace */
+	list(
+		sessionId: PathParam<"sessions", "listResources", "session_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"sessions", "listResources">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectSessionsResourcesResource(effectRuntime).list(sessionId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve one resource mounted in a session's workspace */
+	retrieve(
+		sessionId: PathParam<"sessions", "getResource", "session_id">,
+		resourceId: PathParam<"sessions", "getResource", "resource_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"sessions", "getResource">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectSessionsResourcesResource(effectRuntime).retrieve(sessionId, resourceId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Replace the GitHub token a mounted repository clones and pushes with */
+	update(
+		sessionId: PathParam<"sessions", "updateResource", "session_id">,
+		resourceId: PathParam<"sessions", "updateResource", "resource_id">,
+		params: EndpointBody<"sessions", "updateResource">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"sessions", "updateResource">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectSessionsResourcesResource(effectRuntime).update(sessionId, resourceId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
 export class SessionsResource {
 	readonly #runtime: PromiseSdkRuntime
 	readonly events: SessionsEventsResource
+	readonly resources: SessionsResourcesResource
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.#runtime = runtime
 		this.events = new SessionsEventsResource(runtime)
+		this.resources = new SessionsResourcesResource(runtime)
 	}
 
 	/** Archive a session */

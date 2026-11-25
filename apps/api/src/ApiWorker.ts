@@ -43,6 +43,20 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
+			enterWorkspace: (sessionId, token) =>
+				harnessCall(Effect.suspend(() => harness.enterWorkspace(sessionId, token))).pipe(
+					Effect.withSpan("PiHarness.enterWorkspace"),
+				),
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				harnessCall(
+					Effect.suspend(() =>
+						harness.prepareWorkspace(sessionId, token, repositories, allowedHosts),
+					),
+				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				harnessCall(
+					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
+				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
 					Effect.withSpan("PiHarness.discardWorkspace"),
@@ -69,11 +83,17 @@ const CheckfuLive = Checkfu.layer(
 	Layer.provide(ArtifactStoreLive),
 )
 
+const HarnessLive = PiDurableHarnessLive.pipe(
+	Layer.provide(PiHarnessExecutorLive),
+	Layer.provide(CheckfuLive),
+)
+
 const ApiWorkerLive = Layer.mergeAll(
 	CheckfuLive,
 	ArtifactStoreLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
+	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Digest.layerWebCrypto,
