@@ -1,3 +1,4 @@
+import { MAX_ARTIFACT_BODY_BYTES } from "@checkfu/sdk/Schemas"
 import * as McpProtocol from "effect/ai/McpProtocol"
 import * as McpServer from "effect/ai/McpServer"
 import * as Tool from "effect/ai/Tool"
@@ -97,8 +98,15 @@ const unauthorizedResponse = errorResponse(
 	{ "www-authenticate": "Bearer" },
 )
 
-// Largest API request body (an agent with a full system prompt) plus the JSON-RPC envelope.
-export const MAX_MCP_BODY_BYTES = 2 * 1024 * 1024
+// Room for the JSON-RPC envelope around a tool's arguments.
+const MCP_ENVELOPE_BYTES = 64 * 1024
+
+// The body is bounded before the tool it calls is known, so the bound is the largest API request
+// body, an artifact upload, plus the envelope. The API still holds each operation to its own limit.
+export const MAX_MCP_BODY_BYTES = Math.max(
+	2 * 1024 * 1024,
+	MAX_ARTIFACT_BODY_BYTES + MCP_ENVELOPE_BYTES,
+)
 
 // Everything but the health check needs a credential, so no spelling of a route that the
 // router accepts can reach a handler without one.

@@ -9,6 +9,9 @@ import { AgentCreated } from "../Agent/CreateAgent.command.ts"
 import { AutomationArchived } from "../Automation/ArchiveAutomation.command.ts"
 import { Automation } from "../Automation/Automation.aggregate.ts"
 import { AutomationCreated } from "../Automation/CreateAutomation.command.ts"
+import { Artifact } from "../Artifact/Artifact.aggregate.ts"
+import { ArtifactCreated } from "../Artifact/CreateArtifact.command.ts"
+import { ArtifactDeleted } from "../Artifact/DeleteArtifact.command.ts"
 import { EnvironmentArchived } from "../Environment/ArchiveEnvironment.command.ts"
 import { EnvironmentCreated } from "../Environment/CreateEnvironment.command.ts"
 import { EnvironmentDeleted } from "../Environment/DeleteEnvironment.command.ts"
@@ -22,13 +25,14 @@ import type { ListingChange } from "./ListingStore.ts"
 export class Listing extends Domain.Projection(
 	"Listing",
 	{
-		from: [Agent, Environment, Session, Automation],
+		from: [Agent, Environment, Session, Automation, Artifact],
 		key: Schema.String,
 		keyOf: {
 			Agent: ({ source }) => source.id,
 			Environment: ({ source }) => source.id,
 			Session: ({ source }) => source.id,
 			Automation: ({ source }) => source.id,
+			Artifact: ({ source }) => source.id,
 		},
 		on: [
 			AgentCreated,
@@ -40,11 +44,13 @@ export class Listing extends Domain.Projection(
 			SessionArchived,
 			AutomationCreated,
 			AutomationArchived,
+			ArtifactCreated,
+			ArtifactDeleted,
 		],
 	},
 	{
 		description:
-			"Every agent, environment, session and automation, in creation order, with its status.",
+			"Every agent, environment, session, automation and artifact, in creation order, with its status.",
 	},
 ) {}
 
@@ -73,6 +79,10 @@ const changeOf = ({
 			return { kind: "automation", id, created_at, agent_id: event.agent_id, status: LISTED }
 		case "automation.archived":
 			return { kind: "automation", id, created_at, agent_id: null, status: ARCHIVED }
+		case "artifact.created":
+			return { kind: "artifact", id, created_at, agent_id: null, status: LISTED }
+		case "artifact.deleted":
+			return { kind: "artifact", id, created_at, agent_id: null, status: DELETED }
 	}
 }
 
@@ -81,6 +91,6 @@ export const ListingLive = Listing.toLayer(
 		const store = yield* ListingStore
 		return (batch) => store.record(batch.map(changeOf))
 	}),
-	// Version 1 adds automations; a stage that ran version 0 replays its history into the listing.
-	{ batch: { size: 100 }, version: 1 },
+	// Version 1 adds automations and version 2 artifacts; a stage that ran an earlier version replays its history into the listing.
+	{ batch: { size: 100 }, version: 2 },
 )

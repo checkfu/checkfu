@@ -192,6 +192,50 @@ describe("CLI sessions:events and sessions connect", () => {
 		)
 	})
 
+	it("sends one event object or a whole body from stdin", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const message = { type: "user.message", content: [{ type: "text", text: "Hello" }] }
+
+					const single = yield* cli.run(
+						["sessions:events", "send", "--session-id", yield* createReadySession(cli)],
+						{ stdin: JSON.stringify(message) },
+					)
+					expect(single.exitCode).toBe(0)
+					expect(
+						(JSON.parse(single.stdout) as { data: Array<{ type: string }> }).data[0]?.type,
+					).toBe("user.message")
+
+					const whole = yield* cli.run(
+						["sessions:events", "send", "--session-id", yield* createReadySession(cli)],
+						{ stdin: JSON.stringify({ events: [message] }) },
+					)
+					expect(whole.exitCode).toBe(0)
+					expect((JSON.parse(whole.stdout) as { data: Array<{ type: string }> }).data).toHaveLength(
+						1,
+					)
+
+					let requests = 0
+					const scalar = yield* cli.run(["sessions:events", "send", "--session-id", "sess_1"], {
+						stdin: "hello\n",
+						interceptFetch: async (next, request) => {
+							requests += 1
+							return next(request)
+						},
+					})
+					expect(scalar.exitCode).toBe(1)
+					expect(scalar.stdout).toBe("")
+					expect(scalar.stderr).toContain(
+						"Expected stdin to be { events: [...] }, an array, or a single item object.",
+					)
+					expect(requests).toBe(0)
+				}),
+			),
+		)
+	})
+
 	it("reconnects SSE streams losslessly with Last-Event-ID on transient disconnect", async () => {
 		await Effect.runPromise(
 			Effect.scoped(

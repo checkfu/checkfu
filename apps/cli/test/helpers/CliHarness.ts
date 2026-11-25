@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { makeApiHandler } from "@checkfu/api/Http/Router"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
@@ -10,6 +11,7 @@ import type {
 	TurnInterrupted,
 } from "@checkfu/domain/Session/Harness.external"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import * as ByteSize from "effect/ByteSize"
 import * as Clock from "effect/Clock"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -21,6 +23,7 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
@@ -81,6 +84,7 @@ export interface CliRunOptions {
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
 	readonly onChmod?: (filePath: string, mode: number) => void
+	readonly onRead?: (filePath: string) => void
 	readonly readyWithin?: Duration.Input
 	readonly spawn?: (args: ReadonlyArray<string>) => {
 		readonly exitCode: number
@@ -130,7 +134,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
 		)
-		const ServerLayer = CheckfuLive.pipe(
+		const ServerLayer = Layer.mergeAll(CheckfuLive, makeArtifactStoreMemory().layer).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -197,11 +201,35 @@ export const makeTestServer = (handler?: ModelHandler) =>
 								)
 					},
 					stream: (filePath) => {
+						options?.onRead?.(filePath)
 						const entry = files[filePath]
 						if (entry === undefined) {
 							return Stream.fail(notFoundError("stream", filePath))
 						}
 						return typeof entry === "string" ? Stream.make(new TextEncoder().encode(entry)) : entry
+					},
+					stat: (filePath) => {
+						const entry = files[filePath]
+						if (entry === undefined) {
+							return Effect.fail(notFoundError("stat", filePath))
+						}
+						const size = typeof entry === "string" ? new TextEncoder().encode(entry).byteLength : 0
+						return Effect.succeed({
+							type: "File",
+							mtime: Option.none(),
+							atime: Option.none(),
+							birthtime: Option.none(),
+							dev: 0n,
+							ino: Option.none(),
+							mode: 0o644,
+							nlink: Option.none(),
+							uid: Option.none(),
+							gid: Option.none(),
+							rdev: Option.none(),
+							size: ByteSize.bytes(size),
+							blksize: Option.none(),
+							blocks: Option.none(),
+						})
 					},
 					exists: (filePath) => Effect.succeed(files[filePath] !== undefined),
 					writeFileString: (filePath, data) =>

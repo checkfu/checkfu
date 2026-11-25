@@ -7,6 +7,7 @@ import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
 import { State } from "alchemy/State"
 import * as Cause from "effect/Cause"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -14,6 +15,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import stack, {
 	CLOUDFLARE_STATE_OBSERVABILITY,
@@ -22,6 +24,15 @@ import stack, {
 } from "../../../alchemy.run.ts"
 import ApiWorker, { API_WORKER_PROPS } from "../src/ApiWorker.ts"
 import { PI_HARNESS_WORKER_PROPS } from "../src/Pi/PiHarnessWorker.ts"
+import { ARTIFACT_BUCKET_PROPS, artifactBucketProps } from "../src/Artifacts/ArtifactStore.ts"
+import { JURISDICTION_ENV } from "../src/Placement.ts"
+
+const RemovalPolicyName = Schema.Literals(["retain", "destroy", "protect"])
+
+const UNENFORCEABLE = "R2 cannot keep artifact files in that jurisdiction"
+
+const bucketPropsFor = (env: Record<string, string>) =>
+	artifactBucketProps.parse(ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true }))
 
 describe("Alchemy stack and worker entry", () => {
 	it.effect(
@@ -31,6 +42,7 @@ describe("Alchemy stack and worker entry", () => {
 				expect(ApiWorker).toBeDefined()
 				// 2026-11-17 makes enable_request_signal the default without emitting a redundant-flag warning.
 				expect(API_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
+				expect(ARTIFACT_BUCKET_PROPS).toEqual({ forceDestroy: true })
 				expect("flags" in API_WORKER_PROPS.compatibility).toBe(false)
 				expect(API_WORKER_PROPS.codeUpdateStrategy).toEqual({
 					mode: "deferred",
@@ -94,6 +106,99 @@ describe("Alchemy stack and worker entry", () => {
 				}).pipe(Effect.provide(devStateLayer))
 				expect(devStateStore.id).toBe("local")
 			}),
+	)
+
+	it.effect("keeps artifact bytes in the R2 jurisdiction the objects are placed in", () =>
+		Effect.gen(function* () {
+			expect(yield* bucketPropsFor({})).toEqual({ forceDestroy: true })
+			expect(yield* bucketPropsFor({ [JURISDICTION_ENV]: "" })).toEqual({ forceDestroy: true })
+			for (const jurisdiction of ["eu", "fedramp", "us"]) {
+				expect(yield* bucketPropsFor({ [JURISDICTION_ENV]: jurisdiction })).toEqual({
+					forceDestroy: true,
+					jurisdiction,
+				})
+			}
+			const refused = yield* Effect.flip(bucketPropsFor({ [JURISDICTION_ENV]: "fedramp-high" }))
+			expect(refused.message).toContain(UNENFORCEABLE)
+		}),
+	)
+
+	it.live("refuses to plan a jurisdiction R2 cannot enforce before any network call", () =>
+		Effect.gen(function* () {
+			let requests = 0
+			const scratch = yield* Effect.acquireRelease(
+				Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-"))),
+				(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+			)
+			yield* Effect.acquireRelease(
+				Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+				() => Effect.sync(() => vi.unstubAllEnvs()),
+			)
+			const planned = (jurisdiction: string) =>
+				Effect.sync(() => vi.stubEnv(JURISDICTION_ENV, jurisdiction)).pipe(
+					Effect.andThen(
+						Alchemist.plan({
+							stack: checkfuStack(Effect.void),
+							stage: "jurisdiction",
+							operation: "deploy",
+						}),
+					),
+					Effect.scoped,
+					Effect.provide(Alchemist.layer()),
+					Effect.provideService(Alchemy.AlchemyContext, {
+						dotAlchemy: join(scratch, "project"),
+						dev: false,
+						adopt: false,
+					}),
+					Effect.provideService(FetchHttpClient.Fetch, () => {
+						requests += 1
+						return Promise.reject(new Error("no network in this test"))
+					}),
+					Effect.exit,
+					Effect.map((exit) => (Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "planned")),
+				)
+			expect(yield* planned("fedramp-high")).toContain(UNENFORCEABLE)
+			expect(requests).toBe(0)
+			expect(yield* planned("eu")).not.toContain(UNENFORCEABLE)
+		}),
+	)
+
+	it.live(
+		"refuses to replace or delete the artifact bucket on the production stage only",
+		() =>
+			Effect.gen(function* () {
+				const scratch = yield* Effect.acquireRelease(
+					Effect.promise(() => mkdtemp(join(tmpdir(), "checkfu-stack-"))),
+					(dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })),
+				)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => vi.stubEnv("ALCHEMY_HOME", join(scratch, "home"))),
+					() => Effect.sync(() => vi.unstubAllEnvs()),
+				)
+				const bucketPolicy = (stage: string) =>
+					Alchemist.plan({
+						stack: checkfuStack(Effect.void),
+						stage,
+						operation: "deploy",
+						dev: true,
+					}).pipe(
+						Effect.flatMap((plan) =>
+							Schema.decodeUnknownEffect(RemovalPolicyName)(
+								plan.native.resources["ArtifactBucket"]?.resource.RemovalPolicy,
+							),
+						),
+						Effect.scoped,
+						Effect.provide(Alchemist.layer()),
+						Effect.provideService(Alchemy.AlchemyContext, {
+							dotAlchemy: join(scratch, stage),
+							dev: true,
+							adopt: false,
+						}),
+					)
+				expect(yield* bucketPolicy("production")).toBe("protect")
+				expect(yield* bucketPolicy("staging")).toBe("destroy")
+			}),
+		60_000,
 	)
 
 	it.effect("checks the shipped baseline only for a production deploy", () =>

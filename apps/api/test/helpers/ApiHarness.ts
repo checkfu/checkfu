@@ -39,6 +39,7 @@ import {
 	harnessCall,
 	makePiTurnExecutorLayer,
 } from "../../src/Pi/PiDurableHarness.ts"
+import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
@@ -310,7 +311,8 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
-	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
+	const artifactStore = makeArtifactStoreMemory()
+	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive, artifactStore.layer).pipe(
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
@@ -326,7 +328,16 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 	)
 
-	return { layer, closeAll, requests, forgetPiState, unreachable, conversations, resets }
+	return {
+		layer,
+		closeAll,
+		requests,
+		forgetPiState,
+		unreachable,
+		conversations,
+		resets,
+		artifactStore,
+	}
 }
 
 // The OpenAPI document the API Worker serves as a static asset, as Forge generated it.

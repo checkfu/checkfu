@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { localD1File, removeStage } from "./StageCleanup.ts"
+import { localD1File, localR2File, removeStage } from "./StageCleanup.ts"
 
 const dirs: Array<string> = []
 
@@ -39,6 +39,22 @@ const stage = (
 		write(root, `local/d1/cloudflare-runtime-D1DatabaseObject/${path}`)
 	}
 	write(root, `${gateway}/blob`)
+	const bucketName = `dev:${databaseId.slice(4)}`
+	write(
+		root,
+		`state/Checkfu/${name}/ArtifactBucket.json`,
+		JSON.stringify({
+			logicalId: "ArtifactBucket",
+			resourceType: "Cloudflare.R2.Bucket",
+			attr: { bucketName },
+		}),
+	)
+	const bucket = localR2File(bucketName)
+	for (const path of [bucket, `${bucket}-shm`, `${bucket}-wal`]) {
+		write(root, `local/r2/cloudflare-runtime-R2BucketObject/${path}`)
+	}
+	const blobs = `local/r2/${bucketName.replace(":", "_")}`
+	write(root, `${blobs}/blobs/0123`)
 	write(
 		root,
 		`state/Checkfu/${name}/ApiWorker.json`,
@@ -67,6 +83,9 @@ const stage = (
 		`local/d1/cloudflare-runtime-D1DatabaseObject/${database}`,
 		`local/d1/cloudflare-runtime-D1DatabaseObject/${database}-wal`,
 		gateway,
+		`local/r2/cloudflare-runtime-R2BucketObject/${bucket}`,
+		`local/r2/cloudflare-runtime-R2BucketObject/${bucket}-wal`,
+		blobs,
 		...left.map((path) => path.split("/").slice(0, -1).join("/")),
 	]
 }
@@ -94,12 +113,16 @@ describe("removing a local stage", () => {
 			"dev:7d0e2b1c-5f3a-4e8b-9c6d-0a1b2c3d4e5f",
 		)
 		write(root, "log/run.ndjson")
+		write(root, "local/r2/cloudflare-runtime-R2BucketObject/metadata.sqlite")
 
 		removeStage(root, "Checkfu", "wd-a")
 
 		expect(removed.filter((path) => existsSync(join(root, path)))).toEqual([])
 		expect(kept.filter((path) => !existsSync(join(root, path)))).toEqual([])
 		expect(existsSync(join(root, "log/run.ndjson"))).toBe(true)
+		expect(
+			existsSync(join(root, "local/r2/cloudflare-runtime-R2BucketObject/metadata.sqlite")),
+		).toBe(true)
 	})
 
 	it("removes the bundles of a stage that stopped before writing its state, and no one else's", () => {

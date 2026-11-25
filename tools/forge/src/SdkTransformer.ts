@@ -381,6 +381,10 @@ const generateResourcesFile = (
 							out.indent(() => {
 								for (const qp of op.queryParams) {
 									const keyJson = JSON.stringify(qp.wireName)
+									if (qp.required) {
+										out(keyJson, ": ", qVar, "[", keyJson, "],")
+										continue
+									}
 									out(
 										"...(",
 										qVar,

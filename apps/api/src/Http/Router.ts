@@ -22,9 +22,11 @@ import * as Stream from "effect/Stream"
 import { AgentsLive } from "./AgentsHandlers.ts"
 import { AutomationsLive } from "./AutomationsHandlers.ts"
 import { CheckfuApi, REQUEST_ID_HEADER, RequestId, apiError } from "./Api.ts"
+import { ArtifactsLive } from "./ArtifactsHandlers.ts"
 import { EnvironmentsLive } from "./EnvironmentsHandlers.ts"
 import {
 	AgentBodyLimitLive,
+	ArtifactBodyLimitLive,
 	AuthenticationLive,
 	EventBatchBodyLimitLive,
 	MAX_REQUEST_BODY_BYTES,
@@ -36,6 +38,7 @@ import {
 import { SessionsLive } from "./SessionsHandlers.ts"
 
 export { AgentVersionWaitTimeout, IsSupportedAgentModel } from "./AgentsHandlers.ts"
+export { ArtifactReadWaitTimeout } from "./ArtifactsHandlers.ts"
 export { EnvironmentReadWaitTimeout } from "./EnvironmentsHandlers.ts"
 export {
 	DEFAULT_SSE_KEEPALIVE_INTERVAL,
@@ -84,11 +87,13 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		EnvironmentsLive,
 		SessionsLive,
 		AutomationsLive,
+		ArtifactsLive,
 	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 		RequestValidationLive,
 		AgentBodyLimitLive,
+		ArtifactBodyLimitLive,
 		EventBatchBodyLimitLive,
 	]),
 	Layer.provide(HttpPlatform.layer),
