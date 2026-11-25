@@ -6,24 +6,35 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import { COMPATIBILITY_DATE } from "../src/Compatibility.ts"
 import { SandboxesCloudflare } from "../src/Sandbox/CloudflareSandboxes.do.ts"
 import { Sandboxes } from "../src/Sandbox/Sandboxes.ts"
+import type { ExecResult } from "../src/Sandbox/Sandboxes.ts"
 
 // A spike, not part of the product: one request runs a sandbox through its whole life and
 // reports how long each step took.
 
-export class SandboxSpikeWorker extends Cloudflare.Worker<SandboxSpikeWorker>()(
-	"SandboxSpikeWorker",
-) {}
+export class SandboxSpikeWorker extends Cloudflare.Worker<
+	SandboxSpikeWorker,
+	Record<never, never>
+>()("SandboxSpikeWorker") {}
 
 const FILE = "/workspace/notes/a.txt"
+
+type Shown = string | number | ExecResult
+
+interface Step {
+	readonly step: string
+	readonly ms: number
+	readonly result?: Shown
+}
 
 export default SandboxSpikeWorker.make(
 	{ main: import.meta.url, compatibility: { date: COMPATIBILITY_DATE }, dev: { port: 1390 } },
 	Effect.gen(function* () {
 		const sandboxes = yield* Sandboxes
+		const ctx = yield* Cloudflare.WorkerExecutionContext
 		const steps = (key: string) =>
 			Effect.gen(function* () {
-				const report: Array<Record<string, unknown>> = []
-				const timed = <A, E>(step: string, effect: Effect.Effect<A, E>, show?: (a: A) => unknown) =>
+				const report: Array<Step> = []
+				const timed = <A, E>(step: string, effect: Effect.Effect<A, E>, show?: (a: A) => Shown) =>
 					Effect.gen(function* () {
 						const from = yield* Clock.currentTimeMillis
 						const value = yield* effect
@@ -48,11 +59,20 @@ export default SandboxSpikeWorker.make(
 				yield* timed("exec that fails", cold.exec("ls /nope"), (r) => r)
 				yield* timed("exec past its timeout", cold.exec("sleep 30", { timeout: 1500 }), (r) => r)
 				yield* timed(
-					"exec with no network",
+					"exec reaching a host not allowed",
 					cold.exec([
 						"node",
 						"-e",
-						"fetch('https://example.com').then(r=>console.log(r.status),e=>console.log('blocked:',e.cause?.code??e.message))",
+						"fetch('https://example.org').then(r=>console.log(r.status),e=>console.log('blocked:',e.cause?.code??e.message))",
+					]),
+					(r) => r,
+				)
+				yield* timed(
+					"exec reaching an allowed host",
+					cold.exec([
+						"node",
+						"-e",
+						"fetch('https://example.com/acme/api.git/info/refs',{headers:{authorization:'Bearer from-the-sandbox'}}).then(async r=>console.log(r.status,await r.text()),e=>console.log('blocked:',e.cause?.code??e.message))",
 					]),
 					(r) => r,
 				)
@@ -76,7 +96,24 @@ export default SandboxSpikeWorker.make(
 		return {
 			fetch: Effect.gen(function* () {
 				const request = yield* HttpServerRequest.HttpServerRequest
-				const key = new URL(request.url, "http://spike").searchParams.get("key") ?? "spike"
+				// A sandbox's HTTPS to an allowed host arrives here, named by the sandbox it came from.
+				const { sandbox } = yield* ctx.props
+				if (typeof sandbox === "string") {
+					return HttpServerResponse.text(
+						`egress of ${sandbox}: ${request.method} ${request.url}; the sandbox sent authorization=${request.headers["authorization"] ?? "none"}; the Worker would replace it with the stored token`,
+					)
+				}
+				const params = new URL(request.url, "http://spike").searchParams
+				const key = params.get("key") ?? "spike"
+				const cmd = params.get("cmd")
+				if (cmd !== null) {
+					const ran = yield* Effect.result(
+						Effect.flatMap(sandboxes.open(key), (sandbox) => sandbox.exec(cmd)),
+					)
+					return yield* HttpServerResponse.json(
+						ran._tag === "Success" ? ran.success : { error: ran.failure.message },
+					)
+				}
 				const outcome = yield* Effect.result(steps(key))
 				return yield* HttpServerResponse.json(
 					outcome._tag === "Success"
@@ -85,5 +122,5 @@ export default SandboxSpikeWorker.make(
 				)
 			}).pipe(Effect.orDie),
 		}
-	}).pipe(Effect.provide(SandboxesCloudflare)),
+	}).pipe(Effect.provide(SandboxesCloudflare({ egress: ["example.com"] }))),
 )

@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
+import { placedStub, placement } from "../Placement.ts"
 import { SandboxError, Sandboxes } from "./Sandboxes.ts"
 import type { ExecOptions, Sandbox } from "./Sandboxes.ts"
 
@@ -15,12 +16,25 @@ export class SandboxMachine extends Cloudflare.Container<SandboxMachine>()("Sand
 }) {}
 
 const SNAPSHOT = "snapshot"
+const EGRESS = "egress"
+
+// Cloudflare answers intercepted HTTPS with a certificate from this authority, which it puts in
+// every container. The common tools are pointed at it, since nothing else is reachable.
+const EGRESS_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt"
+const TRUST_EGRESS = {
+	NODE_EXTRA_CA_CERTS: EGRESS_CA,
+	SSL_CERT_FILE: EGRESS_CA,
+	GIT_SSL_CAINFO: EGRESS_CA,
+	CURL_CA_BUNDLE: EGRESS_CA,
+	REQUESTS_CA_BUNDLE: EGRESS_CA,
+}
 
 // The machine has no program of its own: it waits, and every command is run in it.
 const startOptions = (snapshot: Cloudflare.ContainerSnapshot | undefined) => ({
 	entrypoint: ["sleep", "infinity"],
 	enableInternet: false,
 	instance: "basic" as const,
+	env: TRUST_EGRESS,
 	...(snapshot === undefined ? {} : { containerSnapshot: snapshot }),
 })
 
@@ -52,10 +66,24 @@ export class SessionSandbox extends Cloudflare.DurableObject<SessionSandbox>()(
 			Effect.sync(() => {
 				const { storage } = state.raw
 
-				// A no-op while the machine runs; a stopped one starts from its last snapshot.
-				const started = Effect.suspend(() =>
-					machine.start(startOptions(storage.kv.get<Cloudflare.ContainerSnapshot>(SNAPSHOT))),
-				)
+				// A no-op while the machine runs; a stopped one starts from its last snapshot. The
+				// machine has no network of its own: HTTPS to an allowed host is handed to this
+				// Worker, which is where a credential is added, so none is ever inside the machine.
+				const started = Effect.gen(function* () {
+					if (yield* machine.running) {
+						return
+					}
+					yield* machine.start(startOptions(storage.kv.get<Cloudflare.ContainerSnapshot>(SNAPSHOT)))
+					const hosts = storage.kv.get<ReadonlyArray<string>>(EGRESS) ?? []
+					if (hosts.length > 0) {
+						const entrypoint = state.exports.default
+						if (entrypoint === undefined) {
+							return yield* Effect.die(new Error("The Worker hosting a sandbox has no entrypoint."))
+						}
+						const egress = yield* entrypoint({ props: { sandbox: state.raw.id.name ?? "" } })
+						yield* Effect.forEach(hosts, (host) => machine.interceptOutboundHttps(host, egress))
+					}
+				})
 
 				const exec = (argv: ReadonlyArray<string>, command: MachineCommand = {}) =>
 					Effect.gen(function* () {
@@ -91,7 +119,13 @@ export class SessionSandbox extends Cloudflare.DurableObject<SessionSandbox>()(
 					)
 
 				return {
-					open: () => Effect.orDie(started),
+					open: (egress: ReadonlyArray<string>) =>
+						Effect.orDie(
+							Effect.andThen(
+								Effect.sync(() => storage.kv.put(EGRESS, egress)),
+								started,
+							),
+						),
 					exec,
 					suspend: () =>
 						Effect.gen(function* () {
@@ -116,62 +150,64 @@ export class SessionSandbox extends Cloudflare.DurableObject<SessionSandbox>()(
 const WRITE_FILE = 'mkdir -p "$(dirname "$1")" && cat > "$1"'
 
 /** `Sandboxes` on Cloudflare Containers: the key names the object that owns the machine. */
-export const SandboxesCloudflare = Layer.effect(
-	Sandboxes,
-	Effect.gen(function* () {
-		const objects = yield* SessionSandbox
-		const runtime = yield* Cloudflare.Worker
-		const asked = <A, E>(
-			call: Effect.Effect<A, E, RuntimeContext>,
-		): Effect.Effect<A, SandboxError> =>
-			Effect.catchCause(Effect.provideService(call, RuntimeContext, runtime), (cause) =>
-				Cause.hasInterruptsOnly(cause)
-					? Effect.interrupt
-					: Effect.fail(new SandboxError({ message: Cause.pretty(cause) })),
-			)
-		const text = new TextDecoder()
-
-		const sandboxOf = (key: string): Sandbox => {
-			const object = objects.getByName(key)
-			const read = (path: string) =>
-				Effect.flatMap(asked(object.exec(["cat", "--", path])), (output) =>
-					output.exitCode === 0
-						? Effect.succeed(output.stdout)
-						: Effect.fail(new SandboxError({ message: text.decode(output.stderr).trim() })),
+export const SandboxesCloudflare = (options: { readonly egress: ReadonlyArray<string> }) =>
+	Layer.effect(
+		Sandboxes,
+		Effect.gen(function* () {
+			// A sandbox is placed like the session it belongs to.
+			const objectOf = placedStub(yield* SessionSandbox, yield* placement)
+			const runtime = yield* Cloudflare.Worker
+			const asked = <A, E>(
+				call: Effect.Effect<A, E, RuntimeContext>,
+			): Effect.Effect<A, SandboxError> =>
+				Effect.catchCause(Effect.provideService(call, RuntimeContext, runtime), (cause) =>
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.fail(new SandboxError({ message: Cause.pretty(cause) })),
 				)
-			return {
-				exec: (command, options: ExecOptions = {}) =>
-					Effect.map(
-						asked(
-							object.exec(typeof command === "string" ? ["sh", "-c", command] : command, options),
-						),
-						(output) => ({
-							exitCode: output.exitCode,
-							stdout: text.decode(output.stdout),
-							stderr: text.decode(output.stderr),
-						}),
-					),
-				readFile: read,
-				readTextFile: (path) => Effect.map(read(path), (bytes) => text.decode(bytes)),
-				writeFile: (path, content) =>
-					Effect.flatMap(
-						asked(
-							object.exec(["sh", "-c", WRITE_FILE, "sh", path], {
-								stdin: typeof content === "string" ? new TextEncoder().encode(content) : content,
+			const text = new TextDecoder()
+
+			const sandboxOf = (key: string): Sandbox => {
+				const object = objectOf(key)
+				const read = (path: string) =>
+					Effect.flatMap(asked(object.exec(["cat", "--", path])), (output) =>
+						output.exitCode === 0
+							? Effect.succeed(output.stdout)
+							: Effect.fail(new SandboxError({ message: text.decode(output.stderr).trim() })),
+					)
+				return {
+					exec: (command, options: ExecOptions = {}) =>
+						Effect.map(
+							asked(
+								object.exec(typeof command === "string" ? ["sh", "-c", command] : command, options),
+							),
+							(output) => ({
+								exitCode: output.exitCode,
+								stdout: text.decode(output.stdout),
+								stderr: text.decode(output.stderr),
 							}),
 						),
-						(output) =>
-							output.exitCode === 0
-								? Effect.void
-								: Effect.fail(new SandboxError({ message: text.decode(output.stderr).trim() })),
-					),
+					readFile: read,
+					readTextFile: (path) => Effect.map(read(path), (bytes) => text.decode(bytes)),
+					writeFile: (path, content) =>
+						Effect.flatMap(
+							asked(
+								object.exec(["sh", "-c", WRITE_FILE, "sh", path], {
+									stdin: typeof content === "string" ? new TextEncoder().encode(content) : content,
+								}),
+							),
+							(output) =>
+								output.exitCode === 0
+									? Effect.void
+									: Effect.fail(new SandboxError({ message: text.decode(output.stderr).trim() })),
+						),
+				}
 			}
-		}
 
-		return {
-			open: (key) => Effect.as(asked(objects.getByName(key).open()), sandboxOf(key)),
-			suspend: (key) => asked(objects.getByName(key).suspend()),
-			remove: (key) => asked(objects.getByName(key).remove()),
-		}
-	}),
-)
+			return {
+				open: (key) => Effect.as(asked(objectOf(key).open(options.egress)), sandboxOf(key)),
+				suspend: (key) => asked(objectOf(key).suspend()),
+				remove: (key) => asked(objectOf(key).remove()),
+			}
+		}),
+	)
