@@ -147,17 +147,22 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						send: ((
 							command: Parameters<typeof realSession.send>[0],
 							options?: Parameters<typeof realSession.send>[1],
-						) => {
-							calls.push(`session:send:${command._tag}`)
-							return realSession.send(command, options)
-						}) as typeof realSession.send,
+						) =>
+							Effect.suspend(() => {
+								calls.push(`session:send:${command._tag}`)
+								return realSession.send(command, options)
+							})) as typeof realSession.send,
 					}
 					const recordingTurnInput: typeof realTurnInput = {
 						...realTurnInput,
-						get: (...args: Parameters<typeof realTurnInput.get>) => {
-							calls.push("turn-input:get")
-							return realTurnInput.get(...args)
-						},
+						get: (...args: Parameters<typeof realTurnInput.get>) =>
+							realTurnInput.get(...args).pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										calls.push("turn-input:get")
+									}),
+								),
+							),
 					}
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(Session, recordingSession),
@@ -187,6 +192,21 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(calls[0]).toBe("turn-input:get")
 					expect(calls.findIndex((call) => call.startsWith("session:send:"))).toBeGreaterThan(0)
+
+					calls.length = 0
+					const invalid = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/events`,
+						headers: AUTH_HEADERS,
+						body: {
+							events: [
+								{ id: "evt-dup", type: "user.message", content: [{ type: "text", text: "a" }] },
+								{ id: "evt-dup", type: "user.message", content: [{ type: "text", text: "b" }] },
+							],
+						},
+					})
+					expect(invalid.status).toBe(400)
+					expect(calls).toEqual([])
 
 					calls.length = 0
 					yield* sendRequest(apiFetch, {

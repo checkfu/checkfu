@@ -428,7 +428,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("sendEvents", ({ params, headers, payload }) =>
 				Effect.gen(function* () {
 					const id = params.session_id
-					yield* caughtUp(id)
 					const idempotencyKey = headers["idempotency-key"]
 					const seenEventIds = new Set<string>()
 					const prepared: Array<
@@ -477,6 +476,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						prepared.push({ type: "user.message", eventId: event.id, commandId, text })
 					}
 
+					yield* caughtUp(id)
 					if (idempotencyKey !== undefined) {
 						const fingerprint = yield* eventBatchFingerprint(digest, prepared)
 						const claim = yield* sessions.send(
