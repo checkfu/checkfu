@@ -635,7 +635,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					const artifactWorld = yield* recordStep("artifact-created-and-versioned")
 					yield* automations.send(new ArchiveAutomation({ automation_id: automationRef.id }))
-					yield* recordStep("automation-archived")
+					const archivedAutomationWorld = yield* recordStep("automation-archived")
 
 					yield* agents.send(new ArchiveAgent({ agent_id: agentRef.id }))
 					yield* recordStep("archived-agent-after-admission")
@@ -653,6 +653,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						automationWorld,
 						updatedAutomationWorld,
 						artifactWorld,
+						archivedAutomationWorld,
 						archivedEnvWorld,
 						finalWorld,
 						failures: platform.control.failures,
@@ -813,6 +814,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			}).AutomationViewsMatchAutomations,
 		).toBe(false)
 
+		expect(
+			results.archivedAutomationWorld.Automation.map(({ id, state }) => [id, state.status]),
+		).toEqual([[automationRef.id, "archived"]])
+		expect(results.archivedAutomationWorld.AutomationCapacity.map((row) => row.state)).toEqual([
+			{ reserved: 0 },
+		])
 		expect(results.archivedEnvWorld.Environment[0]?.state.status).toBe("archived")
 		expect(results.archivedEnvWorld.EnvironmentView[0]?.state.archived_at).not.toBeNull()
 
