@@ -1410,6 +1410,48 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		}
 	})
 
+	it("replays a committed event under a fresh Idempotency-Key after the session has ended", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) =>
+			makeAssistantReply(model, null, `ok:${extractLastUserText(context)}`, 4, 2),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch)
+					const send = (key: string, id: string, text: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/sessions/${session.id}/events`,
+							headers: { ...AUTH_HEADERS, "idempotency-key": key },
+							body: { events: [{ id, type: "user.message", content: [{ type: "text", text }] }] },
+						})
+
+					const first = yield* send("batch-1", "evt-1", "hello")
+					expect(first.status).toBe(200)
+					const accepted = (yield* Effect.promise(() => first.json())) as unknown
+					const archived = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archived.status).toBe(200)
+
+					// The SDK makes a fresh key for a new call: the committed event still replays.
+					const replay = yield* send("batch-2", "evt-1", "hello")
+					expect(replay.status).toBe(200)
+					expect(yield* Effect.promise(() => replay.json())).toEqual(accepted)
+
+					// A new event on the ended session is refused.
+					const fresh = yield* send("batch-3", "evt-2", "again")
+					expect(fresh.status).toBe(409)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("deduplicates retried user.message and user.interrupt events via client event id or Idempotency-Key after an unconfirmed send", async () => {
 		const seenPrompts: Array<string> = []
 		let markInterruptibleStarted: () => void = () => undefined

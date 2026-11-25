@@ -2,7 +2,6 @@ import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
-import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 
 export const RequestFingerprint = Schema.String.check(
 	Schema.isMinLength(1),
@@ -19,5 +18,5 @@ export class ClaimIdempotencyKey extends Domain.Command("ClaimIdempotencyKey", {
 		fingerprint: RequestFingerprint,
 	},
 	events: [IdempotencyKeyClaimed],
-	rejects: [SessionNotFound, SessionTerminated],
+	rejects: [SessionNotFound],
 }) {}

@@ -724,7 +724,7 @@ describe("Sessions", () => {
 	})
 
 	it.effect(
-		"records the first fingerprint claimed under a command id and replays it for every later claim",
+		"records the first fingerprint claimed under a command id, replays it for every later claim, and claims on an ended session",
 		() => {
 			const missing = Session.ref("sess_missing")
 			const session = Session.ref("sess_claims")
@@ -755,7 +755,11 @@ describe("Sessions", () => {
 				Story.then(session, new SessionStatusTerminated(), new SessionArchived()),
 				Story.when(claim("fp_alpha"), { commandId: "batch:key-1" }),
 				Story.then(session),
+				// An ended session still records a new key, so a retry of events it committed gets their
+				// receipts; the event commands refuse anything new.
 				Story.when(claim("fp_delta"), { commandId: "batch:key-4" }),
+				Story.then(session, new IdempotencyKeyClaimed({ fingerprint: "fp_delta" })),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Late" })),
 				Story.rejected(new SessionTerminated({ session_id: session.id })),
 			)
 		},

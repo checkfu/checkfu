@@ -441,13 +441,12 @@ export class Session extends Domain.Aggregate("Session", {
 			return [new SessionStatusTerminated(), new SessionArchived()]
 		},
 
-		ClaimIdempotencyKey: (state, cmd, ctx) => {
-			const active = requireActive(state, ctx.id)
-			if (active._tag !== "Idle" && active._tag !== "Running") {
-				return active
-			}
-			return [new IdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })]
-		},
+		// A batch key is claimed on an ended session too: a retry of events it already committed
+		// gets their receipts, and the event commands refuse any event that is new.
+		ClaimIdempotencyKey: (state, cmd, ctx) =>
+			state._tag === "Uninitialized"
+				? new SessionNotFound({ session_id: ctx.id })
+				: [new IdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })],
 	},
 	evolve: {
 		"session.created": () => ({ _tag: "Idle" as const, turn: 0 }),
