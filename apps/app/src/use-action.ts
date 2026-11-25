@@ -18,7 +18,9 @@ export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
 		mutationFn: (args: Args) => action(...args),
 		onSettled: () =>
 			Promise.all(
-				(invalidates ?? []).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+				(invalidates ?? []).map((queryKey) =>
+					queryClient.invalidateQueries({ queryKey, refetchType: "all" }),
+				),
 			),
 	})
 	return {

@@ -9,7 +9,7 @@ import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-heade
 import { DataTable } from "@checkfu/ui/table"
 import type { ArtifactFileContent } from "@checkfu/sdk/Api"
 import type { JsonArtifact } from "@checkfu/sdk/client"
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ExternalLinkIcon } from "lucide-react"
 import { useState } from "react"
@@ -191,18 +191,12 @@ function ArtifactView({
 	readonly path: string | undefined
 }): React.JSX.Element {
 	const navigate = useNavigate()
-	const queryClient = useQueryClient()
 	const [deleting, setDeleting] = useState(false)
 	const remove = useAction(
 		async () => {
 			await checkfu.artifacts.delete(artifact.id)
 		},
-		{
-			then: () => {
-				queryClient.removeQueries({ queryKey: ["artifacts", "page"] })
-				void navigate({ to: "/artifacts" })
-			},
-		},
+		{ invalidates: [["artifacts", "page"]], then: () => void navigate({ to: "/artifacts" }) },
 	)
 	return (
 		<>
