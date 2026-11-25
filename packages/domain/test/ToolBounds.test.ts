@@ -11,6 +11,7 @@ import {
 	turnCalls,
 } from "../src/Session/RecordToolEvents.ts"
 import type { TranscriptToolResult, TranscriptToolUse } from "../src/Session/RecordToolEvents.ts"
+import type { ParkedCall } from "../src/Session/ToolEventBounds.ts"
 import {
 	MAX_MESSAGE_TEXT_LENGTH,
 	MAX_TOOL_CALLS_PER_TURN,
@@ -393,6 +394,42 @@ describe("Bounding a turn's tool events", () => {
 	})
 })
 
+describe("Bounding a script that waited on a person", () => {
+	const parked = (task: number, text: string): ParkedCall => ({
+		task_id: task,
+		name: "deploy",
+		content: [{ type: "text", text }],
+		is_error: false,
+	})
+
+	it("states only the results left to record once a script that parked ends", () => {
+		const bounds = boundToolEvents(1)
+		bounds.use(use("call-1", "codemode", { code: "..." }))
+		bounds.result(result("call-1", 7, "done"), [parked(11, "deployed")])
+		const events = bounds.events()
+
+		expect(events.map((event) => `${event.type}:${event.tool_use_id}`)).toEqual([
+			`tool_result:${toolUseId(1, 11)}`,
+			`tool_result:${toolUseId(1, 7)}`,
+		])
+		expect(
+			toolRecordsOf(events).map((record) =>
+				record.type === "call"
+					? toolCallCommandId(record.call.tool_use_id)
+					: toolResultCommandId(record.result.tool_use_id),
+			),
+		).toEqual(["tool:result:tu_1_11", "tool:result:tu_1_7"])
+		expect(events.some((event) => "parent_tool_use_id" in event)).toBe(false)
+	})
+
+	it("records a script that never parked as one call, and none of its calls", () => {
+		const bounds = boundToolEvents(1)
+		bounds.use(use("call-1", "codemode", { code: "..." }))
+		bounds.result(result("call-1", 7, "done"))
+
+		expect(toolCallsOf(bounds.events()).map((call) => call.tool_use_id)).toEqual([toolUseId(1, 7)])
+	})
+})
 describe("Cutting text", () => {
 	it("keeps a valid prefix at every length around a surrogate pair", () => {
 		const text = "ab😀cd"

@@ -5,8 +5,9 @@ import {
 	toolCallCommandId,
 	toolRecordsOf,
 	toolResultCommandId,
+	toolUseCommandId,
 } from "@checkfu/domain/Session/RecordToolEvents"
-import type { ToolRecord, TurnCalls } from "@checkfu/domain/Session/RecordToolEvents"
+import type { ToolRecord } from "@checkfu/domain/Session/RecordToolEvents"
 import { MAX_TOOL_CALLS_PER_TURN } from "@checkfu/domain/Session/SessionTypes"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { toolUseId } from "@checkfu/domain/Session/ToolEventBounds"
@@ -21,15 +22,16 @@ import {
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../src/Pi/PiDurableEngine.ts"
+import { parkedCallLog } from "../src/Pi/PiParkedCalls.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import { turnCallLog } from "../src/Pi/PiTurnCalls.ts"
 import { makeAssistantReply, makeScriptedPiModels } from "./helpers/ApiHarness.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
-const sqlLog = () => {
+const sqlLogs = () => {
 	const db = new DatabaseSync(":memory:")
-	return turnCallLog({
-		exec: (query, ...bindings) => {
+	const sql = {
+		exec: (query: string, ...bindings: ReadonlyArray<unknown>) => {
 			const statement = db.prepare(query)
 			const values = bindings as ReadonlyArray<SQLInputValue>
 			if (statement.columns().length > 0) {
@@ -38,7 +40,13 @@ const sqlLog = () => {
 			statement.run(...values)
 			return []
 		},
-	})
+	}
+	return { turns: turnCallLog(sql), scripts: parkedCallLog(sql) }
+}
+const sqlLog = () => sqlLogs().turns
+const turnOne = () => {
+	const { turns, scripts } = sqlLogs()
+	return { turn: turns(1), script: scripts(1) }
 }
 
 describe("The calls a turn publishes", () => {
@@ -62,6 +70,30 @@ describe("The calls a turn publishes", () => {
 		expect(calls.admit(7)).toBe(false)
 		expect(calls.admitted()).toHaveLength(MAX_TOOL_CALLS_PER_TURN)
 		expect(next.admitted()).toEqual([1000])
+	})
+})
+
+describe("The calls a script waited on", () => {
+	it("keeps each turn's own, so a later turn neither reads nor removes an earlier one's", () => {
+		const { scripts } = sqlLogs()
+		const waited = {
+			task_id: 3,
+			script_task_id: 2,
+			name: "lookup_order",
+			content: [{ type: "text" as const, text: "order 7" }],
+			is_error: false,
+		}
+		scripts(1).record(waited)
+		scripts(2).record({ ...waited, content: [{ type: "text" as const, text: "order 9" }] })
+		expect(scripts(1).forScript(2)).toEqual([
+			{ task_id: 3, name: "lookup_order", content: waited.content, is_error: false },
+		])
+		expect(
+			scripts(2)
+				.forScript(2)
+				.map((call) => call.content),
+		).toEqual([[{ type: "text", text: "order 9" }]])
+		expect(scripts(3).forScript(2)).toEqual([])
 	})
 })
 
@@ -159,10 +191,13 @@ describe("a turn whose calls wait past its limit", () => {
 })
 
 type Kind = "plain" | "ask" | "custom"
-interface Made {
+interface Inner {
 	readonly kind: Kind
 	readonly allow: boolean
+}
+interface Made extends Inner {
 	readonly order: number
+	readonly script?: ReadonlyArray<Inner>
 }
 
 type Entry =
@@ -244,20 +279,33 @@ interface Ran {
 	readonly waited: ReadonlySet<string>
 }
 
-const runTurn = (rounds: ReadonlyArray<ReadonlyArray<Made>>, calls: TurnCalls): Ran => {
+const runTurn = (
+	rounds: ReadonlyArray<ReadonlyArray<Made>>,
+	{ turn: calls, script: scripts }: ReturnType<typeof turnOne>,
+): Ran => {
 	const transcript: Array<Entry> = []
 	const log: Array<SessionFoldEvent> = [{ type: "session.status_running", turn: 1 }]
 	const sent = new Map<string, string>()
 	const fates = new Map<string, "ran" | "denied" | "refused">()
 	const waited = new Set<string>()
 	let task = 0
+	const send = (id: string, body: unknown, events: ReadonlyArray<ToolEvent>) => {
+		const text = JSON.stringify(body)
+		const before = sent.get(id)
+		if (before === undefined) {
+			sent.set(id, text)
+			log.push(...events.map(wire))
+		} else {
+			expect(text).toBe(before)
+		}
+	}
 	const read = () => {
 		const bounds = boundToolEvents(1, mcpToolOf, calls)
 		for (const entry of transcript) {
 			if ("use" in entry) {
 				bounds.use(entry.use)
 			} else {
-				bounds.result(entry.result)
+				bounds.result(entry.result, scripts.forScript(entry.result.task_id))
 			}
 		}
 		const events = bounds.events()
@@ -265,52 +313,26 @@ const runTurn = (rounds: ReadonlyArray<ReadonlyArray<Made>>, calls: TurnCalls): 
 		expect(records.flatMap((record) => published(record).events)).toHaveLength(events.length)
 		for (const record of records) {
 			const { id, events: recorded } = published(record)
-			const body = JSON.stringify(record)
-			const before = sent.get(id)
-			if (before === undefined) {
-				sent.set(id, body)
-				log.push(...recorded.map(wire))
-			} else {
-				expect(body).toBe(before)
-			}
+			send(id, record, recorded)
 		}
 	}
-	for (const round of rounds) {
-		const made = round.map((call) => ({ ...call, task: (task += 1) }))
-		for (const call of made) {
-			transcript.push({
-				use: { id: `c${call.task}`, name: NAMES[call.kind], input: { n: call.task } },
-			})
-		}
-		const parked: Array<(typeof made)[number]> = []
-		const settle = (call: (typeof made)[number], text: string, is_error: boolean) =>
-			transcript.push({
-				result: {
-					id: `c${call.task}`,
-					task_id: call.task,
-					content: [{ type: "text", text }],
-					is_error,
-					...(waited.has(toolUseId(1, call.task)) ? { use_published: true as const } : {}),
-				},
-			})
-		for (const call of made.toSorted((a, b) => a.order - b.order)) {
-			const id = toolUseId(1, call.task)
-			if (call.kind === "plain") {
-				fates.set(id, "ran")
-				settle(call, "read", false)
-			} else if (calls.admit(call.task)) {
-				waited.add(id)
-				parked.push(call)
-			} else {
-				fates.set(id, "refused")
-				settle(call, "This turn has recorded its limit of tool calls.", true)
-			}
-		}
-		if (parked.length === 0) {
-			continue
-		}
+	interface Parked extends Inner {
+		readonly task: number
+		readonly parent?: number
+		readonly settle: (text: string, is_error: boolean) => void
+	}
+	const pause = (parked: ReadonlyArray<Parked>) => {
 		read()
 		for (const call of parked) {
+			if (call.parent !== undefined) {
+				const script: ToolEvent = {
+					type: "tool_use",
+					tool_use_id: toolUseId(1, call.parent),
+					name: "codemode",
+					input: { n: call.parent },
+				}
+				send(toolUseCommandId(script.tool_use_id), script, [script])
+			}
 			log.push(
 				call.kind === "ask"
 					? {
@@ -346,7 +368,7 @@ const runTurn = (rounds: ReadonlyArray<ReadonlyArray<Made>>, calls: TurnCalls): 
 					content: [{ type: "text", text: "shipped" }],
 				})
 				fates.set(id, "ran")
-				settle(call, "shipped", false)
+				call.settle("shipped", false)
 			} else {
 				log.push({
 					type: "user.tool_confirmation",
@@ -354,10 +376,78 @@ const runTurn = (rounds: ReadonlyArray<ReadonlyArray<Made>>, calls: TurnCalls): 
 					result: call.allow ? "allow" : "deny",
 				})
 				fates.set(id, call.allow ? "ran" : "denied")
-				settle(call, call.allow ? "deployed" : "The user denied this call.", !call.allow)
+				call.settle(call.allow ? "deployed" : "The user denied this call.", !call.allow)
 			}
 		}
 		log.push({ type: "session.status_running", turn: 1 })
+	}
+	const REFUSED = "This turn has recorded its limit of tool calls."
+	const runScript = (script: number, inner: ReadonlyArray<Inner>) => {
+		for (const call of inner) {
+			const own = (task += 1)
+			const id = toolUseId(1, own)
+			const record = (text: string, is_error: boolean) => {
+				scripts.record({
+					task_id: own,
+					script_task_id: script,
+					name: NAMES[call.kind],
+					content: [{ type: "text", text }],
+					is_error,
+				})
+			}
+			if (call.kind === "plain") {
+				fates.set(id, "ran")
+			} else if (calls.admit(script) && calls.admit(own)) {
+				waited.add(id)
+				pause([{ ...call, task: own, parent: script, settle: record }])
+			} else {
+				fates.set(id, "refused")
+			}
+		}
+	}
+	for (const round of rounds) {
+		const made = round.map((call) => ({ ...call, task: (task += 1) }))
+		for (const call of made) {
+			transcript.push({
+				use: {
+					id: `c${call.task}`,
+					name: call.script === undefined ? NAMES[call.kind] : "codemode",
+					input: { n: call.task },
+				},
+			})
+		}
+		const parked: Array<Parked> = []
+		const settle = (call: (typeof made)[number]) => (text: string, is_error: boolean) => {
+			transcript.push({
+				result: {
+					id: `c${call.task}`,
+					task_id: call.task,
+					content: [{ type: "text", text }],
+					is_error,
+					...(waited.has(toolUseId(1, call.task)) ? { use_published: true as const } : {}),
+				},
+			})
+		}
+		for (const call of made.toSorted((a, b) => a.order - b.order)) {
+			const id = toolUseId(1, call.task)
+			if (call.script !== undefined) {
+				runScript(call.task, call.script)
+				fates.set(id, "ran")
+				settle(call)("script done", false)
+			} else if (call.kind === "plain") {
+				fates.set(id, "ran")
+				settle(call)("read", false)
+			} else if (calls.admit(call.task)) {
+				waited.add(id)
+				parked.push({ ...call, settle: settle(call) })
+			} else {
+				fates.set(id, "refused")
+				settle(call)(REFUSED, true)
+			}
+		}
+		if (parked.length > 0) {
+			pause(parked)
+		}
 	}
 	read()
 	log.push({
@@ -403,15 +493,32 @@ const expectEveryUseHasItsOutcome = ({ log, fates, waited }: Ran) => {
 }
 
 const made = (kind: Kind, allow = true, order = 0): Made => ({ kind, allow, order })
+const script = (...inner: ReadonlyArray<Kind>): Made => ({
+	...made("plain"),
+	script: inner.map((kind) => ({ kind, allow: true })),
+})
 
 describe("every tool use on the session log gets its outcome", () => {
 	it("keeps the result of a call approved after the turn's other calls filled its limit", () => {
 		const ran = runTurn(
 			[Array.from({ length: MAX_TOOL_CALLS_PER_TURN }, () => made("plain")), [made("ask")]],
-			sqlLog()(1),
+			turnOne(),
 		)
 		expectEveryUseHasItsOutcome(ran)
 		expect([...ran.fates.values()].filter((fate) => fate === "refused")).toEqual([])
+	})
+
+	it("keeps the result of a script's call approved after the script's other calls filled the limit, and the script's own", () => {
+		const many = Array.from({ length: MAX_TOOL_CALLS_PER_TURN + 6 }, (): Kind => "plain")
+		const ran = runTurn([[script(...many, "ask", "plain", "custom")]], turnOne())
+		expectEveryUseHasItsOutcome(ran)
+		expect(ran.waited.size).toBe(2)
+		const late = runTurn(
+			[[...many.map((kind) => made(kind)), made("custom")], [script("plain", "ask")]],
+			turnOne(),
+		)
+		expectEveryUseHasItsOutcome(late)
+		expect([...late.fates.values()].filter((fate) => fate === "refused")).toHaveLength(1)
 	})
 
 	it("refuses a call that would wait once every place is taken, and publishes nothing for it", () => {
@@ -425,25 +532,34 @@ describe("every tool use on the session log gets its outcome", () => {
 				[made("ask"), made("custom")],
 				[made("plain")],
 			],
-			sqlLog()(1),
+			turnOne(),
 		)
 		expectEveryUseHasItsOutcome(ran)
 		expect([...ran.fates.values()].filter((fate) => fate === "refused")).toHaveLength(2)
 	})
 
 	it("holds for any turn, well past the limit, whichever calls wait and whenever it is read", () => {
-		const call = fc.record({
-			kind: fc.constantFrom<Kind>("plain", "plain", "plain", "ask", "custom"),
-			allow: fc.boolean(),
-			order: fc.nat(1000),
-		})
+		const kind = fc.constantFrom<Kind>("plain", "plain", "plain", "ask", "custom")
+		const inner = fc.record({ kind, allow: fc.boolean() })
+		const call = fc.oneof(
+			{ weight: 5, arbitrary: fc.record({ kind, allow: fc.boolean(), order: fc.nat(1000) }) },
+			{
+				weight: 1,
+				arbitrary: fc.record({
+					kind: fc.constant<Kind>("plain"),
+					allow: fc.boolean(),
+					order: fc.nat(1000),
+					script: fc.array(inner, { maxLength: 90 }),
+				}),
+			},
+		)
 		const rounds = fc.array(fc.array(call, { minLength: 1, maxLength: 40 }), {
 			minLength: 1,
 			maxLength: 12,
 		})
 		fc.assert(
 			fc.property(rounds, (turn) => {
-				expectEveryUseHasItsOutcome(runTurn(turn, sqlLog()(1)))
+				expectEveryUseHasItsOutcome(runTurn(turn, turnOne()))
 			}),
 			{ numRuns: 200 },
 		)

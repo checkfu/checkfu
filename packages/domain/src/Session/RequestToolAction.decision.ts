@@ -40,7 +40,11 @@ export class RequestToolActionDecision extends Domain.Decision(RequestToolAction
 		}
 		const use =
 			cmd.awaits === "result"
-				? new AgentCustomToolUse({ tool_use_id: cmd.tool_use_id, name: cmd.name, input: cmd.input })
+				? new AgentCustomToolUse({
+						tool_use_id: cmd.tool_use_id,
+						name: cmd.name,
+						input: cmd.input,
+					})
 				: new AgentMcpToolUse({
 						tool_use_id: cmd.tool_use_id,
 						mcp_server_name: cmd.mcp_server_name,

@@ -42,6 +42,7 @@ import type { SessionMcp } from "./PiMcpSession.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import { MCP_TURN_KEY } from "./PiTurn.ts"
 import type { PiActionAnswer, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
+import { parkedCallLog } from "./PiParkedCalls.ts"
 import { turnCallLog } from "./PiTurnCalls.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
 
@@ -220,6 +221,9 @@ export const PiSessionLive = PiSession.make(
 				const writeScriptOutput = (path: string, content: string | Uint8Array) =>
 					runPromise(workspace().writeScriptOutput(path, content, { turn: admittedTurn() }))
 				const outputEnv = scriptOutputEnv(writeScriptOutput)
+				const parkedCalls = parkedCallLog({
+					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
+				})
 				const turnCalls = turnCallLog({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
 				})
@@ -264,14 +268,15 @@ export const PiSessionLive = PiSession.make(
 					yield* Effect.promise(loadMcp)
 				}
 				const sandboxStub = placedStub(sandboxes, where)
-				const sandbox = withScriptBounds(
-					new RemoteCodemodeSandbox({
-						remote: () => ({
-							execute: (request, exchange) =>
-								runPromise(sandboxStub(sessionId).execute(request, exchange)),
+				const sandbox = () =>
+					withScriptBounds(
+						new RemoteCodemodeSandbox({
+							remote: () => ({
+								execute: (request, exchange) =>
+									runPromise(sandboxStub(sessionId).execute(request, exchange)),
+							}),
 						}),
-					}),
-				)
+					)
 
 				const workspaceTools = workspaceExtension(workspaceDeclarations, (call, signal) =>
 					runPromise(
@@ -281,13 +286,17 @@ export const PiSessionLive = PiSession.make(
 				)
 				let registry = createCheckfuRegistry()
 				const installTools = () => {
-					for (const extension of withToolSurface(sandbox, [
-						workspaceTools,
-						...(mcp?.extensions() ?? []),
-						customToolsExtension(
-							agentTools().filter((tool): tool is CustomTool => tool.type === "custom"),
-						),
-					])) {
+					for (const extension of withToolSurface(
+						sandbox,
+						[
+							workspaceTools,
+							...(mcp?.extensions() ?? []),
+							customToolsExtension(
+								agentTools().filter((tool): tool is CustomTool => tool.type === "custom"),
+							),
+						],
+						{ record: (call) => parkedCalls(admittedTurn()).record(call) },
+					)) {
 						registry.install(extension)
 					}
 					registry.install(
@@ -343,6 +352,7 @@ export const PiSessionLive = PiSession.make(
 				const backend: PiDurableBackend = {
 					...harnessBackend,
 					turnCalls,
+					parkedCalls: (turn) => parkedCalls(turn).forScript,
 					publishMcp: async (request) => {
 						const session = request.mcp === undefined ? undefined : await loadMcp()
 						const published =

@@ -1,9 +1,9 @@
 import * as Effect from "effect/Effect"
-import { RecordToolCall, RecordToolResult } from "./RecordToolCall.command.ts"
+import { RecordToolCall, RecordToolResult, RecordToolUse } from "./RecordToolCall.command.ts"
 import { segmentKey } from "./RunTurn.saga.ts"
 import { Session } from "./Session.aggregate.ts"
 import type { SessionId } from "./Session.id.ts"
-import type { ToolCall, ToolEvent, ToolResult } from "./SessionTypes.ts"
+import type { ToolCall, ToolEvent, ToolResult, ToolUse } from "./SessionTypes.ts"
 
 export {
 	boundToolEvents,
@@ -18,6 +18,8 @@ export {
 } from "./ToolEventBounds.ts"
 
 export const toolCallCommandId = (toolUseId: string): string => `tool:call:${toolUseId}`
+
+export const toolUseCommandId = (toolUseId: string): string => `tool:use:${toolUseId}`
 
 export const toolResultCommandId = (toolUseId: string): string => `tool:result:${toolUseId}`
 
@@ -88,6 +90,36 @@ export const recordToolEvents = Effect.fn("Session.recordToolEvents")(function* 
 						commandId: toolResultCommandId(record.result.tool_use_id),
 					})
 		},
+		{ discard: true },
+	).pipe(
+		Effect.catchTag(
+			["UnknownModelRequest", "SessionNotFound", "SessionNotRunning", "StaleTurn"],
+			() => Effect.void,
+		),
+	)
+})
+
+export const recordWaitingScripts = Effect.fn("Session.recordWaitingScripts")(function* (args: {
+	readonly session_id: SessionId
+	readonly turn: number
+	readonly segment?: number
+	readonly scripts: ReadonlyArray<ToolUse>
+}) {
+	const sessions = yield* Session
+	const segment = args.segment ?? 1
+	const requestId = `${segmentKey(args.session_id, args.turn, segment)}:req:${segment}`
+	yield* Effect.forEach(
+		args.scripts,
+		(use) =>
+			sessions.send(
+				new RecordToolUse({
+					session_id: args.session_id,
+					turn: args.turn,
+					model_request_start_id: requestId,
+					use,
+				}),
+				{ commandId: toolUseCommandId(use.tool_use_id) },
+			),
 		{ discard: true },
 	).pipe(
 		Effect.catchTag(

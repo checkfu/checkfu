@@ -206,6 +206,7 @@ export default defineConfig({
 			files: [
 				"apps/api/src/D1Jurisdiction.ts",
 				"apps/api/src/WorkerHost.ts",
+				"apps/api/src/Pi/PiExecuteTool.ts",
 				"apps/app/src/json-boundary.ts",
 				"apps/mcp/src/JsonSchemaCodec.ts",
 				"packages/sdk/src/Boundary.ts",

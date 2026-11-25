@@ -74,7 +74,7 @@ export type GateDecision =
 	| { readonly kind: "refuse"; readonly message: string }
 
 export const gateDecision = (
-	call: Pick<ToolHookCall, "name" | "parent">,
+	call: Pick<ToolHookCall, "name"> & Partial<Pick<ToolHookCall, "parent">>,
 	toolOf: (
 		name: string,
 	) =>
@@ -84,12 +84,6 @@ export const gateDecision = (
 	const mcp = toolOf(call.name)
 	if (mcp === undefined || mcp.permission !== "ask") {
 		return { kind: "run" }
-	}
-	if (call.parent !== undefined) {
-		return {
-			kind: "refuse",
-			message: `${mcp.tool} needs a person's approval, which a script cannot wait for. Call it directly.`,
-		}
 	}
 	if (!publishable(mcp.tool)) {
 		return {
@@ -195,7 +189,6 @@ export const customToolsExtension = (tools: ReadonlyArray<CustomTool>): Extensio
 			name: tool.name,
 			description: tool.description,
 			parameters: tool.input_schema,
-			callers: ["model"],
 			replay: "safe",
 			execute: async (args, api, context) => {
 				const answer = await api.readSignal(CustomToolResultSignal, ANSWER, context)
@@ -223,13 +216,26 @@ export const customToolsExtension = (tools: ReadonlyArray<CustomTool>): Extensio
 
 export interface ParkedAction extends ActionMemo {
 	readonly tool_use_id: string
+	readonly parent?: { readonly tool_use_id: string; readonly input: JsonObject }
 }
+
+const parkedArguments = (checkpoint: unknown): JsonObject =>
+	(typeof checkpoint === "object" &&
+	checkpoint !== null &&
+	(checkpoint as { readonly phase?: unknown }).phase === "parked"
+		? jsonObjectOf((checkpoint as { readonly arguments?: unknown }).arguments)
+		: undefined) ?? {}
 
 export const parkedActions = async (
 	pi: Harness,
 	turn: number,
 ): Promise<ReadonlyArray<ParkedAction> | undefined> => {
 	const inspection = await pi.inspect(BACKGROUND_CONTEXT)
+	const tools = new Map(
+		inspection.tasks
+			.filter((task) => task.record.kind === "pi.tool")
+			.map((task) => [Number(task.record.id), task] as const),
+	)
 	const parked: Array<ParkedAction> = []
 	for (const task of inspection.tasks) {
 		if (task.record.kind === "pi.generation" && task.state.kind === "running") {
@@ -238,11 +244,26 @@ export const parkedActions = async (
 		if (task.record.kind !== "pi.tool") {
 			continue
 		}
+		if (task.state.kind === "waiting") {
+			continue
+		}
 		const memo = readMemo(task.record.memos?.[ACTION_MEMO])
 		if (task.state.kind !== "sleeping" || memo._tag === "None") {
 			return undefined
 		}
-		parked.push({ tool_use_id: toolUseId(turn, task.record.id), ...memo.value })
+		const owner = task.record.owner === undefined ? undefined : tools.get(Number(task.record.owner))
+		parked.push({
+			tool_use_id: toolUseId(turn, task.record.id),
+			...memo.value,
+			...(owner === undefined
+				? {}
+				: {
+						parent: {
+							tool_use_id: toolUseId(turn, owner.record.id),
+							input: parkedArguments(owner.record.state.checkpoint),
+						},
+					}),
+		})
 	}
 	return parked.length === 0
 		? undefined

@@ -17,6 +17,8 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { hostOf } from "../WorkerHost.ts"
 import { SCRIPT_OUTPUT_DIRECTORY } from "../Workspace/SessionWorkspace.do.ts"
+import { parkedCallsExtension } from "./PiParkedCalls.ts"
+import type { ParkedCalls } from "./PiParkedCalls.ts"
 
 export const SCRIPT_DEADLINE = { defaultMs: 120_000, maxMs: 300_000 } as const
 
@@ -348,30 +350,35 @@ export const scriptOutputEnv = (write: WorkspaceWrite): ExecutionEnv => ({
 })
 
 export type ToolSurface = (
-	sandbox: CodemodeSandboxBase,
+	sandbox: () => CodemodeSandboxBase,
 	extensions: ReadonlyArray<Extension>,
+	parked: Pick<ParkedCalls, "record">,
 	options?: ScriptSurfaceOptions,
 ) => ReadonlyArray<Extension>
 
 export const loadToolSurface = async (): Promise<ToolSurface> => {
-	const [codemode, { createToolSearchExtension }, source] = await Promise.all([
-		import("@earendil-works/pi-durable/codemode"),
-		import("@earendil-works/pi-durable/tool-search"),
-		import("@earendil-works/pi-codemode/source"),
-	])
-	return (sandbox, extensions, options = {}) => {
-		const created = codemode.createCodemodeExtension({ sandbox, models: false })
+	const [codemode, { createToolSearchExtension }, source, { durableCodemodeTool }] =
+		await Promise.all([
+			import("@earendil-works/pi-durable/codemode"),
+			import("@earendil-works/pi-durable/tool-search"),
+			import("@earendil-works/pi-codemode/source"),
+			import("./PiDurableCodemode.ts"),
+		])
+	return (sandbox, extensions, parked, options = {}) => {
+		const created = codemode.createCodemodeExtension({ sandbox: sandbox(), models: false })
 		return [
 			scriptOptionsExtension(codemode.CODEMODE_TOOL_NAME, source, options),
 			...extensions,
 			{
 				...created,
-				tools: (created.tools ?? []).map((tool) =>
-					tool.name === codemode.CODEMODE_TOOL_NAME
-						? { ...tool, executionMode: "sequential" as const }
-						: tool,
-				),
+				tools: [
+					{
+						...durableCodemodeTool(sandbox, options.deadline),
+						executionMode: "sequential" as const,
+					},
+				],
 			},
+			parkedCallsExtension(parked),
 			...(extensions.some((extension) => extension.tools?.some((tool) => tool.deferred === true))
 				? [createToolSearchExtension()]
 				: []),

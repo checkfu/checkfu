@@ -13,6 +13,7 @@ import {
 	withScriptBounds,
 } from "../src/Pi/PiCodemode.ts"
 import type { ScriptDeadline, ScriptLimits } from "../src/Pi/PiCodemode.ts"
+import type { ParkedCalls } from "../src/Pi/PiParkedCalls.ts"
 import { createCheckfuRegistry } from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
@@ -77,6 +78,10 @@ const tickets: Extension = {
 
 const withToolSurface = await loadToolSurface()
 
+const NO_PARKED_CALLS: Pick<ParkedCalls, "record"> = {
+	record: () => undefined,
+}
+
 const withSandbox = (
 	extensions: ReadonlyArray<Extension>,
 	deadline?: ScriptDeadline,
@@ -96,11 +101,15 @@ const withSandbox = (
 		files,
 		env: scriptOutputEnv(write),
 		registry: () => {
-			const sandbox = withScriptBounds(new CodemodeSandbox(), limits)
-			sandboxes.push(sandbox)
+			const sandbox = () => {
+				const made = withScriptBounds(new CodemodeSandbox(), limits)
+				sandboxes.push(made)
+				return made
+			}
 			const surface = withToolSurface(
 				sandbox,
 				extensions,
+				NO_PARKED_CALLS,
 				deadline === undefined ? { limits } : { deadline, limits },
 			)
 			const registry = createCheckfuRegistry()

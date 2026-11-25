@@ -173,6 +173,7 @@ export const createInMemoryPiDurableBackend = async (
 		readonly reset?: PiDurableBackend["reset"]
 		readonly env?: ExecutionEnv
 		readonly turnCalls?: PiDurableBackend["turnCalls"]
+		readonly parkedCalls?: PiDurableBackend["parkedCalls"]
 		readonly publishMcp?: PiDurableBackend["publishMcp"]
 		readonly mcpToolOf?: PiDurableBackend["mcpToolOf"]
 	} = {},
@@ -208,6 +209,7 @@ export const createInMemoryPiDurableBackend = async (
 		hasApiKey,
 		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
 		...(object.turnCalls === undefined ? {} : { turnCalls: object.turnCalls }),
+		...(object.parkedCalls === undefined ? {} : { parkedCalls: object.parkedCalls }),
 		...(object.publishMcp === undefined ? {} : { publishMcp: object.publishMcp }),
 		...(object.mcpToolOf === undefined ? {} : { mcpToolOf: object.mcpToolOf }),
 		signal: (taskId, token, key, value) => pi.signal(taskId, token, key, value, BACKGROUND_CONTEXT),

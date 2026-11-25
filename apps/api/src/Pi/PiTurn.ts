@@ -60,6 +60,9 @@ export const PiParkedCall = Schema.Struct({
 	name: Schema.String,
 	mcp_server_name: Schema.String,
 	input: Schema.JsonObject,
+	parent: Schema.optionalKey(
+		Schema.Struct({ tool_use_id: Schema.String, input: Schema.JsonObject }),
+	),
 })
 export type PiParkedCall = typeof PiParkedCall.Type
 

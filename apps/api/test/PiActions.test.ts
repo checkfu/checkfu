@@ -36,19 +36,9 @@ describe("the gate before a tool runs", () => {
 		expect(gateDecision({ name: "read" }, asks)).toEqual({ kind: "run" })
 	})
 
-	it("refuses a script's call to a tool that asks, telling the model to call it directly", () => {
-		const decision = gateDecision(
-			{ name: "mcp__docs__deploy", parent: { taskId: 7 as never, callId: "c1" } },
-			asks,
-		)
-		expect(decision.kind).toBe("refuse")
-		expect(decision.kind === "refuse" ? decision.message : "").toContain("Call it directly")
-		expect(
-			gateDecision(
-				{ name: "mcp__docs__search", parent: { taskId: 7 as never, callId: "c1" } },
-				asks,
-			),
-		).toEqual({ kind: "run" })
+	it("asks the same for a call a script made: a script parks on it instead of being refused", () => {
+		const scripted = { name: "mcp__docs__deploy", parent: { taskId: 7 as never, callId: "c1" } }
+		expect(gateDecision(scripted, asks)).toEqual({ kind: "ask", server: "docs", tool: "deploy" })
 	})
 
 	it("refuses a call whose tool name the pause could not publish, before it parks", () => {

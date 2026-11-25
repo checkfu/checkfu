@@ -1,7 +1,7 @@
 import { boundToolEvents } from "@checkfu/domain/Session/ToolEventBounds"
-import type { McpToolOf, TurnCalls } from "@checkfu/domain/Session/ToolEventBounds"
+import type { McpToolOf, ParkedCall, TurnCalls } from "@checkfu/domain/Session/ToolEventBounds"
 import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import {
 	AssistantEntry,
@@ -22,6 +22,8 @@ import type {
 	Harness,
 	SignalResult,
 	SignalToken,
+	TaskGraph,
+	TaskGraphWatch,
 	TaskId,
 } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
@@ -63,6 +65,7 @@ export interface PiDurableBackend {
 	) => Promise<SignalResult>
 	readonly reset: Effect.Effect<never>
 	readonly turnCalls?: (turn: number) => TurnCalls
+	readonly parkedCalls?: (turn: number) => (scriptTaskId: number) => ReadonlyArray<ParkedCall>
 	readonly publishMcp?: (request: PiTurnRequest) => Promise<boolean>
 	readonly discoverMcp?: (request: PiTurnRequest, signal: AbortSignal) => Promise<void>
 	readonly untilCancelled?: <A>(
@@ -171,6 +174,7 @@ export const readTurnToolEvents = async (
 	turn: number,
 	mcpToolOf?: McpToolOf,
 	calls?: TurnCalls,
+	parkedCalls: (scriptTaskId: number) => ReadonlyArray<ParkedCall> = () => [],
 ): Promise<Array<ToolEvent>> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input" || record.entry === undefined) {
@@ -205,20 +209,23 @@ export const readTurnToolEvents = async (
 				entry.byTaskId !== askedBy.get(message.toolCallId)
 			) {
 				const rejected = rejectionIn(message.details)
-				bounds.result({
-					id: message.toolCallId,
-					task_id: entry.byTaskId,
-					content: message.content.map((block) => ({
-						type: "text",
-						text: block.type === "text" ? block.text : `[${block.mimeType} image]`,
-					})),
-					is_error: message.isError,
-					...(cutBeforeStored(entry) || message.content.some((block) => block.type !== "text")
-						? { truncated: true as const }
-						: {}),
-					...(rejected === undefined ? {} : { rejected }),
-					...(waitedOnAnAnswer(message.details) ? { use_published: true as const } : {}),
-				})
+				bounds.result(
+					{
+						id: message.toolCallId,
+						task_id: entry.byTaskId,
+						content: message.content.map((block) => ({
+							type: "text",
+							text: block.type === "text" ? block.text : `[${block.mimeType} image]`,
+						})),
+						is_error: message.isError,
+						...(cutBeforeStored(entry) || message.content.some((block) => block.type !== "text")
+							? { truncated: true as const }
+							: {}),
+						...(rejected === undefined ? {} : { rejected }),
+						...(waitedOnAnAnswer(message.details) ? { use_published: true as const } : {}),
+					},
+					parkedCalls(entry.byTaskId),
+				)
 			}
 		}
 	}
@@ -386,47 +393,82 @@ type Settled =
 	| { readonly status: "done" }
 	| { readonly status: "unanswered"; readonly reason?: string }
 
-const PAUSE_POLL_MS = 100
+type Paused = { readonly status: "paused"; readonly calls: ReadonlyArray<ParkedAction> }
 
-const settleOrPause = async (
-	backend: PiDurableBackend,
-	operationId: string,
-	signal: AbortSignal,
-): Promise<
-	Settled | { readonly status: "paused"; readonly calls: ReadonlyArray<ParkedAction> }
-> => {
-	const stop = new AbortController()
-	const stopWaiting = () => stop.abort()
-	signal.addEventListener("abort", stopWaiting, { once: true })
-	const settled = backend.wait(operationId, stop.signal)
-	settled.catch(() => undefined)
-	try {
-		while (true) {
-			const tick = new Promise<undefined>((resolve) => {
-				setTimeout(resolve, PAUSE_POLL_MS)
-			})
-			const winner = await Promise.race([settled, tick])
-			if (winner !== undefined) {
-				return winner
+const mayBePaused = (graph: TaskGraph): boolean => {
+	let sleeping = false
+	for (const node of Object.values(graph.tasks)) {
+		if (node.kind === "pi.generation" && node.state.status === "running") {
+			return false
+		}
+		if (node.kind !== "pi.tool") {
+			continue
+		}
+		if (node.state.status === "sleeping") {
+			sleeping = true
+		} else if (node.state.status !== "waiting") {
+			return false
+		}
+	}
+	return sleeping
+}
+
+const pausedTurn = (backend: PiDurableBackend, operationId: string): Effect.Effect<Paused> =>
+	Effect.callback<Paused>((resume, signal) => {
+		const context = withAbortSignal(signal, BACKGROUND_CONTEXT)
+		const turn = turnOfOperation(operationId)
+		let found = false
+		let current: TaskGraphWatch | undefined
+		const check = async (pi: Harness, graph: TaskGraph): Promise<void> => {
+			if (found || turn === undefined || !mayBePaused(graph)) {
+				return
 			}
-			if (signal.aborted) {
-				return await settled
-			}
-			const pi = await backend.pi()
 			const record = await submissionOf(pi, operationId)
-			const turn = turnOfOperation(operationId)
-			if (record?.type === "input" && record.status === "placed" && turn !== undefined) {
-				const calls = await parkedActions(pi, turn)
-				if (calls !== undefined) {
-					stop.abort()
-					return { status: "paused", calls }
+			if (record?.type !== "input" || record.status !== "placed") {
+				return
+			}
+			const calls = await parkedActions(pi, turn)
+			if (calls !== undefined && !found) {
+				found = true
+				resume(Effect.succeed({ status: "paused", calls }))
+				void current?.stop()
+			}
+		}
+		const follow = async (): Promise<void> => {
+			while (!found && !signal.aborted) {
+				const pi = await backend.pi()
+				const watch = await pi.watchTaskGraph(context)
+				current = watch
+				await check(pi, watch.value)
+				watch.start(async (call) => {
+					if (call.kind === "value") {
+						await check(pi, call.value)
+					}
+				})
+				const end = await watch.closed
+				if (end.kind === "listener_error") {
+					throw end.error
+				}
+				if (end.kind === "aborted" || end.kind === "stopped") {
+					return
 				}
 			}
 		}
-	} finally {
-		signal.removeEventListener("abort", stopWaiting)
-	}
-}
+		follow().catch((error: unknown) => {
+			if (!found && !signal.aborted) {
+				resume(Effect.die(error))
+			}
+		})
+	})
+
+const settleOrPause = (
+	backend: PiDurableBackend,
+	operationId: string,
+): Effect.Effect<Settled | Paused> =>
+	Effect.raceFirst(
+		Effect.promise((signal) => backend.wait(operationId, signal)),
+		pausedTurn(backend, operationId),
+	)
 
 export const pausePiDurableTurn = (
 	backend: PiDurableBackend,
@@ -611,6 +653,7 @@ const resolveSettledPiTurn = (
 								turn,
 								backend.mcpToolOf,
 								backend.turnCalls?.(turn),
+								backend.parkedCalls?.(turn),
 							),
 						)
 			if (settled.status === "paused") {
@@ -701,7 +744,7 @@ export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(fun
 	if (probe === "cancelled") {
 		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
-	const settled = yield* Effect.promise((signal) => settleOrPause(backend, operationId, signal))
+	const settled = yield* settleOrPause(backend, operationId)
 	return yield* resolveSettledPiTurn(backend, operationId, settled, "unknown")
 })
 
@@ -732,6 +775,6 @@ export const runPiDurableTurn = Effect.fn("PiDurableEngine.runTurn")(function* (
 		return { ok: false, error: { _tag: "TurnInterrupted" } }
 	}
 
-	const settled = yield* Effect.promise((signal) => settleOrPause(backend, operationId, signal))
+	const settled = yield* settleOrPause(backend, operationId)
 	return yield* resolveSettledPiTurn(backend, operationId, settled, request.provider)
 })

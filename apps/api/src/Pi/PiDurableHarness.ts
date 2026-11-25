@@ -12,12 +12,13 @@ import type {
 	TurnFailed,
 	TurnPaused,
 } from "@checkfu/domain/Session/Harness.external"
-import { recordToolEvents } from "@checkfu/domain/Session/RecordToolEvents"
+import { recordToolEvents, recordWaitingScripts } from "@checkfu/domain/Session/RecordToolEvents"
 import { RequestToolAction } from "@checkfu/domain/Session/RequestToolAction.command"
 import { RequestToolActionDecision } from "@checkfu/domain/Session/RequestToolAction.decision"
 import { segmentKey } from "@checkfu/domain/Session/RunTurn.saga"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
-import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
+import { MAX_TOOL_INPUT_JSON_LENGTH } from "@checkfu/domain/Session/SessionTypes"
+import type { ModelUsage, ToolEvent, ToolUse } from "@checkfu/domain/Session/SessionTypes"
 import { ToolConfirmation } from "@checkfu/domain/Session/ToolConfirmation.aggregate"
 import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
@@ -201,6 +202,17 @@ export const PiDurableHarnessLive = boundedHarness(
 				events,
 			).pipe(Effect.provideService(Session, sessions))
 
+		const recordScripts = (args: TurnArgs, scripts: ReadonlyArray<ToolUse>) =>
+			retryRecording(
+				recordWaitingScripts({
+					session_id: args.session_id,
+					turn: args.turn,
+					...(args.segment === undefined ? {} : { segment: args.segment }),
+					scripts,
+				}),
+				args.session_id,
+			).pipe(Effect.provideService(Session, sessions))
+
 		const waitOn = (args: TurnArgs, calls: ReadonlyArray<PiParkedCall>) =>
 			Effect.gen(function* () {
 				const segment = args.segment ?? 1
@@ -209,6 +221,24 @@ export const PiDurableHarnessLive = boundedHarness(
 					readonly tool_use_id: string
 					readonly answer: typeof PiActionAnswer.Type
 				}> = []
+				const scripts = new Map(
+					calls.flatMap((call) =>
+						call.parent === undefined ? [] : [[call.parent.tool_use_id, call.parent]],
+					),
+				)
+				yield* recordScripts(
+					args,
+					[...scripts.values()].map((script): ToolUse => {
+						const fits = JSON.stringify(script.input).length <= MAX_TOOL_INPUT_JSON_LENGTH
+						return {
+							type: "tool_use",
+							tool_use_id: script.tool_use_id,
+							name: "codemode",
+							input: fits ? script.input : {},
+							...(fits ? {} : { truncated: true as const }),
+						}
+					}),
+				)
 				for (const call of calls) {
 					const confirmation_id = toolConfirmationId(args.session_id, call.tool_use_id)
 					yield* retryRecording(

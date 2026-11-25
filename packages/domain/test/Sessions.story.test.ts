@@ -55,6 +55,7 @@ import {
 	AgentToolUse,
 	RecordToolCall,
 	RecordToolResult,
+	RecordToolUse,
 } from "../src/Session/RecordToolCall.command.ts"
 import { boundToolEvents, recordToolEvents, toolUseId } from "../src/Session/RecordToolEvents.ts"
 import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
@@ -3722,6 +3723,61 @@ describe("Sessions", () => {
 				Story.when(record("req_1", false)),
 				Story.then(session, new AgentToolResult(recorded)),
 				Story.when(record("req_other", true)),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_other" }),
+				),
+			)
+		},
+	)
+
+	it.effect(
+		"records a script's use alone when it begins to wait, only while a model request is open",
+		() => {
+			const session = Session.ref("sess_tools_script_use_1")
+			const record = (model_request_start_id: string) =>
+				new RecordToolUse({
+					session_id: session.id,
+					turn: 1,
+					model_request_start_id,
+					use: {
+						type: "tool_use",
+						tool_use_id: toolUseId(1, 7),
+						name: "codemode",
+						input: { code: "await tools.deploy()" },
+						truncated: true,
+					},
+				})
+			return story(
+				Story.given(
+					session,
+					createdEvent,
+					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+					new SessionStatusRunning({ turn: 1 }),
+				),
+				Story.when(record("req_1")),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_1" }),
+				),
+				Story.when(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+					}),
+				),
+				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_1" })),
+				Story.when(record("req_1")),
+				Story.then(
+					session,
+					new AgentToolUse({
+						tool_use_id: toolUseId(1, 7),
+						name: "codemode",
+						input: { code: "await tools.deploy()" },
+						truncated: true,
+					}),
+				),
+				Story.when(record("req_other")),
 				Story.rejected(
 					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_other" }),
 				),

@@ -10,6 +10,7 @@ import {
 	ToolCall,
 	ToolInput,
 	ToolResult,
+	ToolUse,
 } from "./SessionTypes.ts"
 import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
@@ -58,5 +59,16 @@ export class RecordToolResult extends Domain.Command("RecordToolResult", {
 		result: ToolResult,
 	},
 	events: [AgentToolResult, AgentMcpToolResult],
+	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, UnknownModelRequest],
+}) {}
+
+export class RecordToolUse extends Domain.Command("RecordToolUse", {
+	input: {
+		session_id: SessionId,
+		turn: PositiveInt,
+		model_request_start_id: NonEmptyString,
+		use: ToolUse,
+	},
+	events: [AgentToolUse],
 	rejects: [SessionNotFound, SessionNotRunning, StaleTurn, UnknownModelRequest],
 }) {}

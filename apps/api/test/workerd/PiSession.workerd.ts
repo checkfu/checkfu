@@ -2318,6 +2318,79 @@ describe("PiSession real Durable Object under workerd", () => {
 		}
 	}, 180_000)
 
+	it("parks a script on a call that asks, ending its sandbox run, and resumes it once allowed", async () => {
+		const open = await startFakeMcpServer(null, { modern: true })
+		try {
+			const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+				name: "Scripting Agent",
+				model: "gpt-4o-mini",
+				mcp_servers: [{ type: "url", name: "open", url: open.url }],
+			})
+			const code =
+				'const r = await tools.mcp__open__echo({ text: "from script" }); return "script got " + r'
+			fakeOpenAI.setHandler((req) =>
+				req.toolOutputs.length === 0
+					? { kind: "tool_call", name: "codemode", arguments: { code } }
+					: { kind: "reply", text: `Done: ${req.toolOutputs[0]}` },
+			)
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+			const send = (event: unknown) =>
+				apiJson(`/v1/sessions/${session.id}/events`, { method: "POST", body: { events: [event] } })
+			const parkedBefore = stripAnsi(workerLogs.join("")).split("Script parked").length
+			expect(
+				(await send({ type: "user.message", content: [{ type: "text", text: "Go." }] })).status,
+			).toBe(200)
+			let events = await listAllEvents(session.id)
+			for (
+				let attempt = 0;
+				attempt < 600 &&
+				!events.some(
+					(e) => e.type === "session.status_idle" && e.stop_reason?.type === "requires_action",
+				);
+				attempt++
+			) {
+				await sleep(100)
+				events = await listAllEvents(session.id)
+			}
+			const asked = events.find((e) => e.type === "agent.mcp_tool_use")
+			expect(asked).toMatchObject({ name: "echo", input: { text: "from script" } })
+			expect(events.some((e) => e.type === "agent.tool_use" && e.name === "codemode")).toBe(true)
+			expect(events.find((e) => e.type === "session.status_idle")?.stop_reason?.event_ids).toEqual([
+				asked?.tool_use_id,
+			])
+			expect(open.calls).toEqual([])
+			expect(stripAnsi(workerLogs.join("")).split("Script parked").length).toBe(parkedBefore + 1)
+
+			expect(
+				(
+					await send({
+						type: "user.tool_confirmation",
+						tool_use_id: asked?.tool_use_id,
+						result: "allow",
+					})
+				).status,
+			).toBe(200)
+			for (
+				let attempt = 0;
+				attempt < 600 && !events.some((e) => e.type === "agent.message");
+				attempt++
+			) {
+				await sleep(100)
+				events = await listAllEvents(session.id)
+			}
+			expect(events.find((e) => e.type === "agent.message")?.content?.[0]?.text).toContain(
+				"script got",
+			)
+			expect(open.calls.map((call) => call.arguments)).toEqual([{ text: "from script" }])
+			expect(events.filter((e) => e.type === "agent.mcp_tool_use")).toHaveLength(1)
+		} finally {
+			await open.close()
+		}
+	}, 120_000)
+
 	it("pauses a turn on a call that asks and on a custom tool, and goes on once each is answered", async () => {
 		const open = await startFakeMcpServer(null, { modern: true })
 		try {

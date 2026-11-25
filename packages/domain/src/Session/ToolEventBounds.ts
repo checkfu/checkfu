@@ -52,6 +52,15 @@ export interface TranscriptToolResult {
 	readonly use_published?: true
 }
 
+export interface ParkedCall {
+	readonly task_id: number
+	readonly name: string
+	readonly content: ReadonlyArray<TextBlock>
+	readonly is_error: boolean
+	readonly content_truncated?: true
+	readonly rejected?: ToolRejection
+}
+
 export type McpToolOf = (name: string) =>
 	| {
 			readonly server: string
@@ -81,7 +90,7 @@ export const turnCalls = (): TurnCalls => {
 export interface ToolEventBounds {
 	readonly round: () => void
 	readonly use: (call: TranscriptToolUse) => void
-	readonly result: (result: TranscriptToolResult) => void
+	readonly result: (result: TranscriptToolResult, parked?: ReadonlyArray<ParkedCall>) => void
 	readonly complete: () => boolean
 	readonly events: () => Array<ToolEvent>
 }
@@ -120,7 +129,7 @@ export const boundToolEvents = (
 			}
 			pending.set(call.id, { slot: slots.push([]) - 1, call })
 		},
-		result: (result) => {
+		result: (result, parked = []) => {
 			const open = ambiguous.get(result.id)
 			if (open !== undefined) {
 				if (open > 1) {
@@ -135,53 +144,83 @@ export const boundToolEvents = (
 				return
 			}
 			pending.delete(result.id)
-			const waited = result.use_published === true
-			if (!waited && !calls.admit(result.task_id)) {
+			const published = result.use_published === true || parked.length > 0
+			if (!published && !calls.admit(result.task_id)) {
 				return
 			}
 			settled.add(result.task_id)
 			const { slot, call } = reserved
 			const input = asObject(call.input)
 			const size = JSON.stringify(input).length
-			const fits = !waited && size <= Math.min(MAX_TOOL_INPUT_JSON_LENGTH, budget)
+			const fits = !published && size <= Math.min(MAX_TOOL_INPUT_JSON_LENGTH, budget)
 			budget -= fits ? size : 0
-			let room = Math.min(MAX_TOOL_RESULT_TEXT_LENGTH, budget)
-			let truncated = result.truncated === true
-			const content: Array<TextBlock> = []
-			for (const block of result.content) {
-				const text = truncateText(block.text, room)
-				truncated ||= text.length < block.text.length
-				room -= text.length
-				budget -= text.length
-				if (text.length > 0) {
-					content.push({ type: "text", text })
+			const resultOf = (
+				taskId: number,
+				name: string,
+				content: ReadonlyArray<TextBlock>,
+				is_error: boolean,
+				cut: true | undefined,
+				rejected: ToolRejection | undefined,
+			): ToolEvent => {
+				let room = Math.min(MAX_TOOL_RESULT_TEXT_LENGTH, budget)
+				let truncated = cut === true
+				const blocks: Array<TextBlock> = []
+				for (const block of content) {
+					const text = truncateText(block.text, room)
+					truncated ||= text.length < block.text.length
+					room -= text.length
+					budget -= text.length
+					if (text.length > 0) {
+						blocks.push({ type: "text", text })
+					}
+				}
+				return {
+					type: "tool_result",
+					tool_use_id: toolUseId(turn, taskId),
+					content: blocks,
+					is_error,
+					...(truncated ? { truncated: true as const } : {}),
+					...(rejected === undefined ? {} : { rejected }),
+					...(mcpToolOf(name) === undefined ? {} : { mcp: true as const }),
 				}
 			}
-			const tool_use_id = toolUseId(turn, result.task_id)
+			const events: Array<ToolEvent> = []
 			const mcp = mcpToolOf(call.name)
-			const resultEvent: ToolEvent = {
-				type: "tool_result",
-				tool_use_id,
-				content,
-				is_error: result.is_error,
-				...(truncated ? { truncated: true as const } : {}),
-				...(result.rejected === undefined ? {} : { rejected: result.rejected }),
-				...(mcp === undefined ? {} : { mcp: true as const }),
+			if (!published) {
+				events.push({
+					type: "tool_use",
+					tool_use_id: toolUseId(turn, result.task_id),
+					name: clampName(mcp?.tool ?? call.name),
+					input: fits ? input : {},
+					...(fits && call.truncated !== true ? {} : { truncated: true as const }),
+					...(mcp === undefined ? {} : { mcp_server_name: mcp.server }),
+					...(mcp?.permission === "allow" ? { evaluated_permission: "allow" as const } : {}),
+				})
 			}
-			slots[slot] = waited
-				? [resultEvent]
-				: [
-						{
-							type: "tool_use",
-							tool_use_id,
-							name: clampName(mcp?.tool ?? call.name),
-							input: fits ? input : {},
-							...(fits && call.truncated !== true ? {} : { truncated: true as const }),
-							...(mcp === undefined ? {} : { mcp_server_name: mcp.server }),
-							...(mcp?.permission === "allow" ? { evaluated_permission: "allow" as const } : {}),
-						},
-						resultEvent,
-					]
+			for (const nested of parked) {
+				settled.add(nested.task_id)
+				events.push(
+					resultOf(
+						nested.task_id,
+						nested.name,
+						nested.content,
+						nested.is_error,
+						nested.content_truncated,
+						nested.rejected,
+					),
+				)
+			}
+			events.push(
+				resultOf(
+					result.task_id,
+					call.name,
+					result.content,
+					result.is_error,
+					result.truncated,
+					result.rejected,
+				),
+			)
+			slots[slot] = events
 		},
 		complete: () => {
 			if (pending.size > 0) {

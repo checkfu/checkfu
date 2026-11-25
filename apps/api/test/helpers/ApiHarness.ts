@@ -41,6 +41,15 @@ import { defineExtension } from "@earendil-works/pi-durable"
 import { actionsExtension, customToolsExtension } from "../../src/Pi/PiActions.ts"
 import { mcpRegistry } from "../../src/Pi/PiMcp.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
+import { loadToolSurface } from "../../src/Pi/PiCodemode.ts"
+import { parkedCallLog } from "../../src/Pi/PiParkedCalls.ts"
+import type { ParkedCallLog, ParkedCalls } from "../../src/Pi/PiParkedCalls.ts"
+import { turnCallLog } from "../../src/Pi/PiTurnCalls.ts"
+import type { TurnCallLog } from "../../src/Pi/PiTurnCalls.ts"
+import type { ScriptDeadline } from "../../src/Pi/PiCodemode.ts"
+import type { CodemodeSandboxBase } from "@earendil-works/pi-codemode/portable"
+import { DatabaseSync } from "node:sqlite"
+import type { SQLInputValue } from "node:sqlite"
 import {
 	AbortGrace,
 	abortPiDurableTurn,
@@ -208,6 +217,8 @@ export interface TestMcpTool {
 	readonly run: (args: unknown) => string | Promise<string>
 }
 
+const loadedToolSurface = await loadToolSurface()
+
 export const makePiDurableTestLayer = (
 	handler: (
 		model: Model<Api>,
@@ -226,6 +237,7 @@ export const makePiDurableTestLayer = (
 		vaults = VaultsTestLive,
 		harnessSessions = (sessions) => sessions,
 		mcpTools,
+		codemode,
 	}: {
 		readonly env?: Record<string, string>
 		readonly platform?: typeof Domain.InMemory
@@ -234,8 +246,43 @@ export const makePiDurableTestLayer = (
 		readonly vaults?: typeof VaultsTestLive
 		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
 		readonly mcpTools?: ReadonlyArray<TestMcpTool>
+		readonly codemode?: {
+			readonly sandbox: (opening: number) => CodemodeSandboxBase
+			readonly deadline?: ScriptDeadline
+		}
 	} = {},
 ) => {
+	const toolSurface = codemode === undefined ? undefined : loadedToolSurface
+	const callLogs = new Map<
+		string,
+		{ readonly parked: ParkedCallLog; readonly turn: TurnCallLog; admitted: number }
+	>()
+	const callLogsOf = (sessionId: string) => {
+		const existing = callLogs.get(sessionId)
+		if (existing !== undefined) {
+			return existing
+		}
+		const db = new DatabaseSync(":memory:")
+		const sql = {
+			exec: (query: string, ...bindings: ReadonlyArray<unknown>) => {
+				const statement = db.prepare(query)
+				const values = bindings as ReadonlyArray<SQLInputValue>
+				if (statement.columns().length > 0) {
+					return statement.all(...values)
+				}
+				statement.run(...values)
+				return []
+			},
+		}
+		const logs = { parked: parkedCallLog(sql), turn: turnCallLog(sql), admitted: 0 }
+		callLogs.set(sessionId, logs)
+		return logs
+	}
+	const parkedLogOf = (sessionId: string): Pick<ParkedCalls, "record"> => {
+		const logs = callLogsOf(sessionId)
+		return { record: (call) => logs.parked(logs.admitted).record(call) }
+	}
+	const openings = new Map<string, number>()
 	const agentToolsBySession = new Map<string, string>()
 	const sessionTools = (sessionId: string) => {
 		if (mcpTools === undefined) {
@@ -267,9 +314,12 @@ export const makePiDurableTestLayer = (
 		const toolOf = (name: string) => tools.toolOf(name)
 		const custom = () => declared().filter((tool): tool is CustomTool => tool.type === "custom")
 		const built = createCheckfuRegistry()
+		const opening = (openings.get(sessionId) ?? 0) + 1
+		openings.set(sessionId, opening)
+		const sandbox = codemode === undefined ? undefined : () => codemode.sandbox(opening)
 		const install = () => {
 			tools = mcpRegistry(servers, declared())
-			built.install(
+			const extensions = [
 				defineExtension({
 					name: "test.mcp",
 					tools: [...tools.byName].map(([name, { binding, tool }]) => ({
@@ -288,15 +338,39 @@ export const makePiDurableTestLayer = (
 						}),
 					})),
 				}),
+				customToolsExtension(custom()),
+			]
+			for (const extension of toolSurface === undefined || sandbox === undefined
+				? extensions
+				: toolSurface(
+						sandbox,
+						extensions,
+						parkedLogOf(sessionId),
+						codemode?.deadline === undefined ? {} : { deadline: codemode.deadline },
+					)) {
+				built.install(extension)
+			}
+			built.install(
+				actionsExtension(
+					toolOf,
+					{
+						admit: (taskId) =>
+							callLogsOf(sessionId).turn(callLogsOf(sessionId).admitted).admit(taskId),
+					},
+					(name) => custom().some((tool) => tool.name === name),
+				),
 			)
-			built.install(customToolsExtension(custom()))
-			built.install(actionsExtension(toolOf))
 		}
 		install()
 		return {
 			registry: built,
 			mcpToolOf: toolOf,
+			turnCalls: callLogsOf(sessionId).turn,
 			publishMcp: async (request: PiTurnRequest) => {
+				const logs = callLogsOf(sessionId)
+				if (request.turn !== logs.admitted) {
+					logs.admitted = request.turn
+				}
 				if (request.tools !== undefined && !agentToolsBySession.has(sessionId)) {
 					agentToolsBySession.set(sessionId, request.tools)
 					install()
@@ -332,8 +406,12 @@ export const makePiDurableTestLayer = (
 			{
 				...(storage === undefined ? {} : { storage }),
 				...(executionEnv === undefined ? {} : { env: executionEnv }),
+				...(codemode === undefined
+					? {}
+					: { parkedCalls: (turn: number) => callLogsOf(sessionId).parked(turn).forScript }),
 				...(tools.publishMcp === undefined ? {} : { publishMcp: tools.publishMcp }),
 				...(tools.mcpToolOf === undefined ? {} : { mcpToolOf: tools.mcpToolOf }),
+				...(tools.turnCalls === undefined ? {} : { turnCalls: tools.turnCalls }),
 				reset: Effect.andThen(
 					Effect.promise(async () => {
 						const serving = await objects.get(sessionId)

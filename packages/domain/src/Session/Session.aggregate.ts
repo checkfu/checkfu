@@ -35,6 +35,7 @@ import {
 	AgentToolUse,
 	RecordToolCall,
 	RecordToolResult,
+	RecordToolUse,
 } from "./RecordToolCall.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
@@ -214,6 +215,7 @@ export class Session extends Domain.Aggregate("Session", {
 		RecordModelRequestStart,
 		RecordToolCall,
 		RecordToolResult,
+		RecordToolUse,
 		PauseTurn,
 		CommitModelReply,
 		FailModelRequest,
@@ -521,6 +523,27 @@ export class Session extends Domain.Aggregate("Session", {
 						}),
 						new AgentMcpToolResult(result),
 					]
+		},
+
+		RecordToolUse: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") {
+				return running
+			}
+			if (running.open_model_request_id !== cmd.model_request_start_id) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			return [
+				new AgentToolUse({
+					tool_use_id: cmd.use.tool_use_id,
+					name: cmd.use.name,
+					input: cmd.use.input,
+					...(cmd.use.truncated === true ? { truncated: true as const } : {}),
+				}),
+			]
 		},
 
 		RecordToolResult: (state, cmd, ctx) => {
