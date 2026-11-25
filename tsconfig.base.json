@@ -77,10 +77,7 @@
 						}
 					},
 					{
-						"include": [
-							"**/packages/domain/src/Listing/ListingStore.ts",
-							"**/packages/sdk/src/Api.ts"
-						],
+						"include": ["**/packages/sdk/src/Api.ts"],
 						"options": {
 							"diagnosticSeverity": {
 								"leakingRequirements": "off"

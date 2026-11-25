@@ -196,17 +196,22 @@ export default defineConfig({
 			},
 		},
 		{
+			files: ["apps/cli/src/GeneratedRuntime.ts"],
+			rules: {
+				"quality/no-chained-type-assertions": "off",
+				"typescript/no-unsafe-type-assertion": "off",
+			},
+		},
+		{
 			files: [
 				"apps/api/src/D1ListingStore.ts",
 				"apps/app/src/api.ts",
 				"apps/app/src/event-stream.ts",
-				"apps/cli/src/GeneratedRuntime.ts",
 				"apps/mcp/src/GeneratedRuntime.ts",
 				"packages/sdk/src/PromiseRuntime.ts",
 				"packages/sdk/src/Runtime.ts",
 			],
 			rules: {
-				"quality/no-chained-type-assertions": "off",
 				"typescript/no-unsafe-type-assertion": "off",
 			},
 		},
@@ -223,7 +228,7 @@ export default defineConfig({
 			},
 		},
 		{
-			files: ["packages/domain/src/Listing/ListingStore.ts", "packages/sdk/src/Api.ts"],
+			files: ["packages/sdk/src/Api.ts"],
 			rules: {
 				"effecttsgo/leaking-requirements": "off",
 			},
