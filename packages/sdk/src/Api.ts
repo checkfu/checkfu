@@ -11,6 +11,7 @@ import type * as HttpClient from "effect/http/HttpClient"
 import type * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { CLIENT_EVENT_ID_MAX_LENGTH } from "./IdempotencyKey.ts"
 import * as SchemaGetter from "effect/SchemaGetter"
 import * as Struct from "effect/Struct"
 import {
@@ -504,7 +505,7 @@ export type UpdateAutomationBody = typeof UpdateAutomationBody.Type
 export const ClientEventId = Schema.String.check(
 	Schema.isTrimmed(),
 	Schema.isMinLength(1),
-	Schema.isMaxLength(128),
+	Schema.isMaxLength(CLIENT_EVENT_ID_MAX_LENGTH),
 )
 export type ClientEventId = typeof ClientEventId.Type
 

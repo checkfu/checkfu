@@ -1,7 +1,17 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
+import * as Schema from "effect/Schema"
+import { ClientEventId } from "../src/Api.ts"
 import { CheckfuFetchError, createFetchClient, operationUrl } from "../src/Fetch.ts"
-import type { FetchInput, JsonOperationId, OperationId, UrlInput } from "../src/Fetch.ts"
+import type {
+	FetchInput,
+	FetchInputArgs,
+	JsonOperationId,
+	OperationId,
+	UrlInput,
+	UrlInputArgs,
+} from "../src/Fetch.ts"
 import { SDK_OPERATION_BINDINGS } from "../src/generated/OperationBindings.ts"
+import { isClientEventId } from "../src/IdempotencyKey.ts"
 
 interface Sent {
 	readonly url: string
@@ -106,11 +116,52 @@ describe("the fetch client", () => {
 		)
 		expect(sent).toEqual([])
 
-		await untyped(createFetchClient({ fetch, headers: { "idempotency-key": "from-defaults" } }))(
-			"automations.create",
-			{ body: { name: "x" } },
+		expect(() => createFetchClient({ fetch, headers: { "Idempotency-Key": "shared" } })).toThrow(
+			"An idempotency key identifies one request",
 		)
-		expect(sent.map((call) => call.headers.get("idempotency-key"))).toEqual(["from-defaults"])
+	})
+
+	it("sends an idempotency key exactly as given, refusing one the API would reject", async () => {
+		const { sent, fetch } = recording(201, JSON.stringify({ id: "agent_1", type: "agent" }))
+		const request = createFetchClient({ fetch })
+		const body = { name: "Helper", model: "claude-opus-5-5" }
+		for (const idempotencyKey of ["job ", " job", "", "k".repeat(129)]) {
+			await expect(request("agents.create", { body, idempotencyKey })).rejects.toThrow(
+				"Invalid idempotencyKey: must be 1 to 128 characters with no leading or trailing whitespace.",
+			)
+		}
+		expect(sent).toEqual([])
+		await request("agents.create", { body, idempotencyKey: "k".repeat(128) })
+		expect(sent.map((call) => call.headers.get("idempotency-key"))).toEqual(["k".repeat(128)])
+	})
+
+	it("checks an idempotency key by the same rule as the API's ClientEventId", () => {
+		const is = Schema.is(ClientEventId)
+		for (const key of [
+			"a",
+			"job 1",
+			"job ",
+			" job",
+			"\tjob",
+			"job\n",
+			"",
+			"k".repeat(128),
+			"k".repeat(129),
+			"\u00a0job",
+			"\u3000job",
+		]) {
+			expect([key, isClientEventId(key)]).toEqual([key, is(key)])
+		}
+	})
+
+	it("takes only a single operation id, so its input always matches that operation", () => {
+		expectTypeOf<FetchInputArgs<"agents.list" | "agents.create">>().toEqualTypeOf<[input: never]>()
+		expectTypeOf<UrlInputArgs<"agents.list" | "sessions.events.stream">>().toEqualTypeOf<
+			[input: never]
+		>()
+		expectTypeOf<
+			Requirement<FetchInputArgs<"agents.create">[0], "body">
+		>().toEqualTypeOf<"required">()
 	})
 
 	it("offers the event stream only as a URL, since its reply is not JSON", () => {

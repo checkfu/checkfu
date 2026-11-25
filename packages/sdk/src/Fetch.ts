@@ -1,4 +1,5 @@
 import { parseJsonAs } from "./Boundary.ts"
+import { CLIENT_EVENT_ID_MESSAGE, isClientEventId } from "./IdempotencyKey.ts"
 import { SDK_OPERATION_BINDINGS } from "./generated/OperationBindings.ts"
 import type { CheckfuOperations } from "./generated/Resources.ts"
 import { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./PathSegment.ts"
@@ -49,9 +50,23 @@ export type FetchResult<Op extends JsonOperationId> = JsonResultOf<Shape<Op>>
 type OptionalWhenEmpty<Input> =
 	Record<never, never> extends Input ? [input?: Input] : [input: Input]
 
+type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (
+	value: infer I,
+) => void
+	? I
+	: never
+
+type IsUnion<T> = [T] extends [UnionToIntersection<T>] ? false : true
+
+export type FetchInputArgs<Op extends JsonOperationId> =
+	IsUnion<Op> extends true ? [input: never] : OptionalWhenEmpty<FetchInput<Op>>
+
+export type UrlInputArgs<Op extends OperationId> =
+	IsUnion<Op> extends true ? [input: never] : OptionalWhenEmpty<UrlInput<Op>>
+
 export type FetchClient = <Op extends JsonOperationId>(
 	operationId: Op,
-	...input: OptionalWhenEmpty<FetchInput<Op>>
+	...input: FetchInputArgs<Op>
 ) => Promise<FetchResult<Op>>
 
 export class CheckfuFetchError extends Error {
@@ -118,11 +133,16 @@ const urlOf = (binding: Binding, input: RawInput): string => {
 
 export const operationUrl = <Op extends OperationId>(
 	operationId: Op,
-	...[input]: OptionalWhenEmpty<UrlInput<Op>>
+	...[input]: UrlInputArgs<Op>
 ): string => urlOf(bindingOf(operationId), input ?? {})
 
 export const createFetchClient = (options: FetchClientOptions = {}): FetchClient => {
 	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
+	if (new Headers(options.headers).has("idempotency-key")) {
+		throw new Error(
+			"An idempotency key identifies one request; pass idempotencyKey with each call, not in the client's headers.",
+		)
+	}
 	return async (operationId, ...[input]) => {
 		const binding = bindingOf(operationId)
 		if (binding.kind === "sse") {
@@ -133,9 +153,11 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 		const fields: RawInput = input ?? {}
 		const headers = new Headers(options.headers)
 		if (fields.idempotencyKey !== undefined) {
+			if (!isClientEventId(fields.idempotencyKey)) {
+				throw new Error(`Invalid idempotencyKey: ${CLIENT_EVENT_ID_MESSAGE}.`)
+			}
 			headers.set("idempotency-key", fields.idempotencyKey)
-		}
-		if (binding.requiresIdempotencyKey && !headers.has("idempotency-key")) {
+		} else if (binding.requiresIdempotencyKey) {
 			throw new Error(`${operationId} needs an idempotency key.`)
 		}
 		if (binding.bodyRequired && fields.body === undefined) {
