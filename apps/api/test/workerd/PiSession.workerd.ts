@@ -192,8 +192,11 @@ const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyAr
 	return Object.keys(saved.props?.env ?? {})
 }
 
-const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => {
-	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
+const startAlchemyDev = async (
+	openAIBaseUrl: string,
+	gitHubBaseUrl: string,
+	stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`,
+) => {
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
 	try {
@@ -316,10 +319,13 @@ const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => 
 		}
 	}, 45_000)
 
-	const stop = async () => {
+	const halt = async () => {
 		clearTimeout(startupTimer)
 		await stopProcessByPid(child)
 		rmSync(envDir, { recursive: true, force: true })
+	}
+	const stop = async () => {
+		await halt()
 		removeStage(join(REPO_ROOT, ".alchemy"), "Checkfu", stage)
 	}
 
@@ -346,7 +352,7 @@ const startAlchemyDev = async (openAIBaseUrl: string, gitHubBaseUrl: string) => 
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
-					return { baseUrl, logs, stage, stop }
+					return { baseUrl, logs, stage, stop, halt }
 				}
 			} catch {
 				const sleepMs = Math.min(100, healthDeadline - Date.now())
@@ -373,6 +379,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
+	let haltWorker: (() => Promise<void>) | undefined
 	let workerLogs: ReadonlyArray<string> = []
 	let workerStage: string
 	let agentId: string
@@ -491,6 +498,31 @@ describe("PiSession real Durable Object under workerd", () => {
 		return res.body.data
 	}
 
+	const storedMemories = async (storeId: string): Promise<Record<string, string>> => {
+		const listed = await apiJson<{
+			readonly data: ReadonlyArray<{ readonly id: string; readonly path: string }>
+		}>(`/v1/memory_stores/${storeId}/memories`)
+		const contents: Record<string, string> = {}
+		for (const entry of listed.body.data) {
+			const memory = await apiJson<{ readonly content: string }>(
+				`/v1/memory_stores/${storeId}/memories/${entry.id}`,
+			)
+			contents[entry.path] = memory.body.content
+		}
+		return contents
+	}
+
+	const replyAfterTurn = async (sessionId: string, text: string, number: number) => {
+		const sent = await apiJson(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(sessionId, (s) => s.status === "idle" && s.turn === number, 60_000)
+		const replies = (await listAllEvents(sessionId)).filter((e) => e.type === "agent.message")
+		return replies.at(-1)?.content?.[0]?.text ?? ""
+	}
+
 	beforeAll(async () => {
 		fakeOpenAI = await startFakeOpenAIResponsesServer((req) => ({
 			kind: "reply",
@@ -508,6 +540,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
+		haltWorker = worker.halt
 		workerLogs = worker.logs
 		workerStage = worker.stage
 
@@ -902,16 +935,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(session.resources.map((resource) => resource.mount_path)).toEqual([repo])
 		expect(JSON.stringify(session)).not.toContain(TEST_GITHUB_TOKEN)
 
-		const turn = async (text: string, number: number) => {
-			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
-				method: "POST",
-				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
-			})
-			expect(sent.status).toBe(200)
-			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 60_000)
-			const replies = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message")
-			return replies.at(-1)?.content?.[0]?.text ?? ""
-		}
+		const turn = (text: string, number: number) => replyAfterTurn(session.id, text, number)
 
 		expect(await turn("Read the readme.", 1)).toContain("# Acme API")
 		const basic = `Basic ${Buffer.from(`x-access-token:${TEST_GITHUB_TOKEN}`).toString("base64")}`
@@ -989,6 +1013,225 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe(`Log: ${pinned} Pinned\n`)
 	}, 120_000)
+
+	it("mounts memory stores as files, saves a session's changes, and shares them with the next session", async () => {
+		const createStore = async (name: string, memories: Readonly<Record<string, string>>) => {
+			const store = await createResource<{ readonly id: string }>("/v1/memory_stores", { name })
+			for (const [path, content] of Object.entries(memories)) {
+				const created = await apiJson(`/v1/memory_stores/${store.id}/memories`, {
+					method: "POST",
+					body: { path, content },
+				})
+				expect(created.status).toBe(201)
+			}
+			return store
+		}
+		const notes = await createStore("Team Notes", { "/facts.md": "The launch code is KIWI-9." })
+		const handbook = await createStore("Handbook", { "/rules.md": "Be kind." })
+		const resources = [
+			{ type: "memory_store", memory_store_id: notes.id },
+			{ type: "memory_store", memory_store_id: handbook.id, access: "read_only" },
+		]
+
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"What is the launch code?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/team-notes/facts.md" },
+					},
+				],
+				"Remember the customer's preference.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: {
+							path: "/mnt/memory/team-notes/customers/acme.md",
+							content: "Prefers email.",
+						},
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/memory/handbook/rules.md", content: "Be cruel." },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/memory/./handbook//rules.md", content: "Be cruel." },
+					},
+					{
+						kind: "tool_call",
+						name: "git",
+						arguments: { args: ["init"], cwd: "/mnt/memory/handbook" },
+					},
+					{ kind: "tool_call", name: "delete", arguments: { path: "/mnt/memory" } },
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/handbook/rules.md" },
+					},
+				],
+				"What does Acme prefer?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/team-notes/customers/acme.md" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		const first = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources,
+		})
+		expect(await replyAfterTurn(first.id, "What is the launch code?", 1)).toContain("KIWI-9")
+		const refused = await replyAfterTurn(first.id, "Remember the customer's preference.", 2)
+		expect(refused.split("The memory store handbook is read-only.").length - 1).toBe(3)
+		expect(refused).toContain("mount root can't be removed or renamed: /mnt/memory")
+		expect(refused.endsWith("Be kind.")).toBe(true)
+		expect(await storedMemories(notes.id)).toEqual({
+			"/customers/acme.md": "Prefers email.",
+			"/facts.md": "The launch code is KIWI-9.",
+		})
+		expect(await storedMemories(handbook.id)).toEqual({ "/rules.md": "Be kind." })
+
+		const second = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources,
+		})
+		expect(await replyAfterTurn(second.id, "What does Acme prefer?", 1)).toContain("Prefers email.")
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain("- /mnt/memory/team-notes (read and write): Team Notes.")
+		expect(systemText).toContain("- /mnt/memory/handbook (read-only): Handbook.")
+	}, 180_000)
+
+	it("follows a memory path that turns from a directory into a file between turns", async () => {
+		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
+			name: "Shapes",
+		})
+		const memories = `/v1/memory_stores/${store.id}/memories`
+		const todo = await apiJson<{ readonly id: string }>(memories, {
+			method: "POST",
+			body: { path: "/notes/todo.md", content: "A file in a directory." },
+		})
+		expect(todo.status).toBe(201)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "memory_store", memory_store_id: store.id }],
+		})
+		const reads = new Map([
+			["Read the todo.", "/mnt/memory/shapes/notes/todo.md"],
+			["Read the notes.", "/mnt/memory/shapes/notes"],
+		])
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: reads.get(req.lastUserText) ?? "/missing" },
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` },
+		)
+		expect(await replyAfterTurn(session.id, "Read the todo.", 1)).toContain(
+			"A file in a directory.",
+		)
+
+		expect((await apiJson(`${memories}/${todo.body.id}`, { method: "DELETE" })).status).toBe(200)
+		const notes = await apiJson(memories, {
+			method: "POST",
+			body: { path: "/notes", content: "Now the directory is a file." },
+		})
+		expect(notes.status).toBe(201)
+		expect(await replyAfterTurn(session.id, "Read the notes.", 2)).toContain(
+			"Now the directory is a file.",
+		)
+		expect(await storedMemories(store.id)).toEqual({ "/notes": "Now the directory is a file." })
+	}, 120_000)
+
+	it("reaches memory stores in a turn Pi resumes after the Workers restart mid-turn", async () => {
+		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
+			name: "Journal",
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "memory_store", memory_store_id: store.id }],
+		})
+		const prompt = "Keep a journal across the restart."
+		let restarted = false
+		const steps: ReadonlyArray<FakeOpenAIAction> = [
+			{
+				kind: "tool_call",
+				name: "write",
+				arguments: { path: "/mnt/memory/journal/before.md", content: "Written before." },
+			},
+			{
+				kind: "tool_call",
+				name: "write",
+				arguments: { path: "/mnt/memory/journal/after.md", content: "Written after." },
+			},
+			{ kind: "tool_call", name: "read", arguments: { path: "/mnt/memory/journal/before.md" } },
+		]
+		fakeOpenAI.setHandler((req) => {
+			if (req.lastUserText !== prompt) {
+				return { kind: "reply", text: "unexpected" }
+			}
+			if (req.toolOutputs.length === 1 && !restarted) {
+				return { kind: "hold" }
+			}
+			return (
+				steps[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				}
+			)
+		})
+
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: prompt }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await fakeOpenAI.waitForRequest(
+			(req) => req.lastUserText === prompt && req.toolOutputs.length === 1,
+			30_000,
+		)
+
+		await haltWorker?.()
+		restarted = true
+		const worker = await startAlchemyDev(fakeOpenAI.baseUrl, fakeGitHub.baseUrl, stage)
+		baseUrl = worker.baseUrl
+		stopWorker = worker.stop
+		haltWorker = worker.halt
+		workerLogs = worker.logs
+
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 120_000)
+		const reply = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message").at(-1)
+			?.content?.[0]?.text
+		expect(reply).toContain("Written before.")
+		expect(await storedMemories(store.id)).toEqual({
+			"/after.md": "Written after.",
+			"/before.md": "Written before.",
+		})
+	}, 240_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"

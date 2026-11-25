@@ -2408,7 +2408,7 @@ const sessionsCreateCommand = CommandMake(
 		resources: FlagString("resources").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
-				"Repositories to mount in the session's workspace (JSON, YAML, or @file)",
+				"Repositories and memory stores to mount in the session's workspace (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),

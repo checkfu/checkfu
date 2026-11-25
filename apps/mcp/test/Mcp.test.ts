@@ -499,6 +499,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 								url: "https://github.com/acme/api",
 								checkout: { type: "branch", name: "main" },
 							},
+							{ type: "memory_store", memory_store_id: "memstore_1", access: "read_only" },
 						],
 					},
 				},
