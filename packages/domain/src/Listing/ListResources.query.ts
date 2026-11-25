@@ -24,7 +24,7 @@ export class ListResources extends Domain.Query(
 	},
 	{
 		description:
-			"Agents, environments or sessions in creation order, a page at a time, leaving out archived ones unless asked.",
+			"Agents, environments, sessions or automations in creation order, a page at a time, leaving out archived ones unless asked.",
 	},
 ) {}
 

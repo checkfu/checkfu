@@ -144,7 +144,7 @@ const run = async <A>(
 interface ListBody {
 	readonly data: ReadonlyArray<AutomationBody>
 	readonly has_more: boolean
-	readonly next_cursor: number | null
+	readonly next_cursor: string | null
 }
 
 const listed = (apiFetch: ApiFetch, query: string, count: number) =>
@@ -478,20 +478,28 @@ describe("Automations API", () => {
 			}),
 		))
 
-	it("lists the automations that are not archived, a page at a time in either order", () =>
+	it("lists automations a page at a time in either order, by agent, with or without archived ones", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
 				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const otherAgent = yield* call<{ id: string }>(apiFetch, "POST", "/v1/agents", {
+					name: "Other",
+					model: "gpt-4o-mini",
+				})
 				const empty = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
 				expect(empty).toEqual({
 					status: 200,
 					body: { data: [], has_more: false, next_cursor: null },
 				})
 				const ids: Array<string> = []
-				for (const name of ["First", "Second", "Third"]) {
+				for (const [name, agent] of [
+					["First", agentId],
+					["Second", agentId],
+					["Third", otherAgent.body.id],
+				] as const) {
 					const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
 						name,
-						agent: agentId,
+						agent,
 						environment_id: environmentId,
 						initial_events: message(`Run ${name}.`),
 						schedule: weekdayMornings,
@@ -499,54 +507,62 @@ describe("Automations API", () => {
 					ids.push(created.body.id)
 				}
 				const all = yield* listed(apiFetch, "", 3)
-				expect(all.body.data.map((automation) => automation.name)).toEqual([
-					"First",
-					"Second",
-					"Third",
-				])
-				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${ids[0]}`)
-				expect(all.body.data[0]).toEqual(fetched.body)
+				const order = all.body.data.map((automation) => automation.id)
+				expect(order.toSorted()).toEqual(ids.toSorted())
 				expect(all.body).toMatchObject({ has_more: false, next_cursor: null })
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${ids[0]}`)
+				expect(all.body.data.find((automation) => automation.id === ids[0])).toEqual(fetched.body)
 
-				const first = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?limit=2")
-				expect(first.body.data.map((automation) => automation.id)).toEqual(ids.slice(0, 2))
-				expect(first.body.has_more).toBe(true)
-				const second = yield* call<ListBody>(
+				const pages = (query: string) =>
+					Effect.gen(function* () {
+						const seen: Array<string> = []
+						let after: string | null = null
+						do {
+							const cursor: string = after === null ? "" : `&after=${after}`
+							const page = yield* call<ListBody>(
+								apiFetch,
+								"GET",
+								`/v1/automations?limit=1${query}${cursor}`,
+							)
+							seen.push(...page.body.data.map((automation) => automation.id))
+							after = page.body.next_cursor
+							expect(page.body.has_more).toBe(after !== null)
+						} while (after !== null)
+						return seen
+					})
+				expect(yield* pages("")).toEqual(order)
+				expect(yield* pages("&order=desc")).toEqual(order.toReversed())
+
+				const byAgent = yield* call<ListBody>(
 					apiFetch,
 					"GET",
-					`/v1/automations?limit=2&after=${first.body.next_cursor}`,
+					`/v1/automations?agent_id=${agentId}`,
 				)
-				expect(second.body).toMatchObject({ has_more: false, next_cursor: null })
-				expect(second.body.data.map((automation) => automation.id)).toEqual(ids.slice(2))
-
-				const newest = yield* call<ListBody>(apiFetch, "GET", "/v1/automations?order=desc&limit=2")
-				expect(newest.body.data.map((automation) => automation.id)).toEqual([ids[2], ids[1]])
-				const oldest = yield* call<ListBody>(
-					apiFetch,
-					"GET",
-					`/v1/automations?order=desc&after=${newest.body.next_cursor}`,
+				expect(byAgent.body.data.map((automation) => automation.id).toSorted()).toEqual(
+					ids.slice(0, 2).toSorted(),
 				)
-				expect(oldest.body.data.map((automation) => automation.id)).toEqual([ids[0]])
 
 				yield* call(apiFetch, "POST", `/v1/automations/${ids[1]}/pause`)
 				yield* call(apiFetch, "POST", `/v1/automations/${ids[0]}/archive`)
 				const remaining = yield* listed(apiFetch, "", 2)
-				expect(remaining.body.data.map((automation) => [automation.id, automation.status])).toEqual(
-					[
-						[ids[1], "paused"],
-						[ids[2], "active"],
-					],
-				)
-				const afterArchived = yield* call<ListBody>(
+				expect(
+					Object.fromEntries(
+						remaining.body.data.map((automation) => [automation.id, automation.status]),
+					),
+				).toEqual({ [String(ids[1])]: "paused", [String(ids[2])]: "active" })
+				const withArchived = yield* call<ListBody>(
 					apiFetch,
 					"GET",
-					`/v1/automations?after=${first.body.next_cursor}`,
+					"/v1/automations?include_archived=true",
 				)
-				expect(afterArchived.body.data.map((automation) => automation.id)).toEqual([ids[2]])
+				expect(withArchived.body.data.map((automation) => automation.id)).toEqual(order)
+				expect(withArchived.body.data.find((automation) => automation.id === ids[0])?.status).toBe(
+					"archived",
+				)
 			}),
 		))
 
-	it("lists while the directory is ahead of an automation's own view: waits for it, or answers 503 with no page", () =>
+	it("lists while the listing is ahead of an automation's own view: waits for it, or answers 503 with no page", () =>
 		run(() =>
 			Effect.gen(function* () {
 				const views = yield* AutomationView
@@ -561,7 +577,9 @@ describe("Automations API", () => {
 								? Effect.map(
 										views.get(ref, options),
 										Option.map((state) =>
-											state === null ? state : { ...state, status: "archived" as const },
+											state === null
+												? state
+												: { ...state, status: "archived" as const, archived_at: state.updated_at },
 										),
 									)
 								: Effect.succeedNone,

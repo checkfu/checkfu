@@ -618,7 +618,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
+	/** List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
 		params: RelaxOptionalProps<EndpointQuery<"automations", "list">> | undefined,
 		options: WithResponseRequestOptions,
@@ -641,6 +641,10 @@ export class EffectAutomationsResource {
 						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["include_archived"] === undefined
+							? {}
+							: { include_archived: params["include_archived"] }),
+						...(params?.["agent_id"] === undefined ? {} : { agent_id: params["agent_id"] }),
 					},
 					responseMode: "decoded-and-response",
 				}),
@@ -649,7 +653,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
+	/** Auto-paginate pages for List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	listPages(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: RequestOptions,
@@ -668,7 +672,7 @@ export class EffectAutomationsResource {
 		)
 	}
 
-	/** Auto-paginate items for List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
+	/** Auto-paginate items for List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	listStream(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: RequestOptions,
@@ -1632,12 +1636,12 @@ export class AutomationsResource {
 		)
 	}
 
-	/** List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
+	/** List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created. */
 	list(
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "list">>, number>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "list">>, string>,
 		ItemOf<EndpointJsonSuccess<"automations", "list">>
 	> {
 		return executePaginatedPromise(

@@ -477,9 +477,8 @@ const automationsListCommandSpec: GeneratedOperationDescriptor = {
 			flagName: "after",
 			wireName: "after",
 			location: "query",
-			kind: "int",
+			kind: "string",
 			required: false,
-			min: 0,
 		},
 		{
 			propName: "limit",
@@ -499,33 +498,57 @@ const automationsListCommandSpec: GeneratedOperationDescriptor = {
 			kind: "literals",
 			required: false,
 		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "agentId",
+			flagName: "agent-id",
+			wireName: "agent_id",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
 	],
 }
 
 const automationsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
+		after: FlagString("after").pipe(
 			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 			),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
 			FlagWithMetavar("N"),
-			FlagWithDescription("Maximum number of events to return (1-100)"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
 			FlagOptional,
 		),
 		order: FlagLiterals("order", ["asc", "desc"]).pipe(
-			FlagWithDescription("Sort order: asc or desc"),
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+		agentId: FlagString("agent-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Only automations created with this agent"),
 			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(automationsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List the automations that are not archived, oldest first by default. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
+		"List automations in creation order, oldest first by default. Archived automations are left out unless include_archived is true. The list catches up shortly after a create or archive, so an automation missing from it does not mean its create failed: to find out, resend the create with its original idempotency key, which returns the automation it created.",
 	),
 )
 

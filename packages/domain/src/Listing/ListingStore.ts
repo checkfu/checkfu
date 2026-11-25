@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
-export const ListingKind = Schema.Literals(["agent", "environment", "session"])
+export const ListingKind = Schema.Literals(["agent", "environment", "session", "automation"])
 export type ListingKind = typeof ListingKind.Type
 
 export const ListingOrder = Schema.Literals(["asc", "desc"])
