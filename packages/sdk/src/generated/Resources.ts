@@ -245,6 +245,72 @@ export interface CheckfuOperations {
 		EndpointBody<"environments", "update">,
 		EndpointSuccess<"environments", "update">
 	>
+	readonly "memoryStores.archive": OperationShape<
+		EndpointParams<"memory_stores", "archive">,
+		EndpointQuery<"memory_stores", "archive">,
+		EndpointBody<"memory_stores", "archive">,
+		EndpointSuccess<"memory_stores", "archive">
+	>
+	readonly "memoryStores.create": OperationShape<
+		EndpointParams<"memory_stores", "create">,
+		EndpointQuery<"memory_stores", "create">,
+		EndpointBody<"memory_stores", "create">,
+		EndpointSuccess<"memory_stores", "create">
+	>
+	readonly "memoryStores.delete": OperationShape<
+		EndpointParams<"memory_stores", "delete">,
+		EndpointQuery<"memory_stores", "delete">,
+		EndpointBody<"memory_stores", "delete">,
+		EndpointSuccess<"memory_stores", "delete">
+	>
+	readonly "memoryStores.list": OperationShape<
+		EndpointParams<"memory_stores", "list">,
+		RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		EndpointBody<"memory_stores", "list">,
+		EndpointSuccess<"memory_stores", "list">
+	>
+	readonly "memoryStores.retrieve": OperationShape<
+		EndpointParams<"memory_stores", "get">,
+		EndpointQuery<"memory_stores", "get">,
+		EndpointBody<"memory_stores", "get">,
+		EndpointSuccess<"memory_stores", "get">
+	>
+	readonly "memoryStores.update": OperationShape<
+		EndpointParams<"memory_stores", "update">,
+		EndpointQuery<"memory_stores", "update">,
+		EndpointBody<"memory_stores", "update">,
+		EndpointSuccess<"memory_stores", "update">
+	>
+	readonly "memoryStores.memories.create": OperationShape<
+		EndpointParams<"memory_stores", "createMemory">,
+		EndpointQuery<"memory_stores", "createMemory">,
+		EndpointBody<"memory_stores", "createMemory">,
+		EndpointSuccess<"memory_stores", "createMemory">
+	>
+	readonly "memoryStores.memories.delete": OperationShape<
+		EndpointParams<"memory_stores", "deleteMemory">,
+		RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">>,
+		EndpointBody<"memory_stores", "deleteMemory">,
+		EndpointSuccess<"memory_stores", "deleteMemory">
+	>
+	readonly "memoryStores.memories.list": OperationShape<
+		EndpointParams<"memory_stores", "listMemories">,
+		RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">>,
+		EndpointBody<"memory_stores", "listMemories">,
+		EndpointSuccess<"memory_stores", "listMemories">
+	>
+	readonly "memoryStores.memories.retrieve": OperationShape<
+		EndpointParams<"memory_stores", "getMemory">,
+		EndpointQuery<"memory_stores", "getMemory">,
+		EndpointBody<"memory_stores", "getMemory">,
+		EndpointSuccess<"memory_stores", "getMemory">
+	>
+	readonly "memoryStores.memories.update": OperationShape<
+		EndpointParams<"memory_stores", "updateMemory">,
+		EndpointQuery<"memory_stores", "updateMemory">,
+		EndpointBody<"memory_stores", "updateMemory">,
+		EndpointSuccess<"memory_stores", "updateMemory">
+	>
 	readonly "sessions.archive": OperationShape<
 		EndpointParams<"sessions", "archive">,
 		EndpointQuery<"sessions", "archive">,
@@ -1969,6 +2035,549 @@ export class EffectEnvironmentsResource {
 	}
 }
 
+export class EffectMemoryStoresMemoriesResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Create a memory at a path that holds none */
+	create(
+		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "createMemory">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "createMemory">>, CheckfuSdkError>
+	create(
+		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "createMemory">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "createMemory">, CheckfuSdkError>
+	create(
+		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "createMemory">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "createMemory">
+		| WithResponse<EndpointSuccess<"memory_stores", "createMemory">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "createMemory", { memory_store_id: memoryStoreId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.memories.create",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.createMemory({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "create" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Delete a memory from its store */
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> & AnyRequestOptions)
+			| undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "deleteMemory">>, CheckfuSdkError>
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
+		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "deleteMemory">>, CheckfuSdkError>
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "deleteMemory">, CheckfuSdkError>
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "deleteMemory">
+		| WithResponse<EndpointSuccess<"memory_stores", "deleteMemory">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "deleteMemory", {
+					memory_store_id: memoryStoreId,
+					memory_id: memoryId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.memoryStores.memories.delete",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.memory_stores.deleteMemory({
+								params: pathParams,
+								query:
+									params?.["expected_content_sha256"] === undefined
+										? {}
+										: { expected_content_sha256: params?.["expected_content_sha256"] },
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List the memories in a store, without their content */
+	list(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> & AnyRequestOptions)
+			| undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "listMemories">>, CheckfuSdkError>
+	list(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "listMemories">>, CheckfuSdkError>
+	list(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "listMemories">, CheckfuSdkError>
+	list(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "listMemories">
+		| WithResponse<EndpointSuccess<"memory_stores", "listMemories">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "listMemories", { memory_store_id: memoryStoreId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.memoryStores.memories.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.memory_stores.listMemories({
+								params: pathParams,
+								query: {
+									...(params?.["path_prefix"] === undefined
+										? {}
+										: { path_prefix: params["path_prefix"] }),
+									...(params?.["depth"] === undefined ? {} : { depth: params["depth"] }),
+								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve a memory with its content */
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "getMemory">>, CheckfuSdkError>
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "getMemory">, CheckfuSdkError>
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "getMemory">
+		| WithResponse<EndpointSuccess<"memory_stores", "getMemory">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "getMemory", {
+					memory_store_id: memoryStoreId,
+					memory_id: memoryId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.memoryStores.memories.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.memory_stores.getMemory({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Replace a memory's content, optionally only if it is unchanged since it was read */
+	update(
+		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
+		params: EndpointBody<"memory_stores", "updateMemory">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "updateMemory">>, CheckfuSdkError>
+	update(
+		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
+		params: EndpointBody<"memory_stores", "updateMemory">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "updateMemory">, CheckfuSdkError>
+	update(
+		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
+		params: EndpointBody<"memory_stores", "updateMemory">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "updateMemory">
+		| WithResponse<EndpointSuccess<"memory_stores", "updateMemory">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "updateMemory", {
+					memory_store_id: memoryStoreId,
+					memory_id: memoryId,
+				}),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.memories.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.updateMemory({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						pendingUpdateReadiness(params, "memoryStores.memories.update"),
+					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectMemoryStoresResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly memories: EffectMemoryStoresMemoriesResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.memories = new EffectMemoryStoresMemoriesResource(runtime)
+	}
+
+	/** Make a memory store read-only and stop new sessions from attaching it */
+	archive(
+		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "archive">>, CheckfuSdkError>
+	archive(
+		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "archive">, CheckfuSdkError>
+	archive(
+		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "archive">
+		| WithResponse<EndpointSuccess<"memory_stores", "archive">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "archive", { memory_store_id: memoryStoreId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.archive",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.archive({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "archive" },
+					),
+			),
+			options,
+		)
+	}
+
+	/** Create a store of memories that sessions can share */
+	create(
+		params: EndpointBody<"memory_stores", "create">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "create">>, CheckfuSdkError>
+	create(
+		params: EndpointBody<"memory_stores", "create">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "create">, CheckfuSdkError>
+	create(
+		params: EndpointBody<"memory_stores", "create">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "create">
+		| WithResponse<EndpointSuccess<"memory_stores", "create">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+				withPendingReadiness(
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.memoryStores.create",
+						key !== undefined ? "idempotent" : "pre-commit-only",
+						withResolvedIdempotencyKey(options, key),
+						() =>
+							this.#runtime.raw.memory_stores.create({
+								headers: key === undefined ? {} : { "idempotency-key": key },
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+					{ kind: "create" },
+				),
+			),
+			options,
+		)
+	}
+
+	/** Delete a memory store and make its memories unreachable */
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "delete">>, CheckfuSdkError>
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "delete">, CheckfuSdkError>
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "delete">
+		| WithResponse<EndpointSuccess<"memory_stores", "delete">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "delete", { memory_store_id: memoryStoreId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.memoryStores.delete",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.memory_stores.delete({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	list(
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & AnyRequestOptions)
+			| undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError>
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "list">
+		| WithResponse<EndpointSuccess<"memory_stores", "list">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.memoryStores.list", "idempotent", options, () =>
+				this.#runtime.raw.memory_stores.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["include_archived"] === undefined
+							? {}
+							: { include_archived: params["include_archived"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"memory_stores", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Retrieve a memory store by ID */
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "get">>, CheckfuSdkError>
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "get">, CheckfuSdkError>
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"memory_stores", "get"> | WithResponse<EndpointSuccess<"memory_stores", "get">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "get", { memory_store_id: memoryStoreId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.memoryStores.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.memory_stores.get({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Rename a memory store or change its description */
+	update(
+		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "update">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "update">>, CheckfuSdkError>
+	update(
+		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "update">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "update">, CheckfuSdkError>
+	update(
+		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "update">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "update">
+		| WithResponse<EndpointSuccess<"memory_stores", "update">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("memory_stores", "update", { memory_store_id: memoryStoreId }),
+				(pathParams) =>
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.memoryStores.update",
+							"pre-commit-only",
+							options,
+							() =>
+								this.#runtime.raw.memory_stores.update({
+									params: pathParams,
+									payload: params,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						pendingUpdateReadiness(params, "memoryStores.update"),
+					),
+			),
+			options,
+		)
+	}
+}
+
 export class EffectSessionsEventsResource {
 	readonly #runtime: EffectSdkRuntime
 
@@ -3113,6 +3722,7 @@ export class EffectResources {
 	readonly artifacts: EffectArtifactsResource
 	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
+	readonly memoryStores: EffectMemoryStoresResource
 	readonly sessions: EffectSessionsResource
 	readonly vaults: EffectVaultsResource
 
@@ -3121,6 +3731,7 @@ export class EffectResources {
 		this.artifacts = new EffectArtifactsResource(runtime)
 		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
+		this.memoryStores = new EffectMemoryStoresResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
 		this.vaults = new EffectVaultsResource(runtime)
 	}
@@ -3684,6 +4295,192 @@ export class EnvironmentsResource {
 	}
 }
 
+export class MemoryStoresMemoriesResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Create a memory at a path that holds none */
+	create(
+		memoryStoreId: PathParam<"memory_stores", "createMemory", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "createMemory">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "createMemory">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresMemoriesResource(effectRuntime).create(memoryStoreId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Delete a memory from its store */
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "deleteMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "deleteMemory", "memory_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "deleteMemory">> &
+			PromiseRequestOptions,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "deleteMemory">> {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresMemoriesResource(effectRuntime).delete(
+				memoryStoreId,
+				memoryId,
+				params,
+				{ ...effectOpts, withResponse: true },
+			),
+		)
+	}
+
+	/** List the memories in a store, without their content */
+	list(
+		memoryStoreId: PathParam<"memory_stores", "listMemories", "memory_store_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "listMemories">> &
+			PromiseRequestOptions,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "listMemories">> {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresMemoriesResource(effectRuntime).list(memoryStoreId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve a memory with its content */
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "getMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "getMemory", "memory_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "getMemory">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresMemoriesResource(effectRuntime).retrieve(memoryStoreId, memoryId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Replace a memory's content, optionally only if it is unchanged since it was read */
+	update(
+		memoryStoreId: PathParam<"memory_stores", "updateMemory", "memory_store_id">,
+		memoryId: PathParam<"memory_stores", "updateMemory", "memory_id">,
+		params: EndpointBody<"memory_stores", "updateMemory">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "updateMemory">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresMemoriesResource(effectRuntime).update(
+				memoryStoreId,
+				memoryId,
+				params,
+				{ ...effectOpts, withResponse: true },
+			),
+		)
+	}
+}
+
+export class MemoryStoresResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly memories: MemoryStoresMemoriesResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.memories = new MemoryStoresMemoriesResource(runtime)
+	}
+
+	/** Make a memory store read-only and stop new sessions from attaching it */
+	archive(
+		memoryStoreId: PathParam<"memory_stores", "archive", "memory_store_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "archive">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresResource(effectRuntime).archive(memoryStoreId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Create a store of memories that sessions can share */
+	create(
+		params: EndpointBody<"memory_stores", "create">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "create">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresResource(effectRuntime).create(params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Delete a memory store and make its memories unreachable */
+	delete(
+		memoryStoreId: PathParam<"memory_stores", "delete", "memory_store_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "delete">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresResource(effectRuntime).delete(memoryStoreId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"memory_stores", "list">>, string>,
+		ItemOf<EndpointJsonSuccess<"memory_stores", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectMemoryStoresResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
+	/** Retrieve a memory store by ID */
+	retrieve(
+		memoryStoreId: PathParam<"memory_stores", "get", "memory_store_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "get">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresResource(effectRuntime).retrieve(memoryStoreId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Rename a memory store or change its description */
+	update(
+		memoryStoreId: PathParam<"memory_stores", "update", "memory_store_id">,
+		params: EndpointBody<"memory_stores", "update">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"memory_stores", "update">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectMemoryStoresResource(effectRuntime).update(memoryStoreId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
 export class SessionsEventsResource {
 	readonly #runtime: PromiseSdkRuntime
 
@@ -4098,6 +4895,7 @@ export class PromiseResources {
 	readonly artifacts: ArtifactsResource
 	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
+	readonly memoryStores: MemoryStoresResource
 	readonly sessions: SessionsResource
 	readonly vaults: VaultsResource
 
@@ -4106,6 +4904,7 @@ export class PromiseResources {
 		this.artifacts = new ArtifactsResource(runtime)
 		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
+		this.memoryStores = new MemoryStoresResource(runtime)
 		this.sessions = new SessionsResource(runtime)
 		this.vaults = new VaultsResource(runtime)
 	}

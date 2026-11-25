@@ -104,6 +104,8 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
+			"memoryStores_archiveMemoryStore",
+			"memoryStores_deleteMemoryStore",
 			"sessions_archiveSession",
 			"vaults_archiveCredential",
 			"vaults_archiveVault",
@@ -121,6 +123,8 @@ describe("MCP tool projection", () => {
 			"artifacts_createArtifactVersion",
 			"automations_createAutomation",
 			"environments_createEnvironment",
+			"memoryStores_createMemory",
+			"memoryStores_createMemoryStore",
 			"sessions_createSession",
 			"vaults_createVault",
 		])

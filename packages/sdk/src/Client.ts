@@ -1,3 +1,4 @@
+import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
@@ -109,6 +110,8 @@ export interface PendingResolved {
 	readonly artifact_version: ArtifactVersion
 	readonly vault: Vault
 	readonly vault_credential: VaultCredential
+	readonly memory_store: MemoryStoreSnapshot
+	readonly memory: MemorySnapshot
 }
 
 export type PendingResolvedResource = PendingResolved[PendingResourceType]
@@ -141,6 +144,10 @@ const retrievePending = (
 			return client.vaults.retrieve(pending.id, options)
 		case "vault_credential":
 			return client.vaults.credentials.retrieve(pending.vault_id, pending.id, options)
+		case "memory_store":
+			return client.memoryStores.retrieve(pending.id, options)
+		case "memory":
+			return client.memoryStores.memories.retrieve(pending.memory_store_id, pending.id, options)
 		default: {
 			const unknown: { readonly type: unknown } = pending
 			return Effect.fail(

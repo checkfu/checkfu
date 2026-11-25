@@ -24,6 +24,14 @@ const SOURCES = [
 	{ name: "AutomationView", version: 5, from: ["Automation"] },
 	{ name: "AutomationRunView", version: 1, from: ["Automation"] },
 	{ name: "ArtifactVersionView", version: 1, from: ["Artifact"] },
+	{
+		name: "Listing",
+		version: 3,
+		from: ["Agent", "Artifact", "Automation", "Environment", "MemoryStore", "Session"],
+	},
+	{ name: "MemoryStoreView", version: 1, from: ["MemoryStore"] },
+	{ name: "MemoryView", version: 1, from: ["Memory"] },
+	{ name: "MemoryIndex", version: 1, from: ["Memory"] },
 ]
 
 const nameOf = (
