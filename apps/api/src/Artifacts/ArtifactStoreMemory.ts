@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { DEFAULT_STORAGE_SCOPE } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
-import { makeArtifactOwner } from "./ArtifactOwnership.ts"
+import { UNMARKED, makeArtifactOwner } from "./ArtifactOwnership.ts"
 import type { ArtifactBucketWriter, ArtifactMarks, ArtifactOwner } from "./ArtifactOwnership.ts"
 import {
 	ArtifactStore,
@@ -19,8 +19,6 @@ const decodeManifest = Schema.decodeUnknownSync(ArtifactManifestJson)
 const LIST_PAGE_SIZE = 1000
 
 const offline = (cause: string) => new ArtifactStoreError({ cause: new Error(cause) })
-
-const UNMARKED: ArtifactMarks = { purged: false, reservation: null }
 
 export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) => {
 	const objects = new Map<string, Uint8Array>()
@@ -138,7 +136,8 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 					return objects.has(artifactBlobKey(scope, artifactId, sha256))
 				}),
 			purge: (artifactId) => ownerOf(scope, artifactId).purge(artifactId),
-			release: (artifactId, writeId) => ownerOf(scope, artifactId).release(artifactId, writeId),
+			release: (artifactId, reservation) =>
+				ownerOf(scope, artifactId).release(artifactId, reservation),
 		})
 
 	return {

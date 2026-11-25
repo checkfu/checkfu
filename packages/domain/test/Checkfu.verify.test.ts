@@ -119,13 +119,14 @@ const STANDING = {
 	"Artifact.PublishedOnlyOnceCreated": "proved",
 	"Artifact.UnpublishedHoldsNoSettings": "proved",
 	"Artifact.PinnedVersionWithinHead": "proved",
-	"Artifact.AWriteIsOpenOnlyBeforeCreation": "proved",
+	"Artifact.AReservationIsOpenOnlyBeforeCreation": "proved",
+	"Artifact.OnlyTheLatestReservationIsOpen": "proved",
 	"Artifact.ATokenIsOnlyOpenedOrDropped": "proved",
 	"Artifact.UnpublishDropsTheToken": "proved",
 	"Artifact.PublishKeepsTheTokenOrTakesTheFreshOne": "proved",
 	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
-	"Artifact.OnlyReservingOpensAWrite": "proved",
-	"Artifact.CreatingTakesTheOpenWrite": "proved",
+	"Artifact.ReservationsAreNumberedInOrder": "proved",
+	"Artifact.CreatingTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
@@ -616,7 +617,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					const updatedAutomationWorld = yield* recordStep("automation-updated")
 
 					const artifactId = ArtifactId.make("art_post_admission")
-					yield* artifacts.send(new ReserveArtifact({ artifact_id: artifactId, write_id: "w1" }))
+					yield* artifacts.send(new ReserveArtifact({ artifact_id: artifactId }))
 					yield* artifacts.send(
 						new CreateArtifact({
 							artifact_id: artifactId,
@@ -624,7 +625,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							manifest: "m1",
 							file_count: 1,
 							total_bytes: 1,
-							write_id: "w1",
+							reservation: 1,
 						}),
 					)
 					yield* artifacts.send(

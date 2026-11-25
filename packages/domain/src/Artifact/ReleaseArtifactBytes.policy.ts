@@ -17,7 +17,7 @@ export const ReleaseArtifactBytesLive = ReleaseArtifactBytes.toLayer(
 		return Effect.fn(function* ({ source, event }) {
 			yield* event._tag === "artifact.deleted"
 				? bytes.purge({ artifact_id: source.id })
-				: bytes.release({ artifact_id: source.id, write_id: event.write_id })
+				: bytes.release({ artifact_id: source.id, reservation: event.reservation })
 		})
 	}),
 	{ retry: Schedule.max([Schedule.exponential("200 millis"), Schedule.recurs(6)]) },

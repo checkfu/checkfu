@@ -5,7 +5,12 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { placedStub, placement, storageScope, storageScopeOf } from "../Placement.ts"
 import type { BuiltArtifactVersion } from "./ArtifactFiles.ts"
-import { ArtifactPurged, makeArtifactOwner } from "./ArtifactOwnership.ts"
+import {
+	ArtifactPurged,
+	ArtifactReservationStale,
+	UNMARKED,
+	makeArtifactOwner,
+} from "./ArtifactOwnership.ts"
 import type { ArtifactBucketWriter, ArtifactMarks } from "./ArtifactOwnership.ts"
 import {
 	ArtifactBucket,
@@ -51,11 +56,11 @@ interface ArtifactObjectsShape {
 	readonly stage: (
 		artifactId: string,
 		built: BuiltArtifactVersion,
-		reservation: string | null,
-	) => Effect.Effect<boolean, ArtifactStoreError, RuntimeContext>
+		reservation: number | null,
+	) => Effect.Effect<"staged" | "purged" | "stale", ArtifactStoreError, RuntimeContext>
 	readonly release: (
 		artifactId: string,
-		writeId: string,
+		reservation: number,
 	) => Effect.Effect<void, ArtifactStoreError, RuntimeContext>
 	readonly purge: (artifactId: string) => Effect.Effect<void, ArtifactStoreError, RuntimeContext>
 }
@@ -80,7 +85,7 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 					bucket: makeWriter(bucket),
 					marks: state.storage.get<ArtifactMarks>(MARKS_KEY).pipe(
 						Effect.mapBoth({
-							onSuccess: (marks) => marks ?? { purged: false, reservation: null },
+							onSuccess: (marks) => marks ?? UNMARKED,
 							onFailure: storeError,
 						}),
 					),
@@ -91,11 +96,14 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 					stage: (artifactId, built, reservation) =>
 						overWire(
 							owner.stage(artifactId, built, reservation).pipe(
-								Effect.as(true),
-								Effect.catchTag("ArtifactPurged", () => Effect.succeed(false)),
+								Effect.as("staged" as const),
+								Effect.catchTags({
+									ArtifactPurged: () => Effect.succeed("purged" as const),
+									ArtifactReservationStale: () => Effect.succeed("stale" as const),
+								}),
 							),
 						),
-					release: (artifactId, writeId) => overWire(owner.release(artifactId, writeId)),
+					release: (artifactId, reservation) => overWire(owner.release(artifactId, reservation)),
 					purge: (artifactId) => overWire(owner.purge(artifactId)),
 				}
 			}),
@@ -124,13 +132,24 @@ export const ArtifactStoreR2 = Layer.effect(
 		return {
 			stage: (artifactId, version, reservation) =>
 				call(() => owners(artifactId).stage(artifactId, version, reservation)).pipe(
-					Effect.flatMap((staged) =>
-						staged ? Effect.void : Effect.fail(new ArtifactPurged({ artifact_id: artifactId })),
+					Effect.flatMap(
+						(outcome): Effect.Effect<void, ArtifactPurged | ArtifactReservationStale> =>
+							outcome === "staged"
+								? Effect.void
+								: outcome === "purged"
+									? Effect.fail(new ArtifactPurged({ artifact_id: artifactId }))
+									: Effect.fail(
+											new ArtifactReservationStale({
+												artifact_id: artifactId,
+												reservation: reservation ?? 0,
+											}),
+										),
 					),
 				),
 			...artifactReads(scope, bucket, run),
 			purge: (artifactId) => call(() => owners(artifactId).purge(artifactId)),
-			release: (artifactId, writeId) => call(() => owners(artifactId).release(artifactId, writeId)),
+			release: (artifactId, reservation) =>
+				call(() => owners(artifactId).release(artifactId, reservation)),
 		}
 	}),
 )

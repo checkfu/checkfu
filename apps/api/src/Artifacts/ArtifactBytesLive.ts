@@ -5,6 +5,7 @@ import { ArtifactStore } from "./ArtifactStore.ts"
 export const ArtifactBytesLive = ArtifactBytes.toLayer(
 	Effect.map(ArtifactStore, (store) => ({
 		purge: ({ artifact_id }) => Effect.orDie(store.purge(artifact_id)),
-		release: ({ artifact_id, write_id }) => Effect.orDie(store.release(artifact_id, write_id)),
+		release: ({ artifact_id, reservation }) =>
+			Effect.orDie(store.release(artifact_id, reservation)),
 	})),
 )

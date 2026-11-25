@@ -78,21 +78,25 @@
 				"kind": "model invariant",
 				"source": "(m) =>\n\t\t\tm.Artifact.every(\n\t\t\t\t(a) =>\n\t\t\t\t\tm.ArtifactVersionView.filter((v) => v.state.artifact_id === a.id).length ===\n\t\t\t\t\ta.state.version,\n\t\t\t)"
 			},
-			"Artifact.AWriteIsOpenOnlyBeforeCreation": {
+			"Artifact.AReservationIsOpenOnlyBeforeCreation": {
 				"kind": "invariant",
-				"source": "(s) => [s.open_write === \"\", s.status === \"\"].some((ok) => ok)"
+				"source": "(s) =>\n\t\t\t[s.open_reservation === 0, s.status === \"\"].some((ok) => ok)"
 			},
-			"Artifact.OnlyReservingOpensAWrite": {
-				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.open_write === before.open_write,\n\t\t\t\tafter.open_write === \"\",\n\t\t\t\tcommand._tag === \"ReserveArtifact\",\n\t\t\t].some((ok) => ok)"
+			"Artifact.OnlyTheLatestReservationIsOpen": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.open_reservation === 0, s.open_reservation === s.reservations].some((ok) => ok)"
 			},
-			"Artifact.CreatingTakesTheOpenWrite": {
+			"Artifact.ReservationsAreNumberedInOrder": {
 				"kind": "transition",
-				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"CreateArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.open_write !== \"\", before.open_write === command.write_id].every((ok) => ok),\n\t\t\t].some((ok) => ok)\n\t\t}"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.reservations === before.reservations,\n\t\t\t\t[command._tag === \"ReserveArtifact\", after.reservations === before.reservations + 1].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"Artifact.CreatingTakesTheOpenReservation": {
+				"kind": "transition",
+				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"CreateArtifact\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.status === before.status,\n\t\t\t\t[before.open_reservation !== 0, before.open_reservation === command.reservation].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)\n\t\t}"
 			},
 			"Artifact.ClaimingAKeyChangesNoState": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"ClaimArtifactIdempotencyKey\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.manifest === before.manifest,\n\t\t\t\t\tafter.open_write === before.open_write,\n\t\t\t\t\tafter.created_at === before.created_at,\n\t\t\t\t\tafter.updated_at === before.updated_at,\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.published_at === before.published_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tcommand._tag !== \"ClaimArtifactIdempotencyKey\",\n\t\t\t\t[\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t\tafter.version === before.version,\n\t\t\t\t\tafter.name === before.name,\n\t\t\t\t\tafter.manifest === before.manifest,\n\t\t\t\t\tafter.reservations === before.reservations,\n\t\t\t\t\tafter.open_reservation === before.open_reservation,\n\t\t\t\t\tafter.created_at === before.created_at,\n\t\t\t\t\tafter.updated_at === before.updated_at,\n\t\t\t\t\tafter.publication_token === before.publication_token,\n\t\t\t\t\tafter.pinned_version === before.pinned_version,\n\t\t\t\t\tafter.published_at === before.published_at,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

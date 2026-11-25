@@ -3,7 +3,6 @@ import { ArtifactId } from "./Artifact.id.ts"
 import { ArtifactReservationLapsed } from "./ArtifactReservationLapsed.rejection.ts"
 import {
 	ArtifactName,
-	ArtifactWriteId,
 	ManifestHash,
 	NonEmptyString,
 	NonNegativeInt,
@@ -31,7 +30,7 @@ export class CreateArtifact extends Domain.Command("CreateArtifact", {
 		manifest: ManifestHash,
 		file_count: PositiveInt,
 		total_bytes: NonNegativeInt,
-		write_id: ArtifactWriteId,
+		reservation: NonNegativeInt,
 	},
 	events: [ArtifactCreated],
 	rejects: [ArtifactReservationLapsed, ArtifactAlreadyExists],

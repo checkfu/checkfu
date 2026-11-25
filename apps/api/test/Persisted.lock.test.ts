@@ -425,7 +425,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(renamed[0]).toContain(manifest)
 			expect(renamed[0]).toContain("Artifact manifests")
 			const marks = "artifact-marks:ArtifactObjects/marks"
-			const kept = lockWith({ [marks]: [{ purged: true, reservation: null }] })
+			const kept = lockWith({ [marks]: [{ purged: true, staged: 2, released: 1 }] })
 			expect(yield* lockProblems(kept)).toEqual([])
 			const reshaped = yield* lockProblems(
 				kept,

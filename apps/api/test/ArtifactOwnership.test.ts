@@ -6,7 +6,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import { buildArtifactVersion } from "../src/Artifacts/ArtifactFiles.ts"
 import type { ArtifactFileInput } from "../src/Artifacts/ArtifactFiles.ts"
-import { makeArtifactOwner } from "../src/Artifacts/ArtifactOwnership.ts"
+import { UNMARKED, makeArtifactOwner } from "../src/Artifacts/ArtifactOwnership.ts"
 import type { ArtifactBucketWriter, ArtifactMarks } from "../src/Artifacts/ArtifactOwnership.ts"
 import { artifactBlobKey, artifactManifestKey } from "../src/Artifacts/ArtifactStore.ts"
 
@@ -16,7 +16,7 @@ const ID = "art_owner"
 const makeOwner = () => {
 	const objects = new Map<string, Uint8Array | string>()
 	const puts: Array<string> = []
-	let marks: ArtifactMarks = { purged: false, reservation: null }
+	let marks: ArtifactMarks = UNMARKED
 	let beforeList: Effect.Effect<void> = Effect.void
 	const bucket: ArtifactBucketWriter<never> = {
 		put: (key, body) =>
@@ -62,8 +62,11 @@ const build = (files: ReadonlyArray<ArtifactFileInput>) =>
 		Effect.provide(Digest.layerWebCrypto),
 	)
 
+const isFailure = (exit: Exit.Exit<unknown, unknown>, tag: string) =>
+	Exit.isFailure(exit) && JSON.stringify(exit.cause).includes(tag)
+
 describe("artifact owner", () => {
-	it.effect("stores each file once and records the reservation it was staged under", () =>
+	it.effect("stores each file once and records the latest reservation staged", () =>
 		Effect.gen(function* () {
 			const { owner, objects, puts, marks } = makeOwner()
 			const first = yield* build([{ path: "a.txt", content: "a" }])
@@ -71,9 +74,9 @@ describe("artifact owner", () => {
 				{ path: "a.txt", content: "a" },
 				{ path: "b.txt", content: "b" },
 			])
-			yield* owner.stage(ID, first, "w1")
+			yield* owner.stage(ID, first, 1)
 			yield* owner.stage(ID, second, null)
-			expect(marks()).toEqual({ purged: false, reservation: "w1" })
+			expect(marks()).toEqual({ purged: false, staged: 1, released: 0 })
 			expect(objects.has(artifactManifestKey(SCOPE, ID, first.manifest_hash))).toBe(true)
 			expect(objects.has(artifactManifestKey(SCOPE, ID, second.manifest_hash))).toBe(true)
 			const shared = artifactBlobKey(SCOPE, ID, first.blobs[0]?.sha256 ?? "")
@@ -82,17 +85,41 @@ describe("artifact owner", () => {
 		}),
 	)
 
-	it.effect("releases files only for the reservation they were staged under", () =>
+	it.effect("releases the files of an expired reservation and of every one it displaced", () =>
 		Effect.gen(function* () {
 			const { owner, objects, marks } = makeOwner()
-			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), "w1")
-			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), "w2")
-			yield* owner.release(ID, "w1")
-			expect(objects.size).toBe(2)
-			yield* owner.release(ID, "w2")
+			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), 1)
+			yield* owner.release(ID, 2)
 			expect(objects.size).toBe(0)
-			expect(marks()).toEqual({ purged: false, reservation: null })
-			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "again" }]), "w3")
+			expect(marks()).toEqual({ purged: false, staged: 1, released: 2 })
+			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "again" }]), 3)
+			expect(objects.size).toBe(2)
+		}),
+	)
+
+	it.effect("keeps a newer reservation's files when an older one is released late", () =>
+		Effect.gen(function* () {
+			const { owner, objects, marks } = makeOwner()
+			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), 2)
+			yield* owner.release(ID, 1)
+			expect(objects.size).toBe(2)
+			expect(marks()).toEqual({ purged: false, staged: 2, released: 1 })
+		}),
+	)
+
+	it.effect("refuses a stage for a reservation older than one already staged or released", () =>
+		Effect.gen(function* () {
+			const { owner, objects } = makeOwner()
+			const late = yield* build([{ path: "late.txt", content: "late" }])
+			yield* owner.release(ID, 1)
+			expect(
+				isFailure(yield* Effect.exit(owner.stage(ID, late, 1)), "ArtifactReservationStale"),
+			).toBe(true)
+			yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), 3)
+			expect(
+				isFailure(yield* Effect.exit(owner.stage(ID, late, 2)), "ArtifactReservationStale"),
+			).toBe(true)
+			yield* owner.release(ID, 2)
 			expect(objects.size).toBe(2)
 		}),
 	)
@@ -101,15 +128,14 @@ describe("artifact owner", () => {
 		Effect.gen(function* () {
 			const { owner, objects, marks } = makeOwner()
 			const files = yield* build([{ path: "a.txt", content: "a" }])
-			yield* owner.stage(ID, files, "w1")
+			yield* owner.stage(ID, files, 1)
 			yield* owner.purge(ID)
 			expect(objects.size).toBe(0)
-			expect(marks()).toEqual({ purged: true, reservation: null })
-			const late = yield* Effect.exit(owner.stage(ID, files, null))
-			expect(Exit.isFailure(late) && JSON.stringify(late.cause).includes("ArtifactPurged")).toBe(
+			expect(marks().purged).toBe(true)
+			expect(isFailure(yield* Effect.exit(owner.stage(ID, files, null)), "ArtifactPurged")).toBe(
 				true,
 			)
-			yield* owner.release(ID, "w1")
+			yield* owner.release(ID, 2)
 			yield* owner.purge(ID)
 			expect(objects.size).toBe(0)
 		}),
@@ -119,7 +145,7 @@ describe("artifact owner", () => {
 		Effect.gen(function* () {
 			const { owner, objects, setBeforeList } = makeOwner()
 			const files = yield* build([{ path: "a.txt", content: "a" }])
-			yield* owner.stage(ID, files, "w1")
+			yield* owner.stage(ID, files, 1)
 			const listing = yield* Deferred.make<void>()
 			const proceed = yield* Deferred.make<void>()
 			setBeforeList(

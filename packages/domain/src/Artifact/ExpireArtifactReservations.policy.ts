@@ -17,8 +17,11 @@ export const ExpireArtifactReservationsLive = ExpireArtifactReservations.toLayer
 		const artifacts = yield* Artifact
 		return Effect.fn(function* ({ source, event }) {
 			yield* artifacts.schedule(
-				new ExpireArtifactReservation({ artifact_id: source.id, write_id: event.write_id }),
-				{ after: ARTIFACT_RESERVATION_TTL, commandId: `expire-reservation:${event.write_id}` },
+				new ExpireArtifactReservation({
+					artifact_id: source.id,
+					reservation: event.reservation,
+				}),
+				{ after: ARTIFACT_RESERVATION_TTL, commandId: `expire-reservation:${event.reservation}` },
 			)
 		})
 	}),

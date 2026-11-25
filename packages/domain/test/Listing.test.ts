@@ -111,14 +111,14 @@ describe("ListResources", () => {
 			})
 			for (const n of [1, 2, 3]) {
 				const artifact_id = ArtifactId.make(`art_list_${n}`)
-				yield* domain.ReserveArtifact({ artifact_id, write_id: "w1" })
+				yield* domain.ReserveArtifact({ artifact_id })
 				yield* domain.CreateArtifact({
 					artifact_id,
 					name: `Artifact ${n}`,
 					manifest: "m".repeat(64),
 					file_count: 1,
 					total_bytes: 1,
-					write_id: "w1",
+					reservation: 1,
 				})
 			}
 			const deletedArtifact = yield* domain.DeleteArtifact({

@@ -17,6 +17,11 @@ export class ArtifactPurged extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("ArtifactPurged", { artifact_id: Schema.String }) {}
 
+export class ArtifactReservationStale extends Schema.TaggedError<
+	ArtifactReservationStale,
+	{ readonly brand: unique symbol }
+>()("ArtifactReservationStale", { artifact_id: Schema.String, reservation: Schema.Int }) {}
+
 export interface ArtifactPutOptions {
 	readonly contentType?: string
 	readonly sha256?: string
@@ -35,7 +40,8 @@ export interface ArtifactBucketWriter<R> {
 
 export const ArtifactMarks = Schema.Struct({
 	purged: Schema.Boolean,
-	reservation: Schema.NullOr(Schema.String),
+	staged: Schema.Int,
+	released: Schema.Int,
 })
 export type ArtifactMarks = typeof ArtifactMarks.Type
 
@@ -55,15 +61,20 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 			stored ? Effect.void : bucket.put(key, body, options),
 		)
 
-	const stage = (artifactId: string, built: BuiltArtifactVersion, reservation: string | null) =>
+	const stage = (artifactId: string, built: BuiltArtifactVersion, reservation: number | null) =>
 		lock.withPermit(
 			Effect.gen(function* () {
 				const marks = yield* ports.marks
 				if (marks.purged) {
 					return yield* new ArtifactPurged({ artifact_id: artifactId })
 				}
-				if (reservation !== null && marks.reservation !== reservation) {
-					yield* ports.saveMarks({ ...marks, reservation })
+				if (reservation !== null) {
+					if (reservation <= marks.released || reservation < marks.staged) {
+						return yield* new ArtifactReservationStale({ artifact_id: artifactId, reservation })
+					}
+					if (reservation > marks.staged) {
+						yield* ports.saveMarks({ ...marks, staged: reservation })
+					}
 				}
 				yield* Effect.forEach(
 					built.blobs,
@@ -84,15 +95,17 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 	const deleteAll = (artifactId: string) =>
 		deleteUntilEmpty(bucket.list(artifactPrefix(scope, artifactId)), bucket.delete)
 
-	const release = (artifactId: string, writeId: string) =>
+	const release = (artifactId: string, reservation: number) =>
 		lock.withPermit(
 			Effect.gen(function* () {
 				const marks = yield* ports.marks
-				if (marks.purged || marks.reservation !== writeId) {
+				if (marks.purged || reservation <= marks.released) {
 					return
 				}
-				yield* deleteAll(artifactId)
-				yield* ports.saveMarks({ ...marks, reservation: null })
+				if (marks.staged <= reservation) {
+					yield* deleteAll(artifactId)
+				}
+				yield* ports.saveMarks({ ...marks, released: reservation })
 			}),
 		)
 
@@ -101,7 +114,7 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 			Effect.gen(function* () {
 				const marks = yield* ports.marks
 				if (!marks.purged) {
-					yield* ports.saveMarks({ purged: true, reservation: null })
+					yield* ports.saveMarks({ ...marks, purged: true })
 				}
 				yield* deleteAll(artifactId)
 			}),
@@ -109,5 +122,7 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 
 	return { stage, release, purge }
 }
+
+export const UNMARKED: ArtifactMarks = { purged: false, staged: 0, released: 0 }
 
 export type ArtifactOwner<R> = ReturnType<typeof makeArtifactOwner<R>>

@@ -34,7 +34,8 @@ export const ArtifactState = Schema.Struct({
 	version: NonNegativeInt,
 	name: Schema.String,
 	manifest: Schema.String,
-	open_write: Schema.String,
+	reservations: NonNegativeInt,
+	open_reservation: NonNegativeInt,
 	created_at: NonNegativeInt,
 	updated_at: NonNegativeInt,
 	publication_token: Schema.String,
@@ -58,7 +59,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 		version: 0,
 		name: "",
 		manifest: "",
-		open_write: "",
+		reservations: 0,
+		open_reservation: 0,
 		created_at: 0,
 		updated_at: 0,
 		publication_token: "",
@@ -91,7 +93,10 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				[s.pinned_version === 0, s.published_at === 0].every((ok) => ok),
 			].some((ok) => ok),
 		PinnedVersionWithinHead: (s) => s.pinned_version <= s.version,
-		AWriteIsOpenOnlyBeforeCreation: (s) => [s.open_write === "", s.status === ""].some((ok) => ok),
+		AReservationIsOpenOnlyBeforeCreation: (s) =>
+			[s.open_reservation === 0, s.status === ""].some((ok) => ok),
+		OnlyTheLatestReservationIsOpen: (s) =>
+			[s.open_reservation === 0, s.open_reservation === s.reservations].some((ok) => ok),
 	},
 	transitions: {
 		CreatedArtifactNeverReturnsToUninitialized: ({ before, after }) =>
@@ -143,19 +148,22 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				),
 			].some((ok) => ok)
 		},
-		OnlyReservingOpensAWrite: ({ before, after, command }) =>
+		ReservationsAreNumberedInOrder: ({ before, after, command }) =>
 			[
-				after.open_write === before.open_write,
-				after.open_write === "",
-				command._tag === "ReserveArtifact",
+				after.reservations === before.reservations,
+				[command._tag === "ReserveArtifact", after.reservations === before.reservations + 1].every(
+					(ok) => ok,
+				),
 			].some((ok) => ok),
-		CreatingTakesTheOpenWrite: ({ before, after, command }) => {
+		CreatingTakesTheOpenReservation: ({ before, after, command }) => {
 			if (command._tag !== "CreateArtifact") {
 				return true
 			}
 			return [
 				after.status === before.status,
-				[before.open_write !== "", before.open_write === command.write_id].every((ok) => ok),
+				[before.open_reservation !== 0, before.open_reservation === command.reservation].every(
+					(ok) => ok,
+				),
 			].some((ok) => ok)
 		},
 		ATokenIsOnlyOpenedOrDropped: ({ before, after }) =>
@@ -203,7 +211,8 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 					after.version === before.version,
 					after.name === before.name,
 					after.manifest === before.manifest,
-					after.open_write === before.open_write,
+					after.reservations === before.reservations,
+					after.open_reservation === before.open_reservation,
 					after.created_at === before.created_at,
 					after.updated_at === before.updated_at,
 					after.publication_token === before.publication_token,
@@ -213,23 +222,19 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 			].some((ok) => ok),
 	},
 	decide: {
-		ReserveArtifact: (state, cmd, ctx) => {
-			if (state.status !== "") {
-				return new ArtifactAlreadyExists({ artifact_id: ctx.id })
-			}
-			return state.open_write === cmd.write_id
-				? []
-				: [new ArtifactReserved({ write_id: cmd.write_id })]
-		},
+		ReserveArtifact: (state, _cmd, ctx) =>
+			state.status !== ""
+				? new ArtifactAlreadyExists({ artifact_id: ctx.id })
+				: [new ArtifactReserved({ reservation: state.reservations + 1 })],
 		ExpireArtifactReservation: (state, cmd) =>
-			[state.status === "", state.open_write === cmd.write_id].every((ok) => ok)
-				? [new ArtifactReservationExpired({ write_id: cmd.write_id })]
+			[state.status === "", state.open_reservation === cmd.reservation].every((ok) => ok)
+				? [new ArtifactReservationExpired({ reservation: cmd.reservation })]
 				: [],
 		CreateArtifact: (state, cmd, ctx) => {
 			if (state.status !== "") {
 				return new ArtifactAlreadyExists({ artifact_id: ctx.id })
 			}
-			if (state.open_write === "" || state.open_write !== cmd.write_id) {
+			if (state.open_reservation === 0 || state.open_reservation !== cmd.reservation) {
 				return new ArtifactReservationLapsed({ artifact_id: ctx.id })
 			}
 			return [
@@ -299,20 +304,23 @@ export class Artifact extends Domain.Aggregate("Artifact", {
 				: [new ArtifactIdempotencyKeyClaimed({ fingerprint: cmd.fingerprint })],
 	},
 	reply: {
+		ReserveArtifact: (state) => ({ reservation: state.reservations }),
 		CreateArtifact: (state) => ({ version: state.version }),
 		AddArtifactVersion: (state) => ({ version: state.version }),
 	},
 	evolve: {
 		"artifact.reserved": (state, e) =>
-			state.status === "" ? { ...state, open_write: e.write_id } : state,
+			state.status === ""
+				? { ...state, reservations: e.reservation, open_reservation: e.reservation }
+				: state,
 		"artifact.reservation_expired": (state, e) =>
-			state.open_write === e.write_id ? { ...state, open_write: "" } : state,
+			state.open_reservation === e.reservation ? { ...state, open_reservation: 0 } : state,
 		"artifact.created": (state, e, envelope) =>
 			state.status === ""
 				? {
 						...state,
 						status: "active",
-						open_write: "",
+						open_reservation: 0,
 						version: e.version,
 						name: e.name,
 						manifest: e.manifest,

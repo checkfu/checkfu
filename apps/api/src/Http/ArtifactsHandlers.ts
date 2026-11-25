@@ -20,7 +20,6 @@ import * as DateTime from "effect/DateTime"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
-import * as Hex from "effect/encoding/Hex"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import { PublicationAddress } from "@checkfu/sdk/Schemas"
@@ -153,9 +152,12 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				),
 			)
 
-		const stage = (id: ArtifactId, built: BuiltArtifactVersion, reservation: string | null) =>
+		const stage = (id: ArtifactId, built: BuiltArtifactVersion, reservation: number | null) =>
 			stored(store.stage(id, built, reservation)).pipe(
-				Effect.catchTag("ArtifactPurged", () => reject(404, `Artifact ${id} not found.`)),
+				Effect.catchTags({
+					ArtifactPurged: () => reject(404, `Artifact ${id} not found.`),
+					ArtifactReservationStale: () => interrupted,
+				}),
 			)
 
 		const missingBytes = (id: ArtifactId, detail: Record<string, string>) =>
@@ -283,12 +285,15 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					} else {
 						id = ArtifactId.make(yield* randomId(random, "art"))
 					}
-					const writeId = Hex.encode(yield* random.randomBytes(12))
+					let reservation = 0
 					if ((yield* artifacts.get(id)).status === "") {
-						yield* artifacts
-							.send(new ReserveArtifact({ artifact_id: id, write_id: writeId }))
-							.pipe(Effect.catchTag("ArtifactAlreadyExists", () => Effect.void))
-						yield* stage(id, built, writeId)
+						reservation = yield* artifacts.send(new ReserveArtifact({ artifact_id: id })).pipe(
+							Effect.map((reserved) => reserved.reply.reservation),
+							Effect.catchTag("ArtifactAlreadyExists", () => Effect.succeed(0)),
+						)
+						if (reservation !== 0) {
+							yield* stage(id, built, reservation)
+						}
 					}
 					const receipt = yield* artifacts
 						.send(
@@ -298,9 +303,9 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 								manifest: built.manifest_hash,
 								file_count: built.file_count,
 								total_bytes: built.total_bytes,
-								write_id: writeId,
+								reservation,
 							}),
-							sendOptions ?? { commandId: `create-artifact:${writeId}` },
+							sendOptions ?? { commandId: `create-artifact:${id}` },
 						)
 						.pipe(
 							Effect.catchTags({

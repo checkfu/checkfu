@@ -120,8 +120,10 @@ const withApi = <A>(
 		) => Effect.Effect<Response>
 		readonly holdSend: (command: string) => Effect.Effect<Gate>
 		readonly deleteSteeredSend: (path: string) => Effect.Effect<Response>
-		readonly openWrite: (artifactId: string) => Effect.Effect<string>
-		readonly expire: (artifactId: string, writeId: string) => Effect.Effect<void>
+		readonly reservationsOf: (
+			artifactId: string,
+		) => Effect.Effect<{ readonly made: number; readonly open: number }>
+		readonly expire: (artifactId: string, reservation: number) => Effect.Effect<void>
 		readonly service: ArtifactStoreService
 		readonly serviceIn: (scope: string) => Effect.Effect<ArtifactStoreService>
 		readonly build: (files: ReadonlyArray<ArtifactFileInput>) => Effect.Effect<BuiltArtifactVersion>
@@ -267,17 +269,17 @@ const withApi = <A>(
 							release: Deferred.succeed(released, undefined),
 						}
 					}),
-				openWrite: (artifactId) =>
-					Effect.map(
-						Effect.orDie(artifacts.get(ArtifactId.make(artifactId))),
-						(state) => state.open_write,
-					),
-				expire: (artifactId, writeId) =>
+				reservationsOf: (artifactId) =>
+					Effect.map(Effect.orDie(artifacts.get(ArtifactId.make(artifactId))), (state) => ({
+						made: state.reservations,
+						open: state.open_reservation,
+					})),
+				expire: (artifactId, reservation) =>
 					Effect.orDie(
 						artifacts.send(
 							new ExpireArtifactReservation({
 								artifact_id: ArtifactId.make(artifactId),
-								write_id: writeId,
+								reservation,
 							}),
 						),
 					),
@@ -986,7 +988,7 @@ describe("Artifacts API", () => {
 		))
 
 	it("releases the partial upload of a create that storage refused part-way once its reservation expires", () =>
-		withApi(({ call, store, expire, openWrite }) =>
+		withApi(({ call, store, expire, reservationsOf }) =>
 			Effect.gen(function* () {
 				store.setFailManifest(true)
 				const failed = yield* call("POST", "/v1/artifacts", {
@@ -1001,7 +1003,7 @@ describe("Artifacts API", () => {
 				const [id, ...others] = artifactIdsIn(store)
 				expect(others).toEqual([])
 				expect(store.objects.size).toBe(2)
-				yield* expire(id ?? "", yield* openWrite(id ?? ""))
+				yield* expire(id ?? "", (yield* reservationsOf(id ?? "")).open)
 				yield* eventually(
 					Effect.sync(() => store.objects.size === 0),
 					"the partial upload is released",
@@ -1526,31 +1528,30 @@ describe("Artifacts API", () => {
 		]
 
 		it("releases the files of a create that never landed once its reservation expires", () =>
-			withApi(({ callSteeredSend, steerSends, store, openWrite, expire }) =>
+			withApi(({ callSteeredSend, steerSends, store, reservationsOf, expire }) =>
 				Effect.gen(function* () {
 					steerSends((command) => (command === "CreateArtifact" ? "lost" : "real"))
 					expect((yield* callSteeredSend("/v1/artifacts", { name: "A", files })).status).toBe(500)
 					const [id] = artifactIdsIn(store)
-					const writeId = yield* openWrite(id ?? "")
-					expect(writeId).not.toBe("")
+					const writeId = (yield* reservationsOf(id ?? "")).open
+					expect(writeId).toBe(1)
 					expect(store.objects.size).toBe(3)
 					yield* expire(id ?? "", writeId)
 					yield* eventually(
 						Effect.sync(() => store.objects.size === 0),
 						"the files are released",
 					)
-					expect(yield* openWrite(id ?? "")).toBe("")
+					expect((yield* reservationsOf(id ?? "")).open).toBe(0)
 				}),
 			))
 
 		it("keeps a create that landed although its reply was lost", () =>
-			withApi(({ call, callSteeredSend, steerSends, store, expire }) =>
+			withApi(({ call, callSteeredSend, steerSends, store, expire, reservationsOf }) =>
 				Effect.gen(function* () {
 					steerSends((command) => (command === "CreateArtifact" ? "landed" : "real"))
 					expect((yield* callSteeredSend("/v1/artifacts", { name: "A", files })).status).toBe(500)
 					const [id] = artifactIdsIn(store)
-					const writes = [...store.marks.values()].map((marks) => marks.reservation)
-					yield* expire(id ?? "", writes[0] ?? "")
+					yield* expire(id ?? "", (yield* reservationsOf(id ?? "")).made)
 					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
 					expect((yield* json<FileBody>(file)).content).toBe("b")
 					expect(store.objects.size).toBe(3)
@@ -1558,7 +1559,7 @@ describe("Artifacts API", () => {
 			))
 
 		it("refuses a create that stalls past its reservation, and a retry with the same key succeeds", () =>
-			withApi(({ call, callSteeredSend, holdSend, store, openWrite, expire, statusForKey }) =>
+			withApi(({ call, callSteeredSend, holdSend, store, reservationsOf, expire, statusForKey }) =>
 				Effect.gen(function* () {
 					const headers = { "idempotency-key": "stalled-then-retried" }
 					const held = yield* holdSend("CreateArtifact")
@@ -1567,7 +1568,7 @@ describe("Artifacts API", () => {
 					)
 					yield* held.reached
 					const [id] = artifactIdsIn(store)
-					yield* expire(id ?? "", yield* openWrite(id ?? ""))
+					yield* expire(id ?? "", (yield* reservationsOf(id ?? "")).open)
 					yield* eventually(
 						Effect.sync(() => store.objects.size === 0),
 						"the files are released",
@@ -1584,7 +1585,7 @@ describe("Artifacts API", () => {
 			))
 
 		it("keeps a retry's files when the reservation of an earlier attempt expires after it", () =>
-			withApi(({ call, callSteeredSend, steerSends, store, openWrite, expire }) =>
+			withApi(({ call, callSteeredSend, steerSends, store, reservationsOf, expire }) =>
 				Effect.gen(function* () {
 					const headers = { "idempotency-key": "expired-under-a-retry" }
 					steerSends((command) => (command === "CreateArtifact" ? "lost" : "real"))
@@ -1592,7 +1593,7 @@ describe("Artifacts API", () => {
 						(yield* callSteeredSend("/v1/artifacts", { name: "A", files }, headers)).status,
 					).toBe(500)
 					const [id] = artifactIdsIn(store)
-					const first = yield* openWrite(id ?? "")
+					const first = (yield* reservationsOf(id ?? "")).open
 					expect((yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)).status).toBe(
 						201,
 					)
@@ -1600,6 +1601,52 @@ describe("Artifacts API", () => {
 					yield* Effect.sleep("50 millis")
 					const file = yield* call("GET", `/v1/artifacts/${id}/versions/1/file?path=b.txt`)
 					expect((yield* json<FileBody>(file)).content).toBe("b")
+				}),
+			))
+
+		it("releases a failed create's files when a retry dies between its reservation and its upload", () =>
+			withApi(({ call, callSteeredSend, steerSends, store, reservationsOf, expire }) =>
+				Effect.gen(function* () {
+					const headers = { "idempotency-key": "retry-died-before-upload" }
+					steerSends((command) => (command === "CreateArtifact" ? "lost" : "real"))
+					expect(
+						(yield* callSteeredSend("/v1/artifacts", { name: "A", files }, headers)).status,
+					).toBe(500)
+					const [id] = artifactIdsIn(store)
+					expect(store.objects.size).toBe(3)
+					store.setBeforePut(
+						Effect.suspend(() => {
+							store.setBeforePut(Effect.void)
+							return Effect.die(new Error("the retry died before its upload"))
+						}),
+					)
+					expect((yield* call("POST", "/v1/artifacts", { name: "A", files }, headers)).status).toBe(
+						500,
+					)
+					expect(yield* reservationsOf(id ?? "")).toEqual({ made: 2, open: 2 })
+					yield* expire(id ?? "", 1)
+					expect(store.objects.size).toBe(3)
+					yield* expire(id ?? "", 2)
+					yield* eventually(
+						Effect.sync(() => store.objects.size === 0),
+						"the files are released",
+					)
+				}),
+			))
+
+		it("uploads nothing when a keyed create's reservation is refused because the create already landed", () =>
+			withApi(({ call, callSteeredSend, holdSend, store }) =>
+				Effect.gen(function* () {
+					const headers = { "idempotency-key": "reserve-lost-the-race" }
+					const body = { name: "A", files }
+					const held = yield* holdSend("ReserveArtifact")
+					const slow = yield* Effect.forkDetach(callSteeredSend("/v1/artifacts", body, headers))
+					yield* held.reached
+					expect((yield* call("POST", "/v1/artifacts", body, headers)).status).toBe(201)
+					const puts = [...store.objects.keys()].map((key) => store.putCount(key))
+					yield* held.release
+					expect((yield* Fiber.join(slow)).status).toBe(201)
+					expect([...store.objects.keys()].map((key) => store.putCount(key))).toEqual(puts)
 				}),
 			))
 

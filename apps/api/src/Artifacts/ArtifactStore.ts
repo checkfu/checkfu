@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema"
 import { JURISDICTION_ENV, placement, storageScope } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import type { ArtifactManifest, BuiltArtifactVersion } from "./ArtifactFiles.ts"
-import type { ArtifactPurged } from "./ArtifactOwnership.ts"
+import type { ArtifactPurged, ArtifactReservationStale } from "./ArtifactOwnership.ts"
 
 export class ArtifactStoreError extends Schema.TaggedError<
 	ArtifactStoreError,
@@ -20,8 +20,8 @@ export interface ArtifactStoreService {
 	readonly stage: (
 		artifactId: string,
 		version: BuiltArtifactVersion,
-		reservation: string | null,
-	) => Effect.Effect<void, ArtifactStoreError | ArtifactPurged>
+		reservation: number | null,
+	) => Effect.Effect<void, ArtifactStoreError | ArtifactPurged | ArtifactReservationStale>
 	readonly getManifest: (
 		artifactId: string,
 		manifestHash: string,
@@ -35,7 +35,10 @@ export interface ArtifactStoreService {
 		sha256: string,
 	) => Effect.Effect<boolean, ArtifactStoreError>
 	readonly purge: (artifactId: string) => Effect.Effect<void, ArtifactStoreError>
-	readonly release: (artifactId: string, writeId: string) => Effect.Effect<void, ArtifactStoreError>
+	readonly release: (
+		artifactId: string,
+		reservation: number,
+	) => Effect.Effect<void, ArtifactStoreError>
 }
 
 export class ArtifactStore extends Context.Service<ArtifactStore, ArtifactStoreService>()(

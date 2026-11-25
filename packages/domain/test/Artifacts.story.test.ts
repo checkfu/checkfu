@@ -61,10 +61,17 @@ describe("Artifacts", () => {
 		const artifact = Artifact.ref("art_001")
 		return story(
 			Story.clock(t0),
-			Story.state(artifact, { status: "", version: 0, name: "", manifest: "", open_write: "" }),
-			Story.when(new ReserveArtifact({ artifact_id: artifact.id, write_id: "w1" })),
-			Story.then(artifact, new ArtifactReserved({ write_id: "w1" })),
-			Story.state(artifact, { status: "", open_write: "w1" }),
+			Story.state(artifact, {
+				status: "",
+				version: 0,
+				name: "",
+				manifest: "",
+				open_reservation: 0,
+			}),
+			Story.when(new ReserveArtifact({ artifact_id: artifact.id })),
+			Story.then(artifact, new ArtifactReserved({ reservation: 1 })),
+			Story.replied({ reservation: 1 }),
+			Story.state(artifact, { status: "", reservations: 1, open_reservation: 1 }),
 			Story.when(
 				new CreateArtifact({
 					artifact_id: artifact.id,
@@ -72,7 +79,7 @@ describe("Artifacts", () => {
 					manifest: manifestA,
 					file_count: 2,
 					total_bytes: 1024,
-					write_id: "w1",
+					reservation: 1,
 				}),
 			),
 			Story.then(
@@ -91,7 +98,7 @@ describe("Artifacts", () => {
 				version: 1,
 				name: "Report",
 				manifest: manifestA,
-				open_write: "",
+				open_reservation: 0,
 				created_at: DateTime.toEpochMillis(t0),
 				updated_at: DateTime.toEpochMillis(t0),
 			}),
@@ -227,7 +234,7 @@ describe("Artifacts", () => {
 						manifest: manifestB,
 						file_count: 1,
 						total_bytes: 1,
-						write_id: "w1",
+						reservation: 1,
 					}),
 				),
 				Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
@@ -332,7 +339,7 @@ describe("Artifacts", () => {
 					manifest: manifestC,
 					file_count: 1,
 					total_bytes: 7,
-					write_id: "w1",
+					reservation: 1,
 				}),
 			),
 			Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
@@ -346,45 +353,44 @@ describe("Artifacts", () => {
 	})
 
 	it.effect(
-		"creates only under the write it reserved, and lets no create land once that expires",
+		"creates only under the latest reservation, and lets no create land once that expires",
 		() => {
 			const artifact = Artifact.ref("art_reserved")
-			const create = (write_id: string) =>
+			const create = (reservation: number) =>
 				new CreateArtifact({
 					artifact_id: artifact.id,
 					name: "Reserved",
 					manifest: manifestA,
 					file_count: 1,
 					total_bytes: 1,
-					write_id,
+					reservation,
 				})
-			const reserve = (write_id: string) =>
-				new ReserveArtifact({ artifact_id: artifact.id, write_id })
-			const expire = (write_id: string) =>
-				new ExpireArtifactReservation({ artifact_id: artifact.id, write_id })
+			const reserve = new ReserveArtifact({ artifact_id: artifact.id })
+			const expire = (reservation: number) =>
+				new ExpireArtifactReservation({ artifact_id: artifact.id, reservation })
+			const lapsed = new ArtifactReservationLapsed({ artifact_id: artifact.id })
 			return story(
 				Story.clock(t0),
-				Story.when(create("w1")),
-				Story.rejected(new ArtifactReservationLapsed({ artifact_id: artifact.id })),
-				Story.when(reserve("w1")),
-				Story.then(artifact, new ArtifactReserved({ write_id: "w1" })),
-				Story.when(reserve("w1")),
+				Story.when(create(0)),
+				Story.rejected(lapsed),
+				Story.when(reserve),
+				Story.then(artifact, new ArtifactReserved({ reservation: 1 })),
+				Story.when(reserve),
+				Story.then(artifact, new ArtifactReserved({ reservation: 2 })),
+				Story.replied({ reservation: 2 }),
+				Story.when(create(1)),
+				Story.rejected(lapsed),
+				Story.when(expire(1)),
 				Story.then(artifact),
-				Story.when(reserve("w2")),
-				Story.then(artifact, new ArtifactReserved({ write_id: "w2" })),
-				Story.when(create("w1")),
-				Story.rejected(new ArtifactReservationLapsed({ artifact_id: artifact.id })),
-				Story.when(expire("w1")),
-				Story.then(artifact),
-				Story.state(artifact, { status: "", open_write: "w2" }),
-				Story.when(expire("w2")),
-				Story.then(artifact, new ArtifactReservationExpired({ write_id: "w2" })),
-				Story.state(artifact, { status: "", open_write: "" }),
-				Story.when(create("w2")),
-				Story.rejected(new ArtifactReservationLapsed({ artifact_id: artifact.id })),
-				Story.when(reserve("w3")),
-				Story.then(artifact, new ArtifactReserved({ write_id: "w3" })),
-				Story.when(create("w3")),
+				Story.state(artifact, { status: "", reservations: 2, open_reservation: 2 }),
+				Story.when(expire(2)),
+				Story.then(artifact, new ArtifactReservationExpired({ reservation: 2 })),
+				Story.state(artifact, { status: "", reservations: 2, open_reservation: 0 }),
+				Story.when(create(2)),
+				Story.rejected(lapsed),
+				Story.when(reserve),
+				Story.then(artifact, new ArtifactReserved({ reservation: 3 })),
+				Story.when(create(3)),
 				Story.then(
 					artifact,
 					new ArtifactCreated({
@@ -395,12 +401,12 @@ describe("Artifacts", () => {
 						total_bytes: 1,
 					}),
 				),
-				Story.state(artifact, { status: "active", open_write: "" }),
-				Story.when(expire("w3")),
+				Story.state(artifact, { status: "active", reservations: 3, open_reservation: 0 }),
+				Story.when(expire(3)),
 				Story.then(artifact),
-				Story.when(reserve("w4")),
+				Story.when(reserve),
 				Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
-				Story.state(artifact, { status: "active", open_write: "" }),
+				Story.state(artifact, { status: "active", reservations: 3, open_reservation: 0 }),
 			)
 		},
 	)

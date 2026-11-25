@@ -15,6 +15,4 @@ export const ManifestHash = Schema.String.check(
 	Schema.isMaxLength(MANIFEST_HASH_LENGTH),
 )
 
-export const ArtifactWriteId = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
-
 export const PublicationToken = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32))
