@@ -478,7 +478,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							sendOptions,
 						)
 						.pipe(
-							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+							Effect.catchTags({
+								SessionAlreadyExists: () => reject(409, IDEMPOTENCY_KEY_REUSED),
+								AgentNotFound: () => reject(404, `Agent ${agentId} not found.`),
+								AgentVersionNotFound: ({ version }) =>
+									reject(404, `Agent ${agentId} has no version ${version}.`),
+								EnvironmentNotFound: () => reject(404, `Environment ${environmentId} not found.`),
+							}),
 						)
 					// The token goes straight to the session's workspace: no command carries it. A retried
 					// create stores it only where none is stored yet, so it cannot undo a later rotation.
