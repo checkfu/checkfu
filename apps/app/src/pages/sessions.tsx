@@ -2,26 +2,42 @@ import { Button } from "@checkfu/ui/button"
 import { Callout } from "@checkfu/ui/callout"
 import { Field } from "@checkfu/ui/field"
 import { shortId, timeAgo } from "@checkfu/ui/format"
-import { Input, Textarea } from "@checkfu/ui/input"
-import { PageHeader } from "@checkfu/ui/page-header"
+import { Input, Select, Textarea } from "@checkfu/ui/input"
+import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-header"
 import { DataTable } from "@checkfu/ui/table"
 import type { JsonSession } from "@checkfu/sdk/client"
-import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query"
+import {
+	useInfiniteQuery,
+	useQueryClient,
+	useSuspenseInfiniteQuery,
+	useSuspenseQuery,
+} from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
-import { PlusIcon } from "lucide-react"
+import { PlusIcon, XIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
-import { checkfu } from "../api.ts"
+import { checkfu, errorMessage, isSignedOut } from "../api.ts"
 import { choicesOf, OptionPicker } from "../option-picker.tsx"
 import {
 	agentChoices,
+	artifactChoices,
 	environmentChoices,
+	memoryStoreChoices,
 	present,
 	sessionQuery,
 	sessionsPage,
 } from "../queries.ts"
 import { selection } from "../selection.ts"
+import {
+	RESOURCE_LABELS,
+	describeResource,
+	emptyDraft,
+	namesResource,
+	resourceBody,
+	resourceIdentity,
+} from "../session-resources.ts"
+import type { ResourceDraft, ResourceType, SessionResourceItem } from "../session-resources.ts"
 import { sessionTitle } from "../session-title.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
@@ -118,8 +134,9 @@ export function NewSessionPage(): React.JSX.Element {
 	const environment = selection(environments, chosenEnvironment)
 	const agentId = agent.id
 	const environmentId = environment.id
-	const ready = agentId !== "" && environmentId !== ""
 	const [title, setTitle] = useState("")
+	const [resources, setResources] = useState<ReadonlyArray<ResourceDraft>>([])
+	const ready = agentId !== "" && environmentId !== "" && resources.every(namesResource)
 	const startKey = useSubmissionKey()
 	const start = useAction(
 		async () => {
@@ -130,8 +147,13 @@ export function NewSessionPage(): React.JSX.Element {
 				agent: agentId,
 				environment_id: environmentId,
 				title: title.trim() === "" ? null : title.trim(),
+				...(resources.length === 0 ? {} : { resources: resources.map(resourceBody) }),
 			}
-			const session = await checkfu.sessions.create(body, startKey.keyFor(body))
+			const identity = {
+				...body,
+				...(resources.length === 0 ? {} : { resources: resources.map(resourceIdentity) }),
+			}
+			const session = await checkfu.sessions.create(body, startKey.keyFor(identity))
 			startKey.settle()
 			return session
 		},
@@ -190,6 +212,7 @@ export function NewSessionPage(): React.JSX.Element {
 						<Field label="Title">
 							<Input value={title} onChange={(event) => setTitle(event.target.value)} />
 						</Field>
+						<ResourcesEditor drafts={resources} onChange={setResources} />
 						{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
 						<Button type="submit" disabled={start.pending || !ready}>
 							Start session
@@ -324,6 +347,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					{earlier.error === undefined ? null : <Callout tone="error">{earlier.error}</Callout>}
 				</div>
 			)}
+			{session.resources.length === 0 ? null : <SessionResources session={session} open={open} />}
 			<Transcript events={events} calls={calls.fold} send={open ? sendAnswer : undefined} />
 			{open && findingCalls !== null ? (
 				findingCalls.error !== undefined ? (
@@ -388,5 +412,348 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 				</form>
 			) : null}
 		</>
+	)
+}
+
+function ResourcesEditor({
+	drafts,
+	onChange,
+}: {
+	readonly drafts: ReadonlyArray<ResourceDraft>
+	readonly onChange: (drafts: ReadonlyArray<ResourceDraft>) => void
+}): React.JSX.Element {
+	const types: ReadonlyArray<ResourceType> = [
+		"github_repository",
+		"memory_store",
+		"artifact",
+		"skill",
+	]
+	return (
+		<div className="space-y-3">
+			<div>
+				<h2 className="text-sm font-medium">Resources</h2>
+				<p className="text-control text-muted-foreground">
+					Mounted in the workspace: repositories under /workspace, memory under /mnt/memory,
+					artifact files under /mnt/artifacts and skills under /mnt/skills.
+				</p>
+			</div>
+			{drafts.map((draft, index) => (
+				<div key={index} className="space-y-3 rounded-lg border p-3">
+					<div className="flex items-center justify-between">
+						<span className="text-sm font-medium">{RESOURCE_LABELS[draft.type]}</span>
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={`Remove ${RESOURCE_LABELS[draft.type].toLowerCase()}`}
+							onClick={() => onChange(drafts.filter((_, at) => at !== index))}
+						>
+							<XIcon />
+						</Button>
+					</div>
+					<ResourceFields draft={draft} onChange={(next) => onChange(drafts.with(index, next))} />
+				</div>
+			))}
+			<div className="flex flex-wrap gap-2">
+				{types.map((type) => (
+					<Button
+						key={type}
+						variant="outline"
+						size="sm"
+						onClick={() => onChange([...drafts, emptyDraft(type)])}
+					>
+						<PlusIcon /> {RESOURCE_LABELS[type]}
+					</Button>
+				))}
+			</div>
+		</div>
+	)
+}
+
+function ResourceFields({
+	draft,
+	onChange,
+}: {
+	readonly draft: ResourceDraft
+	readonly onChange: (draft: ResourceDraft) => void
+}): React.JSX.Element {
+	switch (draft.type) {
+		case "github_repository":
+			return (
+				<>
+					<Field label="URL">
+						<Input
+							required
+							placeholder="https://github.com/owner/repository"
+							value={draft.url}
+							onChange={(event) => onChange({ ...draft, url: event.target.value })}
+						/>
+					</Field>
+					<Field label="Token" description="Used to clone and push. Never shown again.">
+						<Input
+							type="password"
+							autoComplete="off"
+							value={draft.token}
+							onChange={(event) => onChange({ ...draft, token: event.target.value })}
+						/>
+					</Field>
+					<Field label="Branch or commit" description="Defaults to the default branch.">
+						<Input
+							value={draft.checkout}
+							onChange={(event) => onChange({ ...draft, checkout: event.target.value })}
+						/>
+					</Field>
+					<Field label="Mount path" description="Defaults to /workspace/<repository>.">
+						<Input
+							className="font-mono"
+							value={draft.mountPath}
+							onChange={(event) => onChange({ ...draft, mountPath: event.target.value })}
+						/>
+					</Field>
+				</>
+			)
+		case "memory_store":
+			return (
+				<>
+					<MemoryStorePicker
+						chosen={draft.memoryStoreId}
+						onChange={(memoryStoreId) => onChange({ ...draft, memoryStoreId })}
+					/>
+					<Field label="Access">
+						<Select
+							value={draft.access}
+							onChange={(event) =>
+								onChange({
+									...draft,
+									access: event.target.value === "read_only" ? "read_only" : "read_write",
+								})
+							}
+						>
+							<option value="read_write">Read and write</option>
+							<option value="read_only">Read only</option>
+						</Select>
+					</Field>
+					<Field label="Instructions" description="How this session should use the store.">
+						<Input
+							value={draft.instructions}
+							onChange={(event) => onChange({ ...draft, instructions: event.target.value })}
+						/>
+					</Field>
+				</>
+			)
+		case "artifact":
+		case "skill":
+			return (
+				<>
+					<ArtifactPicker
+						skill={draft.type === "skill"}
+						chosen={draft.artifactId}
+						onChange={(artifactId) => onChange({ ...draft, artifactId })}
+					/>
+					<Field label="Version" description="Defaults to the current version.">
+						<Input
+							type="number"
+							min={1}
+							value={draft.version}
+							onChange={(event) => onChange({ ...draft, version: event.target.value })}
+						/>
+					</Field>
+				</>
+			)
+	}
+}
+
+interface LazyChoices<T> {
+	readonly data: { readonly pages: ReadonlyArray<{ readonly data: ReadonlyArray<T> }> } | undefined
+	readonly isFetchingNextPage: boolean
+	readonly error: unknown
+	readonly hasNextPage: boolean
+	readonly fetchNextPage: () => Promise<{ readonly isError: boolean }>
+}
+
+function LazyPicker<T extends { readonly id: string }>({
+	query,
+	label,
+	noun,
+	placeholder,
+	empty,
+	chosen,
+	onChange,
+	describe,
+}: {
+	readonly query: LazyChoices<T>
+	readonly label: string
+	readonly noun: string
+	readonly placeholder: string
+	readonly empty: React.ReactNode
+	readonly chosen: string
+	readonly onChange: (id: string) => void
+	readonly describe: (option: T) => string
+}): React.JSX.Element {
+	const { data, error, isFetchingNextPage, hasNextPage, fetchNextPage } = query
+	if (data === undefined) {
+		return error === null || isSignedOut(error) ? (
+			<p className="text-control text-muted-foreground">Loading {noun}…</p>
+		) : (
+			<Callout tone="error">{errorMessage(error)}</Callout>
+		)
+	}
+	const options = choicesOf({ data, error, isFetchingNextPage, hasNextPage, fetchNextPage })
+	if (options.items.length === 0 && options.more === null) {
+		return <Callout>{empty}</Callout>
+	}
+	return (
+		<OptionPicker
+			label={label}
+			noun={noun}
+			placeholder={placeholder}
+			options={options}
+			value={chosen === "" ? { id: "", gone: false } : selection(options.items, chosen)}
+			onChange={onChange}
+			describe={describe}
+		/>
+	)
+}
+
+function MemoryStorePicker({
+	chosen,
+	onChange,
+}: {
+	readonly chosen: string
+	readonly onChange: (id: string) => void
+}): React.JSX.Element {
+	return (
+		<LazyPicker
+			query={useInfiniteQuery(memoryStoreChoices)}
+			label="Store"
+			noun="memory stores"
+			placeholder="Choose a store"
+			empty={
+				<>
+					There are no memory stores yet.{" "}
+					<Link to="/memory-stores/new" className="underline">
+						Create one
+					</Link>
+					.
+				</>
+			}
+			chosen={chosen}
+			onChange={onChange}
+			describe={(memoryStore) => memoryStore.name}
+		/>
+	)
+}
+
+function ArtifactPicker({
+	skill,
+	chosen,
+	onChange,
+}: {
+	readonly skill: boolean
+	readonly chosen: string
+	readonly onChange: (id: string) => void
+}): React.JSX.Element {
+	return (
+		<LazyPicker
+			query={useInfiniteQuery(artifactChoices)}
+			label={skill ? "Skill" : "Artifact"}
+			noun="artifacts"
+			placeholder={skill ? "Choose an artifact with a SKILL.md at its root" : "Choose an artifact"}
+			empty="There are no artifacts yet. Create one with the CLI or the API."
+			chosen={chosen}
+			onChange={onChange}
+			describe={(artifact) => `${artifact.name} (v${artifact.version})`}
+		/>
+	)
+}
+
+function SessionResources({
+	session,
+	open,
+}: {
+	readonly session: JsonSession
+	readonly open: boolean
+}): React.JSX.Element {
+	return (
+		<details className="rounded-lg border p-3 text-sm">
+			<summary className="cursor-pointer font-medium">
+				Resources ({session.resources.length})
+			</summary>
+			<div className="mt-3">
+				<DescriptionList>
+					{session.resources.map((resource) => (
+						<Description key={resource.id} label={describeResource(resource).label}>
+							<ResourceLine session={session} resource={resource} open={open} />
+						</Description>
+					))}
+				</DescriptionList>
+			</div>
+		</details>
+	)
+}
+
+function ResourceLine({
+	session,
+	resource,
+	open,
+}: {
+	readonly session: JsonSession
+	readonly resource: SessionResourceItem
+	readonly open: boolean
+}): React.JSX.Element {
+	const { name, detail } = describeResource(resource)
+	const [token, setToken] = useState<string | null>(null)
+	const rotate = useAction(
+		async (next: string) => {
+			await checkfu.sessions.rotateToken(session.id, resource.id, next)
+		},
+		{ then: () => setToken(null) },
+	)
+	return (
+		<div className="space-y-2">
+			<div className="flex flex-wrap items-baseline gap-x-2">
+				{resource.type === "memory_store" ? (
+					<Link
+						to="/memory-stores/$memoryStoreId"
+						params={{ memoryStoreId: resource.memory_store_id }}
+						className="hover:underline"
+					>
+						{name}
+					</Link>
+				) : (
+					<span>{name}</span>
+				)}
+				<span className="text-muted-foreground">{detail}</span>
+				<span className="font-mono text-xs text-muted-foreground">{resource.mount_path}</span>
+				{resource.type === "github_repository" && open && token === null ? (
+					<Button variant="ghost" size="sm" onClick={() => setToken("")}>
+						Replace token
+					</Button>
+				) : null}
+			</div>
+			{token === null ? null : (
+				<form
+					className="flex gap-2"
+					onSubmit={(event) => {
+						event.preventDefault()
+						rotate.run(token)
+					}}
+				>
+					<Input
+						type="password"
+						autoComplete="off"
+						aria-label="New token"
+						value={token}
+						onChange={(event) => setToken(event.target.value)}
+					/>
+					<Button type="submit" size="sm" disabled={rotate.pending || token === ""}>
+						Save
+					</Button>
+					<Button variant="ghost" size="sm" onClick={() => setToken(null)}>
+						Cancel
+					</Button>
+				</form>
+			)}
+			{rotate.error === undefined ? null : <Callout tone="error">{rotate.error}</Callout>}
+		</div>
 	)
 }

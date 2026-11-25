@@ -23,9 +23,13 @@ import { Route as AppAutomationsNewRouteImport } from './routes/_app/automations
 import { Route as AppEnvironmentsIndexRouteImport } from './routes/_app/environments/index'
 import { Route as AppEnvironmentsEnvironmentIdRouteImport } from './routes/_app/environments/$environmentId'
 import { Route as AppEnvironmentsNewRouteImport } from './routes/_app/environments/new'
+import { Route as AppMemoryStoresIndexRouteImport } from './routes/_app/memory-stores/index'
+import { Route as AppMemoryStoresNewRouteImport } from './routes/_app/memory-stores/new'
 import { Route as AppSessionsIndexRouteImport } from './routes/_app/sessions/index'
 import { Route as AppSessionsSessionIdRouteImport } from './routes/_app/sessions/$sessionId'
 import { Route as AppSessionsNewRouteImport } from './routes/_app/sessions/new'
+import { Route as AppMemoryStoresMemoryStoreIdIndexRouteImport } from './routes/_app/memory-stores/$memoryStoreId/index'
+import { Route as AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport } from './routes/_app/memory-stores/$memoryStoreId/memories/$memoryId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -98,6 +102,16 @@ const AppEnvironmentsNewRoute = AppEnvironmentsNewRouteImport.update({
   path: '/environments/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMemoryStoresIndexRoute = AppMemoryStoresIndexRouteImport.update({
+  id: '/memory-stores/',
+  path: '/memory-stores/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMemoryStoresNewRoute = AppMemoryStoresNewRouteImport.update({
+  id: '/memory-stores/new',
+  path: '/memory-stores/new',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSessionsIndexRoute = AppSessionsIndexRouteImport.update({
   id: '/sessions/',
   path: '/sessions/',
@@ -113,6 +127,18 @@ const AppSessionsNewRoute = AppSessionsNewRouteImport.update({
   path: '/sessions/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppMemoryStoresMemoryStoreIdIndexRoute =
+  AppMemoryStoresMemoryStoreIdIndexRouteImport.update({
+    id: '/memory-stores/$memoryStoreId/',
+    path: '/memory-stores/$memoryStoreId/',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute =
+  AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport.update({
+    id: '/memory-stores/$memoryStoreId/memories/$memoryId',
+    path: '/memory-stores/$memoryStoreId/memories/$memoryId',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -124,13 +150,17 @@ export interface FileRoutesByFullPath {
   '/automations/new': typeof AppAutomationsNewRoute
   '/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
   '/environments/new': typeof AppEnvironmentsNewRoute
+  '/memory-stores/new': typeof AppMemoryStoresNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
   '/agents/': typeof AppAgentsIndexRoute
   '/artifacts/': typeof AppArtifactsIndexRoute
   '/automations/': typeof AppAutomationsIndexRoute
   '/environments/': typeof AppEnvironmentsIndexRoute
+  '/memory-stores/': typeof AppMemoryStoresIndexRoute
   '/sessions/': typeof AppSessionsIndexRoute
+  '/memory-stores/$memoryStoreId/': typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  '/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
@@ -142,13 +172,17 @@ export interface FileRoutesByTo {
   '/automations/new': typeof AppAutomationsNewRoute
   '/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
   '/environments/new': typeof AppEnvironmentsNewRoute
+  '/memory-stores/new': typeof AppMemoryStoresNewRoute
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
   '/agents': typeof AppAgentsIndexRoute
   '/artifacts': typeof AppArtifactsIndexRoute
   '/automations': typeof AppAutomationsIndexRoute
   '/environments': typeof AppEnvironmentsIndexRoute
+  '/memory-stores': typeof AppMemoryStoresIndexRoute
   '/sessions': typeof AppSessionsIndexRoute
+  '/memory-stores/$memoryStoreId': typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  '/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -162,13 +196,17 @@ export interface FileRoutesById {
   '/_app/automations/new': typeof AppAutomationsNewRoute
   '/_app/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
   '/_app/environments/new': typeof AppEnvironmentsNewRoute
+  '/_app/memory-stores/new': typeof AppMemoryStoresNewRoute
   '/_app/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/_app/sessions/new': typeof AppSessionsNewRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
   '/_app/artifacts/': typeof AppArtifactsIndexRoute
   '/_app/automations/': typeof AppAutomationsIndexRoute
   '/_app/environments/': typeof AppEnvironmentsIndexRoute
+  '/_app/memory-stores/': typeof AppMemoryStoresIndexRoute
   '/_app/sessions/': typeof AppSessionsIndexRoute
+  '/_app/memory-stores/$memoryStoreId/': typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  '/_app/memory-stores/$memoryStoreId/memories/$memoryId': typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -182,13 +220,17 @@ export interface FileRouteTypes {
     | '/automations/new'
     | '/environments/$environmentId'
     | '/environments/new'
+    | '/memory-stores/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
     | '/agents/'
     | '/artifacts/'
     | '/automations/'
     | '/environments/'
+    | '/memory-stores/'
     | '/sessions/'
+    | '/memory-stores/$memoryStoreId/'
+    | '/memory-stores/$memoryStoreId/memories/$memoryId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/sign-in'
@@ -200,13 +242,17 @@ export interface FileRouteTypes {
     | '/automations/new'
     | '/environments/$environmentId'
     | '/environments/new'
+    | '/memory-stores/new'
     | '/sessions/$sessionId'
     | '/sessions/new'
     | '/agents'
     | '/artifacts'
     | '/automations'
     | '/environments'
+    | '/memory-stores'
     | '/sessions'
+    | '/memory-stores/$memoryStoreId'
+    | '/memory-stores/$memoryStoreId/memories/$memoryId'
   id:
     | '__root__'
     | '/_app'
@@ -219,13 +265,17 @@ export interface FileRouteTypes {
     | '/_app/automations/new'
     | '/_app/environments/$environmentId'
     | '/_app/environments/new'
+    | '/_app/memory-stores/new'
     | '/_app/sessions/$sessionId'
     | '/_app/sessions/new'
     | '/_app/agents/'
     | '/_app/artifacts/'
     | '/_app/automations/'
     | '/_app/environments/'
+    | '/_app/memory-stores/'
     | '/_app/sessions/'
+    | '/_app/memory-stores/$memoryStoreId/'
+    | '/_app/memory-stores/$memoryStoreId/memories/$memoryId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -333,6 +383,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppEnvironmentsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/memory-stores/': {
+      id: '/_app/memory-stores/'
+      path: '/memory-stores'
+      fullPath: '/memory-stores/'
+      preLoaderRoute: typeof AppMemoryStoresIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/memory-stores/new': {
+      id: '/_app/memory-stores/new'
+      path: '/memory-stores/new'
+      fullPath: '/memory-stores/new'
+      preLoaderRoute: typeof AppMemoryStoresNewRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/sessions/': {
       id: '/_app/sessions/'
       path: '/sessions'
@@ -354,6 +418,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSessionsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/memory-stores/$memoryStoreId/': {
+      id: '/_app/memory-stores/$memoryStoreId/'
+      path: '/memory-stores/$memoryStoreId'
+      fullPath: '/memory-stores/$memoryStoreId/'
+      preLoaderRoute: typeof AppMemoryStoresMemoryStoreIdIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/memory-stores/$memoryStoreId/memories/$memoryId': {
+      id: '/_app/memory-stores/$memoryStoreId/memories/$memoryId'
+      path: '/memory-stores/$memoryStoreId/memories/$memoryId'
+      fullPath: '/memory-stores/$memoryStoreId/memories/$memoryId'
+      preLoaderRoute: typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -366,13 +444,17 @@ interface AppRouteChildren {
   AppAutomationsNewRoute: typeof AppAutomationsNewRoute
   AppEnvironmentsEnvironmentIdRoute: typeof AppEnvironmentsEnvironmentIdRoute
   AppEnvironmentsNewRoute: typeof AppEnvironmentsNewRoute
+  AppMemoryStoresNewRoute: typeof AppMemoryStoresNewRoute
   AppSessionsSessionIdRoute: typeof AppSessionsSessionIdRoute
   AppSessionsNewRoute: typeof AppSessionsNewRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
   AppArtifactsIndexRoute: typeof AppArtifactsIndexRoute
   AppAutomationsIndexRoute: typeof AppAutomationsIndexRoute
   AppEnvironmentsIndexRoute: typeof AppEnvironmentsIndexRoute
+  AppMemoryStoresIndexRoute: typeof AppMemoryStoresIndexRoute
   AppSessionsIndexRoute: typeof AppSessionsIndexRoute
+  AppMemoryStoresMemoryStoreIdIndexRoute: typeof AppMemoryStoresMemoryStoreIdIndexRoute
+  AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute: typeof AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -384,13 +466,19 @@ const AppRouteChildren: AppRouteChildren = {
   AppAutomationsNewRoute: AppAutomationsNewRoute,
   AppEnvironmentsEnvironmentIdRoute: AppEnvironmentsEnvironmentIdRoute,
   AppEnvironmentsNewRoute: AppEnvironmentsNewRoute,
+  AppMemoryStoresNewRoute: AppMemoryStoresNewRoute,
   AppSessionsSessionIdRoute: AppSessionsSessionIdRoute,
   AppSessionsNewRoute: AppSessionsNewRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
   AppArtifactsIndexRoute: AppArtifactsIndexRoute,
   AppAutomationsIndexRoute: AppAutomationsIndexRoute,
   AppEnvironmentsIndexRoute: AppEnvironmentsIndexRoute,
+  AppMemoryStoresIndexRoute: AppMemoryStoresIndexRoute,
   AppSessionsIndexRoute: AppSessionsIndexRoute,
+  AppMemoryStoresMemoryStoreIdIndexRoute:
+    AppMemoryStoresMemoryStoreIdIndexRoute,
+  AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute:
+    AppMemoryStoresMemoryStoreIdMemoriesMemoryIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

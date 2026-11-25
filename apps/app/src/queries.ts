@@ -62,6 +62,44 @@ export const automationRunsQuery = (id: string) =>
 		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
 	})
 
+export const memoryStoresPage = (after?: string) =>
+	queryOptions({
+		queryKey: ["memory-stores", "page", after ?? null],
+		queryFn: ({ signal }) => checkfu.memoryStores.list(after, signal),
+	})
+
+export const memoryStoreQuery = (id: string) =>
+	queryOptions({
+		queryKey: ["memory-stores", "one", id],
+		queryFn: ({ signal }) => checkfu.memoryStores.retrieve(id, signal),
+	})
+
+export const memoryStoreChoices = infiniteQueryOptions({
+	queryKey: ["memory-stores", "choices"],
+	queryFn: ({ pageParam, signal }) => checkfu.memoryStores.list(pageParam, signal),
+	initialPageParam: undefined as string | undefined,
+	getNextPageParam: (page) => page.next_cursor ?? undefined,
+})
+
+export const artifactChoices = infiniteQueryOptions({
+	queryKey: ["artifacts", "choices"],
+	queryFn: ({ pageParam, signal }) => checkfu.artifacts.list(pageParam, signal),
+	initialPageParam: undefined as string | undefined,
+	getNextPageParam: (page) => page.next_cursor ?? undefined,
+})
+
+export const memoriesQuery = (storeId: string) =>
+	queryOptions({
+		queryKey: ["memories", storeId, "all"],
+		queryFn: ({ signal }) => checkfu.memoryStores.memories(storeId, signal),
+	})
+
+export const memoryQuery = (storeId: string, id: string) =>
+	queryOptions({
+		queryKey: ["memories", storeId, "one", id],
+		queryFn: ({ signal }) => checkfu.memoryStores.memory(storeId, id, signal),
+	})
+
 export const sessionsPage = (after?: string) =>
 	queryOptions({
 		queryKey: ["sessions", "page", after ?? null],
