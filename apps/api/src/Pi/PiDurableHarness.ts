@@ -334,20 +334,23 @@ export const PiDurableHarnessLive = boundedHarness(
 					),
 					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 				),
-			storeRepositoryToken: (args) =>
-				withRetry(
-					executor.storeRepositoryToken(
-						args.session_id,
-						args.resource_id,
-						Redacted.value(args.authorization_token),
-						args.replace,
-					),
-				).pipe(
+			storeRepositoryToken: (args) => {
+				const store = executor.storeRepositoryToken(
+					args.session_id,
+					args.resource_id,
+					Redacted.value(args.authorization_token),
+					args.replace,
+				)
+				// A replacement is not sent again on its own: one whose reply was lost may have landed,
+				// and resending it after a later rotation would put the older token back. The caller
+				// sends it again.
+				return (args.replace ? store : withRetry(store)).pipe(
 					Effect.tapError((error) =>
 						Effect.logError("Repository token not stored", args.session_id, error.cause),
 					),
 					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
-				),
+				)
+			},
 			discardWorkspace: (args) =>
 				withRetry(executor.discardWorkspace(args.session_id)).pipe(
 					Effect.tap(() => Effect.logInfo("Workspace discarded", args.session_id)),

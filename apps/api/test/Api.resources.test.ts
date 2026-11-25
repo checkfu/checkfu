@@ -423,9 +423,8 @@ describe("Session resources", () => {
 	})
 
 	it("rotates a repository's token while the session lives, and not after it ends", async () => {
-		const { layer, closeAll, repositoryTokens, beforeTokenStored } = makePiDurableTestLayer(
-			async (model) => makeAssistantReply(model, null, "ok", 1, 1),
-		)
+		const { layer, closeAll, repositoryTokens, beforeTokenStored, tokenDeliveries, unreachable } =
+			makePiDurableTestLayer(async (model) => makeAssistantReply(model, null, "ok", 1, 1))
 		try {
 			await Effect.runPromise(
 				Effect.gen(function* () {
@@ -447,6 +446,16 @@ describe("Session resources", () => {
 					expect(rotatedText).not.toContain(TOKEN)
 					expect(JSON.parse(rotatedText)).toEqual(repository)
 					expect([...repositoryTokens]).toEqual([[`${session.id}/${repository?.id}`, TOKEN]])
+
+					// A replacement whose delivery fails is not sent again on its own: it may have
+					// landed, and a later rotation may land before a resend would.
+					unreachable.add(session.id)
+					tokenDeliveries.length = 0
+					const undelivered = yield* request(apiFetch, "POST", path, {
+						authorization_token: "ghp_not_delivered",
+					})
+					expect([undelivered.status, tokenDeliveries]).toEqual([503, ["ghp_not_delivered"]])
+					unreachable.delete(session.id)
 
 					expect((yield* request(apiFetch, "POST", path, {})).status).toBe(400)
 					expect(

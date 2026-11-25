@@ -283,6 +283,8 @@ export const makePiDurableTestLayer = (
 	const repositoryTokens = new Map<string, string>()
 	const preparations: Array<WorkspacePreparation> = []
 	const beforeTokenStored: Array<() => Promise<Response>> = []
+	// Every token sent to a workspace, once per attempt.
+	const tokenDeliveries: Array<string> = []
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -324,14 +326,23 @@ export const makePiDurableTestLayer = (
 					return preparations.shift() ?? { ok: true }
 				}),
 			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
-				Effect.promise(async () => {
-					// What happens elsewhere while the token is on its way to the workspace.
-					await beforeTokenStored.shift()?.()
-					const key = `${sessionId}/${resourceId}`
-					if (replace || !repositoryTokens.has(key)) {
-						repositoryTokens.set(key, token)
-					}
-				}),
+				Effect.suspend(() => {
+					tokenDeliveries.push(token)
+					return unreachable.has(sessionId)
+						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+						: Effect.void
+				}).pipe(
+					Effect.andThen(
+						Effect.promise(async () => {
+							// What happens elsewhere while the token is on its way to the workspace.
+							await beforeTokenStored.shift()?.()
+							const key = `${sessionId}/${resourceId}`
+							if (replace || !repositoryTokens.has(key)) {
+								repositoryTokens.set(key, token)
+							}
+						}),
+					),
+				),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -397,6 +408,7 @@ export const makePiDurableTestLayer = (
 		repositoryTokens,
 		preparations,
 		beforeTokenStored,
+		tokenDeliveries,
 	}
 }
 

@@ -6,10 +6,9 @@ import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
-import { grepWithin, readLongLine } from "./WorkspacePaging.ts"
+import { grepWithin } from "./WorkspacePaging.ts"
 import {
 	GIT_TOOL,
-	READ_PAGE_BYTES,
 	WORKSPACE_TOOL_OPTIONS,
 	boundWorkspaceResult,
 	decodeGitToolArguments,
@@ -169,14 +168,6 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 									return grepWithin(fs, call.arguments, workspaceOutputLimits("grep").maxBytes)
 								}
 								const { content, isError } = await files.execute(call, { abortSignal })
-								if (isError && call.name === "read") {
-									const page = await readLongLine(fs, call.arguments, READ_PAGE_BYTES).catch(
-										() => undefined,
-									)
-									if (page !== undefined) {
-										return page
-									}
-								}
 								return boundWorkspaceResult(call.name, { content, isError })
 							})
 							return (
@@ -196,10 +187,15 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 									"The session has ended and its workspace was discarded.",
 								)
 							}
-							storage.kv.put(ALLOWED_HOSTS, allowedHosts)
 							// Run for the turn that asked, so a later turn refuses it, and held by the fence,
-							// so a discard waits for a clone under way before it purges.
-							const next = fence.run(token, () => preparing.then(() => prepare(repositories)))
+							// so a discard waits for a clone under way before it purges. The network policy is
+							// set inside it too, so a refused preparation leaves the current turn's policy.
+							const next = fence.run(token, () =>
+								preparing.then(() => {
+									storage.kv.put(ALLOWED_HOSTS, allowedHosts)
+									return prepare(repositories)
+								}),
+							)
 							preparing = next.catch(() => undefined)
 							return (
 								(await next) ??
