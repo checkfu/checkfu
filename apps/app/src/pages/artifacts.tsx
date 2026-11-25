@@ -9,19 +9,12 @@ import { Description, DescriptionList, PageHeader } from "@checkfu/ui/page-heade
 import { DataTable } from "@checkfu/ui/table"
 import type { ArtifactFileContent } from "@checkfu/sdk/Api"
 import type { JsonArtifact } from "@checkfu/sdk/client"
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query"
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ExternalLinkIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
-import {
-	byteSize,
-	expiry,
-	fileView,
-	linkForVersion,
-	publicationLabel,
-	webUrl,
-} from "../artifact-view.ts"
+import { byteSize, expiry, fileView, publicationLabel, webUrl } from "../artifact-view.ts"
 import { checkfu, errorMessage, isSignedOut } from "../api.ts"
 import type { JsonArtifactLink } from "../api.ts"
 import { Pager } from "../pager.tsx"
@@ -198,12 +191,18 @@ function ArtifactView({
 	readonly path: string | undefined
 }): React.JSX.Element {
 	const navigate = useNavigate()
+	const queryClient = useQueryClient()
 	const [deleting, setDeleting] = useState(false)
 	const remove = useAction(
 		async () => {
 			await checkfu.artifacts.delete(artifact.id)
 		},
-		{ invalidates: [["artifacts", "page"]], then: () => void navigate({ to: "/artifacts" }) },
+		{
+			then: () => {
+				queryClient.removeQueries({ queryKey: ["artifacts", "page"] })
+				void navigate({ to: "/artifacts" })
+			},
+		},
 	)
 	return (
 		<>
@@ -250,11 +249,6 @@ function ArtifactView({
 	)
 }
 
-const viewSearch = (artifact: JsonArtifact, version: number, path?: string) => ({
-	...(version === artifact.version ? {} : { version }),
-	...(path === undefined ? {} : { path }),
-})
-
 function FilesSection({
 	artifact,
 	version,
@@ -276,7 +270,7 @@ function FilesSection({
 							void navigate({
 								to: "/artifacts/$artifactId",
 								params: { artifactId: artifact.id },
-								search: viewSearch(artifact, Number(event.target.value)),
+								search: (previous) => ({ ...previous, version: Number(event.target.value) }),
 								resetScroll: false,
 							})
 						}
@@ -310,8 +304,15 @@ function OlderVersion({
 	readonly version: number
 	readonly path: string | undefined
 }): React.JSX.Element {
-	const files = present(useSuspenseQuery(artifactVersionQuery(artifact.id, version))).files
-	return <FileList artifact={artifact} version={version} files={files} path={path} />
+	const found = useQuery(artifactVersionQuery(artifact.id, version))
+	if (found.data !== undefined) {
+		return <FileList artifact={artifact} version={version} files={found.data.files} path={path} />
+	}
+	return found.error === null || isSignedOut(found.error) ? (
+		<p className="text-control text-muted-foreground">Loading…</p>
+	) : (
+		<Callout tone="error">{errorMessage(found.error)}</Callout>
+	)
 }
 
 function FileList({
@@ -340,7 +341,7 @@ function FileList({
 							<Link
 								to="/artifacts/$artifactId"
 								params={{ artifactId: artifact.id }}
-								search={viewSearch(artifact, version, file.path)}
+								search={(previous) => ({ ...previous, path: file.path })}
 								resetScroll={false}
 								aria-current={file.path === path ? "true" : undefined}
 								className="font-mono text-xs hover:underline aria-[current=true]:font-semibold"
@@ -439,12 +440,11 @@ function LinkSection({
 	readonly version: number
 }): React.JSX.Element {
 	const [seconds, setSeconds] = useState(DEFAULT_LINK_SECONDS)
-	const [created, setCreated] = useState<JsonArtifactLink | null>(null)
-	const link = linkForVersion(created, version)
+	const [link, setLink] = useState<JsonArtifactLink | null>(null)
 	const create = useAction(
 		(target: number, expiresIn: number) =>
 			checkfu.artifacts.link(artifactId, target, { expires_in: expiresIn }),
-		{ then: setCreated },
+		{ then: setLink },
 	)
 	return (
 		<section className="space-y-3">

@@ -5,7 +5,6 @@ import {
 	byteSize,
 	expiry,
 	fileView,
-	linkForVersion,
 	publicationLabel,
 	webUrl,
 } from "../src/artifact-view.ts"
@@ -53,15 +52,6 @@ describe("artifact file content", () => {
 		expect(
 			renderToStaticMarkup(<FileBody file={file("application/zip", "base64", "AAAA")} />),
 		).toContain("Binary file, 4 B.")
-	})
-})
-
-describe("artifact viewing link", () => {
-	it("shows a created link only while its version is the one selected", () => {
-		const link = { url: "https://content.test/a/t/", version: 1 }
-		expect(linkForVersion(link, 1)).toBe(link)
-		expect(linkForVersion(link, 2)).toBeNull()
-		expect(linkForVersion(null, 1)).toBeNull()
 	})
 })
 
