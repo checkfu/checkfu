@@ -629,30 +629,35 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return HttpServerResponse.empty({ status: 204 })
 					}
 					let cursor = Math.min(from, head.cursor)
-					// Every read of the log is a bounded page, read until one comes back empty. A client
-					// still reading the last page lets events pile up; reading again before the live read
-					// starts keeps its first delivery to what arrived during that one read. A cursor at
-					// the head needs no page: the snapshot just read is that read.
-					const pagesAfterCursor = Stream.suspend(() =>
-						Stream.paginate(cursor, (seq: number) =>
-							Effect.map(
-								sessionViews.list(ref, {
-									after: seq,
-									take: SSE_CATCHUP_PAGE_SIZE,
-									order: "asc",
-								}),
-								(page) =>
-									[
-										page.entries,
-										Option.map(
-											Option.fromUndefinedOr(page.entries.at(-1)),
-											(last) => last.envelope.seq,
-										),
-									] as const,
+					// Every read of the log is a bounded page from the cursor. Catch-up reads until a page
+					// comes back empty: a client still reading the last page lets events pile up, and
+					// reading again before the live read starts keeps its first delivery to what arrived
+					// during that one read. A cursor at the head needs no page: the snapshot just read is
+					// that read. Live reads follow the view's own continuation, since a commit after a read
+					// sends another head.
+					const pagesAfterCursor = (until: "empty" | "last page") =>
+						Stream.suspend(() =>
+							Stream.paginate(cursor, (seq: number) =>
+								Effect.map(
+									sessionViews.list(ref, {
+										after: seq,
+										take: SSE_CATCHUP_PAGE_SIZE,
+										order: "asc",
+									}),
+									(page) =>
+										[
+											page.entries,
+											until === "empty"
+												? Option.map(
+														Option.fromUndefinedOr(page.entries.at(-1)),
+														(last) => last.envelope.seq,
+													)
+												: Option.fromNullOr(page.cursor),
+										] as const,
+								),
 							),
-						),
-					).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
-					const catchUp = cursor < head.cursor ? pagesAfterCursor : Stream.empty
+						).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
+					const catchUp = cursor < head.cursor ? pagesAfterCursor("empty") : Stream.empty
 					// On Cloudflare the view object sends the session's head once on connect and once per
 					// commit, and what is new is read in pages: no read is ever larger than a page, however
 					// late the socket opened. Heads that arrive during a read fold into the newest. Pages
@@ -667,7 +672,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										Stream.buffer({ capacity: 1, strategy: "sliding" }),
 										Stream.takeWhile((latest) => !(latest.archived && latest.seq <= cursor)),
 										Stream.flatMap((latest) =>
-											latest.seq > cursor ? pagesAfterCursor : Stream.empty,
+											latest.seq > cursor ? pagesAfterCursor("last page") : Stream.empty,
 										),
 									)
 								})
