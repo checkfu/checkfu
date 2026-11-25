@@ -15,6 +15,7 @@ import { SessionId } from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
+import { TurnInput } from "@checkfu/domain/Session/TurnInput.view"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -217,6 +218,10 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const admitSession = yield* AdmitSessionDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const turnInputs = yield* TurnInput
+		// The turn policies are fed by this view, and a view that is rebuilding takes its
+		// first event as history, which they skip: read it so the command's events are live.
+		const caughtUp = (id: SessionId) => Effect.asVoid(turnInputs.get(Session.ref(id)))
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
@@ -409,6 +414,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("archive", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.session_id
+					yield* caughtUp(id)
 					const receipt = yield* sessions.send(new ArchiveSession({ session_id: id }))
 					const result = yield* sessionViews
 						.get(Session.ref(id), { atLeast: receipt })
@@ -422,6 +428,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("sendEvents", ({ params, headers, payload }) =>
 				Effect.gen(function* () {
 					const id = params.session_id
+					yield* caughtUp(id)
 					const idempotencyKey = headers["idempotency-key"]
 					const seenEventIds = new Set<string>()
 					const prepared: Array<
