@@ -1,0 +1,48 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Checkfu } from "../src/Checkfu.model.ts"
+import { LISTING_VERSION, Listing } from "../src/Listing/Listing.projection.ts"
+
+const SOURCES = [
+	{
+		name: "Listing",
+		version: 2,
+		from: ["Agent", "Artifact", "Automation", "Environment", "Session"],
+	},
+	{ name: "AgentView", version: 0, from: ["Agent"] },
+	{ name: "AgentVersionByNumberView", version: 2, from: ["Agent"] },
+	{ name: "EnvironmentView", version: 0, from: ["Environment"] },
+	{ name: "SessionView", version: 2, from: ["Session"] },
+	{ name: "TurnInput", version: 3, from: ["Session"] },
+	{ name: "AutomationView", version: 5, from: ["Automation"] },
+	{ name: "AutomationRunView", version: 1, from: ["Automation"] },
+	{ name: "ArtifactView", version: 0, from: ["Artifact"] },
+	{ name: "ArtifactVersionView", version: 1, from: ["Artifact"] },
+]
+
+const nameOf = (
+	source: { readonly aggregateName: string } | { readonly viewName: string },
+): string => ("aggregateName" in source ? source.aggregateName : source.viewName)
+
+const declared = [
+	{ name: Listing.projectionName, version: LISTING_VERSION, from: Listing.definition.from },
+	...Checkfu.definitions.views.map((view) => ({
+		name: view.viewName,
+		version: view.definition.version ?? 0,
+		from: view.definition.from,
+	})),
+]
+
+describe("views and projections", () => {
+	it("read the sources recorded for their version", () => {
+		expect(declared.map((consumer) => consumer.name).toSorted()).toEqual(
+			[...new Set(SOURCES.map((entry) => entry.name))].toSorted(),
+		)
+		for (const consumer of declared) {
+			expect(
+				SOURCES.find((entry) => entry.name === consumer.name && entry.version === consumer.version)
+					?.from,
+				`${consumer.name} is at version ${consumer.version} with no recorded sources: add an entry for the new version`,
+			).toEqual(consumer.from.map(nameOf).toSorted())
+		}
+	})
+})

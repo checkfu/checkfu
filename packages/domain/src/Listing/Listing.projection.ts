@@ -86,10 +86,12 @@ const changeOf = ({
 	}
 }
 
+export const LISTING_VERSION = 2
+
 export const ListingLive = Listing.toLayer(
 	Effect.gen(function* () {
 		const store = yield* ListingStore
 		return (batch) => store.record(batch.map(changeOf))
 	}),
-	{ batch: { size: 100 }, version: 2 },
+	{ batch: { size: 100 }, version: LISTING_VERSION },
 )
