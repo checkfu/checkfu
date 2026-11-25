@@ -1085,7 +1085,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							type: "string",
 							minLength: 1,
 							maxLength: 256,
-							description: "Only automations created with this agent",
+							description: "Only automations that use this agent",
 						},
 					},
 					required: [],

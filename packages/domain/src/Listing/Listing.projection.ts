@@ -9,6 +9,7 @@ import { AgentCreated } from "../Agent/CreateAgent.command.ts"
 import { AutomationArchived } from "../Automation/ArchiveAutomation.command.ts"
 import { Automation } from "../Automation/Automation.aggregate.ts"
 import { AutomationCreated } from "../Automation/CreateAutomation.command.ts"
+import { AutomationUpdated } from "../Automation/UpdateAutomation.command.ts"
 import { Artifact } from "../Artifact/Artifact.aggregate.ts"
 import { ArtifactCreated } from "../Artifact/CreateArtifact.command.ts"
 import { ArtifactDeleted } from "../Artifact/DeleteArtifact.command.ts"
@@ -43,6 +44,7 @@ export class Listing extends Domain.Projection(
 			SessionCreated,
 			SessionArchived,
 			AutomationCreated,
+			AutomationUpdated,
 			AutomationArchived,
 			ArtifactCreated,
 			ArtifactDeleted,
@@ -76,6 +78,8 @@ const changeOf = ({
 		case "session.archived":
 			return { kind: "session", id, created_at, agent_id: null, status: ARCHIVED }
 		case "automation.created":
+			return { kind: "automation", id, created_at, agent_id: event.agent_id, status: LISTED }
+		case "automation.updated":
 			return { kind: "automation", id, created_at, agent_id: event.agent_id, status: LISTED }
 		case "automation.archived":
 			return { kind: "automation", id, created_at, agent_id: null, status: ARCHIVED }

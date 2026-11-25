@@ -4,6 +4,7 @@ import type { ListingKind, ListingOrder } from "@checkfu/domain/Listing/ListingS
 import { ListResources } from "@checkfu/domain/Listing/ListResources.query"
 import { ERRORS } from "@checkfu/sdk/Api"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
@@ -65,7 +66,13 @@ export const makeLister = Effect.gen(function* () {
 						const resource = yield* outcome
 						const archived =
 							resource !== null && "archived_at" in resource && resource.archived_at !== null
-						if (resource !== null && (include_archived || !archived)) {
+						const agentMatches =
+							resource !== null &&
+							(input.agent_id === undefined ||
+								("agent" in resource &&
+									Predicate.hasProperty(resource.agent, "id") &&
+									resource.agent.id === input.agent_id))
+						if (resource !== null && agentMatches && (include_archived || !archived)) {
 							const size = utf8.encode(JSON.stringify(resource)).length
 							const next = pageBytesWith(bytes, data.length, size)
 							if (data.length > 0 && next > LIST_PAGE_BYTES) {

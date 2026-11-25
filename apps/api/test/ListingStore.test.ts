@@ -122,6 +122,28 @@ describe.each(Object.entries(stores))("ListingStore (%s)", (_name, store) => {
 		),
 	)
 
+	it.effect("moves a row to its new agent, and keeps the agent when a change names none", () =>
+		provided(
+			Effect.gen(function* () {
+				const listing = yield* ListingStore
+				yield* listing.record([row("session", "s1", 1, LISTED, "a1")])
+				yield* listing.record([row("session", "s1", 5, LISTED, "a2")])
+				yield* listing.record([row("session", "s1", 9, ARCHIVED)])
+				yield* listing.record([row("session", "s2", 3, LISTED, "a2")])
+				expect(
+					ids(yield* listing.page(filter({ agent_id: "a1", include_archived: true }), first)),
+				).toEqual([])
+				expect(
+					ids(yield* listing.page(filter({ agent_id: "a2", include_archived: true }), first)),
+				).toEqual(["s1", "s2"])
+				expect(ids(yield* listing.page(filter({ include_archived: true }), first))).toEqual([
+					"s1",
+					"s2",
+				])
+			}),
+		),
+	)
+
 	it.effect("orders by creation time, then id, whatever order the rows were recorded in", () =>
 		provided(
 			Effect.gen(function* () {

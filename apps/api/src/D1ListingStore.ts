@@ -37,7 +37,7 @@ export const ListingDatabase = Cloudflare.D1.Database(
 )
 
 const UPSERT =
-	"INSERT INTO listing (kind, id, created_at, agent_id, status) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (kind, id) DO UPDATE SET status = MAX(status, excluded.status)"
+	"INSERT INTO listing (kind, id, created_at, agent_id, status) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (kind, id) DO UPDATE SET status = MAX(status, excluded.status), agent_id = COALESCE(excluded.agent_id, agent_id)"
 
 export const listingPageQuery = (
 	order: ListingOrder,
