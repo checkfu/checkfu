@@ -14,7 +14,6 @@ export const PROVIDER_API_KEY_ENV: Readonly<Record<SupportedProvider, string>> =
 export const isSupportedProvider = (value: string): value is SupportedProvider =>
 	value === "openai" || value === "anthropic"
 
-// A model too small for Pi's compaction defaults (legacy gpt-4, 8,192 tokens) is not offered.
 const offered = (models: Readonly<Record<string, Model<Api>>>): ReadonlyArray<Model<Api>> =>
 	Object.values(models).filter(
 		(model) => model.contextWindow >= PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,

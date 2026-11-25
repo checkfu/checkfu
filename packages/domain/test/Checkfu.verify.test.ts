@@ -56,13 +56,6 @@ import {
 } from "../src/Session/AdmitSession.command.ts"
 import { AdmitSessionDecision } from "../src/Session/AdmitSession.decision.ts"
 
-/**
- * Focused cross-domain exploration surface for the unified hosted model.
- * Z3 proofs always cover every aggregate, command, decision, and relation in
- * `Checkfu`; scoping BFS/walks to the cross-domain admission, turn, and
- * idempotency lifecycle keeps exploration fast while still exercising
- * `AdmitSessionDecision`, `StartTurn`, `RunTurn`, and all 6 hosted views.
- */
 class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 	model: Checkfu,
 	commands: [
@@ -211,8 +204,6 @@ const evaluateCheckfuInvariants = (world: unknown): Record<string, boolean> =>
 	)
 
 describe("Checkfu unified hosted model Z3 formal verification", () => {
-	// Omit `story` replay on walks for the same reason as Sessions.verify.test.ts:
-	// StopModelRequest intentionally retries HarnessUnavailable via Effect.orDie during walk replay.
 	it("proves every aggregate, decision, and relation in Z3 and checks cross-domain admission and turns", async () => {
 		const hostedCommands = CheckfuDomainApi.commands.map((command) => command.tag)
 		expect(hostedCommands).toEqual([
@@ -263,7 +254,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 120, length: 8 },
-				// It reads TurnInput, which the explorer cannot follow; StartTurn starts the same run.
+
 				allow: { skipped: ["EnsureTurnStarted"] },
 				opaque: [sessionIdOfNextRun, isUsableSchedule, upcomingOccurrences],
 				lock: "./Checkfu.verify.lock.json",
@@ -501,7 +492,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							}),
 						)
 
-					// 1. Create Agent v1 + Environment and admit sessionV1 pinned to v1.
 					yield* recordStep("initial")
 					yield* createAgent.send(
 						new CreateAgent({
@@ -532,7 +522,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					yield* recordStep("admitted-v1")
 
-					// 2. Advance the agent head v1 -> v2 AFTER sessionV1 was admitted, then no-op update.
 					yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: agentRef.id,
@@ -562,9 +551,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					yield* recordStep("noop-update-agent-at-v2")
 
-					// 3. Admit a second session at head v2, then send two back-to-back messages on
-					// sessionV1 so the second message queues while turn 1 runs and RunTurn itself
-					// commits turn 2's session.status_running event during CommitModelReply.
 					yield* admitSession.send(
 						new AdmitSession({
 							session_id: sessionV2Ref.id,
@@ -583,8 +569,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					const completedTurnWorld = yield* recordStep("completed-two-turns-on-v1-while-head-is-v2")
 
-					// 3b. Admit an automation and run it once: the run opens its own session with the
-					// automation's message and completes a turn.
 					yield* admitAutomation.send(
 						new AdmitAutomation({
 							automation_id: automationRef.id,
@@ -619,7 +603,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					const updatedAutomationWorld = yield* recordStep("automation-updated")
 
-					// 4. Archive Agent, Archive Environment, Delete Environment, and Archive Session post-admission.
 					yield* agents.send(new ArchiveAgent({ agent_id: agentRef.id }))
 					yield* recordStep("archived-agent-after-admission")
 					yield* environments.send(new ArchiveEnvironment({ environment_id: envRef.id }))
@@ -659,8 +642,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			})
 		}
 
-		// Confirm the queued message did not directly emit session.status_running — turn 2
-		// was started by RunTurn's CommitModelReply and read from the committed session log.
 		expect(results.queuedSendEventTags).toEqual(["user.message"])
 		const completedSessionV1 = results.completedTurnWorld.Session.find(
 			(row) => row.id === "sess_post_v1",
@@ -681,7 +662,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		expect(completedSessionV1Input?.state.input).toEqual([])
 		expect(completedSessionV1Input?.state.unsent).toEqual([])
 
-		// Confirm the automation step produced nonempty automation state that the invariants judged.
 		const automationWorld = results.automationWorld
 		expect(
 			automationWorld.Automation.map(({ id, state }) => [
@@ -762,13 +742,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			}).AutomationViewsMatchAutomations,
 		).toBe(false)
 
-		// Confirm post-admission ArchiveEnvironment took effect before DeleteEnvironment masked it.
 		expect(results.archivedEnvWorld.Environment[0]?.state.status).toBe("archived")
 		expect(results.archivedEnvWorld.EnvironmentView[0]?.state.archived_at).not.toBeNull()
 
-		// Confirm final state actually contains both v1 & v2 sessions, archived Agent v2,
-		// no row for the no-op candidate, exact enumerated lookup keys (no orphans), deleted
-		// Environment with no EnvironmentView row, and terminated+archived sessionV1 retaining turn 2.
 		expect(results.finalWorld.Agent[0]?.state.status).toBe("archived")
 		expect(results.finalWorld.Agent[0]?.state.version).toBe(2)
 		expect(results.finalWorld.AgentView.map((row) => row.id)).toEqual(["agent_post_1"])
@@ -800,13 +776,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			[`sess_${automationRef.id}_1`, 1],
 		])
 
-		// Negative controls: verify each invariant fails on real projection/reference corruption,
-		// including:
-		// 1. Both SessionView and TurnInput drifting together from admitted v1 to v2.
-		// 2. Missing an AgentVersionByNumberView row for v1.
-		// 3. An extra orphaned AgentVersionByNumberView lookup row alongside the valid rows.
-		// 4. Missing the referenced Environment aggregate.
-		// 5. Both SessionView and TurnInput reporting turn 1 (or 0) when committed history ran 2 turns.
 		expect(
 			evaluateCheckfuInvariants({
 				...results.finalWorld,
@@ -842,8 +811,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
 		})
-		// A pinned session reads its version's row, so a wrong historical row must be caught
-		// even when the row is present and the head is right.
+
 		const untampered = evaluateCheckfuInvariants(results.finalWorld)
 		expect(Object.values(untampered).every(Boolean)).toBe(true)
 		for (const tamper of [

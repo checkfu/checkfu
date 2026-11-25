@@ -13,7 +13,8 @@
 		"@checkfu/mcp": "workspace:*",
 		"@checkfu/sdk": "workspace:*",
 		"@cloudflare/forge": "catalog:",
-		"effect": "catalog:"
+		"effect": "catalog:",
+		"oxc-parser": "0.141.0"
 	},
 	"devDependencies": {
 		"@effect/vitest": "catalog:",

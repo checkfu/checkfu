@@ -11,6 +11,7 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { asIsoDateTimes } from "./Boundary.ts"
 import {
 	APIConnectionError,
 	APIUserAbortError,
@@ -112,16 +113,8 @@ const normalizeDatesToJson = (value: unknown): Schema.Json => {
 	return null
 }
 
-/**
- * Converts Effect `DateTime.Utc` fields to ISO-8601 strings across any decoded
- * wire response so plain TypeScript callers of the Promise client receive plain
- * JSON objects.
- */
 export const toIsoJson = <T>(value: T): IsoDateTimes<T> => {
-	// Boundary conversion: `normalizeDatesToJson` preserves all wire keys/primitives
-	// and replaces every `DateTime.Utc` instance with its ISO-8601 string, matching `IsoDateTimes<T>`.
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-	const converted = normalizeDatesToJson(value) as IsoDateTimes<T>
+	const converted = asIsoDateTimes<T>(normalizeDatesToJson(value))
 	const readiness = getPendingReadiness(value)
 	if (readiness !== undefined) {
 		attachPendingReadiness(converted, readiness)
@@ -214,10 +207,6 @@ export interface LazyPromiseResponse<T> {
 	readonly buildResponse: () => Promise<Response>
 }
 
-/**
- * Awaitable API result supporting `.withResponse()` and `.asResponse()` over a
- * single underlying HTTP exchange.
- */
 export class APIPromise<T> extends Promise<T> {
 	readonly #promise: Promise<PromiseWithResponse<T> | LazyPromiseResponse<T>>
 	#withResponsePromise: Promise<PromiseWithResponse<T>> | undefined
@@ -232,8 +221,6 @@ export class APIPromise<T> extends Promise<T> {
 				resolve(res.data)
 			}, reject)
 		})
-		// Prevent unhandled rejection when caller consumes via `.withResponse()` or `.asResponse()`
-		// instead of awaiting `this` directly; awaiting either view still rejects with the exact error.
 		void this.catch(() => undefined)
 		this.#promise = promise
 	}
@@ -383,10 +370,6 @@ export class EventStream<T> implements AsyncIterable<T> {
 		}
 	}
 
-	/**
-	 * Splits the stream into two independent `EventStream`s that both receive all
-	 * subsequent events from the single underlying connection.
-	 */
 	tee(): readonly [EventStream<T>, EventStream<T>] {
 		const source = this[Symbol.asyncIterator]()
 		const controller = this.controller
@@ -458,10 +441,6 @@ export class EventStream<T> implements AsyncIterable<T> {
 		return [makeBranch(leftQueue, true), makeBranch(rightQueue, false)] as const
 	}
 
-	/**
-	 * Returns a Web `ReadableStream` of newline-delimited UTF-8 JSON bytes suitable
-	 * for streaming directly in an HTTP `Response`.
-	 */
 	toReadableStream(): ReadableStream<Uint8Array> {
 		const encoder = new TextEncoder()
 		const iterator = this[Symbol.asyncIterator]()
@@ -484,9 +463,6 @@ export class EventStream<T> implements AsyncIterable<T> {
 		})
 	}
 
-	/**
-	 * Returns a Web `ReadableStream` of decoded event objects.
-	 */
 	toEventReadableStream(): ReadableStream<T> {
 		const iterator = this[Symbol.asyncIterator]()
 		return new ReadableStream<T>({

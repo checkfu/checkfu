@@ -338,7 +338,6 @@ describe("turn engine", () => {
 					return makeAssistantReply(model, null, "Summary", 12, 3)
 				}
 				if (prompt === "First") {
-					// Enough history for Pi to select a cut and exceed its blocking threshold.
 					return makeAssistantReply(model, null, "a".repeat(84_000), 120_000, 1)
 				}
 				if (prompt === "Second" && ++attempts === 1) {
@@ -466,7 +465,6 @@ describe("turn engine", () => {
 				? message.content
 				: message.content.map((part) => (part.type === "text" ? part.text : "")).join("")
 
-		// 1. Dropped waiter whose turn settles with a provider error: successor must NOT see Turn 1's prompt.
 		let releaseFailed: () => void = () => undefined
 		const failedGate = new Promise<void>((resolve) => {
 			releaseFailed = resolve
@@ -518,7 +516,6 @@ describe("turn engine", () => {
 					})
 					expect(failedContexts.at(-1)).toEqual(["user:clean-turn-2"])
 
-					// Re-entering Turn 1 still returns its sealed usage and failure outcome.
 					expect(
 						yield* runPiDurableTurn(failedBackend, turnRequest(1, "doomed-turn-1")),
 					).toMatchObject({
@@ -534,7 +531,6 @@ describe("turn engine", () => {
 			await failedBackend.close()
 		}
 
-		// 2. Dropped waiter whose turn is subsequently aborted: successor must NOT see Turn 1's prompt.
 		let markAbortStarted: () => void = () => undefined
 		const abortStarted = new Promise<void>((resolve) => {
 			markAbortStarted = resolve
@@ -726,7 +722,6 @@ describe("turn engine", () => {
 				anthropic: Redacted.make("sk-ant-test"),
 			})
 
-			// 1. Real OpenAI provider stream refuses a 302 redirect at transport; redirect target gets 0 hits.
 			const openaiBase = models.getModel("openai", "gpt-4o-mini")
 			if (openaiBase === undefined) {
 				throw new Error("expected gpt-4o-mini")
@@ -741,7 +736,6 @@ describe("turn engine", () => {
 			expect(redirectorHits).toBeGreaterThanOrEqual(1)
 			expect(targetHits).toBe(0)
 
-			// 2. Real Anthropic provider stream refuses a 302 redirect at transport; redirect target gets 0 hits.
 			const hitsBeforeAnthropic = redirectorHits
 			const anthropicBase = models.getModel("anthropic", "claude-sonnet-4-5")
 			if (anthropicBase === undefined) {
@@ -757,8 +751,6 @@ describe("turn engine", () => {
 			expect(redirectorHits).toBeGreaterThan(hitsBeforeAnthropic)
 			expect(targetHits).toBe(0)
 
-			// 3. Transport fetch wrapper sets redirect: "manual" (workerd-compatible), rejects raw 3xx
-			//    responses, and blocks requests whose origin does not match the provider baseUrl.
 			const seenInits: Array<RequestInit | undefined> = []
 			const mockRedirectFetch = (async (
 				_input: Parameters<typeof fetch>[0],
@@ -785,16 +777,12 @@ describe("turn engine", () => {
 			)
 			expect(seenInits).toHaveLength(1)
 
-			// 4. A URL instance carrying an extra `url` property must still be validated and
-			//    dispatched using its real destination, never the unrelated `url` property.
 			const spoofedUrl = Object.assign(new URL("https://evil.example/steal"), {
 				url: "https://api.openai.com/v1/responses",
 			})
 			await expect(guardedFetch(spoofedUrl)).rejects.toThrow(/disallowed origin/i)
 			expect(seenInits).toHaveLength(1)
 
-			// 5. Redirect responses marked `redirected: true` or `type: "opaqueredirect"` must also
-			//    be rejected and have their response body cancelled.
 			let opaqueBodyCancelled = false
 			const opaqueBody = new ReadableStream<Uint8Array>({
 				cancel() {
@@ -828,8 +816,6 @@ describe("turn engine", () => {
 				/redirect/i,
 			)
 
-			// 6. Request objects (native, subclassed, or plain request-like objects) are rejected
-			//    fail-closed without calling upstream fetch or consuming the request body.
 			const seenDispatches: Array<{
 				readonly input: Parameters<typeof fetch>[0]
 				readonly init: RequestInit | undefined
@@ -861,8 +847,6 @@ describe("turn engine", () => {
 			).rejects.toThrow(/only URL strings and URL instances/i)
 			expect(seenDispatches).toHaveLength(0)
 
-			// 7. Allowed URL instances are pinned as normalized immutable URL strings before dispatch,
-			//    so post-call URL mutation while awaiting credentials cannot change the destination.
 			const allowedUrl = Object.assign(new URL("https://api.openai.com/v1/responses"), {
 				url: "https://evil.example/override",
 			})
@@ -891,8 +875,6 @@ describe("turn engine", () => {
 			await inFlight
 			expect(asyncObservedTargets).toEqual(["https://api.openai.com/v1/responses"])
 
-			// 8. Init options (including runtime transport fields and getter-backed fields) are
-			//    evaluated once, forwarded intact without mutating caller init, and keep manual redirects.
 			let bodyGetterCalls = 0
 			let headersGetterCalls = 0
 			let proxyGetterCalls = 0
@@ -933,8 +915,6 @@ describe("turn engine", () => {
 				"http://127.0.0.1:8081",
 			)
 
-			// 8b. Copying `init` must not invoke prototype setters when `init` carries an own
-			//     enumerable `__proto__` key, so inherited transport options cannot be injected.
 			const protoPollutingInit: RequestInit = { method: "POST", redirect: "follow" }
 			Object.defineProperty(protoPollutingInit, "__proto__", {
 				value: {
@@ -953,7 +933,6 @@ describe("turn engine", () => {
 			expect(copiedProtoInit?.headers).toBeUndefined()
 			expect(copiedProtoInit !== undefined && "proxy" in copiedProtoInit).toBe(false)
 
-			// 9. When `upstreamFetch` is omitted, `globalThis.fetch` is resolved lazily at call time.
 			const savedGlobalFetch = globalThis.fetch
 			const lateBoundTargets: Array<Parameters<typeof fetch>[0]> = []
 			try {
@@ -1023,8 +1002,6 @@ describe("turn engine", () => {
 				}
 				const realGuardedFetch = createNoRedirectProviderFetch(directBaseUrl)
 
-				// 1. Custom `dispatcher` in `init` routes through that transport instead of direct origin,
-				//    and still refuses 3xx redirects returned by the dispatcher.
 				let dispatcherHits = 0
 				const customDispatcher = {
 					dispatch(_opts: unknown, handler: NodeDispatchHandler) {
@@ -1081,7 +1058,6 @@ describe("turn engine", () => {
 				await expect(realGuardedFetch(directRequestUrl, redirectInit)).rejects.toThrow(/redirect/i)
 				expect(directReceived).toHaveLength(0)
 
-				// 2. Direct-vs-guarded parity for buffered `keepalive: true` POSTs, empty headers, and FormData.
 				const directKeepaliveRes = await fetch(directRequestUrl, {
 					method: "POST",
 					headers: { "x-provider-test": "keepalive" },
@@ -1134,9 +1110,6 @@ describe("turn engine", () => {
 				expect(receivedMultipart?.body).toContain(`--${boundaryMatch?.[1] ?? ""}`)
 				expect(receivedMultipart?.body).toContain("multipart-payload")
 
-				// 3. Request objects (including subclasses with default Authorization headers or
-				//    inherited/explicit keepalive: true) are rejected fail-closed without contacting
-				//    the server or consuming the request body.
 				const countBeforeRequestReject = directReceived.length
 				const rejectedReq = new Request(directRequestUrl, {
 					method: "POST",
@@ -1166,10 +1139,6 @@ describe("turn engine", () => {
 				expect(credentialedReq.bodyUsed).toBe(false)
 				expect(directReceived).toHaveLength(countBeforeRequestReject)
 
-				// 4. Node upload streams in `init.body` are forwarded untouched to the transport:
-				//    the guard installs no wrapper or error listener, so destroying an upload stream
-				//    with an error and rejecting delivers the transport rejection to the caller and
-				//    emits the stream `error` event once to a listener attached before emission.
 				const uploadStream = new PassThrough()
 				const uploadError = new Error("upload destroyed before response")
 				const transportError = new Error("transport failed after upload destroy")
@@ -1182,8 +1151,6 @@ describe("turn engine", () => {
 						expect(forwardedBody).toBe(uploadStream)
 						listenerCountAtTransport = forwardedBody.listenerCount("error")
 						forwardedBody.destroy(uploadError)
-						// Listener attached synchronously between `destroy(error)` and Node's async
-						// `error` event emission must receive the error exactly once.
 						forwardedBody.on("error", (error: Error) => {
 							observedStreamErrors.push(error)
 						})
@@ -1297,7 +1264,6 @@ describe("turn engine", () => {
 				const directBaseUrl = `http://127.0.0.1:${directPort}/v1`
 				const guardedProxyFetch = createNoRedirectProviderFetch(directBaseUrl)
 
-				// 1. Proxy routing and redirect refusal through configured Bun proxy.
 				const payload = JSON.stringify({ input: "via-bun-proxy" })
 				const proxyInit: RequestInit = {
 					method: "POST",
@@ -1330,8 +1296,6 @@ describe("turn engine", () => {
 				expect(proxyHits).toBe(2)
 				expect(directReceived).toHaveLength(0)
 
-				// An own enumerable `__proto__` property on `init` must not become the prototype of
-				// the forwarded options object and inject `proxy` or `headers` into Bun's fetch.
 				const protoProxyInit: RequestInit = { method: "POST", body: "direct-only" }
 				Object.defineProperty(protoProxyInit, "__proto__", {
 					value: {
@@ -1349,7 +1313,6 @@ describe("turn engine", () => {
 				expect(directReceived[0]?.authorization).toBeUndefined()
 				expect(directReceived[0]?.body).toBe("direct-only")
 
-				// 2. Connection reuse: `{ keepalive: false }` opens fresh connections vs default reuse.
 				const noReuseBaseUrl = `http://127.0.0.1:${noReusePort}/v1`
 				const guardedNoReuseFetch = createNoRedirectProviderFetch(noReuseBaseUrl)
 				for (let call = 0; call < 2; call++) {
@@ -1371,8 +1334,6 @@ describe("turn engine", () => {
 				}
 				expect(reuseConnections).toBe(1)
 
-				// 3. Known-length POST preserves Content-Length, empty POST sends 0 bytes, and streaming
-				//    uploads cancel cleanly on abort.
 				const fixedLengthRes = await guardedProxyFetch(`${directBaseUrl}/responses`, {
 					method: "POST",
 					body: "abcd",
@@ -1422,7 +1383,6 @@ describe("turn engine", () => {
 				})
 				expect(streamCancelled).toBe(true)
 
-				// 4. Request objects are rejected fail-closed without contacting the server.
 				const countBeforeReject = directReceived.length
 				const rejectedReq = new Request(`${directBaseUrl}/responses`, {
 					method: "POST",
@@ -1472,8 +1432,6 @@ describe("turn engine", () => {
 						)
 						yield* Effect.promise(() => entered)
 
-						// Interrupting the holder while its async critical section is still running
-						// must NOT release the semaphore permit before the critical section finishes.
 						const interrupting = yield* Effect.forkChild(Fiber.interrupt(holder), {
 							startImmediately: true,
 						})
@@ -1554,7 +1512,6 @@ describe("turn engine", () => {
 	})
 
 	it("keeps a queued abort alive when interrupted while submit holds the permit", async () => {
-		// 1. Directly exercise `PiSession.do.ts`'s `makePiHarnessBackend` abort path.
 		const cancelled = new Set<string>()
 		const harnessAborts: Array<string> = []
 		const harnessBackend = makePiHarnessBackend(
@@ -1600,8 +1557,6 @@ describe("turn engine", () => {
 					expect(harnessBackend.isCancelled("turn:1")).toBe(true)
 					expect(harnessAborts).toEqual([])
 
-					// Interrupting the queued abort while `submit` holds the permit must NOT
-					// drop the waiter before `harness.abort` executes.
 					const interrupting = yield* Effect.forkChild(Fiber.interrupt(abortFiber), {
 						startImmediately: true,
 					})
@@ -1618,9 +1573,6 @@ describe("turn engine", () => {
 			}),
 		)
 
-		// 2. End-to-end against `InMemoryPiDurableBackend`: interrupt abort while `admitPiTurn`
-		// is paused inside `submit()` (after the final fence check) and verify recovery sees
-		// `TurnInterrupted` instead of a completed reply.
 		let markEnteredSubmit!: () => void
 		const enteredSubmit = new Promise<void>((resolve) => {
 			markEnteredSubmit = resolve
@@ -1866,9 +1818,7 @@ describe("turn engine", () => {
 			const prompt = extractLastUserText(context)
 			prompts.push(prompt)
 			return prompt === "hang"
-				? new Promise<AssistantMessage>(() => {
-						// Never settles and ignores its abort signal.
-					})
+				? new Promise<AssistantMessage>(() => {})
 				: Promise.resolve(makeAssistantReply(model, null, `Echo: ${prompt}`, 1, 1))
 		})
 		let resets = 0
@@ -1907,12 +1857,9 @@ describe("turn engine", () => {
 			})
 		}
 
-		// The abandoned turn never stops, so the next turn's abort runs out of grace and resets.
 		expect(Exit.isFailure(await runNext())).toBe(true)
 		expect(resets).toBe(1)
 
-		// Reopened over the same storage, Pi has the abort on record: it settles the stuck
-		// turn without calling the model again, and the next turn runs.
 		const next = await runNext()
 		expect(Exit.isSuccess(next) && next.value).toMatchObject({
 			ok: true,
@@ -1952,7 +1899,6 @@ describe("turn engine", () => {
 		})
 		const interrupted = { ok: false, error: { _tag: "TurnInterrupted" } }
 		try {
-			// Turn 1 never reached Pi; the session moved on and turn 2 is running.
 			const second = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second")))
 			while (prompts.length === 0) {
 				await new Promise<void>((resolve) => {
@@ -1966,7 +1912,6 @@ describe("turn engine", () => {
 			releaseSecond()
 			expect(await second).toMatchObject({ ok: true, reply: { text: "Echo: second" } })
 
-			// The same late turn after turn 2 settled is still refused, and never reaches the model.
 			expect(await Effect.runPromise(runPiDurableTurn(backend, turn(1, "late")))).toMatchObject(
 				interrupted,
 			)
@@ -2038,7 +1983,6 @@ describe("turn engine", () => {
 		}
 
 		try {
-			// Original runTurn enters admitPiTurn, acquires withLock, and pauses before submit().
 			const originalTurn = Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:1",
@@ -2051,8 +1995,6 @@ describe("turn engine", () => {
 			)
 			await enteredEnsureRoot
 
-			// Retry's recovery probe starts while admitPiTurn still holds the lock before submit().
-			// It MUST wait for admission to finish instead of returning null.
 			let recoverySettled = false
 			const recovery = Effect.runPromise(recoverPiDurableTurn(backend, "turn:1")).then(
 				(outcome) => {
@@ -2136,8 +2078,6 @@ describe("turn engine", () => {
 			unpublishedOperationIds: unpublished.map((n) => `turn:${n}`),
 		})
 		try {
-			// Pi answers turns 1 and 2, but the domain had already abandoned both, so neither reply
-			// reached the session.
 			await Effect.runPromise(runPiDurableTurn(backend, turn(1, "lost")))
 			await Effect.runPromise(runPiDurableTurn(backend, turn(2, "also lost", [1])))
 			await Effect.runPromise(runPiDurableTurn(backend, turn(3, "kept", [1, 2])))
@@ -2168,7 +2108,6 @@ describe("turn engine", () => {
 			releaseDrain = resolve
 		})
 		let draining = false
-		// Admission of turn 2 lets go of the lock to wait for turn 1; this holds it in that gap.
 		const backend: PiDurableBackend = {
 			...real,
 			abort: () => Effect.succeed(true),
@@ -2272,7 +2211,6 @@ describe("turn engine", () => {
 		try {
 			const first = Effect.runPromise(runPiDurableTurn(real, turn(1, "first")))
 			await until(() => prompts.length === 1)
-			// The original call and a retry of it both wait for turn 1 to drain; the retry then gives up.
 			const original = Effect.runPromise(runPiDurableTurn(backend, turn(2, "second")))
 			await until(() => draining === 1)
 			const retry = Effect.runFork(runPiDurableTurn(backend, turn(2, "second")))

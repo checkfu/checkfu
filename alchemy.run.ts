@@ -31,8 +31,6 @@ export const inProduction = <E, R>(check: Effect.Effect<void, E, R>) =>
 		}
 	})
 
-// `alchemy dev` provisions no wildcard route or DNS record, so under it no Worker reads a publish
-// domain: the content Worker takes no route and publications live under /p/<address>/.
 export const publishDomainOnlyWhenRouted = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.gen(function* () {
 		if (!(yield* Alchemy.AlchemyContext).dev) {
@@ -74,7 +72,6 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 			yield* PiHarnessWorker
 			const content = yield* ContentWorker
 			const publish = yield* publishDomain
-			// The route needs a proxied record for every name it serves; 100:: is never reached.
 			if (publish !== undefined) {
 				yield* Cloudflare.DNS.Record("PublishWildcard", {
 					zoneId: Output.map(content.routes, (routes) => routes[0]?.zoneId ?? ""),
@@ -121,7 +118,6 @@ export const checkfuStack = (baseline: Effect.Effect<void>) =>
 		}).pipe(
 			Effect.provide([PiHarnessWorkerLive, ContentWorkerLive, ApiWorkerLive]),
 			publishDomainOnlyWhenRouted,
-			// Checked against the real settings, so dev refuses what a deploy would.
 			(stack) => Effect.andThen(customDomains, stack),
 			protectInProduction,
 		),

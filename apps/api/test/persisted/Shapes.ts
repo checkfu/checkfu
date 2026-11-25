@@ -125,7 +125,6 @@ interface ModelClass {
 const commandReply = (model: string, command: CommandClass): PersistedShape => ({
 	id: `command-reply:${model}/${command.tag}`,
 	kind: "command-reply",
-	// Both aggregate and decision receipts store null when the command declares no reply.
 	schema: command.reply ?? Schema.Null,
 })
 
@@ -143,9 +142,6 @@ const shapesOfModel = (model: ModelClass): ReadonlyArray<PersistedShape> => {
 		}
 		for (const command of aggregate.definition.commands) {
 			shapes.push(commandReply(model.modelName, command))
-			// Only a command that cannot reject can be scheduled, and a scheduled command is
-			// stored until it is delivered. Every such command is locked, scheduled today or not,
-			// so one scheduled later is already covered.
 			if (command.rejects.length === 0) {
 				shapes.push({
 					id: `scheduled-command:${owner}/${command.tag}`,
@@ -245,12 +241,6 @@ const validatePiDocRuntimeValue = (
 			),
 	}).pipe(Effect.tap((copied) => validator(copied).pipe(Effect.mapError((error) => error.issue))))
 
-/**
- * Encodes a Checkfu-owned Pi durable document's on-disk metadata (`version`,
- * `scope`, `family`) together with its value schema. When previous versions are
- * declared, decoding runs the token's `migrate(value, fromVersion)` handler and
- * validates the migrated value against the current runtime schema.
- */
 export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema => {
 	const def = spec.token.definition
 	const family = def.family === true
@@ -307,11 +297,6 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 		)
 	}
 
-	// Pi's `materializeDocumentValue` hands runtime callers the stored JSON (or a
-	// strict-JSON copy of `migrate(...)`) without running an Effect codec. Validate
-	// both current and previous versions directly against `Schema.toType(...)` after
-	// `copyJson(...)` so decoding defaults, wire transforms, and JSON-codec coercions
-	// (such as `"NaN"` -> `NaN` for `Schema.Number`) can never mask a runtime mismatch.
 	const runtimeSchema = Schema.toType(spec.schema)
 	const runtimeCodecJson = Schema.toCodecJson(runtimeSchema)
 	const validateCurrent = Schema.decodeUnknownEffect(runtimeSchema)
@@ -321,10 +306,6 @@ export const piDocPersistedSchema = (spec: CheckfuPiDocSpec): PersistedSchema =>
 		Schema.toJsonSchemaDocument(runtimeCodecJson),
 	)
 
-	// Previous wire branches accept the raw stored JSON object without stripping
-	// undeclared properties, running field transforms, or applying decoding
-	// defaults, while still folding each previous runtime schema into the
-	// JSON-Schema fingerprint and validating the old runtime shape before migrate().
 	const previousBranches = previous.map((step) => {
 		const stepRuntime = Schema.toType(step.schema)
 		return {

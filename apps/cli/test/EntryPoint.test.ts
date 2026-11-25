@@ -10,9 +10,6 @@ const cliRoot = fileURLToPath(new URL("..", import.meta.url))
 
 describe.skipIf(process.platform === "win32")("the CLI started from another project", () => {
 	it("gets nothing from that project's .env when a package script starts it with both flags", () => {
-		// Outside the checkout the CLI only starts with both flags. Bun must then keep that
-		// directory's .env out, or a key meant for one deployment would count as exported
-		// and be sent to whatever --base-url names.
 		const project = mkdtempSync(join(tmpdir(), "checkfu-script-"))
 		try {
 			writeFileSync(

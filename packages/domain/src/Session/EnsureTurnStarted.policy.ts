@@ -11,13 +11,8 @@ import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { TurnInput } from "./TurnInput.view.ts"
 
-// Its own timer, so it never replaces the one StartTurn arms. Like StartTurn's, it counts from when
-// the run starts, as the harness's own bound on a run does; the earlier of the two ends the turn.
 export const ENSURED_TURN_DEADLINE = "ensured-turn-deadline"
 
-// StartTurn is fed by TurnInput so the verifier can follow a turn, but a view that is
-// rebuilding takes an event as history, which a policy fed by it never sees. Deliveries
-// from the session itself always arrive: start the same run, under the same key, from here.
 export class EnsureTurnStarted extends Domain.Policy("EnsureTurnStarted", {
 	from: Session,
 	on: [SessionStatusRunning, SessionStatusIdle, SessionStatusTerminated],

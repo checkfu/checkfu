@@ -104,7 +104,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const createAgent = yield* CreateAgentDecision
 
-					// Create an agent directly through the domain with an independent version_id ("aver_custom_001")
 					const customAgentId = AgentId.make("agent_custom_001")
 					const customVersionId = AgentVersionId.make("aver_custom_001")
 					yield* createAgent.send(
@@ -126,7 +125,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					// Create session pinning explicit version 1 against the custom-version-id agent
 					const sessRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -159,7 +157,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						{ type: "text", text: "CustomVersion: Ping" },
 					])
 
-					// Delete environment -> immediate GET returns 404 (read-your-writes)
 					const delRes = yield* sendRequest(apiFetch, {
 						method: "DELETE",
 						path: `/v1/environments/${env.id}`,
@@ -285,7 +282,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							last_reply_turn,
 						})
 					yield* turn(1, "lost", 0)
-					// Turn 2 fails before it reaches Pi, so nothing removes turn 1 from the context for it.
 					yield* Effect.flip(
 						turn(2, "missing version", 0, 99).pipe(
 							Effect.provideService(AgentVersionLookupTimeout, "10 millis"),
@@ -325,7 +321,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const provider = yield* Harness
 
-					// Create agent v1 -> update to v2
 					const v1Res = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -349,7 +344,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					// Conflicting nested + top-level version -> 400
 					const conflictRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -362,7 +356,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(conflictRes.status).toBe(400)
 
-					// Object agent ref without nested version + top-level agent_version: 1 -> pins v1!
 					const pinnedRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -502,7 +495,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const agents = yield* Agent
 					const environments = yield* Environment
 
-					// Simulate AgentView lagging completely (always missing / returning ConsistencyTimeout).
 					const laggingAgentViews: typeof realAgentViews = {
 						...realAgentViews,
 						get: (ref, options) =>
@@ -517,7 +509,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 										}),
 									),
 					}
-					// Simulate EnvironmentView returning empty on initial `get`, while `waitFor` catches up.
 					let envGetCalls = 0
 					const laggingEnvViews: typeof realEnvViews = {
 						...realEnvViews,
@@ -542,7 +533,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						Effect.provideService(EnvironmentView, laggingEnvViews),
 					)
 
-					// 1. Agent create returns 202 Pending; follow-up partial update with version 1 MUST NOT 404/409.
 					const createdAgent = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -571,7 +561,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					expect(agentState.model_id).toBe("gpt-4o-mini")
 					expect(agentState.system).toBe("Keep this system prompt")
 
-					// Stale version after the committed v2 update must return 409.
 					const staleAgent = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/agents/${agentId}`,
@@ -580,7 +569,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(staleAgent.status).toBe(409)
 
-					// 2. Environment create returns 202 Pending; partial update is decided against committed v1 instead of false 404.
 					const createdEnv = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",
@@ -703,7 +691,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							Effect.gen(function* () {
 								if (raceVersion3OnNextAtLeast && options?.atLeast !== undefined) {
 									raceVersion3OnNextAtLeast = false
-									// Writer B commits version 3 before Writer A reads AgentView for version 2.
 									const v3Receipt = yield* updateAgent.send(
 										new UpdateAgent({
 											agent_id: ref.id,
@@ -744,7 +731,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						created_at: string
 					}
 
-					// Writer A updates v1 -> v2 while Writer B concurrently commits v2 -> v3.
 					raceVersion3OnNextAtLeast = true
 					const updateRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -778,7 +764,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						created_at: created.created_at,
 					})
 
-					// Head AgentView really is at Writer B's version 3.
 					const headRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/agents/${created.id}`,
@@ -806,7 +791,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
 
-					// OpenAPI schema for POST /v1/sessions must require either `agent` or `agent_id`.
 					const spec = openApiDocument<{
 						paths: Record<
 							string,
@@ -837,7 +821,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						),
 					).toBe(true)
 
-					// Missing both agent and agent_id fails request validation with 400.
 					const missingAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -850,7 +833,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						error: { type: "invalid_request_error" },
 					})
 
-					// Conflicting agent and agent_id still fails with 400 conflict message.
 					const conflictRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -892,7 +874,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 							Effect.gen(function* () {
 								if (raceVersion3OnNextAtLeast && options?.atLeast !== undefined) {
 									raceVersion3OnNextAtLeast = false
-									// Writer B commits version 3 before Writer A reads EnvironmentView for version 2.
 									const v3Receipt = yield* environments.send(
 										new UpdateEnvironment({
 											environment_id: ref.id,
@@ -925,9 +906,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						created_at: string
 					}
 
-					// Writer A updates v1 -> v2 while Writer B concurrently commits v2 -> v3.
-					// EnvironmentView only stores head (now v3), so returning v2 with a fabricated
-					// timestamp or leaking v3 would both be wrong; return 202 pending instead.
 					raceVersion3OnNextAtLeast = true
 					const updateRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -947,7 +925,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						pending: true,
 					})
 
-					// Head EnvironmentView really is at Writer B's version 3.
 					const headRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/environments/${created.id}`,
@@ -979,9 +956,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					const stalledTimeouts: Array<unknown> = []
 					let waitCalls = 0
 					const checkpoints: Array<unknown> = []
-					// While lagging, the view has nothing for a read without a checkpoint, and every
-					// wait times out. A read at a checkpoint is served, as the real view does once it
-					// has applied that commit.
 					const laggingVersionsByNumber = {
 						...realVersionsByNumber,
 						get: (
@@ -993,8 +967,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								if (options?.atLeast === undefined) {
 									return Effect.succeedNone
 								}
-								// A view that never reaches the checkpoint answers when its timeout runs
-								// out: the one the caller passes, or the domain's own 10 seconds.
 								if (stalled) {
 									stalledTimeouts.push(options.timeout)
 									return Effect.sleep(options.timeout ?? "10 seconds").pipe(
@@ -1055,8 +1027,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					expect(waitCalls).toBe(0)
 					expect(checkpoints).toEqual([expect.objectContaining({ stream: `Agent/${created.id}` })])
 
-					// A checkpointed read that cannot be served gives up within the configured version
-					// budget (50 ms here), not the domain's default, and reports the version as pending.
 					stalled = true
 					const stalledRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1129,7 +1099,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					expect(createRes.status).toBe(201)
 					const created = (yield* Effect.promise(() => createRes.json())) as { id: string }
 
-					// Capture the pre-delete snapshot that a lagging EnvironmentView would still hold.
 					staleSnapshot = yield* realEnvViews.get(Environment.ref(EnvironmentId.make(created.id)))
 					expect(Option.isSome(staleSnapshot)).toBe(true)
 
@@ -1145,7 +1114,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						type: "environment_deleted",
 					})
 
-					// Immediate GET must return 404 even while EnvironmentView still serves the stale snapshot.
 					const getAfterDelete = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/environments/${created.id}`,
@@ -1522,7 +1490,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			runTurn: (name, request) =>
 				Effect.gen(function* () {
 					runTurnCalls += 1
-					// Final (and only) runTurn attempt commits the reply in Pi, then loses its RPC receipt.
 					const backend = yield* Effect.promise(() => backendFor(name))
 					yield* runPiDurableTurn(backend, request)
 					return yield* new HarnessCallFailed({ cause: "final RPC receipt lost" })
@@ -1596,7 +1563,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					yield* sendAndSettle(apiFetch, session.id, ["save me"], 1)
 
 					expect(runTurnCalls).toBe(1)
-					// 1 initial recovery check + 1 post-final recovery probe after the lost receipt.
 					expect(recoverTurnCalls).toBe(2)
 					expect(modelCalls).toBe(1)
 
@@ -1659,11 +1625,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						const backend = yield* Effect.promise(() => backendFor(name))
 						if (runTurnCalls === 1) {
 							if (mode === "admitted") {
-								// Pi admits and settles the turn, then the RPC receipt is lost.
 								yield* runPiDurableTurn(backend, request)
 							}
-							// The environment changes before the harness decides to retry, so a harness
-							// that looked at it again would see the change.
 							if (mutateDuringBackoff !== null) {
 								const mutate = mutateDuringBackoff
 								mutateDuringBackoff = null
@@ -1743,7 +1706,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						})
 						const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-						// Arm the environment mutation to fire right after attempt 1 fails (before attempt 2).
 						const targetId = envIdToMutate
 						const triggerMutation = () =>
 							Effect.gen(function* () {
@@ -1772,7 +1734,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 								yield* envViews.get(Environment.ref(targetId), { atLeast: receipt })
 							}).pipe(Effect.orDie)
 
-						// The mutation fires when the call is sent again.
 						mutateDuringBackoff = triggerMutation
 
 						const sendRes = yield* sendRequest(apiFetch, {
@@ -1804,7 +1765,6 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						}
 						expect(settled).toBe(true)
 
-						// The call is sent again either way; a turn Pi already admitted is joined, not run again.
 						expect(recoverTurnCalls).toBe(1)
 						expect(runTurnCalls).toBe(2)
 
@@ -2931,8 +2891,6 @@ describe("Agent and environment field length limits", () => {
 			(write) => write.className === "AgentAggregate" && write.key === "intent",
 		)
 		expect(primaryIntents.length).toBeGreaterThanOrEqual(4)
-		// The largest write is one agent event with every field at its limit in four-byte
-		// characters, which shows the worst case was exercised.
 		expect(Math.max(...primaryIntents.map((write) => write.bytes))).toBeGreaterThan(750_000)
 		expect(writes.some((write) => write.key.startsWith("decided:"))).toBe(true)
 		expect(writes.some((write) => write.key.startsWith("receipt:"))).toBe(true)
@@ -3028,8 +2986,6 @@ describe("Agent and environment field length limits", () => {
 				}),
 		).toThrow("Schema validation failed")
 
-		// Persist over-limit snapshots, historical events, and view rows in Durable Objects
-		// storage, then cold-restart fresh DO instances against the same backing store.
 		const persistedStore = new Map<string, Map<string, Uint8Array>>()
 		const doAgentId = AgentId.make("agent_do_legacy")
 		const doV1Id = AgentVersionId.make("aver_do_legacy_1")

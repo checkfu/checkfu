@@ -21,7 +21,6 @@ const HYDRATE_CONCURRENCY = 10
 
 const utf8 = new TextEncoder()
 
-/** The bytes of a JSON array once it holds one more entry: its brackets, commas and entries. */
 export const pageBytesWith = (bytes: number, count: number, size: number): number =>
 	(count === 0 ? 2 : bytes + 1) + size
 
@@ -36,7 +35,6 @@ export const makeLister = Effect.gen(function* () {
 	if (query === undefined) {
 		return yield* Effect.die(new Error("ListResources is not hosted by the model."))
 	}
-	// A kind that cannot be archived, such as an artifact, has no archived_at.
 	return <A extends object, E, R>(
 		kind: ListingKind,
 		input: ListQuery,
@@ -45,7 +43,6 @@ export const makeLister = Effect.gen(function* () {
 		Effect.gen(function* () {
 			const include_archived = input.include_archived ?? false
 			const page = yield* Effect.orDie(
-				// @effect-diagnostics-next-line anyUnknownInErrorContext:off
 				query.run(
 					{ kind, include_archived, agent_id: input.agent_id ?? null, order: input.order ?? "asc" },
 					{ take: input.limit ?? 50, ...(input.after === undefined ? {} : { after: input.after }) },

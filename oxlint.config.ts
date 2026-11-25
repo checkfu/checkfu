@@ -3,8 +3,6 @@ import { strict as effectStrict } from "@effect/tsgo/oxlint-presets"
 import { defineConfig } from "oxlint"
 import type { OxlintConfig } from "oxlint"
 
-// Each operation is confined to the one file that owns it. That file is exempt from its own
-// entry and from nothing else.
 const OWNED = [
 	{
 		owner: "packages/ui/src/use-mount-effect.ts",
@@ -93,7 +91,16 @@ export default defineConfig({
 		"effecttsgo/unstable-api-usage": "off",
 		"@typescript-eslint/ban-ts-comment": [
 			"error",
-			{ "ts-expect-error": { descriptionFormat: String.raw`^ -- boundary: \S` } },
+			{
+				"ts-expect-error": true,
+				"ts-ignore": true,
+				"ts-nocheck": true,
+				"ts-check": false,
+			},
+		],
+		"no-warning-comments": [
+			"error",
+			{ terms: ["oxlint-disable", "eslint-disable"], location: "anywhere" },
 		],
 		"import/no-cycle": "error",
 		"import/no-duplicates": "error",
@@ -146,26 +153,18 @@ export default defineConfig({
 			},
 		],
 
-		// Effect v4 and @alchemy.run/* modules are designed around namespace imports
-		// (e.g. `import * as Effect from "effect/Effect"`).
 		"import-x/no-namespace": "off",
-		// tsconfig.base.json enables exactOptionalPropertyTypes with readonly object types;
-		// conditional spreads (`...(v === undefined ? {} : { k: v })`) omit optional keys
-		// without duplicating types into mutable builders.
 		"quality/no-conditional-empty-object-spread": "off",
 	},
 	overrides: [
 		...(cloudflare.overrides ?? []),
 		{
-			// Keep test-local helpers and deferred resolvers co-located inside their describe/it blocks.
 			files: ["**/*.{test,spec}.{ts,tsx,mts,cts}"],
 			rules: {
 				"unicorn/consistent-function-scoping": "off",
 			},
 		},
 		{
-			// Test suites and test harnesses intentionally craft invalid/partial payloads
-			// and narrow untyped test doubles (e.g. `res.json()`, corrupt snapshots).
 			files: ["**/test/**/*.ts"],
 			rules: {
 				"quality/no-chained-type-assertions": "off",
@@ -173,16 +172,12 @@ export default defineConfig({
 			},
 		},
 		{
-			// @alchemy.run/domain's Z3 formal verifier symbolically evaluates predicate arrow
-			// functions and does not model the global `Boolean` constructor.
 			files: ["**/*.{aggregate,decision,model}.ts"],
 			rules: {
 				"unicorn/prefer-native-coercion-functions": "off",
 			},
 		},
 		{
-			// PiRefusals emits structured console.warn logs outside Effect for Cloudflare
-			// Worker logs, and the refusal tests intercept console.warn to verify redaction.
 			files: [
 				"apps/api/src/Pi/PiRefusals.ts",
 				"apps/api/test/Api.refusals.anthropic.test.ts",
@@ -193,9 +188,6 @@ export default defineConfig({
 			},
 		},
 		{
-			// SnapshotMigrationStep chains heterogeneous versioned aggregate states across
-			// arbitrary domain schemas where intermediate steps and the dynamic wire union
-			// are intentionally type-erased at the codec boundary.
 			files: ["packages/snapshots/src/VersionedSnapshot.ts"],
 			rules: {
 				"quality/no-chained-type-assertions": "off",
@@ -204,8 +196,6 @@ export default defineConfig({
 			},
 		},
 		{
-			// GeneratedRuntime dynamically decodes erased HttpApiEndpoint Schema.Top contracts
-			// and dispatches Forge-generated operations onto the typed HttpApiClient by name.
 			files: ["apps/cli/src/GeneratedRuntime.ts"],
 			rules: {
 				"quality/no-chained-type-assertions": "off",
@@ -213,8 +203,35 @@ export default defineConfig({
 			},
 		},
 		{
-			// The generated MCP tool manifest copies JSON Schema literals (numeric bounds,
-			// regular-expression patterns) verbatim from the OpenAPI document.
+			files: [
+				"apps/api/src/D1Jurisdiction.ts",
+				"apps/app/src/json-boundary.ts",
+				"apps/mcp/src/JsonSchemaCodec.ts",
+				"packages/sdk/src/Boundary.ts",
+			],
+			rules: {
+				"typescript/no-unsafe-type-assertion": "off",
+			},
+		},
+		{
+			files: ["apps/api/test/Persisted.lock.test.ts"],
+			rules: {
+				"effecttsgo/schema-number": "off",
+			},
+		},
+		{
+			files: ["apps/api/src/Http/Listing.ts"],
+			rules: {
+				"effecttsgo/any-unknown-in-error-context": "off",
+			},
+		},
+		{
+			files: ["packages/sdk/src/Api.ts"],
+			rules: {
+				"effecttsgo/leaking-requirements": "off",
+			},
+		},
+		{
 			files: ["apps/mcp/src/generated/Tools.ts"],
 			rules: {
 				"unicorn/numeric-separators-style": "off",

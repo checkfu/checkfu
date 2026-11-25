@@ -1,31 +1,3 @@
-/**
- * Pure turn-tracking state machine for `sessions connect`.
- *
- * Input proof rules preserved by every transition:
- * 1. Replayed SSE frames (`data.seq <= lastProcessedSeq`) prove nothing new and
- *    must never update turn counters, settle another turn, record errors, or wake waiters.
- * 2. A `user.message` receipt `{ turn, queued }` proves server acceptance for `turn`:
- *    - `queued === false`: server started `turn` from idle. Updates live status to
- *      `running` only if `liveTurn < turn` and session is not terminated; clears any
- *      stale queued marker for `turn`.
- *    - `queued === true`: server queued `turn` behind active predecessor `turn - 1`.
- *      Never claims `turn` itself is running; only infers predecessor `turn - 1` is
- *      running if `liveTurn < turn - 1` (so a delayed receipt arriving after SSE
- *      already delivered `idle` for `turn - 1` never flips `liveStatus` back to `running`).
- *    - `queued === undefined` (legacy receipt): infers started-from-idle only when
- *      the pre-send snapshot was idle and `turn === liveTurn + 1` with no intervening
- *      live state transition.
- * 3. SSE `session.status_running` / `session.status_idle` advance the replay cursor
- *    (`observedTurn` / `settledTurn`) and advance `(liveStatus, liveTurn)` only when
- *    catching up to or passing `liveTurn`.
- * 4. SSE `session.error` records turn error context without failing the turn until
- *    `session.status_idle(retries_exhausted)` or `session.status_terminated` with
- *    `retry_status === "terminal"`.
- * 5. A GET `/sessions/:id` snapshot may lag behind SSE; it can only confirm a queued
- *    turn did not start when `state` still shows that turn queued and unobserved,
- *    never overriding SSE progress or a `queued: false` receipt.
- */
-
 export interface TurnFailure {
 	readonly turn: number
 	readonly message: string
@@ -170,8 +142,6 @@ export const extractSubmittedMessageReceipt = (
 	if (typeof turn !== "number" || !Number.isInteger(turn) || turn < 1) {
 		return undefined
 	}
-	// Deployments older than the `queued` field send a receipt without it; a `queued`
-	// that is present but not a boolean is not a receipt at all.
 	if (!("queued" in first)) {
 		return { turn, queued: undefined }
 	}
@@ -494,7 +464,6 @@ export const evaluateHaltedQueueSnapshot = (
 	snapshot: SessionSnapshotSummary,
 	retriesExhausted: boolean,
 ): HaltedQueueSnapshotDecision => {
-	// Never let a stale GET snapshot override SSE progress or a newer queued:false receipt
 	if (
 		refreshedState.ended ||
 		refreshedState.observedTurn >= checkedState.targetTurn ||

@@ -113,8 +113,6 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 						if (head.version === receipt.reply.version && head.archived_at === null) {
 							return head
 						}
-						// `head.created_at` is the immutable `environment.created` event timestamp,
-						// so version 1's exact snapshot can be returned even if a later mutation landed.
 						return {
 							id,
 							type: "environment" as const,
@@ -190,10 +188,6 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					if (head.version === receipt.reply.version && head.archived_at === null) {
 						return head
 					}
-					// Another writer updated or archived the environment before this read;
-					// EnvironmentView only stores head, so the exact committed snapshot (including
-					// its event timestamp) is no longer available. Return 202 pending rather than
-					// leaking another writer's version or fabricating `updated_at`.
 					return { id, type: "environment" as const, pending: true as const }
 				}).pipe(handled),
 			)

@@ -66,12 +66,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
 
-					// 1. Health check is public
 					const healthRes = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
 					expect(healthRes.status).toBe(200)
 					expect(yield* Effect.promise(() => healthRes.json())).toEqual({ status: "ok" })
 
-					// 2. Create & update agent (v1 -> v2, OpenAI model)
 					const createAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -108,7 +106,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(agentV2.version).toBe(2)
 					expect(agentV2.system).toBe("You are concise.")
 
-					// 3. Create environment
 					const createEnvRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",
@@ -123,7 +120,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(env.id).toMatch(/^env_/)
 					expect(env.config.type).toBe("cloud")
 
-					// 4. Create session pinned to agent v2 + environment
 					const createSessRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -144,7 +140,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(session.id).toMatch(/^sess_/)
 					expect(session.agent).toEqual({ id: agentV1.id, version: 2 })
 
-					// 5. Open live SSE stream, then send turn 1 user.message
 					const streamRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream`,
@@ -185,7 +180,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						{ type: "text", text: "Echo: Hello Checkfu!" },
 					])
 
-					// 6. Send turn 2 and verify pi-durable preserves full conversation history
 					const lastTurn1Seq = turn1Frames.at(-1)!.id
 					const turn2Stream = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -213,7 +207,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						{ type: "text", text: "Echo: Follow up!" },
 					])
 
-					// 7. Paginated history + accumulated usage across both turns
 					const listRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events?limit=3`,
@@ -243,7 +236,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(updatedSession.turn).toBe(2)
 					expect(updatedSession.usage).toEqual({ input_tokens: 30, output_tokens: 14 })
 
-					// 8. Archive session
 					const archiveRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/archive`,
@@ -262,7 +254,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			await closeAll()
 		}
 
-		// Turn 1 had 1 message (user); Turn 2 had 3 messages (user + assistant + user) inside pi-durable!
 		expect(seenCalls).toHaveLength(2)
 		expect(seenCalls[0]).toMatchObject({
 			provider: "openai",
@@ -333,7 +324,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
 
-					// Missing auth header -> 401 with Bearer challenge
 					const noAuthRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -342,7 +332,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(noAuthRes.status).toBe(401)
 					expect(noAuthRes.headers.get("www-authenticate")).toBe("Bearer")
 
-					// Wrong bearer token -> 401 with Bearer challenge
 					const wrongAuthRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -352,7 +341,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					expect(wrongAuthRes.status).toBe(401)
 					expect(wrongAuthRes.headers.get("www-authenticate")).toBe("Bearer")
 
-					// x-api-key header works
 					const xApiKeyRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -361,7 +349,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					})
 					expect(xApiKeyRes.status).toBe(201)
 
-					// The credential check answers for the key alone, under either header.
 					const verify = (headers?: Record<string, string>) =>
 						sendRequest(apiFetch, {
 							method: "GET",
@@ -388,11 +375,9 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
 
-					// /health remains available
 					const healthRes = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
 					expect(healthRes.status).toBe(200)
 
-					// /v1/* fails closed with 503 when CHECKFU_API_KEY is unset
 					const unconfiguredRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",
@@ -1059,7 +1044,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						{ timeout: "2 seconds" },
 					)
 
-					// Stored AgentId and EnvironmentId > 256 chars match their advertised schemas.
 					for (const agentId of [longAgentId, extraLongAgentId]) {
 						expect(
 							(yield* sendRequest(apiFetch, {
@@ -1095,7 +1079,6 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					})
 					expect(getSession.status).toBe(200)
 
-					// SessionId enforces its 256-char limit via parameter schema validation (400), not route 404.
 					const oversizedSession = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${"s".repeat(MAX_IDENTIFIER_LENGTH + 1)}`,
@@ -1127,7 +1110,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 							Effect.succeedSome({
 								id: "agent_broken",
 								type: "agent",
-								version: 0, // Violates PositiveInt in AgentResource!
+								version: 0,
 								name: "Broken",
 								model: { id: "gpt-4o-mini" },
 								system: null,
@@ -1225,11 +1208,8 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(Scope.provide(handlerScope))
 
-					// makeApiHandler acquired its router layer inside the caller's scope (Empty -> Open means
-					// router finalizers are registered on handlerScope rather than an orphaned Scope.make()).
 					expect(handlerScope.state._tag).toBe("Open")
 
-					// Router stays alive across multiple requests while its owning scope is open.
 					const first = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
 					expect(first.status).toBe(200)
 					expect(handlerScope.state._tag).toBe("Open")
@@ -1257,12 +1237,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const apiKeyHeaders = { "x-api-key": TEST_API_KEY }
 
-					// Public routes retain their own cache policy (not forced to no-store).
 					const healthRes = yield* sendRequest(apiFetch, { method: "GET", path: "/health" })
 					expect(healthRes.status).toBe(200)
 					expect(healthRes.headers.get("cache-control")).toBeNull()
 
-					// Protected JSON and SSE routes authenticated via x-api-key MUST include no-store.
 					const agentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents",

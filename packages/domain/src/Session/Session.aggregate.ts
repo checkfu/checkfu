@@ -444,8 +444,6 @@ export class Session extends Domain.Aggregate("Session", {
 			]
 		},
 
-		// A batch key is claimed on an ended session too: a retry of events it already committed
-		// gets their receipts, and the event commands refuse any event that is new.
 		ClaimIdempotencyKey: (state, cmd, ctx) =>
 			state._tag === "Uninitialized"
 				? new SessionNotFound({ session_id: ctx.id })

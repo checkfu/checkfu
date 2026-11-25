@@ -25,7 +25,6 @@ const accepted = (connect: Connect, key: string) =>
 		Effect.gen(function* () {
 			const response = yield* connect(key, {
 				requestId: 0,
-				// Watching from version 0 sends the current state at once, then one per commit.
 				mode: "watch",
 				context: {},
 				cursor: 0,
@@ -49,16 +48,11 @@ const accepted = (connect: Connect, key: string) =>
 			return socket
 		}),
 		(socket) => Effect.sync(() => socket.close(1000, "")),
-		// The upgrade can be retried for a while during a deploy; a client that left stops it.
 		{ interruptible: true },
 	)
 
-// Cloudflare's WebSocket cannot pause, so frames a slow client has not read wait in the Worker.
-// Past this many bytes the stream ends and the client resumes from the last event it received.
 export const SOCKET_BUFFER_BYTES = 1024 * 1024
 
-// What a watch frame says about the key: the seq of its newest entry, and whether its state
-// is archived.
 const Watched = Schema.Struct({
 	cursor: Schema.Finite,
 	state: Schema.NullOr(Schema.Struct({ archived_at: Schema.NullOr(Schema.String) })),
@@ -69,13 +63,6 @@ export interface ViewHead {
 	readonly archived: boolean
 }
 
-/**
- * The view key's head each time it changes, from the Durable Object that owns it over a
- * hibernatable WebSocket. The socket watches the key's state rather than replaying its entries,
- * so each frame holds one state however long the upgrade took; the first comes as soon as it
- * opens. The caller reads what changed in bounded pages. Ends when the object closes the socket
- * or the caller falls `SOCKET_BUFFER_BYTES` behind.
- */
 export const objectSocketChanges = (connect: Connect, key: string): Stream.Stream<ViewHead> => {
 	const decodeFrame = Schema.decodeUnknownEffect(
 		Schema.fromJsonString(
@@ -95,7 +82,6 @@ export const objectSocketChanges = (connect: Connect, key: string): Stream.Strea
 			Socket.toStream,
 		),
 	).pipe(
-		// A closed or overflowed socket ends the stream.
 		Stream.catchIf(
 			(error) =>
 				error.reason._tag === "SocketCloseError" || error.reason._tag === "SocketReadError",

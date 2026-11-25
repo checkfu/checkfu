@@ -1,16 +1,30 @@
-import type * as Brand from "effect/Brand"
 import * as Clock from "effect/Clock"
 import type * as SecureRandom from "effect/crypto/SecureRandom"
-import type * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import type * as HttpApiClient from "effect/http-api/HttpApiClient"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { CheckfuApi, ClientEventId } from "./Api.ts"
 import type { CheckfuHttpApiClient, PendingResource } from "./Api.ts"
+import {
+	asEndpointSseEvent,
+	asEndpointSseStream,
+	endpointParamsCodec,
+	lookupRawSseMethod,
+} from "./Boundary.ts"
+import type {
+	ApiEndpoint,
+	ApiEndpointName,
+	ApiGroupName,
+	EndpointDecodedParams,
+	EndpointProp,
+	EndpointSseEvent,
+	EndpointSuccess,
+	IsoDateTimes,
+	SchemaTypeOrNever,
+} from "./Boundary.ts"
 import {
 	APIConnectionError,
 	APIConnectionTimeoutError,
@@ -22,7 +36,7 @@ import {
 } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { streamApiSse, streamSessionEvents } from "./Sse.ts"
-import type { ApiSseError, StreamSseOptions } from "./Sse.ts"
+import type { StreamSseOptions } from "./Sse.ts"
 import {
 	CurrentRequestTransportMeta,
 	computeRetryDelayMs,
@@ -34,25 +48,15 @@ import {
 } from "./Transport.ts"
 import type { HeaderMap, RetrySafety } from "./Transport.ts"
 
-/**
- * Recursively transforms Effect `DateTime.Utc` values into ISO-8601 `string`s
- * and unbrands primitive branded types for plain TypeScript callers.
- */
-export type IsoDateTimes<T> = T extends DateTime.Utc
-	? string
-	: T extends Brand.Brand<infer _K>
-		? T extends string
-			? string
-			: T extends number
-				? number
-				: T
-		: T extends string | number | boolean | null | undefined | symbol | bigint
-			? T
-			: T extends ReadonlyArray<infer U>
-				? ReadonlyArray<IsoDateTimes<U>>
-				: T extends object
-					? { readonly [K in keyof T]: IsoDateTimes<T[K]> }
-					: T
+export type {
+	ApiEndpoint,
+	ApiEndpointName,
+	ApiGroupName,
+	EndpointDecodedParams,
+	EndpointSseEvent,
+	EndpointSuccess,
+	IsoDateTimes,
+}
 
 type RequiredKeysOf<T> = {
 	[K in keyof T]-?: Record<never, never> extends Pick<T, K> ? never : K
@@ -62,9 +66,6 @@ type OptionalKeysOf<T> = {
 	[K in keyof T]-?: Record<never, never> extends Pick<T, K> ? K : never
 }[keyof T]
 
-/**
- * Allows `undefined` explicitly on optional keys under `exactOptionalPropertyTypes`.
- */
 export type RelaxOptionalProps<T> = [T] extends [never]
 	? never
 	: T extends object
@@ -73,18 +74,6 @@ export type RelaxOptionalProps<T> = [T] extends [never]
 			}
 		: T
 
-export type ApiGroupName = keyof (typeof CheckfuApi)["groups"]
-export type ApiEndpointName<G extends ApiGroupName> =
-	keyof (typeof CheckfuApi)["groups"][G]["endpoints"]
-export type ApiEndpoint<
-	G extends ApiGroupName,
-	E extends ApiEndpointName<G>,
-> = (typeof CheckfuApi)["groups"][G]["endpoints"][E]
-
-type EndpointProp<Ep, K extends string> = Ep extends { readonly [P in K]: infer V } ? V : never
-
-type SchemaTypeOrNever<S> = S extends Schema.Top ? S["Type"] : never
-
 type JsonPayloadOf<P> =
 	P extends ReadonlyMap<string, { readonly schemas: ReadonlyArray<Schema.Top> }>
 		? never
@@ -92,15 +81,6 @@ type JsonPayloadOf<P> =
 			? P["Type"]
 			: never
 
-type UnwrapStreamElement<T> =
-	T extends Stream.Stream<infer Event, infer _E, infer _R> ? Event : never
-
-export type EndpointDecodedParams<
-	G extends ApiGroupName,
-	E extends ApiEndpointName<G>,
-> = SchemaTypeOrNever<EndpointProp<ApiEndpoint<G, E>, "~Params">>
-
-/** A path argument: a number where the endpoint's parameter decodes to one, otherwise a string. */
 export type PathParam<
 	G extends ApiGroupName,
 	E extends ApiEndpointName<G>,
@@ -119,20 +99,10 @@ export type EndpointBody<G extends ApiGroupName, E extends ApiEndpointName<G>> =
 	EndpointProp<ApiEndpoint<G, E>, "~Payload">
 >
 
-export type EndpointSuccess<
-	G extends ApiGroupName,
-	E extends ApiEndpointName<G>,
-> = HttpApiClient.SuccessType<EndpointProp<ApiEndpoint<G, E>, "~Success">>
-
 export type EndpointJsonSuccess<
 	G extends ApiGroupName,
 	E extends ApiEndpointName<G>,
 > = IsoDateTimes<EndpointSuccess<G, E>>
-
-export type EndpointSseEvent<
-	G extends ApiGroupName,
-	E extends ApiEndpointName<G>,
-> = UnwrapStreamElement<EndpointSuccess<G, E>>
 
 type CheckfuApiGroup = (typeof CheckfuApi.groups)[ApiGroupName]
 type CheckfuEndpointValues<G> = G extends { readonly endpoints: infer E } ? E[keyof E] : never
@@ -303,11 +273,7 @@ export const decodeEndpointParams = <G extends ApiGroupName, E extends ApiEndpoi
 			invalidPath(`Endpoint ${String(group)}.${String(endpoint)} does not accept path parameters.`),
 		)
 	}
-	// Boundary codec: `endpointDef.params` is the runtime schema corresponding to `~Params`.
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-	const params = paramsSchema as Schema.Codec<EndpointDecodedParams<G, E>, unknown, never, never>
-	// Encoding the arguments through the endpoint's own schema turns a number into its path text
-	// only where the parameter is numeric, and refuses a number or a missing value for a string id.
+	const params = endpointParamsCodec<G, E>(paramsSchema)
 	return Schema.encodeUnknownEffect(params)(pathArgs).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(params)),
 		Effect.mapError((err) => invalidPath(`Invalid path parameters: ${err.message}`)),
@@ -587,33 +553,7 @@ export const executePaginatedStreamEffect = <
 		Stream.flatMap((page) => Stream.fromIterable(page.data)),
 	)
 
-type RawSseMethod = (request: {
-	readonly params?: unknown
-	readonly query?: unknown
-	readonly responseMode: "response-only"
-}) => Effect.Effect<HttpClientResponse.HttpClientResponse, ApiSseError>
-
 const decodeGenericSseJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
-
-const lookupRawSseMethod = (
-	raw: CheckfuHttpApiClient,
-	group: string,
-	endpoint: string,
-): RawSseMethod | undefined => {
-	for (const [groupName, groupClient] of Object.entries(raw)) {
-		if (groupName !== group || typeof groupClient !== "object" || groupClient === null) {
-			continue
-		}
-		for (const [endpointName, fn] of Object.entries(groupClient)) {
-			if (endpointName === endpoint && typeof fn === "function") {
-				// Boundary dispatch: `raw[group][endpoint]` is the typed HttpApiClient SSE endpoint.
-				// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-				return fn as RawSseMethod
-			}
-		}
-	}
-	return undefined
-}
 
 export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEndpointName<G>>(
 	runtime: EffectSdkRuntime,
@@ -627,17 +567,17 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 		const sessionId = rawParams["session_id"] ?? ""
 		const rawAfter = rawQuery?.["after"]
 		const after = typeof rawAfter === "number" ? rawAfter : undefined
-		// Boundary dispatch: `sessions.streamEvents` decodes `SessionEvent`, matching `EndpointSseEvent<"sessions", "streamEvents">`.
-		// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-		return streamSessionEvents(
-			runtime.raw,
-			sessionId,
-			{
-				...options,
-				...(after === undefined ? {} : { after }),
-			},
-			runtime.defaultHeaders,
-		) as Stream.Stream<EndpointSseEvent<G, E>, CheckfuSdkError>
+		return asEndpointSseStream<G, E>(
+			streamSessionEvents(
+				runtime.raw,
+				sessionId,
+				{
+					...options,
+					...(after === undefined ? {} : { after }),
+				},
+				runtime.defaultHeaders,
+			),
+		)
 	}
 	return Stream.unwrap(
 		Effect.gen(function* () {
@@ -663,10 +603,7 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 				decodeEvent: (rawData) =>
 					decodeGenericSseJson(rawData).pipe(
 						Effect.mapBoth({
-							onSuccess: (parsed) =>
-								// Boundary cast: parsed JSON payload for generic `CheckfuApi[G][E]` SSE event.
-								// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-								parsed as EndpointSseEvent<G, E>,
+							onSuccess: (parsed) => asEndpointSseEvent<G, E>(parsed),
 							onFailure: (err) =>
 								new APIConnectionError({
 									message: `Invalid SSE event payload: ${err.message}`,
@@ -716,8 +653,6 @@ export const pollPending = <T>(
 	options?: WaitForPendingOptions<T>,
 ): Effect.Effect<T, CheckfuSdkError> =>
 	Effect.gen(function* () {
-		// A receipt that names its committed version is read at exactly that version, so any
-		// successful read is the resource it promised.
 		const readiness: PendingReadiness | undefined =
 			pending.type === "artifact_version" && "version" in pending
 				? { kind: "create" }

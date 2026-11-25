@@ -201,9 +201,6 @@ describe("Cloudflare Forge pipeline", () => {
 			expect(item.name).not.toContain("beta")
 		}
 
-		// OpenAPI HTTP descriptions remain wire-format accurate (no CLI @file/YAML syntax),
-		// listEvents cursor description documents both asc and desc order semantics,
-		// and CLI flag help adds @file/YAML guidance from CLI metadata
 		const spec = JSON.parse(openApiJson) as {
 			paths: Record<string, Record<string, Record<string, Json>>>
 		}
@@ -437,13 +434,11 @@ describe("Cloudflare Forge pipeline", () => {
 		const sdkResources = sdkFiles.find((f) => f.path === "Resources.ts")?.content ?? ""
 		const sdkBindings = sdkFiles.find((f) => f.path === "OperationBindings.ts")?.content ?? ""
 
-		// Catalog matches non-skipped OpenAPI operations 1:1
 		expect(sortUnique(catalog.operations.map((op) => `${op.apiGroup}.${op.apiEndpoint}`))).toEqual(
 			expectedEndpoints,
 		)
 		expect(sortUnique(catalog.operations.map((op) => op.operationId))).toEqual(expectedOperationIds)
 
-		// Generated SDK OperationBindings.ts matches non-skipped OpenAPI operations 1:1
 		const bindingOperationIds = Array.from(
 			sdkBindings.matchAll(/operationId:\s*"([^"]+)"/g),
 			(m) => m[1] ?? "",
@@ -451,7 +446,6 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(sortUnique(bindingOperationIds)).toEqual(expectedOperationIds)
 		expect(bindingOperationIds.length).toBe(expectedOperationIds.length)
 
-		// Generated SDK Resources.ts CheckfuOperations map matches non-skipped OpenAPI operations 1:1
 		const resourceOperationIds = Array.from(
 			sdkResources.matchAll(/readonly\s+"([^"]+)":\s*OperationShape</g),
 			(m) => m[1] ?? "",
@@ -459,7 +453,6 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(sortUnique(resourceOperationIds)).toEqual(expectedOperationIds)
 		expect(resourceOperationIds.length).toBe(expectedOperationIds.length)
 
-		// Generated CLI Commands.ts descriptors match non-skipped OpenAPI endpoints 1:1
 		const cliEndpoints = Array.from(
 			cliCommands.matchAll(/apiGroup:\s*"([^"]+)",\s*\n\s*apiEndpoint:\s*"([^"]+)"/g),
 			(m) => `${m[1] ?? ""}.${m[2] ?? ""}`,
@@ -467,7 +460,6 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(sortUnique(cliEndpoints)).toEqual(expectedEndpoints)
 		expect(cliEndpoints.length).toBe(expectedEndpoints.length)
 
-		// Generated relative imports must emit .ts specifiers so native Node ESM resolves directly
 		expect(sdkResources).not.toMatch(/from\s+["']\.{1,2}\/[^"']+\.js["']/)
 		expect(cliCommands).not.toMatch(/from\s+["']\.{1,2}\/[^"']+\.js["']/)
 		expect(sdkResources).toContain('from "../Runtime.ts"')

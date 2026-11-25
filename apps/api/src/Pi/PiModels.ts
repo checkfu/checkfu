@@ -162,18 +162,6 @@ const discardResponseBody = (body: Response["body"]): void => {
 	void body.cancel().catch(() => undefined)
 }
 
-/**
- * Wraps provider `fetch` calls so outbound requests stay pinned to the
- * resolved provider origin and refuse HTTP redirects at the transport.
- * Prevents a redirect from sending transcripts or API keys to another host.
- *
- * Only URL strings and native `URL` instances are accepted. The validated
- * destination is dispatched as an immutable normalized URL string (`parsed.href`)
- * with `{ ...init, redirect: "manual" }`, leaving the underlying `fetch`
- * transport as the sole owner of headers, bodies, routing options (`dispatcher`,
- * `proxy`, `keepalive`), and stream lifetimes. `Request` objects (native or
- * custom) are rejected fail-closed with a `TypeError`.
- */
 export const createNoRedirectProviderFetch = (
 	expectedBaseUrl: string,
 	upstreamFetch?: typeof fetch,
@@ -207,9 +195,6 @@ export const createNoRedirectProviderFetch = (
 			)
 		}
 		const baseFetch = upstreamFetch ?? globalThis.fetch
-		// Cloudflare workerd throws a TypeError on `redirect: "error"` before
-		// dispatching the request; use `redirect: "manual"` and reject 3xx
-		// responses below so redirects are never followed.
 		const requestInit: RequestInit =
 			init === undefined ? { redirect: "manual" } : { ...init, redirect: "manual" }
 		const response = await baseFetch(parsed.href, requestInit)
@@ -290,15 +275,6 @@ const expectedAnthropicRefusalMessage = (
 
 type WrappedStreamOverrides = Required<Pick<StreamOptions, "fetch" | "onProviderStreamEvent">>
 
-/**
- * `@earendil-works/pi-ai` folds completed OpenAI Responses `refusal` parts into
- * text blocks with `stopReason: "stop"` and `rawStopReason: "completed"`, and
- * maps `response.incomplete` (`content_filter`) to an error event with
- * `errorMessage: "Response incomplete: content_filter"`.
- * Preserve `rawStopReason` only for confirmed refusals; if the SDK throws on a
- * later SSE `error` event (before `onProviderStreamEvent` runs), abort, or
- * transport failure, strip `rawStopReason` so stream failures stay errors.
- */
 const runOpenAIResponsesRefusalGuard = (
 	model: Model<"openai-responses">,
 	options: StreamOptions | undefined,
@@ -340,10 +316,6 @@ const runOpenAIResponsesRefusalGuard = (
 		try {
 			for await (const event of inner) {
 				if (event.type === "done" && completedWithRefusal && event.message.stopReason === "stop") {
-					// Emit completed OpenAI refusals as error-stopped messages with `rawStopReason: "refusal"`
-					// carrying only the explicit `refusal` part text (discarding any mixed output_text/thinking).
-					// GenerationTask's `afterResponse` hook normalizes them into published refusal turns,
-					// while CompactionTask (`completeSimple`) rejects them so a refusal never overwrites history.
 					const refusalText = finalRefusalTexts.filter((text) => text.length > 0).join("")
 					outer.push({
 						type: "error",
@@ -384,15 +356,6 @@ const runOpenAIResponsesRefusalGuard = (
 	return outer
 }
 
-/**
- * `@earendil-works/pi-ai` records `rawStopReason` on `message_delta` before the
- * stream finishes. If Anthropic emits a stream error (before or after
- * `message_stop` — where the SDK decoder throws before `onProviderStreamEvent`
- * runs) or disconnects after a `refusal`/`sensitive` delta, `pi-ai` retains
- * `rawStopReason` while overwriting `errorMessage` with the stream failure.
- * Clear `rawStopReason` unless `message_stop` completed cleanly with the codec's
- * expected refusal error message.
- */
 const runAnthropicMessagesRefusalGuard = (
 	model: Model<"anthropic-messages">,
 	options: StreamOptions | undefined,
@@ -437,9 +400,6 @@ const runAnthropicMessagesRefusalGuard = (
 						expectedRefusalErrorMessage !== null &&
 						event.error.errorMessage === expectedRefusalErrorMessage
 					if (isConfirmedRefusal) {
-						// Anthropic may explain a refusal in free text. Pi would keep it in a failed
-						// compaction's record and match it against its retryable errors, so the refusal
-						// carries the codec's own text for a refusal without an explanation.
 						outer.push(
 							event.error.rawStopReason === "sensitive"
 								? event
@@ -466,12 +426,6 @@ const runAnthropicMessagesRefusalGuard = (
 	return outer
 }
 
-/**
- * Eager OpenAI + Anthropic providers for Cloudflare workerd and Bun/Node.
- * Wire codecs are imported statically (never `.lazy.js`) so an evicted or
- * aborted Durable Object request can never leave a dynamic import pending
- * across the isolate.
- */
 export const createOpenAIProvider = (baseUrl?: string | null): Provider<"openai-responses"> => {
 	const resolvedBaseUrl = resolveOpenAIBaseUrl(baseUrl)
 	const models =

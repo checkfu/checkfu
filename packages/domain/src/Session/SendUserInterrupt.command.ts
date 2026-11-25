@@ -7,8 +7,6 @@ import { SessionNotRunning } from "./SessionNotRunning.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import { PositiveInt } from "./SessionTypes.ts"
 
-// Carries its turn, so whatever forwards it to the harness stops that turn and no later one.
-// An interrupt recorded before it carried one reads as naming none.
 export class UserInterrupt extends Domain.Event("user.interrupt", {
 	turn: Schema.NullOr(PositiveInt).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
 }) {}

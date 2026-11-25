@@ -103,10 +103,6 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 export const makeApiHandler = Effect.gen(function* () {
 	const random = yield* SecureRandom.SecureRandom
 	const buildLogAnnotations = yield* References.CurrentLogAnnotations
-	// Acquire the router layer in the caller's Scope (the owning Worker build scope
-	// in production, or Effect.scoped in tests) so router finalizers run on disposal.
-	// Enforce per-resource ID limits in each route's parameter schema rather than
-	// rejecting long stored AgentId/EnvironmentId values with a route-level 404.
 	const buildApp = HttpRouter.toHttpEffect(ApiLive).pipe(
 		Effect.provideService(HttpRouter.RouterConfig, { maxParamLength: Number.MAX_SAFE_INTEGER }),
 	)

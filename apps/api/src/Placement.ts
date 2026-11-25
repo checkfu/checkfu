@@ -8,7 +8,6 @@ export const LOCATION_HINT_ENV = "CHECKFU_LOCATION_HINT"
 
 const UNSET = Schema.Literal("")
 
-// Placement.test.ts holds both lists equal to the platform's own types.
 export const Jurisdiction = Schema.Literals(["eu", "fedramp", "fedramp-high", "us"])
 
 export const LocationHint = Schema.Literals([
@@ -51,7 +50,6 @@ export const placement: Config.Config<Placement> = Config.all({
 	})),
 )
 
-// Names the jurisdiction in storage keys, so objects placed apart never share stored bytes.
 export const DEFAULT_STORAGE_SCOPE = "default"
 
 export const storageScopeOf = ({ jurisdiction }: Placement): string =>

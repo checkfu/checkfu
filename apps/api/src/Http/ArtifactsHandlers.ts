@@ -57,7 +57,6 @@ export const ArtifactReadWaitTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => "5 seconds" },
 )
 
-// The first 128 bits of the key's hash, so the id fits in a publication address with its token.
 export const keyedArtifactId = (digest: Digest.Digest["Service"], idempotencyKey: string) =>
 	Effect.map(idempotentId(digest, "art", ["create", "artifact", "id", idempotencyKey]), (id) =>
 		ArtifactId.make(id.slice(0, "art_".length + 32)),
@@ -228,8 +227,6 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				return artifactResource(id, state, manifest, yield* publicationOf(id, state))
 			})
 
-		// The key's first request is claimed on the artifact under a command id of (artifact, key), so
-		// the same key with another request is refused, and a retry is the same command, applied once.
 		const sentWith = (
 			id: ArtifactId,
 			idempotencyKey: string | undefined,
@@ -354,7 +351,6 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						yield* purgeIfDeleted(id)
 						return yield* reject(404, `Artifact ${id} was deleted after creation committed.`)
 					}
-					// The artifact as this create made it, so a keyed replay answers the same.
 					return artifactResource(
 						id,
 						{ ...settled, version: receipt.reply.version, updated_at: settled.created_at },

@@ -10,7 +10,6 @@ import { SOCKET_BUFFER_BYTES, objectSocketChanges } from "../src/Http/ObjectSock
 
 type Listener = (event: Socket.WebSocketEvent) => void
 
-/** An accepted Durable Object socket that sends `frames` the moment the reader listens. */
 const pushingSocket = (frames: ReadonlyArray<string>) => {
 	const socket = {
 		readyState: 1,
@@ -71,11 +70,9 @@ describe("objectSocketChanges", () => {
 			const frames = Array.from({ length: 20 }, () => stateFrame(100 * 1024))
 			const socket = pushingSocket(frames)
 			const ticks = yield* objectSocketChanges(answering(socket), "session").pipe(Stream.runCollect)
-			// Every frame up to the one that crossed the limit is delivered; the stream then ends.
 			const delivered = Math.floor(SOCKET_BUFFER_BYTES / (frames[0]?.length ?? 1)) + 1
 			expect(ticks).toHaveLength(delivered)
 			expect(delivered).toBeLessThan(frames.length)
-			// Effect closes it as over the limit, before the stream's own release closes it again.
 			expect(socket.closes[0]).toBe(1008)
 		}),
 	)
@@ -84,11 +81,9 @@ describe("objectSocketChanges", () => {
 		Effect.gen(function* () {
 			const fiber = yield* objectSocketChanges(() => Effect.never, "session").pipe(
 				Stream.runDrain,
-				// Detached, so a fiber that ignores interrupts fails this test instead of hanging it.
 				Effect.forkDetach,
 			)
 			yield* Effect.sleep(Duration.millis(20))
-			// Interrupting waits for the fiber, so the wait that can time out is a separate one.
 			yield* Effect.forkDetach(Fiber.interrupt(fiber))
 			yield* Fiber.await(fiber).pipe(
 				Effect.timeoutOrElse({

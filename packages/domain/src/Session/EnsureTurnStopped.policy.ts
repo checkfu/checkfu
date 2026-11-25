@@ -7,10 +7,6 @@ import { TurnId, turnKey } from "./RunTurn.saga.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { Session } from "./Session.aggregate.ts"
 
-// Forwards each stop from the session itself, for the turn the event names, so no view rebuild can
-// swallow one: the harness refuses a run whose turn it was told to stop, whichever arrives first.
-// The hosted model's only stop path, so each stop has one outcome. Keyed by turn, so a stop still
-// being retried for one turn never holds up the next turn's.
 export class EnsureTurnStopped extends Domain.Policy("EnsureTurnStopped", {
 	from: Session,
 	on: [UserInterrupt, TurnAbandoned, SessionStatusTerminated],

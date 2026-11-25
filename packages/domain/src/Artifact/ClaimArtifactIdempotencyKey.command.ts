@@ -8,7 +8,6 @@ export class ArtifactIdempotencyKeyClaimed extends Domain.Event(
 	{ fingerprint: RequestFingerprint },
 ) {}
 
-// Sent under a command id derived from (artifact, key): a retry gets the first fingerprint back.
 export class ClaimArtifactIdempotencyKey extends Domain.Command("ClaimArtifactIdempotencyKey", {
 	input: {
 		artifact_id: ArtifactId,

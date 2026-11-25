@@ -39,10 +39,6 @@ export interface ApiStatusErrorFields<Status extends number = number> {
 	readonly unconfirmedIndex?: number | undefined
 }
 
-/**
- * The shared shape of the errors for a non-2xx response: `requestID` and `error` read the
- * response's request id and body, and `retryable` says whether the status may succeed later.
- */
 const ApiStatusError = <const Tag extends string, Status extends number>(
 	tag: Tag,
 	retryable: (status: Status) => boolean,
@@ -210,18 +206,12 @@ export const isCheckfuError = (value: unknown): value is CheckfuSdkError =>
 	typeof value._tag === "string" &&
 	SDK_ERROR_TAGS.has(value._tag)
 
-/**
- * Runtime base guard supporting `err instanceof CheckfuError` across all SDK errors.
- */
 export class CheckfuError extends Error {
 	static override [Symbol.hasInstance](value: unknown): value is CheckfuSdkError {
 		return isCheckfuError(value)
 	}
 }
 
-/**
- * Runtime base guard supporting `err instanceof APIError` across all HTTP status SDK errors.
- */
 export class APIError extends CheckfuError {
 	readonly status: number = 0
 	readonly errorType: string | undefined = undefined

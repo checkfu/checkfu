@@ -25,9 +25,6 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 	it("ignores .env and bunfig preloads in the current directory and can run as Bun", () => {
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-standalone-"))
 		try {
-			// Built through the documented root script, into a scratch copy of the layout
-			// (`<checkout>/apps/cli/dist/checkfu`) so a binary someone has already built in
-			// the real `apps/cli/dist` is left alone.
 			const checkout = join(scratch, "checkout")
 			const binary = join(checkout, "apps", "cli", "dist", "checkfu")
 			mkdirSync(join(checkout, "apps", "cli", "dist"), { recursive: true })
@@ -62,8 +59,6 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 			expect(call.stderr).not.toContain("planted")
 			expect(existsSync(join(hostile, "PRELOAD_RAN"))).toBe(false)
 
-			// It names the checkout script only when standing in its own checkout. From `/`
-			// a root worked out from the binary's virtual source path would wrongly match.
 			for (const [cwd, name] of [
 				[hostile, "checkfu"],
 				["/", "checkfu"],
@@ -92,13 +87,9 @@ describe.skipIf(process.platform === "win32")("standalone binary", () => {
 
 	it("stops on an interrupt even when its parent holds an IPC channel", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-standalone-"))
-		// A server that accepts the request and never answers keeps the command pending.
-		// Its first request is also the signal that the CLI is up and has its handlers
-		// installed, so the interrupt is not sent into a process that is still starting.
 		const server = createServer(() => undefined)
 		const requested = once(server, "request")
 		let child: ChildProcess | undefined
-		// Everything started here is stopped in `finally`, whichever step fails.
 		try {
 			const binary = join(scratch, "checkfu")
 			const build = spawnSync("bun", ["run", "checkfu:build", "--outfile", binary], {
@@ -208,8 +199,6 @@ describe("which ways of starting the CLI are accepted", () => {
 })
 
 describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () => {
-	// A copy of the checkfu script, the CLI's source and the root bunfig, so .env files can
-	// be planted without touching the real checkout.
 	const copyCheckout = (): string => {
 		const copy = mkdtempSync(join(tmpdir(), "checkfu-checkout-"))
 		cpSync(join(repoRoot, "package.json"), join(copy, "package.json"))
@@ -249,7 +238,6 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 		return { server, url: `http://127.0.0.1:${port}` }
 	}
 
-	// Asynchronous, so the servers above can see a request while the CLI is running.
 	const run = (cwd: string, env: Record<string, string>) =>
 		new Promise<{ readonly status: number | null; readonly stderr: string }>((resolve, reject) => {
 			const child = spawn("bun", ["checkfu", "sessions", "retrieve", "--session-id", "s"], {
@@ -309,7 +297,6 @@ describe.skipIf(process.platform === "win32")("`bun checkfu` in a checkout", () 
 				"Bearer exported",
 			])
 
-			// Bun itself still loads these files for everything else started in the checkout.
 			const tool = spawnSync("bun", ["-e", "console.log(process.env.CHECKFU_API_KEY ?? 'unset')"], {
 				cwd: checkout,
 				env: cliProcessEnv(),

@@ -275,7 +275,6 @@ export const redactApiErrorEnvelope = (error: unknown): LoggableApiFailure | nul
 const HandlerErrors = [ERRORS[400], ERRORS[404], ERRORS[409], ERRORS[429], ERRORS[500], ERRORS[503]]
 const BodyErrors = [...HandlerErrors, ERRORS[413], ERRORS[415]]
 
-// @effect-diagnostics-next-line leakingRequirements:off
 export class Authentication extends HttpApiMiddleware.Service<Authentication>()(
 	"@checkfu/api/Authentication",
 	{
@@ -715,7 +714,6 @@ export type PendingAutomation = typeof PendingAutomation.Type
 export const PendingArtifact = pendingResource("artifact")
 export type PendingArtifact = typeof PendingArtifact.Type
 
-// Names the committed version, so waiting for it reads that immutable version and not the latest.
 export const PendingArtifactVersion = Schema.Struct({
 	id: Schema.String,
 	type: Schema.Literal("artifact_version"),
@@ -1379,8 +1377,6 @@ const Sessions = HttpApiGroup.make("sessions")
 	.add(
 		HttpApiEndpoint.get("streamEvents", "/v1/sessions/:session_id/events/stream", {
 			params: sessionParams,
-			// Keep `after` as a raw string here so `streamEvents` can give a non-empty
-			// `Last-Event-ID` header precedence before decoding the selected cursor.
 			query: {
 				after: Schema.optionalKey(
 					Schema.String.annotate({
@@ -1888,8 +1884,6 @@ export const CheckfuApi = HttpApi.make("checkfu")
 		OpenApi.Description,
 		"Managed agents API for managing agents, environments, sessions, automations, and artifacts.",
 	)
-	// The published schemas forbid unknown body fields, so a misspelled field is refused rather
-	// than dropped.
 	.annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
 	.middleware(RequestValidation)
 

@@ -122,7 +122,6 @@ interface Option {
 	readonly label: string
 }
 
-/** The listed options, plus the one already chosen when the list no longer offers it. */
 const withCurrent = (choices: Choices<Option>, current: string, noun: string): Choices<Option> =>
 	current === "" || choices.items.some((option) => option.id === current)
 		? choices
@@ -148,7 +147,6 @@ function AutomationForm({
 	readonly error: string | undefined
 	readonly onSubmit: (draft: AutomationDraft) => void
 	readonly onCancel?: () => void
-	/** An existing automation's saved agent and environment, kept selectable when the lists no longer offer them. */
 	readonly saved?: { readonly agentId: string; readonly environmentId: string }
 }): React.JSX.Element {
 	const agentChoicesPage = choicesOf(useSuspenseInfiniteQuery(agentChoices))
@@ -288,8 +286,6 @@ export function NewAutomationPage(): React.JSX.Element {
 	const environments = useSuspenseInfiniteQuery(environmentChoices).data.pages.flatMap(
 		(page) => page.data,
 	)
-	// Chosen once, as on the session form: a newer agent or environment appearing later never
-	// changes what an untouched form submits.
 	const [draft, setDraft] = useState(() => ({
 		...emptyDraft(localTimezone()),
 		agentId: agents[0]?.id ?? "",
@@ -333,7 +329,6 @@ export function AutomationPage(): React.JSX.Element {
 	return <AutomationView key={automation.id} automation={automation} />
 }
 
-/** The draft being edited, and the snapshot it started from: only the difference is sent. */
 interface Edit {
 	readonly base: AutomationDraft
 	readonly draft: AutomationDraft

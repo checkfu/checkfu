@@ -46,9 +46,6 @@ const settle = (platform: Platform) =>
 		return yield* Effect.die(new Error("the platform did not settle"))
 	})
 
-// Like the real harness: a run for a turn it was told to stop is refused, and a stop ends a run
-// under way. A held turn (turn 1 by default) waits for `hold`, or for its stop, before it replies.
-// `slowStop` names a turn whose stop takes effect but is never acknowledged.
 const harnessOf =
 	(
 		calls: Array<string>,
@@ -110,9 +107,8 @@ const harnessOf =
 		)
 
 interface Handlers {
-	// As if every event reached StartTurn only as history, while its view rebuilt.
 	readonly missStartTurn?: boolean
-	// Holds every EnsureTurnStarted delivery until released.
+
 	readonly delayEnsure?: Deferred.Deferred<void>
 }
 
@@ -144,7 +140,6 @@ const handlersOf =
 
 const sessionId = SessionId.make("sess_ensure")
 
-// The platform stamps events with its clock; policies read the Effect clock. Keep them equal.
 const moveTo = (clock: { now: number }, at: number) =>
 	Effect.andThen(
 		Effect.sync(() => {
@@ -253,7 +248,6 @@ describe("EnsureTurnStarted", () => {
 })
 
 describe("turn deadlines with a late EnsureTurnStarted delivery", () => {
-	// Both start paths count a turn's deadline from when the run starts, as the harness bounds a run.
 	const lateDelivery = (missStartTurn: boolean, endsAt: number) => {
 		const calls: Array<string> = []
 		return Effect.flatMap(
@@ -399,7 +393,6 @@ describe("EnsureTurnStopped per turn", () => {
 })
 
 describe("stop events recorded before they named a turn", () => {
-	// The kernel decodes a stored event with the JSON codec of its class's current schema.
 	it("read an interrupt with no turn as naming none", () => {
 		expect(
 			Schema.decodeSync(Schema.toCodecJson(UserInterrupt))({ _tag: "user.interrupt" }),

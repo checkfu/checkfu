@@ -5,7 +5,6 @@ import { AutomationCreated } from "../src/Automation/CreateAutomation.command.ts
 import { AutomationRunFailed } from "../src/Automation/RecordAutomationRunFailed.command.ts"
 import { AutomationRunStarted } from "../src/Automation/RecordAutomationRunStarted.command.ts"
 
-// What stages that ran automations before descriptions and revisions stored.
 const createdBeforeDescriptions = {
 	_tag: "automation.created",
 	name: "Morning report",

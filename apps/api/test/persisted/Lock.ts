@@ -32,6 +32,7 @@ export const PersistedLock = Schema.Struct({
 export type PersistedLock = typeof PersistedLock.Type
 
 export const PersistedLockJson = Schema.fromJsonString(PersistedLock, { space: "\t" })
+const decodeBaselineJson = Schema.decodeSync(Schema.fromJsonString(Baseline))
 
 export class PersistedLockError extends Schema.TaggedError<
 	PersistedLockError,
@@ -300,9 +301,9 @@ export const shipBlockers = (
 			return ["No baseline has been cut yet."]
 		}
 		const current = yield* cutBaseline(latest.label, latest.cut_at, shapes)
-		return isDeepStrictEqual(latest.schemas, current.schemas) &&
-			// oxlint-disable-next-line unicorn/prefer-structured-clone -- JSON round-trip normalizes undefined fields to match Persisted.lock.json
-			isDeepStrictEqual(latest.shapes, JSON.parse(JSON.stringify(current.shapes)))
+		const stored = decodeBaselineJson(JSON.stringify(current))
+		return isDeepStrictEqual(latest.schemas, stored.schemas) &&
+			isDeepStrictEqual(latest.shapes, stored.shapes)
 			? []
 			: [`Persisted shapes changed since "${latest.label}".`]
 	})

@@ -22,7 +22,6 @@ export const PiTurnReply = Schema.Struct({
 	stop_reason: ModelStopReason,
 })
 
-// Not held to the domain's length limits: the API clamps a failure after it arrives.
 export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
 	error_type: Schema.String,
 	message: Schema.String,
@@ -41,8 +40,6 @@ export type PiTurnOutcome = typeof PiTurnOutcome.Type
 
 export const PiRecoveredTurn = Schema.NullOr(PiTurnOutcome)
 
-// Every method the harness Worker serves, as its argument tuple and its result. The RPC type
-// and the persisted lock are both derived from this, so neither can describe a different call.
 export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },

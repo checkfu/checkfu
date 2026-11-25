@@ -26,7 +26,6 @@ export interface CheckfuPiDocSpec {
 export const ACTIVE_USAGE_DOC_VERSION = 1 as const
 export const ActiveUsageState = Schema.Struct({
 	operation: Schema.NullOr(Schema.String),
-	// The newest turn this conversation has admitted. An older one arriving late is refused.
 	turn: NonNegativeInt,
 	input_tokens: NonNegativeInt,
 	output_tokens: NonNegativeInt,
@@ -37,8 +36,6 @@ export const SETTLED_USAGE_DOC_VERSION = 1 as const
 export const SettledUsageState = ModelUsage
 export type SettledUsageState = typeof SettledUsageState.Type
 
-// Each Pi object hosts one Checkfu session. Only one submission
-// can accrue usage at a time, including any blocking compaction or retry.
 export const ActiveUsage = defineDoc<ActiveUsageState>({
 	kind: "checkfu.active-usage",
 	version: ACTIVE_USAGE_DOC_VERSION,
@@ -61,10 +58,6 @@ export const SettledUsage = defineDocFamily<SettledUsageState, SettledUsageState
 	initial: (usage: SettledUsageState): SettledUsageState => ({ ...usage }),
 })
 
-/**
- * Every Pi document Checkfu persists, for the persistence lock. A document
- * defined above and left out of this list fails the in-memory storage in tests.
- */
 export const CHECKFU_PI_DOCS: ReadonlyArray<CheckfuPiDocSpec> = Object.freeze([
 	{ token: ActiveUsage, schema: ActiveUsageState },
 	{ token: SettledUsage, schema: SettledUsageState },

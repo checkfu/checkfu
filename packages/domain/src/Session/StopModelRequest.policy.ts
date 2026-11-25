@@ -42,7 +42,6 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 				)
 				return
 			}
-			// Keep cleanup pending in this turn's durable inbox until the harness acknowledges it.
 			yield* interrupt.pipe(Effect.orDie)
 		})
 	}),

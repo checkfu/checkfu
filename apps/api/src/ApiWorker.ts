@@ -71,13 +71,8 @@ export const API_WORKER_PROPS = {
 	main: import.meta.url,
 	compatibility: { date: COMPATIBILITY_DATE },
 	codeUpdateStrategy: TURN_CODE_UPDATE_STRATEGY,
-	// The generated OpenAPI document is a static asset: GET /openapi.json is served without
-	// running the Worker, and the document is not part of the code every isolate loads.
-	// Resolved from this module, like `main`, so Alchemy finds it from any working directory.
 	assets: fileURLToPath(new URL("../public", import.meta.url)),
 	observability: {
-		// Keep top-level Workers Observability enabled when adding `issues`, since
-		// providing `observability` bypasses Alchemy's DEFAULT_OBSERVABILITY fallback.
 		enabled: true,
 		issues: { enabled: true },
 	},
@@ -86,9 +81,6 @@ export const API_WORKER_PROPS = {
 export default ApiWorker.make(
 	Effect.map(customDomains, ({ api }) => ({ ...API_WORKER_PROPS, ...api })),
 	Effect.gen(function* () {
-		// Platform pins the owning instance/build Scope onto the Worker init context.
-		// Building both the domain/telemetry layers and the HTTP router in that scope
-		// keeps them alive across requests and runs their finalizers when disposed.
 		const scope = Option.getOrUndefined(yield* Effect.serviceOption(Scope.Scope))
 		if (scope === undefined) {
 			return yield* Effect.die(new Error("ApiWorker requires an owning instance Scope."))

@@ -57,8 +57,6 @@ const apiCall = <A>(
 		),
 	)
 
-// Each publication gets its own hostname, so pages that load files from `/` work as at a root.
-// A route, not a Custom Domain: only routes take a wildcard hostname.
 export const contentWorkerProps = (domain: string | undefined) =>
 	domain === undefined
 		? CONTENT_WORKER_PROPS

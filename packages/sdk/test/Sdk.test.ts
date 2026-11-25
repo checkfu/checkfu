@@ -63,6 +63,12 @@ import type {
 
 const ISO_NOW = "2026-11-23T18:00:00.000Z"
 
+const expectNotCallable =
+	<Fn>(_fn: Fn) =>
+	<Args extends ReadonlyArray<unknown>>(
+		..._check: Fn extends (...args: Args) => void ? [never] : []
+	): void => {}
+
 const toWebRequest = (input: RequestInfo | URL, init?: RequestInit): Request =>
 	new Request(input, init)
 
@@ -450,14 +456,14 @@ describe("@checkfu/sdk", () => {
 						expect(!isPendingResource(archived) && archived.archived_at !== null).toBe(true)
 
 						const requestsBefore = seen.length
-						const numericId = yield* Effect.flip(
-							// @ts-expect-error -- boundary: a JavaScript caller can pass a number for a string id
-							client.agents.archive(123),
-						)
-						const missingId = yield* Effect.flip(
-							// @ts-expect-error -- boundary: a JavaScript caller can leave out the id
-							client.agents.retrieve(),
-						)
+						expectNotCallable(client.agents.archive)<[number]>()
+						expectNotCallable(client.agents.retrieve)<[]>()
+						const looseAgents = client.agents as unknown as {
+							archive(id: unknown): ReturnType<typeof client.agents.archive>
+							retrieve(): ReturnType<typeof client.agents.retrieve>
+						}
+						const numericId = yield* Effect.flip(looseAgents.archive(123))
+						const missingId = yield* Effect.flip(looseAgents.retrieve())
 						expect([numericId._tag, missingId._tag]).toEqual(["BadRequestError", "BadRequestError"])
 						expect(seen.length).toBe(requestsBefore)
 
@@ -818,7 +824,6 @@ describe("@checkfu/sdk", () => {
 								headers: { "content-type": "text/event-stream" },
 							})
 						}
-						// Replay seq 1 and emit seq 2 + terminal archived seq 3
 						return new Response(
 							`${sseFrame(sampleUserMessageEvent(1))}${sseFrame(sampleUserMessageEvent(2))}${sseFrame(sampleArchivedEvent(3))}`,
 							{
@@ -886,7 +891,6 @@ describe("@checkfu/sdk", () => {
 						expect(ready.version).toBe(2)
 						expect(polls).toBe(3)
 
-						// Non-pending value returns immediately without polling
 						const passthrough = yield* client.waitForPending(ready)
 						expect(passthrough).toBe(ready)
 						expect(polls).toBe(3)
@@ -955,7 +959,6 @@ describe("@checkfu/sdk", () => {
 						expect(version.version).toBe(2)
 						expect(versionPolls).toBe(2)
 
-						// A copied receipt still names its version, so it needs no `until`.
 						const copied = yield* client.waitForPending({ ...added }, pollOpts)
 						expect(copied.version).toBe(2)
 					}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
@@ -1235,8 +1238,9 @@ describe("@checkfu/sdk", () => {
 
 				await expect(
 					(async () => {
-						for await (const _event of client.sessions.events.list("sess_cycle", { after: 2 })) {
-							// iterates until cycle guard triggers
+						const seen: Array<unknown> = []
+						for await (const event of client.sessions.events.list("sess_cycle", { after: 2 })) {
+							seen.push(event)
 						}
 					})(),
 				).rejects.toThrow(PaginationCursorCycleError)
@@ -1284,10 +1288,8 @@ describe("@checkfu/sdk", () => {
 			})
 
 			try {
-				// 1. Eager 404 on await before entering for-await
 				await expect(client.sessions.events.stream("sess_missing")).rejects.toThrow(NotFoundError)
 
-				// 2. Direct for-await without extra await
 				const directEvents: Array<JsonSessionEvent> = []
 				for await (const ev of client.sessions.events.stream("sess_ok")) {
 					directEvents.push(ev)
@@ -1295,7 +1297,6 @@ describe("@checkfu/sdk", () => {
 				expect(directEvents.map((e) => e.seq)).toEqual([1, 2])
 				expect(typeof directEvents[0]?.created_at).toBe("string")
 
-				// 3. tee() splits one underlying connection into two independent streams
 				const liveStream = await client.sessions.events.stream("sess_tee")
 				const [leftStream, rightStream] = liveStream.tee()
 				const [leftSeqs, rightSeqs] = await Promise.all([
@@ -1318,7 +1319,6 @@ describe("@checkfu/sdk", () => {
 				expect(rightSeqs).toEqual([1, 2])
 				expect(okStreamFetches).toBe(1)
 
-				// 4. toReadableStream yields UTF-8 JSONL
 				const readableStream = (await client.sessions.events.stream("sess_ok")).toReadableStream()
 				const jsonlText = await new Response(readableStream).text()
 				const parsedLines = jsonlText
@@ -1327,7 +1327,6 @@ describe("@checkfu/sdk", () => {
 					.map((line) => JSON.parse(line) as { readonly seq: number })
 				expect(parsedLines.map((l) => l.seq)).toEqual([1, 2])
 
-				// 5. controller.abort() aborts a live stream with APIUserAbortError
 				const abortable = await client.sessions.events.stream("sess_abort")
 				const seenBeforeAbort: Array<number> = []
 				await expect(
@@ -1340,7 +1339,6 @@ describe("@checkfu/sdk", () => {
 				).rejects.toThrow(APIUserAbortError)
 				expect(seenBeforeAbort).toEqual([1])
 
-				// 6. waitForPending on Promise facade
 				const session = sampleSession()
 				const pendingCheck = await client.waitForPending({
 					...session,
@@ -1369,7 +1367,6 @@ describe("@checkfu/sdk", () => {
 		})
 
 		it("exports complete Forge-generated SDK_OPERATION_BINDINGS and Op type helpers", () => {
-			// Operations marked `x-forge-skip` in the contract get no generated surface.
 			const ungenerated = new Set(["health", "auth"])
 			const expectedEndpoints = Object.entries(CheckfuApi.groups)
 				.filter(([group]) => !ungenerated.has(group))
@@ -1395,7 +1392,6 @@ describe("@checkfu/sdk", () => {
 			)
 			expect(streamBinding?.kind).toBe("sse")
 
-			// Compile-time assertions for Op / BodyOf / ResultOf / JsonResultOf type helpers
 			const sampleBody: BodyOf<Op<"agents.create">> = { name: "Bot", model: "gpt-6.2-sol" }
 			expect(sampleBody.name).toBe("Bot")
 			type EffectRetrieveAgent = ResultOf<Op<"agents.retrieve">>
@@ -1411,7 +1407,6 @@ describe("@checkfu/sdk", () => {
 			"bases mutation retry safety on the effective Idempotency-Key header sent on the wire",
 			() =>
 				Effect.gen(function* () {
-					// 1) headers: { "Idempotency-Key": null } strips the key AND prevents connection-error retries
 					let strippedCalls = 0
 					const strippedKeys: Array<string | null> = []
 					const strippedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1443,7 +1438,6 @@ describe("@checkfu/sdk", () => {
 					expect(strippedCalls).toBe(1)
 					expect(strippedKeys).toEqual([null])
 
-					// 2) Explicit idempotencyKey overrides defaultHeaders: { "Idempotency-Key": null } and retries safely
 					let overrideCalls = 0
 					const overrideKeys: Array<string | null> = []
 					const overrideFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1477,7 +1471,6 @@ describe("@checkfu/sdk", () => {
 					expect(overrideCalls).toBe(2)
 					expect(overrideKeys).toEqual(["k_explicit_1", "k_explicit_1"])
 
-					// 3) Per-call headers: { "Idempotency-Key": "k_hdr" } with autoIdempotencyKey: false enables retries
 					let headerKeyCalls = 0
 					const headerKeys: Array<string | null> = []
 					const headerKeyFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1517,7 +1510,6 @@ describe("@checkfu/sdk", () => {
 			"does not retry partially accepted or unconfirmed batches without idempotency (even on 429/503)",
 			() =>
 				Effect.gen(function* () {
-					// 1) 429 with accepted receipts must not replay the batch
 					let acceptedCalls = 0
 					const acceptedFetch = (async () => {
 						acceptedCalls += 1
@@ -1565,7 +1557,6 @@ describe("@checkfu/sdk", () => {
 					)
 					expect(acceptedCalls).toBe(1)
 
-					// 2) 503 with unconfirmed_index: 0 must not replay the batch without idempotency
 					let unconfirmedCalls = 0
 					const unconfirmedFetch = (async () => {
 						unconfirmedCalls += 1
@@ -1602,7 +1593,6 @@ describe("@checkfu/sdk", () => {
 					)
 					expect(unconfirmedCalls).toBe(1)
 
-					// 3) Clean pre-commit 429 (no accepted receipts, no unconfirmed_index) still retries
 					let preCommitCalls = 0
 					const preCommitFetch = (async () => {
 						preCommitCalls += 1
@@ -1763,7 +1753,6 @@ describe("@checkfu/sdk", () => {
 				const pendingStream = client.sessions.events.stream("sess_abort_init", undefined, {
 					signal: controller.signal,
 				})
-				// Abort immediately on the same tick while Queue/Deferred allocation is still awaiting
 				controller.abort()
 				await expect(pendingStream).rejects.toThrow(APIUserAbortError)
 				expect(fetches).toBe(0)
@@ -1900,7 +1889,6 @@ describe("@checkfu/sdk", () => {
 						expect(unkeyedSendCalls, `${testCase.label} on unkeyed send`).toBe(1)
 					}
 
-					// Keyed write (autoIdempotencyKey: true) safely retries plain gateway 503
 					let keyedCalls = 0
 					yield* Effect.gen(function* () {
 						const client = yield* CheckfuClient
@@ -1952,7 +1940,6 @@ describe("@checkfu/sdk", () => {
 				await client.close()
 			}
 
-			// Post-open producer defect (after opening and emitting event 1) must settle next queue read
 			const managed = ManagedRuntime.make(
 				CheckfuClient.layerFetch({
 					apiKey: "ck_test_key",
@@ -2011,9 +1998,7 @@ describe("@checkfu/sdk", () => {
 				fetch: mockFetch,
 			})
 			try {
-				// 1) controller.abort() with events already buffered in queue must reject on the very next read
 				const abortStream = await client.sessions.events.stream("sess_buffered_abort")
-				// Yield a timer turn so the producer fills the queue with all 4 events
 				await new Promise<void>((resolve) => {
 					setTimeout(resolve, 15)
 				})
@@ -2024,7 +2009,6 @@ describe("@checkfu/sdk", () => {
 				abortStream.controller.abort()
 				await expect(abortIter.next()).rejects.toThrow(APIUserAbortError)
 
-				// 2) iterator.return() with events already buffered in queue must yield done on subsequent reads
 				const returnStream = await client.sessions.events.stream("sess_buffered_return")
 				await new Promise<void>((resolve) => {
 					setTimeout(resolve, 15)
@@ -2044,7 +2028,6 @@ describe("@checkfu/sdk", () => {
 			"decodes legacy v1 status events without turn and delivers complete SSE frames before an oversized trailing frame",
 			() =>
 				Effect.gen(function* () {
-					// 1) Legacy v1 status events without `turn` decode cleanly in both list and stream
 					const legacyRunning = {
 						id: "evt_1",
 						seq: 1,
@@ -2087,8 +2070,6 @@ describe("@checkfu/sdk", () => {
 						expect(Array.from(streamed).map((e) => e.seq)).toEqual([1, 2, 3])
 					}).pipe(Effect.provide(makeEffectLayer(legacyFetch)))
 
-					// 2) Complete SSE frame in the same chunk as an oversized (>10 MiB) trailing frame
-					//    must still be delivered before EventTooLarge fails the stream
 					const oversizedChunk = `${sseFrame(sampleUserMessageEvent(1))}id: 2\nevent: user.message\ndata: ${"x".repeat(10 * 1024 * 1024 + 64)}`
 					const oversizedFetch = async () =>
 						new Response(oversizedChunk, {
@@ -2119,7 +2100,6 @@ describe("@checkfu/sdk", () => {
 			"restricts positive x-should-retry hints to idempotent writes and refuses unkeyed replay",
 			() =>
 				Effect.gen(function* () {
-					// 1) Unkeyed create with gateway 503 + x-should-retry: true must NOT retry
 					let unkeyedCreateCalls = 0
 					const gateway503HintFetch = (async () => {
 						unkeyedCreateCalls += 1
@@ -2147,7 +2127,6 @@ describe("@checkfu/sdk", () => {
 					expect(createErr._tag).toBe("ServiceUnavailableError")
 					expect(unkeyedCreateCalls).toBe(1)
 
-					// 2) Unkeyed sessions.events.send with gateway 503 or plain 429 + x-should-retry: true must NOT retry
 					let unkeyedSendCalls = 0
 					const unkeyedSendFetch = (async () => {
 						unkeyedSendCalls += 1
@@ -2179,7 +2158,6 @@ describe("@checkfu/sdk", () => {
 					expect(sendErr._tag).toBe("RateLimitError")
 					expect(unkeyedSendCalls).toBe(1)
 
-					// 3) Keyed create with gateway 503 + x-should-retry: true IS idempotent and retries cleanly
 					let keyedCreateCalls = 0
 					const keyedRetryFetch = (async () => {
 						keyedCreateCalls += 1
@@ -2210,7 +2188,6 @@ describe("@checkfu/sdk", () => {
 					expect(created.id).toBe("agent_keyed")
 					expect(keyedCreateCalls).toBe(2)
 
-					// 4) Unkeyed Checkfu 429 envelope with x-should-retry: false still suppresses retries
 					let suppressed429Calls = 0
 					const suppressed429Fetch = (async () => {
 						suppressed429Calls += 1
@@ -2253,27 +2230,23 @@ describe("@checkfu/sdk", () => {
 						seenLastEventIds.push(req.headers.get("last-event-id"))
 						connectionIndex += 1
 						if (connectionIndex === 1) {
-							// Opaque frame ID on data event + subsequent ID-only update before clean rotation
 							return new Response('id: tok_alpha\ndata: {"n":1}\n\nid: tok_beta\n\n', {
 								status: 200,
 								headers: { "content-type": "text/event-stream" },
 							})
 						}
 						if (connectionIndex === 2) {
-							// Data event inherits tok_beta, then ID-only reset clears Last-Event-ID
 							return new Response('data: {"n":2}\n\nid:\n\n', {
 								status: 200,
 								headers: { "content-type": "text/event-stream" },
 							})
 						}
 						if (connectionIndex === 3) {
-							// Data event sets tok_gamma, then data event with empty id resets Last-Event-ID
 							return new Response('id: tok_gamma\ndata: {"n":3}\n\nid:\ndata: {"n":4}\n\n', {
 								status: 200,
 								headers: { "content-type": "text/event-stream" },
 							})
 						}
-						// Final event with terminal marker
 						return new Response('id: tok_final\ndata: {"n":5,"done":true}\n\n', {
 							status: 200,
 							headers: { "content-type": "text/event-stream" },
@@ -2322,7 +2295,6 @@ describe("@checkfu/sdk", () => {
 			"uses the effective resume cursor across defaultHeaders, per-call Last-Event-ID, and after",
 			() =>
 				Effect.gen(function* () {
-					// 1) after: 100 + per-call Last-Event-ID: 50 -> server honors 50, SDK delivers 51..101 (no silent drop!)
 					const reqs1: Array<{
 						readonly after: string | null
 						readonly lastEventId: string | null
@@ -2364,7 +2336,6 @@ describe("@checkfu/sdk", () => {
 					expect(Array.from(delivered1).map((e) => e.seq)).toEqual([51, 52, 100, 101])
 					expect(reqs1).toEqual([{ after: null, lastEventId: "50" }])
 
-					// 2) Same with defaultHeaders: { "Last-Event-ID": "50" } + after: 100
 					const deliveredDefault = yield* Effect.gen(function* () {
 						const client = yield* CheckfuClient
 						return yield* Stream.runCollect(
@@ -2379,8 +2350,6 @@ describe("@checkfu/sdk", () => {
 					)
 					expect(Array.from(deliveredDefault).map((e) => e.seq)).toEqual([51, 52, 100, 101])
 
-					// 3) Inverse: after: 50 + Last-Event-ID: 100 where connection 1 fails before any event arrives ->
-					//    reconnect MUST keep Last-Event-ID: 100 (never overwrite with 50!)
 					const reqs2: Array<{
 						readonly after: string | null
 						readonly lastEventId: string | null
@@ -2564,10 +2533,13 @@ describe("@checkfu/sdk", () => {
 						fetch: automationFetch,
 					})
 					try {
-						await expect(
-							// @ts-expect-error -- boundary: a JavaScript caller can leave out the key the type requires
-							unkeyed.automations.create(body),
-						).rejects.toMatchObject({ _tag: "BadRequestError" })
+						expectNotCallable(unkeyed.automations.create)<[typeof body]>()
+						const looseAutomations = unkeyed.automations as unknown as {
+							create(payload: typeof body): ReturnType<typeof unkeyed.automations.create>
+						}
+						await expect(looseAutomations.create(body)).rejects.toMatchObject({
+							_tag: "BadRequestError",
+						})
 					} finally {
 						await unkeyed.close()
 					}
@@ -2659,7 +2631,6 @@ describe("@checkfu/sdk", () => {
 						timeout: "2 seconds" as const,
 					}
 
-					// Effect client: archive & update skip stale pre-mutation projections
 					yield* Effect.gen(function* () {
 						const client = yield* CheckfuClient
 						const pendingAgentArch = yield* client.agents.archive("agent_arch")
@@ -2694,7 +2665,6 @@ describe("@checkfu/sdk", () => {
 						expect(archivedSess.archived_at).not.toBeNull()
 						expect(sessionArchivePolls).toBe(2)
 
-						// Non-self-identifying pending mutation requires an explicit `until` predicate
 						const ambiguousPending = attachPendingReadiness(
 							{ id: "agent_arch", type: "agent" as const, pending: true as const },
 							{ kind: "requires-until", operation: "agents.customMutation" },
@@ -2704,7 +2674,6 @@ describe("@checkfu/sdk", () => {
 						expect(cfgErr.message).toContain("until")
 					}).pipe(Effect.provide(makeEffectLayer(mutationFetch, { maxRetries: 0 })))
 
-					// Promise client preserves mutation readiness across toIsoJson (both direct & .withResponse())
 					agentArchivePolls = 0
 					agentUpdatePolls = 0
 					yield* Effect.promise(async () => {
@@ -2744,7 +2713,6 @@ describe("@checkfu/sdk", () => {
 						return jsonResponse(sampleAgent())
 					}) as typeof globalThis.fetch
 
-					// Promise client constructed with gateway mounted at /tenant/v1 (API URL .../tenant/v1/v1)
 					yield* Effect.promise(async () => {
 						const client = new Checkfu({
 							apiKey: "ck_test_key",
@@ -2776,7 +2744,6 @@ describe("@checkfu/sdk", () => {
 						}
 					})
 
-					// Effect client construction & withOptions also strip trailing /v1 at most once
 					seenUrls.length = 0
 					yield* Effect.gen(function* () {
 						const effectClient = yield* CheckfuClient
@@ -2813,7 +2780,6 @@ describe("@checkfu/sdk", () => {
 								await new Promise<void>((resolve) => {
 									setTimeout(resolve, 15)
 								})
-								// Replay already-seen event seq=5 (<= after: 5), then fail the body mid-stream
 								controller.enqueue(encoder.encode(sseFrame(sampleUserMessageEvent(5))))
 								controller.error(new TypeError("connection reset after replay"))
 							},
@@ -2842,7 +2808,6 @@ describe("@checkfu/sdk", () => {
 					}).pipe(Effect.provide(makeEffectLayer(replayErrorFetch)))
 
 					expect(err._tag).toBe("APIConnectionError")
-					// 1 initial attempt + 2 reconnects = 3 total attempts (attempt counter was NOT reset)
 					expect(attempts).toBe(3)
 				}),
 		)
@@ -2888,7 +2853,6 @@ describe("@checkfu/sdk", () => {
 						const pendingArchive = yield* client.agents.archive("agent_copy")
 						expect(isPendingResource(pendingArchive)).toBe(true)
 
-						// Shallow-copied and structuredClone'd receipts lose WeakMap metadata -> must require `until`
 						const copied = { ...pendingArchive }
 						const cloned = structuredClone(pendingArchive)
 
@@ -2897,7 +2861,6 @@ describe("@checkfu/sdk", () => {
 						expect(copyErr.message).toContain("until")
 						expect(getPolls).toBe(0)
 
-						// A copied receipt that happens to carry a version is still not self-identifying.
 						const versioned = { ...pendingArchive, version: 7 }
 						const versionedErr = yield* Effect.flip(client.waitForPending(versioned, pollOpts))
 						expect(versionedErr._tag).toBe("CheckfuConfigError")
@@ -2909,7 +2872,6 @@ describe("@checkfu/sdk", () => {
 						expect(cloneErr.message).toContain("until")
 						expect(getPolls).toBe(0)
 
-						// With an explicit `until` predicate, the cloned receipt polls cleanly until ready
 						const ready = yield* client.waitForPending(cloned, {
 							...pollOpts,
 							until: (agent) => agent.archived_at !== null,
@@ -2917,7 +2879,6 @@ describe("@checkfu/sdk", () => {
 						expect(ready.archived_at).not.toBeNull()
 						expect(getPolls).toBe(2)
 
-						// Direct SDK create receipt still resolves on first successful GET without `until`
 						const pendingCreate = yield* client.agents.create({
 							name: "Fresh",
 							model: "gpt-6.2-sol",
@@ -2952,12 +2913,10 @@ describe("@checkfu/sdk", () => {
 				const fastIter = fastBranch[Symbol.asyncIterator]()
 				const slowIter = slowBranch[Symbol.asyncIterator]()
 
-				// Fast branch reads 3 events ahead, buffering resolved promises in slowBranch's queue
 				expect((await fastIter.next()).value?.seq).toBe(1)
 				expect((await fastIter.next()).value?.seq).toBe(2)
 				expect((await fastIter.next()).value?.seq).toBe(3)
 
-				// Aborting the shared controller must reject slowBranch on its very next read without yielding 1..3
 				stream.controller.abort()
 				await expect(slowIter.next()).rejects.toThrow(APIUserAbortError)
 				await expect(fastIter.next()).rejects.toThrow(APIUserAbortError)
@@ -2970,7 +2929,6 @@ describe("@checkfu/sdk", () => {
 			"fails immediately on HTTP 200 response schema mismatches while still retrying interrupted body reads",
 			() =>
 				Effect.gen(function* () {
-					// 1) HTTP 200 with `{}` is a schema mismatch -> must NOT retry (1 call, retryable === false)
 					let mismatchCalls = 0
 					const mismatchFetch = (async () => {
 						mismatchCalls += 1
@@ -2986,7 +2944,6 @@ describe("@checkfu/sdk", () => {
 					expect(mismatchErr.retryable).toBe(false)
 					expect(mismatchCalls).toBe(1)
 
-					// 2) HTTP 200 with non-JSON body is also a non-retryable decode failure (1 call)
 					let htmlCalls = 0
 					const htmlFetch = (async () => {
 						htmlCalls += 1
@@ -3005,7 +2962,6 @@ describe("@checkfu/sdk", () => {
 					expect(htmlErr.retryable).toBe(false)
 					expect(htmlCalls).toBe(1)
 
-					// 3) HTTP 200 with an interrupted body stream IS a transient transport failure -> retries cleanly
 					let interruptedCalls = 0
 					const encoder = new TextEncoder()
 					const interruptedFetch = (async () => {
@@ -3087,7 +3043,6 @@ describe("@checkfu/sdk", () => {
 					},
 				}
 
-				// 1) Plain await on unary request does NOT reconstruct a web Response or copy body bytes
 				const agent = await executeUnaryPromise(spyRuntime, undefined, (effectRuntime, opts) =>
 					new EffectAgentsResource(effectRuntime).retrieve("agent_lazy", {
 						...opts,
@@ -3097,7 +3052,6 @@ describe("@checkfu/sdk", () => {
 				expect(agent.id).toBe("agent_lazy")
 				expect(responseBodyCopies).toBe(0)
 
-				// 2) Auto-paginating across 3 pages does NOT reconstruct any Response bodies
 				const seenSeqs: Array<number> = []
 				const pagePromise = executePaginatedPromise(
 					spyRuntime,
@@ -3117,7 +3071,6 @@ describe("@checkfu/sdk", () => {
 				expect(seenSeqs).toEqual([1, 2, 3])
 				expect(responseBodyCopies).toBe(0)
 
-				// 3) Calling withResponse() / asResponse() lazily builds a readable Response ONCE for the same exchange
 				const callsBefore = fetchCalls
 				const pendingUnary = executeUnaryPromise(spyRuntime, undefined, (effectRuntime, opts) =>
 					new EffectAgentsResource(effectRuntime).retrieve("agent_lazy", {

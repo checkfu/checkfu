@@ -4,19 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 
 declare const CHECKFU_STANDALONE: boolean | undefined
 
-/**
- * True in the binary produced by `bun run checkfu:build`. It is compiled with Bun's
- * `.env` and `bunfig.toml` autoloading switched off, so it needs no flags to keep
- * the current directory from injecting configuration or code.
- */
-export const isStandalone: boolean =
-	// oxlint-disable-next-line unicorn/no-typeof-undefined -- the identifier exists only once the build defines it; comparing it directly would throw everywhere else
-	typeof CHECKFU_STANDALONE !== "undefined" && CHECKFU_STANDALONE
+export const isStandalone: boolean = typeof CHECKFU_STANDALONE === "boolean" && CHECKFU_STANDALONE
 
-/**
- * The checkout this CLI belongs to. The binary is built into `apps/cli/dist`, so it
- * finds the checkout from its own path; its source lives in Bun's virtual filesystem.
- */
 export const checkoutRoot: string = isStandalone
 	? fileURLToPath(new URL("../../../", pathToFileURL(process.execPath)))
 	: fileURLToPath(new URL("../../../", import.meta.url))
@@ -29,15 +18,6 @@ const physicalPath = (path: string): string | undefined => {
 	}
 }
 
-/**
- * Why this start is refused, or `undefined` when it is accepted.
- *
- * Bun loads `.env` files and `bunfig.toml` preloads from the directory it starts in, so
- * the only accepted start is the `checkfu` package script's: exactly `--no-env-file`
- * with the CLI's bunfig. Every Bun flag, including one injected through `BUN_OPTIONS`,
- * appears in `execArgv`, so a start with anything else, or with nothing, is refused.
- * The standalone binary is compiled with both switched off and needs no flags.
- */
 export const startupRefusal = (
 	execArgv: ReadonlyArray<string>,
 	cwd: string,

@@ -183,8 +183,6 @@ describe("one Pi conversation per session", () => {
 					"interrupted session did not settle idle",
 				)
 
-				// The model call ignores its abort signal, so the turn is still running in Pi.
-				// Only resetting the object can clear it.
 				unreachable.delete(conversationName(session.id))
 				yield* sendAndSettle(apiFetch, session.id, ["next"], 2)
 				expect(resets.length).toBeGreaterThan(0)
@@ -309,7 +307,6 @@ describe("one Pi conversation per session", () => {
 				Effect.ensuring(gate.open),
 				Effect.scoped,
 				Effect.provide(
-					// Long enough for the next turn to reset the object and try again.
 					Layer.succeed(HarnessTurnTimeout, "250 millis").pipe(Layer.provideMerge(layer)),
 				),
 			)

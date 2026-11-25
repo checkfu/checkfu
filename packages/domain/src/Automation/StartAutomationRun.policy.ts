@@ -56,8 +56,6 @@ export const StartAutomationRunLive = StartAutomationRun.toLayer(
 						unrecoverable,
 					}),
 				)
-			// A retried delivery resends the same command id and gets the first receipt back,
-			// so SessionAlreadyExists here means another caller owns that session.
 			const outcome = yield* opening
 				.send(
 					new OpenAutomationSession({

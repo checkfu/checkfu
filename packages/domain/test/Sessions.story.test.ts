@@ -95,8 +95,6 @@ const fullStory = Story.make(Sessions, {
 	stub: [Harness],
 })
 
-// The DO inbox redelivers failed rows. Request one redelivery here since
-// Story's in-memory host surfaces an unhandled policy failure immediately.
 const retryCleanup = StopModelRequest.toLayer(StopModelRequest, {
 	retry: Schedule.recurs(1),
 }).pipe(Layer.provide(StopModelRequestLive))
@@ -763,8 +761,7 @@ describe("Sessions", () => {
 				),
 				Story.when(claim("fp_alpha"), { commandId: "batch:key-1" }),
 				Story.then(session),
-				// An ended session still records a new key, so a retry of events it committed gets their
-				// receipts; the event commands refuse anything new.
+
 				Story.when(claim("fp_delta"), { commandId: "batch:key-4" }),
 				Story.then(session, new IdempotencyKeyClaimed({ fingerprint: "fp_delta" })),
 				Story.when(new SendUserMessage({ session_id: session.id, text: "Late" })),
@@ -3107,7 +3104,6 @@ describe("Sessions", () => {
 			aggregates: [Counter],
 		}) {}
 
-		// Backing storage persists across Durable Object reopen/eviction cycles.
 		const backingStores = new Map<string, Map<string, unknown>>()
 		const storeFor = (storageKey: string) => {
 			let data = backingStores.get(storageKey)
@@ -3238,7 +3234,6 @@ describe("Sessions", () => {
 			return DurableObjects.makePlatform(host).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto))
 		}
 
-		// 1. Seed exact v1 wire payload directly into Durable Object storage.
 		const counterId = CounterId.make("cnt_1")
 		const counterStore = storeFor("CounterAggregate:cnt_1")
 		counterStore.set("meta", {
@@ -3249,7 +3244,6 @@ describe("Sessions", () => {
 			},
 		})
 
-		// 2. Send a real state-changing command through the DurableObjects kernel & storage adapter.
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const counters = yield* Counter
@@ -3265,7 +3259,6 @@ describe("Sessions", () => {
 			},
 		})
 
-		// 3. Reopen the same backing storage with a brand-new platform instance; converter must not run again.
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const counters = yield* Counter
@@ -3281,7 +3274,6 @@ describe("Sessions", () => {
 			},
 		})
 
-		// 4. Unknown future schema_version must fail cleanly without overwriting storage.
 		const futureId = CounterId.make("cnt_future")
 		const futureMeta = {
 			version: 1,
@@ -3320,14 +3312,12 @@ describe("Sessions", () => {
 		const encode = Schema.encodeSync(TransformedSnapshot)
 		const decode = Schema.decodeUnknownSync(TransformedSnapshot)
 
-		// Current version encode/decode applies NumberFromString exactly once.
 		expect(encode({ count: 3 })).toEqual({
 			schema_version: 2,
 			state: { count: "3" },
 		})
 		expect(decode({ schema_version: 2, state: { count: "3" } })).toEqual({ count: 3 })
 
-		// Older version migrates to canonical v2 Type and re-encodes to v2 Encoded.
 		const migrated = decode({ schema_version: 1, state: { rawCount: "42" } })
 		expect(migrated).toEqual({ count: 42 })
 		expect(encode(migrated)).toEqual({

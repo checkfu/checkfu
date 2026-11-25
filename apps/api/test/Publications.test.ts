@@ -46,7 +46,6 @@ const PUBLISH_DOMAIN = "publish.test"
 
 const ADDRESS = /^a[0-9a-f]{1,32}-[0-9a-z]{25}$/
 
-// The address of the same artifact with a token it never held.
 const forged = (address: string) => `${address.slice(0, -25)}${"0".repeat(25)}`
 
 interface PublicationBody {

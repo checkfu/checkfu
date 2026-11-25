@@ -117,7 +117,6 @@ describe("Checkfu unified hosted model stories", () => {
 			return story(
 				Story.clock(t0),
 
-				// Reject admission before Agent exists.
 				Story.when(
 					new AdmitSession({
 						session_id: sessionRejected.id,
@@ -129,7 +128,6 @@ describe("Checkfu unified hosted model stories", () => {
 				),
 				Story.rejected(new AgentNotFound({ agent_id: AgentId.make(missingAgentId) })),
 
-				// Create Agent v1, update to v2, and create two Environments.
 				Story.when(
 					new CreateAgent({
 						agent_id: agent.id,
@@ -232,7 +230,6 @@ describe("Checkfu unified hosted model stories", () => {
 				Story.then(deletedEnv, new EnvironmentDeleted()),
 				Story.view(EnvironmentView, deletedEnv, Story.none),
 
-				// Reject nonexistent future version and missing, deleted, or archived environments.
 				Story.when(
 					new AdmitSession({
 						session_id: sessionRejected.id,
@@ -276,7 +273,6 @@ describe("Checkfu unified hosted model stories", () => {
 				),
 				Story.rejected(new EnvironmentArchivedError({ environment_id: archivedEnv.id })),
 
-				// Admit session pinned to v1, and a second session defaulting to head v2.
 				Story.when(
 					new AdmitSession({
 						session_id: sessionV1.id,
@@ -326,7 +322,6 @@ describe("Checkfu unified hosted model stories", () => {
 				),
 				Story.replied({ agent_version: 2 }),
 
-				// Verify hosted cross-domain views for both pinned v1 and head v2 admissions.
 				Story.view(AgentVersionByNumberView, agentVersionLookupKey(agent.id, 1), {
 					id: v1,
 					agent_id: agent.id,
@@ -383,7 +378,6 @@ describe("Checkfu unified hosted model stories", () => {
 					unsent: [],
 				}),
 
-				// Archiving the Agent blocks new admissions...
 				Story.when(new ArchiveAgent({ agent_id: agent.id })),
 				Story.then(agent, new AgentArchived()),
 				Story.view(AgentView, agent, {
@@ -410,8 +404,6 @@ describe("Checkfu unified hosted model stories", () => {
 				),
 				Story.rejected(new AgentArchivedError({ agent_id: agent.id })),
 
-				// ...while the already-admitted v1 session completes a full turn against its active
-				// environment via StartTurn + RunTurn.
 				Story.when(new SendUserMessage({ session_id: sessionV1.id, text: "Hello Checkfu" })),
 				Story.then(
 					sessionV1,

@@ -6,10 +6,6 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 
-// These run the real query script against the installed Alchemy, with an empty
-// Alchemy home and no network, so the answers `checkfu deploy` relies on are the
-// ones Alchemy actually gives rather than the ones a test double assumes.
-
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 const script = join(repoRoot, "apps", "cli", "scripts", "alchemy-query.ts")
 const ACCOUNT = "0123456789abcdef0123456789abcdef"
@@ -29,8 +25,6 @@ const askAccount = (home: string, extra: ProcessEnv): typeof Answer.Type => {
 			env[key] = value
 		}
 	}
-	// Run from the empty home, not the checkout, so a developer's own `.env` (which
-	// Alchemy reads from the working directory) cannot supply credentials.
 	const result = spawnSync("bun", [script, "account", "default", ""], {
 		cwd: home,
 		env: { ...env, ALCHEMY_HOME: home, ...extra },
@@ -57,7 +51,6 @@ describe("alchemy-query against the installed Alchemy", () => {
 					CLOUDFLARE_EMAIL: "ops@example.com",
 				}),
 			).toEqual({ status: "connected", account_id: ACCOUNT })
-			// Half a set of credentials, or CI with none, is a failure and not "not configured".
 			expect(askAccount(home, { CI: "true" })).toMatchObject({ status: "error" })
 		} finally {
 			rmSync(home, { recursive: true, force: true })

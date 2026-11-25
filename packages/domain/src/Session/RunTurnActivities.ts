@@ -54,11 +54,6 @@ export type RunTurnActivityKey = keyof typeof RUN_TURN_ACTIVITIES
 type ActivitySuccess<K extends RunTurnActivityKey> =
 	(typeof RUN_TURN_ACTIVITIES)[K]["success"]["Type"]
 
-/**
- * Single factory for RunTurn workflow activities. Every activity key must be
- * declared in {@link RUN_TURN_ACTIVITIES} so its checkpointed output schema is
- * automatically covered by `Persisted.lock.json`.
- */
 export const runTurnActivity = <K extends RunTurnActivityKey, R>(
 	key: K,
 	execute: Effect.Effect<ActivitySuccess<K>, never, R>,

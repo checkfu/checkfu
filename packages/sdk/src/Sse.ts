@@ -564,7 +564,6 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 							return yield* mapSseError(streamError, response.headers)
 						}
 
-						// Clean close without terminal event (e.g. server connection rotation).
 						loopState.attempt = 0
 						if (advancedCursor) {
 							loopState.noProgressCloses = 0
@@ -641,8 +640,6 @@ export const streamSessionEvents = (
 					message: "after must be a non-negative integer.",
 				})
 			}
-			// Match server precedence (`non-empty Last-Event-ID header > query after`) across
-			// both client defaultHeaders and per-call headers so filtering and reconnects agree.
 			const effectiveInitialHeaders = mergeHeaderMaps(defaultHeaders, options?.headers)
 			const rawHeaderLastEventId = lookupHeader(effectiveInitialHeaders, "last-event-id")
 			const headerLastEventId =

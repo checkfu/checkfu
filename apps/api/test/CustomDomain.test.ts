@@ -12,7 +12,6 @@ import {
 } from "../src/CustomDomain.ts"
 import { CONTENT_WORKER_PROPS, contentWorkerProps } from "../src/Content/ContentWorker.ts"
 
-// An empty entry in `.env` arrives as "".
 const parse = (env: Record<string, string>) =>
 	customDomains.parse(ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true }))
 
@@ -54,12 +53,10 @@ describe("custom domains", () => {
 				api: { domain: null },
 				mcp: {},
 			})
-			// Both Workers can be detached at once.
 			expect(yield* parse({ [API_DOMAIN_ENV]: DETACH_ALL, [MCP_DOMAIN_ENV]: DETACH_ALL })).toEqual({
 				api: { domain: null },
 				mcp: { domain: null },
 			})
-			// Only the exact word: anything else that is not a hostname is a mistake.
 			for (const value of ["None", "NONE", " none", "null", "false"]) {
 				expect([value, yield* refused({ [API_DOMAIN_ENV]: value })]).not.toEqual([
 					value,
@@ -81,7 +78,6 @@ describe("custom domains", () => {
 			expect(
 				yield* parse({ [API_DOMAIN_ENV]: "api.example.com", [MCP_DOMAIN_ENV]: "mcp.example.com" }),
 			).toEqual({ api: { domain: "api.example.com" }, mcp: { domain: "mcp.example.com" } })
-			// A spelling that only a URL would fold into the other hostname is not accepted at all.
 			expect(
 				yield* refused({
 					[API_DOMAIN_ENV]: "sample.example.com",
@@ -131,7 +127,6 @@ describe("custom domains", () => {
 				"api..example.com",
 				".example.com",
 				`${"a".repeat(64)}.example.com`,
-				// Letters a URL turns into ASCII ones: these would name sample… and key….
 				"\u017Fample.example.com",
 				"\u212Aey.example.com",
 				"caf\u00E9.example.com",

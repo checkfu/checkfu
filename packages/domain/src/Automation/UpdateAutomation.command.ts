@@ -48,12 +48,6 @@ export class AutomationRevisionConflict extends Domain.Rejection(
 	},
 ) {}
 
-/**
- * Replaces the automation's configuration with one built on `expected_revision`. The flags say
- * what differs from that revision's configuration (`changed`: anything at all); since the command is refused unless that
- * revision is still current, they hold for the configuration it replaces. Only the API handler sends
- * it, and the domain Api does not serve it.
- */
 export class UpdateAutomation extends Domain.Command("UpdateAutomation", {
 	input: {
 		automation_id: AutomationId,

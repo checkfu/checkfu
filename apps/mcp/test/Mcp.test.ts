@@ -90,7 +90,6 @@ const listToolsRequest = (path: string, headers: Record<string, string> = {}, bo
 
 const isList = (value: Argument): value is ReadonlyArray<Argument> => Array.isArray(value)
 
-// Every copy of `value` that differs by one unknown field added to one of its objects.
 const withUnknownField = (value: Argument): Array<Argument> => {
 	if (isList(value)) {
 		return value.flatMap((item, index) =>
@@ -122,7 +121,6 @@ const isCredentialCheck = (input: RequestInfo | URL) =>
 	new URL(typeof input === "string" ? input : "href" in input ? input.href : input.url).pathname ===
 	CREDENTIAL_CHECK_PATH
 
-// A stand-in API that accepts the caller's credential and then answers every operation with `reply`.
 const afterCredentialCheck = (reply: () => Promise<Response>) => ({
 	fetch: ((input) =>
 		isCredentialCheck(input)
@@ -474,7 +472,6 @@ describe("Checkfu MCP server", () => {
 			expect(refusals).toBeGreaterThan(40)
 			expect(server.apiRequests.length).toBe(0)
 
-			// The same calls without the unknown field pass the published schema and reach the API.
 			for (const [name, valid] of Object.entries(calls)) {
 				const result = yield* callTool(client, name, valid)
 				const [block] = result.content
@@ -502,7 +499,6 @@ describe("Checkfu MCP server", () => {
 
 	it("accepts exactly the retry keys the API accepts that a header carries unchanged", () => {
 		const apiAccepts = Schema.is(ClientEventId)
-		// Tab and printable ASCII: what fetch and curl both deliver to a server byte for byte.
 		const headerCarries = (key: string) => /^[\t\u0020-\u007E]*$/u.test(key)
 		const keys = [
 			"",
@@ -594,7 +590,6 @@ describe("Checkfu MCP server", () => {
 		expect(new Set(pathParameters.map((parameter) => parameter.pattern))).toEqual(
 			new Set([PATH_SEGMENT_PATTERN]),
 		)
-		// Lookaround is not part of every regular-expression engine a client may validate with.
 		expect(JSON.stringify(GENERATED_TOOLS)).not.toMatch(/\(\?<?[=!]/)
 	})
 
@@ -742,8 +737,6 @@ describe("Checkfu MCP server", () => {
 			yield* callOk(client, "environments_createEnvironment", { body: { name: "default" } })
 			expect(server.apiRequests.at(-1)?.headers.get("authorization")).toBe(`Bearer ${TEST_API_KEY}`)
 
-			// A credential the API refuses is refused here too, before the request is handled:
-			// at connection time, and for a tool call.
 			const operations = server.apiRequests.length
 			const stale = { authorization: "Bearer ck_stale_key" }
 			for (const request of [
@@ -775,8 +768,6 @@ describe("Checkfu MCP server", () => {
 			expect(accepted.status).toBe(200)
 			expect(accepted.headers.get("www-authenticate")).toBeNull()
 
-			// Only the API's own confirmation admits a request. An API that cannot be asked, or that
-			// answers anything else, has not accepted the credential.
 			const unconfigured = {
 				type: "error",
 				error: { type: "service_unavailable", message: "API authentication is not configured." },
@@ -815,7 +806,6 @@ describe("Checkfu MCP server", () => {
 		Effect.gen(function* () {
 			const server = yield* makeTestServer
 
-			// Every spelling here is one the router resolves to the MCP endpoint.
 			for (const path of ["/mcp", "/mcp/", "/MCP", "/%6dcp", "//mcp", "/mcp/?x=1"]) {
 				const anonymous = yield* server.fetch(listToolsRequest(path))
 				expect([path, anonymous.status]).toEqual([path, 401])
@@ -829,7 +819,6 @@ describe("Checkfu MCP server", () => {
 				expect([path, admitted.status]).toEqual([path, 200])
 				expect(admitted.headers.get("cache-control")).toBe("no-store")
 			}
-			// A scheme with no token is what "Bearer $UNSET_VARIABLE" sends.
 			for (const authorization of ["Bearer", "Bearer ", "bearer", " "]) {
 				const empty = yield* server.fetch(listToolsRequest("/mcp", { authorization }))
 				expect([authorization, empty.status]).toEqual([authorization, 401])
@@ -841,14 +830,11 @@ describe("Checkfu MCP server", () => {
 				expect([path, health.status]).toEqual([path, 200])
 				expect(health.headers.get("cache-control")).toBeNull()
 			}
-			// Only a GET is the health check. Anything else sent there needs a credential like every
-			// other request, and is refused before its body is read.
 			const posted = yield* server.fetch(
 				new Request(`${MCP_ORIGIN}/health`, { method: "POST", body: "x".repeat(1024) }),
 			)
 			expect(posted.status).toBe(401)
 
-			// A request target is a path, not a URL: a leading "//" is not a host.
 			for (const path of ["//", "//health", "//x/health", "/health/"]) {
 				const anonymous = yield* server.fetch(new Request(`${MCP_ORIGIN}${path}`))
 				expect([path, anonymous.status]).toEqual([path, 401])
@@ -1041,7 +1027,6 @@ describe("Checkfu MCP server", () => {
 			})
 			expect(largest["type"]).toBe("agent")
 
-			// A tool call carrying the largest artifact upload the API accepts is admitted whole.
 			expect(MAX_MCP_BODY_BYTES).toBeGreaterThanOrEqual(MAX_ARTIFACT_BODY_BYTES + 64 * 1024)
 			const escaped = `${String.fromCodePoint(0x5c)}u0436`.repeat(MAX_ARTIFACT_FILE_BYTES / 2)
 			const files = Array.from(

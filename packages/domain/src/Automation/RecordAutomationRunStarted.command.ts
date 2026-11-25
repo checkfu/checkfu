@@ -11,7 +11,6 @@ export class AutomationRunStarted extends Domain.Event("automation.run_started",
 	session_id: SessionId,
 	trigger: AutomationTrigger,
 	scheduled_at: Schema.NullOr(NonNegativeInt),
-	// Runs recorded before runs named their agent read as naming none.
 	agent_id: Schema.NullOr(ResourceId).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
 	agent_version: Schema.NullOr(PositiveInt).pipe(
 		Schema.withDecodingDefaultKey(Effect.succeed(null)),

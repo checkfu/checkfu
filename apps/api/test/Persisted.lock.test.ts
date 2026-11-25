@@ -202,7 +202,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(required[0]).toContain(id)
 				expect(required[0]).toContain("A run in flight during a deploy")
 
-				// A Domain upgrade that changes the persisted __cause codec must fail the lock.
 				const lockWithCause = lockWith({
 					[id]: [
 						{
@@ -239,7 +238,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 	it.effect("blocks a release that cannot deliver an already-armed turn deadline", () =>
 		Effect.gen(function* () {
 			const id = "scheduled-command:Checkfu.Session/AbandonTurn"
-			// The Durable Object stores this JSON as the alarm job's command.
+
 			const lock = lockWith({
 				[id]: [
 					{
@@ -603,7 +602,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					return shape
 				})
 
-			// Even with TurnInput bumped to v4, adding a required field breaks queued deliveries.
 			const breaking = upgradedTurnInput(
 				Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
 			)
@@ -612,7 +610,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			expect(breakingProblems).toEqual([expect.stringContaining(startDeliveryId)])
 			expect(breakingProblems.every((p) => p.includes("Queued policy deliveries"))).toBe(true)
 
-			// A backward-compatible optional field passes once the policy delivery is reviewed.
 			const compatible = upgradedTurnInput(
 				Schema.NullOr(
 					Schema.Struct({
@@ -643,7 +640,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			}
 			expect(yield* lockProblems(reviewedLock, compatible)).toEqual([])
 
-			// A view with no policy consumers can still break shape freely on a version bump.
 			const agentViewId = viewShapeId("Checkfu", "AgentView", 0)
 			const upgradedAgentView = persistedShapes.map((shape) =>
 				shape.id === agentViewId
@@ -756,9 +752,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(registered.toSorted()).toEqual(declaredBeforeWorkerImport.toSorted())
 				expect(new Set(declaredBeforeWorkerImport).size).toBe(declaredBeforeWorkerImport.length)
 
-				// Importing the deploy entry point (PiHarnessWorker -> PiSession -> PiDurableEngine) MUST
-				// enumerate the exact same Pi document IDs as the standalone persisted:cut / persisted:check
-				// entry point (Shapes.ts -> PiDocRegistry.ts).
 				yield* Effect.promise(() => import("../src/Pi/PiHarnessWorker.ts"))
 				const declaredAfterWorkerImport = CHECKFU_PI_DOCS.map((spec) =>
 					piDocShapeId(spec.token.definition.kind),
@@ -766,7 +759,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(declaredAfterWorkerImport).toEqual(declaredBeforeWorkerImport)
 				expect(registered.toSorted()).toEqual(declaredAfterWorkerImport.toSorted())
 
-				// Runtime guard: persisting any non-pi.* document kind not in CHECKFU_PI_DOCS fails at storage commit.
 				const backend = yield* Effect.acquireRelease(
 					Effect.promise(() =>
 						createInMemoryPiDurableBackend(
@@ -797,8 +789,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					).rejects.toThrow(/Unregistered Pi durable document/),
 				)
 			}),
-		// Importing the whole Worker takes most of the default five seconds on a busy
-		// CI machine; the limit should fail a hang, not a slow import.
+
 		30_000,
 	)
 
@@ -815,7 +806,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					output_tokens: NonNegativeInt,
 				})
 
-				// 1. Renaming a field in place (v1) without a migration breaks replay of old receipts.
 				const renamedInPlace = replacing(
 					id,
 					piDocPersistedSchema({
@@ -829,7 +819,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				])
 				expect(inPlaceBlockers[0]).toContain("Pi durable documents survive deployments")
 
-				// 2. Bumping version to 2 without a migrate handler still fails on shipped v1 receipts.
 				const unmigratedV2 = replacing(
 					id,
 					piDocPersistedSchema({
@@ -843,7 +832,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					expect.stringContaining(`${id} can no longer read a value written by baseline`),
 				])
 
-				// 3. A broken migrate() that forgets to map input_tokens -> prompt_tokens fails decode.
 				const brokenMigrate = replacing(
 					id,
 					piDocPersistedSchema({
@@ -862,7 +850,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					expect.stringContaining(`${id} can no longer read a value written by baseline`),
 				])
 
-				// 4. Changing scope or family breaks stored documents and is blocked.
 				const changedFamily = replacing(
 					id,
 					piDocPersistedSchema({
@@ -880,7 +867,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					expect.stringContaining(`${id} can no longer read a value written by baseline`),
 				])
 
-				// 5. Bumping version to 2 with a working migrate() + previous v1 schema passes once reviewed.
 				const migratedV2 = replacing(
 					id,
 					piDocPersistedSchema({
@@ -903,9 +889,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(unreviewed[0]).toContain("has not been reviewed")
 				expect(yield* lockProblems(yield* reviewing(lock, id, migratedV2), migratedV2)).toEqual([])
 
-				// 6. A v1 schema cut using Schema.toType (e.g. storing numeric count for NumberFromString
-				//    or a required defaulted_weight) MUST remain readable when that same schema moves
-				//    into `previous` for v2, while still passing the untouched raw JSON to migrate().
 				const V1WithTransformAndDefault = Schema.Struct({
 					input_tokens: NonNegativeInt,
 					output_tokens: NonNegativeInt,
@@ -935,8 +918,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				const cutV1Samples = yield* sampleEncoded(v1Shape, 4)
 				const v1CutLock = lockWith({ [id]: [v1StoredSample, ...cutV1Samples] })
 
-				// Moving V1WithTransformAndDefault into `previous` with an identity migration MUST pass
-				// on both the explicit { count: 7 } sample and every baseline sample cut from v1.
 				const identityV2 = replacing(
 					id,
 					piDocPersistedSchema({
@@ -953,8 +934,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				)
 				expect(yield* lockProblems(v1CutLock, identityV2)).toEqual([])
 
-				// 6b. Migrations must also receive untouched raw stored JSON (e.g. absent optionalKey
-				//     fields stay absent, string fields stay strings) rather than decoded/mutated copies.
 				const V1OptionalString = Schema.Struct({
 					input_tokens: NonNegativeInt,
 					output_tokens: NonNegativeInt,
@@ -1024,9 +1003,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				)
 				expect(yield* lockProblems(rawV1Lock, handlesRawJson)).toEqual([])
 
-				// 7. Pi's materializeDocumentValue returns stored/migrated JSON directly without
-				//    running an Effect codec, so the lock MUST validate the runtime value shape
-				//    without applying decoding defaults or wire-to-runtime transforms.
 				const CurrentTransformedV2 = Schema.Struct({
 					count: Schema.FiniteFromString,
 					output_tokens: NonNegativeInt,
@@ -1039,7 +1015,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							definition: {
 								...SettledUsage.definition,
 								version: 2,
-								// Returns a string for `count`; Pi does NOT run NumberFromString at runtime.
+
 								migrate: (value) => ({
 									count: typeof value.input_tokens === "number" ? String(value.input_tokens) : "0",
 									output_tokens: value.output_tokens ?? 0,
@@ -1104,8 +1080,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				}
 				expect(v2RoundTripFailures).toEqual([])
 
-				// 7b. A migration (or unversioned schema change) that omits a field with a decoding
-				//     default MUST fail because Pi does not apply Effect defaults at runtime.
 				const WithDefaultedFieldV2 = Schema.Struct({
 					prompt_tokens: NonNegativeInt,
 					output_tokens: NonNegativeInt,
@@ -1177,11 +1151,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					),
 				).toEqual([])
 
-				// 7c. JSON-codec coercions (e.g. Effect's Schema.toCodecJson(Schema.Number) decoding
-				//     "NaN" / "Infinity" / "-Infinity" strings into numbers) MUST NOT mask a migration
-				//     or stored value that leaves a Schema.Number field as a string at runtime.
 				const NumberFieldV2 = Schema.Struct({
-					// oxlint-disable-next-line effecttsgo/schema-number -- intentionally tests Schema.Number JSON coercion of "NaN"/"Infinity"
 					n: Schema.Number,
 				})
 				for (const coercedString of ["NaN", "Infinity", "-Infinity"] as const) {
@@ -1244,8 +1214,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					}),
 				).toBeNull()
 
-				// 8. Undeclared properties in a stored v1 object MUST reach migrate() untouched,
-				//    matching Pi's runtime behavior instead of being stripped by Struct decoding.
 				const V1PartialSchema = Schema.Struct({
 					input_tokens: NonNegativeInt,
 				})
@@ -1270,8 +1238,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							definition: {
 								...SettledUsage.definition,
 								version: 2,
-								// Copies every stored property; if legacy_extra were stripped, this would
-								// falsely pass a schema that expects `extra_seen` only when absent.
+
 								migrate: (value) => ({
 									prompt_tokens: value.input_tokens ?? 0,
 									extra_seen: "legacy_extra" in value ? "unexpected_extra" : "stored",
@@ -1304,9 +1271,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				)
 				expect(yield* lockProblems(extraKeyLock, readsExtraKey)).toEqual([])
 
-				// 9. Migrations must satisfy Pi's strict JSON copy (`copyJson` in materializeDocumentValue),
-				//    rejecting undeclared NaN / Infinity / undefined / non-plain objects that Struct decoding
-				//    would otherwise strip silently.
 				const nonStrictCases: ReadonlyArray<readonly [string, unknown]> = [
 					["NaN", Number.NaN],
 					["Infinity", Number.POSITIVE_INFINITY],
@@ -1346,9 +1310,6 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					])
 				}
 
-				// 10. Conversation-scoped Pi documents fingerprint and check `history` and `fork`
-				//     semantics in both current and previous wire envelopes because Pi's
-				//     `checkRecordScope` rejects changes before migration runs.
 				const convKind = "checkfu.conversation-note"
 				const convId = piDocShapeId(convKind)
 				const ConvV1 = Schema.Struct({ note: Schema.String })
@@ -1403,11 +1364,11 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				expect(yield* shipBlockers(convLock, [changedFork])).toEqual([
 					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
 				])
-				// Migrating v1 -> v2 while changing history/fork is still blocked on the previous envelope.
+
 				expect(yield* shipBlockers(convLock, [makeConvShape("rewindable", "current", 2)])).toEqual([
 					expect.stringContaining(`${convId} can no longer read a value written by baseline`),
 				])
-				// Migrating v1 -> v2 while preserving history & fork succeeds once reviewed.
+
 				const validConvV2 = [makeConvShape("latest", "current", 2)]
 				expect(
 					yield* lockProblems(yield* reviewing(convLock, convId, validConvV2), validConvV2),

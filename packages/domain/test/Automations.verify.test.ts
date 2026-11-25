@@ -9,8 +9,6 @@ import { sessionIdOfNextRun } from "../src/Automation/Automation.id.ts"
 import { upcomingOccurrences } from "../src/Automation/Schedule.ts"
 import { Automations } from "../src/Automations.model.ts"
 
-// The explorer cannot follow a firing armed for a computed instant, so it leaves
-// ArmAutomation out and sends FireAutomation itself, for any instant, at any point.
 class AutomationsLifecycleApi extends Domain.Api("AutomationsLifecycleApi", {
 	model: Automations,
 	commands: [

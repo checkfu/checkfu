@@ -8,7 +8,7 @@ pre-commit:
     lint:
       files: git diff --cached --name-only --diff-filter=ACMRT
       glob: "*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
-      run: bun run effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives --no-error-on-unmatched-pattern -- {files}
+      run: bun tools/forge/src/CheckDirectives.ts {files} && bun run effect-tsgo oxlint --disable-nested-config --type-aware --deny-warnings --report-unused-disable-directives --no-error-on-unmatched-pattern -- {files}
     format:
       files: git diff --cached --name-only --diff-filter=ACMRT
       run: bun run oxfmt --check --no-error-on-unmatched-pattern -- {files}

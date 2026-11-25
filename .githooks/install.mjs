@@ -2,10 +2,6 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
-// Run by `bun install`. Adds a pre-commit hook that runs the committing worktree's
-// .githooks/pre-commit where no hook exists yet, never changes a file that does, and
-// never fails the install.
-
 const SHIM = `#!/bin/sh
 hook="$(git rev-parse --show-toplevel)/.githooks/pre-commit"
 [ -x "$hook" ] || exit 0
