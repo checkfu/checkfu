@@ -1480,6 +1480,71 @@ describe("PiSession real Durable Object under workerd", () => {
 		})
 	}, 240_000)
 
+	it("mounts an artifact version as read-only files the model can read and cannot change", async () => {
+		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
+			name: "Q3 Data",
+			files: [
+				{ path: "sales.csv", content: "region,total\nEMEA,4217\n" },
+				{ path: "img/pixel.bin", content: "AAEC/w==", encoding: "base64" },
+			],
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "artifact", artifact_id: artifact.id }],
+		})
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"What did EMEA sell?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+					},
+				],
+				"Fix the total.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/artifacts/q3-data/sales.csv", content: "EMEA,0" },
+					},
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+					},
+				],
+				"What else is there?": [
+					{
+						kind: "tool_call",
+						name: "find",
+						arguments: { pattern: "**/*.bin", path: "/mnt/artifacts/q3-data" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
+		const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
+		expect(refused).toContain("read-only mount at /mnt/artifacts: cannot modify")
+		expect(refused).toContain("EMEA,4217")
+		expect(await replyAfterTurn(session.id, "What else is there?", 3)).toContain("img/pixel.bin")
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain("- /mnt/artifacts/q3-data: Q3 Data (version 1)")
+	}, 180_000)
+
 	it("checks out the branch it was asked for when a tag has the same name", async () => {
 		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
 		const tip = fakeGitHub.git("acme/api", "rev-parse", "main").trim()

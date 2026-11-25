@@ -14,7 +14,11 @@ import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.com
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
-import { SessionResources, memoryMountPath } from "@checkfu/domain/Session/SessionResource"
+import {
+	SessionResources,
+	artifactMountPath,
+	memoryMountPath,
+} from "@checkfu/domain/Session/SessionResource"
 import type { RepositoryToken, SessionResourceId } from "@checkfu/domain/Session/SessionResource"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
@@ -33,10 +37,13 @@ import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
+import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
+import { ArtifactManifestAt } from "../Artifacts/ResolveArtifactVersion.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type {
@@ -252,20 +259,30 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 	}
 }
 
-const askedResource = (resource: CreateSessionResource) =>
-	resource.type === "github_repository"
-		? {
+const askedResource = (resource: CreateSessionResource) => {
+	switch (resource.type) {
+		case "github_repository":
+			return {
 				type: resource.type,
 				url: resource.url,
 				mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
 				checkout: resource.checkout ?? null,
 			}
-		: {
+		case "memory_store":
+			return {
 				type: resource.type,
 				memory_store_id: resource.memory_store_id,
 				access: resource.access ?? "read_write",
 				instructions: resource.instructions ?? null,
 			}
+		default:
+			return {
+				type: resource.type,
+				artifact_id: resource.artifact_id,
+				version: resource.version ?? null,
+			}
+	}
+}
 
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
@@ -274,6 +291,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
 		const memoryStores = yield* MemoryStore
+		const artifacts = yield* Artifact
+		const manifestAt = yield* ArtifactManifestAt
 		const harness = yield* Harness
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
@@ -353,6 +372,35 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					),
 				)
 
+		const artifactVersion = Effect.fn(function* (wanted: {
+			readonly artifact_id: ArtifactId
+			readonly version?: number
+		}) {
+			const artifact = yield* artifacts.get(wanted.artifact_id)
+			if (artifact.status !== "active") {
+				return yield* reject(404, `Artifact ${wanted.artifact_id} not found.`)
+			}
+			const version = wanted.version ?? artifact.version
+			if (version > artifact.version) {
+				return yield* reject(404, `Artifact ${wanted.artifact_id} has no version ${version}.`)
+			}
+			const manifest = yield* manifestAt(wanted.artifact_id, artifact, version).pipe(
+				Effect.catchTag("ArtifactVersionNotReady", () =>
+					reject(503, "Timed out waiting for view consistency."),
+				),
+			)
+			if (manifest === null) {
+				return yield* reject(404, `Artifact ${wanted.artifact_id} not found.`)
+			}
+			return {
+				artifact_id: wanted.artifact_id,
+				version,
+				manifest,
+				name: artifact.name,
+				mount_path: artifactMountPath(artifact.name, wanted.artifact_id),
+			}
+		})
+
 		const requestedResource = Effect.fn(function* (resource: CreateSessionResource) {
 			if (resource.type === "github_repository") {
 				return {
@@ -360,6 +408,15 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					url: resource.url,
 					mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
 					checkout: resource.checkout ?? null,
+				}
+			}
+			if (resource.type === "artifact") {
+				return {
+					type: resource.type,
+					...(yield* artifactVersion({
+						...resource,
+						artifact_id: ArtifactId.make(resource.artifact_id),
+					})),
 				}
 			}
 			const storeId = MemoryStoreId.make(resource.memory_store_id)

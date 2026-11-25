@@ -5,7 +5,10 @@ import * as Predicate from "effect/Predicate"
 import { createRepositoryFetch, githubBaseUrl, makeGitCalls } from "./Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
+import { ARTIFACT_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
+import { makeArtifactMount } from "./ArtifactMount.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
+import type { SessionArtifacts } from "./SessionArtifacts.ts"
 import { makeSessionMemory } from "./SessionMemory.ts"
 import { makeTurnFence } from "./WorkspaceFence.ts"
 import type { TurnToken } from "./WorkspaceFence.ts"
@@ -74,6 +77,12 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						call(api.memoryWrite(sessionId, name, path, content, exclusive)),
 					remove: (name, path, expected) => call(api.memoryRemove(sessionId, name, path, expected)),
 				})
+				const artifacts: SessionArtifacts = {
+					mounts: () => call(api.artifactMounts(sessionId)),
+					files: (mountPath) => call(api.artifactFiles(sessionId, mountPath)),
+					read: (mountPath, path, offset, length) =>
+						call(api.artifactRead(sessionId, mountPath, path, offset, length)),
+				}
 				const gitCalls = makeGitCalls()
 				let turnScope = new AbortController()
 				const open = async () => {
@@ -86,6 +95,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						storage,
 						mounts: {
 							[MEMORY_ROOT]: makeMemoryMount(memory),
+							[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts),
 						},
 						git: createGitClient({
 							fetch: createRepositoryFetch({

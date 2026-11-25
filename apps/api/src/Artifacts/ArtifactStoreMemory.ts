@@ -125,10 +125,15 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 						return bytes === undefined ? null : decodeManifest(decoder.decode(bytes))
 					}),
 				),
-			getBlob: (artifactId, sha256) =>
+			getBlob: (artifactId, sha256, range) =>
 				read(() => {
 					blobReads += 1
-					return objects.get(artifactBlobKey(scope, artifactId, sha256)) ?? null
+					const bytes = objects.get(artifactBlobKey(scope, artifactId, sha256))
+					return bytes === undefined
+						? null
+						: range === undefined
+							? bytes
+							: bytes.slice(range.offset, range.offset + range.length)
 				}),
 			hasBlob: (artifactId, sha256) =>
 				read(() => {

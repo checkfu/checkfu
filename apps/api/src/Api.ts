@@ -1,6 +1,7 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { SessionArtifactCalls } from "./Workspace/SessionArtifacts.ts"
 import { SessionMemoryCalls } from "./Workspace/SessionMemory.ts"
 
 export class ArtifactVersionNotReady extends Schema.TaggedError<
@@ -26,6 +27,7 @@ export const ApiCalls = {
 		error: ArtifactVersionNotReady,
 	},
 	...SessionMemoryCalls,
+	...SessionArtifactCalls,
 } as const
 
 type Calls = typeof ApiCalls

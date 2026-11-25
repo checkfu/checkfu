@@ -11,6 +11,11 @@ import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import type { ArtifactManifest, BuiltArtifactVersion } from "./ArtifactFiles.ts"
 import type { ArtifactPurged, ArtifactReservationStale } from "./ArtifactOwnership.ts"
 
+export interface ByteRange {
+	readonly offset: number
+	readonly length: number
+}
+
 export class ArtifactStoreError extends Schema.TaggedError<
 	ArtifactStoreError,
 	{ readonly brand: unique symbol }
@@ -29,6 +34,7 @@ export interface ArtifactStoreService {
 	readonly getBlob: (
 		artifactId: string,
 		sha256: string,
+		range?: ByteRange,
 	) => Effect.Effect<Uint8Array | null, ArtifactStoreError>
 	readonly hasBlob: (
 		artifactId: string,
@@ -121,10 +127,13 @@ export const artifactReads = (
 				return object === null ? null : yield* decodeManifest(yield* object.text())
 			}),
 		),
-	getBlob: (artifactId, sha256) =>
+	getBlob: (artifactId, sha256, range) =>
 		run(
 			Effect.gen(function* () {
-				const object = yield* bucket.get(artifactBlobKey(scope, artifactId, sha256))
+				const object = yield* bucket.get(
+					artifactBlobKey(scope, artifactId, sha256),
+					range === undefined ? undefined : { range },
+				)
 				return object === null ? null : yield* object.bytes()
 			}),
 		),

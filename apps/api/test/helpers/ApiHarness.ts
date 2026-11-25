@@ -50,7 +50,9 @@ import {
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
 import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
+import { makeArtifactMount } from "../../src/Workspace/ArtifactMount.ts"
 import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
 import { makeSessionMemory } from "../../src/Workspace/SessionMemory.ts"
 import type { SessionMemory } from "../../src/Workspace/SessionMemory.ts"
@@ -309,23 +311,55 @@ export const makePiDurableTestLayer = (
 	let memoryCalls:
 		| {
 				readonly access: Effect.Success<typeof SessionMemoryAccess>
+				readonly artifacts: Effect.Success<typeof SessionArtifactAccess>
 				readonly run: <A>(effect: Effect.Effect<A>) => Promise<A>
 		  }
 		| undefined
 	const memoryCallsLive = Layer.effectDiscard(
 		Effect.gen(function* () {
 			const access = yield* SessionMemoryAccess
+			const artifacts = yield* SessionArtifactAccess
 			const services = yield* Effect.context<never>()
-			memoryCalls = { access, run: (effect) => Effect.runPromiseWith(services)(effect) }
+			memoryCalls = {
+				access,
+				artifacts,
+				run: (effect) => Effect.runPromiseWith(services)(effect),
+			}
 		}),
 	)
-	const run = <A, E>(
-		effect: (access: Effect.Success<typeof SessionMemoryAccess>) => Effect.Effect<A, E>,
-	) => {
+	const built = () => {
 		if (memoryCalls === undefined) {
 			throw new Error("The test layer is not built yet.")
 		}
-		return memoryCalls.run(Effect.orDie(effect(memoryCalls.access)))
+		return memoryCalls
+	}
+	const run = <A, E>(
+		effect: (access: Effect.Success<typeof SessionMemoryAccess>) => Effect.Effect<A, E>,
+	) => built().run(Effect.orDie(effect(built().access)))
+	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") => {
+		const mount = makeArtifactMount(root, {
+			mounts: () => built().run(Effect.orDie(built().artifacts.artifactMounts(sessionId))),
+			files: (mountPath) =>
+				built().run(Effect.orDie(built().artifacts.artifactFiles(sessionId, mountPath))),
+			read: (mountPath, path, offset, length) =>
+				built().run(
+					Effect.orDie(built().artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
+				),
+		})
+		return {
+			list: async () =>
+				((await mount.readdir("", { recursive: true })) ?? [])
+					.filter((entry) => entry.type === "file")
+					.map((entry) => `${root}/${entry.name}`)
+					.toSorted(),
+			read: async (path: string, range?: { readonly offset: number; readonly length: number }) => {
+				const read = await mount.readFile(
+					path.slice(root.length + 1),
+					range === undefined ? undefined : { range },
+				)
+				return read === null ? null : await new Response(read.body).text()
+			},
+		}
 	}
 	const sessionMemoryOf = (sessionId: string): SessionMemory =>
 		makeSessionMemory({
@@ -515,6 +549,7 @@ export const makePiDurableTestLayer = (
 		tokenDeliveries,
 		workspaceFiles,
 		memoryFiles,
+		artifactFiles,
 	}
 }
 

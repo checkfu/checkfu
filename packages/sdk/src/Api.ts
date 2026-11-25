@@ -25,6 +25,7 @@ import {
 	ArtifactFilesInput,
 	ArtifactVersionFilesInput,
 	ArtifactId,
+	ArtifactMount,
 	ArtifactName,
 	ArtifactPath,
 	AutomationId,
@@ -47,8 +48,7 @@ import {
 	MAX_LINK_TTL_SECONDS,
 	MIN_LINK_TTL_SECONDS,
 	GitHubRepositoryResource,
-	MAX_SESSION_MEMORY_STORES,
-	MAX_SESSION_REPOSITORIES,
+	MAX_SESSION_RESOURCES,
 	MemoryAccess,
 	MemoryInstructions,
 	MemoryStoreResource,
@@ -506,11 +506,23 @@ export const MemoryStoreParams = Schema.Struct({
 	),
 })
 
-const CreateSessionResource = Schema.Union([GitHubRepositoryParams, MemoryStoreParams])
+export const ArtifactMountParams = Schema.Struct({
+	type: Schema.Literal("artifact"),
+	artifact_id: ResourceId.annotate({ description: "Artifact whose files to mount, read-only" }),
+	version: Schema.optionalKey(
+		PositiveInt.annotate({ description: "Version to mount (default: the current version)" }),
+	),
+})
+
+const CreateSessionResource = Schema.Union([
+	GitHubRepositoryParams,
+	MemoryStoreParams,
+	ArtifactMountParams,
+])
 export type CreateSessionResource = typeof CreateSessionResource.Type
 
 const CreateSessionResources = Schema.Array(CreateSessionResource).check(
-	Schema.isMaxLength(MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES),
+	Schema.isMaxLength(MAX_SESSION_RESOURCES),
 )
 
 const CreateSessionCommonFields = {
@@ -523,7 +535,7 @@ const CreateSessionCommonFields = {
 	),
 	resources: Schema.optionalKey(
 		CreateSessionResources.annotate({
-			description: "Repositories and memory stores to mount in the session's workspace",
+			description: "Repositories, memory stores and artifacts to mount in the session's workspace",
 		}),
 	),
 }
@@ -666,6 +678,7 @@ const resourceTimestamps = {
 export const SessionResourceItem = Schema.Union([
 	Schema.Struct({ ...GitHubRepositoryResource.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...MemoryStoreResource.fields, ...resourceTimestamps }),
+	Schema.Struct({ ...ArtifactMount.fields, ...resourceTimestamps }),
 ])
 export type SessionResourceItem = typeof SessionResourceItem.Type
 

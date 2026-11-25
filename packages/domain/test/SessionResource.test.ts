@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import { SessionCreated } from "../src/Session/CreateSession.command.ts"
 import { RunTurn } from "../src/Session/RunTurn.saga.ts"
 import {
+	MAX_SESSION_ARTIFACTS,
 	MAX_SESSION_MEMORY_STORES,
 	MAX_SESSION_REPOSITORIES,
 	MemoryMountPath,
@@ -12,6 +13,7 @@ import {
 	RepositoryToken,
 	RepositoryUrl,
 	SessionResources,
+	artifactMountPath,
 	memoryMountPath,
 	mountsOverlap,
 } from "../src/Session/SessionResource.ts"
@@ -202,5 +204,30 @@ describe("session resources", () => {
 		expect(valid([{ ...store(1), access: "write_only" }])).toBe(false)
 		expect(valid([{ ...store(1), instructions: "x".repeat(4097) }])).toBe(false)
 		expect(valid([{ ...store(1), mount_path: "/workspace/store-1" }])).toBe(false)
+	})
+
+	it("mounts an artifact under /mnt/artifacts at its name, and admits up to 8 of them", () => {
+		expect(artifactMountPath("Q3 Data", "art_1")).toBe("/mnt/artifacts/q3-data")
+		expect(artifactMountPath("../../etc", "art_1")).toBe("/mnt/artifacts/etc")
+		expect(artifactMountPath("!!!", "art_1")).toBe("/mnt/artifacts/art_1")
+		const valid = accepts(SessionResources)
+		const artifact = (index: number) => ({
+			id: `sesrsc_a${index}`,
+			type: "artifact" as const,
+			artifact_id: `art_${index}`,
+			version: 1,
+			manifest: "a".repeat(64),
+			name: `Set ${index}`,
+			mount_path: `/mnt/artifacts/set-${index}`,
+		})
+		const artifacts = (count: number) =>
+			Array.from({ length: count }, (_, index) => artifact(index))
+		expect(valid(artifacts(MAX_SESSION_ARTIFACTS))).toBe(true)
+		expect(valid(artifacts(MAX_SESSION_ARTIFACTS + 1))).toBe(false)
+		expect(valid([artifact(1), { ...artifact(2), mount_path: "/mnt/artifacts/set-1" }])).toBe(false)
+		expect(valid([{ ...artifact(1), version: 0 }])).toBe(false)
+		expect(valid([{ ...artifact(1), manifest: "" }])).toBe(false)
+		expect(valid([{ ...artifact(1), mount_path: "/mnt/memory/set-1" }])).toBe(false)
+		expect(valid([{ ...artifact(1), mount_path: "/mnt/artifacts/a/b" }])).toBe(false)
 	})
 })

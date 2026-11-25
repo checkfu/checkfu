@@ -469,9 +469,16 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					"api-call:Api.resolvePublication/args",
 					"api-call:Api.resolvePublication/error",
 					"api-call:Api.resolvePublication/result",
-					...["memoryList", "memoryMounts", "memoryRead", "memoryRemove", "memoryWrite"].flatMap(
-						(method) => [`api-call:Api.${method}/args`, `api-call:Api.${method}/result`],
-					),
+					...[
+						"artifactFiles",
+						"artifactMounts",
+						"artifactRead",
+						"memoryList",
+						"memoryMounts",
+						"memoryRead",
+						"memoryRemove",
+						"memoryWrite",
+					].flatMap((method) => [`api-call:Api.${method}/args`, `api-call:Api.${method}/result`]),
 				].toSorted(),
 			)
 			const claims = "signed-link:ArtifactLink/claims"
