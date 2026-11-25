@@ -1,12 +1,11 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
-import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
 	turn: Schema.Finite,
-	provider: Schema.Literals(SUPPORTED_PROVIDERS),
+	provider: Schema.String.check(Schema.isMinLength(1)),
 	modelId: Schema.String,
 	system: Schema.NullOr(Schema.String),
 	text: Schema.String,

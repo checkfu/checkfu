@@ -1,0 +1,10 @@
+# `@checkfu/pi-providers`
+
+Edge-hardened, extensible provider registry and wire-format runtime for `@earendil-works/pi-ai` and `@earendil-works/pi-durable`.
+
+## Entrypoints
+
+- **`@checkfu/pi-providers/catalog`**: Zero vendor SDKs, zero Pi runtime. Declarative provider specs, model specifier parsing (`<provider>/<model-id>` + bare aliases), credential checks, and base URL validation. Safe in public API Workers, CLIs, and browsers.
+- **`@checkfu/pi-providers/runtime`**: Statically imported (non-lazy, Durable-Object-safe) wire codecs for `anthropic-messages`, `openai-responses`, and `openai-completions`, wrapped with origin-pinned no-redirect fetch, wire-level refusal guards, and dynamic Day-1 unlisted-model resolution.
+- **`@checkfu/pi-providers/refusals`**: Wire-format refusal predicates and normalization helpers.
+- **`@checkfu/pi-providers/fetch`**: Origin-pinned no-redirect `fetch` wrapper and strict base URL validators.

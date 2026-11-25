@@ -32,6 +32,7 @@
         "@alchemy.run/cloudflare": "catalog:",
         "@alchemy.run/domain": "catalog:",
         "@checkfu/domain": "workspace:*",
+        "@checkfu/pi-providers": "workspace:*",
         "@checkfu/sdk": "workspace:*",
         "@checkfu/snapshots": "workspace:*",
         "@distilled.cloud/cloudflare": "catalog:",
@@ -123,6 +124,16 @@
       "devDependencies": {
         "@effect/platform-node": "catalog:",
         "@effect/vitest": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/pi-providers": {
+      "name": "@checkfu/pi-providers",
+      "version": "0.0.0",
+      "dependencies": {
+        "@earendil-works/pi-ai": "catalog:",
+      },
+      "devDependencies": {
         "vitest": "catalog:",
       },
     },
@@ -336,6 +347,8 @@
     "@checkfu/forge": ["@checkfu/forge@workspace:tools/forge"],
 
     "@checkfu/mcp": ["@checkfu/mcp@workspace:apps/mcp"],
+
+    "@checkfu/pi-providers": ["@checkfu/pi-providers@workspace:packages/pi-providers"],
 
     "@checkfu/sdk": ["@checkfu/sdk@workspace:packages/sdk"],
 

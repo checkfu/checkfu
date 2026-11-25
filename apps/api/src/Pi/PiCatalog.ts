@@ -1,52 +1,63 @@
-import type { Api, Model } from "@earendil-works/pi-ai"
-import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.models"
-import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models"
+import {
+	BUILTIN_PROVIDER_IDS,
+	BUILTIN_PROVIDERS,
+	checkProviderCredentials,
+	findProvider,
+	formatSupportedProviders,
+	isBuiltinProviderId,
+	resolveModelSpecifier,
+} from "@checkfu/pi-providers/catalog"
+import type {
+	BuiltinProviderId,
+	ProviderRuntimeConfig,
+	ProviderSpec,
+	ResolvedModelSpecifier,
+} from "@checkfu/pi-providers/catalog"
 import { PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW } from "./PiContextBudget.ts"
 
-export const SUPPORTED_PROVIDERS = ["openai", "anthropic"] as const
-export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number]
+export const SUPPORTED_PROVIDERS = BUILTIN_PROVIDER_IDS
+export type SupportedProvider = BuiltinProviderId
 
-export const PROVIDER_API_KEY_ENV: Readonly<Record<SupportedProvider, string>> = {
-	openai: "OPENAI_API_KEY",
-	anthropic: "ANTHROPIC_API_KEY",
-}
+export const PROVIDER_API_KEY_ENV: Readonly<Record<string, string>> = Object.fromEntries(
+	BUILTIN_PROVIDERS.flatMap((provider) =>
+		provider.auth.kind === "bearer" || provider.auth.kind === "api_key_header"
+			? [[provider.id, provider.auth.env] as const]
+			: [],
+	),
+)
 
-export const isSupportedProvider = (value: string): value is SupportedProvider =>
-	value === "openai" || value === "anthropic"
-
-const offered = (models: Readonly<Record<string, Model<Api>>>): ReadonlyArray<Model<Api>> =>
-	Object.values(models).filter(
-		(model) => model.contextWindow >= PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
-	)
-
-const MODELS: Readonly<Record<SupportedProvider, ReadonlyArray<Model<Api>>>> = {
-	openai: offered(OPENAI_MODELS),
-	anthropic: offered(ANTHROPIC_MODELS),
-}
-
-const findModel = (provider: SupportedProvider, modelId: string) =>
-	MODELS[provider].find((model) => model.id === modelId)
+export const isSupportedProvider = (
+	value: string,
+	customProviders?: ReadonlyArray<ProviderSpec>,
+): boolean =>
+	isBuiltinProviderId(value) ||
+	(customProviders?.some((provider) => provider.id === value) ?? false)
 
 export const resolveCatalogModel = (
 	requestedModelId: string,
-): { readonly provider: SupportedProvider; readonly model: Model<Api> } | null => {
-	const slashIndex = requestedModelId.indexOf("/")
-	if (slashIndex > 0) {
-		const provider = requestedModelId.slice(0, slashIndex)
-		const modelId = requestedModelId.slice(slashIndex + 1)
-		if (isSupportedProvider(provider) && modelId.length > 0) {
-			const model = findModel(provider, modelId)
-			if (model !== undefined) {
-				return { provider, model }
-			}
+	customProviders?: ReadonlyArray<ProviderSpec>,
+): ResolvedModelSpecifier | null =>
+	resolveModelSpecifier(requestedModelId, {
+		...(customProviders === undefined ? {} : { customProviders }),
+		minContextWindow: PI_DEFAULT_COMPACTION_MIN_CONTEXT_WINDOW,
+	})
+
+export const supportedProvidersDescription = (
+	customProviders?: ReadonlyArray<ProviderSpec>,
+): string => formatSupportedProviders(customProviders)
+
+export const checkCatalogProviderCredentials = (
+	providerId: string,
+	config: Pick<ProviderRuntimeConfig, "env" | "aiBinding">,
+	customProviders?: ReadonlyArray<ProviderSpec>,
+) => {
+	const provider = findProvider(providerId, customProviders)
+	if (provider === undefined) {
+		return {
+			ok: false as const,
+			missing: [] as ReadonlyArray<string>,
+			message: `Unknown provider "${providerId}".`,
 		}
-		return null
 	}
-	for (const provider of SUPPORTED_PROVIDERS) {
-		const model = findModel(provider, requestedModelId)
-		if (model !== undefined) {
-			return { provider, model }
-		}
-	}
-	return null
+	return checkProviderCredentials(provider, config)
 }
