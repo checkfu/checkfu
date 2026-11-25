@@ -81,5 +81,6 @@ export const ListingLive = Listing.toLayer(
 		const store = yield* ListingStore
 		return (batch) => store.record(batch.map(changeOf))
 	}),
-	{ batch: { size: 100 } },
+	// Version 1 adds automations; a stage that ran version 0 replays its history into the listing.
+	{ batch: { size: 100 }, version: 1 },
 )
