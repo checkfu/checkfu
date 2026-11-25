@@ -1,4 +1,7 @@
-import { AdmitAutomation } from "@checkfu/domain/Automation/AdmitAutomation.command"
+import {
+	AdmitAutomation,
+	AutomationScheduleUnusable,
+} from "@checkfu/domain/Automation/AdmitAutomation.command"
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
@@ -11,7 +14,7 @@ import { PauseAutomation } from "@checkfu/domain/Automation/PauseAutomation.comm
 import type { AutomationRunFailed } from "@checkfu/domain/Automation/RecordAutomationRunFailed.command"
 import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAutomationRunStarted.command"
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
-import { firingsAhead, sameSchedule } from "@checkfu/domain/Automation/Schedule"
+import { firingsAhead, isUsableSchedule, sameSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
 import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
 import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
@@ -215,6 +218,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const idempotencyKey = headers["idempotency-key"]
 					const { agent_id, agent_version } = yield* agentOf(payload.agent)
 					const environment_id = yield* environmentOf(payload.environment_id)
+					if (!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)) {
+						return yield* new AutomationScheduleUnusable(payload.schedule)
+					}
 					const command = {
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
@@ -269,6 +275,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 							},
 						}
 						const reschedule = !sameSchedule(next.schedule, current.schedule)
+						if (reschedule && !isUsableSchedule(next.schedule.expression, next.schedule.timezone)) {
+							return yield* new AutomationScheduleUnusable(next.schedule)
+						}
 						const agent_changed =
 							next.agent_id !== current.agent_id || next.agent_version !== current.agent_version
 						const environment_changed = next.environment_id !== current.environment_id
