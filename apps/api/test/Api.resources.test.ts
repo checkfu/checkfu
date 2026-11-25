@@ -322,8 +322,8 @@ describe("Session resources", () => {
 
 					yield* sendAndSettle(apiFetch, session.id, ["second"], 2)
 					expect(preparedWorkspaces).toEqual([
-						{ sessionId: session.id, repositories: [mount] },
-						{ sessionId: session.id, repositories: [mount] },
+						{ sessionId: session.id, repositories: [mount], allowedHosts: null },
+						{ sessionId: session.id, repositories: [mount], allowedHosts: null },
 					])
 					expect(systems).toHaveLength(1)
 					expect(systems[0]).toContain("Be brief.")
@@ -338,6 +338,34 @@ describe("Session resources", () => {
 					yield* sendAndSettle(apiFetch, plain.id, ["hello"], 1)
 					expect(preparedWorkspaces).toHaveLength(2)
 					expect(systems[1]).not.toContain("Repositories mounted")
+
+					// A limited environment's hosts go to the workspace with each turn, for its git to keep to.
+					const limited = yield* json<{ id: string }>(
+						yield* request(apiFetch, "POST", "/v1/environments", {
+							name: "Closed",
+							config: {
+								type: "cloud",
+								networking: {
+									type: "limited",
+									allow_mcp_servers: false,
+									allow_package_managers: false,
+									allowed_hosts: ["example.com"],
+								},
+							},
+						}),
+					)
+					const closed = yield* json<SessionBody>(
+						yield* request(apiFetch, "POST", "/v1/sessions", {
+							...base,
+							environment_id: limited.id,
+							resources: [{ type: "github_repository", url: "https://github.com/acme/api" }],
+						}),
+					)
+					yield* sendAndSettle(apiFetch, closed.id, ["hello"], 1)
+					expect(preparedWorkspaces.at(-1)).toMatchObject({
+						sessionId: closed.id,
+						allowedHosts: ["example.com"],
+					})
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -395,8 +423,8 @@ describe("Session resources", () => {
 	})
 
 	it("rotates a repository's token while the session lives, and not after it ends", async () => {
-		const { layer, closeAll, repositoryTokens } = makePiDurableTestLayer(async (model) =>
-			makeAssistantReply(model, null, "ok", 1, 1),
+		const { layer, closeAll, repositoryTokens, beforeTokenStored } = makePiDurableTestLayer(
+			async (model) => makeAssistantReply(model, null, "ok", 1, 1),
 		)
 		try {
 			await Effect.runPromise(
@@ -430,14 +458,22 @@ describe("Session resources", () => {
 						)).status,
 					).toBe(404)
 
-					expect(
-						(yield* request(apiFetch, "POST", `/v1/sessions/${session.id}/archive`)).status,
-					).toBe(200)
+					// The session ends while a rotation is on its way: its workspace is discarded and
+					// stores nothing, so the rotation is refused rather than reported as stored.
+					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
+					beforeTokenStored.push(() =>
+						runPromise(request(apiFetch, "POST", `/v1/sessions/${session.id}/archive`)),
+					)
+					const racing = yield* request(apiFetch, "POST", path, {
+						authorization_token: "ghp_racing_the_end",
+					})
+					expect(racing.status).toBe(409)
 					const late = yield* request(apiFetch, "POST", path, {
 						authorization_token: "ghp_too_late",
 					})
 					expect(late.status).toBe(409)
-					expect([...repositoryTokens]).toEqual([[`${session.id}/${repository?.id}`, TOKEN]])
+					// A token racing the end may reach the workspace before its discard purges it.
+					expect([...repositoryTokens.values()]).not.toContain("ghp_too_late")
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -454,6 +490,7 @@ describe("repository fetch", () => {
 	const record = (baseUrl: string | null = null) => {
 		const calls: Array<{ url: string; authorization: string | null; redirect: unknown }> = []
 		const repositoryFetch = createRepositoryFetch({
+			allowedHosts: () => null,
 			repositories: () => mounted,
 			token: (resourceId) => (resourceId === "sesrsc_api" ? TOKEN : undefined),
 			baseUrl,
@@ -495,6 +532,55 @@ describe("repository fetch", () => {
 		])
 	})
 
+	it("reaches a mounted repository only on a host the environment allows", async () => {
+		const reach = (allowed: ReadonlyArray<string> | null) => {
+			let sent = 0
+			const repositoryFetch = createRepositoryFetch({
+				allowedHosts: () => allowed,
+				repositories: () => mounted,
+				token: () => undefined,
+				baseUrl: null,
+				fetch: () => {
+					sent += 1
+					return Promise.resolve(new Response("ok"))
+				},
+			})
+			return repositoryFetch("https://github.com/acme/api/info/refs").then(async (response) => [
+				response.status,
+				sent,
+				response.status === 403 ? await response.text() : "",
+			])
+		}
+		expect(await reach(null)).toEqual([200, 1, ""])
+		expect(await reach(["GitHub.com"])).toEqual([200, 1, ""])
+		const [status, sent, message] = await reach([])
+		expect([status, sent]).toEqual([403, 0])
+		expect(message).toContain("allowed_hosts")
+		expect((await reach(["api.github.com"])).slice(0, 2)).toEqual([403, 0])
+	})
+
+	it("ends a request its caller aborts, and gives every request a deadline", async () => {
+		const signals: Array<AbortSignal | undefined> = []
+		const repositoryFetch = createRepositoryFetch({
+			allowedHosts: () => null,
+			repositories: () => mounted,
+			token: () => undefined,
+			baseUrl: null,
+			fetch: (_input, init) => {
+				signals.push(init?.signal ?? undefined)
+				return Promise.resolve(new Response("ok"))
+			},
+		})
+		const caller = new AbortController()
+		await repositoryFetch("https://github.com/acme/api/info/refs", { signal: caller.signal })
+		await repositoryFetch("https://github.com/acme/api/info/refs")
+		expect(signals.every((signal) => typeof signal?.aborted === "boolean")).toBe(true)
+		expect(signals[0]?.aborted).toBe(false)
+		caller.abort()
+		expect(signals[0]?.aborted).toBe(true)
+		expect(signals[1]?.aborted).toBe(false)
+	})
+
 	it("reaches nothing that is not a mounted repository", async () => {
 		const { calls, repositoryFetch } = record()
 		const refused = [
@@ -530,6 +616,7 @@ describe("repository fetch", () => {
 	it("passes a response up to the size a workspace can hold, and fails one past it", async () => {
 		const respondWith = (bytes: number) =>
 			createRepositoryFetch({
+				allowedHosts: () => null,
 				repositories: () => mounted,
 				token: () => undefined,
 				baseUrl: null,

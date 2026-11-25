@@ -22,6 +22,8 @@ const NEWEST_TURN = "newest-turn"
 const INITIALIZED = "initialized"
 const WORKING_DIRECTORY = "/workspace"
 const REPOSITORIES = "repositories"
+// The hosts the session's environment lets git reach, as of the last turn to prepare the workspace.
+const ALLOWED_HOSTS = "allowed-hosts"
 const tokenKey = (resourceId: string) => `token:${resourceId}`
 
 const refusedPreparation = (resourceId: string, message: string): WorkspacePreparation => ({
@@ -63,6 +65,8 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						fetch: createRepositoryFetch({
 							repositories: mounted,
 							token: (resourceId) => storage.kv.get<string>(tokenKey(resourceId)),
+							allowedHosts: () =>
+								storage.kv.get<ReadonlyArray<string> | null>(ALLOWED_HOSTS) ?? null,
 							baseUrl,
 							fetch: (input, init) => fetch(input, init),
 						}),
@@ -182,6 +186,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 					prepare: (
 						token: TurnToken,
 						repositories: ReadonlyArray<RepositoryMount>,
+						allowedHosts: ReadonlyArray<string> | null,
 					): Effect.Effect<WorkspacePreparation> =>
 						Effect.promise(async () => {
 							const resourceId = repositories[0]?.id ?? ""
@@ -191,6 +196,7 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 									"The session has ended and its workspace was discarded.",
 								)
 							}
+							storage.kv.put(ALLOWED_HOSTS, allowedHosts)
 							// Run for the turn that asked, so a later turn refuses it, and held by the fence,
 							// so a discard waits for a clone under way before it purges.
 							const next = fence.run(token, () => preparing.then(() => prepare(repositories)))

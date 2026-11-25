@@ -275,12 +275,14 @@ export const makePiDurableTestLayer = (
 	const preparedWorkspaces: Array<{
 		readonly sessionId: string
 		readonly repositories: ReadonlyArray<RepositoryMount>
+		readonly allowedHosts: ReadonlyArray<string> | null
 	}> = []
 	// Every workspace call of the harness, in order, with the turn it was made for.
 	const workspaceCalls: Array<string> = []
 	const refusedWorkspaces = new Set<string>()
 	const repositoryTokens = new Map<string, string>()
 	const preparations: Array<WorkspacePreparation> = []
+	const beforeTokenStored: Array<() => Promise<Response>> = []
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -315,14 +317,16 @@ export const makePiDurableTestLayer = (
 					workspaceCalls.push(`enter ${sessionId} ${token.turn}`)
 					return !refusedWorkspaces.has(sessionId)
 				}),
-			prepareWorkspace: (sessionId, token, repositories) =>
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
 				Effect.sync(() => {
 					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
-					preparedWorkspaces.push({ sessionId, repositories })
+					preparedWorkspaces.push({ sessionId, repositories, allowedHosts })
 					return preparations.shift() ?? { ok: true }
 				}),
 			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
-				Effect.sync(() => {
+				Effect.promise(async () => {
+					// What happens elsewhere while the token is on its way to the workspace.
+					await beforeTokenStored.shift()?.()
 					const key = `${sessionId}/${resourceId}`
 					if (replace || !repositoryTokens.has(key)) {
 						repositoryTokens.set(key, token)
@@ -392,6 +396,7 @@ export const makePiDurableTestLayer = (
 		refusedWorkspaces,
 		repositoryTokens,
 		preparations,
+		beforeTokenStored,
 	}
 }
 

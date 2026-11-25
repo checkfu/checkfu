@@ -50,8 +50,14 @@ export const PiHarnessCalls = {
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	// The workspace is the harness's: its tools run next to the session object that calls them.
 	enterWorkspace: { args: Schema.Tuple([Schema.String, TurnToken]), result: Schema.Boolean },
+	// The last argument is the hosts the session's environment lets the workspace reach, or null.
 	prepareWorkspace: {
-		args: Schema.Tuple([Schema.String, TurnToken, Schema.Array(RepositoryMount)]),
+		args: Schema.Tuple([
+			Schema.String,
+			TurnToken,
+			Schema.Array(RepositoryMount),
+			Schema.NullOr(Schema.Array(Schema.String)),
+		]),
 		result: WorkspacePreparation,
 	},
 	storeRepositoryToken: {

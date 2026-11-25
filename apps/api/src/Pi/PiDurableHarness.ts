@@ -8,6 +8,9 @@ import type {
 	TurnFailed,
 	TurnInterrupted,
 } from "@checkfu/domain/Session/Harness.external"
+import { Environment } from "@checkfu/domain/Environment/Environment.aggregate"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -60,6 +63,7 @@ export interface WorkspaceExecutorService {
 		sessionId: string,
 		token: TurnToken,
 		repositories: ReadonlyArray<RepositoryMount>,
+		allowedHosts: ReadonlyArray<string> | null,
 	) => Effect.Effect<WorkspacePreparation, HarnessCallFailed>
 	readonly storeRepositoryToken: (
 		sessionId: string,
@@ -150,9 +154,18 @@ export const describeMounts = (
 				),
 			].join("\n")
 
+// The hosts an environment lets a workspace reach: null for any, none when it has no settings.
+const allowedHostsOf = (config: EnvironmentConfig | null): ReadonlyArray<string> | null =>
+	config === null
+		? []
+		: config.networking.type === "limited"
+			? config.networking.allowed_hosts
+			: null
+
 export const PiDurableHarnessLive = boundedHarness(
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
+		const environments = yield* Environment
 		const executor = yield* PiTurnExecutor
 
 		return {
@@ -229,7 +242,14 @@ export const PiDurableHarnessLive = boundedHarness(
 					const repositories = args.resources
 					if (repositories.length > 0) {
 						const prepared = yield* withRetry(
-							executor.prepareWorkspace(args.session_id, token, repositories),
+							executor.prepareWorkspace(
+								args.session_id,
+								token,
+								repositories,
+								allowedHostsOf(
+									(yield* environments.get(EnvironmentId.make(args.environment_id))).config,
+								),
+							),
 						).pipe(
 							Effect.tapError((error) =>
 								Effect.logError("Workspace unreachable", args.session_id, error.cause),

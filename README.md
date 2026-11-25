@@ -134,6 +134,7 @@ curl -sS --fail-with-body -X POST "$CHECKFU_URL/v1/sessions" \
 - `authorization_token` is optional for public repositories. It is held only by the session's workspace, is never returned or shown to the model, and is erased with the workspace. Replace it with `POST /v1/sessions/{session_id}/resources/{resource_id}`.
 - `checkout` takes a branch (`{type: "branch", name}`) or a full commit (`{type: "commit", sha}`); the default branch is used without it. A branch is cloned at its latest commit only.
 - The agent has a `git` tool: it can commit in the workspace and fetch, pull and push to the session's mounted repositories. No other repository is reachable.
+- In an environment with `limited` networking, git reaches GitHub only if `github.com` is in its `allowed_hosts`; the environment's current setting applies from the next turn. Each git request must finish within a minute and send at most 8 MiB.
 - A session takes up to 8 repositories. Their mount paths must be inside `/workspace` and must not contain one another.
 - If a clone fails, the turn ends with a `session.error` of type `repository_unavailable`, and the next turn tries again.
 

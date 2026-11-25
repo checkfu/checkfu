@@ -527,6 +527,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return yield* reject(409, `Session ${session.id} is terminated.`)
 					}
 					yield* storeToken(session.id, resource.id, payload.authorization_token, true)
+					// A session ended while the token was sent has its workspace discarded, which stores
+					// nothing; the session's end is committed before the discard, so it shows here.
+					if ((yield* sessions.get(session.id))._tag === "Terminated") {
+						return yield* reject(409, `Session ${session.id} is terminated.`)
+					}
 					const [item] = serializeResources([resource], session.created_at)
 					return yield* present(Option.fromNullishOr(item), 404, "Resource not found.")
 				}).pipe(handled),
