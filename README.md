@@ -174,7 +174,7 @@ Attach stores when you create a session. Each is mounted in the workspace as a d
 
 - The agent reads and writes memories with its file tools, and is told where each store is mounted, with its description and your `instructions`.
 - The mount is live: a read reads the store, and a write, delete or move is saved to the store as it is made. Nothing is copied into the workspace or saved when the turn ends.
-- As in a shared filesystem, the last write to a memory wins. To change a memory only if it is as you last read it, use the API's `precondition` (or `expected_content_sha256` on a delete). A move writes the new path before it removes the old one, and removes it only if it did not change meanwhile, so a refused move leaves the memory where it was.
+- As in a shared filesystem, the last write to a memory wins. To change a memory only if it is as you last read it, use the API's `precondition` (or `expected_content_sha256` on a delete). A move writes the new path before it removes the old one, and removes it only if it did not change meanwhile, so a refused move leaves the memory where it was. As with `rename(2)`, a move onto a directory that holds memories is refused.
 - A memory is UTF-8 text, stored byte for byte; a file that is not UTF-8 is refused. One path is either a memory or a directory of memories, never both, however many sessions write at once.
 - A store deleted while a session is attached is empty and read-only to that session from then on.
 - `access` is `read_write` by default. A `read_only` store refuses every write, including through `git`, and the directory a store is mounted at cannot be removed or replaced. Use read-only for reference material, and for any agent that reads untrusted input.

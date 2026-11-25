@@ -236,6 +236,14 @@ export const makeMemoryMount = (memory: SessionMemory): PassthroughMount => {
 				return
 			}
 			const file = await read(source)
+			// As rename(2): a file replaces a file, but nothing replaces a directory that holds
+			// anything, and a directory does not replace a file. Checked before anything moves.
+			if (below(await memory.list(target.mount.name), target.path).length > 0) {
+				throw failure(file === null ? "ENOTEMPTY" : "EISDIR", `Directory not empty: ${to}`)
+			}
+			if (file === null && (await read(target)) !== null) {
+				throw failure("ENOTDIR", `Not a directory: ${to}`)
+			}
 			// Planned from paths alone: each file is read only when its turn to move comes.
 			const moves =
 				file !== null

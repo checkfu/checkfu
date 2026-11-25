@@ -172,6 +172,7 @@ describe("memory mount", () => {
 		// Each file is read when it moves, not all of them first.
 		expect(calls).toEqual([
 			"read /dir",
+			"read /moved",
 			"read /dir/x.md",
 			"write /moved/x.md",
 			"remove /dir/x.md",
@@ -179,5 +180,24 @@ describe("memory mount", () => {
 			"write /moved/y.md",
 			"remove /dir/y.md",
 		])
+	})
+
+	it("refuses to move onto a directory that holds memories, or a directory onto a memory", async () => {
+		const files = new Map([
+			["/draft/notes.md", "Draft."],
+			["/published/notes.md", "Published."],
+			["/one.md", "One."],
+		])
+		const calls: Array<string> = []
+		const mount = mountOver(files, { calls })
+		calls.length = 0
+		expect(await code(mount.rename?.("notes/draft", "notes/published", {}))).toBe("ENOTEMPTY")
+		expect(await code(mount.rename?.("notes/draft/notes.md", "notes/published", {}))).toBe("EISDIR")
+		expect(await code(mount.rename?.("notes/draft", "notes/one.md", {}))).toBe("ENOTDIR")
+		// A directory moved onto its own parent finds it holding the directory itself.
+		files.set("/a/b/c.md", "C.")
+		expect(await code(mount.rename?.("notes/a/b", "notes/a", {}))).toBe("ENOTEMPTY")
+		expect(calls.filter((call) => !call.startsWith("read"))).toEqual([])
+		expect(files.get("/published/notes.md")).toBe("Published.")
 	})
 })
