@@ -34,10 +34,12 @@ import {
 	SessionResources,
 	artifactMountPath,
 	memoryMountPath,
+	skillMountPath,
 } from "@checkfu/domain/Session/SessionResource"
 import type { RepositoryToken, SessionResourceId } from "@checkfu/domain/Session/SessionResource"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
+import { MAX_SKILL_FILE_BYTES } from "@checkfu/sdk/Schemas"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -84,6 +86,8 @@ import { Vault } from "@checkfu/domain/Vault/Vault.aggregate"
 import { VaultId } from "@checkfu/domain/Vault/Vault.id"
 import * as Result from "effect/Result"
 import { ArtifactManifestAt } from "../Artifacts/ResolveArtifactVersion.ts"
+import { PinnedArtifact } from "../Artifacts/PinnedArtifact.ts"
+import { SkillReader } from "../Skills/SkillReader.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
@@ -246,6 +250,17 @@ const serializeSession = (
 	resources: serializeResources(snapshot.resources, snapshot.created_at),
 })
 
+const SKILL_FILE = "SKILL.md"
+
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true })
+const utf8Of = (bytes: Uint8Array): Option.Option<string> => {
+	try {
+		return Option.some(strictUtf8.decode(bytes))
+	} catch {
+		return Option.none()
+	}
+}
+
 const decodeResources = Schema.decodeUnknownEffect(SessionResources)
 
 const repositoryName = (url: string): string => url.slice(url.lastIndexOf("/") + 1)
@@ -373,6 +388,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const memoryStores = yield* MemoryStore
 		const artifacts = yield* Artifact
 		const manifestAt = yield* ArtifactManifestAt
+		const pinnedArtifact = yield* PinnedArtifact
+		const skills = yield* SkillReader
 		const harness = yield* Harness
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
@@ -590,6 +607,41 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			}
 		})
 
+		const skillOf = Effect.fn(
+			function* (pinned: { readonly artifact_id: ArtifactId; readonly manifest: string }) {
+				const invalid = (reason: string) =>
+					reject(400, `Artifact ${pinned.artifact_id} is not a skill: ${reason}.`)
+				const gone = reject(404, `Artifact ${pinned.artifact_id} not found.`)
+				const manifest = yield* pinnedArtifact.manifest(pinned.artifact_id, pinned.manifest)
+				if (manifest === null) {
+					return yield* gone
+				}
+				const file = manifest.files.find(({ path }) => path === SKILL_FILE)
+				if (file === undefined) {
+					return yield* invalid(`it has no ${SKILL_FILE} at its root`)
+				}
+				if (file.size > MAX_SKILL_FILE_BYTES) {
+					return yield* invalid(
+						`its ${SKILL_FILE} is ${file.size} bytes; the limit is ${MAX_SKILL_FILE_BYTES}`,
+					)
+				}
+				const bytes = yield* pinnedArtifact.blob(pinned.artifact_id, file.sha256)
+				if (bytes === null) {
+					return yield* gone
+				}
+				const markdown = Option.getOrUndefined(utf8Of(bytes))
+				if (markdown === undefined) {
+					return yield* invalid(`its ${SKILL_FILE} is not UTF-8 text`)
+				}
+				const read = yield* skills.read(markdown)
+				if (!read.ok) {
+					return yield* invalid(read.message)
+				}
+				return { name: read.name, description: read.description }
+			},
+			Effect.catchTag("ArtifactBytesMissing", () => reject(500, "Failed to load artifact files.")),
+		)
+
 		const requestedResource = Effect.fn(function* (resource: CreateSessionResource) {
 			if (resource.type === "github_repository") {
 				return {
@@ -606,6 +658,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						...resource,
 						artifact_id: ArtifactId.make(resource.artifact_id),
 					})),
+				}
+			}
+			if (resource.type === "skill") {
+				const pinned = yield* artifactVersion({
+					...resource,
+					artifact_id: ArtifactId.make(resource.artifact_id),
+				})
+				const { name, description } = yield* skillOf(pinned)
+				return {
+					...pinned,
+					type: resource.type,
+					name,
+					description,
+					mount_path: skillMountPath(name),
 				}
 			}
 			const storeId = MemoryStoreId.make(resource.memory_store_id)

@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import {
 	MAX_SESSION_ARTIFACTS,
 	MAX_SESSION_MEMORY_STORES,
+	MAX_SESSION_SKILLS,
 	MAX_SESSION_REPOSITORIES,
 	MemoryMountPath,
 	MountPath,
@@ -14,6 +15,7 @@ import {
 	artifactMountPath,
 	memoryMountPath,
 	mountsOverlap,
+	skillMountPath,
 } from "../src/Session/SessionResource.ts"
 
 const accepts = (schema: Schema.Top) => Schema.is(Schema.toType(schema))
@@ -204,5 +206,39 @@ describe("session resources", () => {
 		expect(valid([{ ...artifact(1), manifest: "" }])).toBe(false)
 		expect(valid([{ ...artifact(1), mount_path: "/mnt/memory/set-1" }])).toBe(false)
 		expect(valid([{ ...artifact(1), mount_path: "/mnt/artifacts/a/b" }])).toBe(false)
+	})
+
+	it("mounts a skill under /mnt/skills at its own name, and admits up to 16 of them", () => {
+		const valid = accepts(SessionResources)
+		const skill = (name: string) => ({
+			id: `sesrsc_${name}`,
+			type: "skill" as const,
+			artifact_id: `art_${name}`,
+			version: 1,
+			manifest: "a".repeat(64),
+			name,
+			description: "Use when the task calls for it.",
+			mount_path: skillMountPath(name),
+		})
+		const skills = (count: number) =>
+			Array.from({ length: count }, (_, index) => skill(`skill-${index}`))
+		expect(skillMountPath("pdf-forms")).toBe("/mnt/skills/pdf-forms")
+		expect(valid(skills(MAX_SESSION_SKILLS))).toBe(true)
+		expect(valid(skills(MAX_SESSION_SKILLS + 1))).toBe(false)
+		expect(valid([skill("pdf-forms"), { ...skill("pdf-forms"), id: "sesrsc_twin" }])).toBe(false)
+		for (const name of [
+			"PDF",
+			"pdf forms",
+			"-pdf",
+			"pdf-",
+			"pdf--forms",
+			"../etc",
+			"a".repeat(65),
+		]) {
+			expect([name, valid([{ ...skill("ok"), name }])]).toEqual([name, false])
+		}
+		expect(valid([{ ...skill("ok"), description: "" }])).toBe(false)
+		expect(valid([{ ...skill("ok"), description: "x".repeat(1025) }])).toBe(false)
+		expect(valid([{ ...skill("ok"), mount_path: "/mnt/artifacts/ok" }])).toBe(false)
 	})
 })

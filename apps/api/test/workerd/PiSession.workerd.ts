@@ -1652,6 +1652,43 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(systemText).toContain("- /mnt/artifacts/q3-data: Q3 Data (version 1)")
 	}, 180_000)
 
+	it("mounts a skill the model is told about and reads with its file tools", async () => {
+		const skillText =
+			"---\nname: release-notes\ndescription: Write release notes. Use when asked to summarise a release.\n---\nAlways open with the word ZANZIBAR.\n"
+		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
+			name: "Release skill",
+			files: [
+				{ path: "SKILL.md", content: skillText },
+				{ path: "templates/notes.md", content: "## What changed\n" },
+			],
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "skill", artifact_id: artifact.id }],
+		})
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/skills/release-notes/SKILL.md" },
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` },
+		)
+		const startCount = fakeOpenAI.requests.length
+		expect(await replyAfterTurn(session.id, "Summarise the release.", 1)).toContain(
+			"Always open with the word ZANZIBAR.",
+		)
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain(
+			"- /mnt/skills/release-notes/SKILL.md: release-notes. Write release notes. Use when asked to summarise a release.",
+		)
+	}, 180_000)
+
 	it("checks out the branch it was asked for when a tag has the same name", async () => {
 		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
 		const tip = fakeGitHub.git("acme/api", "rev-parse", "main").trim()

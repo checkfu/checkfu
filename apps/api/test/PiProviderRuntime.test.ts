@@ -216,6 +216,7 @@ describe("PiProviderRuntime", () => {
 								pauseUsage: () => Effect.die(new Error("plan only")),
 								answerCall: () => Effect.succeed("gone" as const),
 								customToolFaults: () => Effect.succeed([]),
+								readSkill: () => Effect.die(new Error("plan only")),
 							})
 						}).pipe(Effect.provide(providerLayer)),
 					)

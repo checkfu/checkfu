@@ -425,6 +425,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					"prepareWorkspace",
 					"putSecret",
 					"readOutputs",
+					"readSkill",
 					"recoverTurn",
 					"runTurn",
 					"sealVault",
