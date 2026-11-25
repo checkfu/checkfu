@@ -7,9 +7,15 @@ import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
-import { ArmAutomationLive } from "../src/Automation/ArmAutomation.policy.ts"
+import {
+	ArmAutomationLive,
+	EnsureAutomationArmedLive,
+} from "../src/Automation/ArmAutomation.policy.ts"
 import { FreeAutomationSlotLive } from "../src/Automation/FreeAutomationSlot.policy.ts"
-import { StartAutomationRunLive } from "../src/Automation/StartAutomationRun.policy.ts"
+import {
+	EnsureAutomationRunStartedLive,
+	StartAutomationRunLive,
+} from "../src/Automation/StartAutomationRun.policy.ts"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { ListingLive } from "../src/Listing/Listing.projection.ts"
@@ -132,7 +138,9 @@ const handlersOf =
 			EnsureTurnStoppedLive,
 			RunTurnLive,
 			ArmAutomationLive,
+			EnsureAutomationArmedLive,
 			StartAutomationRunLive,
+			EnsureAutomationRunStartedLive,
 			FreeAutomationSlotLive,
 			ListingLive,
 			ListResourcesLive,
