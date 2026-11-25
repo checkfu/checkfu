@@ -282,50 +282,35 @@ export const resolveTimeout = (
 	return Effect.succeed(parsed.value)
 }
 
+const invalidPath = (message: string) =>
+	new BadRequestError({ status: 400, errorType: "invalid_request_error", message })
+
 export const decodeEndpointParams = <G extends ApiGroupName, E extends ApiEndpointName<G>>(
 	group: G,
 	endpoint: E,
 	pathArgs: Readonly<Record<string, string | number>>,
 ): Effect.Effect<EndpointDecodedParams<G, E>, BadRequestError> => {
-	const rawParams = Object.fromEntries(
-		Object.entries(pathArgs).map(([label, value]) => [label, String(value)]),
-	)
-	for (const [label, rawValue] of Object.entries(rawParams)) {
-		const pathErr = validatePathSegment(rawValue, label)
+	for (const [label, value] of Object.entries(pathArgs)) {
+		const pathErr = typeof value === "string" ? validatePathSegment(value, label) : undefined
 		if (pathErr !== undefined) {
-			return Effect.fail(
-				new BadRequestError({
-					status: 400,
-					errorType: "invalid_request_error",
-					message: pathErr,
-				}),
-			)
+			return Effect.fail(invalidPath(pathErr))
 		}
 	}
 	const endpointDef = lookupCheckfuEndpoint(String(group), String(endpoint))
 	const paramsSchema = endpointDef?.params
 	if (paramsSchema === undefined) {
 		return Effect.fail(
-			new BadRequestError({
-				status: 400,
-				errorType: "invalid_request_error",
-				message: `Endpoint ${String(group)}.${String(endpoint)} does not accept path parameters.`,
-			}),
+			invalidPath(`Endpoint ${String(group)}.${String(endpoint)} does not accept path parameters.`),
 		)
 	}
-	return Schema.decodeEffect(
-		// Boundary decode: `endpointDef.params` is the runtime schema corresponding to `~Params`.
-		// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-		paramsSchema as Schema.Codec<EndpointDecodedParams<G, E>, unknown, never, never>,
-	)(rawParams).pipe(
-		Effect.mapError(
-			(err) =>
-				new BadRequestError({
-					status: 400,
-					errorType: "invalid_request_error",
-					message: `Invalid path parameters: ${err.message}`,
-				}),
-		),
+	// Boundary codec: `endpointDef.params` is the runtime schema corresponding to `~Params`.
+	// oxlint-disable-next-line typescript/no-unsafe-type-assertion
+	const params = paramsSchema as Schema.Codec<EndpointDecodedParams<G, E>, unknown, never, never>
+	// Encoding the arguments through the endpoint's own schema turns a number into its path text
+	// only where the parameter is numeric, and refuses a number or a missing value for a string id.
+	return Schema.encodeUnknownEffect(params)(pathArgs).pipe(
+		Effect.flatMap(Schema.decodeUnknownEffect(params)),
+		Effect.mapError((err) => invalidPath(`Invalid path parameters: ${err.message}`)),
 	)
 }
 

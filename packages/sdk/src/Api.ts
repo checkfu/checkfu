@@ -25,7 +25,6 @@ import {
 	AutomationName,
 	AutomationRunError,
 	AutomationSchedule,
-	AutomationTrigger,
 	CronExpression,
 	AutomationSnapshot,
 	EnvironmentConfig,
@@ -776,10 +775,17 @@ const booleanQuery = (description: string) =>
 			}),
 		)
 
-const RunNumberFromString = Schema.FiniteFromString.check(
-	Schema.isInt(),
-	Schema.isGreaterThanOrEqualTo(1),
-).annotate({ description: "Run number, from 1" })
+const RunNumberFromString = Schema.String.check(Schema.isPattern(/^[1-9]\d{0,14}$/u))
+	.annotate({ description: "Run number: a whole number from 1, written in decimal" })
+	.pipe(
+		Schema.decodeTo(
+			Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999_999_999 })),
+			{
+				decode: SchemaGetter.transform(Number),
+				encode: SchemaGetter.transform(String),
+			},
+		),
+	)
 
 const resourceListQuery = {
 	after: Schema.optionalKey(ResourceListCursor),
@@ -1436,14 +1442,6 @@ const Automations = HttpApiGroup.make("automations")
 				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
-				),
-				has_error: Schema.optionalKey(
-					booleanQuery("Only failed runs (true) or only started runs (false)"),
-				),
-				trigger_type: Schema.optionalKey(
-					AutomationTrigger.annotate({
-						description: "Only runs the schedule started, or only runs started on request",
-					}),
 				),
 			},
 			success: ListAutomationRunsResponse,

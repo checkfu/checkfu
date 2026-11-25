@@ -518,6 +518,12 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						run: {
 							type: "string",
 							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+							description: "Run number: a whole number from 1, written in decimal",
+							allOf: [
+								{
+									pattern: "^[1-9]\\d{0,14}$",
+								},
+							],
 						},
 					},
 					required: ["automation_id", "run"],
@@ -625,16 +631,6 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							type: "string",
 							enum: ["asc", "desc"],
 							description: "Sort order: asc or desc",
-						},
-						has_error: {
-							type: "string",
-							enum: ["true", "false"],
-							description: "Only failed runs (true) or only started runs (false)",
-						},
-						trigger_type: {
-							type: "string",
-							enum: ["schedule", "manual"],
-							description: "Only runs the schedule started, or only runs started on request",
 						},
 					},
 					required: [],

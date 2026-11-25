@@ -139,19 +139,6 @@ const textOf = (
 
 const UPDATE_RETRIES = 3
 
-const runFilter = (query: {
-	readonly has_error?: boolean
-	readonly trigger_type?: "schedule" | "manual"
-}) => {
-	const trigger = query.trigger_type === undefined ? {} : { trigger: query.trigger_type }
-	if (query.has_error === undefined) {
-		return query.trigger_type === undefined ? undefined : trigger
-	}
-	return query.has_error
-		? { _tag: "automation.run_failed" as const, ...trigger }
-		: { _tag: "automation.run_started" as const, ...trigger }
-}
-
 const present = (snapshot: AutomationSnapshot) =>
 	Effect.map(Clock.currentTimeMillis, (now) => automationResource(snapshot, now))
 
@@ -375,12 +362,10 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				Effect.gen(function* () {
 					const id = params.automation_id
 					yield* committed(id)
-					const where = runFilter(query)
 					const page = yield* automationRuns.list(Automation.ref(id), {
 						...(query.after === undefined ? {} : { after: query.after }),
 						take: query.limit ?? 50,
 						order: query.order ?? "asc",
-						...(where === undefined ? {} : { where }),
 					})
 					return {
 						data: page.entries.map((entry) => automationRunResource(id, entry)),

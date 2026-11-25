@@ -842,22 +842,6 @@ const automationsRunsListCommandSpec: GeneratedOperationDescriptor = {
 			kind: "literals",
 			required: false,
 		},
-		{
-			propName: "hasError",
-			flagName: "has-error",
-			wireName: "has_error",
-			location: "query",
-			kind: "literals",
-			required: false,
-		},
-		{
-			propName: "triggerType",
-			flagName: "trigger-type",
-			wireName: "trigger_type",
-			location: "query",
-			kind: "literals",
-			required: false,
-		},
 	],
 }
 
@@ -882,14 +866,6 @@ const automationsRunsListCommand = CommandMake(
 		),
 		order: FlagLiterals("order", ["asc", "desc"]).pipe(
 			FlagWithDescription("Sort order: asc or desc"),
-			FlagOptional,
-		),
-		hasError: FlagLiterals("has-error", ["true", "false"]).pipe(
-			FlagWithDescription("Only failed runs (true) or only started runs (false)"),
-			FlagOptional,
-		),
-		triggerType: FlagLiterals("trigger-type", ["schedule", "manual"]).pipe(
-			FlagWithDescription("Only runs the schedule started, or only runs started on request"),
 			FlagOptional,
 		),
 	},
@@ -932,7 +908,10 @@ const automationsRunsRetrieveCommand = CommandMake(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
 		),
-		run: FlagString("run").pipe(FlagWithMetavar("ID"), FlagWithDescription("run parameter")),
+		run: FlagString("run").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Run number: a whole number from 1, written in decimal"),
+		),
 	},
 	(flags) => invokeGeneratedOperation(automationsRunsRetrieveCommandSpec, flags),
 ).pipe(

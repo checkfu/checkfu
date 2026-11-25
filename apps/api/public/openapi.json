@@ -14875,26 +14875,6 @@
 							"description": "Sort order: asc or desc"
 						},
 						"required": false
-					},
-					{
-						"name": "has_error",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"enum": ["true", "false"],
-							"description": "Only failed runs (true) or only started runs (false)"
-						},
-						"required": false
-					},
-					{
-						"name": "trigger_type",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"enum": ["schedule", "manual"],
-							"description": "Only runs the schedule started, or only runs started on request"
-						},
-						"required": false
 					}
 				],
 				"security": [
@@ -15418,7 +15398,9 @@
 						"name": "run",
 						"in": "path",
 						"schema": {
-							"type": "string"
+							"type": "string",
+							"pattern": "^[1-9]\\d{0,14}$",
+							"description": "Run number: a whole number from 1, written in decimal"
 						},
 						"required": true
 					}

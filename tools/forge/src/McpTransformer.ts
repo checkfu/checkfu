@@ -218,14 +218,19 @@ const projectOperation = (
 	const properties: Record<string, Json> = {}
 	const required: Array<string> = []
 	if (pathParameters.length > 0) {
-		if (pathParameters.some((parameter) => parameter.schema["pattern"] !== undefined)) {
-			throw new Error(`${label}: a path parameter with its own pattern is not supported.`)
-		}
 		properties["path"] = parameterObject(
-			pathParameters.map((parameter) => ({
-				...parameter,
-				schema: { ...parameter.schema, pattern: PATH_SEGMENT_PATTERN },
-			})),
+			pathParameters.map((parameter) => {
+				const own = parameter.schema["pattern"]
+				// One segment always; a parameter's own pattern too, since a schema has one `pattern`.
+				return {
+					...parameter,
+					schema: {
+						...parameter.schema,
+						pattern: PATH_SEGMENT_PATTERN,
+						...(own === undefined ? {} : { allOf: [{ pattern: own }] }),
+					},
+				}
+			}),
 		)
 		required.push("path")
 	}

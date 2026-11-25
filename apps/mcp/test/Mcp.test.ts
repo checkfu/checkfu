@@ -293,6 +293,13 @@ describe("Checkfu MCP server", () => {
 				expect([agent_id, refused.error.type]).toEqual([agent_id, "invalid_request_error"])
 				expect(refused.error.message).toContain('["path"]["agent_id"]')
 			}
+			for (const run of ["0", "01", "1.5", "a/b"]) {
+				const refused = yield* callError(client, "automations_getRun", {
+					path: { automation_id: "auto_1", run },
+				})
+				expect([run, refused.error.type]).toEqual([run, "invalid_request_error"])
+				expect(refused.error.message).toContain('["path"]["run"]')
+			}
 			const illFormed = yield* callError(client, "agents_getAgent", {
 				path: { agent_id: "agent_\uD800" },
 			})

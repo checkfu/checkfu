@@ -491,12 +491,6 @@ export class EffectAutomationsRunsResource {
 									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
-									...(params?.["has_error"] === undefined
-										? {}
-										: { has_error: params["has_error"] }),
-									...(params?.["trigger_type"] === undefined
-										? {}
-										: { trigger_type: params["trigger_type"] }),
 								},
 								responseMode: "decoded-and-response",
 							}),

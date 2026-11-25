@@ -271,23 +271,12 @@ describe("Automations API", () => {
 					[`/v1/automations/auto_missing/runs/1`, 404],
 					[`/v1/automations/${id}/runs/0`, 400],
 					[`/v1/automations/${id}/runs/1.5`, 400],
+					[`/v1/automations/${id}/runs/1.00000000000000001`, 400],
+					[`/v1/automations/${id}/runs/01`, 400],
 				] as const) {
 					const missing = yield* call<ErrorBody>(apiFetch, "GET", path)
 					expect([path, missing.status]).toEqual([path, status])
 				}
-				const runsWhere = (query: string) =>
-					Effect.map(
-						call<{ data: ReadonlyArray<RunBody> }>(
-							apiFetch,
-							"GET",
-							`/v1/automations/${id}/runs?${query}`,
-						),
-						(page) => page.body.data.map((entry) => entry.run),
-					)
-				expect(yield* runsWhere("trigger_type=manual")).toEqual([1])
-				expect(yield* runsWhere("trigger_type=schedule")).toEqual([])
-				expect(yield* runsWhere("has_error=false")).toEqual([1])
-				expect(yield* runsWhere("has_error=true")).toEqual([])
 				yield* waitForSession(
 					apiFetch,
 					`sess_${id}_1`,
@@ -955,18 +944,6 @@ describe("Automations API", () => {
 					session_id: null,
 					error: { type: "agent_unavailable" },
 				})
-				const failed = yield* call<{ data: ReadonlyArray<RunBody> }>(
-					apiFetch,
-					"GET",
-					`/v1/automations/${id}/runs?has_error=true&trigger_type=manual`,
-				)
-				expect(failed.body.data.map((entry) => entry.run)).toEqual([1])
-				const started = yield* call<{ data: ReadonlyArray<RunBody> }>(
-					apiFetch,
-					"GET",
-					`/v1/automations/${id}/runs?has_error=false`,
-				)
-				expect(started.body.data).toEqual([])
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
 				expect(fetched.body).toMatchObject({
 					status: "paused",

@@ -245,21 +245,20 @@ describe("MCP tool projection", () => {
 			).toThrow(message)
 		}
 
-		expect(() =>
-			project(
-				withOperation("/v1/agents/{agent_id}", "get", {
-					...exposed,
-					parameters: [
-						{
-							name: "agent_id",
-							in: "path",
-							required: true,
-							schema: { type: "string", pattern: "^agent_" },
-						},
-					],
-				}),
-			),
-		).toThrow(/a path parameter with its own pattern is not supported/)
+		const patterned = project(
+			withOperation("/v1/agents/{agent_id}", "get", {
+				...exposed,
+				parameters: [
+					{
+						name: "agent_id",
+						in: "path",
+						required: true,
+						schema: { type: "string", pattern: "^agent_" },
+					},
+				],
+			}),
+		)
+		expect(JSON.stringify(patterned)).toContain('"allOf":[{"pattern":"^agent_"}]')
 
 		const spec = JSON.parse(withOperation("/v1/agents", "get", exposed)) as {
 			paths: Record<string, Record<string, Json>>
