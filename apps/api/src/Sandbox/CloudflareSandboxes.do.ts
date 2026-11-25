@@ -19,7 +19,8 @@ const SNAPSHOT = "snapshot"
 const EGRESS = "egress"
 
 // Cloudflare answers intercepted HTTPS with a certificate from this authority, which it puts in
-// every container. The common tools are pointed at it, since nothing else is reachable.
+// every container. The common tools are pointed at it, since nothing else is reachable. A
+// command does not inherit what the machine was started with, so each one is given it.
 const EGRESS_CA = "/etc/cloudflare/certs/cloudflare-containers-ca.crt"
 const TRUST_EGRESS = {
 	NODE_EXTRA_CA_CERTS: EGRESS_CA,
@@ -34,7 +35,6 @@ const startOptions = (snapshot: Cloudflare.ContainerSnapshot | undefined) => ({
 	entrypoint: ["sleep", "infinity"],
 	enableInternet: false,
 	instance: "basic" as const,
-	env: TRUST_EGRESS,
 	...(snapshot === undefined ? {} : { containerSnapshot: snapshot }),
 })
 
@@ -90,7 +90,7 @@ export class SessionSandbox extends Cloudflare.DurableObject<SessionSandbox>()(
 						yield* started
 						const process = yield* machine.exec([...argv], {
 							...(command.cwd === undefined ? {} : { cwd: command.cwd }),
-							...(command.env === undefined ? {} : { env: { ...command.env } }),
+							env: { ...TRUST_EGRESS, ...command.env },
 							...(command.stdin === undefined ? {} : { stdin: "pipe" as const }),
 						})
 						if (command.stdin !== undefined && process.stdin !== undefined) {

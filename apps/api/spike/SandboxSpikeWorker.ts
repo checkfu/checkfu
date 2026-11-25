@@ -112,6 +112,18 @@ export default SandboxSpikeWorker.make(
 				}
 				const params = new URL(request.url, "http://spike").searchParams
 				const key = params.get("key") ?? "spike"
+				const op = params.get("op")
+				if (op === "suspend" || op === "remove" || op === "open") {
+					const from = yield* Clock.currentTimeMillis
+					const done = yield* Effect.result(
+						op === "open" ? Effect.asVoid(sandboxes.open(key)) : sandboxes[op](key),
+					)
+					return yield* HttpServerResponse.json(
+						done._tag === "Success"
+							? { op, ms: (yield* Clock.currentTimeMillis) - from }
+							: { op, error: done.failure.message },
+					)
+				}
 				const cmd = params.get("cmd")
 				if (cmd !== null) {
 					const ran = yield* Effect.result(
