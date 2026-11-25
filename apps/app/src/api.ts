@@ -38,6 +38,7 @@ const call = async <T>(
 	path: string,
 	body?: unknown,
 	idempotencyKey?: string,
+	signal?: AbortSignal,
 ): Promise<T> => {
 	const headers = new Headers()
 	if (body !== undefined) {
@@ -49,6 +50,7 @@ const call = async <T>(
 	const response = await fetch(path, {
 		method,
 		headers,
+		...(signal === undefined ? {} : { signal }),
 		...(body === undefined ? {} : { body: JSON.stringify(body) }),
 	})
 	if (!response.ok) {
@@ -125,12 +127,16 @@ export const newIdempotencyKey = (): string => crypto.randomUUID()
 const resource = <T, Create, Update extends { readonly version: number } = never>(
 	collection: string,
 ) => ({
-	list: (after?: string) =>
+	list: (after?: string, signal?: AbortSignal) =>
 		call<Page<T>>(
 			"GET",
 			`${collection}?limit=100&order=desc${after === undefined ? "" : `&after=${encodeURIComponent(after)}`}`,
+			undefined,
+			undefined,
+			signal,
 		),
-	retrieve: (id: string) => call<T>("GET", `${collection}/${encodeURIComponent(id)}`),
+	retrieve: (id: string, signal?: AbortSignal) =>
+		call<T>("GET", `${collection}/${encodeURIComponent(id)}`, undefined, undefined, signal),
 	create: async (body: Create, idempotencyKey: string) =>
 		settled(collection, await call<T | Pending>("POST", collection, body, idempotencyKey)),
 	update: async (id: string, body: Update) =>
@@ -154,10 +160,13 @@ export const checkfu = {
 		...resource<JsonSession, CreateSessionBody>("/v1/sessions"),
 		send: (id: string, body: SendSessionEventsBody, idempotencyKey: string) =>
 			call<unknown>("POST", `/v1/sessions/${encodeURIComponent(id)}/events`, body, idempotencyKey),
-		events: (id: string, before?: number) =>
+		events: (id: string, before?: number, signal?: AbortSignal) =>
 			call<EventPage>(
 				"GET",
 				`/v1/sessions/${encodeURIComponent(id)}/events?order=desc&limit=100${before === undefined ? "" : `&after=${before}`}`,
+				undefined,
+				undefined,
+				signal,
 			),
 		eventsAfter: (id: string, after: number) =>
 			call<EventPage>(

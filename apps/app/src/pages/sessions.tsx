@@ -13,7 +13,15 @@ import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
 import { checkfu, errorMessage, isSignedOut } from "../api.ts"
-import { agentChoices, environmentChoices, sessionQuery, sessionsPage } from "../queries.ts"
+import {
+	agentChoices,
+	environmentChoices,
+	present,
+	sessionQuery,
+	sessionsPage,
+} from "../queries.ts"
+import { selection } from "../selection.ts"
+import type { Selection } from "../selection.ts"
 import { Status } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 import { Transcript } from "./transcript.tsx"
@@ -115,15 +123,10 @@ const choicesOf = <T,>(query: {
 	more: query.hasNextPage ? () => void query.fetchNextPage() : null,
 })
 
-const selectedOrFirst = (
-	options: ReadonlyArray<{ readonly id: string }>,
-	chosen: string | undefined,
-): string =>
-	options.some((option) => option.id === chosen) ? (chosen ?? "") : (options[0]?.id ?? "")
-
 function OptionPicker<T extends { readonly id: string }>({
 	label,
 	noun,
+	placeholder,
 	options,
 	value,
 	onChange,
@@ -131,15 +134,28 @@ function OptionPicker<T extends { readonly id: string }>({
 }: {
 	readonly label: string
 	readonly noun: string
+	readonly placeholder: string
 	readonly options: Choices<T>
-	readonly value: string
+	readonly value: Selection
 	readonly onChange: (id: string) => void
 	readonly describe: (option: T) => string
 }): React.JSX.Element {
 	return (
 		<div className="space-y-2">
-			<Field label={label}>
-				<Select value={value} onChange={(event) => onChange(event.target.value)}>
+			<Field
+				label={label}
+				error={
+					value.gone
+						? `The ${label.toLowerCase()} you chose is no longer available. Choose another.`
+						: undefined
+				}
+			>
+				<Select required value={value.id} onChange={(event) => onChange(event.target.value)}>
+					{value.id === "" ? (
+						<option value="" disabled>
+							{placeholder}
+						</option>
+					) : null}
 					{options.items.map((option) => (
 						<option key={option.id} value={option.id}>
 							{describe(option)}
@@ -163,10 +179,12 @@ export function NewSessionPage(): React.JSX.Element {
 	const environmentOptions = choicesOf(useSuspenseInfiniteQuery(environmentChoices))
 	const agents = agentOptions.items
 	const environments = environmentOptions.items
-	const [chosenAgent, setAgentId] = useState<string>()
-	const [chosenEnvironment, setEnvironmentId] = useState<string>()
-	const agentId = selectedOrFirst(agents, chosenAgent)
-	const environmentId = selectedOrFirst(environments, chosenEnvironment)
+	const [chosenAgent, setAgentId] = useState(() => agents[0]?.id)
+	const [chosenEnvironment, setEnvironmentId] = useState(() => environments[0]?.id)
+	const agent = selection(agents, chosenAgent)
+	const environment = selection(environments, chosenEnvironment)
+	const agentId = agent.id
+	const environmentId = environment.id
 	const ready = agentId !== "" && environmentId !== ""
 	const [title, setTitle] = useState("")
 	const startKey = useSubmissionKey()
@@ -201,35 +219,39 @@ export function NewSessionPage(): React.JSX.Element {
 				</Callout>
 			) : (
 				<form
-					className="max-w-2xl space-y-4"
+					className="max-w-2xl"
 					onSubmit={(event) => {
 						event.preventDefault()
 						start.run()
 					}}
 				>
-					<OptionPicker
-						label="Agent"
-						noun="agents"
-						options={agentOptions}
-						value={agentId}
-						onChange={setAgentId}
-						describe={(agent) => `${agent.name} (${agent.model.id})`}
-					/>
-					<OptionPicker
-						label="Environment"
-						noun="environments"
-						options={environmentOptions}
-						value={environmentId}
-						onChange={setEnvironmentId}
-						describe={(environment) => environment.name}
-					/>
-					<Field label="Title">
-						<Input value={title} onChange={(event) => setTitle(event.target.value)} />
-					</Field>
-					{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
-					<Button type="submit" disabled={start.pending || !ready}>
-						Start session
-					</Button>
+					<fieldset disabled={start.pending} className="min-w-0 space-y-4">
+						<OptionPicker
+							label="Agent"
+							noun="agents"
+							placeholder="Choose an agent"
+							options={agentOptions}
+							value={agent}
+							onChange={setAgentId}
+							describe={(agent) => `${agent.name} (${agent.model.id})`}
+						/>
+						<OptionPicker
+							label="Environment"
+							noun="environments"
+							placeholder="Choose an environment"
+							options={environmentOptions}
+							value={environment}
+							onChange={setEnvironmentId}
+							describe={(environment) => environment.name}
+						/>
+						<Field label="Title">
+							<Input value={title} onChange={(event) => setTitle(event.target.value)} />
+						</Field>
+						{start.error === undefined ? null : <Callout tone="error">{start.error}</Callout>}
+						<Button type="submit" disabled={start.pending || !ready}>
+							Start session
+						</Button>
+					</fieldset>
 				</form>
 			)}
 		</>
@@ -238,7 +260,7 @@ export function NewSessionPage(): React.JSX.Element {
 
 export function SessionPage(): React.JSX.Element {
 	const { sessionId } = detail.useParams()
-	const session = useSuspenseQuery(sessionQuery(sessionId)).data
+	const session = present(useSuspenseQuery(sessionQuery(sessionId)))
 	return <SessionView key={session.id} session={session} />
 }
 

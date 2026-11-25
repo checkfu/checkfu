@@ -130,6 +130,17 @@ describe("app worker", () => {
 		expect((await session(env, cookie)).status).toBe(401)
 	})
 
+	it("accepts a session only on the dashboard that issued it, even with the same key", async () => {
+		const { env } = makeEnv()
+		const cookie = await sessionCookie(env)
+		expect((await session(env, cookie)).status).toBe(204)
+		const elsewhere = await worker.fetch(
+			new Request("http://app-1340.localhost:1340/auth/session", { headers: { cookie } }),
+			env,
+		)
+		expect(elsewhere.status).toBe(401)
+	})
+
 	it("tells caches not to keep a session check", async () => {
 		const { env } = makeEnv()
 		const cookie = await sessionCookie(env)

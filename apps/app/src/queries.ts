@@ -1,21 +1,24 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
-import { checkfu } from "./api.ts"
+import { ApiError, checkfu } from "./api.ts"
 import type { EventPage } from "./api.ts"
 
 export const agentsPage = (after?: string) =>
 	queryOptions({
 		queryKey: ["agents", "page", after ?? null],
-		queryFn: () => checkfu.agents.list(after),
+		queryFn: ({ signal }) => checkfu.agents.list(after, signal),
 	})
 
 export const agentQuery = (id: string) =>
-	queryOptions({ queryKey: ["agents", "one", id], queryFn: () => checkfu.agents.retrieve(id) })
+	queryOptions({
+		queryKey: ["agents", "one", id],
+		queryFn: ({ signal }) => checkfu.agents.retrieve(id, signal),
+	})
 
 export const agentChoices = infiniteQueryOptions({
 	queryKey: ["agents", "choices"],
-	queryFn: ({ pageParam }) => checkfu.agents.list(pageParam),
+	queryFn: ({ pageParam, signal }) => checkfu.agents.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
 	getNextPageParam: (page) => page.next_cursor ?? undefined,
 })
@@ -23,18 +26,18 @@ export const agentChoices = infiniteQueryOptions({
 export const environmentsPage = (after?: string) =>
 	queryOptions({
 		queryKey: ["environments", "page", after ?? null],
-		queryFn: () => checkfu.environments.list(after),
+		queryFn: ({ signal }) => checkfu.environments.list(after, signal),
 	})
 
 export const environmentQuery = (id: string) =>
 	queryOptions({
 		queryKey: ["environments", "one", id],
-		queryFn: () => checkfu.environments.retrieve(id),
+		queryFn: ({ signal }) => checkfu.environments.retrieve(id, signal),
 	})
 
 export const environmentChoices = infiniteQueryOptions({
 	queryKey: ["environments", "choices"],
-	queryFn: ({ pageParam }) => checkfu.environments.list(pageParam),
+	queryFn: ({ pageParam, signal }) => checkfu.environments.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
 	getNextPageParam: (page) => page.next_cursor ?? undefined,
 })
@@ -42,16 +45,19 @@ export const environmentChoices = infiniteQueryOptions({
 export const sessionsPage = (after?: string) =>
 	queryOptions({
 		queryKey: ["sessions", "page", after ?? null],
-		queryFn: () => checkfu.sessions.list(after),
+		queryFn: ({ signal }) => checkfu.sessions.list(after, signal),
 	})
 
 export const sessionQuery = (id: string) =>
-	queryOptions({ queryKey: ["sessions", "one", id], queryFn: () => checkfu.sessions.retrieve(id) })
+	queryOptions({
+		queryKey: ["sessions", "one", id],
+		queryFn: ({ signal }) => checkfu.sessions.retrieve(id, signal),
+	})
 
 export const transcriptQuery = (id: string) =>
 	infiniteQueryOptions({
 		queryKey: ["transcripts", id],
-		queryFn: ({ pageParam }) => checkfu.sessions.events(id, pageParam),
+		queryFn: ({ pageParam, signal }) => checkfu.sessions.events(id, pageParam, signal),
 		initialPageParam: undefined as number | undefined,
 		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
 		staleTime: Number.POSITIVE_INFINITY,
@@ -64,3 +70,10 @@ export const eventsOf = (transcript: Transcript): ReadonlyArray<JsonSessionEvent
 
 export const isFinal = (events: ReadonlyArray<JsonSessionEvent>): boolean =>
 	events.some((event) => event.type === "session.archived")
+
+export const present = <T>(query: { readonly data: T; readonly error: unknown }): T => {
+	if (query.error instanceof ApiError && query.error.status === 404) {
+		throw query.error
+	}
+	return query.data
+}

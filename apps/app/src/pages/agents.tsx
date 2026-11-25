@@ -13,7 +13,7 @@ import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
-import { agentQuery, agentsPage } from "../queries.ts"
+import { agentQuery, agentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
@@ -141,35 +141,37 @@ function AgentForm({
 			setDraft({ ...draft, [field]: event.target.value })
 	return (
 		<form
-			className="max-w-2xl space-y-4"
+			className="max-w-2xl"
 			onSubmit={(event) => {
 				event.preventDefault()
 				action.run(draft)
 			}}
 		>
-			<Field label="Name">
-				<Input required value={draft.name} onChange={set("name")} />
-			</Field>
-			<Field label="Model" description="For example claude-sonnet-5-5 or gpt-6.2-sol.">
-				<Input required value={draft.model} onChange={set("model")} className="font-mono" />
-			</Field>
-			<Field label="System prompt">
-				<Textarea rows={8} value={draft.system} onChange={set("system")} />
-			</Field>
-			<Field label="Description">
-				<Input value={draft.description} onChange={set("description")} />
-			</Field>
-			{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
-			<div className="flex gap-2">
-				<Button type="submit" disabled={action.pending}>
-					{submitLabel}
-				</Button>
-				{onCancel === undefined ? null : (
-					<Button variant="ghost" onClick={onCancel}>
-						Cancel
+			<fieldset disabled={action.pending} className="min-w-0 space-y-4">
+				<Field label="Name">
+					<Input required value={draft.name} onChange={set("name")} />
+				</Field>
+				<Field label="Model" description="For example claude-sonnet-5-5 or gpt-6.2-sol.">
+					<Input required value={draft.model} onChange={set("model")} className="font-mono" />
+				</Field>
+				<Field label="System prompt">
+					<Textarea rows={8} value={draft.system} onChange={set("system")} />
+				</Field>
+				<Field label="Description">
+					<Input value={draft.description} onChange={set("description")} />
+				</Field>
+				{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
+				<div className="flex gap-2">
+					<Button type="submit" disabled={action.pending}>
+						{submitLabel}
 					</Button>
-				)}
-			</div>
+					{onCancel === undefined ? null : (
+						<Button variant="ghost" onClick={onCancel}>
+							Cancel
+						</Button>
+					)}
+				</div>
+			</fieldset>
 		</form>
 	)
 }
@@ -196,7 +198,7 @@ export function NewAgentPage(): React.JSX.Element {
 
 export function AgentPage(): React.JSX.Element {
 	const { agentId } = detail.useParams()
-	const agent = useSuspenseQuery(agentQuery(agentId)).data
+	const agent = present(useSuspenseQuery(agentQuery(agentId)))
 	return <AgentView key={agent.id} agent={agent} />
 }
 

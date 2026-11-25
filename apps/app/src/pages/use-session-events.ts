@@ -8,6 +8,7 @@ import { EventTail, progressOf, transcriptEvents } from "../event-tail.ts"
 import { eventsOf, isFinal, sessionQuery, transcriptQuery } from "../queries.ts"
 
 const QUIET_RECONNECT_MS = 5000
+const REFRESH_MS = 250
 
 const EVENT_TYPES: Record<SessionEventType, true> = {
 	"user.message": true,
@@ -62,22 +63,32 @@ export function useSessionEvents({
 		if (isFinal(events)) {
 			return () => tail.dispose()
 		}
-		const source = new EventSource(checkfu.sessions.streamUrl(session.id, newestSeq()))
+		let disposed = false
+		let source: EventSource | undefined
 		let slowReconnect: ReturnType<typeof setTimeout> | undefined
+		let refresh: ReturnType<typeof setTimeout> | undefined
 		const settle = () => {
 			clearTimeout(slowReconnect)
 			slowReconnect = undefined
+		}
+		const transitioned = () => {
+			if (refresh === undefined) {
+				refresh = setTimeout(() => {
+					refresh = undefined
+					onTransition()
+				}, REFRESH_MS)
+			}
 		}
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
 			const event = JSON.parse(message.data) as JsonSessionEvent
 			tail.add([event])
 			if (event.type === "session.status_idle" || event.type === "session.archived") {
-				onTransition()
+				transitioned()
 			}
 			if (event.type === "session.archived") {
 				settle()
-				source.close()
+				source?.close()
 			}
 		}
 		const ended = async () => {
@@ -88,27 +99,42 @@ export function useSessionEvents({
 				await readNewer()
 			}
 		}
-		for (const type of Object.keys(EVENT_TYPES)) {
-			source.addEventListener(type, receive)
-		}
-		source.addEventListener("open", () => {
-			settle()
-			setError(undefined)
-		})
-		source.addEventListener("error", () => {
-			if (source.readyState === EventSource.CLOSED) {
-				settle()
-				ended().catch((error_: unknown) => setError(errorMessage(error_)))
-			} else if (slowReconnect === undefined) {
-				slowReconnect = setTimeout(
-					() => setError("Live updates were interrupted. Reconnecting…"),
-					QUIET_RECONNECT_MS,
-				)
+		const listen = () => {
+			if (disposed || isFinal(tail.snapshot())) {
+				return
 			}
+			const stream = new EventSource(checkfu.sessions.streamUrl(session.id, newestSeq()))
+			source = stream
+			for (const type of Object.keys(EVENT_TYPES)) {
+				stream.addEventListener(type, receive)
+			}
+			stream.addEventListener("open", () => {
+				settle()
+				setError(undefined)
+			})
+			stream.addEventListener("error", () => {
+				if (stream.readyState === EventSource.CLOSED) {
+					settle()
+					ended().catch((error_: unknown) => setError(errorMessage(error_)))
+				} else if (slowReconnect === undefined) {
+					slowReconnect = setTimeout(
+						() => setError("Live updates were interrupted. Reconnecting…"),
+						QUIET_RECONNECT_MS,
+					)
+				}
+			})
+		}
+		readNewer().then(listen, (error_: unknown) => {
+			if (!isSignedOut(error_)) {
+				setError(errorMessage(error_))
+			}
+			listen()
 		})
 		return () => {
+			disposed = true
 			settle()
-			source.close()
+			clearTimeout(refresh)
+			source?.close()
 			tail.dispose()
 		}
 	})

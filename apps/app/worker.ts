@@ -40,11 +40,16 @@ const fromBase64url = (text: string): Uint8Array<ArrayBuffer> | undefined => {
 	}
 }
 
-const sessionPayload = (expires: number) => utf8.encode(`checkfu-dashboard-session:${expires}`)
+const sessionPayload = (audience: string, expires: number) =>
+	utf8.encode(`checkfu-dashboard-session:${audience}:${expires}`)
 
-const issueSession = async (apiKey: string, now: number): Promise<string> => {
+const issueSession = async (apiKey: string, audience: string, now: number): Promise<string> => {
 	const expires = now + SESSION_SECONDS * 1000
-	const mac = await crypto.subtle.sign("HMAC", await sessionKey(apiKey), sessionPayload(expires))
+	const mac = await crypto.subtle.sign(
+		"HMAC",
+		await sessionKey(apiKey),
+		sessionPayload(audience, expires),
+	)
 	return `${expires}.${base64url(mac)}`
 }
 
@@ -73,7 +78,7 @@ const signedIn = async (request: Request, env: Env, now: number): Promise<boolea
 		"HMAC",
 		await sessionKey(env.CHECKFU_API_KEY),
 		mac,
-		sessionPayload(expires),
+		sessionPayload(new URL(request.url).origin, expires),
 	)
 }
 
@@ -131,7 +136,10 @@ const signIn = async (request: Request, env: Env, now: number): Promise<Response
 	return new Response(null, {
 		status: 204,
 		headers: {
-			"set-cookie": cookie(await issueSession(env.CHECKFU_API_KEY, now), SESSION_SECONDS),
+			"set-cookie": cookie(
+				await issueSession(env.CHECKFU_API_KEY, new URL(request.url).origin, now),
+				SESSION_SECONDS,
+			),
 		},
 	})
 }

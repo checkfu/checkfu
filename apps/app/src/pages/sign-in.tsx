@@ -3,7 +3,7 @@ import { Field } from "@checkfu/ui/field"
 import { Input } from "@checkfu/ui/input"
 import { Logo } from "@checkfu/ui/logo"
 import { useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useActionState } from "react"
 import type * as React from "react"
 import { signIn } from "../api.ts"
@@ -15,6 +15,7 @@ const MESSAGES = {
 
 export function SignInPage(): React.JSX.Element {
 	const navigate = useNavigate()
+	const { redirect } = useSearch({ from: "/sign-in" })
 	const queryClient = useQueryClient()
 	const [error, submit, pending] = useActionState(
 		async (_previous: string | undefined, form: FormData): Promise<string | undefined> => {
@@ -25,7 +26,7 @@ export function SignInPage(): React.JSX.Element {
 				return MESSAGES[result]
 			}
 			queryClient.clear()
-			await navigate({ to: "/sessions" })
+			await (redirect === undefined ? navigate({ to: "/sessions" }) : navigate({ href: redirect }))
 			return undefined
 		},
 		undefined,

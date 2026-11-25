@@ -12,7 +12,7 @@ import { useState } from "react"
 import type * as React from "react"
 import { Pager } from "../pager.tsx"
 import { checkfu } from "../api.ts"
-import { environmentQuery, environmentsPage } from "../queries.ts"
+import { environmentQuery, environmentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
 
@@ -103,22 +103,24 @@ export function NewEnvironmentPage(): React.JSX.Element {
 				breadcrumb={<Link to="/environments">Environments</Link>}
 			/>
 			<form
-				className="max-w-2xl space-y-4"
+				className="max-w-2xl"
 				onSubmit={(event) => {
 					event.preventDefault()
 					create.run()
 				}}
 			>
-				<Field label="Name">
-					<Input required value={name} onChange={(event) => setName(event.target.value)} />
-				</Field>
-				<Field label="Description">
-					<Input value={description} onChange={(event) => setDescription(event.target.value)} />
-				</Field>
-				{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
-				<Button type="submit" disabled={create.pending}>
-					Create environment
-				</Button>
+				<fieldset disabled={create.pending} className="min-w-0 space-y-4">
+					<Field label="Name">
+						<Input required value={name} onChange={(event) => setName(event.target.value)} />
+					</Field>
+					<Field label="Description">
+						<Input value={description} onChange={(event) => setDescription(event.target.value)} />
+					</Field>
+					{create.error === undefined ? null : <Callout tone="error">{create.error}</Callout>}
+					<Button type="submit" disabled={create.pending}>
+						Create environment
+					</Button>
+				</fieldset>
 			</form>
 		</>
 	)
@@ -126,7 +128,7 @@ export function NewEnvironmentPage(): React.JSX.Element {
 
 export function EnvironmentPage(): React.JSX.Element {
 	const { environmentId } = detail.useParams()
-	const environment = useSuspenseQuery(environmentQuery(environmentId)).data
+	const environment = present(useSuspenseQuery(environmentQuery(environmentId)))
 	const archive = useAction(async () => {
 		await checkfu.environments.archive(environment.id)
 	}, ["environments"])
