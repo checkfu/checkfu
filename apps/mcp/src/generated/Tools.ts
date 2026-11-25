@@ -1352,6 +1352,52 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "memoryStores_listMemoryStores",
+		title: "List memory stores",
+		description:
+			"List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear.",
+		method: "GET",
+		path: "/v1/memory_stores",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "object",
+					properties: {
+						after: {
+							type: "string",
+							pattern: "^\\d{1,15}:[^/\\\\]+$",
+							description:
+								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+						order: {
+							type: "string",
+							enum: ["asc", "desc"],
+							description: "Sort order by creation: asc (oldest first, the default) or desc",
+						},
+						include_archived: {
+							type: "string",
+							enum: ["true", "false"],
+							description: "Include archived results: true or false (default false)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: [],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "memoryStores_updateMemory",
 		title: "Update a memory",
 		description: "Replace a memory's content, optionally only if it is unchanged since it was read",

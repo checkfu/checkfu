@@ -73,7 +73,7 @@ const withApi = async (run: (apiFetch: ApiFetch) => Effect.Effect<void>) => {
 }
 
 describe("Memory stores", () => {
-	it("creates, reads, renames, archives and deletes a store", () =>
+	it("creates, reads, renames, lists, archives and deletes a store", () =>
 		withApi((apiFetch) =>
 			Effect.gen(function* () {
 				const created = yield* request(apiFetch, "POST", "/v1/memory_stores", {
@@ -108,8 +108,30 @@ describe("Memory stores", () => {
 				expect(bare.description).toBe("")
 				expect(bare.id).not.toBe(store.id)
 
+				const listed = () =>
+					Effect.map(
+						Effect.flatMap(
+							request(apiFetch, "GET", "/v1/memory_stores?include_archived=true"),
+							json<{ data: ReadonlyArray<StoreBody> }>,
+						),
+						({ data }) => data.map(({ name, archived_at }) => [name, archived_at === null]),
+					)
+				expect(yield* listed()).toEqual([
+					["Preferences", true],
+					["Bare", true],
+				])
+
 				const archived = yield* json<StoreBody>(yield* request(apiFetch, "POST", `${path}/archive`))
 				expect(archived.archived_at).not.toBeNull()
+				// An archived store is listed only when asked for.
+				expect(yield* listed()).toEqual([
+					["Preferences", false],
+					["Bare", true],
+				])
+				const active = yield* json<{ data: ReadonlyArray<StoreBody> }>(
+					yield* request(apiFetch, "GET", "/v1/memory_stores"),
+				)
+				expect(active.data.map(({ name }) => name)).toEqual(["Bare"])
 				expect((yield* request(apiFetch, "POST", `${path}/archive`)).status).toBe(200)
 				expect((yield* request(apiFetch, "POST", path, { name: "Too late" })).status).toBe(409)
 
@@ -117,6 +139,7 @@ describe("Memory stores", () => {
 				expect(yield* json(deleted)).toEqual({ id: store.id, type: "memory_store_deleted" })
 				expect((yield* request(apiFetch, "GET", path)).status).toBe(404)
 				expect((yield* request(apiFetch, "DELETE", path)).status).toBe(404)
+				expect(yield* listed()).toEqual([["Bare", true]])
 				expect((yield* request(apiFetch, "POST", `${path}/archive`)).status).toBe(404)
 				expect((yield* request(apiFetch, "GET", "/v1/memory_stores/memstore_missing")).status).toBe(
 					404,

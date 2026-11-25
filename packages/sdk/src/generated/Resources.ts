@@ -184,6 +184,12 @@ export interface CheckfuOperations {
 		EndpointBody<"memory_stores", "delete">,
 		EndpointSuccess<"memory_stores", "delete">
 	>
+	readonly "memoryStores.list": OperationShape<
+		EndpointParams<"memory_stores", "list">,
+		RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		EndpointBody<"memory_stores", "list">,
+		EndpointSuccess<"memory_stores", "list">
+	>
 	readonly "memoryStores.retrieve": OperationShape<
 		EndpointParams<"memory_stores", "get">,
 		EndpointQuery<"memory_stores", "get">,
@@ -1559,6 +1565,79 @@ export class EffectMemoryStoresResource {
 		)
 	}
 
+	/** List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">> | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"memory_stores", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"memory_stores", "list">
+		| WithResponse<EndpointSuccess<"memory_stores", "list">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.memoryStores.list", "idempotent", options, () =>
+				this.#runtime.raw.memory_stores.list({
+					query: {
+						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["include_archived"] === undefined
+							? {}
+							: { include_archived: params["include_archived"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"memory_stores", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
+	/** Auto-paginate items for List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"memory_stores", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					options,
+				),
+			params?.["after"],
+			params?.order ?? "asc",
+		)
+	}
+
 	/** Retrieve a memory store by ID */
 	retrieve(
 		memoryStoreId: string,
@@ -2600,6 +2679,30 @@ export class MemoryStoresResource {
 				...effectOpts,
 				withResponse: true,
 			}),
+		)
+	}
+
+	/** List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"memory_stores", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"memory_stores", "list">>, string>,
+		ItemOf<EndpointJsonSuccess<"memory_stores", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["after"],
+			params?.order ?? "asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectMemoryStoresResource(effectRuntime).list(
+					{
+						...params,
+						...(cursor === undefined ? {} : { after: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
 		)
 	}
 

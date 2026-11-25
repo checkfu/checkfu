@@ -20,6 +20,7 @@ import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import { MemoryAccess } from "../MemoryAccess.ts"
 import { CheckfuApi } from "./Api.ts"
+import { makeLister } from "./Listing.ts"
 import {
 	archiveAndRead,
 	bestEffortAfterCommit,
@@ -52,6 +53,7 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 		const memoryViews = yield* MemoryView
 		const access = yield* MemoryAccess
 		const deleteMemory = yield* DeleteMemoryDecision
+		const list = yield* makeLister
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 
@@ -177,6 +179,9 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 					}
 					return yield* present(result, 404, `Memory store ${id} not found.`)
 				}).pipe(handled),
+			)
+			.handle("list", ({ query }) =>
+				list("memory_store", query, (id) => existingStore(MemoryStoreId.make(id))).pipe(handled),
 			)
 			.handle("get", ({ params }) => existingStore(params.memory_store_id).pipe(handled))
 			.handle("update", ({ params, payload }) =>

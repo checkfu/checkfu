@@ -1157,6 +1157,79 @@ const memoryStoresDeleteCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(memoryStoresDeleteCommandSpec, flags),
 ).pipe(CommandWithDescription("Delete a memory store and make its memories unreachable"))
 
+const memoryStoresListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "memory-stores list",
+	apiGroup: "memory_stores",
+	apiEndpoint: "list",
+	hasBody: false,
+	flags: [
+		{
+			propName: "after",
+			flagName: "after",
+			wireName: "after",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+		{
+			propName: "order",
+			flagName: "order",
+			wireName: "order",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+		{
+			propName: "includeArchived",
+			flagName: "include-archived",
+			wireName: "include_archived",
+			location: "query",
+			kind: "literals",
+			required: false,
+		},
+	],
+}
+
+const memoryStoresListCommand = CommandMake(
+	"list",
+	{
+		after: FlagString("after").pipe(
+			FlagWithDescription(
+				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+			),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+		order: FlagLiterals("order", ["asc", "desc"]).pipe(
+			FlagWithDescription("Sort order by creation: asc (oldest first, the default) or desc"),
+			FlagOptional,
+		),
+		includeArchived: FlagLiterals("include-archived", ["true", "false"]).pipe(
+			FlagWithDescription("Include archived results: true or false (default false)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(memoryStoresListCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear.",
+	),
+)
+
 const memoryStoresRetrieveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "memory-stores retrieve",
 	apiGroup: "memory_stores",
@@ -2151,6 +2224,7 @@ export const buildGeneratedResourceCommands = <
 				memoryStoresArchiveCommand,
 				memoryStoresCreateCommand,
 				memoryStoresDeleteCommand,
+				memoryStoresListCommand,
 				memoryStoresRetrieveCommand,
 				memoryStoresUpdateCommand,
 				...(extras?.["memory-stores"] ?? ([] as const)),

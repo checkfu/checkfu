@@ -791,6 +791,7 @@ export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
 export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot, ResourceListCursor)
+export const ListMemoryStoresResponse = listResponse(MemoryStoreSnapshot, ResourceListCursor)
 export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
 export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
@@ -1597,6 +1598,25 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 						},
 					],
 				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/memory_stores", {
+			query: resourceListQuery,
+			success: ListMemoryStoresResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List memory stores")
+			.annotate(
+				OpenApi.Description,
+				"List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "list" },
+				"x-checkfu-mcp": { name: "memoryStores_listMemoryStores" },
+				"x-checkfu-cli": resourceListCli,
 			}),
 	)
 	.add(

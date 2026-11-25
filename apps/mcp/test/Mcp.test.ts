@@ -184,6 +184,7 @@ describe("Checkfu MCP server", () => {
 				"memoryStores_getMemory",
 				"memoryStores_getMemoryStore",
 				"memoryStores_listMemories",
+				"memoryStores_listMemoryStores",
 				"memoryStores_updateMemory",
 				"memoryStores_updateMemoryStore",
 				"sessions_archiveSession",
@@ -237,6 +238,7 @@ describe("Checkfu MCP server", () => {
 				memoryStores_getMemory: "read-only, additive, repeatable",
 				memoryStores_getMemoryStore: "read-only, additive, repeatable",
 				memoryStores_listMemories: "read-only, additive, repeatable",
+				memoryStores_listMemoryStores: "read-only, additive, repeatable",
 				memoryStores_updateMemory: "writes, destructive, not repeatable",
 				memoryStores_updateMemoryStore: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
@@ -423,6 +425,7 @@ describe("Checkfu MCP server", () => {
 				memoryStores_getMemory: memory,
 				memoryStores_getMemoryStore: store,
 				memoryStores_listMemories: { ...store, query: { path_prefix: "/notes/" } },
+				memoryStores_listMemoryStores: { query: { include_archived: "true" } },
 				memoryStores_updateMemory: {
 					...memory,
 					body: {
