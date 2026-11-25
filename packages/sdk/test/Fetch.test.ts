@@ -43,6 +43,7 @@ type Requirement<T, K extends PropertyKey> = K extends keyof T
 interface LooseInput {
 	readonly path?: Readonly<Record<string, string>>
 	readonly body?: { readonly name: string }
+	readonly idempotencyKey?: string
 }
 
 const untyped = (request: ReturnType<typeof createFetchClient>) =>
@@ -133,6 +134,33 @@ describe("the fetch client", () => {
 		expect(sent).toEqual([])
 		await request("agents.create", { body, idempotencyKey: "k".repeat(128) })
 		expect(sent.map((call) => call.headers.get("idempotency-key"))).toEqual(["k".repeat(128)])
+	})
+
+	it("refuses an idempotency key on an operation that does not deduplicate by one", async () => {
+		const { sent, fetch } = recording(202, JSON.stringify({ run: 1 }))
+		const request = untyped(createFetchClient({ fetch }))
+		const input: LooseInput = { path: { automation_id: "auto_1" }, idempotencyKey: "run-once" }
+		await expect(request("automations.run", input)).rejects.toThrow(
+			"automations.run takes no idempotency key",
+		)
+		expect(sent).toEqual([])
+	})
+
+	it("uses the headers it was created with, even if the caller's object changes later", async () => {
+		const { sent, fetch } = recording(201, JSON.stringify({ id: "agent_1", type: "agent" }))
+		const shared = new Headers({ "x-trace": "dashboard" })
+		const request = createFetchClient({ fetch, headers: shared })
+		shared.set("idempotency-key", "added-later")
+		shared.set("x-trace", "changed")
+		const body = { name: "Helper", model: "claude-opus-5-5" }
+		await request("agents.create", { body })
+		await request("agents.create", { body })
+		expect(
+			sent.map((call) => [call.headers.get("idempotency-key"), call.headers.get("x-trace")]),
+		).toEqual([
+			[null, "dashboard"],
+			[null, "dashboard"],
+		])
 	})
 
 	it("checks an idempotency key by the same rule as the API's ClientEventId", () => {

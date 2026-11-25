@@ -138,7 +138,8 @@ export const operationUrl = <Op extends OperationId>(
 
 export const createFetchClient = (options: FetchClientOptions = {}): FetchClient => {
 	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
-	if (new Headers(options.headers).has("idempotency-key")) {
+	const defaults = new Headers(options.headers)
+	if (defaults.has("idempotency-key")) {
 		throw new Error(
 			"An idempotency key identifies one request; pass idempotencyKey with each call, not in the client's headers.",
 		)
@@ -151,8 +152,13 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 			)
 		}
 		const fields: RawInput = input ?? {}
-		const headers = new Headers(options.headers)
+		const headers = new Headers(defaults)
 		if (fields.idempotencyKey !== undefined) {
+			if (!binding.supportsIdempotencyKey) {
+				throw new Error(
+					`${operationId} takes no idempotency key; retrying it with one would not prevent a duplicate.`,
+				)
+			}
 			if (!isClientEventId(fields.idempotencyKey)) {
 				throw new Error(`Invalid idempotencyKey: ${CLIENT_EVENT_ID_MESSAGE}.`)
 			}
