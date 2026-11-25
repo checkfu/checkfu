@@ -33,6 +33,7 @@ import { RunTurn } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { EnsureTurnStarted, EnsureTurnStartedLive } from "./Session/EnsureTurnStarted.policy.ts"
+import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
 import { StartTurn } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest } from "./Session/StopModelRequest.policy.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
@@ -69,6 +70,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		StartTurn,
 		EnsureTurnStarted,
 		StopModelRequest,
+		EnsureTurnStopped,
 		ArmAutomation,
 		StartAutomationRun,
 		FreeAutomationSlot,
@@ -402,6 +404,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 export const CheckfuHandlersLive = Layer.mergeAll(
 	SessionsHandlersLive,
 	EnsureTurnStartedLive,
+	EnsureTurnStoppedLive,
 	ArmAutomationLive,
 	StartAutomationRunLive,
 	FreeAutomationSlotLive,

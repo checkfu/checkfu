@@ -10,7 +10,7 @@ import { Session } from "./Session.aggregate.ts"
 import { TurnInput } from "./TurnInput.view.ts"
 
 // The session policy handles running, idle and terminated in stream order.
-export const TURN_DEADLINE = "turn-deadline"
+const TURN_DEADLINE = "turn-deadline"
 
 export class StartTurn extends Domain.Policy("StartTurn", {
 	from: TurnInput,

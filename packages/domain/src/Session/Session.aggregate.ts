@@ -297,7 +297,7 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag !== "Running") {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
 			}
-			return [new UserInterrupt()]
+			return [new UserInterrupt({ turn: active.turn })]
 		},
 
 		RecordModelRequestStart: (state, cmd, ctx) => {
