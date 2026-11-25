@@ -26,10 +26,21 @@ export const CONTENT_HEADERS = {
 	"x-content-type-options": "nosniff",
 	"referrer-policy": "no-referrer",
 	"access-control-allow-origin": "*",
+	"access-control-expose-headers": "etag",
 	"cross-origin-resource-policy": "cross-origin",
 	"cache-control": "private, no-store",
 	"x-robots-tag": "noindex",
 } as const
+
+const ALLOWED_METHODS = "GET, HEAD, OPTIONS"
+
+const PREFLIGHT_HEADERS = {
+	...CONTENT_HEADERS,
+	allow: ALLOWED_METHODS,
+	"access-control-allow-methods": ALLOWED_METHODS,
+	"access-control-allow-headers": "*",
+	"access-control-max-age": "86400",
+}
 
 const INDEX_FILE = "index.html"
 
@@ -155,8 +166,14 @@ export const serveContent = (options: {
 
 	return (request: ContentRequest): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
 		Effect.gen(function* () {
+			if (request.method === "OPTIONS") {
+				return HttpServerResponse.empty({ status: 204, headers: PREFLIGHT_HEADERS })
+			}
 			if (request.method !== "GET" && request.method !== "HEAD") {
-				return plain(405, "Method not allowed.")
+				return HttpServerResponse.text("Method not allowed.", {
+					status: 405,
+					headers: { ...CONTENT_HEADERS, allow: ALLOWED_METHODS },
+				})
 			}
 			const url = URL.parse(request.url)
 			if (url === null) {

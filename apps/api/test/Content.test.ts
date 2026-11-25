@@ -340,6 +340,14 @@ describe("Artifact viewing links", () => {
 				expect(head.headers.get("content-length")).toBe(String("<h1>home</h1>".length))
 				expectSandboxed(head, "HEAD")
 
+				const preflight = yield* open(`${link.url}data.json`, "OPTIONS")
+				expect(preflight.status).toBe(204)
+				expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS")
+				expect(preflight.headers.get("access-control-allow-headers")).toBe("*")
+				expectSandboxed(preflight, "OPTIONS")
+				const refused = yield* open(link.url, "POST")
+				expect(refused.headers.get("allow")).toBe("GET, HEAD, OPTIONS")
+
 				for (const [url, method, status] of [
 					[`${link.url}missing.js`, "GET", 404],
 					[`${link.url}%E0%A4%A`, "GET", 404],
