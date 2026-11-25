@@ -1,8 +1,10 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import * as Clock from "effect/Clock"
+import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
+import * as Redacted from "effect/Redacted"
 import { COMPATIBILITY_DATE } from "../src/Compatibility.ts"
 import { SandboxesCloudflare } from "../src/Sandbox/CloudflareSandboxes.do.ts"
 import { Sandboxes } from "../src/Sandbox/Sandboxes.ts"
@@ -31,6 +33,8 @@ export default SandboxSpikeWorker.make(
 	Effect.gen(function* () {
 		const sandboxes = yield* Sandboxes
 		const ctx = yield* Cloudflare.WorkerExecutionContext
+		// The spike runs commands for whoever asks, so a deployed one answers only its deployer.
+		const token = Redacted.value(yield* Config.Redacted("SPIKE_TOKEN"))
 		const steps = (key: string) =>
 			Effect.gen(function* () {
 				const report: Array<Step> = []
@@ -102,6 +106,9 @@ export default SandboxSpikeWorker.make(
 					return HttpServerResponse.text(
 						`egress of ${sandbox}: ${request.method} ${request.url}; the sandbox sent authorization=${request.headers["authorization"] ?? "none"}; the Worker would replace it with the stored token`,
 					)
+				}
+				if (token.length < 32 || request.headers["x-spike-token"] !== token) {
+					return HttpServerResponse.empty({ status: 404 })
 				}
 				const params = new URL(request.url, "http://spike").searchParams
 				const key = params.get("key") ?? "spike"
