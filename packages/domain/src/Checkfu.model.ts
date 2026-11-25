@@ -309,14 +309,14 @@ export class Checkfu extends Domain.Model("Checkfu", {
 				const view = m.AutomationView.find((v) => v.id === a.id)
 				return view === undefined || view.state.revision === a.state.revision
 			}),
-		ReservedSlotsEqualLiveAutomations: (m) =>
-			m.AutomationCapacity.every(
-				(c) =>
-					c.state.reserved ===
-					m.Automation.filter((a) =>
-						[a.state.status === "active", a.state.status === "paused"].some((live) => live),
-					).length,
-			),
+		ReservedSlotsEqualLiveAutomations: (m) => {
+			const live = m.Automation.filter((a) =>
+				[a.state.status === "active", a.state.status === "paused"].some((ok) => ok),
+			).length
+			return m.AutomationCapacity.length === 0
+				? live === 0
+				: m.AutomationCapacity.every((c) => c.state.reserved === live)
+		},
 		ArtifactViewMatchesArtifact: (m) =>
 			[
 				m.Artifact.every((a) => {

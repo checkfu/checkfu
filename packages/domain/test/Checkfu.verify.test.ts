@@ -781,6 +781,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				})),
 			}).ReservedSlotsEqualLiveAutomations,
 		).toBe(false)
+		expect(
+			evaluateCheckfuInvariants({ ...automationWorld, AutomationCapacity: [] })
+				.ReservedSlotsEqualLiveAutomations,
+		).toBe(false)
 		const runSession = automationWorld.Session.find(
 			(row) => row.id === `sess_${automationRef.id}_1`,
 		)
