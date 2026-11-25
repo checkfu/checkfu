@@ -8,6 +8,8 @@ import * as Schema from "effect/Schema"
 import { buildSurfaceCatalog, isJsonArray } from "./SurfaceCatalog.ts"
 import type { GeneratedFile, SurfaceOperation } from "./SurfaceCatalog.ts"
 
+const PLAIN_KEYS: ReadonlySet<string> = new Set(["type", "pattern", "description"])
+
 const POSITIVE_DECIMAL = /^\^\[1-9\]\\d\{0,(\d{1,2})\}\$$/u
 
 const positiveDecimal = (pattern: Json | undefined) => {
@@ -226,7 +228,9 @@ const projectOperation = (
 			pathParameters.map((parameter) => {
 				const own = parameter.schema["pattern"]
 				const clauses = parameter.schema["allOf"]
-				const integer = positiveDecimal(own)
+				const integer = Object.keys(parameter.schema).every((key) => PLAIN_KEYS.has(key))
+					? positiveDecimal(own)
+					: undefined
 				if (integer !== undefined) {
 					const description = parameter.schema["description"]
 					return {

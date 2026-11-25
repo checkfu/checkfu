@@ -1443,12 +1443,22 @@ describe("Artifacts API", () => {
 				expect((yield* call("POST", path, body)).status).toBe(201)
 				const resent = yield* callViewless("POST", path, body)
 				expect(resent.status).toBe(201)
-				expect((yield* json<VersionBody>(resent)).version).toBe(2)
+				const replayed = yield* json<VersionBody>(resent)
+				expect(replayed.version).toBe(2)
 				const changed = yield* callViewless("POST", path, {
 					...body,
 					files: [{ path: "app.js", sha256: kept }],
 				})
 				expect(changed.status).toBe(409)
+				const introduced = replayed.files.find((file) => file.path === "index.html")?.sha256
+				const impossible = yield* callViewless("POST", path, {
+					version: 1,
+					files: [
+						{ path: "index.html", sha256: introduced ?? "" },
+						{ path: "app.js", sha256: kept },
+					],
+				})
+				expect(impossible.status).toBe(409)
 				expect(viewReads()).toBe(0)
 			}),
 		))

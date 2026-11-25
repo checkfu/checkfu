@@ -427,8 +427,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					const state = yield* requireActive(id)
 					if (state.version !== payload.version) {
 						if (state.version === payload.version + 1) {
-							const committed = yield* keptFrom(payload.files, loadManifest(id, state.manifest))
-							const resent = yield* buildArtifactVersion(digest, payload.files, committed).pipe(
+							const replaced = yield* keptFrom(
+								payload.files,
+								loadManifest(id, state.replaced_manifest),
+							)
+							const resent = yield* buildArtifactVersion(digest, payload.files, replaced).pipe(
 								Effect.asSome,
 								Effect.catchTag("InvalidArtifactFiles", () => Effect.succeedNone),
 							)
