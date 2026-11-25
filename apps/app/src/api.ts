@@ -1,8 +1,6 @@
+import { CheckfuFetchError, createFetchClient, operationUrl } from "@checkfu/sdk/fetch"
+import type { FetchResult } from "@checkfu/sdk/fetch"
 import type {
-	ArtifactFileContent,
-	ArtifactLink,
-	AutomationRun,
-	AutomationRunQueued,
 	CreateAgentBody,
 	CreateArtifactLinkBody,
 	CreateAutomationBody,
@@ -14,89 +12,27 @@ import type {
 	UpdateAutomationBody,
 } from "@checkfu/sdk/Api"
 import { showsChanges } from "./automation-draft.ts"
-import { parseApiJson } from "./json-boundary.ts"
 import type {
-	IsoDateTimes,
 	JsonAgent,
 	JsonArtifact,
-	JsonArtifactVersion,
 	JsonAutomation,
 	JsonEnvironment,
 	JsonSession,
-	JsonSessionEvent,
 } from "@checkfu/sdk/client"
 
-export type JsonAutomationRun = IsoDateTimes<AutomationRun>
+export { CheckfuFetchError as ApiError }
 
-export interface RunPage {
-	readonly data: ReadonlyArray<JsonAutomationRun>
-	readonly has_more: boolean
-	readonly next_cursor: number | null
-}
-
-export class ApiError extends Error {
-	readonly status: number
-
-	constructor(status: number, message: string) {
-		super(message)
-		this.status = status
-	}
-}
-
-interface Page<T> {
-	readonly data: ReadonlyArray<T>
-	readonly has_more: boolean
-	readonly next_cursor: string | null
-}
-
-export interface EventPage {
-	readonly data: ReadonlyArray<JsonSessionEvent>
-	readonly has_more: boolean
-	readonly next_cursor: number | null
-}
+export type RunPage = FetchResult<"automations.runs.list">
+export type JsonAutomationRun = RunPage["data"][number]
+export type EventPage = FetchResult<"sessions.events.list">
+export type JsonArtifactLink = FetchResult<"artifacts.versions.link">
 
 interface Pending {
 	readonly id: string
 	readonly pending: true
 }
 
-const call = async <T>(
-	method: "GET" | "POST" | "DELETE",
-	path: string,
-	body?: unknown,
-	idempotencyKey?: string,
-	signal?: AbortSignal,
-): Promise<T> => {
-	const headers = new Headers()
-	if (body !== undefined) {
-		headers.set("content-type", "application/json")
-	}
-	if (idempotencyKey !== undefined) {
-		headers.set("idempotency-key", idempotencyKey)
-	}
-	const response = await fetch(path, {
-		method,
-		headers,
-		...(signal === undefined ? {} : { signal }),
-		...(body === undefined ? {} : { body: JSON.stringify(body) }),
-	})
-	if (!response.ok) {
-		const json: unknown = await response.json().catch(() => undefined)
-		const message =
-			typeof json === "object" &&
-			json !== null &&
-			"error" in json &&
-			typeof json.error === "object" &&
-			json.error !== null &&
-			"message" in json.error &&
-			typeof json.error.message === "string"
-				? json.error.message
-				: `Request failed with status ${response.status}.`
-		throw new ApiError(response.status, message)
-	}
-	const text = await response.text()
-	return parseApiJson<T>(text)
-}
+const request = createFetchClient()
 
 const isPending = <T>(value: T | Pending): value is Pending =>
 	typeof value === "object" && value !== null && "pending" in value && value.pending === true
@@ -107,8 +43,8 @@ const pause = () =>
 	})
 
 const settled = async <T>(
-	collection: string,
-	result: T | Pending,
+	retrieve: (id: string) => Promise<T>,
+	result: NoInfer<T> | Pending,
 	done: (resource: T) => boolean = () => true,
 ): Promise<T> => {
 	if (!isPending(result)) {
@@ -116,7 +52,7 @@ const settled = async <T>(
 	}
 	for (let attempt = 0; ; attempt++) {
 		try {
-			const resource = await call<T>("GET", `${collection}/${encodeURIComponent(result.id)}`)
+			const resource = await retrieve(result.id)
 			if (done(resource)) {
 				return resource
 			}
@@ -125,7 +61,11 @@ const settled = async <T>(
 			}
 			await pause()
 		} catch (error) {
-			if (attempt >= 40 || !(error instanceof ApiError) || ![404, 503].includes(error.status)) {
+			if (
+				attempt >= 40 ||
+				!(error instanceof CheckfuFetchError) ||
+				![404, 503].includes(error.status)
+			) {
 				throw error
 			}
 			await pause()
@@ -149,126 +89,157 @@ const isArchived = (value: unknown): boolean =>
 
 export const newIdempotencyKey = (): string => crypto.randomUUID()
 
-const readable = <T>(collection: string) => ({
-	list: (after?: string, signal?: AbortSignal) =>
-		call<Page<T>>(
-			"GET",
-			`${collection}?limit=100&order=desc${after === undefined ? "" : `&after=${encodeURIComponent(after)}`}`,
-			undefined,
-			undefined,
-			signal,
-		),
-	retrieve: (id: string, signal?: AbortSignal) =>
-		call<T>("GET", `${collection}/${encodeURIComponent(id)}`, undefined, undefined, signal),
+const newestFirst = (after: string | undefined) => ({
+	limit: 100,
+	order: "desc" as const,
+	...(after === undefined ? {} : { after }),
 })
 
-const resource = <T, Create, Update extends { readonly version: number } = never>(
-	collection: string,
-) => ({
-	...readable<T>(collection),
-	create: async (body: Create, idempotencyKey: string) =>
-		settled(collection, await call<T | Pending>("POST", collection, body, idempotencyKey)),
-	update: async (id: string, body: Update) =>
-		settled(
-			collection,
-			await call<T | Pending>("POST", `${collection}/${encodeURIComponent(id)}`, body),
-			(saved) => versionOf(saved) > body.version,
-		),
-	archive: async (id: string) =>
-		settled(
-			collection,
-			await call<T | Pending>("POST", `${collection}/${encodeURIComponent(id)}/archive`),
-			isArchived,
-		),
-})
-
-const automations = "/v1/automations"
-const automationPath = (id: string, action = "") =>
-	`${automations}/${encodeURIComponent(id)}${action}`
-const automationAction = async (
-	id: string,
-	action: string,
-	done: (automation: JsonAutomation) => boolean,
-) =>
-	settled(
-		automations,
-		await call<JsonAutomation | Pending>("POST", automationPath(id, action)),
-		done,
-	)
-
-export type JsonArtifactLink = IsoDateTimes<ArtifactLink>
-
-const artifactPath = (id: string) => `/v1/artifacts/${encodeURIComponent(id)}`
-const versionPath = (id: string, version: number) => `${artifactPath(id)}/versions/${version}`
+const retrieveAgent = (agent_id: string, signal?: AbortSignal): Promise<JsonAgent> =>
+	request("agents.retrieve", { path: { agent_id }, ...(signal === undefined ? {} : { signal }) })
+const retrieveEnvironment = (
+	environment_id: string,
+	signal?: AbortSignal,
+): Promise<JsonEnvironment> =>
+	request("environments.retrieve", {
+		path: { environment_id },
+		...(signal === undefined ? {} : { signal }),
+	})
+const retrieveAutomation = (automation_id: string, signal?: AbortSignal): Promise<JsonAutomation> =>
+	request("automations.retrieve", {
+		path: { automation_id },
+		...(signal === undefined ? {} : { signal }),
+	})
+const retrieveSession = (session_id: string, signal?: AbortSignal): Promise<JsonSession> =>
+	request("sessions.retrieve", {
+		path: { session_id },
+		...(signal === undefined ? {} : { signal }),
+	})
+const withSignal = (signal: AbortSignal | undefined) => (signal === undefined ? {} : { signal })
 
 export const checkfu = {
-	agents: resource<JsonAgent, CreateAgentBody, UpdateAgentBody>("/v1/agents"),
-	environments: resource<JsonEnvironment, CreateEnvironmentBody>("/v1/environments"),
-	automations: {
-		...resource<JsonAutomation, CreateAutomationBody>(automations),
-		update: async (id: string, body: UpdateAutomationBody) =>
+	agents: {
+		list: (after?: string, signal?: AbortSignal) =>
+			request("agents.list", { query: newestFirst(after), ...withSignal(signal) }),
+		retrieve: retrieveAgent,
+		create: async (body: CreateAgentBody, idempotencyKey: string) =>
+			settled(retrieveAgent, await request("agents.create", { body, idempotencyKey })),
+		update: async (agent_id: string, body: UpdateAgentBody) =>
 			settled(
-				automations,
-				await call<JsonAutomation | Pending>("POST", automationPath(id), body),
+				retrieveAgent,
+				await request("agents.update", { path: { agent_id }, body }),
+				(saved) => versionOf(saved) > body.version,
+			),
+		archive: async (agent_id: string) =>
+			settled(retrieveAgent, await request("agents.archive", { path: { agent_id } }), isArchived),
+	},
+	environments: {
+		list: (after?: string, signal?: AbortSignal) =>
+			request("environments.list", { query: newestFirst(after), ...withSignal(signal) }),
+		retrieve: retrieveEnvironment,
+		create: async (body: CreateEnvironmentBody, idempotencyKey: string) =>
+			settled(retrieveEnvironment, await request("environments.create", { body, idempotencyKey })),
+		archive: async (environment_id: string) =>
+			settled(
+				retrieveEnvironment,
+				await request("environments.archive", { path: { environment_id } }),
+				isArchived,
+			),
+	},
+	automations: {
+		list: (after?: string, signal?: AbortSignal) =>
+			request("automations.list", { query: newestFirst(after), ...withSignal(signal) }),
+		retrieve: retrieveAutomation,
+		create: async (body: CreateAutomationBody, idempotencyKey: string) =>
+			settled(retrieveAutomation, await request("automations.create", { body, idempotencyKey })),
+		update: async (automation_id: string, body: UpdateAutomationBody) =>
+			settled(
+				retrieveAutomation,
+				await request("automations.update", { path: { automation_id }, body }),
 				(saved) => showsChanges(saved, body),
 			),
-		pause: (id: string) =>
-			automationAction(id, "/pause", (automation) => automation.status !== "active"),
-		unpause: (id: string) =>
-			automationAction(id, "/unpause", (automation) => automation.status !== "paused"),
+		pause: async (automation_id: string) =>
+			settled(
+				retrieveAutomation,
+				await request("automations.pause", { path: { automation_id } }),
+				(automation) => automation.status !== "active",
+			),
+		unpause: async (automation_id: string) =>
+			settled(
+				retrieveAutomation,
+				await request("automations.unpause", { path: { automation_id } }),
+				(automation) => automation.status !== "paused",
+			),
+		archive: async (automation_id: string) =>
+			settled(
+				retrieveAutomation,
+				await request("automations.archive", { path: { automation_id } }),
+				isArchived,
+			),
 		run: async (
-			id: string,
+			automation_id: string,
 		): Promise<{ readonly run: number; readonly listed: JsonAutomationRun | null }> => {
-			const queued = await call<AutomationRunQueued>("POST", automationPath(id, "/run"))
-			const listed = await settled<JsonAutomationRun>(automationPath(id, "/runs"), {
-				id: String(queued.run),
-				pending: true,
-			}).catch(() => null)
+			const queued = await request("automations.run", { path: { automation_id } })
+			const listed = await settled(
+				(run) =>
+					request("automations.runs.retrieve", { path: { automation_id, run: Number(run) } }),
+				{ id: String(queued.run), pending: true },
+			).catch(() => null)
 			return { run: queued.run, listed }
 		},
-		runs: (id: string, before?: number, signal?: AbortSignal) =>
-			call<RunPage>(
-				"GET",
-				`${automationPath(id, "/runs")}?order=desc&limit=20${before === undefined ? "" : `&after=${before}`}`,
-				undefined,
-				undefined,
-				signal,
-			),
+		runs: (automation_id: string, before?: number, signal?: AbortSignal) =>
+			request("automations.runs.list", {
+				path: { automation_id },
+				query: { order: "desc", limit: 20, ...(before === undefined ? {} : { after: before }) },
+				...withSignal(signal),
+			}),
 	},
 	sessions: {
-		...resource<JsonSession, CreateSessionBody>("/v1/sessions"),
-		send: (id: string, body: SendSessionEventsBody, idempotencyKey: string) =>
-			call<unknown>("POST", `/v1/sessions/${encodeURIComponent(id)}/events`, body, idempotencyKey),
-		events: (id: string, before?: number, signal?: AbortSignal) =>
-			call<EventPage>(
-				"GET",
-				`/v1/sessions/${encodeURIComponent(id)}/events?order=desc&limit=100${before === undefined ? "" : `&after=${before}`}`,
-				undefined,
-				undefined,
-				signal,
+		list: (after?: string, signal?: AbortSignal) =>
+			request("sessions.list", { query: newestFirst(after), ...withSignal(signal) }),
+		retrieve: retrieveSession,
+		create: async (body: CreateSessionBody, idempotencyKey: string) =>
+			settled(retrieveSession, await request("sessions.create", { body, idempotencyKey })),
+		archive: async (session_id: string) =>
+			settled(
+				retrieveSession,
+				await request("sessions.archive", { path: { session_id } }),
+				isArchived,
 			),
-		streamUrl: (id: string, after: number) =>
-			`/v1/sessions/${encodeURIComponent(id)}/events/stream?after=${after}`,
+		send: (session_id: string, body: SendSessionEventsBody, idempotencyKey: string) =>
+			request("sessions.events.send", { path: { session_id }, body, idempotencyKey }),
+		events: (session_id: string, before?: number, signal?: AbortSignal) =>
+			request("sessions.events.list", {
+				path: { session_id },
+				query: { order: "desc", limit: 100, ...(before === undefined ? {} : { after: before }) },
+				...withSignal(signal),
+			}),
+		streamUrl: (session_id: string, after: number) =>
+			operationUrl("sessions.events.stream", { session_id }, { after }),
 	},
 	artifacts: {
-		...readable<JsonArtifact>("/v1/artifacts"),
-		version: (id: string, version: number, signal?: AbortSignal) =>
-			call<JsonArtifactVersion>("GET", versionPath(id, version), undefined, undefined, signal),
-		file: (id: string, version: number, path: string, signal?: AbortSignal) =>
-			call<ArtifactFileContent>(
-				"GET",
-				`${versionPath(id, version)}/file?path=${encodeURIComponent(path)}`,
-				undefined,
-				undefined,
-				signal,
-			),
-		link: (id: string, version: number, body: CreateArtifactLinkBody) =>
-			call<JsonArtifactLink>("POST", `${versionPath(id, version)}/links`, body),
-		publish: (id: string, body: PublishArtifactBody, idempotencyKey: string) =>
-			call<JsonArtifact>("POST", `${artifactPath(id)}/publication`, body, idempotencyKey),
-		unpublish: (id: string, idempotencyKey: string) =>
-			call<JsonArtifact>("DELETE", `${artifactPath(id)}/publication`, undefined, idempotencyKey),
-		delete: (id: string) => call<unknown>("DELETE", artifactPath(id)),
+		list: (after?: string, signal?: AbortSignal) =>
+			request("artifacts.list", { query: newestFirst(after), ...withSignal(signal) }),
+		retrieve: (artifact_id: string, signal?: AbortSignal): Promise<JsonArtifact> =>
+			request("artifacts.retrieve", { path: { artifact_id }, ...withSignal(signal) }),
+		version: (artifact_id: string, version: number, signal?: AbortSignal) =>
+			request("artifacts.versions.retrieve", {
+				path: { artifact_id, version },
+				...withSignal(signal),
+			}),
+		file: (artifact_id: string, version: number, path: string, signal?: AbortSignal) =>
+			request("artifacts.versions.file", {
+				path: { artifact_id, version },
+				query: { path },
+				...withSignal(signal),
+			}),
+		link: (artifact_id: string, version: number, body: CreateArtifactLinkBody) =>
+			request("artifacts.versions.link", { path: { artifact_id, version }, body }),
+		publish: (artifact_id: string, body: PublishArtifactBody, idempotencyKey: string) =>
+			request("artifacts.publish", { path: { artifact_id }, body, idempotencyKey }),
+		unpublish: (artifact_id: string, idempotencyKey: string) =>
+			request("artifacts.unpublish", { path: { artifact_id }, idempotencyKey }),
+		delete: (artifact_id: string) => request("artifacts.delete", { path: { artifact_id } }),
 	},
 }
 
@@ -276,7 +247,7 @@ export const errorMessage = (error: unknown): string =>
 	error instanceof Error ? error.message : "Something went wrong."
 
 export const isSignedOut = (error: unknown): boolean =>
-	error instanceof ApiError && error.status === 401
+	error instanceof CheckfuFetchError && error.status === 401
 
 export const signedIn = async (): Promise<boolean> => {
 	const response = await fetch("/auth/session")

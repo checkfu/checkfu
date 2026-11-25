@@ -65,6 +65,8 @@ export type RawSseMethod = (request: {
 
 export const asIsoDateTimes = <T>(json: Schema.Json): IsoDateTimes<T> => json as IsoDateTimes<T>
 
+export const parseJsonAs = <T>(text: string): T => (text === "" ? undefined : JSON.parse(text)) as T
+
 export const endpointParamsCodec = <G extends ApiGroupName, E extends ApiEndpointName<G>>(
 	schema: Schema.Top,
 ): Schema.Codec<EndpointDecodedParams<G, E>, unknown, never, never> =>
