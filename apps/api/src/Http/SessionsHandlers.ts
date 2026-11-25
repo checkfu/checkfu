@@ -39,8 +39,9 @@ import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type { ClientEventId, SendSessionEventReceipt, SessionResourceItem } from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	commitForStream,
-	createCommandId,
+	createIdentity,
 	currentRequestId,
 	handled,
 	idempotentCommandId,
@@ -49,6 +50,7 @@ import {
 	orPending,
 	present,
 	randomId,
+	readExisting,
 	reject,
 	settled,
 	sha256Json,
@@ -255,27 +257,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return found !== null
 			})
 
-		const existing = (id: SessionId) =>
-			Effect.gen(function* () {
-				const ref = Session.ref(id)
-				const found = Option.getOrNull(yield* sessionViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const committed = yield* sessions.get(id)
-				if (committed._tag === "Uninitialized") {
-					return yield* reject(404, `Session ${id} not found.`)
-				}
-				const projected = yield* sessionViews.waitFor(
-					ref,
-					{ id },
-					{ timeout: yield* SessionReadWaitTimeout },
-				)
-				if (projected === null) {
-					return yield* reject(503, `Session ${id} projection is not ready.`)
-				}
-				return projected
+		const existing = (id: SessionId) => {
+			const ref = Session.ref(id)
+			return readExisting({
+				current: sessionViews.get(ref),
+				missing: Effect.flatMap(sessions.get(id), (committed) =>
+					committed._tag === "Uninitialized"
+						? reject(404, `Session ${id} not found.`)
+						: Effect.void,
+				),
+				projected: Effect.flatMap(SessionReadWaitTimeout, (timeout) =>
+					sessionViews.waitFor(ref, { id }, { timeout }),
+				),
 			})
+		}
 
 		const pinnedVersionReady = (agentId: string, version: number) =>
 			Effect.gen(function* () {
@@ -372,24 +367,21 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
 						checkout: resource.checkout ?? null,
 					}))
-					let id: SessionId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						id = SessionId.make(
-							yield* idempotentId(digest, "sess", ["create", "session", "id", idempotencyKey]),
-						)
-						sendOptions = {
-							commandId: yield* createCommandId(digest, "session", idempotencyKey, {
-								agent_id: agentId,
-								agent_version: agentVersion,
-								environment_id: environmentId,
-								title,
-								...(requested.length === 0 ? {} : { resources: requested }),
-							}),
-						}
-					} else {
-						id = SessionId.make(yield* randomId(random, "sess"))
-					}
+					const identity = yield* createIdentity(
+						{ digest, random },
+						"session",
+						"sess",
+						idempotencyKey,
+						{
+							agent_id: agentId,
+							agent_version: agentVersion,
+							environment_id: environmentId,
+							title,
+							...(requested.length === 0 ? {} : { resources: requested }),
+						},
+					)
+					const id = SessionId.make(identity.id)
+					const sendOptions = identity.sendOptions
 					const resources = yield* decodeResources(
 						yield* Effect.forEach(requested, (resource, index) =>
 							Effect.map(
@@ -476,17 +468,16 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			)
 			.handle("get", ({ params }) => retrieve(params.session_id).pipe(handled))
 			.handle("archive", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.session_id
-					const receipt = yield* sessions.send(new ArchiveSession({ session_id: id }))
-					const result = yield* sessionViews
-						.get(Session.ref(id), { atLeast: receipt })
-						.pipe(orPending(id, "session"))
-					if (isPending(result)) {
-						return result
-					}
-					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
-				}).pipe(handled),
+				archiveAndRead(
+					params.session_id,
+					"session",
+					"Session",
+					sessions.send(new ArchiveSession({ session_id: params.session_id })),
+					(receipt) => sessionViews.get(Session.ref(params.session_id), { atLeast: receipt }),
+				).pipe(
+					Effect.map((result) => (isPending(result) ? result : serializeSession(result))),
+					handled,
+				),
 			)
 			.handle("listResources", ({ params }) =>
 				Effect.gen(function* () {
