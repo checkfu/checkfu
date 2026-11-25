@@ -463,7 +463,13 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							sendOptions,
 						)
 						.pipe(
-							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+							Effect.catchTags({
+								SessionAlreadyExists: () => reject(409, IDEMPOTENCY_KEY_REUSED),
+								AgentNotFound: () => reject(404, `Agent ${agentId} not found.`),
+								AgentVersionNotFound: ({ version }) =>
+									reject(404, `Agent ${agentId} has no version ${version}.`),
+								EnvironmentNotFound: () => reject(404, `Environment ${environmentId} not found.`),
+							}),
 						)
 					yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
