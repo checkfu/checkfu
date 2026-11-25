@@ -139,6 +139,7 @@ function AutomationForm({
 	error,
 	onSubmit,
 	onCancel,
+	saved,
 }: {
 	readonly draft: AutomationDraft
 	readonly onChange: (draft: AutomationDraft) => void
@@ -147,6 +148,8 @@ function AutomationForm({
 	readonly error: string | undefined
 	readonly onSubmit: (draft: AutomationDraft) => void
 	readonly onCancel?: () => void
+	/** An existing automation's saved agent and environment, kept selectable when the lists no longer offer them. */
+	readonly saved?: { readonly agentId: string; readonly environmentId: string }
 }): React.JSX.Element {
 	const agentChoicesPage = choicesOf(useSuspenseInfiniteQuery(agentChoices))
 	const environmentChoicesPage = choicesOf(useSuspenseInfiniteQuery(environmentChoices))
@@ -158,7 +161,7 @@ function AutomationForm({
 				label: `${agent.name} (${agent.model.id})`,
 			})),
 		},
-		draft.agentId,
+		saved?.agentId ?? "",
 		"agent",
 	)
 	const environmentOptions = withCurrent(
@@ -169,7 +172,7 @@ function AutomationForm({
 				label: environment.name,
 			})),
 		},
-		draft.environmentId,
+		saved?.environmentId ?? "",
 		"environment",
 	)
 	const agent = selection(agentOptions.items, draft.agentId === "" ? undefined : draft.agentId)
@@ -281,7 +284,17 @@ function AutomationForm({
 
 export function NewAutomationPage(): React.JSX.Element {
 	const navigate = useNavigate()
-	const [draft, setDraft] = useState(() => emptyDraft(localTimezone()))
+	const agents = useSuspenseInfiniteQuery(agentChoices).data.pages.flatMap((page) => page.data)
+	const environments = useSuspenseInfiniteQuery(environmentChoices).data.pages.flatMap(
+		(page) => page.data,
+	)
+	// Chosen once, as on the session form: a newer agent or environment appearing later never
+	// changes what an untouched form submits.
+	const [draft, setDraft] = useState(() => ({
+		...emptyDraft(localTimezone()),
+		agentId: agents[0]?.id ?? "",
+		environmentId: environments[0]?.id ?? "",
+	}))
 	const createKey = useSubmissionKey()
 	const create = useAction(
 		async (submitted: AutomationDraft) => {
@@ -333,7 +346,11 @@ function AutomationView({
 }): React.JSX.Element {
 	const [edit, setEdit] = useState<Edit | null>(null)
 	const invalidates = [["automations"]] as const
-	const runNow = useAction(() => checkfu.automations.run(automation.id), { invalidates })
+	const [queuedRun, setQueuedRun] = useState<number | null>(null)
+	const runNow = useAction(() => checkfu.automations.run(automation.id), {
+		invalidates,
+		then: (started) => setQueuedRun(started.listed === null ? started.run : null),
+	})
 	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
 	const unpause = useAction(() => checkfu.automations.unpause(automation.id), { invalidates })
 	const archive = useAction(() => checkfu.automations.archive(automation.id), { invalidates })
@@ -390,6 +407,12 @@ function AutomationView({
 				}
 			/>
 			{error === undefined ? null : <Callout tone="error">{error}</Callout>}
+			{queuedRun === null ? null : (
+				<Callout>
+					Run #{queuedRun} is queued and not listed yet. It will appear under Runs once it starts;
+					reload to check rather than running it again.
+				</Callout>
+			)}
 			{edit === null ? (
 				<>
 					<AutomationDetails automation={automation} />
@@ -397,6 +420,7 @@ function AutomationView({
 				</>
 			) : (
 				<AutomationForm
+					saved={{ agentId: edit.base.agentId, environmentId: edit.base.environmentId }}
 					draft={edit.draft}
 					onChange={(draft) => setEdit({ ...edit, draft })}
 					submitLabel="Save"

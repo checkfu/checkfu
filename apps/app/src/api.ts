@@ -202,13 +202,20 @@ export const checkfu = {
 			automationAction(id, "/pause", (automation) => automation.status !== "active"),
 		unpause: (id: string) =>
 			automationAction(id, "/unpause", (automation) => automation.status !== "paused"),
-		/** Starts a run and resolves once that run is listed, started or failed. */
-		run: async (id: string) => {
+		/**
+		 * Starts a run and resolves once that run is listed, started or failed. The run is accepted
+		 * once the POST answers, so a run still not listed after the wait is reported as queued
+		 * (`listed: null`), never as a failed request a second click would repeat.
+		 */
+		run: async (
+			id: string,
+		): Promise<{ readonly run: number; readonly listed: JsonAutomationRun | null }> => {
 			const queued = await call<AutomationRunQueued>("POST", automationPath(id, "/run"))
-			return settled<JsonAutomationRun>(automationPath(id, "/runs"), {
+			const listed = await settled<JsonAutomationRun>(automationPath(id, "/runs"), {
 				id: String(queued.run),
 				pending: true,
-			})
+			}).catch(() => null)
+			return { run: queued.run, listed }
 		},
 		runs: (id: string, before?: number, signal?: AbortSignal) =>
 			call<RunPage>(

@@ -38,7 +38,7 @@ describe("editing an automation", () => {
 		const draft = { ...draftOf(automation), name: " Noon report ", expression: "0 12 * * *" }
 		expect(changesOf(draftOf(automation), draft)).toEqual({
 			name: "Noon report",
-			schedule: { type: "cron", expression: "0 12 * * *", timezone: "America/New_York" },
+			schedule: { expression: "0 12 * * *" },
 		})
 	})
 
@@ -80,7 +80,24 @@ describe("editing against the snapshot the editor opened", () => {
 	})
 })
 
+describe("editing one schedule field", () => {
+	it("sends only that field, so another editor's change to the other survives", () => {
+		const opened = draftOf(automation)
+		expect(changesOf(opened, { ...opened, timezone: "Asia/Tokyo" })).toEqual({
+			schedule: { timezone: "Asia/Tokyo" },
+		})
+	})
+})
+
 describe("waiting for an update to show", () => {
+	it("waits for the agent version too, not only the agent", () => {
+		const pinned = { ...automation, agent: { id: "agent_2", version: 1 } }
+		expect(showsChanges(pinned, { agent: "agent_2" })).toBe(false)
+		expect(
+			showsChanges({ ...pinned, agent: { id: "agent_2", version: null } }, { agent: "agent_2" }),
+		).toBe(true)
+	})
+
 	it("accepts a read only once every submitted field is visible", () => {
 		const changes = {
 			name: "Noon report",
@@ -116,6 +133,21 @@ describe("creating an automation", () => {
 			initial_events: [{ type: "user.message", content: [{ type: "text", text: "Go." }] }],
 			schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
 		})
+	})
+})
+
+describe("firing times in other years and unknown zones", () => {
+	const now = Date.parse("2026-11-25T00:00:00.000Z")
+
+	it("show the year only when it is not this one", () => {
+		expect(firingLabel("2026-12-01T14:00:00.000Z", "UTC", now)).not.toContain("2026")
+		expect(firingLabel("2032-02-29T23:59:00.000Z", "UTC", now)).toContain("2032")
+	})
+
+	it("fall back to UTC when the browser does not know the zone", () => {
+		const label = firingLabel("2026-12-01T14:00:00.000Z", "Mars/Olympus", now)
+		expect(label).toContain("UTC")
+		expect(label).toContain("2:00")
 	})
 })
 

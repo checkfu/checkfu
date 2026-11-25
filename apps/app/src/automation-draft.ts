@@ -75,7 +75,15 @@ export const changesOf = (base: AutomationDraft, draft: AutomationDraft): Update
 		...(edited("agentId") ? { agent: draft.agentId } : {}),
 		...(edited("environmentId") ? { environment_id: draft.environmentId } : {}),
 		...(edited("message") ? { initial_events: next.initial_events } : {}),
-		...(edited("expression") || edited("timezone") ? { schedule: next.schedule } : {}),
+		// Each schedule field on its own, so an edit to one keeps another editor's change to the other.
+		...(edited("expression") || edited("timezone")
+			? {
+					schedule: {
+						...(edited("expression") ? { expression: next.schedule.expression } : {}),
+						...(edited("timezone") ? { timezone: next.schedule.timezone } : {}),
+					},
+				}
+			: {}),
 	}
 }
 
@@ -85,26 +93,46 @@ export const showsChanges = (automation: JsonAutomation, changes: UpdateAutomati
 		changes.name === undefined || automation.name === changes.name,
 		changes.description === undefined || automation.description === changes.description,
 		changes.agent === undefined ||
-			automation.agent.id ===
-				(typeof changes.agent === "string" ? changes.agent : changes.agent.id),
+			[
+				automation.agent.id ===
+					(typeof changes.agent === "string" ? changes.agent : changes.agent.id),
+				automation.agent.version ===
+					(typeof changes.agent === "string" ? null : (changes.agent.version ?? null)),
+			].every(Boolean),
 		changes.environment_id === undefined || automation.environment_id === changes.environment_id,
 		changes.initial_events === undefined ||
 			JSON.stringify(automation.initial_events) === JSON.stringify(changes.initial_events),
-		changes.schedule === undefined ||
-			[
-				automation.schedule.expression === changes.schedule.expression,
-				automation.schedule.timezone === changes.schedule.timezone,
-			].every(Boolean),
+		changes.schedule?.expression === undefined ||
+			automation.schedule.expression === changes.schedule.expression,
+		changes.schedule?.timezone === undefined ||
+			automation.schedule.timezone === changes.schedule.timezone,
 	].every(Boolean)
 
-/** A firing time as the automation's own timezone shows it. */
-export const firingLabel = (iso: string, timezone: string): string =>
+const firingFormat = (timeZone: string, withYear: boolean) =>
 	new Intl.DateTimeFormat(undefined, {
 		weekday: "short",
+		...(withYear ? { year: "numeric" } : {}),
 		month: "short",
 		day: "numeric",
 		hour: "numeric",
 		minute: "2-digit",
-		timeZone: timezone,
+		timeZone,
 		timeZoneName: "short",
-	}).format(new Date(iso))
+	})
+
+/**
+ * A firing time as the automation's own timezone shows it, with the year when it is not this one.
+ * A zone the server knows but this browser does not falls back to UTC, labelled as such.
+ */
+export const firingLabel = (iso: string, timezone: string, now = Date.now()): string => {
+	const at = new Date(iso)
+	const withYear = at.getUTCFullYear() !== new Date(now).getUTCFullYear()
+	try {
+		return firingFormat(timezone, withYear).format(at)
+	} catch (error) {
+		if (error instanceof RangeError) {
+			return firingFormat("UTC", withYear).format(at)
+		}
+		throw error
+	}
+}
