@@ -90,7 +90,10 @@ const automationRunResource = (
 					type: "schedule" as const,
 					scheduled_at: DateTime.makeUnsafe(entry.event.scheduled_at),
 				},
-	agent: { id: entry.event.agent_id, version: entry.event.agent_version },
+	agent:
+		entry.event.agent_id === null
+			? null
+			: { id: entry.event.agent_id, version: entry.event.agent_version },
 	session_id: entry.event._tag === "automation.run_started" ? entry.event.session_id : null,
 	error: entry.event._tag === "automation.run_failed" ? entry.event.error : null,
 	created_at: entry.envelope.at,

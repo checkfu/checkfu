@@ -14946,27 +14946,34 @@
 														]
 													},
 													"agent": {
-														"type": "object",
-														"properties": {
-															"id": {
-																"type": "string"
-															},
-															"version": {
-																"anyOf": [
-																	{
-																		"type": "integer",
-																		"minimum": 1,
-																		"maximum": 9007199254740991
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"id": {
+																		"type": "string"
 																	},
-																	{
-																		"type": "null"
+																	"version": {
+																		"anyOf": [
+																			{
+																				"type": "integer",
+																				"minimum": 1,
+																				"maximum": 9007199254740991
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
 																	}
-																]
+																},
+																"required": ["id", "version"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
 															}
-														},
-														"required": ["id", "version"],
-														"additionalProperties": false,
-														"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest)"
+														],
+														"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent."
 													},
 													"session_id": {
 														"anyOf": [
@@ -15469,27 +15476,34 @@
 											]
 										},
 										"agent": {
-											"type": "object",
-											"properties": {
-												"id": {
-													"type": "string"
-												},
-												"version": {
-													"anyOf": [
-														{
-															"type": "integer",
-															"minimum": 1,
-															"maximum": 9007199254740991
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string"
 														},
-														{
-															"type": "null"
+														"version": {
+															"anyOf": [
+																{
+																	"type": "integer",
+																	"minimum": 1,
+																	"maximum": 9007199254740991
+																},
+																{
+																	"type": "null"
+																}
+															]
 														}
-													]
+													},
+													"required": ["id", "version"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
 												}
-											},
-											"required": ["id", "version"],
-											"additionalProperties": false,
-											"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest)"
+											],
+											"description": "The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent."
 										},
 										"session_id": {
 											"anyOf": [
