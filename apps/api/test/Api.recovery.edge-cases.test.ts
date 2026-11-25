@@ -7,8 +7,11 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as TestClock from "effect/testing/TestClock"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeApiHandler } from "../src/Http/Router.ts"
@@ -16,6 +19,7 @@ import { recoverPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngin
 import {
 	AgentVersionLookupTimeout,
 	HarnessLimits,
+	HarnessTurnTimeout,
 	PiDurableHarnessLive,
 	makePiTurnExecutorLayer,
 } from "../src/Pi/PiDurableHarness.ts"
@@ -627,6 +631,90 @@ describe("interrupted turns and turn recovery", () => {
 				expect(reply).toEqual(recoveredReply)
 				expect(runTurnCalls).toBe(0)
 				expect(recoverCalls).toBe(2)
+			}).pipe(Effect.scoped, Effect.provide(layer)),
+		)
+	})
+
+	it("gives recovery and submission one deadline, so the saga step ends inside its alarm", async () => {
+		const submitted = Deferred.makeUnsafe<void>()
+		const executorLayer = makePiTurnExecutorLayer({
+			recoverTurn: () => Effect.as(Effect.sleep("1 second"), null),
+			runTurn: () => Effect.andThen(Deferred.succeed(submitted, undefined), Effect.never),
+			abortTurn: () => Effect.void,
+		})
+		const CheckfuLive = Checkfu.layer(
+			CheckfuHandlersLive.pipe(
+				Layer.provide(ListingStore.memory),
+				Layer.provide(PiDurableHarnessLive),
+			),
+		).pipe(Layer.provide(executorLayer))
+		const PiProviderLive = PiDurableHarnessLive.pipe(
+			Layer.provide(executorLayer),
+			Layer.provide(CheckfuLive),
+		)
+		const layer = Layer.mergeAll(CheckfuLive, PiProviderLive).pipe(
+			Layer.provideMerge(
+				Layer.succeed(HarnessLimits, {
+					attempts: 1,
+					baseDelay: "1 millis",
+					interruptTimeout: "50 millis",
+					settleMargin: "500 millis",
+				}),
+			),
+			Layer.provideMerge(Layer.succeed(HarnessTurnTimeout, "1 second")),
+			Layer.provide(Domain.InMemory),
+			Layer.provideMerge(Digest.layerWebCrypto),
+			Layer.provideMerge(SecureRandom.layerWebCrypto),
+			Layer.provideMerge(
+				ConfigProvider.layer(
+					ConfigProvider.fromUnknown({
+						CHECKFU_API_KEY: TEST_API_KEY,
+						OPENAI_API_KEY: "sk-openai-test",
+					}),
+				),
+			),
+		)
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const { fetch: apiFetch } = yield* makeApiHandler
+				const provider = yield* Harness
+				const agentRes = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: "/v1/agents",
+					headers: AUTH_HEADERS,
+					body: { name: "Deadline Agent", model: "gpt-4o-mini" },
+				})
+				const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
+				const envRes = yield* sendRequest(apiFetch, {
+					method: "POST",
+					path: "/v1/environments",
+					headers: AUTH_HEADERS,
+					body: { name: "Deadline Env" },
+				})
+				const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
+
+				const outcome = yield* Effect.gen(function* () {
+					const turn = yield* Effect.forkChild(
+						Effect.flip(
+							provider.runTurn({
+								session_id: SessionId.make("sesn_deadline"),
+								agent_id: agent.id,
+								agent_version: 1,
+								environment_id: env.id,
+								turn: 1,
+								input: ["hello"],
+							}),
+						),
+					)
+					// Recovery spends most of the deadline and finds nothing, so the turn is submitted.
+					yield* TestClock.adjust("1 second")
+					yield* Deferred.await(submitted)
+					// The submission gets what is left of the deadline, not a deadline of its own.
+					yield* TestClock.adjust("500 millis")
+					return yield* TestClock.withLive(Effect.timeout(Fiber.join(turn), "2 seconds"))
+				}).pipe(Effect.provide(TestClock.layer()))
+				expect(outcome).toEqual({ _tag: "HarnessUnavailable" })
 			}).pipe(Effect.scoped, Effect.provide(layer)),
 		)
 	})

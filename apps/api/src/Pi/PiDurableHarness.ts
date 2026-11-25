@@ -82,6 +82,14 @@ export const HarnessTurnTimeout = Context.Reference<Duration.Input>(
 	{ defaultValue: () => Duration.millis(DEFAULT_TURN_TIMEOUT_MS) },
 )
 
+const settleTimeout = Effect.gen(function* () {
+	const { settleMargin } = yield* HarnessLimits
+	return Duration.sum(
+		Duration.fromInputUnsafe(yield* HarnessTurnTimeout),
+		Duration.fromInputUnsafe(settleMargin),
+	)
+})
+
 const turnOperationId = (turn: number) => `turn:${turn}`
 
 // Every turn after the last published reply and before this one.
@@ -96,14 +104,9 @@ export const PiDurableHarnessLive = boundedHarness(
 		const executor = yield* PiTurnExecutor
 
 		return {
-			runTurn: (args) =>
-				Effect.gen(function* () {
-					const { settleMargin } = yield* HarnessLimits
-					const settleTimeout = Duration.sum(
-						Duration.fromInputUnsafe(yield* HarnessTurnTimeout),
-						Duration.fromInputUnsafe(settleMargin),
-					)
-					const conversation = conversationName(args.session_id)
+			runTurn: (args) => {
+				const conversation = conversationName(args.session_id)
+				const settle = Effect.gen(function* () {
 					const operationId = turnOperationId(args.turn)
 
 					// Recover any already-admitted or settled Pi operation before checking
@@ -115,14 +118,6 @@ export const PiDurableHarnessLive = boundedHarness(
 							Effect.logError("Harness unreachable", conversation, error.cause),
 						),
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
-						Effect.timeoutOrElse({
-							duration: settleTimeout,
-							orElse: () =>
-								Effect.andThen(
-									Effect.logError("Harness did not settle the turn in time", conversation),
-									Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
-								),
-						}),
 					)
 					if (recovered !== null) {
 						if (!recovered.ok) {
@@ -200,21 +195,26 @@ export const PiDurableHarnessLive = boundedHarness(
 							Effect.logError("Harness unreachable", conversation, error.cause),
 						),
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
-						Effect.timeoutOrElse({
-							duration: settleTimeout,
-							orElse: () =>
-								Effect.andThen(
-									Effect.logError("Harness did not settle the turn in time", conversation),
-									Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
-								),
-						}),
 					)
 
 					if (!outcome.ok) {
 						return yield* Effect.fail(outcome.error)
 					}
 					return outcome.reply
-				}),
+				})
+				// One deadline for recovery and submission together, so the saga step that waits on
+				// them ends inside the alarm that runs it.
+				return Effect.flatMap(settleTimeout, (duration) =>
+					Effect.timeoutOrElse(settle, {
+						duration,
+						orElse: () =>
+							Effect.andThen(
+								Effect.logError("Harness did not settle the turn in time", conversation),
+								Effect.fail<HarnessUnavailable>({ _tag: "HarnessUnavailable" }),
+							),
+					}),
+				)
+			},
 			interrupt: (args) =>
 				Effect.gen(function* () {
 					const { interruptTimeout } = yield* HarnessLimits
