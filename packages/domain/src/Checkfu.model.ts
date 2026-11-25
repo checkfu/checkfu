@@ -304,6 +304,19 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					m.Automation.some((a) => [a.id === v.id, a.state.status !== ""].every((ok) => ok)),
 				),
 			].every((ok) => ok),
+		AutomationViewRevisionMatchesAutomation: (m) =>
+			m.Automation.every((a) => {
+				const view = m.AutomationView.find((v) => v.id === a.id)
+				return view === undefined || view.state.revision === a.state.revision
+			}),
+		ReservedSlotsEqualLiveAutomations: (m) =>
+			m.AutomationCapacity.every(
+				(c) =>
+					c.state.reserved ===
+					m.Automation.filter((a) =>
+						[a.state.status === "active", a.state.status === "paused"].some((live) => live),
+					).length,
+			),
 		ArtifactViewMatchesArtifact: (m) =>
 			[
 				m.Artifact.every((a) => {
@@ -336,6 +349,12 @@ export class Checkfu extends Domain.Model("Checkfu", {
 						v.state.version !== a.state.version || v.state.manifest === a.state.manifest,
 					].every((ok) => ok),
 				),
+			),
+		EveryArtifactVersionIsRecorded: (m) =>
+			m.Artifact.every(
+				(a) =>
+					m.ArtifactVersionView.filter((v) => v.state.artifact_id === a.id).length ===
+					a.state.version,
 			),
 	},
 	sometimes: {

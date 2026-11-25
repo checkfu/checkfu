@@ -16,6 +16,7 @@ import { CreateAgentDecision } from "../src/Agent/CreateAgent.decision.ts"
 import { UpdateAgent } from "../src/Agent/UpdateAgent.command.ts"
 import { UpdateAgentDecision } from "../src/Agent/UpdateAgent.decision.ts"
 import { Automation } from "../src/Automation/Automation.aggregate.ts"
+import { ArchiveAutomation } from "../src/Automation/ArchiveAutomation.command.ts"
 import { AdmitAutomation } from "../src/Automation/AdmitAutomation.command.ts"
 import { AdmitAutomationDecision } from "../src/Automation/AdmitAutomation.decision.ts"
 import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
@@ -27,7 +28,10 @@ import { AutomationCapacity } from "../src/Automation/AutomationCapacity.aggrega
 import { AutomationRunView } from "../src/Automation/AutomationRunView.view.ts"
 import { AutomationView } from "../src/Automation/AutomationView.view.ts"
 import { isUsableSchedule, upcomingOccurrences } from "../src/Automation/Schedule.ts"
+import { AddArtifactVersion } from "../src/Artifact/AddArtifactVersion.command.ts"
 import { Artifact } from "../src/Artifact/Artifact.aggregate.ts"
+import { ArtifactId } from "../src/Artifact/Artifact.id.ts"
+import { CreateArtifact } from "../src/Artifact/CreateArtifact.command.ts"
 import { ArtifactVersionView } from "../src/Artifact/ArtifactVersionView.view.ts"
 import { ArtifactView } from "../src/Artifact/ArtifactView.view.ts"
 import { ArchiveEnvironment } from "../src/Environment/ArchiveEnvironment.command.ts"
@@ -163,8 +167,11 @@ const STANDING = {
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
 	"Checkfu.AutomationViewsMatchAutomations": "checked",
+	"Checkfu.AutomationViewRevisionMatchesAutomation": "checked",
+	"Checkfu.ReservedSlotsEqualLiveAutomations": "checked",
 	"Checkfu.ArtifactViewMatchesArtifact": "checked",
 	"Checkfu.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
+	"Checkfu.EveryArtifactVersionIsRecorded": "checked",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -358,6 +365,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					const admitAutomation = yield* AdmitAutomationDecision
 					const updateAutomation = yield* UpdateAutomationDecision
 					const automations = yield* Automation
+					const artifacts = yield* Artifact
 
 					const agentRef = Agent.ref(AgentId.make("agent_post_1"))
 					const v1Id = AgentVersionId.make("aver_post_1")
@@ -604,6 +612,31 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					const updatedAutomationWorld = yield* recordStep("automation-updated")
 
+					const artifactId = ArtifactId.make("art_post_admission")
+					yield* artifacts.send(
+						new CreateArtifact({
+							artifact_id: artifactId,
+							name: "Report",
+							manifest: "m1",
+							file_count: 1,
+							total_bytes: 1,
+							fence: 0,
+						}),
+					)
+					yield* artifacts.send(
+						new AddArtifactVersion({
+							artifact_id: artifactId,
+							expected_version: 1,
+							manifest: "m2",
+							file_count: 1,
+							total_bytes: 2,
+							fence: 0,
+						}),
+					)
+					const artifactWorld = yield* recordStep("artifact-created-and-versioned")
+					yield* automations.send(new ArchiveAutomation({ automation_id: automationRef.id }))
+					yield* recordStep("automation-archived")
+
 					yield* agents.send(new ArchiveAgent({ agent_id: agentRef.id }))
 					yield* recordStep("archived-agent-after-admission")
 					yield* environments.send(new ArchiveEnvironment({ environment_id: envRef.id }))
@@ -619,6 +652,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						completedTurnWorld,
 						automationWorld,
 						updatedAutomationWorld,
+						artifactWorld,
 						archivedEnvWorld,
 						finalWorld,
 						failures: platform.control.failures,
@@ -630,7 +664,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 
 		expect(results.failures).toEqual([])
 		expect(results.deaths).toEqual([])
-		expect(results.stepChecks.length).toBe(12)
+		expect(results.stepChecks.length).toBe(14)
 		for (const check of results.stepChecks) {
 			expect(check.invariants, `invariants failed at step '${check.step}'`).toEqual({
 				EverySessionReferencesExistingAgentVersion: true,
@@ -640,6 +674,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				AutomationViewsMatchAutomations: true,
 				ArtifactViewMatchesArtifact: true,
 				EveryArtifactVersionIsWithinItsArtifactsHead: true,
+				AutomationViewRevisionMatchesAutomation: true,
+				EveryArtifactVersionIsRecorded: true,
+				ReservedSlotsEqualLiveAutomations: true,
 			})
 		}
 
@@ -714,6 +751,35 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					state: { ...row.state, activation: 0 },
 				})),
 			}).AutomationViewsMatchAutomations,
+		).toBe(false)
+		expect(
+			evaluateCheckfuInvariants({
+				...updatedWorld,
+				AutomationView: updatedWorld.AutomationView.map((row) => ({
+					...row,
+					state: { ...row.state, revision: 99 },
+				})),
+			}).AutomationViewRevisionMatchesAutomation,
+		).toBe(false)
+		const artifactWorld = results.artifactWorld
+		expect(artifactWorld.Artifact.map((row) => row.state.version)).toEqual([2])
+		expect(artifactWorld.ArtifactVersionView.length).toBe(2)
+		expect(
+			evaluateCheckfuInvariants({
+				...artifactWorld,
+				ArtifactVersionView: artifactWorld.ArtifactVersionView.filter(
+					(row) => row.state.version === 1,
+				),
+			}).EveryArtifactVersionIsRecorded,
+		).toBe(false)
+		expect(
+			evaluateCheckfuInvariants({
+				...automationWorld,
+				AutomationCapacity: automationWorld.AutomationCapacity.map((row) => ({
+					...row,
+					state: { reserved: 0 },
+				})),
+			}).ReservedSlotsEqualLiveAutomations,
 		).toBe(false)
 		const runSession = automationWorld.Session.find(
 			(row) => row.id === `sess_${automationRef.id}_1`,
@@ -795,6 +861,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewsMatchAutomations: true,
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
+			AutomationViewRevisionMatchesAutomation: true,
+			EveryArtifactVersionIsRecorded: true,
+			ReservedSlotsEqualLiveAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -811,6 +880,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewsMatchAutomations: true,
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
+			AutomationViewRevisionMatchesAutomation: true,
+			EveryArtifactVersionIsRecorded: true,
+			ReservedSlotsEqualLiveAutomations: true,
 		})
 
 		const untampered = evaluateCheckfuInvariants(results.finalWorld)
@@ -852,6 +924,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewsMatchAutomations: true,
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
+			AutomationViewRevisionMatchesAutomation: true,
+			EveryArtifactVersionIsRecorded: true,
+			ReservedSlotsEqualLiveAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -866,6 +941,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewsMatchAutomations: true,
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
+			AutomationViewRevisionMatchesAutomation: true,
+			EveryArtifactVersionIsRecorded: true,
+			ReservedSlotsEqualLiveAutomations: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -885,6 +963,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewsMatchAutomations: true,
 			ArtifactViewMatchesArtifact: true,
 			EveryArtifactVersionIsWithinItsArtifactsHead: true,
+			AutomationViewRevisionMatchesAutomation: true,
+			EveryArtifactVersionIsRecorded: true,
+			ReservedSlotsEqualLiveAutomations: true,
 		})
 	})
 })

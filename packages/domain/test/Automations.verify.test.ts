@@ -52,6 +52,7 @@ const STANDING = {
 	"Automation.AnUpdateLeavesRunsAlone": "proved",
 	"Automations.AutomationViewMatchesAutomation": "checked",
 	"Automations.RunLedgerHoldsEveryReportedRun": "checked",
+	"Automations.AutomationViewRevisionMatchesAutomation": "checked",
 	"Automations.AnAutomationFiresOnSchedule": "reached",
 	"Automations.AnAutomationIsPaused": "reached",
 	"Automations.AnAutomationIsArchived": "reached",

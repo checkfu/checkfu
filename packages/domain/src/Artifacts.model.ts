@@ -40,6 +40,12 @@ export class Artifacts extends Domain.Model("Artifacts", {
 					].every((ok) => ok),
 				),
 			),
+		EveryArtifactVersionIsRecorded: (m) =>
+			m.Artifact.every(
+				(a) =>
+					m.ArtifactVersionView.filter((v) => v.state.artifact_id === a.id).length ===
+					a.state.version,
+			),
 	},
 	sometimes: {
 		AnArtifactGainsASecondVersion: (m) =>
