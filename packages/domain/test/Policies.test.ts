@@ -1,10 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Checkfu } from "../src/Checkfu.model.ts"
 
-const MAY_BE_FED_BY_A_VIEW = new Set(["StartTurn", "StopModelRequest"])
-
 describe("policies", () => {
-	it("are fed by an aggregate, except the session turn policies", () => {
+	it("are fed by an aggregate, except StartTurn", () => {
 		const fedByAView = Checkfu.definitions.policies
 			.filter((policy) => {
 				const from = policy.definition.from
@@ -12,7 +10,6 @@ describe("policies", () => {
 				return sources.some((source) => source.kind !== "Aggregate")
 			})
 			.map((policy) => policy.policyName)
-		expect(fedByAView).toContain("StartTurn")
-		expect(fedByAView.filter((name) => !MAY_BE_FED_BY_A_VIEW.has(name))).toEqual([])
+		expect(fedByAView).toEqual(["StartTurn"])
 	})
 })
