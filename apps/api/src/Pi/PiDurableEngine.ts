@@ -330,7 +330,67 @@ const admitPiTurnUnderWay = (
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
 		let finalizedPrevious: string | undefined
+		let credentialsVerified = false
 		while (true) {
+			if (!credentialsVerified) {
+				const precheck = yield* backend.withLock(
+					Effect.promise(async (): Promise<"submitted" | "cancelled" | "check_credentials"> => {
+						const pi = await backend.pi()
+						if ((await submissionOf(pi, operationId)) !== undefined) {
+							return "submitted"
+						}
+						if (backend.isCancelled(operationId)) {
+							return "cancelled"
+						}
+						return "check_credentials"
+					}),
+				)
+				if (precheck === "submitted") {
+					return true
+				}
+				if (precheck === "cancelled") {
+					return false
+				}
+				const credentialOutcome = yield* Effect.promise(async (): Promise<AdmitPiTurnResult> => {
+					if (backend.checkCredentials !== undefined) {
+						const check = await backend.checkCredentials(request.provider)
+						return check.ok ? true : { _tag: "missing_key", message: check.message }
+					}
+					if (await backend.hasApiKey(request.provider)) {
+						return true
+					}
+					return {
+						_tag: "missing_key",
+						message:
+							backend.missingCredentialsMessage === undefined
+								? undefined
+								: await backend.missingCredentialsMessage(request.provider),
+					}
+				})
+				if (backend.isCancelled(operationId)) {
+					return false
+				}
+				if (typeof credentialOutcome === "object") {
+					const raced = yield* backend.withLock(
+						Effect.promise(async (): Promise<"submitted" | "cancelled" | "missing"> => {
+							const pi = await backend.pi()
+							if ((await submissionOf(pi, operationId)) !== undefined) {
+								return "submitted"
+							}
+							return backend.isCancelled(operationId) ? "cancelled" : "missing"
+						}),
+					)
+					if (raced === "submitted") {
+						return true
+					}
+					if (raced === "cancelled") {
+						return false
+					}
+					return credentialOutcome
+				}
+				credentialsVerified = true
+			}
+
 			const admitted: AdmitLockOutcome = yield* backend.withLock(
 				Effect.promise(async (): Promise<AdmitLockOutcome> => {
 					const pi = await backend.pi()
@@ -339,20 +399,6 @@ const admitPiTurnUnderWay = (
 					}
 					if (backend.isCancelled(operationId)) {
 						return false
-					}
-					if (backend.checkCredentials !== undefined) {
-						const check = await backend.checkCredentials(request.provider)
-						if (!check.ok) {
-							return { _tag: "missing_key", message: check.message }
-						}
-					} else if (!(await backend.hasApiKey(request.provider))) {
-						return {
-							_tag: "missing_key",
-							message:
-								backend.missingCredentialsMessage === undefined
-									? undefined
-									: await backend.missingCredentialsMessage(request.provider),
-						}
 					}
 					await backend.ensureRoot(agent)
 					if (backend.isCancelled(operationId)) {

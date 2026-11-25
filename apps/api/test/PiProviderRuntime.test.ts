@@ -4,14 +4,17 @@ import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import type { ProviderRuntimeConfig } from "@checkfu/pi-providers/catalog"
+import type { ProviderRuntimeConfig, ProviderSpec } from "@checkfu/pi-providers/catalog"
+import { buildPiProvider } from "@checkfu/pi-providers/runtime"
+import { hasApi } from "@earendil-works/pi-ai/models"
 import { describe, expect, it, vi } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import { runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import { AbortGrace, abortPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
 import { PiHarnessWorker } from "../src/Pi/PiHarness.ts"
 import {
 	EnvPiProviderRuntimeLive,
@@ -160,6 +163,298 @@ describe("PiProviderRuntime", () => {
 				yield* Effect.promise(() => Promise.resolve(providers.checkCredentials("openai"))),
 			).toMatchObject({ ok: false })
 		}),
+	)
+
+	it.live(
+		"rejects requests for models removed from a custom provider allowlist or with an incompatible API",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* Effect.acquireRelease(
+					Effect.promise(() => startCaptureResponsesServer()),
+					(running) => Effect.promise(() => running.close()),
+				)
+				const makeSpec = (
+					format: "openai-responses" | "openai-completions",
+					modelIds: ReadonlyArray<string>,
+				): ProviderSpec => ({
+					id: "acme",
+					name: "Acme",
+					source: "custom",
+					defaultFormat: format,
+					formats: [format],
+					baseUrl: server.baseUrl,
+					auth: { kind: "bearer", env: "ACME_API_KEY", label: "Acme API Key" },
+					allowUnlistedModels: false,
+					models: Object.fromEntries(modelIds.map((id) => [id, {}])),
+				})
+
+				let currentSpec = makeSpec("openai-responses", ["model-a", "model-b"])
+				const runtime = dynamicPiProviderRuntime(() =>
+					Effect.succeed({
+						env: { ACME_API_KEY: "sk-acme-1" },
+						customProviders: [currentSpec],
+					}),
+				)
+				const providers = yield* runtime.forSession({ sessionId: "sess_allowlist" })
+				const models = providers.createModels()
+				const staleModelA = models.getModel("acme", "model-a")
+				expect(staleModelA).toBeDefined()
+				if (staleModelA === undefined || !hasApi(staleModelA, "openai-responses")) {
+					return
+				}
+
+				// Remove model-a from the allowlist while acme remains configured.
+				currentSpec = makeSpec("openai-responses", ["model-b"])
+				const simpleRemoved = yield* Effect.promise(() =>
+					models.completeSimple(staleModelA, {
+						messages: [{ role: "user", content: "blocked", timestamp: 1_700_000_000_000 }],
+					}),
+				)
+				expect(simpleRemoved.stopReason).toBe("error")
+				expect(simpleRemoved.errorMessage).toContain("acme/model-a")
+
+				const typedRemoved = yield* Effect.promise(() =>
+					models.complete(staleModelA, {
+						messages: [{ role: "user", content: "blocked", timestamp: 1_700_000_000_001 }],
+					}),
+				)
+				expect(typedRemoved.stopReason).toBe("error")
+				expect(typedRemoved.errorMessage).toContain("acme/model-a")
+
+				const deferredHandle = {
+					id: "handle_1",
+					provider: "acme",
+					modelId: "model-a",
+					api: "openai-responses",
+				} as const
+
+				const deferredRemoved = yield* Effect.promise(() =>
+					models.fetchDeferred(staleModelA, deferredHandle),
+				)
+				expect(deferredRemoved.stopReason).toBe("error")
+
+				const cancelRemoved = yield* Effect.flip(
+					Effect.tryPromise({
+						try: () => models.cancelDeferred(staleModelA, deferredHandle),
+						catch: String,
+					}),
+				)
+				expect(cancelRemoved).toContain("acme/model-a")
+				expect(yield* Effect.promise(() => models.getAuth(staleModelA))).toBeUndefined()
+
+				// Re-add model-a on an incompatible API: typed stream/complete must reject it.
+				currentSpec = makeSpec("openai-completions", ["model-a"])
+				const incompatibleApi = yield* Effect.promise(() =>
+					models.complete(staleModelA, {
+						messages: [{ role: "user", content: "wrong-api", timestamp: 1_700_000_000_002 }],
+					}),
+				)
+				expect(incompatibleApi.stopReason).toBe("error")
+				expect(incompatibleApi.errorMessage).toContain("openai-completions")
+				expect(server.authHeaders).toEqual([])
+			}),
+	)
+
+	it.live(
+		"refreshes synchronous model lookups on checkCredentials when a provider or model is added mid-session",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* Effect.acquireRelease(
+					Effect.promise(() => startCaptureResponsesServer()),
+					(running) => Effect.promise(() => running.close()),
+				)
+				let customProviders: ReadonlyArray<ProviderSpec> = []
+				const runtime = dynamicPiProviderRuntime(() =>
+					Effect.succeed({
+						env: customProviders.length > 0 ? { ACME_API_KEY: "sk-acme-added" } : {},
+						customProviders,
+					}),
+				)
+
+				const providers = yield* runtime.forSession({ sessionId: "sess_added_mid" })
+				const models = providers.createModels()
+				expect(models.getModel("acme", "model-new")).toBeUndefined()
+
+				customProviders = [
+					{
+						id: "acme",
+						name: "Acme",
+						source: "custom",
+						defaultFormat: "openai-responses",
+						formats: ["openai-responses"],
+						baseUrl: server.baseUrl,
+						auth: { kind: "bearer", env: "ACME_API_KEY", label: "Acme API Key" },
+						allowUnlistedModels: false,
+						models: { "model-new": {} },
+					},
+				]
+
+				expect(
+					yield* Effect.promise(() => Promise.resolve(providers.checkCredentials("acme"))),
+				).toEqual({ ok: true })
+
+				const addedModel = models.getModel("acme", "model-new")
+				expect(addedModel).toBeDefined()
+				if (addedModel === undefined) {
+					return
+				}
+
+				// Newly opened registries (e.g. after storage reopen) also see the synced provider.
+				expect(providers.createModels().getModel("acme", "model-new")?.id).toBe("model-new")
+
+				const reply = yield* Effect.promise(() =>
+					models.completeSimple(addedModel, {
+						messages: [{ role: "user", content: "hello", timestamp: 1_700_000_000_000 }],
+					}),
+				)
+				expect(reply.stopReason).toBe("stop")
+				expect(server.authHeaders).toEqual(["Bearer sk-acme-added"])
+			}),
+	)
+
+	it.live(
+		"preserves setProvider, deleteProvider, and clearProviders across dynamic resolutions",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* Effect.acquireRelease(
+					Effect.promise(() => startCaptureResponsesServer()),
+					(running) => Effect.promise(() => running.close()),
+				)
+				const runtime = dynamicPiProviderRuntime(() =>
+					Effect.succeed({
+						env: { OPENAI_API_KEY: "sk-openai-live", ANTHROPIC_API_KEY: "sk-ant-live" },
+						baseUrlOverrides: { openai: server.baseUrl },
+					}),
+				)
+
+				const providers = yield* runtime.forSession({ sessionId: "sess_mutations" })
+				const models = providers.createModels()
+				const openaiModel = models.getModel("openai", "gpt-4o-mini")
+				expect(openaiModel).toBeDefined()
+				if (openaiModel === undefined) {
+					return
+				}
+
+				models.deleteProvider("openai")
+				expect(models.getProvider("openai")).toBeUndefined()
+				expect(yield* Effect.promise(() => models.getAuth("openai"))).toBeUndefined()
+				expect(yield* Effect.promise(() => models.checkAuth("openai"))).toBeUndefined()
+				const deletedReply = yield* Effect.promise(() =>
+					models.completeSimple(openaiModel, {
+						messages: [{ role: "user", content: "deleted", timestamp: 1_700_000_000_000 }],
+					}),
+				)
+				expect(deletedReply.stopReason).toBe("error")
+				expect(server.authHeaders).toEqual([])
+
+				// Even after checkCredentials syncs openai, the explicit deleteProvider stays honored.
+				yield* Effect.promise(() => Promise.resolve(providers.checkCredentials("openai")))
+				expect(models.getProvider("openai")).toBeUndefined()
+
+				const overrideSpec: ProviderSpec = {
+					id: "custom-override",
+					name: "Custom Override",
+					source: "custom",
+					defaultFormat: "openai-responses",
+					formats: ["openai-responses"],
+					baseUrl: server.baseUrl,
+					auth: { kind: "bearer", env: "CUSTOM_OVERRIDE_KEY", label: "Custom Override Key" },
+					allowUnlistedModels: false,
+					models: { "override-model": {} },
+				}
+				const overrideProvider = buildPiProvider(overrideSpec, {
+					env: { CUSTOM_OVERRIDE_KEY: "sk-override-key" },
+				})
+
+				models.clearProviders()
+				expect(models.getProviders()).toEqual([])
+				expect(yield* Effect.promise(() => models.getAuth("anthropic"))).toBeUndefined()
+
+				models.setProvider(overrideProvider)
+				expect(models.getProviders().map((p) => p.id)).toEqual(["custom-override"])
+				const overrideAuth = yield* Effect.promise(() => models.getAuth("custom-override"))
+				expect(overrideAuth?.auth.headers?.Authorization).toBe("Bearer sk-override-key")
+				expect(yield* Effect.promise(() => models.getAuth("anthropic"))).toBeUndefined()
+			}),
+	)
+
+	it.live(
+		"runs slow credential checks outside the session lock so abort does not reset the Durable Object",
+		() =>
+			Effect.gen(function* () {
+				const cancelled = new Set<string>()
+				const harnessAborts: Array<string> = []
+				let resetCount = 0
+				let ensureRootCalls = 0
+				let submitCalls = 0
+
+				let markCheckEntered!: () => void
+				const checkEntered = new Promise<void>((resolve) => {
+					markCheckEntered = resolve
+				})
+				let releaseCheck!: () => void
+				const checkGate = new Promise<void>((resolve) => {
+					releaseCheck = resolve
+				})
+
+				const backend = makePiHarnessBackend(
+					{
+						pi: async () => ({
+							commit: async () => undefined,
+						}),
+						abort: async ({ operationId }: { readonly operationId: string }) => {
+							harnessAborts.push(operationId)
+						},
+						root: async () => {
+							ensureRootCalls += 1
+						},
+						submit: async () => {
+							submitCalls += 1
+						},
+					} as unknown as Parameters<typeof makePiHarnessBackend>[0],
+					{
+						isCancelled: (operationId: string) => cancelled.has(operationId),
+						markCancelled: (operationId: string) => {
+							cancelled.add(operationId)
+						},
+					} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+					{},
+					() => {
+						resetCount += 1
+					},
+					() => Promise.resolve(true),
+					{
+						checkCredentials: async () => {
+							markCheckEntered()
+							await checkGate
+							return { ok: true }
+						},
+					},
+				)
+
+				try {
+					const turnFiber = yield* Effect.forkChild(
+						runPiDurableTurn(backend, makeTurnRequest(1, "openai")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => checkEntered)
+
+					const aborted = yield* abortPiDurableTurn(backend, "turn:1").pipe(
+						Effect.provideService(AbortGrace, "30 millis"),
+					)
+					expect(aborted).toBe(true)
+					expect(resetCount).toBe(0)
+					expect(harnessAborts).toEqual(["turn:1"])
+
+					releaseCheck()
+					const outcome = yield* Fiber.join(turnFiber)
+					expect(outcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+					expect(ensureRootCalls).toBe(0)
+					expect(submitCalls).toBe(0)
+				} finally {
+					releaseCheck()
+				}
+			}),
 	)
 
 	it.effect("invokes async checkCredentials once per turn admission and surfaces its message", () =>

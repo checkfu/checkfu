@@ -1,8 +1,9 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type { ProviderCredentialCheck, ProviderRuntimeConfig } from "@checkfu/pi-providers/catalog"
 import { createProviderModels } from "@checkfu/pi-providers/runtime"
-import { lazyStream } from "@earendil-works/pi-ai"
-import type { AnyModel, Api, Model, ModelType, ModelTypeMap } from "@earendil-works/pi-ai"
+import { ModelsError, getModelType, lazyStream } from "@earendil-works/pi-ai"
+import type { AnyModel, Api, Model, ModelType, ModelTypeMap, Provider } from "@earendil-works/pi-ai"
+import { hasApi } from "@earendil-works/pi-ai/models"
 import type { MutableModels } from "@earendil-works/pi-ai/models"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -52,39 +53,85 @@ export const staticPiProviderRuntime = (
 		}),
 })
 
-const refreshChatModel = <TApi extends Api>(
+const unavailableModelMessage = (provider: string, id: string): string =>
+	`Model "${provider}/${id}" is not available in the current provider configuration.`
+
+const requireCurrentChatModel = (models: MutableModels, model: Model<Api>): Model<Api> => {
+	const resolved = models.getModel(model.provider, model.id)
+	if (resolved === undefined) {
+		throw new ModelsError("model_validation", unavailableModelMessage(model.provider, model.id))
+	}
+	return resolved
+}
+
+const requireCurrentTypedChatModel = <TApi extends Api>(
 	models: MutableModels,
 	model: Model<TApi>,
 ): Model<TApi> => {
-	const resolved = models.getModel(model.provider, model.id)
-	if (resolved === undefined || resolved.api !== model.api) {
-		return model
+	const resolved = requireCurrentChatModel(models, model)
+	if (!hasApi(resolved, model.api)) {
+		throw new ModelsError(
+			"model_validation",
+			`Model "${model.provider}/${model.id}" uses API "${resolved.api}", not "${model.api}".`,
+		)
 	}
-	return {
-		...model,
-		baseUrl: resolved.baseUrl,
-		...(resolved.headers === undefined ? {} : { headers: resolved.headers }),
-	}
+	return resolved
+}
+
+interface DynamicModelsController {
+	readonly models: MutableModels
+	readonly syncConfig: (config: ProviderRuntimeConfig, provider?: string) => void
 }
 
 const createDynamicProviderModels = (
 	initialConfig: ProviderRuntimeConfig,
-	resolveConfig: (provider?: string) => Promise<ProviderRuntimeConfig>,
-): MutableModels => {
-	let baselineConfig = initialConfig
+	resolveConfig: (
+		provider?: string,
+		caller?: DynamicModelsController,
+	) => Promise<ProviderRuntimeConfig>,
+): DynamicModelsController => {
 	let baselineModels = createProviderModels(initialConfig)
+	let lastFullConfig: ProviderRuntimeConfig | undefined = initialConfig
+	let cleared = false
+	const overrides = new Map<string, Provider<Api>>()
+	const deletions = new Set<string>()
 
-	const resolveModels = async (provider?: string): Promise<MutableModels> => {
-		const nextConfig = await resolveConfig(provider)
-		if (nextConfig === baselineConfig) {
+	const applyMutations = (target: MutableModels): MutableModels => {
+		if (cleared) {
+			target.clearProviders()
+		}
+		for (const id of deletions) {
+			target.deleteProvider(id)
+		}
+		for (const provider of overrides.values()) {
+			target.setProvider(provider)
+		}
+		return target
+	}
+
+	const buildAndSync = (config: ProviderRuntimeConfig, provider?: string): MutableModels => {
+		if (provider === undefined && config === lastFullConfig) {
 			return baselineModels
 		}
-		const fresh = createProviderModels(nextConfig)
+		const fresh = applyMutations(createProviderModels(config))
 		if (provider === undefined) {
-			baselineConfig = nextConfig
 			baselineModels = fresh
+			lastFullConfig = config
+			return fresh
 		}
+		const updated = fresh.getProvider(provider)
+		if (updated !== undefined) {
+			baselineModels.setProvider(updated)
+		} else {
+			baselineModels.deleteProvider(provider)
+		}
+		lastFullConfig = undefined
 		return fresh
+	}
+
+	const resolveModels = async (provider?: string): Promise<MutableModels> => {
+		const nextConfig = await resolveConfig(provider, controller)
+		return buildAndSync(nextConfig, provider)
 	}
 
 	function getModelsOfType<TType extends ModelType>(
@@ -127,24 +174,65 @@ const createDynamicProviderModels = (
 
 	function getAuth(
 		providerId: string,
-		overrides?: Parameters<MutableModels["getAuth"]>[1],
+		overridesParam?: Parameters<MutableModels["getAuth"]>[1],
 	): ReturnType<MutableModels["getAuth"]>
 	function getAuth(
 		model: AnyModel,
-		overrides?: Parameters<MutableModels["getAuth"]>[1],
+		overridesParam?: Parameters<MutableModels["getAuth"]>[1],
 	): ReturnType<MutableModels["getAuth"]>
 	async function getAuth(
 		target: string | AnyModel,
-		overrides?: Parameters<MutableModels["getAuth"]>[1],
+		overridesParam?: Parameters<MutableModels["getAuth"]>[1],
 	) {
 		const providerId = typeof target === "string" ? target : target.provider
 		const models = await resolveModels(providerId)
-		return typeof target === "string"
-			? models.getAuth(target, overrides)
-			: models.getAuth(target, overrides)
+		if (typeof target === "string") {
+			return models.getAuth(target, overridesParam)
+		}
+		const resolved = models.getModelOfType(getModelType(target), target.provider, target.id)
+		if (resolved === undefined) {
+			return undefined
+		}
+		return models.getAuth(resolved, overridesParam)
 	}
 
-	return {
+	const stream: MutableModels["stream"] = (model, context, options) =>
+		lazyStream(
+			model,
+			async () => {
+				const models = await resolveModels(model.provider)
+				const target = requireCurrentTypedChatModel(models, model)
+				return models.stream(target, context, options)
+			},
+			undefined,
+			options?.signal,
+		)
+
+	const streamSimple: MutableModels["streamSimple"] = (model, context, options) =>
+		lazyStream(
+			model,
+			async () => {
+				const models = await resolveModels(model.provider)
+				const target = requireCurrentChatModel(models, model)
+				return models.streamSimple(target, context, options)
+			},
+			undefined,
+			options?.signal,
+		)
+
+	const streamDeferred: MutableModels["streamDeferred"] = (model, handle, options) =>
+		lazyStream(
+			model,
+			async () => {
+				const models = await resolveModels(model.provider)
+				const target = requireCurrentChatModel(models, model)
+				return models.streamDeferred(target, handle, options)
+			},
+			undefined,
+			options?.signal,
+		)
+
+	const models: MutableModels = {
 		getProviders: () => baselineModels.getProviders(),
 		getProvider: (id) => baselineModels.getProvider(id),
 		getModels: (provider) => baselineModels.getModels(provider),
@@ -165,89 +253,125 @@ const createDynamicProviderModels = (
 			(await resolveModels(providerId)).login(providerId, type, interaction, options),
 		logout: async (providerId, options) =>
 			(await resolveModels(providerId)).logout(providerId, options),
-		stream: (model, context, options) =>
-			lazyStream(
-				model,
-				async () => {
-					const models = await resolveModels(model.provider)
-					return models.stream(refreshChatModel(models, model), context, options)
-				},
-				undefined,
-				options?.signal,
-			),
-		complete: async (model, context, options) => {
-			const models = await resolveModels(model.provider)
-			return models.complete(refreshChatModel(models, model), context, options)
-		},
-		streamSimple: (model, context, options) =>
-			lazyStream(
-				model,
-				async () => {
-					const models = await resolveModels(model.provider)
-					const target = models.getModel(model.provider, model.id) ?? model
-					return models.streamSimple(target, context, options)
-				},
-				undefined,
-				options?.signal,
-			),
-		completeSimple: async (model, context, options) => {
-			const models = await resolveModels(model.provider)
-			const target = models.getModel(model.provider, model.id) ?? model
-			return models.completeSimple(target, context, options)
-		},
-		streamDeferred: (model, handle, options) =>
-			lazyStream(
-				model,
-				async () => {
-					const models = await resolveModels(model.provider)
-					const target = models.getModel(model.provider, model.id) ?? model
-					return models.streamDeferred(target, handle, options)
-				},
-				undefined,
-				options?.signal,
-			),
-		fetchDeferred: async (model, handle, options) => {
-			const models = await resolveModels(model.provider)
-			const target = models.getModel(model.provider, model.id) ?? model
-			return models.fetchDeferred(target, handle, options)
-		},
+		stream,
+		complete: (model, context, options) => stream(model, context, options).result(),
+		streamSimple,
+		completeSimple: (model, context, options) => streamSimple(model, context, options).result(),
+		streamDeferred,
+		fetchDeferred: (model, handle, options) => streamDeferred(model, handle, options).result(),
 		cancelDeferred: async (model, handle, options) => {
-			const models = await resolveModels(model.provider)
-			const target = models.getModel(model.provider, model.id) ?? model
-			return models.cancelDeferred(target, handle, options)
+			const resolvedModels = await resolveModels(model.provider)
+			const target = requireCurrentChatModel(resolvedModels, model)
+			return resolvedModels.cancelDeferred(target, handle, options)
 		},
-		generateImages: async (model, context, options) =>
-			(await resolveModels(model.provider)).generateImages(model, context, options),
-		classify: async (model, context, options) =>
-			(await resolveModels(model.provider)).classify(model, context, options),
+		generateImages: async (model, context, options) => {
+			const resolvedModels = await resolveModels(model.provider)
+			const target = resolvedModels.getModelOfType("image", model.provider, model.id)
+			if (target === undefined) {
+				return {
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					output: [],
+					stopReason: options?.signal?.aborted ? "aborted" : "error",
+					errorMessage: unavailableModelMessage(model.provider, model.id),
+					timestamp: Date.now(),
+				}
+			}
+			return resolvedModels.generateImages(target, context, options)
+		},
+		classify: async (model, context, options) => {
+			const resolvedModels = await resolveModels(model.provider)
+			const target = resolvedModels.getModelOfType("classifier", model.provider, model.id)
+			if (target === undefined) {
+				return {
+					api: model.api,
+					provider: model.provider,
+					model: model.id,
+					answers: {},
+					stopReason: options?.signal?.aborted ? "aborted" : "error",
+					errorMessage: unavailableModelMessage(model.provider, model.id),
+					timestamp: Date.now(),
+				}
+			}
+			return resolvedModels.classify(target, context, options)
+		},
 		setProvider: (provider) => {
+			deletions.delete(provider.id)
+			overrides.set(provider.id, provider)
+			lastFullConfig = undefined
 			baselineModels.setProvider(provider)
 		},
 		deleteProvider: (id) => {
+			overrides.delete(id)
+			deletions.add(id)
+			lastFullConfig = undefined
 			baselineModels.deleteProvider(id)
 		},
 		clearProviders: () => {
+			cleared = true
+			overrides.clear()
+			deletions.clear()
+			lastFullConfig = undefined
 			baselineModels.clearProviders()
 		},
 	}
+
+	const controller: DynamicModelsController = {
+		models,
+		syncConfig: (config, provider) => {
+			buildAndSync(config, provider)
+		},
+	}
+
+	return controller
 }
 
 export const dynamicPiProviderRuntime = (
 	resolve: (context: PiProviderResolveContext) => Effect.Effect<ProviderRuntimeConfig>,
 ): PiProviderRuntimeService => ({
 	forSession: ({ sessionId }) =>
-		Effect.map(resolve({ sessionId }), (initialConfig) => ({
-			createModels: () =>
-				createDynamicProviderModels(initialConfig, (provider) =>
-					Effect.runPromise(
-						resolve(provider === undefined ? { sessionId } : { sessionId, provider }),
-					),
-				),
-			checkCredentials: async (provider) => {
-				const config = await Effect.runPromise(resolve({ sessionId, provider }))
-				return checkCatalogProviderCredentials(provider, config, config.customProviders)
-			},
-		})),
+		Effect.map(resolve({ sessionId }), (initialConfig) => {
+			let latestConfig = initialConfig
+			const syncedByProvider = new Map<string, ProviderRuntimeConfig>()
+			const instances = new Set<DynamicModelsController>()
+
+			const resolveAndSync = async (
+				provider?: string,
+				caller?: DynamicModelsController,
+			): Promise<ProviderRuntimeConfig> => {
+				const config = await Effect.runPromise(
+					resolve(provider === undefined ? { sessionId } : { sessionId, provider }),
+				)
+				if (provider === undefined) {
+					latestConfig = config
+					syncedByProvider.clear()
+				} else {
+					syncedByProvider.set(provider, config)
+				}
+				for (const instance of instances) {
+					if (instance !== caller) {
+						instance.syncConfig(config, provider)
+					}
+				}
+				return config
+			}
+
+			return {
+				createModels: () => {
+					const controller = createDynamicProviderModels(latestConfig, resolveAndSync)
+					for (const [provider, config] of syncedByProvider) {
+						controller.syncConfig(config, provider)
+					}
+					instances.add(controller)
+					return controller.models
+				},
+				checkCredentials: async (provider) => {
+					const config = await resolveAndSync(provider)
+					return checkCatalogProviderCredentials(provider, config, config.customProviders)
+				},
+			}
+		}),
 })
 
 /**
