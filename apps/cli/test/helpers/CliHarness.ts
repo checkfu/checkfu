@@ -131,6 +131,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 				runTurn: effective.generate,
 				interrupt: effective.interrupt,
 				discardWorkspace: () => Effect.void,
+				storeRepositoryToken: () => Effect.void,
 			}),
 		)
 		const CheckfuLive = Checkfu.layer(
@@ -138,6 +139,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		)
 		const ServerLayer = Layer.mergeAll(
 			CheckfuLive,
+			HarnessLive,
 			makeArtifactStoreMemory().layer,
 			ArtifactLinksTest,
 		).pipe(

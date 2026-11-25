@@ -29,6 +29,7 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 					agent_version: pinnedVersion,
 					environment_id: environment.id,
 					title: cmd.title,
+					resources: cmd.resources,
 				}),
 			),
 		]

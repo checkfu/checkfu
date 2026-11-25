@@ -1,6 +1,6 @@
-export interface TurnToken {
-	readonly turn: number
-}
+import type { TurnToken } from "./WorkspaceShapes.ts"
+
+export type { TurnToken } from "./WorkspaceShapes.ts"
 
 export interface FenceStore {
 	readonly get: () => TurnToken | undefined
@@ -12,6 +12,15 @@ export const makeTurnFence = (store: FenceStore) => {
 	const isCurrent = (token: TurnToken): boolean => {
 		const newest = store.get()
 		return newest === undefined || token.turn >= newest.turn
+	}
+	const hold = async <A>(work: () => Promise<A>): Promise<A> => {
+		const done = work()
+		running.add(done)
+		try {
+			return await done
+		} finally {
+			running.delete(done)
+		}
 	}
 	const drain = async (): Promise<void> => {
 		await Promise.allSettled(running)
@@ -26,17 +35,8 @@ export const makeTurnFence = (store: FenceStore) => {
 			return isCurrent(token)
 		},
 		drain,
-		run: async <A>(token: TurnToken, work: () => Promise<A>): Promise<A | undefined> => {
-			if (!isCurrent(token)) {
-				return undefined
-			}
-			const done = work()
-			running.add(done)
-			try {
-				return await done
-			} finally {
-				running.delete(done)
-			}
-		},
+		run: async <A>(token: TurnToken, work: () => Promise<A>): Promise<A | undefined> =>
+			isCurrent(token) ? hold(work) : undefined,
+		hold,
 	}
 }

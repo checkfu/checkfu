@@ -1,6 +1,7 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
 import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
+import { RepositoryMount, TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
 import { SUPPORTED_PROVIDERS } from "./PiCatalog.ts"
 
 export const PiTurnRequest = Schema.Struct({
@@ -44,5 +45,19 @@ export const PiHarnessCalls = {
 	recoverTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: PiRecoveredTurn },
 	runTurn: { args: Schema.Tuple([Schema.String, PiTurnRequest]), result: PiTurnOutcome },
 	abortTurn: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
+	enterWorkspace: { args: Schema.Tuple([Schema.String, TurnToken]), result: Schema.Boolean },
+	prepareWorkspace: {
+		args: Schema.Tuple([
+			Schema.String,
+			TurnToken,
+			Schema.Array(RepositoryMount),
+			Schema.NullOr(Schema.Array(Schema.String)),
+		]),
+		result: WorkspacePreparation,
+	},
+	storeRepositoryToken: {
+		args: Schema.Tuple([Schema.String, Schema.String, Schema.String, Schema.Boolean]),
+		result: Schema.Void,
+	},
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 } as const

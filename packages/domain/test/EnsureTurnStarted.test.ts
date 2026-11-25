@@ -72,6 +72,7 @@ const harnessOf =
 				const isStopped = (turn: number) => Deferred.isDoneUnsafe(stopOf(turn))
 				return {
 					discardWorkspace: () => Effect.void,
+					storeRepositoryToken: () => Effect.void,
 					interrupt: ({ turn }: { readonly turn: number }) =>
 						Effect.gen(function* () {
 							calls.push(`interrupt:${turn}`)
@@ -180,6 +181,7 @@ const run = <A, E, R>(
 			agent_version: null,
 			environment_id: BoundedEnvironmentId.make("env_ensure"),
 			title: null,
+			resources: [],
 		})
 		yield* settle(platform)
 		return yield* body(platform, clock)

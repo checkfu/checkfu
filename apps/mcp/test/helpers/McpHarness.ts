@@ -39,12 +39,14 @@ export const makeTestServer = Effect.gen(function* () {
 				}),
 			interrupt: () => Effect.void,
 			discardWorkspace: () => Effect.void,
+			storeRepositoryToken: () => Effect.void,
 		}),
 	)
 	const ApiLayer = Layer.mergeAll(
 		Checkfu.layer(
 			CheckfuHandlersLive.pipe(Layer.provide(ListingStore.memory), Layer.provide(HarnessLive)),
 		),
+		HarnessLive,
 		makeArtifactStoreMemory().layer,
 		ArtifactLinksTest,
 	).pipe(

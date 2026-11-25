@@ -26,6 +26,7 @@
 		"@earendil-works/pi-ai": "catalog:",
 		"@earendil-works/pi-durable": "catalog:",
 		"@earendil-works/pi-schema": "catalog:",
+		"@platformatic/vfs": "catalog:",
 		"agents": "catalog:",
 		"alchemy": "catalog:",
 		"effect": "catalog:",

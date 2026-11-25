@@ -54,6 +54,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { SessionResourceId } from "../src/Session/SessionResource.ts"
 import {
 	AdmitSession,
 	AgentVersionNotFound,
@@ -70,6 +71,7 @@ const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
 		discardWorkspace: () => Effect.void,
+		storeRepositoryToken: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
@@ -114,6 +116,25 @@ describe("Checkfu unified hosted model stories", () => {
 			const sessionRejected = Session.ref(SessionId.make("sess_verify_rejected"))
 			const reqId = `${sessionV1.id}:turn:1:req:1`
 			const envConfig = { type: "cloud" as const, networking: { type: "unrestricted" as const } }
+			const repositories = [
+				{
+					id: SessionResourceId.make("sesrsc_verify_api"),
+					type: "github_repository" as const,
+					url: "https://github.com/acme/api",
+					mount_path: "/workspace/api",
+					checkout: null,
+				},
+				{
+					id: SessionResourceId.make("sesrsc_verify_docs"),
+					type: "github_repository" as const,
+					url: "https://github.com/acme/docs",
+					mount_path: "/workspace/handbook",
+					checkout: {
+						type: "commit" as const,
+						sha: "0123456789abcdef0123456789abcdef01234567",
+					},
+				},
+			]
 
 			return story(
 				Story.clock(t0),
@@ -281,6 +302,7 @@ describe("Checkfu unified hosted model stories", () => {
 						agent_version: 1,
 						environment_id: boundedEnvId,
 						title: "Pinned v1",
+						resources: repositories,
 					}),
 				),
 				Story.then(
@@ -290,6 +312,7 @@ describe("Checkfu unified hosted model stories", () => {
 						agent_version: 1,
 						environment_id: env.id,
 						title: "Pinned v1",
+						resources: repositories,
 					}),
 				),
 				Story.replied({ agent_version: 1 }),
@@ -356,6 +379,8 @@ describe("Checkfu unified hosted model stories", () => {
 					updated_at: t0,
 					archived_at: null,
 				}),
+				Story.view(SessionView, sessionV1, { resources: repositories }),
+				Story.view(TurnInput, sessionV1, { resources: repositories }),
 				Story.view(SessionView, sessionLatest, {
 					id: sessionLatest.id,
 					type: "session",
@@ -363,6 +388,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent_version: 2,
 					environment_id: env.id,
 					title: null,
+					resources: [],
 					status: "idle",
 					turn: 0,
 					usage: { input_tokens: 0, output_tokens: 0 },
@@ -374,6 +400,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent_id: agent.id,
 					agent_version: 2,
 					environment_id: env.id,
+					resources: [],
 					turn: 0,
 					input: [],
 					unsent: [],
@@ -417,6 +444,7 @@ describe("Checkfu unified hosted model stories", () => {
 					agent_id: agent.id,
 					agent_version: 1,
 					environment_id: env.id,
+					resources: repositories,
 					turn: 1,
 				}),
 				Story.succeed(Harness.runTurn, {

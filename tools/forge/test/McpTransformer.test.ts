@@ -385,6 +385,69 @@ describe("MCP tool projection", () => {
 		expect(Object.keys((tool?.inputSchema["$defs"] ?? {}) as object)).toContain("SessionEvent")
 	})
 
+	it("leaves a secret out of a tool's arguments, wherever in the body it is, and refuses a required one", () => {
+		const secret = { type: "string", format: "password" }
+		const body = (schema: Json) => ({
+			...searchAgents,
+			"x-checkfu-mcp": { name: "agents_searchAgents" },
+			requestBody: { required: true, content: { "application/json": { schema } } },
+		})
+		const tool = project(
+			withOperation(
+				"/v1/agents/search",
+				"post",
+				body({
+					type: "object",
+					properties: {
+						name: { type: "string" },
+						token: secret,
+						sources: {
+							type: "array",
+							items: {
+								anyOf: [
+									{
+										type: "object",
+										properties: { url: { type: "string" }, authorization_token: secret },
+										required: ["url"],
+										additionalProperties: false,
+									},
+								],
+							},
+						},
+					},
+					required: ["name"],
+					additionalProperties: false,
+				}),
+			),
+		).find((candidate) => candidate.name === "agents_searchAgents")
+		expect(tool?.inputSchema["properties"]).toMatchObject({
+			body: {
+				properties: {
+					name: { type: "string" },
+					sources: {
+						items: { anyOf: [{ properties: { url: { type: "string" } }, required: ["url"] }] },
+					},
+				},
+				required: ["name"],
+			},
+		})
+		expect(JSON.stringify(tool?.inputSchema)).not.toContain("token")
+		expect(() =>
+			project(
+				withOperation(
+					"/v1/agents/search",
+					"post",
+					body({ type: "object", properties: { token: secret }, required: ["token"] }),
+				),
+			),
+		).toThrow(/POST \/v1\/agents\/search: MCP tools cannot take the secret "token"/)
+		const created = project(exportDeterministicOpenApiJson()).find(
+			(candidate) => candidate.name === "sessions_createSession",
+		)
+		expect(JSON.stringify(created?.inputSchema)).toContain("github_repository")
+		expect(JSON.stringify(created?.inputSchema)).not.toContain("authorization_token")
+	})
+
 	it("emits one module that carries the API version and the tool manifest", () => {
 		const openApiJson = exportDeterministicOpenApiJson()
 		using forge = parse(openApiJson)

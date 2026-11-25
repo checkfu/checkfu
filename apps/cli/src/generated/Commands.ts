@@ -1822,6 +1822,14 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "resources",
+			flagName: "resources",
+			wireName: "resources",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -1858,6 +1866,13 @@ const sessionsCreateCommand = CommandMake(
 			FlagOptional,
 		),
 		title: FlagString("title").pipe(FlagWithDescription("Optional session title"), FlagOptional),
+		resources: FlagString("resources").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Repositories to mount in the session's workspace (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
 		idempotencyKey: FlagString("idempotency-key").pipe(
 			FlagWithMetavar("KEY"),
 			FlagWithDescription("Optional Idempotency-Key header for safe retries"),
@@ -2185,6 +2200,130 @@ const sessionsEventsStreamCommand = CommandMake(
 	]),
 )
 
+const sessionsResourcesListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:resources list",
+	apiGroup: "sessions",
+	apiEndpoint: "listResources",
+	hasBody: false,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const sessionsResourcesListCommand = CommandMake(
+	"list",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsResourcesListCommandSpec, flags),
+).pipe(CommandWithDescription("List what is mounted in a session's workspace"))
+
+const sessionsResourcesRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:resources retrieve",
+	apiGroup: "sessions",
+	apiEndpoint: "getResource",
+	hasBody: false,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "resourceId",
+			flagName: "resource-id",
+			wireName: "resource_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const sessionsResourcesRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+		resourceId: FlagString("resource-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session resource ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsResourcesRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve one resource mounted in a session's workspace"))
+
+const sessionsResourcesUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:resources update",
+	apiGroup: "sessions",
+	apiEndpoint: "updateResource",
+	hasBody: true,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "resourceId",
+			flagName: "resource-id",
+			wireName: "resource_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "authorizationToken",
+			flagName: "authorization-token",
+			wireName: "authorization_token",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+	],
+}
+
+const sessionsResourcesUpdateCommand = CommandMake(
+	"update",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+		resourceId: FlagString("resource-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session resource ID"),
+		),
+		authorizationToken: FlagString("authorization-token").pipe(
+			FlagWithDescription("Body field authorization_token"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsResourcesUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Replace the GitHub token a mounted repository clones and pushes with (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -2194,6 +2333,7 @@ export const buildGeneratedResourceCommands = <
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const SessionsResourcesExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
 	readonly artifacts?: ArtifactsExtras
@@ -2203,6 +2343,7 @@ export const buildGeneratedResourceCommands = <
 	readonly environments?: EnvironmentsExtras
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
+	readonly "sessions:resources"?: SessionsResourcesExtras
 }) =>
 	[
 		CommandMake("agents").pipe(
@@ -2289,6 +2430,15 @@ export const buildGeneratedResourceCommands = <
 				sessionsEventsSendCommand,
 				sessionsEventsStreamCommand,
 				...(extras?.["sessions:events"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("sessions:resources").pipe(
+			CommandWithDescription("List session resources and rotate their credentials"),
+			CommandWithSubcommands([
+				sessionsResourcesListCommand,
+				sessionsResourcesRetrieveCommand,
+				sessionsResourcesUpdateCommand,
+				...(extras?.["sessions:resources"] ?? ([] as const)),
 			]),
 		),
 	] as const
