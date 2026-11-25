@@ -61,27 +61,41 @@ export const createBodyOf = (draft: AutomationDraft): CreateAutomationBody => ({
 	schedule: schedule(draft),
 })
 
-/** Only what the draft changes, so the server keeps every field the user did not touch. */
-export const changesOf = (
-	automation: JsonAutomation,
-	draft: AutomationDraft,
-): UpdateAutomationBody => {
+/**
+ * The fields the user edited, measured against the draft the editor opened with, so the server
+ * keeps everything else: changes another editor made meanwhile, and stored text the user never
+ * touched. Only edited fields are normalized.
+ */
+export const changesOf = (base: AutomationDraft, draft: AutomationDraft): UpdateAutomationBody => {
 	const next = createBodyOf(draft)
-	const was = draftOf(automation)
+	const edited = (field: keyof AutomationDraft) => draft[field] !== base[field]
 	return {
-		...(next.name === automation.name ? {} : { name: next.name }),
-		...(next.description === (automation.description ?? null)
-			? {}
-			: { description: next.description ?? null }),
-		...(draft.agentId === was.agentId ? {} : { agent: draft.agentId }),
-		...(draft.environmentId === was.environmentId ? {} : { environment_id: draft.environmentId }),
-		...(draft.message.trim() === was.message ? {} : { initial_events: next.initial_events }),
-		...(next.schedule.expression === automation.schedule.expression &&
-		next.schedule.timezone === automation.schedule.timezone
-			? {}
-			: { schedule: next.schedule }),
+		...(edited("name") ? { name: next.name } : {}),
+		...(edited("description") ? { description: next.description ?? null } : {}),
+		...(edited("agentId") ? { agent: draft.agentId } : {}),
+		...(edited("environmentId") ? { environment_id: draft.environmentId } : {}),
+		...(edited("message") ? { initial_events: next.initial_events } : {}),
+		...(edited("expression") || edited("timezone") ? { schedule: next.schedule } : {}),
 	}
 }
+
+/** Whether a read of the automation already shows an update, so the editor can close on it. */
+export const showsChanges = (automation: JsonAutomation, changes: UpdateAutomationBody): boolean =>
+	[
+		changes.name === undefined || automation.name === changes.name,
+		changes.description === undefined || automation.description === changes.description,
+		changes.agent === undefined ||
+			automation.agent.id ===
+				(typeof changes.agent === "string" ? changes.agent : changes.agent.id),
+		changes.environment_id === undefined || automation.environment_id === changes.environment_id,
+		changes.initial_events === undefined ||
+			JSON.stringify(automation.initial_events) === JSON.stringify(changes.initial_events),
+		changes.schedule === undefined ||
+			[
+				automation.schedule.expression === changes.schedule.expression,
+				automation.schedule.timezone === changes.schedule.timezone,
+			].every(Boolean),
+	].every(Boolean)
 
 /** A firing time as the automation's own timezone shows it. */
 export const firingLabel = (iso: string, timezone: string): string =>

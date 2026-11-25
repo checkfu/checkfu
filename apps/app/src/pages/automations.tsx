@@ -11,7 +11,7 @@ import { getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { useState } from "react"
 import type * as React from "react"
-import { checkfu } from "../api.ts"
+import { checkfu, errorMessage, isSignedOut } from "../api.ts"
 import type { JsonAutomationRun } from "../api.ts"
 import {
 	changesOf,
@@ -178,7 +178,10 @@ function AutomationForm({
 		draft.environmentId === "" ? undefined : draft.environmentId,
 	)
 	const set = (changes: Partial<AutomationDraft>) => onChange({ ...draft, ...changes })
-	if (agentOptions.items.length === 0 || environmentOptions.items.length === 0) {
+	if (
+		(agentOptions.items.length === 0 && agentOptions.more === null) ||
+		(environmentOptions.items.length === 0 && environmentOptions.more === null)
+	) {
 		return (
 			<Callout>
 				An automation needs an{" "}
@@ -317,12 +320,18 @@ export function AutomationPage(): React.JSX.Element {
 	return <AutomationView key={automation.id} automation={automation} />
 }
 
+/** The draft being edited, and the snapshot it started from: only the difference is sent. */
+interface Edit {
+	readonly base: AutomationDraft
+	readonly draft: AutomationDraft
+}
+
 function AutomationView({
 	automation,
 }: {
 	readonly automation: JsonAutomation
 }): React.JSX.Element {
-	const [draft, setDraft] = useState<AutomationDraft | null>(null)
+	const [edit, setEdit] = useState<Edit | null>(null)
 	const invalidates = [["automations"]] as const
 	const runNow = useAction(() => checkfu.automations.run(automation.id), { invalidates })
 	const pause = useAction(() => checkfu.automations.pause(automation.id), { invalidates })
@@ -330,12 +339,15 @@ function AutomationView({
 	const archive = useAction(() => checkfu.automations.archive(automation.id), { invalidates })
 	const save = useAction(
 		async (submitted: AutomationDraft) => {
-			const changes = changesOf(automation, submitted)
+			if (edit === null) {
+				return
+			}
+			const changes = changesOf(edit.base, submitted)
 			if (Object.keys(changes).length > 0) {
 				await checkfu.automations.update(automation.id, changes)
 			}
 		},
-		{ invalidates, then: () => setDraft(null) },
+		{ invalidates, then: () => setEdit(null) },
 	)
 	const archived = automation.status === "archived"
 	const busy = runNow.pending || pause.pending || unpause.pending || archive.pending
@@ -349,7 +361,7 @@ function AutomationView({
 				accessory={<Status status={automation.status} />}
 				description={automation.description ?? undefined}
 				actions={
-					archived || draft !== null ? undefined : (
+					archived || edit !== null ? undefined : (
 						<>
 							<Button size="sm" disabled={busy} onClick={() => runNow.run()}>
 								Run now
@@ -363,7 +375,11 @@ function AutomationView({
 									Pause
 								</Button>
 							)}
-							<Button variant="outline" size="sm" onClick={() => setDraft(draftOf(automation))}>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setEdit({ base: draftOf(automation), draft: draftOf(automation) })}
+							>
 								Edit
 							</Button>
 							<Button variant="destructive" size="sm" disabled={busy} onClick={() => archive.run()}>
@@ -374,20 +390,20 @@ function AutomationView({
 				}
 			/>
 			{error === undefined ? null : <Callout tone="error">{error}</Callout>}
-			{draft === null ? (
+			{edit === null ? (
 				<>
 					<AutomationDetails automation={automation} />
 					<AutomationRuns automation={automation} />
 				</>
 			) : (
 				<AutomationForm
-					draft={draft}
-					onChange={setDraft}
+					draft={edit.draft}
+					onChange={(draft) => setEdit({ ...edit, draft })}
 					submitLabel="Save"
 					pending={save.pending}
 					error={save.error}
 					onSubmit={(submitted) => save.run(submitted)}
-					onCancel={() => setDraft(null)}
+					onCancel={() => setEdit(null)}
 				/>
 			)}
 		</>
@@ -467,12 +483,7 @@ function AutomationRuns({
 }: {
 	readonly automation: JsonAutomation
 }): React.JSX.Element {
-	const runs = useSuspenseInfiniteQuery({
-		...automationRunsQuery(automation.id),
-		// A run is listed once its session opens or it fails; poll until the newest one shows up.
-		refetchInterval: (query) =>
-			(query.state.data?.pages[0]?.data[0]?.run ?? 0) < automation.run_count ? 1000 : false,
-	})
+	const runs = useSuspenseInfiniteQuery(automationRunsQuery(automation.id))
 	const rows = runs.data.pages.flatMap((page) => page.data)
 	return (
 		<section className="space-y-2">
@@ -525,6 +536,9 @@ function AutomationRuns({
 				>
 					Older runs
 				</Button>
+			) : null}
+			{runs.isFetchNextPageError && !isSignedOut(runs.error) ? (
+				<Callout tone="error">{errorMessage(runs.error)}</Callout>
 			) : null}
 		</section>
 	)

@@ -9,6 +9,7 @@ import type {
 	UpdateAgentBody,
 	UpdateAutomationBody,
 } from "@checkfu/sdk/Api"
+import { showsChanges } from "./automation-draft.ts"
 import type {
 	IsoDateTimes,
 	JsonAgent,
@@ -192,12 +193,23 @@ export const checkfu = {
 	automations: {
 		...resource<JsonAutomation, CreateAutomationBody>(automations),
 		update: async (id: string, body: UpdateAutomationBody) =>
-			settled(automations, await call<JsonAutomation | Pending>("POST", automationPath(id), body)),
+			settled(
+				automations,
+				await call<JsonAutomation | Pending>("POST", automationPath(id), body),
+				(saved) => showsChanges(saved, body),
+			),
 		pause: (id: string) =>
 			automationAction(id, "/pause", (automation) => automation.status !== "active"),
 		unpause: (id: string) =>
 			automationAction(id, "/unpause", (automation) => automation.status !== "paused"),
-		run: (id: string) => call<AutomationRunQueued>("POST", automationPath(id, "/run")),
+		/** Starts a run and resolves once that run is listed, started or failed. */
+		run: async (id: string) => {
+			const queued = await call<AutomationRunQueued>("POST", automationPath(id, "/run"))
+			return settled<JsonAutomationRun>(automationPath(id, "/runs"), {
+				id: String(queued.run),
+				pending: true,
+			})
+		},
 		runs: (id: string, before?: number, signal?: AbortSignal) =>
 			call<RunPage>(
 				"GET",

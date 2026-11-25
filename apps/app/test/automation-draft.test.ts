@@ -1,6 +1,12 @@
 import type { JsonAutomation } from "@checkfu/sdk/client"
 import { describe, expect, it } from "vitest"
-import { changesOf, createBodyOf, draftOf, firingLabel } from "../src/automation-draft.ts"
+import {
+	changesOf,
+	createBodyOf,
+	draftOf,
+	firingLabel,
+	showsChanges,
+} from "../src/automation-draft.ts"
 
 const automation: JsonAutomation = {
 	id: "auto_1",
@@ -25,12 +31,12 @@ const automation: JsonAutomation = {
 
 describe("editing an automation", () => {
 	it("sends nothing when nothing changed, so the server keeps every field as it is", () => {
-		expect(changesOf(automation, draftOf(automation))).toEqual({})
+		expect(changesOf(draftOf(automation), draftOf(automation))).toEqual({})
 	})
 
 	it("sends only the fields the edit changed", () => {
 		const draft = { ...draftOf(automation), name: " Noon report ", expression: "0 12 * * *" }
-		expect(changesOf(automation, draft)).toEqual({
+		expect(changesOf(draftOf(automation), draft)).toEqual({
 			name: "Noon report",
 			schedule: { type: "cron", expression: "0 12 * * *", timezone: "America/New_York" },
 		})
@@ -38,16 +44,55 @@ describe("editing an automation", () => {
 
 	it("clears a blanked description and follows the latest version of a newly chosen agent", () => {
 		const draft = { ...draftOf(automation), description: "  ", agentId: "agent_2" }
-		expect(changesOf(automation, draft)).toEqual({ description: null, agent: "agent_2" })
+		expect(changesOf(draftOf(automation), draft)).toEqual({ description: null, agent: "agent_2" })
 	})
 
 	it("keeps the agent's pinned version while the agent stays the same", () => {
 		const draft = { ...draftOf(automation), message: "Write the evening report." }
-		expect(changesOf(automation, draft)).toEqual({
+		expect(changesOf(draftOf(automation), draft)).toEqual({
 			initial_events: [
 				{ type: "user.message", content: [{ type: "text", text: "Write the evening report." }] },
 			],
 		})
+	})
+})
+
+describe("editing against the snapshot the editor opened", () => {
+	it("leaves another editor's newer schedule alone when only the name was edited", () => {
+		const opened = draftOf(automation)
+		const draft = { ...opened, name: "Renamed" }
+		expect(changesOf(opened, draft)).toEqual({ name: "Renamed" })
+	})
+
+	it("keeps stored text the user never touched, even when it is not trimmed", () => {
+		const stored = {
+			...automation,
+			description: "",
+			initial_events: [
+				{
+					type: "user.message" as const,
+					content: [{ type: "text" as const, text: "  indented\n" }],
+				},
+			],
+		}
+		const opened = draftOf(stored)
+		expect(changesOf(opened, { ...opened, name: "Renamed" })).toEqual({ name: "Renamed" })
+	})
+})
+
+describe("waiting for an update to show", () => {
+	it("accepts a read only once every submitted field is visible", () => {
+		const changes = {
+			name: "Noon report",
+			schedule: { ...automation.schedule, expression: "0 12 * * *" },
+		}
+		expect(showsChanges(automation, changes)).toBe(false)
+		expect(showsChanges({ ...automation, name: "Noon report" }, changes)).toBe(false)
+		expect(showsChanges({ ...automation, schedule: changes.schedule }, changes)).toBe(false)
+		expect(
+			showsChanges({ ...automation, name: "Noon report", schedule: changes.schedule }, changes),
+		).toBe(true)
+		expect(showsChanges(automation, {})).toBe(true)
 	})
 })
 
