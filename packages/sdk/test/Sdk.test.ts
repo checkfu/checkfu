@@ -11,7 +11,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AgentResource, SessionResource } from "../src/Api.ts"
+import { AgentResource, ListAgentsResponse, SessionResource } from "../src/Api.ts"
 import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
 import {
 	executePaginatedPromise,
@@ -117,6 +117,7 @@ const sampleAgent = (overrides?: {
 	id: "agent_1",
 	type: "agent" as const,
 	mcp_servers: [],
+	tools: [],
 	version: 1,
 	name: "Assistant",
 	model: { id: "gpt-6.2-sol" },
@@ -281,6 +282,28 @@ describe("Responses from a server that predates a field", () => {
 		expect(
 			readSession({ ...session, mcp_server_credentials: bound }).mcp_server_credentials,
 		).toEqual(bound)
+	})
+
+	it("reads an agent as the server sent it before agents declared servers or tools, retrieved or listed", () => {
+		const body = JSON.stringify({
+			id: "agent_1",
+			type: "agent",
+			version: 1,
+			name: "Assistant",
+			model: { id: "gpt-6.2-sol" },
+			system: "Be concise.",
+			description: null,
+			created_at: ISO_NOW,
+			updated_at: ISO_NOW,
+			archived_at: null,
+		})
+		const retrieved = Schema.decodeUnknownSync(Schema.toCodecJson(AgentResource))(JSON.parse(body))
+		expect(retrieved.tools).toEqual([])
+		expect(retrieved.mcp_servers).toEqual([])
+		const listed = Schema.decodeUnknownSync(Schema.toCodecJson(ListAgentsResponse))(
+			JSON.parse(`{"data":[${body}],"has_more":false,"next_cursor":null}`),
+		)
+		expect(listed.data.map((agent) => [agent.tools, agent.mcp_servers])).toEqual([[[], []]])
 	})
 })
 

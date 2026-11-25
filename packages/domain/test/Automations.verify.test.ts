@@ -1,5 +1,9 @@
 import * as Domain from "@alchemy.run/domain"
-import { decodeMcpServerCredentials, decodeMcpServers } from "../src/Mcp/McpServers.ts"
+import {
+	decodeAgentTools,
+	decodeMcpServerCredentials,
+	decodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -79,6 +83,7 @@ describe("Automations Z3 formal verification", () => {
 						upcomingOccurrences,
 						decodeMcpServers,
 						decodeMcpServerCredentials,
+						decodeAgentTools,
 					],
 					lock: "./Automations.verify.lock.json",
 					require: { proved: PROVED },

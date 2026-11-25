@@ -52,6 +52,7 @@ describe("Agents", () => {
 				agent,
 				new AgentCreated({
 					mcp_servers: "[]",
+					tools: "[]",
 					version: 1,
 					version_id: v1,
 					name: "Coding Assistant",
@@ -120,6 +121,7 @@ describe("Agents", () => {
 				agent,
 				new AgentCreated({
 					mcp_servers: "[]",
+					tools: "[]",
 					version: 1,
 					version_id: v1,
 					name: "Reviewer",
@@ -162,6 +164,7 @@ describe("Agents", () => {
 				agent,
 				new AgentUpdated({
 					mcp_servers: "[]",
+					tools: "[]",
 					version: 2,
 					version_id: v2,
 					name: "Reviewer",
@@ -246,6 +249,7 @@ describe("Agents", () => {
 				agent,
 				new AgentCreated({
 					mcp_servers: "[]",
+					tools: "[]",
 					version: 1,
 					version_id: v1,
 					name: "Worker",
@@ -379,6 +383,7 @@ describe("Agents", () => {
 				version_id: v[n]!,
 				...configs[n]!,
 				mcp_servers: "[]",
+				tools: "[]",
 			})
 		return story(
 			Story.clock(t0),

@@ -111,3 +111,27 @@ export const settleTurnUsage = async (pi: Harness, operation: string): Promise<M
 	}
 	return saved
 }
+
+export const pauseTurnUsage = async (
+	pi: Harness,
+	operation: string,
+	pause: string,
+): Promise<ModelUsage> => {
+	const key = `${operation}:pause:${pause}`
+	const saved = await pi.snapshot(SettledUsage, key, BACKGROUND_CONTEXT)
+	if (saved !== undefined) {
+		return { input_tokens: saved.input_tokens, output_tokens: saved.output_tokens }
+	}
+	const recorded = await pi.commit(async (tx) => {
+		const active = await tx.doc(ActiveUsage)
+		if (active.operation !== operation) {
+			return undefined
+		}
+		const total = await totalUsage(tx)
+		const usage = await closeUsage(tx, key, active, total)
+		active.input_tokens = total.input_tokens
+		active.output_tokens = total.output_tokens
+		return usage
+	}, BACKGROUND_CONTEXT)
+	return recorded ?? { input_tokens: 0, output_tokens: 0 }
+}

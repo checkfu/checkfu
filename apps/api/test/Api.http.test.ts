@@ -933,6 +933,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			"type",
 		])
 		expect(Object.keys(byType.get("session.status_idle")?.properties ?? {}).toSorted()).toEqual([
+			"cancelled_event_ids",
 			"created_at",
 			"id",
 			"seq",
@@ -947,7 +948,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			"seq",
 			"type",
 		])
-		for (const emptyTag of ["user.interrupt", "session.status_terminated", "session.archived"]) {
+		expect(
+			Object.keys(byType.get("session.status_terminated")?.properties ?? {}).toSorted(),
+		).toEqual(["cancelled_event_ids", "created_at", "id", "seq", "type"])
+		for (const emptyTag of ["user.interrupt", "session.archived"]) {
 			expect(Object.keys(byType.get(emptyTag)?.properties ?? {}).toSorted()).toEqual([
 				"created_at",
 				"id",

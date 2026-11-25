@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
@@ -34,7 +35,7 @@ export class SendUserMessage extends Domain.Command("SendUserMessage", {
 		text: MessageText,
 	},
 	events: [UserMessage, SessionStatusRunning],
-	rejects: [SessionNotFound, SessionTerminated, PendingMessageQueueFull],
+	rejects: [SessionNotFound, SessionTerminated, PendingMessageQueueFull, SessionAwaitingAction],
 	reply: {
 		turn: PositiveInt,
 	},

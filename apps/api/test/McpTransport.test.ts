@@ -415,6 +415,7 @@ describe("A session's MCP servers", () => {
 				`session-${(sessions += 1)}`,
 			),
 			admittedTurn: () => state.turn,
+			agentTools: () => [],
 		})
 		const call = async (name: string, args: Schema.JsonObject, signal?: AbortSignal) => {
 			const tool = mcp
@@ -606,6 +607,7 @@ describe("A session's MCP servers", () => {
 			kv: { get: (key) => kv.get(key), put: (key, value) => kv.set(key, value) },
 			vaults,
 			admittedTurn: () => state.turn,
+			agentTools: () => [],
 		})
 		const binding = { name: "docs", url: URL_, credential_id: "cred_1", vault_id: "vlt_1" }
 		const limited = (allowed_hosts: ReadonlyArray<string>): EnvironmentNetworking => ({

@@ -4,16 +4,17 @@ import { AbandonTurn } from "./AbandonTurn.command.ts"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { SessionStatusIdle } from "./CommitModelReply.command.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, TURN_TIMEOUT, TURN_TIMEOUT_MESSAGE } from "./Harness.external.ts"
-import { RunTurn, turnKey } from "./RunTurn.saga.ts"
+import { TurnContinued } from "./PauseTurn.command.ts"
+import { RunTurn, segmentKey } from "./RunTurn.saga.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { TurnInput } from "./TurnInput.view.ts"
 
-const TURN_DEADLINE = "turn-deadline"
+const deadline = (segment: number) => (segment === 1 ? "turn-deadline" : `turn-deadline:${segment}`)
 
 export class StartTurn extends Domain.Policy("StartTurn", {
 	from: TurnInput,
-	on: [SessionStatusRunning, SessionStatusIdle, SessionStatusTerminated],
+	on: [SessionStatusRunning, TurnContinued, SessionStatusIdle, SessionStatusTerminated],
 }) {}
 
 export const StartTurnLive = StartTurn.toLayer(
@@ -24,27 +25,40 @@ export const StartTurnLive = StartTurn.toLayer(
 			if (state === null || state.turn < 1) {
 				return
 			}
-			if (event._tag !== "session.status_running") {
-				yield* sessions
-					.unschedule(source.id, TURN_DEADLINE)
+			const segment = state.segment ?? 1
+			const unschedule = (id: string) =>
+				sessions
+					.unschedule(source.id, id)
 					.pipe(
 						Effect.catchTag(
 							["AlreadyExecuted", "AlreadyCancelled", "NotScheduled"],
 							() => Effect.void,
 						),
 					)
+			if (event._tag === "session.status_idle" && event.stop_reason.type === "requires_action") {
+				return
+			}
+			if (event._tag === "session.status_running" && segment > 1) {
+				return
+			}
+			if (event._tag !== "session.status_running" && event._tag !== "turn.continued") {
+				yield* unschedule(deadline(segment))
 				return
 			}
 			yield* sessions.schedule(
 				new AbandonTurn({
 					session_id: source.id,
 					turn: state.turn,
+					segment,
 					error_type: TURN_TIMEOUT,
 					message: TURN_TIMEOUT_MESSAGE,
 				}),
-				{ after: DEFAULT_TURN_TIMEOUT_MS, commandId: TURN_DEADLINE },
+				{ after: DEFAULT_TURN_TIMEOUT_MS, commandId: deadline(segment) },
 			)
-			yield* runs.start(turnKey(source.id, state.turn), {
+			if (segment > 1) {
+				yield* unschedule(deadline(segment - 1))
+			}
+			yield* runs.start(segmentKey(source.id, state.turn, segment), {
 				session_id: source.id,
 				agent_id: state.agent_id,
 				agent_version: state.agent_version,
@@ -52,6 +66,7 @@ export const StartTurnLive = StartTurn.toLayer(
 				turn: state.turn,
 				input: state.input,
 				...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
+				...(segment === 1 ? {} : { segment }),
 			})
 		})
 	}),

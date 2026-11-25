@@ -19,6 +19,7 @@ const TAG_LENGTH = 10
 export interface NamedTool {
 	readonly prefix: string
 	readonly name: string
+	readonly kept?: boolean
 }
 
 export interface ToolNames extends NamedTool {
@@ -35,7 +36,13 @@ const fitsPublic = (name: string): boolean =>
 const keyOf = (tool: NamedTool): string => JSON.stringify([tool.prefix, tool.name])
 
 export const assignToolNames = (tools: ReadonlyArray<NamedTool>): ReadonlyArray<ToolNames> => {
-	const distinct = [...new Map(tools.map((tool) => [keyOf(tool), tool])).entries()]
+	const distinct = [
+		...new Map(
+			tools
+				.toSorted((a, b) => Number(a.kept === true) - Number(b.kept === true))
+				.map((tool) => [keyOf(tool), tool]),
+		).entries(),
+	]
 	const plain = new Map(
 		distinct.map(([key, tool]) => {
 			const name = `${tool.prefix}${tool.name}`
@@ -57,8 +64,17 @@ export const assignToolNames = (tools: ReadonlyArray<NamedTool>): ReadonlyArray<
 		takenModels.add(model)
 		takenScripts.add(toCodemodeIdentifier(model))
 	}
+	for (const [key, tool] of distinct) {
+		if (tool.kept === true) {
+			take(key, `${tool.prefix}${tool.name}`)
+		}
+	}
 	for (const [key, name] of plain) {
-		if (name !== undefined && sharing.get(toCodemodeIdentifier(name)) === 1) {
+		if (models.has(key) || name === undefined) {
+			continue
+		}
+		const script = toCodemodeIdentifier(name)
+		if (sharing.get(script) === 1 && !takenModels.has(name) && !takenScripts.has(script)) {
 			take(key, name)
 		}
 	}
@@ -110,6 +126,7 @@ export const assignToolNames = (tools: ReadonlyArray<NamedTool>): ReadonlyArray<
 		return {
 			prefix: tool.prefix,
 			name: tool.name,
+			...(tool.kept === true ? { kept: true } : {}),
 			model,
 			script: toCodemodeIdentifier(model),
 			public: publics.get(key) ?? "",

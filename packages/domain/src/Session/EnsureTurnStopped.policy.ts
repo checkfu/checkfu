@@ -33,14 +33,20 @@ export const EnsureTurnStoppedLive = EnsureTurnStopped.toLayer(
 			if (event._tag === "user.interrupt") {
 				yield* interrupt.pipe(
 					Effect.catchTag("HarnessUnavailable", () =>
-						sessions.send(
-							new AbandonTurn({
-								session_id: source.id,
-								turn,
-								error_type: HARNESS_UNAVAILABLE,
-								message: HARNESS_UNAVAILABLE_MESSAGE,
-							}),
-						),
+						Effect.gen(function* () {
+							const receipt = yield* sessions.send(
+								new AbandonTurn({
+									session_id: source.id,
+									turn,
+									segment: event.segment ?? 1,
+									error_type: HARNESS_UNAVAILABLE,
+									message: HARNESS_UNAVAILABLE_MESSAGE,
+								}),
+							)
+							if (receipt.events.length === 0) {
+								yield* Effect.orDie(interrupt)
+							}
+						}),
 					),
 				)
 				return

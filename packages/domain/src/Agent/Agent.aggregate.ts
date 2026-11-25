@@ -2,7 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { NonNegativeInt } from "./AgentTypes.ts"
-import { NO_MCP_SERVERS } from "../Mcp/McpServers.ts"
+import { NO_AGENT_TOOLS, NO_MCP_SERVERS } from "../Mcp/McpServers.ts"
 import { AgentId } from "./Agent.id.ts"
 import { AgentNotFound } from "./AgentNotFound.rejection.ts"
 import { AgentArchived, ArchiveAgent } from "./ArchiveAgent.command.ts"
@@ -21,13 +21,18 @@ const AgentStateV1 = Schema.Struct({
 	description: Schema.String,
 })
 
-export const AgentState = Schema.Struct({
+const AgentStateV2 = Schema.Struct({
 	...AgentStateV1.fields,
 	mcp_servers: Schema.String,
 })
+
+export const AgentState = Schema.Struct({
+	...AgentStateV2.fields,
+	tools: Schema.String,
+})
 export type AgentState = typeof AgentState.Type
 
-export const AGENT_STATE_SCHEMA_VERSION = 2 as const
+export const AGENT_STATE_SCHEMA_VERSION = 3 as const
 
 export const AgentStateSnapshot = versionedSnapshot({
 	current: AGENT_STATE_SCHEMA_VERSION,
@@ -40,6 +45,11 @@ export const AgentStateSnapshot = versionedSnapshot({
 				...state,
 				mcp_servers: state.status === "" ? "" : NO_MCP_SERVERS,
 			}),
+		}),
+		snapshotVersion({
+			version: 2,
+			schema: AgentStateV2,
+			migrate: (state) => ({ ...state, tools: state.status === "" ? "" : NO_AGENT_TOOLS }),
 		}),
 	],
 })
@@ -58,6 +68,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 		has_description: false,
 		description: "",
 		mcp_servers: "",
+		tools: "",
 	},
 	commands: [ArchiveAgent],
 	events: [AgentCreated, AgentUpdated],
@@ -148,6 +159,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 						has_description: e.description !== null,
 						description: e.description ?? "",
 						mcp_servers: e.mcp_servers ?? NO_MCP_SERVERS,
+						tools: e.tools ?? NO_AGENT_TOOLS,
 					}
 				: state,
 		"agent.updated": (state, e) =>
@@ -163,6 +175,7 @@ export class Agent extends Domain.Aggregate("Agent", {
 						has_description: e.description !== null,
 						description: e.description ?? "",
 						mcp_servers: e.mcp_servers ?? state.mcp_servers,
+						tools: e.tools ?? state.tools,
 					}
 				: state,
 		"agent.archived": (state) =>
