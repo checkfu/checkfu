@@ -142,7 +142,10 @@ describe("the fetch client", () => {
 	})
 
 	it("sends no body or content type on a request without one", async () => {
-		const { sent, fetch } = recording(200, "")
+		const { sent, fetch } = recording(
+			200,
+			JSON.stringify({ id: "art_1", type: "artifact_deleted" }),
+		)
 		await createFetchClient({ fetch })("artifacts.delete", { path: { artifact_id: "art_1" } })
 		expect([
 			sent[0]?.method,
@@ -150,6 +153,40 @@ describe("the fetch client", () => {
 			sent[0]?.body,
 			sent[0]?.headers.has("content-type"),
 		]).toEqual(["DELETE", "/v1/artifacts/art_1", null, false])
+	})
+
+	it("refuses the event stream at run time too, without sending a request", async () => {
+		const { sent, fetch } = recording(200, "event: message\ndata: {}\n\n")
+		await expect(
+			untyped(createFetchClient({ fetch }))("sessions.events.stream", {
+				path: { session_id: "sess_1" },
+			}),
+		).rejects.toThrow('open operationUrl("sessions.events.stream") with an EventSource')
+		expect(sent).toEqual([])
+	})
+
+	it("refuses an empty reply from an operation that promises JSON", async () => {
+		const { fetch } = recording(200, "")
+		await expect(
+			createFetchClient({ fetch })("artifacts.delete", { path: { artifact_id: "art_1" } }),
+		).rejects.toThrow("artifacts.delete answered 200 with an empty body.")
+	})
+
+	it("keeps the status when an error reply's body cannot be read", async () => {
+		const fetch: typeof globalThis.fetch = async () =>
+			new Response(
+				new ReadableStream({
+					start: (controller) => controller.error(new Error("connection reset")),
+				}),
+				{ status: 401 },
+			)
+		await expect(
+			createFetchClient({ fetch })("agents.retrieve", { path: { agent_id: "agent_1" } }),
+		).rejects.toMatchObject({
+			status: 401,
+			type: null,
+			message: "Request failed with status 401.",
+		})
 	})
 
 	it("raises the API's error type and message with the status, and a fallback when the reply is not an API error", async () => {

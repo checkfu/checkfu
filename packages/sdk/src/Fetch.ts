@@ -125,6 +125,11 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
 	return async (operationId, ...[input]) => {
 		const binding = bindingOf(operationId)
+		if (binding.kind === "sse") {
+			throw new Error(
+				`${operationId} streams events; open operationUrl("${operationId}") with an EventSource.`,
+			)
+		}
 		const fields: RawInput = input ?? {}
 		const headers = new Headers(options.headers)
 		if (fields.idempotencyKey !== undefined) {
@@ -145,15 +150,11 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 			...(fields.signal === undefined ? {} : { signal: fields.signal }),
 			...(fields.body === undefined ? {} : { body: JSON.stringify(fields.body) }),
 		})
-		const text = await response.text()
 		if (!response.ok) {
-			const envelope = ((): ErrorEnvelope => {
-				try {
-					return parseJsonAs<ErrorEnvelope>(text) ?? {}
-				} catch {
-					return {}
-				}
-			})()
+			const envelope = await response
+				.text()
+				.then((text) => parseJsonAs<ErrorEnvelope | null>(text) ?? {})
+				.catch((): ErrorEnvelope => ({}))
 			throw new CheckfuFetchError(
 				response.status,
 				typeof envelope.error?.type === "string" ? envelope.error.type : null,
@@ -161,6 +162,10 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 					? envelope.error.message
 					: `Request failed with status ${response.status}.`,
 			)
+		}
+		const text = await response.text()
+		if (text === "") {
+			throw new Error(`${operationId} answered ${response.status} with an empty body.`)
 		}
 		return parseJsonAs<FetchResult<typeof operationId>>(text)
 	}
