@@ -19,6 +19,10 @@ import { EnvironmentDeleted } from "../Environment/DeleteEnvironment.command.ts"
 import { Environment } from "../Environment/Environment.aggregate.ts"
 import { SessionArchived } from "../Session/ArchiveSession.command.ts"
 import { SessionCreated } from "../Session/CreateSession.command.ts"
+import { MemoryStoreArchived } from "../Memory/ArchiveMemoryStore.command.ts"
+import { MemoryStoreCreated } from "../Memory/CreateMemoryStore.command.ts"
+import { MemoryStoreDeleted } from "../Memory/DeleteMemoryStore.command.ts"
+import { MemoryStore } from "../Memory/MemoryStore.aggregate.ts"
 import { Session } from "../Session/Session.aggregate.ts"
 import { ARCHIVED, DELETED, LISTED, ListingStore } from "./ListingStore.ts"
 import type { ListingChange } from "./ListingStore.ts"
@@ -26,7 +30,7 @@ import type { ListingChange } from "./ListingStore.ts"
 export class Listing extends Domain.Projection(
 	"Listing",
 	{
-		from: [Agent, Environment, Session, Automation, Artifact],
+		from: [Agent, Environment, Session, Automation, Artifact, MemoryStore],
 		key: Schema.String,
 		keyOf: {
 			Agent: ({ source }) => source.id,
@@ -34,6 +38,7 @@ export class Listing extends Domain.Projection(
 			Session: ({ source }) => source.id,
 			Automation: ({ source }) => source.id,
 			Artifact: ({ source }) => source.id,
+			MemoryStore: ({ source }) => source.id,
 		},
 		on: [
 			AgentCreated,
@@ -48,11 +53,14 @@ export class Listing extends Domain.Projection(
 			AutomationArchived,
 			ArtifactCreated,
 			ArtifactDeleted,
+			MemoryStoreCreated,
+			MemoryStoreArchived,
+			MemoryStoreDeleted,
 		],
 	},
 	{
 		description:
-			"Every agent, environment, session, automation and artifact, in creation order, with its status.",
+			"Every agent, environment, session, automation, artifact and memory store, in creation order, with its status.",
 	},
 ) {}
 
@@ -87,10 +95,16 @@ const changeOf = ({
 			return { kind: "artifact", id, created_at, agent_id: null, status: LISTED }
 		case "artifact.deleted":
 			return { kind: "artifact", id, created_at, agent_id: null, status: DELETED }
+		case "memory_store.created":
+			return { kind: "memory_store", id, created_at, agent_id: null, status: LISTED }
+		case "memory_store.archived":
+			return { kind: "memory_store", id, created_at, agent_id: null, status: ARCHIVED }
+		case "memory_store.deleted":
+			return { kind: "memory_store", id, created_at, agent_id: null, status: DELETED }
 	}
 }
 
-export const LISTING_VERSION = 2
+export const LISTING_VERSION = 3
 
 export const ListingLive = Listing.toLayer(
 	Effect.gen(function* () {

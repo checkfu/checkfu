@@ -423,14 +423,15 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 	const kind: SurfaceOperationKind =
 		sse !== undefined ? "sse" : pagination !== undefined ? "paginated" : "unary"
 
-	const explicitIdempotent = method.extension("x-checkfu-idempotent") === true
-	const retrySafety: SurfaceRetrySafety = explicitIdempotent
-		? "idempotent"
-		: supportsIdempotencyKey
-			? "idempotency-key-gated"
-			: IDEMPOTENT_HTTP_METHODS.has(httpMethod)
-				? "idempotent"
-				: "pre-commit-only"
+	const declared = method.extension("x-checkfu-idempotent")
+	const retrySafety: SurfaceRetrySafety =
+		declared === true
+			? "idempotent"
+			: supportsIdempotencyKey
+				? "idempotency-key-gated"
+				: declared !== false && IDEMPOTENT_HTTP_METHODS.has(httpMethod)
+					? "idempotent"
+					: "pre-commit-only"
 
 	return {
 		operationId,

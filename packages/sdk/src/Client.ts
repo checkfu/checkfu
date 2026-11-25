@@ -19,6 +19,8 @@ import type {
 	PendingArtifactVersion,
 	PendingAutomation,
 	PendingEnvironment,
+	PendingMemory,
+	PendingMemoryStore,
 	PendingSession,
 	Session,
 } from "./Api.ts"
@@ -38,6 +40,7 @@ import type {
 	WithResponse,
 	WithResponseRequestOptions,
 } from "./Runtime.ts"
+import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import {
 	DEFAULT_MAX_RETRIES,
 	DEFAULT_TIMEOUT_MS,
@@ -118,6 +121,14 @@ export interface WaitForPendingMethod {
 		result: ArtifactVersion | PendingArtifactVersion,
 		options?: WaitForPendingOptions<ArtifactVersion>,
 	): Effect.Effect<ArtifactVersion, CheckfuSdkError>
+	(
+		result: MemoryStoreSnapshot | PendingMemoryStore,
+		options?: WaitForPendingOptions<MemoryStoreSnapshot>,
+	): Effect.Effect<MemoryStoreSnapshot, CheckfuSdkError>
+	(
+		result: MemorySnapshot | PendingMemory,
+		options?: WaitForPendingOptions<MemorySnapshot>,
+	): Effect.Effect<MemorySnapshot, CheckfuSdkError>
 }
 
 export const INTERNAL_EFFECT_RUNTIME = Symbol.for("@checkfu/sdk/EffectSdkRuntime")
@@ -176,6 +187,14 @@ export class CheckfuSdkClient extends EffectResources {
 		options?: WaitForPendingOptions<ArtifactVersion>,
 	): Effect.Effect<ArtifactVersion, CheckfuSdkError>
 	waitForPending(
+		result: MemoryStoreSnapshot | PendingMemoryStore,
+		options?: WaitForPendingOptions<MemoryStoreSnapshot>,
+	): Effect.Effect<MemoryStoreSnapshot, CheckfuSdkError>
+	waitForPending(
+		result: MemorySnapshot | PendingMemory,
+		options?: WaitForPendingOptions<MemorySnapshot>,
+	): Effect.Effect<MemorySnapshot, CheckfuSdkError>
+	waitForPending(
 		result:
 			| Agent
 			| PendingAgent
@@ -188,12 +207,30 @@ export class CheckfuSdkClient extends EffectResources {
 			| Artifact
 			| PendingArtifact
 			| ArtifactVersion
-			| PendingArtifactVersion,
+			| PendingArtifactVersion
+			| MemoryStoreSnapshot
+			| PendingMemoryStore
+			| MemorySnapshot
+			| PendingMemory,
 		options?: WaitForPendingOptions<
-			Agent | Environment | Session | Automation | Artifact | ArtifactVersion
+			| Agent
+			| Environment
+			| Session
+			| Automation
+			| Artifact
+			| ArtifactVersion
+			| MemoryStoreSnapshot
+			| MemorySnapshot
 		>,
 	): Effect.Effect<
-		Agent | Environment | Session | Automation | Artifact | ArtifactVersion,
+		| Agent
+		| Environment
+		| Session
+		| Automation
+		| Artifact
+		| ArtifactVersion
+		| MemoryStoreSnapshot
+		| MemorySnapshot,
 		CheckfuSdkError
 	> {
 		if (!isPendingResource(result)) {
@@ -256,6 +293,26 @@ export class CheckfuSdkClient extends EffectResources {
 					new CheckfuConfigError({
 						message: `waitForPending cannot wait for a pending ${String(unknown.type)}.`,
 					}),
+				)
+			}
+			case "memory_store":
+				return pollPending(result, (id, opts) => this.memoryStores.retrieve(id, opts), {
+					...baseOpts,
+					...(until === undefined
+						? {}
+						: { until: (resource: MemoryStoreSnapshot) => until(resource) }),
+				})
+			case "memory": {
+				const storeId = result.memory_store_id
+				return pollPending(
+					result,
+					(id, opts) => this.memoryStores.memories.retrieve(storeId, id, opts),
+					{
+						...baseOpts,
+						...(until === undefined
+							? {}
+							: { until: (resource: MemorySnapshot) => until(resource) }),
+					},
 				)
 			}
 		}

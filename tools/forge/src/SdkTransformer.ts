@@ -391,30 +391,27 @@ const generateResourcesFile = (
 						}
 						if (op.queryParams.length > 0) {
 							const qVar = hasBodyAndQuery ? "query" : "params"
-							out("query: {")
-							out.indent(() => {
-								for (const qp of op.queryParams) {
-									const keyJson = JSON.stringify(qp.wireName)
-									if (qp.required) {
-										out(keyJson, ": ", qVar, "[", keyJson, "],")
-										continue
+							const present = (wireName: string): string => {
+								const keyJson = JSON.stringify(wireName)
+								return `${qVar}?.[${keyJson}] === undefined ? {} : { ${keyJson}: ${qVar}[${keyJson}] }`
+							}
+							const [only, ...others] = op.queryParams
+							if (only !== undefined && others.length === 0 && !only.required) {
+								out("query: ", present(only.wireName), ",")
+							} else {
+								out("query: {")
+								out.indent(() => {
+									for (const qp of op.queryParams) {
+										if (qp.required) {
+											const keyJson = JSON.stringify(qp.wireName)
+											out(keyJson, ": ", qVar, "[", keyJson, "],")
+											continue
+										}
+										out("...(", present(qp.wireName), "),")
 									}
-									out(
-										"...(",
-										qVar,
-										"?.[",
-										keyJson,
-										"] === undefined ? {} : { ",
-										keyJson,
-										": ",
-										qVar,
-										"[",
-										keyJson,
-										"] }),",
-									)
-								}
-							})
-							out("},")
+								})
+								out("},")
+							}
 						}
 						if (op.requiresIdempotencyKey) {
 							out('headers: { "idempotency-key": key },')
@@ -446,7 +443,7 @@ const generateResourcesFile = (
 				out.indent(() => {
 					emitRawInvoke()
 					out(",")
-					if (op.apiEndpoint === "create") {
+					if (op.apiEndpoint === "create" || op.apiEndpoint === "createMemory") {
 						out('{ kind: "create" },')
 					} else if (op.apiEndpoint === "archive") {
 						out('{ kind: "archive" },')
