@@ -163,13 +163,17 @@ const reportOpenAIRefusals = (
 ) => {
 	const refusals: Array<string> = []
 	const inner = start(async (data, model) => {
+		// The final response holds every output item, so it alone says whether the reply refused.
 		if (
 			isObject(data) &&
 			"type" in data &&
-			data.type === "response.output_item.done" &&
-			"item" in data
+			data.type === "response.completed" &&
+			"response" in data &&
+			isObject(data.response) &&
+			"output" in data.response &&
+			Array.isArray(data.response.output)
 		) {
-			refusals.push(...refusalTexts(data.item))
+			refusals.push(...data.response.output.flatMap(refusalTexts))
 		}
 		await options?.onProviderStreamEvent?.(data, model)
 	})

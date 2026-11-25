@@ -271,17 +271,7 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					content_index: 0,
 					delta: "I cannot assist with that request.",
 				})}\n\n`,
-				`event: response.output_item.done\ndata: ${JSON.stringify({
-					type: "response.output_item.done",
-					output_index: 0,
-					item: {
-						id: "msg_1",
-						type: "message",
-						role: "assistant",
-						status: "completed",
-						content: [{ type: "refusal", refusal: "I cannot assist with that request." }],
-					},
-				})}\n\n`,
+				// No output_item.done carries the refusal: only the final response says it.
 				`event: response.completed\ndata: ${JSON.stringify({
 					type: "response.completed",
 					response: {
