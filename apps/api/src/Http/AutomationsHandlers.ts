@@ -30,7 +30,9 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Schedule from "effect/Schedule"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
@@ -273,6 +275,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 							},
 						}
 						const reschedule = !sameSchedule(next.schedule, current.schedule)
+						if (reschedule && !isUsableSchedule(next.schedule.expression, next.schedule.timezone)) {
+							return yield* new AutomationScheduleUnusable(next.schedule)
+						}
 						const agent_changed =
 							next.agent_id !== current.agent_id || next.agent_version !== current.agent_version
 						const environment_changed = next.environment_id !== current.environment_id
@@ -297,17 +302,15 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						)
 						return commitForStream(receipt.commits, `Automation/${id}`)
 					})
-					const attempt = (
-						retries: number,
-					): Effect.Effect<Effect.Success<typeof send>, Effect.Error<typeof send>> =>
-						Effect.catchTag(send, "AutomationRevisionConflict", (conflict) =>
-							retries === 0
-								? Effect.fail(conflict)
-								: automationViews
-										.waitFor(ref, { revision: { gte: conflict.current_revision } }, { timeout })
-										.pipe(Effect.andThen(attempt(retries - 1))),
-						)
-					const committed = yield* attempt(UPDATE_RETRIES)
+					const committed = yield* Effect.retry(send, {
+						schedule: Schedule.recurs(UPDATE_RETRIES),
+						while: (error) =>
+							Predicate.isTagged(error, "AutomationRevisionConflict")
+								? automationViews
+										.waitFor(ref, { revision: { gte: error.current_revision } }, { timeout })
+										.pipe(Effect.as(true))
+								: false,
+					})
 					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }
 						: yield* after(id, committed)

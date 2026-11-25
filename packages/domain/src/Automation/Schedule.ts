@@ -42,16 +42,29 @@ const hasADate = (expression: string): boolean =>
 		Option.isSome,
 	)
 
-const namedZone = (timezone: string): Option.Option<DateTime.TimeZone.Named> =>
-	DateTime.zoneMakeNamed(timezone).pipe(
-		Option.filter((zone) => !zone.id.startsWith("+") && !zone.id.startsWith("-")),
+const offsets = new WeakMap<DateTime.TimeZone.Named, boolean>()
+
+const isOffset = (zone: DateTime.TimeZone.Named): boolean => {
+	const known = offsets.get(zone)
+	if (known !== undefined) {
+		return known
+	}
+	const offset = Option.exists(
+		DateTime.zoneFromString(
+			new Intl.DateTimeFormat("en-US", { timeZone: zone.id }).resolvedOptions().timeZone,
+		),
+		DateTime.isTimeZoneOffset,
 	)
+	offsets.set(zone, offset)
+	return offset
+}
 
 const parseInZone = (
 	expression: string,
 	timezone: string,
 ): Option.Option<readonly [Cron.Cron, DateTime.TimeZone.Named]> =>
-	namedZone(timezone).pipe(
+	DateTime.zoneMakeNamed(timezone).pipe(
+		Option.filter((zone) => !isOffset(zone)),
 		Option.flatMap((zone) =>
 			Option.getSuccess(Cron.parse(expression, UTC)).pipe(
 				Option.map((cron) => [cron, zone] as const),

@@ -941,6 +941,10 @@ describe("Automations API", () => {
 					name: "Too late",
 				})
 				expect([archived.status, archived.body.error.type]).toEqual([409, "conflict_error"])
+				const unusable = yield* call<ErrorBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					schedule: { timezone: "Mars/Olympus" },
+				})
+				expect(unusable.status).toBe(400)
 			}),
 		))
 
@@ -1111,6 +1115,17 @@ describe("Automations API", () => {
 					key,
 				)
 				expect(changed.status).toBe(409)
+				const unusableUnderTheSameKey = yield* call<ErrorBody>(
+					apiFetch,
+					"POST",
+					"/v1/automations",
+					{
+						...body,
+						schedule: { type: "cron", expression: "0 9 * * *", timezone: "Mars/Olympus" },
+					},
+					key,
+				)
+				expect(unusableUnderTheSameKey.status).toBe(400)
 			}),
 		))
 
