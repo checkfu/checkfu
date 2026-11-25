@@ -29,6 +29,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Schedule from "effect/Schedule"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
@@ -292,19 +293,15 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 						)
 						return commitForStream(receipt.commits, `Automation/${id}`)
 					})
-					const committed = yield* send.pipe(
-						Effect.tapErrorTag("AutomationRevisionConflict", (conflict) =>
-							automationViews.waitFor(
-								ref,
-								{ revision: { gte: conflict.current_revision } },
-								{ timeout },
-							),
-						),
-						Effect.retry({
-							times: UPDATE_RETRIES,
-							while: (error) => Predicate.isTagged(error, "AutomationRevisionConflict"),
-						}),
-					)
+					const committed = yield* Effect.retry(send, {
+						schedule: Schedule.recurs(UPDATE_RETRIES),
+						while: (error) =>
+							Predicate.isTagged(error, "AutomationRevisionConflict")
+								? automationViews
+										.waitFor(ref, { revision: { gte: error.current_revision } }, { timeout })
+										.pipe(Effect.as(true))
+								: false,
+					})
 					return committed === undefined
 						? { id, type: "automation" as const, pending: true as const }
 						: yield* after(id, committed)

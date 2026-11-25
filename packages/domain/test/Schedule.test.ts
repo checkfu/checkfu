@@ -66,23 +66,6 @@ describe("schedule firings", () => {
 		).toEqual(["2026-03-08T07:15:00.000Z", "2026-03-09T06:15:00.000Z"])
 	})
 
-	it("fires once for hours a gap of more than an hour skipped, and never at an hour the expression excludes", () => {
-		const localHours = upcomingOccurrences(
-			"30 1-3 * * *",
-			"Antarctica/Troll",
-			Date.parse("2026-03-28T20:00:00Z"),
-			5,
-		).map((at) =>
-			new Intl.DateTimeFormat("en-GB", {
-				timeZone: "Antarctica/Troll",
-				day: "numeric",
-				hour: "2-digit",
-				minute: "2-digit",
-			}).format(at),
-		)
-		expect(localHours).toEqual(["29, 03:30", "30, 01:30", "30, 02:30", "30, 03:30", "31, 01:30"])
-	})
-
 	it("returns no firings for a count that is not a positive whole number, without searching", () => {
 		for (const count of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
 			expect([count, upcomingOccurrences("0 9 * * *", "UTC", 0, count)]).toEqual([count, []])

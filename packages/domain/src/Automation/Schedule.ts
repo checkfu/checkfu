@@ -1,49 +1,76 @@
 import * as Cron from "effect/Cron"
 import * as DateTime from "effect/DateTime"
-import * as Iterable from "effect/Iterable"
 import * as Option from "effect/Option"
 
 export const UPCOMING_FIRINGS = 5
 
-const SPRING_FORWARD_LOOKBACK_MILLIS = 3 * 60 * 60 * 1000
+const LOOKBACK_MILLIS = 3 * 60 * 60 * 1000
 
 const firings = Option.liftThrowable(
-	(cron: Cron.Cron, after: number, count: number): ReadonlyArray<number> =>
-		Number.isSafeInteger(count) && count >= 1
-			? Array.from(
-					Iterable.take(
-						Iterable.filter(
-							Cron.sequence(cron, after - SPRING_FORWARD_LOOKBACK_MILLIS),
-							(at) => at.getTime() > after,
-						),
-						count,
-					),
-					(at) => at.getTime(),
-				)
-			: [],
+	(
+		cron: Cron.Cron,
+		zone: DateTime.TimeZone,
+		after: number,
+		count: number,
+	): ReadonlyArray<number> => {
+		const found: Array<number> = []
+		if (!Number.isSafeInteger(count) || count < 1) {
+			return found
+		}
+		const wallClockAfter =
+			after + DateTime.zonedOffset(DateTime.makeZonedUnsafe(after, { timeZone: zone }))
+		for (const wallClock of Cron.sequence(cron, wallClockAfter - LOOKBACK_MILLIS)) {
+			const at = DateTime.toEpochMillis(
+				DateTime.makeZonedUnsafe(wallClock, { timeZone: zone, adjustForTimeZone: true }),
+			)
+			if (at > Math.max(after, found.at(-1) ?? after)) {
+				found.push(at)
+			}
+			if (found.length === count) {
+				return found
+			}
+		}
+		return found
+	},
 )
 
 const UTC = DateTime.zoneMakeNamedUnsafe("UTC")
 
 const hasADate = (expression: string): boolean =>
 	Option.getSuccess(Cron.parse(expression, UTC)).pipe(
-		Option.flatMap((cron) => firings(cron, 0, 1)),
+		Option.flatMap((cron) => firings(cron, UTC, 0, 1)),
 		Option.isSome,
 	)
 
-const isOffset = (zone: DateTime.TimeZone.Named): boolean =>
-	Option.exists(
+const offsets = new WeakMap<DateTime.TimeZone.Named, boolean>()
+
+const isOffset = (zone: DateTime.TimeZone.Named): boolean => {
+	const known = offsets.get(zone)
+	if (known !== undefined) {
+		return known
+	}
+	const offset = Option.exists(
 		DateTime.zoneFromString(
 			new Intl.DateTimeFormat("en-US", { timeZone: zone.id }).resolvedOptions().timeZone,
 		),
 		DateTime.isTimeZoneOffset,
 	)
+	offsets.set(zone, offset)
+	return offset
+}
 
-const parseInZone = (expression: string, timezone: string): Option.Option<Cron.Cron> =>
+const parseInZone = (
+	expression: string,
+	timezone: string,
+): Option.Option<readonly [Cron.Cron, DateTime.TimeZone.Named]> =>
 	DateTime.zoneMakeNamed(timezone).pipe(
 		Option.filter((zone) => !isOffset(zone)),
-		Option.flatMap((zone) => Option.getSuccess(Cron.parse(expression, zone))),
-		Option.filter((cron) => cron.minutes.size === 1 && cron.seconds.size === 1),
+		Option.flatMap((zone) =>
+			Option.getSuccess(Cron.parse(expression, UTC)).pipe(
+				Option.map((cron) => [cron, zone] as const),
+			),
+		),
+		Option.filter(([cron]) => cron.minutes.size === 1 && cron.seconds.size === 1),
 		Option.filter(() => hasADate(expression)),
 	)
 
@@ -62,7 +89,7 @@ export const upcomingOccurrences = (
 	count: number,
 ): ReadonlyArray<number> =>
 	parseInZone(expression, timezone).pipe(
-		Option.flatMap((cron) => firings(cron, after, count)),
+		Option.flatMap(([cron, zone]) => firings(cron, zone, after, count)),
 		Option.getOrElse((): ReadonlyArray<number> => []),
 	)
 
