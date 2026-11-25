@@ -9,6 +9,9 @@ import * as Schedule from "effect/Schedule"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { AutomationReadWaitTimeout } from "../src/Http/AutomationsHandlers.ts"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
+import type { AutomationSnapshot } from "@checkfu/domain/Automation/AutomationView.view"
+import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
 import * as Domain from "@alchemy.run/domain"
 import * as Option from "effect/Option"
 import type * as Layer from "effect/Layer"
@@ -32,6 +35,8 @@ interface AutomationBody {
 	readonly id: string
 	readonly type: string
 	readonly name: string
+	readonly description: string | null
+	readonly updated_at: string
 	readonly agent: { readonly id: string; readonly version: number | null }
 	readonly environment_id: string
 	readonly initial_events: ReadonlyArray<unknown>
@@ -640,6 +645,262 @@ describe("Automations API", () => {
 					const refused = yield* call<ErrorBody>(apiFetch, "GET", `/v1/automations?${query}`)
 					expect([query, refused.status]).toEqual([query, 400])
 				}
+			}),
+		))
+
+	it("updates the fields it is given, keeps the rest, and runs later sessions with the update", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					description: "Every weekday morning.",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				expect(created.body.description).toBe("Every weekday morning.")
+
+				const renamed = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "Weekday report",
+				})
+				expect(renamed.status).toBe(200)
+				const views = yield* AutomationView
+				const viewed = views.get(Automation.ref(AutomationId.make(id))).pipe(
+					Effect.map((found) => Option.getOrNull(found)),
+					Effect.orDie,
+				)
+				const activationOf = Effect.map(viewed, (found) => found?.activation)
+				const revisionOf = Effect.map(viewed, (found) => found?.revision)
+				expect(yield* activationOf).toBe(0)
+				const again = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "Weekday report",
+				})
+				expect([again.status, again.body]).toEqual([200, renamed.body])
+				expect(yield* revisionOf).toBe(2)
+				expect(renamed.body).toEqual({
+					...created.body,
+					name: "Weekday report",
+					updated_at: renamed.body.updated_at,
+				})
+
+				const noon = { type: "cron", expression: "0 13 * * *", timezone: "UTC" }
+				const changed = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					description: null,
+					agent: { id: agentId, version: 1 },
+					initial_events: message("Write the noon report."),
+					schedule: noon,
+				})
+				expect(changed.status).toBe(200)
+				expect(changed.body).toMatchObject({
+					name: "Weekday report",
+					description: null,
+					agent: { id: agentId, version: 1 },
+					environment_id: environmentId,
+					initial_events: message("Write the noon report."),
+					schedule: noon,
+					status: "active",
+				})
+				expect(changed.body.upcoming_runs_at).toEqual([
+					"2026-01-05T13:00:00.000Z",
+					"2026-01-06T13:00:00.000Z",
+					"2026-01-07T13:00:00.000Z",
+					"2026-01-08T13:00:00.000Z",
+					"2026-01-09T13:00:00.000Z",
+				])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body).toEqual(changed.body)
+				expect(yield* activationOf).toBe(1)
+
+				yield* call<RunBody>(apiFetch, "POST", `/v1/automations/${id}/run`)
+				yield* settledRuns(apiFetch, id, 1)
+				yield* waitForSession(
+					apiFetch,
+					`sess_${id}_1`,
+					(session) => session.status === "idle" && session.turn === 1,
+				)
+				const session = yield* call<{ title: string }>(apiFetch, "GET", `/v1/sessions/sess_${id}_1`)
+				expect(session.body.title).toBe("Weekday report")
+				const events = yield* call<{
+					data: ReadonlyArray<{ type: string; content?: ReadonlyArray<{ text: string }> }>
+				}>(apiFetch, "GET", `/v1/sessions/sess_${id}_1/events`)
+				expect(
+					events.body.data
+						.filter((event) => event.type === "user.message")
+						.map((event) => event.content?.[0]?.text),
+				).toEqual(["Write the noon report."])
+			}),
+		))
+
+	it("keeps both of two concurrent updates that change different fields", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const afternoon = { type: "cron", expression: "0 13 * * *", timezone: "UTC" }
+				const [renamed, rescheduled] = yield* Effect.all(
+					[
+						call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, { name: "Renamed" }),
+						call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+							schedule: afternoon,
+						}),
+					],
+					{ concurrency: "unbounded" },
+				)
+				expect([renamed.status, rescheduled.status]).toEqual([200, 200])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body).toMatchObject({ name: "Renamed", schedule: afternoon })
+			}),
+		))
+
+	it("applies an update the view has not caught up with, and refuses an unchanged update to an archived automation", () =>
+		run(() =>
+			Effect.gen(function* () {
+				const views = yield* AutomationView
+				let stale: AutomationSnapshot | undefined
+				const lagging = {
+					...views,
+					get: (
+						ref: Parameters<typeof views.get>[0],
+						options?: Parameters<typeof views.get>[1],
+					) => {
+						const once = stale
+						stale = undefined
+						return once === undefined ? views.get(ref, options) : Effect.succeedSome(once)
+					},
+				} as unknown as typeof views
+				const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+					Effect.provideService(AutomationView, lagging),
+				)
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "A",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const ref = Automation.ref(AutomationId.make(id))
+				const before = Option.getOrNull(yield* Effect.orDie(views.get(ref)))
+				yield* call(apiFetch, "POST", `/v1/automations/${id}`, { name: "B" })
+
+				stale = before ?? undefined
+				const back = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "A",
+				})
+				expect([back.status, back.body.name]).toEqual([200, "A"])
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body.name).toBe("A")
+
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/archive`)
+				const archived = yield* call<ErrorBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "A",
+				})
+				expect([archived.status, archived.body.error.type]).toEqual([409, "conflict_error"])
+			}),
+		))
+
+	it("changes the cron expression and the timezone separately, keeping both of two concurrent edits", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				const zoned = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					schedule: { timezone: "Europe/London" },
+				})
+				expect(zoned.body.schedule).toEqual({ ...weekdayMornings, timezone: "Europe/London" })
+				yield* Effect.all(
+					[
+						call(apiFetch, "POST", `/v1/automations/${id}`, {
+							schedule: { timezone: "Asia/Tokyo" },
+						}),
+						call(apiFetch, "POST", `/v1/automations/${id}`, {
+							schedule: { expression: "0 13 * * *" },
+						}),
+					],
+					{ concurrency: "unbounded" },
+				)
+				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(fetched.body.schedule).toEqual({
+					type: "cron",
+					expression: "0 13 * * *",
+					timezone: "Asia/Tokyo",
+				})
+			}),
+		))
+
+	it("updates a paused automation without starting it, and refuses what it cannot update", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const { agentId, environmentId } = yield* prerequisites(apiFetch)
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: agentId,
+					environment_id: environmentId,
+					initial_events: message("Write the morning report."),
+					schedule: weekdayMornings,
+				})
+				const id = created.body.id
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/pause`)
+				const noon = { type: "cron", expression: "0 13 * * *", timezone: "UTC" }
+				const paused = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					schedule: noon,
+				})
+				expect(paused.body).toMatchObject({
+					status: "paused",
+					schedule: noon,
+					upcoming_runs_at: [],
+				})
+				const unpaused = yield* call<AutomationBody>(
+					apiFetch,
+					"POST",
+					`/v1/automations/${id}/unpause`,
+				)
+				expect(unpaused.body.upcoming_runs_at[0]).toBe("2026-01-05T13:00:00.000Z")
+
+				const refusals: ReadonlyArray<readonly [string, unknown, number]> = [
+					["/v1/automations/auto_missing", { name: "x" }, 404],
+					[
+						`/v1/automations/${id}`,
+						{ schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } },
+						400,
+					],
+					[`/v1/automations/${id}`, { agent: "agent_missing" }, 404],
+					[`/v1/automations/${id}`, { agent: { id: agentId, version: 9 } }, 404],
+					[`/v1/automations/${id}`, { environment_id: "env_missing" }, 404],
+					[`/v1/automations/${id}`, { initial_events: [] }, 400],
+					[`/v1/automations/${id}`, { name: "" }, 400],
+					[`/v1/automations/${id}`, { description: "x".repeat(2049) }, 400],
+				]
+				for (const [path, body, status] of refusals) {
+					const refused = yield* call<ErrorBody>(apiFetch, "POST", path, body)
+					expect([path, body, refused.status]).toEqual([path, body, status])
+				}
+				const unchanged = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${id}`)
+				expect(unchanged.body).toEqual(unpaused.body)
+
+				yield* call(apiFetch, "POST", `/v1/automations/${id}/archive`)
+				const archived = yield* call<ErrorBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "Too late",
+				})
+				expect([archived.status, archived.body.error.type]).toEqual([409, "conflict_error"])
 			}),
 		))
 

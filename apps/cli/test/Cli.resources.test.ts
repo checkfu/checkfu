@@ -401,6 +401,17 @@ describe("CLI help, errors, and resource commands", () => {
 
 					const unpaused = yield* cli.run(["automations", "unpause", ...id])
 					expect(JSON.parse(unpaused.stdout).status).toBe("active")
+					const renamed = yield* cli.run(["automations", "update", ...id, "--name", "Renamed"])
+					expect([renamed.exitCode, renamed.stderr]).toEqual([0, ""])
+					expect(JSON.parse(renamed.stdout)).toMatchObject({
+						name: "Renamed",
+						initial_events: [
+							{
+								type: "user.message",
+								content: [{ type: "text", text: "Write the morning report." }],
+							},
+						],
+					})
 					const retrieved = yield* cli.run(["automations", "retrieve", ...id])
 					expect(JSON.parse(retrieved.stdout).run_count).toBe(1)
 					const archived = yield* cli.run(["automations", "archive", ...id])

@@ -14,6 +14,7 @@ import { AutomationId } from "./Automation.id.ts"
 import { AutomationSlotReserved } from "./AutomationCapacity.aggregate.ts"
 import { AutomationCapacityId } from "./AutomationCapacity.id.ts"
 import {
+	AutomationDescription,
 	AutomationName,
 	AutomationSchedule,
 	CronExpression,
@@ -46,6 +47,7 @@ export class AdmitAutomation extends Domain.Command("AdmitAutomation", {
 		automation_id: AutomationId,
 		capacity_id: AutomationCapacityId,
 		name: AutomationName,
+		description: Schema.NullOr(AutomationDescription),
 		agent_id: BoundedAgentId,
 		agent_version: Schema.NullOr(PositiveInt),
 		environment_id: BoundedEnvironmentId,

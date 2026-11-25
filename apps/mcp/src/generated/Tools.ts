@@ -339,6 +339,18 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							maxLength: 256,
 							description: "Human-readable automation name",
 						},
+						description: {
+							anyOf: [
+								{
+									type: "string",
+									maxLength: 2048,
+								},
+								{
+									type: "null",
+								},
+							],
+							description: "What the automation is for, up to 2048 characters",
+						},
 						agent: {
 							anyOf: [
 								{
@@ -680,6 +692,155 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				},
 			},
 			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
+		name: "automations_updateAutomation",
+		title: "Update an automation",
+		description:
+			"Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated.",
+		method: "POST",
+		path: "/v1/automations/{automation_id}",
+		readOnly: false,
+		idempotent: false,
+		destructive: true,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 128,
+							description: "Automation ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_id"],
+					additionalProperties: false,
+				},
+				body: {
+					type: "object",
+					properties: {
+						name: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "New automation name",
+						},
+						description: {
+							anyOf: [
+								{
+									type: "string",
+									maxLength: 2048,
+								},
+								{
+									type: "null",
+								},
+							],
+							description:
+								"New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text.",
+						},
+						agent: {
+							anyOf: [
+								{
+									type: "string",
+									minLength: 1,
+									maxLength: 256,
+								},
+								{
+									type: "object",
+									properties: {
+										id: {
+											type: "string",
+											minLength: 1,
+											maxLength: 256,
+										},
+										version: {
+											type: "integer",
+											minimum: 1,
+											maximum: 9007199254740991,
+										},
+									},
+									required: ["id"],
+									additionalProperties: false,
+								},
+							],
+							description:
+								"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one",
+						},
+						environment_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							description: "Environment ID later runs' sessions use",
+						},
+						initial_events: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["user.message"],
+									},
+									content: {
+										type: "array",
+										items: {
+											type: "object",
+											properties: {
+												type: {
+													type: "string",
+													enum: ["text"],
+												},
+												text: {
+													type: "string",
+													minLength: 1,
+												},
+											},
+											required: ["type", "text"],
+											additionalProperties: false,
+										},
+										minItems: 1,
+									},
+								},
+								required: ["type", "content"],
+								additionalProperties: false,
+							},
+							minItems: 1,
+							maxItems: 1,
+							description: "The one user message later runs' sessions start with",
+						},
+						schedule: {
+							type: "object",
+							properties: {
+								type: {
+									type: "string",
+									enum: ["cron"],
+								},
+								expression: {
+									type: "string",
+									minLength: 1,
+									maxLength: 256,
+								},
+								timezone: {
+									type: "string",
+									minLength: 1,
+									maxLength: 64,
+								},
+							},
+							additionalProperties: false,
+							description:
+								"New schedule, with the same rules as on create. A field left out keeps its value, so the expression and the timezone can change separately. On an active automation the next firing moves to it.",
+						},
+					},
+					additionalProperties: false,
+				},
+			},
+			required: ["path", "body"],
 			additionalProperties: false,
 		},
 	},

@@ -369,6 +369,14 @@ const automationsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "description",
+			flagName: "description",
+			wireName: "description",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
 			propName: "agent",
 			flagName: "agent",
 			wireName: "agent",
@@ -390,7 +398,7 @@ const automationsCreateCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "initial_events",
 			location: "body",
 			kind: "repeat-structured",
-			required: false,
+			required: true,
 			min: 0,
 			max: 1,
 		},
@@ -418,6 +426,10 @@ const automationsCreateCommand = CommandMake(
 	{
 		name: FlagString("name").pipe(
 			FlagWithDescription("Human-readable automation name"),
+			FlagOptional,
+		),
+		description: FlagString("description").pipe(
+			FlagWithDescription("What the automation is for, up to 2048 characters"),
 			FlagOptional,
 		),
 		agent: FlagString("agent").pipe(
@@ -673,6 +685,119 @@ const automationsUnpauseCommand = CommandMake(
 ).pipe(
 	CommandWithDescription(
 		"Resume an automation's schedule from now, without running the occurrences it missed",
+	),
+)
+
+const automationsUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automations update",
+	apiGroup: "automations",
+	apiEndpoint: "update",
+	hasBody: true,
+	flags: [
+		{
+			propName: "automationId",
+			flagName: "automation-id",
+			wireName: "automation_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "name",
+			flagName: "name",
+			wireName: "name",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "description",
+			flagName: "description",
+			wireName: "description",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "agent",
+			flagName: "agent",
+			wireName: "agent",
+			location: "body",
+			kind: "text-or-object",
+			required: false,
+		},
+		{
+			propName: "environmentId",
+			flagName: "environment-id",
+			wireName: "environment_id",
+			location: "body",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "initialEvents",
+			flagName: "initial-event",
+			wireName: "initial_events",
+			location: "body",
+			kind: "repeat-structured",
+			required: false,
+			min: 0,
+			max: 1,
+		},
+		{
+			propName: "schedule",
+			flagName: "schedule",
+			wireName: "schedule",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+	],
+}
+
+const automationsUpdateCommand = CommandMake(
+	"update",
+	{
+		automationId: FlagString("automation-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Automation ID"),
+		),
+		name: FlagString("name").pipe(FlagWithDescription("New automation name"), FlagOptional),
+		description: FlagString("description").pipe(
+			FlagWithDescription(
+				"New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text.",
+			),
+			FlagOptional,
+		),
+		agent: FlagString("agent").pipe(
+			FlagWithMetavar("VALUE|JSON|@FILE"),
+			FlagWithDescription(
+				"Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one (accepts value, JSON/YAML object, or @file)",
+			),
+			FlagOptional,
+		),
+		environmentId: FlagString("environment-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Environment ID later runs' sessions use"),
+			FlagOptional,
+		),
+		initialEvents: FlagString("initial-event").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("The user message later runs start with, as JSON, YAML, or @file"),
+			FlagBetween(0, 1),
+		),
+		schedule: FlagString("schedule").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"New schedule, with the same rules as on create. A field left out keeps its value, so the expression and the timezone can change separately. On an active automation the next firing moves to it. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationsUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated. (accepts flags and/or JSON/YAML on stdin)",
 	),
 )
 
@@ -1393,7 +1518,7 @@ const sessionsEventsSendCommandSpec: GeneratedOperationDescriptor = {
 			wireName: "events",
 			location: "body",
 			kind: "repeat-structured",
-			required: false,
+			required: true,
 			min: 0,
 			max: 8,
 		},
@@ -1535,6 +1660,7 @@ export const buildGeneratedResourceCommands = <
 				automationsRetrieveCommand,
 				automationsRunCommand,
 				automationsUnpauseCommand,
+				automationsUpdateCommand,
 				...(extras?.["automations"] ?? ([] as const)),
 			]),
 		),

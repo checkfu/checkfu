@@ -11,6 +11,7 @@ import { AutomationPaused } from "./PauseAutomation.command.ts"
 import { AutomationFired } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused } from "./UnpauseAutomation.command.ts"
+import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const NEXT_FIRING = "next-firing"
 
@@ -19,6 +20,7 @@ export class ArmAutomation extends Domain.Policy("ArmAutomation", {
 	on: [
 		AutomationCreated,
 		AutomationUnpaused,
+		AutomationUpdated,
 		AutomationFired,
 		AutomationPaused,
 		AutomationArchived,
@@ -44,6 +46,9 @@ export const ArmAutomationLive = ArmAutomation.toLayer(
 				return
 			}
 			if (event._tag === "automation.fired" && event.trigger === "manual") {
+				return
+			}
+			if (event._tag === "automation.updated" && !event.rescheduled) {
 				return
 			}
 			const next = state.upcoming[0]

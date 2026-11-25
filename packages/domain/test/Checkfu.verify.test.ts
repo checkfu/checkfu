@@ -18,6 +18,8 @@ import { UpdateAgentDecision } from "../src/Agent/UpdateAgent.decision.ts"
 import { Automation } from "../src/Automation/Automation.aggregate.ts"
 import { AdmitAutomation } from "../src/Automation/AdmitAutomation.command.ts"
 import { AdmitAutomationDecision } from "../src/Automation/AdmitAutomation.decision.ts"
+import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
+import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
 import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 import { RunAutomation } from "../src/Automation/RunAutomation.command.ts"
 import { AutomationId, sessionIdOfNextRun } from "../src/Automation/Automation.id.ts"
@@ -109,6 +111,7 @@ const STANDING = {
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",
 	"Automation.ReportedNeverExceedsRuns": "proved",
+	"Automation.RevisedExactlyWhenCreated": "proved",
 	"Automation.CreatedAutomationNeverReturnsToUninitialized": "proved",
 	"Automation.ArchivedAutomationStaysArchived": "proved",
 	"Automation.ArchivedAutomationNeverFires": "proved",
@@ -116,12 +119,14 @@ const STANDING = {
 	"Automation.RunsGrowByOneOrNotAtAll": "proved",
 	"Automation.OnlyRunAndFireStartRuns": "proved",
 	"Automation.ScheduledFiringNeedsAnActiveAutomationAndALaterInstant": "proved",
-	"Automation.OnlyAResumeStartsANewActivation": "proved",
+	"Automation.OnlyAResumeOrAnUpdateStartsANewActivation": "proved",
 	"Automation.EveryResumeStartsANewActivation": "proved",
 	"Automation.ScheduledInstantNeverGoesBack": "proved",
 	"Automation.FiredCarriesTheNewRun": "proved",
 	"Automation.RunsAreReportedInOrder": "proved",
 	"Automation.AFailedRunPausesOnlyAnActiveAutomation": "proved",
+	"Automation.OnlyCreationOrAnUpdateRevisesIt": "proved",
+	"Automation.AnUpdateLeavesRunsAlone": "proved",
 	"AutomationCapacity.ReservedSlotsStayWithinTheLimit": "proved",
 	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
@@ -138,6 +143,8 @@ const STANDING = {
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"UpdateAutomation.AnUpdateNeedsTheCurrentRevisionOfALiveAutomation": "proved",
+	"UpdateAutomation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": "proved",
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
@@ -323,6 +330,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					const updateAgent = yield* UpdateAgentDecision
 					const admitSession = yield* AdmitSessionDecision
 					const admitAutomation = yield* AdmitAutomationDecision
+					const updateAutomation = yield* UpdateAutomationDecision
 					const automations = yield* Automation
 
 					const agentRef = Agent.ref(AgentId.make("agent_post_1"))
@@ -545,6 +553,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							automation_id: automationRef.id,
 							capacity_id: AUTOMATION_CAPACITY,
 							name: "Post-Admission Automation",
+							description: null,
 							agent_id: BoundedAgentId.make(agentRef.id),
 							agent_version: null,
 							environment_id: BoundedEnvironmentId.make(envRef.id),
@@ -554,6 +563,24 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					yield* automations.send(new RunAutomation({ automation_id: automationRef.id }))
 					const automationWorld = yield* recordStep("automation-admitted-and-run")
+					yield* updateAutomation.send(
+						new UpdateAutomation({
+							automation_id: automationRef.id,
+							expected_revision: 1,
+							changed: true,
+							reschedule: true,
+							agent_changed: true,
+							environment_changed: false,
+							name: "Updated Automation",
+							description: "Moved to noon.",
+							agent_id: BoundedAgentId.make(agentRef.id),
+							agent_version: 1,
+							environment_id: BoundedEnvironmentId.make(envRef.id),
+							text: "Run the updated automation",
+							schedule: { type: "cron", expression: "0 12 * * *", timezone: "UTC" },
+						}),
+					)
+					const updatedAutomationWorld = yield* recordStep("automation-updated")
 
 					// 4. Archive Agent, Archive Environment, Delete Environment, and Archive Session post-admission.
 					yield* agents.send(new ArchiveAgent({ agent_id: agentRef.id }))
@@ -570,6 +597,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 						queuedSendEventTags: queuedSendReceipt.events.map((event) => event._tag),
 						completedTurnWorld,
 						automationWorld,
+						updatedAutomationWorld,
 						archivedEnvWorld,
 						finalWorld,
 						failures: platform.control.failures,
@@ -581,7 +609,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 
 		expect(results.failures).toEqual([])
 		expect(results.deaths).toEqual([])
-		expect(results.stepChecks.length).toBe(11)
+		expect(results.stepChecks.length).toBe(12)
 		for (const check of results.stepChecks) {
 			expect(check.invariants, `invariants failed at step '${check.step}'`).toEqual({
 				EverySessionReferencesExistingAgentVersion: true,
@@ -616,10 +644,29 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 
 		// Confirm the automation step produced nonempty automation state that the invariants judged.
 		const automationWorld = results.automationWorld
-		expect(automationWorld.Automation.map((row) => [row.id, row.state])).toEqual([
+		expect(
+			automationWorld.Automation.map(({ id, state }) => [
+				id,
+				{
+					status: state.status,
+					runs: state.runs,
+					reported: state.reported,
+					last_scheduled_at: state.last_scheduled_at,
+					activation: state.activation,
+					revision: state.revision,
+				},
+			]),
+		).toEqual([
 			[
 				automationRef.id,
-				{ status: "active", runs: 1, reported: 1, last_scheduled_at: 0, activation: 0 },
+				{
+					status: "active",
+					runs: 1,
+					reported: 1,
+					last_scheduled_at: 0,
+					activation: 0,
+					revision: 1,
+				},
 			],
 		])
 		expect(automationWorld.AutomationCapacity.map((row) => row.state)).toEqual([{ reserved: 1 }])
@@ -627,6 +674,27 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			[["active", 1]],
 		)
 		expect(automationWorld.AutomationRunView.map((row) => row.state)).toEqual([{ recorded: 1 }])
+		const updatedWorld = results.updatedAutomationWorld
+		expect(
+			updatedWorld.Automation.map((row) => [row.state.activation, row.state.revision]),
+		).toEqual([[1, 2]])
+		expect(
+			updatedWorld.AutomationView.map((row) => [
+				row.state.name,
+				row.state.agent_version,
+				row.state.activation,
+				row.state.schedule.expression,
+			]),
+		).toEqual([["Updated Automation", 1, 1, "0 12 * * *"]])
+		expect(
+			evaluateCheckfuInvariants({
+				...updatedWorld,
+				AutomationView: updatedWorld.AutomationView.map((row) => ({
+					...row,
+					state: { ...row.state, activation: 0 },
+				})),
+			}).AutomationViewsMatchAutomations,
+		).toBe(false)
 		const runSession = automationWorld.Session.find(
 			(row) => row.id === `sess_${automationRef.id}_1`,
 		)

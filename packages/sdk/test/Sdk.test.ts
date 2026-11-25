@@ -119,6 +119,7 @@ const sampleAutomation = (overrides?: {
 	id: "auto_1",
 	type: "automation" as const,
 	name: "Morning report",
+	description: null,
 	agent: { id: "agent_1", version: null },
 	environment_id: "env_1",
 	initial_events: [

@@ -10021,6 +10021,17 @@
 											"minLength": 1,
 											"maxLength": 256
 										},
+										"description": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 2048
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
 										"environment_id": {
 											"type": "string",
 											"minLength": 1,
@@ -10160,6 +10171,7 @@
 										"id",
 										"type",
 										"name",
+										"description",
 										"environment_id",
 										"schedule",
 										"status",
@@ -10623,6 +10635,18 @@
 										"maxLength": 256,
 										"description": "Human-readable automation name"
 									},
+									"description": {
+										"anyOf": [
+											{
+												"type": "string",
+												"maxLength": 2048
+											},
+											{
+												"type": "null"
+											}
+										],
+										"description": "What the automation is for, up to 2048 characters"
+									},
 									"agent": {
 										"anyOf": [
 											{
@@ -10838,6 +10862,17 @@
 														"minLength": 1,
 														"maxLength": 256
 													},
+													"description": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 2048
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
 													"environment_id": {
 														"type": "string",
 														"minLength": 1,
@@ -10977,6 +11012,7 @@
 													"id",
 													"type",
 													"name",
+													"description",
 													"environment_id",
 													"schedule",
 													"status",
@@ -11400,6 +11436,17 @@
 											"minLength": 1,
 											"maxLength": 256
 										},
+										"description": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 2048
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
 										"environment_id": {
 											"type": "string",
 											"minLength": 1,
@@ -11539,6 +11586,7 @@
 										"id",
 										"type",
 										"name",
+										"description",
 										"environment_id",
 										"schedule",
 										"status",
@@ -11884,12 +11932,10 @@
 				"x-checkfu-mcp": {
 					"name": "automations_getAutomation"
 				}
-			}
-		},
-		"/v1/automations/{automation_id}/pause": {
+			},
 			"post": {
 				"tags": ["automations"],
-				"operationId": "automations.pause",
+				"operationId": "automations.update",
 				"parameters": [
 					{
 						"name": "automation_id",
@@ -11932,6 +11978,17 @@
 											"type": "string",
 											"minLength": 1,
 											"maxLength": 256
+										},
+										"description": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 2048
+												},
+												{
+													"type": "null"
+												}
+											]
 										},
 										"environment_id": {
 											"type": "string",
@@ -12072,6 +12129,796 @@
 										"id",
 										"type",
 										"name",
+										"description",
+										"environment_id",
+										"schedule",
+										"status",
+										"pause_reason",
+										"last_run_at",
+										"created_at",
+										"updated_at",
+										"archived_at",
+										"agent",
+										"initial_events",
+										"run_count",
+										"upcoming_runs_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"202": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string"
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"pending": {
+											"type": "boolean",
+											"enum": [true]
+										}
+									},
+									"required": ["id", "type", "pending"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["payload_too_large"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"415": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["unsupported_media_type"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Change any of an automation's fields; the ones left out keep their values. Changes apply to runs that start after the update, and on an active automation a new schedule replaces the next firing. An archived automation can't be updated.",
+				"summary": "Update an automation",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 256,
+										"description": "New automation name"
+									},
+									"description": {
+										"anyOf": [
+											{
+												"type": "string",
+												"maxLength": 2048
+											},
+											{
+												"type": "null"
+											}
+										],
+										"description": "New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text."
+									},
+									"agent": {
+										"anyOf": [
+											{
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											},
+											{
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"version": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
+													}
+												},
+												"required": ["id"],
+												"additionalProperties": false
+											}
+										],
+										"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+									},
+									"environment_id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 256,
+										"description": "Environment ID later runs' sessions use"
+									},
+									"initial_events": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["user.message"]
+												},
+												"content": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"properties": {
+															"type": {
+																"type": "string",
+																"enum": ["text"]
+															},
+															"text": {
+																"type": "string",
+																"minLength": 1
+															}
+														},
+														"required": ["type", "text"],
+														"additionalProperties": false
+													},
+													"minItems": 1
+												}
+											},
+											"required": ["type", "content"],
+											"additionalProperties": false
+										},
+										"minItems": 1,
+										"maxItems": 1,
+										"description": "The one user message later runs' sessions start with"
+									},
+									"schedule": {
+										"type": "object",
+										"properties": {
+											"type": {
+												"type": "string",
+												"enum": ["cron"]
+											},
+											"expression": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											},
+											"timezone": {
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 64
+											}
+										},
+										"additionalProperties": false,
+										"description": "New schedule, with the same rules as on create. A field left out keeps its value, so the expression and the timezone can change separately. On an active automation the next firing moves to it."
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": true
+				},
+				"x-forge-group-name": "automations",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": {
+					"group": "automations",
+					"endpoint": "update"
+				},
+				"x-checkfu-mcp": {
+					"name": "automations_updateAutomation"
+				},
+				"x-checkfu-cli": {
+					"textOrObjectFields": ["agent"],
+					"repeatArrayField": {
+						"field": "initial_events",
+						"flag": "initial-event",
+						"description": "The user message later runs start with, as JSON, YAML, or @file"
+					}
+				}
+			}
+		},
+		"/v1/automations/{automation_id}/pause": {
+			"post": {
+				"tags": ["automations"],
+				"operationId": "automations.pause",
+				"parameters": [
+					{
+						"name": "automation_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128,
+							"description": "Automation ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 128
+										},
+										"type": {
+											"type": "string",
+											"enum": ["automation"]
+										},
+										"name": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"description": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 2048
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"environment_id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"schedule": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["cron"]
+												},
+												"expression": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 256
+												},
+												"timezone": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 64
+												}
+											},
+											"required": ["type", "expression", "timezone"],
+											"additionalProperties": false
+										},
+										"status": {
+											"type": "string",
+											"enum": ["active", "paused", "archived"]
+										},
+										"pause_reason": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"last_run_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										},
+										"archived_at": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"agent": {
+											"type": "object",
+											"properties": {
+												"id": {
+													"type": "string"
+												},
+												"version": {
+													"anyOf": [
+														{
+															"type": "integer",
+															"minimum": 1,
+															"maximum": 9007199254740991
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"required": ["id", "version"],
+											"additionalProperties": false
+										},
+										"initial_events": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["user.message"]
+													},
+													"content": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["text"]
+																},
+																"text": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"required": ["type", "text"],
+															"additionalProperties": false
+														},
+														"minItems": 1
+													}
+												},
+												"required": ["type", "content"],
+												"additionalProperties": false
+											},
+											"minItems": 1,
+											"maxItems": 1
+										},
+										"run_count": {
+											"type": "integer",
+											"minimum": -9007199254740991,
+											"maximum": 9007199254740991
+										},
+										"upcoming_runs_at": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"name",
+										"description",
 										"environment_id",
 										"schedule",
 										"status",
@@ -12491,6 +13338,17 @@
 											"minLength": 1,
 											"maxLength": 256
 										},
+										"description": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 2048
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
 										"environment_id": {
 											"type": "string",
 											"minLength": 1,
@@ -12630,6 +13488,7 @@
 										"id",
 										"type",
 										"name",
+										"description",
 										"environment_id",
 										"schedule",
 										"status",
@@ -13049,6 +13908,17 @@
 											"minLength": 1,
 											"maxLength": 256
 										},
+										"description": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 2048
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
 										"environment_id": {
 											"type": "string",
 											"minLength": 1,
@@ -13188,6 +14058,7 @@
 										"id",
 										"type",
 										"name",
+										"description",
 										"environment_id",
 										"schedule",
 										"status",

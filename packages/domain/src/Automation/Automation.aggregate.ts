@@ -1,5 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
-import { versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
+import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 import * as Schema from "effect/Schema"
 import { ArchiveAutomation, AutomationArchived } from "./ArchiveAutomation.command.ts"
 import { AutomationId, sessionIdOfNextRun } from "./Automation.id.ts"
@@ -24,6 +24,7 @@ import {
 import { AutomationFired, RunAutomation } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused, UnpauseAutomation } from "./UnpauseAutomation.command.ts"
+import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
 	status: Schema.String,
@@ -31,14 +32,25 @@ export const AutomationState = Schema.Struct({
 	reported: NonNegativeInt,
 	last_scheduled_at: NonNegativeInt,
 	activation: NonNegativeInt,
+	revision: NonNegativeInt,
 })
 export type AutomationState = typeof AutomationState.Type
 
-export const AUTOMATION_STATE_SCHEMA_VERSION = 1 as const
+export const AUTOMATION_STATE_SCHEMA_VERSION = 2 as const
+
+/** Version 1 had no revision; a created automation was at its first configuration. */
+const AutomationStateV1 = AutomationState.mapFields(({ revision: _revision, ...fields }) => fields)
 
 export const AutomationStateSnapshot = versionedSnapshot({
 	current: AUTOMATION_STATE_SCHEMA_VERSION,
 	schema: AutomationState,
+	previous: [
+		snapshotVersion({
+			version: 1,
+			schema: AutomationStateV1,
+			migrate: (state) => ({ ...state, revision: state.status === "" ? 0 : 1 }),
+		}),
+	],
 })
 
 const fired = (
@@ -63,6 +75,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 		reported: 0,
 		last_scheduled_at: 0,
 		activation: 0,
+		revision: 0,
 	},
 	commands: [
 		CreateAutomation,
@@ -75,6 +88,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 		RecordAutomationRunStarted,
 		RecordAutomationRunFailed,
 	],
+	events: [AutomationUpdated],
 	keyOf: (cmd) => cmd.automation_id,
 	invariants: {
 		StatusIsKnown: (s) =>
@@ -89,6 +103,11 @@ export class Automation extends Domain.Aggregate("Automation", {
 				),
 			].some((ok) => ok),
 		ReportedNeverExceedsRuns: (s) => s.reported <= s.runs,
+		RevisedExactlyWhenCreated: (s) =>
+			[
+				[s.status === "", s.revision === 0].every((ok) => ok),
+				[s.status !== "", s.revision > 0].every((ok) => ok),
+			].some((ok) => ok),
 	},
 	transitions: {
 		CreatedAutomationNeverReturnsToUninitialized: ({ before, after }) =>
@@ -123,12 +142,17 @@ export class Automation extends Domain.Aggregate("Automation", {
 				after.last_scheduled_at === command.scheduled_at,
 			].every((ok) => ok)
 		},
-		OnlyAResumeStartsANewActivation: ({ before, after, command }) =>
+		OnlyAResumeOrAnUpdateStartsANewActivation: ({ before, after, command, events }) =>
 			[
 				after.activation === before.activation,
 				[
 					command._tag === "UnpauseAutomation",
 					before.status === "paused",
+					after.activation === before.activation + 1,
+				].every((ok) => ok),
+				[
+					events.some((event) => event._tag === "automation.updated"),
+					before.status === "active",
 					after.activation === before.activation + 1,
 				].every((ok) => ok),
 			].some((ok) => ok),
@@ -143,6 +167,22 @@ export class Automation extends Domain.Aggregate("Automation", {
 			events.every((event) => event._tag !== "automation.fired" || event.run === after.runs),
 		RunsAreReportedInOrder: ({ before, after }) =>
 			[after.reported === before.reported, after.reported === before.reported + 1].some((ok) => ok),
+		OnlyCreationOrAnUpdateRevisesIt: ({ before, after, events }) =>
+			[
+				after.revision === before.revision,
+				[before.status === "", after.revision === 1].every((ok) => ok),
+				[
+					events.some((event) => event._tag === "automation.updated"),
+					after.revision === before.revision + 1,
+				].every((ok) => ok),
+			].some((ok) => ok),
+		AnUpdateLeavesRunsAlone: ({ before, after, events }) =>
+			events.every((event) => event._tag !== "automation.updated") ||
+			[
+				after.runs === before.runs,
+				after.reported === before.reported,
+				after.last_scheduled_at === before.last_scheduled_at,
+			].every((ok) => ok),
 		AFailedRunPausesOnlyAnActiveAutomation: ({ before, after, command }) =>
 			[
 				command._tag !== "RecordAutomationRunFailed",
@@ -158,6 +198,7 @@ export class Automation extends Domain.Aggregate("Automation", {
 			return [
 				new AutomationCreated({
 					name: cmd.name,
+					description: cmd.description,
 					agent_id: cmd.agent_id,
 					agent_version: cmd.agent_version,
 					environment_id: cmd.environment_id,
@@ -241,7 +282,9 @@ export class Automation extends Domain.Aggregate("Automation", {
 				scheduled_at: cmd.scheduled_at,
 				error: { type: cmd.error_type, message: cmd.message },
 			})
-			return cmd.unrecoverable && state.status === "active"
+			return [cmd.unrecoverable, state.status === "active", cmd.revision === state.revision].every(
+				(ok) => ok,
+			)
 				? [failed, new AutomationPaused({ reason: cmd.error_type })]
 				: [failed]
 		},
@@ -250,11 +293,16 @@ export class Automation extends Domain.Aggregate("Automation", {
 		RunAutomation: (state) => ({ run: state.runs }),
 	},
 	evolve: {
-		"automation.created": (state) => (state.status === "" ? { ...state, status: "active" } : state),
+		"automation.created": (state) =>
+			state.status === "" ? { ...state, status: "active", revision: 1 } : state,
 		"automation.paused": (state) =>
 			state.status === "active" ? { ...state, status: "paused" } : state,
 		"automation.unpaused": (state, e) =>
 			state.status === "paused" ? { ...state, status: "active", activation: e.activation } : state,
+		"automation.updated": (state, e) =>
+			[state.status === "active", state.status === "paused"].some((live) => live)
+				? { ...state, revision: e.revision, activation: e.activation }
+				: state,
 		"automation.archived": (state) =>
 			[state.status === "active", state.status === "paused"].some((live) => live)
 				? { ...state, status: "archived" }

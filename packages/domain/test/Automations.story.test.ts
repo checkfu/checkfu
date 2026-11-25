@@ -42,6 +42,7 @@ import {
 	UnpauseAutomation,
 } from "../src/Automation/UnpauseAutomation.command.ts"
 import { Automations } from "../src/Automations.model.ts"
+import { AutomationUpdated } from "../src/Automation/UpdateAutomation.command.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 
 const story = Story.make(Automations, { layer: ArmAutomationLive })
@@ -59,6 +60,7 @@ const dailyAtNine = {
 
 const config = {
 	name: "Morning report",
+	description: null,
 	agent_id: "agent_001",
 	agent_version: null,
 	environment_id: "env_001",
@@ -399,6 +401,7 @@ describe("Automations", () => {
 			Story.when(
 				new RecordAutomationRunFailed({
 					...second,
+					revision: 1,
 					error_type: "session_unavailable",
 					message: "The session stopped.",
 					unrecoverable: false,
@@ -410,6 +413,50 @@ describe("Automations", () => {
 			Story.view(AutomationView, automation, { status: "active" }),
 		)
 	})
+
+	it.effect(
+		"records a failure from before an update without pausing the updated automation",
+		() => {
+			const failure = (revision: number) =>
+				new RecordAutomationRunFailed({
+					automation_id: automation.id,
+					run: 1,
+					trigger: "manual",
+					scheduled_at: null,
+					revision,
+					error_type: "agent_unavailable",
+					message: "The agent is archived.",
+					unrecoverable: true,
+				})
+			return story(
+				...created(),
+				Story.given(
+					automation,
+					new AutomationUpdated({
+						...config,
+						agent_id: "agent_002",
+						revision: 2,
+						activation: 0,
+						rescheduled: false,
+					}),
+				),
+				Story.when(new RunAutomation({ automation_id: automation.id })),
+				Story.then(automation, manual(1)),
+				Story.replied({ run: 1 }),
+				Story.when(failure(1)),
+				Story.then(
+					automation,
+					new AutomationRunFailed({
+						run: 1,
+						trigger: "manual",
+						scheduled_at: null,
+						error: { type: "agent_unavailable", message: "The agent is archived." },
+					}),
+				),
+				Story.state(automation, { status: "active", revision: 2 }),
+			)
+		},
+	)
 
 	it.effect("pauses after a run fails for a reason a retry cannot fix", () =>
 		story(
@@ -423,6 +470,7 @@ describe("Automations", () => {
 					run: 1,
 					trigger: "manual",
 					scheduled_at: null,
+					revision: 1,
 					error_type: "agent_unavailable",
 					message: "The agent is archived.",
 					unrecoverable: true,
@@ -480,6 +528,29 @@ describe("Automations", () => {
 		expect(usable.filter(([expression, zone]) => !isUsableSchedule(expression, zone))).toEqual([])
 		expect(unusable.filter(([expression, zone]) => isUsableSchedule(expression, zone))).toEqual([])
 		expect(nextOccurrence("0 0 31 2 *", "UTC", ms("2026-01-01T00:00:00.000Z"))).toBeNull()
+	})
+
+	it.effect("keeps an overdue firing in view when an update leaves the schedule as it was", () => {
+		const nineOn = (day: number) => ms(`2026-01-0${day}T09:00:00.000Z`)
+		return story(
+			Story.clock(at("2026-01-01T08:00:00.000Z")),
+			Story.given(automation, new AutomationCreated(config)),
+			Story.clock(at("2026-01-01T10:00:00.000Z")),
+			Story.given(
+				automation,
+				new AutomationUpdated({
+					...config,
+					name: "Renamed",
+					revision: 2,
+					activation: 0,
+					rescheduled: false,
+				}),
+			),
+			Story.view(AutomationView, automation, {
+				name: "Renamed",
+				upcoming: [1, 2, 3, 4, 5].map(nineOn),
+			}),
+		)
 	})
 
 	it("shows an overdue firing once, then only the stored firings after now", () => {

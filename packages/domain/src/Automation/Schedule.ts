@@ -63,6 +63,11 @@ const parseInZone = (
 		Option.filter(() => hasADate(expression)),
 	)
 
+export const sameSchedule = (
+	a: { readonly expression: string; readonly timezone: string },
+	b: { readonly expression: string; readonly timezone: string },
+): boolean => a.expression === b.expression && a.timezone === b.timezone
+
 export const isUsableSchedule = (expression: string, timezone: string): boolean =>
 	Option.isSome(parseInZone(expression, timezone))
 

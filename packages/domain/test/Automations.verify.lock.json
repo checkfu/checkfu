@@ -42,10 +42,6 @@
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"FireAutomation\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tbefore.status === \"active\",\n\t\t\t\tcommand.activation === before.activation,\n\t\t\t\tcommand.scheduled_at > before.last_scheduled_at,\n\t\t\t\tafter.runs === before.runs + 1,\n\t\t\t\tafter.last_scheduled_at === command.scheduled_at,\n\t\t\t].every((ok) => ok)\n\t\t}"
 			},
-			"Automation.OnlyAResumeStartsANewActivation": {
-				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
-			},
 			"Automation.EveryResumeStartsANewActivation": {
 				"kind": "transition",
 				"source": "({ before, after, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag !== \"automation.unpaused\" || after.activation === before.activation + 1,\n\t\t\t)"
@@ -85,6 +81,22 @@
 			"Automations.AnAutomationIsArchived": {
 				"kind": "sometimes",
 				"source": "(m) => m.Automation.some((a) => a.state.status === \"archived\")"
+			},
+			"Automation.OnlyAResumeOrAnUpdateStartsANewActivation": {
+				"kind": "transition",
+				"source": "({ before, after, command, events }) =>\n\t\t\t[\n\t\t\t\tafter.activation === before.activation,\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UnpauseAutomation\",\n\t\t\t\t\tbefore.status === \"paused\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tbefore.status === \"active\",\n\t\t\t\t\tafter.activation === before.activation + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.RevisedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.revision === 0].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.revision > 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.OnlyCreationOrAnUpdateRevisesIt": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\t[\n\t\t\t\tafter.revision === before.revision,\n\t\t\t\t[before.status === \"\", after.revision === 1].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tafter.revision === before.revision + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Automation.AnUpdateLeavesRunsAlone": {
+				"kind": "transition",
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every((event) => event._tag !== \"automation.updated\") ||\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tafter.reported === before.reported,\n\t\t\t\tafter.last_scheduled_at === before.last_scheduled_at,\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}

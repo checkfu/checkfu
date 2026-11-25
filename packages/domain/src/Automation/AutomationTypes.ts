@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema"
 
 export {
+	AutomationDescription,
 	AutomationName,
 	AutomationRunError,
 	AutomationSchedule,
