@@ -9,8 +9,6 @@ import {
 	MessageText,
 	ModelUsage,
 	NonNegativeInt,
-	PositiveInt,
-	ResourceId,
 	ThinkingText,
 } from "./SessionTypes.ts"
 
@@ -63,41 +61,5 @@ export const runTurnActivity = <K extends RunTurnActivityKey, R>(
 	Activity.make<R, (typeof RUN_TURN_ACTIVITIES)[K]["success"]>({
 		name: RUN_TURN_ACTIVITIES[key].name,
 		success: RUN_TURN_ACTIVITIES[key].success,
-		execute,
-	})
-
-export const OpenedRun = Schema.Union([
-	Schema.Struct({
-		outcome: Schema.Literal("started"),
-		agent_id: ResourceId,
-		agent_version: PositiveInt,
-	}),
-	Schema.Struct({
-		outcome: Schema.Literal("refused"),
-		error_type: ErrorType,
-		message: ErrorMessage,
-		unrecoverable: Schema.Boolean,
-	}),
-	Schema.Struct({ outcome: Schema.Literal("reported") }),
-])
-
-export const OPEN_AUTOMATION_RUN_ACTIVITIES = {
-	open: { name: "open", success: OpenedRun },
-	report: { name: "report", success: Schema.Boolean },
-} as const
-
-export type OpenAutomationRunActivityKey = keyof typeof OPEN_AUTOMATION_RUN_ACTIVITIES
-
-export const openAutomationRunActivity = <K extends OpenAutomationRunActivityKey, R>(
-	key: K,
-	execute: Effect.Effect<(typeof OPEN_AUTOMATION_RUN_ACTIVITIES)[K]["success"]["Type"], never, R>,
-	attempt?: number,
-) =>
-	Activity.make<R, (typeof OPEN_AUTOMATION_RUN_ACTIVITIES)[K]["success"]>({
-		name:
-			attempt === undefined
-				? OPEN_AUTOMATION_RUN_ACTIVITIES[key].name
-				: `${OPEN_AUTOMATION_RUN_ACTIVITIES[key].name}:${attempt}`,
-		success: OPEN_AUTOMATION_RUN_ACTIVITIES[key].success,
 		execute,
 	})

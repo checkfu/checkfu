@@ -5,12 +5,7 @@ import { AgentVersionByNumberView } from "./Agent/AgentVersionByNumberView.view.
 import { AgentView } from "./Agent/AgentView.view.ts"
 import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
-import {
-	ArmAutomation,
-	ArmAutomationLive,
-	EnsureAutomationArmed,
-	EnsureAutomationArmedLive,
-} from "./Automation/ArmAutomation.policy.ts"
+import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.policy.ts"
 import { Automation } from "./Automation/Automation.aggregate.ts"
 import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
@@ -21,11 +16,8 @@ import {
 	FreeAutomationSlotLive,
 } from "./Automation/FreeAutomationSlot.policy.ts"
 import { AutomationRunView } from "./Automation/AutomationRunView.view.ts"
-import { OpenAutomationRun, OpenAutomationRunLive } from "./Automation/OpenAutomationRun.saga.ts"
 import { AutomationView } from "./Automation/AutomationView.view.ts"
 import {
-	EnsureAutomationRunStarted,
-	EnsureAutomationRunStartedLive,
 	StartAutomationRun,
 	StartAutomationRunLive,
 } from "./Automation/StartAutomationRun.policy.ts"
@@ -71,12 +63,10 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		EnsureTurnStarted,
 		EnsureTurnStopped,
 		ArmAutomation,
-		EnsureAutomationArmed,
 		StartAutomationRun,
-		EnsureAutomationRunStarted,
 		FreeAutomationSlot,
 	],
-	sagas: [RunTurn, OpenAutomationRun],
+	sagas: [RunTurn],
 	projections: [Listing],
 	queries: [ListResources],
 	invariants: {
@@ -404,11 +394,8 @@ export const CheckfuHandlersLive = Layer.mergeAll(
 	EnsureTurnStartedLive,
 	EnsureTurnStoppedLive,
 	RunTurnLive,
-	OpenAutomationRunLive,
 	ArmAutomationLive,
-	EnsureAutomationArmedLive,
 	StartAutomationRunLive,
-	EnsureAutomationRunStartedLive,
 	FreeAutomationSlotLive,
 	ListingLive,
 	ListResourcesLive,
