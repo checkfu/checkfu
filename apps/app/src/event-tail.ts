@@ -84,8 +84,7 @@ const turnOf = (event: JsonSessionEvent): number | undefined =>
 const latest = <T>(
 	events: ReadonlyArray<JsonSessionEvent>,
 	read: (event: JsonSessionEvent) => T | undefined,
-	fallback: T,
-): T => {
+): T | undefined => {
 	for (let index = events.length - 1; index >= 0; index -= 1) {
 		const event = events[index]
 		const value = event === undefined ? undefined : read(event)
@@ -93,13 +92,31 @@ const latest = <T>(
 			return value
 		}
 	}
-	return fallback
+	return undefined
 }
+
+type Progress = Pick<JsonSession, "status" | "turn">
+
+const PHASE: Record<JsonSession["status"], number> = { running: 0, idle: 1, terminated: 2 }
+
+const later = (a: Progress, b: Progress): Progress =>
+	a.status === "terminated" || b.status === "terminated"
+		? { status: "terminated", turn: Math.max(a.turn, b.turn) }
+		: a.turn !== b.turn
+			? a.turn > b.turn
+				? a
+				: b
+			: PHASE[a.status] >= PHASE[b.status]
+				? a
+				: b
 
 export const progressOf = (
 	events: ReadonlyArray<JsonSessionEvent>,
-	snapshot: Pick<JsonSession, "status" | "turn">,
-): Pick<JsonSession, "status" | "turn"> => ({
-	status: latest(events, statusOf, snapshot.status),
-	turn: latest(events, turnOf, snapshot.turn),
-})
+	snapshot: Progress,
+): Progress => {
+	const status = latest(events, statusOf)
+	if (status === undefined) {
+		return snapshot
+	}
+	return later(snapshot, { status, turn: latest(events, turnOf) ?? 0 })
+}

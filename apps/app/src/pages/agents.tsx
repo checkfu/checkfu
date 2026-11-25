@@ -16,6 +16,8 @@ import { checkfu } from "../api.ts"
 import { agentQuery, agentsPage, present } from "../queries.ts"
 import { LifecycleStatus } from "../status.tsx"
 import { useAction, useSubmissionKey } from "../use-action.ts"
+import { bodyOf, changesFrom, draftOf, emptyDraft, FIELD_LABELS, rebase } from "../agent-draft.ts"
+import type { AgentDraft } from "../agent-draft.ts"
 
 const list = getRouteApi("/_app/agents/")
 const detail = getRouteApi("/_app/agents/$agentId")
@@ -90,57 +92,28 @@ export function AgentsPage(): React.JSX.Element {
 	)
 }
 
-interface AgentDraft {
-	readonly name: string
-	readonly model: string
-	readonly system: string
-	readonly description: string
-}
-
-const draftOf = (agent: JsonAgent): AgentDraft => ({
-	name: agent.name,
-	model: agent.model.id,
-	system: agent.system ?? "",
-	description: agent.description ?? "",
-})
-
-const bodyOf = (draft: AgentDraft) => ({
-	name: draft.name.trim(),
-	model: draft.model.trim(),
-	system: draft.system === "" ? null : draft.system,
-	description: draft.description === "" ? null : draft.description,
-})
-
-const changesFrom = (from: JsonAgent, draft: AgentDraft) => {
-	const before = draftOf(from)
-	const after = bodyOf(draft)
-	return {
-		...(after.name === before.name ? {} : { name: after.name }),
-		...(after.model === before.model ? {} : { model: after.model }),
-		...(draft.system === before.system ? {} : { system: after.system }),
-		...(draft.description === before.description ? {} : { description: after.description }),
-	}
-}
-
 function AgentForm<Saved>({
-	initial,
+	draft,
+	onChange,
 	submitLabel,
+	notice,
 	onSubmit,
 	onSaved,
 	onCancel,
 }: {
-	readonly initial: AgentDraft
+	readonly draft: AgentDraft
+	readonly onChange: (draft: AgentDraft) => void
 	readonly submitLabel: string
+	readonly notice?: React.ReactNode
 	readonly onSubmit: (draft: AgentDraft) => Promise<Saved>
 	readonly onSaved: (saved: Saved) => void
 	readonly onCancel?: () => void
 }): React.JSX.Element {
-	const [draft, setDraft] = useState(initial)
 	const action = useAction(onSubmit, { invalidates: ["agents"], then: onSaved })
 	const set =
 		(field: keyof AgentDraft) =>
 		(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-			setDraft({ ...draft, [field]: event.target.value })
+			onChange({ ...draft, [field]: event.target.value })
 	return (
 		<form
 			className="max-w-2xl"
@@ -163,8 +136,9 @@ function AgentForm<Saved>({
 					<Input value={draft.description} onChange={set("description")} />
 				</Field>
 				{action.error === undefined ? null : <Callout tone="error">{action.error}</Callout>}
+				{notice}
 				<div className="flex gap-2">
-					<Button type="submit" disabled={action.pending}>
+					<Button type="submit" disabled={action.pending || notice !== undefined}>
 						{submitLabel}
 					</Button>
 					{onCancel === undefined ? null : (
@@ -181,11 +155,13 @@ function AgentForm<Saved>({
 export function NewAgentPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const createKey = useSubmissionKey()
+	const [draft, setDraft] = useState(emptyDraft)
 	return (
 		<>
 			<PageHeader title="New agent" breadcrumb={<Link to="/agents">Agents</Link>} />
 			<AgentForm
-				initial={{ name: "", model: "", system: "", description: "" }}
+				draft={draft}
+				onChange={setDraft}
 				submitLabel="Create agent"
 				onSubmit={async (draft) => {
 					const body = bodyOf(draft)
@@ -208,7 +184,11 @@ export function AgentPage(): React.JSX.Element {
 }
 
 function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
-	const [editingFrom, setEditingFrom] = useState<JsonAgent | null>(null)
+	const [edit, setEdit] = useState<{ readonly base: JsonAgent; readonly draft: AgentDraft } | null>(
+		null,
+	)
+	const behind = edit !== null && agent.version > edit.base.version
+	const update = edit === null ? null : rebase(edit.base, edit.draft, agent)
 	const archive = useAction(
 		async () => {
 			await checkfu.agents.archive(agent.id)
@@ -225,9 +205,13 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 				accessory={<LifecycleStatus resource={agent} />}
 				description={agent.description ?? undefined}
 				actions={
-					archived || editingFrom !== null ? undefined : (
+					archived || edit !== null ? undefined : (
 						<>
-							<Button variant="outline" size="sm" onClick={() => setEditingFrom(agent)}>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setEdit({ base: agent, draft: draftOf(agent) })}
+							>
 								Edit
 							</Button>
 							<Button
@@ -243,7 +227,7 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 				}
 			/>
 			{archive.error === undefined ? null : <Callout tone="error">{archive.error}</Callout>}
-			{editingFrom === null ? (
+			{edit === null ? (
 				<>
 					<DescriptionList>
 						<Description label="Model">
@@ -262,19 +246,41 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 				</>
 			) : (
 				<AgentForm
-					initial={draftOf(editingFrom)}
+					draft={edit.draft}
+					onChange={(draft) => setEdit({ ...edit, draft })}
 					submitLabel="Save new version"
-					onCancel={() => setEditingFrom(null)}
+					notice={
+						behind && update !== null ? (
+							<Callout>
+								<p>
+									This agent was saved as v{agent.version} while you were editing v
+									{edit.base.version}. Your edits are kept.
+									{update.overlapping.length === 0
+										? " None of them touch the fields that changed."
+										: ` Yours will replace the newer ${update.overlapping.map((field) => FIELD_LABELS[field]).join(", ")}.`}
+								</p>
+								<Button
+									size="sm"
+									variant="outline"
+									className="mt-2"
+									onClick={() => setEdit({ base: agent, draft: update.draft })}
+								>
+									Apply my edits to v{agent.version}
+								</Button>
+							</Callout>
+						) : undefined
+					}
+					onCancel={() => setEdit(null)}
 					onSubmit={async (draft) => {
-						const changes = changesFrom(editingFrom, draft)
+						const changes = changesFrom(edit.base, draft)
 						if (Object.keys(changes).length > 0) {
-							await checkfu.agents.update(editingFrom.id, {
-								version: editingFrom.version,
+							await checkfu.agents.update(edit.base.id, {
+								version: edit.base.version,
 								...changes,
 							})
 						}
 					}}
-					onSaved={() => setEditingFrom(null)}
+					onSaved={() => setEdit(null)}
 				/>
 			)}
 		</>

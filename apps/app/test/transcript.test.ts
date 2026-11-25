@@ -137,13 +137,36 @@ describe("transcript", () => {
 		expect(isFinal([message(1), archived(2)])).toBe(true)
 	})
 
-	it("takes status and turn from the newest events, and the snapshot only for what they lack", () => {
-		const snapshot = { status: "running" as const, turn: 4 }
-		expect(progressOf([message(1)], snapshot)).toEqual(snapshot)
-		expect(progressOf([running(1, 1), idle(2)], snapshot)).toEqual({ status: "idle", turn: 1 })
-		expect(progressOf([running(1, 1), idle(2), message(3), running(4, 2)], snapshot)).toEqual({
+	it("shows whichever of the snapshot and the events is further along, and never regresses", () => {
+		const terminated = (seq: number): JsonSessionEvent => ({
+			id: `evt_${seq}`,
+			seq,
+			type: "session.status_terminated",
+			created_at: at,
+		})
+		expect(progressOf([message(1)], { status: "running", turn: 4 })).toEqual({
+			status: "running",
+			turn: 4,
+		})
+		expect(progressOf([running(1, 2)], { status: "terminated", turn: 2 })).toEqual({
+			status: "terminated",
+			turn: 2,
+		})
+		expect(progressOf([running(1, 1), idle(2)], { status: "running", turn: 2 })).toEqual({
 			status: "running",
 			turn: 2,
+		})
+		expect(progressOf([running(1, 2), idle(2)], { status: "running", turn: 2 })).toEqual({
+			status: "idle",
+			turn: 2,
+		})
+		expect(progressOf([idle(2), running(3, 3)], { status: "idle", turn: 2 })).toEqual({
+			status: "running",
+			turn: 3,
+		})
+		expect(progressOf([running(1, 3), terminated(2)], { status: "running", turn: 3 })).toEqual({
+			status: "terminated",
+			turn: 3,
 		})
 	})
 })

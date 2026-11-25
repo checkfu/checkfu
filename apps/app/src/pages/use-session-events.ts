@@ -166,10 +166,7 @@ export function useSessionEvents({
 				}
 			})
 		}
-		readNewer().then(listen, (error_: unknown) => {
-			report(error_)
-			listen()
-		})
+		listen()
 		return () => {
 			settle()
 			source?.close()
