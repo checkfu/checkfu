@@ -1419,6 +1419,40 @@ describe("Artifacts API", () => {
 			}),
 		))
 
+	it("answers a resent version that kept files with the committed version, without reading a view", () =>
+		withApi(({ call, callViewless, viewReads }) =>
+			Effect.gen(function* () {
+				const created = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", {
+						name: "Site",
+						files: [
+							{ path: "index.html", content: "<h1>home</h1>" },
+							{ path: "app.js", content: "start()" },
+						],
+					}),
+				)
+				const kept = created.files.find((file) => file.path === "app.js")?.sha256 ?? ""
+				const body = {
+					version: 1,
+					files: [
+						{ path: "index.html", content: "<h1>fixed</h1>" },
+						{ path: "app.js", sha256: kept },
+					],
+				}
+				const path = `/v1/artifacts/${created.id}/versions`
+				expect((yield* call("POST", path, body)).status).toBe(201)
+				const resent = yield* callViewless("POST", path, body)
+				expect(resent.status).toBe(201)
+				expect((yield* json<VersionBody>(resent)).version).toBe(2)
+				const changed = yield* callViewless("POST", path, {
+					...body,
+					files: [{ path: "app.js", sha256: kept }],
+				})
+				expect(changed.status).toBe(409)
+				expect(viewReads()).toBe(0)
+			}),
+		))
+
 	it("lists each artifact's size and publication without its files or a storage read", () =>
 		withApi(({ call, store }) =>
 			Effect.gen(function* () {
