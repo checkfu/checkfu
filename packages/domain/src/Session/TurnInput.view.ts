@@ -15,8 +15,6 @@ export const TurnInputState = Schema.Struct({
 	turn: NonNegativeInt,
 	input: Schema.Array(MessageText),
 	unsent: Schema.Array(MessageText),
-	// The last turn whose reply the session published. A later turn's reply never reached the
-	// session, so the model must not keep it. Absent in state written before it existed.
 	last_reply_turn: Schema.optionalKey(NonNegativeInt),
 })
 export type TurnInputState = typeof TurnInputState.Type
@@ -72,7 +70,6 @@ export class TurnInput extends Domain.View("TurnInput", {
 			state === null ? null : { ...state, input: [], unsent: [] },
 	},
 	emit: {
-		// An idle session has no live turn or deadline to stop on termination.
 		"session.status_terminated": (event, { before }) =>
 			before !== null && before.input.length > 0 ? event : undefined,
 	},

@@ -281,10 +281,6 @@ export const createCommandId = (
 		stringifyCanonicalJson(payload),
 	])
 
-// Ephemeral-keyed HMAC-SHA-256 verification via `Mac.Mac` (`Mac.layerWebCrypto`)
-// delegates tag comparison to native `crypto.subtle.verify("HMAC", ...)` instead
-// of a JavaScript byte loop (`Mac.timingSafeEqual`), keeping arbitrary-length
-// credential checks constant-time without depending on `node:crypto`.
 const prepareConfiguredCredential = (mac: Mac.Mac["Service"], secret: Redacted.Redacted<string>) =>
 	Effect.gen(function* () {
 		const key = yield* mac.generateKey(Mac.hmacSha256)

@@ -138,7 +138,6 @@ describe("normalizeApiUrl", () => {
 					}
 				}
 
-				// 1) Server retry: directive updates reconnect delay without disconnecting the live stream
 				let retryRequests = 0
 				const retryFetch = (async () => {
 					retryRequests++
@@ -162,7 +161,6 @@ describe("normalizeApiUrl", () => {
 				expect(retryRequests).toBe(1)
 				expect(Array.from(retryEvents).map((e) => e.seq)).toEqual([1, 2])
 
-				// 1b) Advertised retry: delay overrides baseReconnectDelayMs only when a disconnect occurs
 				const retryDropClock = makeVirtualClock()
 				let retryDropRequests = 0
 				const retryDropLastIds: Array<string | null> = []
@@ -211,7 +209,6 @@ describe("normalizeApiUrl", () => {
 				expect(retryDropClock.sleepsMs).toEqual([10])
 				expect(Array.from(retryDropEvents).map((e) => e.seq)).toEqual([1, 2])
 
-				// 2) Keepalive and event frames with \r\n\r + \n split across chunk boundaries decode cleanly
 				let splitRequests = 0
 				const splitFetch = (async () => {
 					splitRequests++
@@ -254,7 +251,6 @@ describe("normalizeApiUrl", () => {
 				expect(splitRequests).toBe(4)
 				expect(Array.from(splitEvents).map((e) => e.seq)).toEqual([1])
 
-				// 3) Iterative reconnection over 50 consecutive rotations delivers all events cleanly in order
 				let rotSeq = 0
 				const rotFetch = (async () => {
 					rotSeq++
@@ -278,7 +274,6 @@ describe("normalizeApiUrl", () => {
 					Array.from({ length: 50 }, (_, idx) => idx + 1),
 				)
 
-				// 4) Non-200 SSE responses decode ApiErrorEnvelopes and fall back to HTTP status
 				const sseErrorCases: ReadonlyArray<{
 					readonly status: number
 					readonly body: string
@@ -341,7 +336,6 @@ describe("normalizeApiUrl", () => {
 					expect(err.message).not.toContain("undefined")
 				}
 
-				// 5) HTTP 408 / 503 on SSE open/reconnect are retried and resume with Last-Event-ID
 				let timeout408Requests = 0
 				const timeout408LastIds: Array<string | null> = []
 				const timeout408Fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -386,7 +380,6 @@ describe("normalizeApiUrl", () => {
 				expect(timeout408LastIds).toEqual([null, "1", "1"])
 				expect(Array.from(timeout408Events).map((e) => e.seq)).toEqual([1, 2])
 
-				// 6) First reconnect after an event still honors maxReconnectAttempts
 				let zeroRetryBodyCalls = 0
 				const zeroRetryBodyFetch = (async () => {
 					zeroRetryBodyCalls++
@@ -454,7 +447,6 @@ describe("normalizeApiUrl", () => {
 				}).pipe(Effect.provide(makeLayer(boundedAfterEventFetch)))
 				expect(boundedAfterEventCalls).toBe(3)
 
-				// 7) Terminal event (session.archived) finishes immediately and cancels an open body
 				let openBodyCanceled = false
 				const openAfterArchiveFetch = (async () => {
 					let sent = false
@@ -465,9 +457,7 @@ describe("normalizeApiUrl", () => {
 								controller.enqueue(encoder.encode(sseSessionFrame(1, "session.archived")))
 								return
 							}
-							return new Promise<void>(() => {
-								// intentionally never resolves — simulates server keeping connection open
-							})
+							return new Promise<void>(() => {})
 						},
 						cancel() {
 							openBodyCanceled = true
@@ -490,8 +480,6 @@ describe("normalizeApiUrl", () => {
 				expect(Array.from(archivedImmediate).map((e) => e.seq)).toEqual([1])
 				expect(openBodyCanceled).toBe(true)
 
-				// 8) Short no-progress closes apply capped exponential backoff (even under `retry: 0`),
-				//    while long-lived idle connections reset the streak to prompt 50ms reconnects
 				const idleClock = makeVirtualClock()
 				let idleBackoffCalls = 0
 				const idleBackoffFetch = (async () => {
@@ -550,8 +538,6 @@ describe("normalizeApiUrl", () => {
 					250, 500, 1000, 2000, 4000, 5000, 5000, 50, 50, 50, 50, 250, 500, 1000,
 				])
 
-				// 9) Monotonic numeric session cursor never regresses Last-Event-ID on partial older replay,
-				//    deduplicates replayed frames, and backs off when no cursor progress occurs
 				const replayClock = makeVirtualClock()
 				const replayCursorLastIds: Array<string | null> = []
 				let replayCursorCalls = 0
@@ -588,8 +574,6 @@ describe("normalizeApiUrl", () => {
 				expect(replayClock.sleepsMs).toEqual([250])
 				expect(Array.from(replayCursorEvents).map((e) => e.seq)).toEqual([5, 6])
 
-				// 10) Malformed SessionEvent frames fail immediately without retrying, and data-less
-				//     id-only frames do not advance Last-Event-ID
 				for (const malformedBody of [
 					'id: 2\nevent: session.status_idle\ndata: {"seq":2}\n\n',
 					'id: 2\nevent: session.status_idle\ndata: {"id":"e2","seq":2,"type":"session.status_idle","created_at":"2026-11-22T00:00:00.000Z"}\n\n',
@@ -645,8 +629,6 @@ describe("normalizeApiUrl", () => {
 				expect(idOnlySessionLastIds).toEqual([null, "1"])
 				expect(Array.from(idOnlySessionEvents).map((e) => e.seq)).toEqual([1, 2])
 
-				// 11) Long-lived idle connections reset retry budget across proxy resets, while
-				//     immediate body-read resets remain strictly bounded by maxReconnectAttempts
 				const longResetClock = makeVirtualClock()
 				let longResetCalls = 0
 				const longResetLastIds: Array<string | null> = []
@@ -732,7 +714,6 @@ describe("normalizeApiUrl", () => {
 				expect(immediateClock.sleepsMs).toEqual([250, 500, 1000, 2000, 4000])
 				expect(immediateResetErr._tag).toBe("CliFailure")
 
-				// 12) Truncated SSE frames at EOF count against maxReconnectAttempts (including 0)
 				let truncatedCalls = 0
 				const truncatedFetch = (async () => {
 					truncatedCalls += 1
@@ -777,7 +758,6 @@ describe("normalizeApiUrl", () => {
 				expect(zeroTruncatedCalls).toBe(1)
 				expect(zeroTruncatedErr.message).toContain("incomplete SSE frame")
 
-				// 13) Stalled 60s connections without events or completed keepalives do NOT reset retries
 				const stalledResetClock = makeVirtualClock()
 				let stalledResetCalls = 0
 				const stalledResetLastIds: Array<string | null> = []
@@ -819,8 +799,6 @@ describe("normalizeApiUrl", () => {
 				expect(stalledResetClock.sleepsMs).toEqual([250, 500, 1000, 2000, 4000])
 				expect(stalledResetErr._tag).toBe("CliFailure")
 
-				// 14) Bounded error-body handling: transient 503 cancels stalled body immediately,
-				//     huge/stalled non-retried 400 bounds diagnostic read, and gateway 403 preserves status
 				let stalled503Canceled = false
 				let stalled503Calls = 0
 				const stalled503Fetch = (async () => {
@@ -1096,7 +1074,6 @@ describe("Transform and formatOutput", () => {
 			}),
 		).toBe("null")
 
-		// Reserved property names like __proto__ are preserved as own properties in transforms & normalization
 		expect(
 			formatOutput(sample, {
 				format: "json",
@@ -1304,7 +1281,6 @@ describe("Transform and formatOutput", () => {
 	})
 
 	it("honors the selected output format for non-string values with --raw-output and round-trips terminal-safe YAML", () => {
-		// --format yaml -r on streaming objects preserves YAML document separators instead of emitting JSONL
 		const streamedEvents = [
 			{ id: "evt_1", type: "user.message" },
 			{ id: "evt_2", type: "agent.message" },
@@ -1328,7 +1304,6 @@ describe("Transform and formatOutput", () => {
 			streamedEvents,
 		)
 
-		// --format yaml -r on a string still outputs the raw unquoted string
 		expect(
 			formatOutput(sample, {
 				format: "yaml",
@@ -1338,7 +1313,6 @@ describe("Transform and formatOutput", () => {
 			}),
 		).toBe("agt_123")
 
-		// --format pretty -r on an object preserves pretty JSON formatting
 		expect(
 			formatOutput(
 				{ a: 1 },
@@ -1351,7 +1325,6 @@ describe("Transform and formatOutput", () => {
 			),
 		).toBe('{\n  "a": 1\n}')
 
-		// Terminal-safe YAML uses YAML double-quoted escapes so values & keys remain both safe and lossless
 		const tricky = {
 			name: "evil\u202ename",
 			controls: "hi\u001b[31m\u0007\u009b\u2028\u2029\u2066there",
@@ -1392,7 +1365,6 @@ describe("Transform and formatOutput", () => {
 				{ id: "evt_3", type: "session.status_idle", stop_reason: { type: "end_turn" } },
 			],
 		}
-		// 7 objects total: root + 3 events + 2 text content blocks + 1 stop_reason
 		const expectedObjectCount = 7
 		const countEntriesCalls = <A>(fn: () => A): readonly [A, number] => {
 			let calls = 0
@@ -1431,7 +1403,6 @@ describe("Transform and formatOutput", () => {
 		expect(projected).toEqual(["evt_1", "evt_2", "evt_3"])
 		expect(projCalls).toBe(expectedObjectCount)
 
-		// Multiple references to the same branch reuse the single normalized value without recopying
 		const duplicated = evaluateTransform(listResponse, "{a:data,b:data}") as {
 			readonly a: unknown
 			readonly b: unknown

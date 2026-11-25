@@ -6,11 +6,6 @@ import { admissionRefusal } from "./AdmissionRefusal.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { Session } from "./Session.aggregate.ts"
 
-/**
- * Atomically verifies that the referenced agent (and requested version) and
- * environment are active when creating a session, so a concurrent archive or
- * delete cannot leave a newly created session pointing at an ineligible resource.
- */
 export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 	reads: { agent: Agent, environment: Environment, session: Session },
 	keyOf: (cmd) => ({

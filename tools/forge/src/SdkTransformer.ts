@@ -143,7 +143,6 @@ const generateResourcesFile = (
 
 	const out = file("Resources.ts")
 
-	// 1. Canonical CheckfuOperations map & Op<K> helper
 	out("export interface CheckfuOperations {")
 	out.indent(() => {
 		for (const op of operations) {
@@ -307,7 +306,6 @@ const generateResourcesFile = (
 		}
 
 		out("/** ", docText, " */")
-		// Overload 1: withResponse: true
 		out(op.methodName, "(")
 		out.indent(() => emitSignatureArgs("withResponse"))
 		out(
@@ -325,11 +323,9 @@ const generateResourcesFile = (
 			CheckfuSdkError,
 			">",
 		)
-		// Overload 2: default (unwrapped data)
 		out(op.methodName, "(")
 		out.indent(() => emitSignatureArgs("default"))
 		out("): ", EffectType, "<", EndpointSuccess, "<", g, ", ", e, ">, ", CheckfuSdkError, ">")
-		// Implementation
 		out(op.methodName, "(")
 		out.indent(() => emitSignatureArgs("impl"))
 		out(
@@ -490,7 +486,6 @@ const generateResourcesFile = (
 		out("}")
 		out()
 
-		// Pagination companions for paginated GET endpoints
 		if (op.kind === "paginated" && op.pagination !== undefined) {
 			const cursorParam = op.pagination.cursorParam
 			const cursorKeyJson = JSON.stringify(cursorParam)
@@ -810,7 +805,6 @@ const generateResourcesFile = (
 	const groupNodes: Array<SurfaceGroupNode> = []
 	collectGroupsBottomUp(root, groupNodes)
 
-	// 2. Effect resource classes (bottom-up so child classes are declared before parents)
 	for (const node of groupNodes) {
 		const clsName = effectClassName(node)
 		out("export class ", clsName, " {")
@@ -870,7 +864,6 @@ const generateResourcesFile = (
 	out("}")
 	out()
 
-	// 3. Promise resource classes (bottom-up so child classes are declared before parents)
 	for (const node of groupNodes) {
 		const clsName = promiseClassName(node)
 		const effectClsName = effectClassName(node)

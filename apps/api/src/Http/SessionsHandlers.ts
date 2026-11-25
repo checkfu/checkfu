@@ -575,8 +575,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				Effect.gen(function* () {
 					const id = params.session_id
 					const ref = Session.ref(id)
-					// One view read answers both whether the session exists and where its log ends. Only a
-					// session the view has not projected yet needs the aggregate and a second read.
 					const projected = yield* sessionViews.snapshot(ref)
 					const head =
 						projected.state !== null
@@ -595,12 +593,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						return HttpServerResponse.empty({ status: 204 })
 					}
 					let cursor = Math.min(from, head.cursor)
-					// Every read of the log is a bounded page from the cursor. Catch-up reads until a page
-					// comes back empty: a client still reading the last page lets events pile up, and
-					// reading again before the live read starts keeps its first delivery to what arrived
-					// during that one read. A cursor at the head needs no page: the snapshot just read is
-					// that read. Live reads follow the view's own continuation, since a commit after a read
-					// sends another head.
 					const pagesAfterCursor = (until: "empty" | "last page") =>
 						Stream.suspend(() =>
 							Stream.paginate(cursor, (seq: number) =>
@@ -624,11 +616,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							),
 						).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
 					const catchUp = cursor < head.cursor ? pagesAfterCursor("empty") : Stream.empty
-					// On Cloudflare the view object sends the session's head once on connect and once per
-					// commit, and what is new is read in pages: no read is ever larger than a page, however
-					// late the socket opened. Heads that arrive during a read fold into the newest. Pages
-					// start past what the client asked for and are read only when the head moved past them;
-					// a session archived at or below that point has nothing left to send.
 					const live: Stream.Stream<SessionEventEntry> =
 						connectSessionView === undefined
 							? Stream.suspend(() => sessionViews.events(ref, { after: cursor }))

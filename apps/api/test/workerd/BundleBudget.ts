@@ -8,7 +8,6 @@ import * as Schema from "effect/Schema"
 
 const PROBE = fileURLToPath(new URL("./StartupProbe.mjs", import.meta.url))
 const SAMPLES = 3
-// All samples together end before the 60 seconds the test that calls this is given.
 const PROBE_TIMEOUT_MS = 15_000
 
 const ProbeResult = Schema.fromJsonString(
@@ -21,13 +20,9 @@ export interface BundleMeasurement {
 	readonly totalBytes: number
 	readonly startupCpuMs: number
 	readonly harnessSources: ReadonlyArray<string>
-	// The largest sources of the eager code, by bytes, read from the source maps: a package for
-	// a dependency, a file for the repository's own code.
 	readonly eagerContributors: ReadonlyArray<{ readonly source: string; readonly bytes: number }>
 }
 
-// Every sample is a cold import in plain Node, whatever the caller's environment: no compile
-// cache to reuse code compiled by an earlier sample, and none of the caller's Node options.
 const probeEnv = (): NodeJS.ProcessEnv => {
 	const { NODE_OPTIONS: _ignored, ...inherited } = process.env
 	return { ...inherited, NODE_DISABLE_COMPILE_CACHE: "1" }
@@ -38,7 +33,6 @@ const HARNESS_SOURCE =
 const MODEL_TABLE =
 	/@earendil-works\/pi-ai\/dist\/(?:model-catalog\.js|providers\/(?:data\/[^/]+\.json|[^/]+\.models\.js))$/
 
-// Every file under the bundle, at any depth, so no check sees less than what ships.
 const bundleFiles = (root: string): ReadonlyArray<string> =>
 	readdirSync(root, { recursive: true, withFileTypes: true })
 		.filter((entry) => entry.isFile())
@@ -58,9 +52,6 @@ const harnessSources = (root: string): ReadonlyArray<string> =>
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-// Source map "mappings": per generated line, segments of base64 VLQ fields. Only the first two
-// are needed, the generated column (relative within a line) and the source (relative overall);
-// a segment with a column alone starts an unmapped range.
 const decodeMappings = (
 	mappings: string,
 ): ReadonlyArray<ReadonlyArray<readonly [number, number | undefined]>> => {
@@ -118,7 +109,6 @@ const eagerContributors = (files: ReadonlyArray<string>, top = 12) => {
 				if (source === undefined) {
 					return
 				}
-				// Columns count UTF-16 code units; the budget counts UTF-8 bytes.
 				const span = lines[index]?.slice(column, segments[at + 1]?.[0]) ?? ""
 				const key = contributorOf(map.sources?.[source] ?? "unknown")
 				bytesBySource.set(key, (bytesBySource.get(key) ?? 0) + Buffer.byteLength(span, "utf8"))
@@ -134,7 +124,6 @@ const eagerContributors = (files: ReadonlyArray<string>, top = 12) => {
 const probe = async (entry: string, resultFile: string, timeout: number) => {
 	const child = spawn(process.execPath, [PROBE, pathToFileURL(entry).href, resultFile], {
 		env: probeEnv(),
-		// The entry's own output goes nowhere; the result comes back in the file.
 		stdio: ["ignore", "ignore", "inherit"],
 		timeout,
 		killSignal: "SIGKILL",
@@ -151,11 +140,6 @@ const probe = async (entry: string, resultFile: string, timeout: number) => {
 const bytes = (files: ReadonlyArray<string>) =>
 	files.reduce((sum, file) => sum + statSync(file).size, 0)
 
-/**
- * Evaluates the entry under Node with the platform modules stubbed. `eagerFiles` are the
- * bundle's modules Node loaded doing so. `startupCpuMs` is the CPU that took, the work
- * Cloudflare bounds at one second (error 10021); it tracks the trend, not Cloudflare's number.
- */
 export const measureBundle = async (
 	dir: string,
 	entryName: string,
@@ -187,8 +171,6 @@ export const measureBundle = async (
 	}
 }
 
-// Each byte budget is what the Worker measured when it was last set, plus about 25 KB. The
-// start-up budget is half of Cloudflare's one second, so the trend is caught with room to act.
 export const API_WORKER_BUDGET = {
 	eagerBytes: 1_270_000,
 	totalBytes: 1_270_000,

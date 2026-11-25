@@ -46,15 +46,9 @@ export type {
 const VERIFY_MAX_BODY_BYTES = 16 * 1024
 const VERIFY_BODY_TIMEOUT_MS = 2000
 
-/** Turns a URL someone typed into the base the API lives under, dropping one trailing `/v1`. */
 export const normalizeApiUrl = (raw: string): Effect.Effect<string, CliFailure> =>
 	sdkNormalizeApiUrl(raw).pipe(Effect.mapError((err) => configError(err.message)))
 
-/**
- * A saved URL is the exact base a key was verified against, so it is used as stored.
- * Normalizing it a second time could strip another path segment and send the key
- * somewhere that was never verified.
- */
 const savedApiUrl = (saved: SavedConnection): Effect.Effect<string, CliFailure> =>
 	sdkNormalizeApiUrl(saved.url, { stripApiVersionSuffix: false }).pipe(
 		Effect.mapError((err) => configError(err.message)),
@@ -139,7 +133,6 @@ const decodeJsonOption = Schema.decodeOption(Schema.fromJsonString(Schema.Unknow
 
 const isVerified = Schema.is(Schema.Struct({ type: Schema.Literal("authentication_verified") }))
 
-// The API's credential check: 401 without an accepted key, a confirmation with one.
 const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
 	Effect.gen(function* () {
 		const http = yield* HttpClient.HttpClient
@@ -170,7 +163,6 @@ const probeProtectedRoute = (baseUrl: string, apiKey: Option.Option<string>) =>
 		}),
 	)
 
-/** An API key that can travel in an `Authorization` header unchanged. */
 export const isSendableApiKey = (apiKey: string): boolean => /^[!-~]+$/.test(apiKey)
 
 export const verifyApiKey = (
@@ -178,13 +170,10 @@ export const verifyApiKey = (
 	apiKey: string,
 ): Effect.Effect<void, CliFailure, HttpClient.HttpClient> =>
 	Effect.gen(function* () {
-		// An API deployed before the credential check existed answers 404 here, as does a
-		// mistyped path.
 		const notCheckfu = (status: number) =>
 			networkFailure(
 				`${baseUrl} did not answer like a Checkfu API (HTTP ${status}). Check the URL, including its path${status === 404 ? "; a deployment older than this CLI needs redeploying first" : ""}.`,
 			)
-		// The key is only sent to a route that has just refused a request for lacking one.
 		const anonymous = yield* probeProtectedRoute(baseUrl, Option.none())
 		if (anonymous.status !== 401 || anonymous.error?.type !== "authentication_error") {
 			return yield* notCheckfu(anonymous.status)

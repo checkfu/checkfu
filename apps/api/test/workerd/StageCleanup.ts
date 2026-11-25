@@ -28,7 +28,6 @@ const R2BucketState = Schema.fromJsonString(
 const D1_OBJECT = "cloudflare-runtime-D1DatabaseObject"
 const R2_OBJECT = "cloudflare-runtime-R2BucketObject"
 
-/** The file workerd keeps a Durable Object in: its id for `getByName(name)` in the namespace. */
 const localObjectFile = (namespace: string, name: string): string => {
 	const key = createHash("sha256").update(namespace).digest()
 	const id = createHmac("sha256", key).update(name).digest().subarray(0, 16)
@@ -54,11 +53,6 @@ const list = (dir: string): ReadonlyArray<string> => {
 	}
 }
 
-/**
- * Removes what a local `alchemy dev` stage left in `.alchemy`: its state, its Worker bundles, and
- * the local data of each Worker, D1 database and R2 bucket its state names. Bundles go even when the state was never
- * written; local data names come only from the state, so another stage keeps its data.
- */
 export const removeStage = (alchemyDir: string, stack: string, stage: string): void => {
 	const stateDir = join(alchemyDir, "state", stack, stage)
 	const states = list(stateDir).map((file) => readFileSync(join(stateDir, file), "utf8"))
@@ -67,8 +61,6 @@ export const removeStage = (alchemyDir: string, stack: string, stage: string): v
 	const buckets = states.flatMap((state) =>
 		Option.toArray(Schema.decodeOption(R2BucketState)(state)),
 	)
-	// A bundle is `<stack>-<stage>-<logical id>`, and no logical id in the stack has a hyphen, so
-	// a hyphen after this stage's prefix means the bundle belongs to a stage whose name extends it.
 	const bundlePrefix = `${stack}-${stage}-`
 	for (const name of list(join(alchemyDir, "bundles"))) {
 		if (name.startsWith(bundlePrefix) && !name.slice(bundlePrefix.length).includes("-")) {
@@ -95,7 +87,6 @@ export const removeStage = (alchemyDir: string, stack: string, stage: string): v
 		attr: { bucketName },
 	} of buckets) {
 		removeObject(join(alchemyDir, "local", "r2", R2_OBJECT), localR2File(bucketName))
-		// workerd keeps a bucket's blobs under its name with path-unsafe characters replaced.
 		const blobs = bucketName.replaceAll(/[?<>*"'^/\\:|]/g, "_")
 		rmSync(join(alchemyDir, "local", "r2", blobs), { recursive: true, force: true })
 	}

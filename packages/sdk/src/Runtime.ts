@@ -34,10 +34,6 @@ import {
 } from "./Transport.ts"
 import type { HeaderMap, RetrySafety } from "./Transport.ts"
 
-/**
- * Recursively transforms Effect `DateTime.Utc` values into ISO-8601 `string`s
- * and unbrands primitive branded types for plain TypeScript callers.
- */
 export type IsoDateTimes<T> = T extends DateTime.Utc
 	? string
 	: T extends Brand.Brand<infer _K>
@@ -62,9 +58,6 @@ type OptionalKeysOf<T> = {
 	[K in keyof T]-?: Record<never, never> extends Pick<T, K> ? K : never
 }[keyof T]
 
-/**
- * Allows `undefined` explicitly on optional keys under `exactOptionalPropertyTypes`.
- */
 export type RelaxOptionalProps<T> = [T] extends [never]
 	? never
 	: T extends object
@@ -100,7 +93,6 @@ export type EndpointDecodedParams<
 	E extends ApiEndpointName<G>,
 > = SchemaTypeOrNever<EndpointProp<ApiEndpoint<G, E>, "~Params">>
 
-/** A path argument: a number where the endpoint's parameter decodes to one, otherwise a string. */
 export type PathParam<
 	G extends ApiGroupName,
 	E extends ApiEndpointName<G>,
@@ -303,11 +295,7 @@ export const decodeEndpointParams = <G extends ApiGroupName, E extends ApiEndpoi
 			invalidPath(`Endpoint ${String(group)}.${String(endpoint)} does not accept path parameters.`),
 		)
 	}
-	// Boundary codec: `endpointDef.params` is the runtime schema corresponding to `~Params`.
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion
 	const params = paramsSchema as Schema.Codec<EndpointDecodedParams<G, E>, unknown, never, never>
-	// Encoding the arguments through the endpoint's own schema turns a number into its path text
-	// only where the parameter is numeric, and refuses a number or a missing value for a string id.
 	return Schema.encodeUnknownEffect(params)(pathArgs).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(params)),
 		Effect.mapError((err) => invalidPath(`Invalid path parameters: ${err.message}`)),
@@ -606,8 +594,6 @@ const lookupRawSseMethod = (
 		}
 		for (const [endpointName, fn] of Object.entries(groupClient)) {
 			if (endpointName === endpoint && typeof fn === "function") {
-				// Boundary dispatch: `raw[group][endpoint]` is the typed HttpApiClient SSE endpoint.
-				// oxlint-disable-next-line typescript/no-unsafe-type-assertion
 				return fn as RawSseMethod
 			}
 		}
@@ -627,8 +613,6 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 		const sessionId = rawParams["session_id"] ?? ""
 		const rawAfter = rawQuery?.["after"]
 		const after = typeof rawAfter === "number" ? rawAfter : undefined
-		// Boundary dispatch: `sessions.streamEvents` decodes `SessionEvent`, matching `EndpointSseEvent<"sessions", "streamEvents">`.
-		// oxlint-disable-next-line typescript/no-unsafe-type-assertion
 		return streamSessionEvents(
 			runtime.raw,
 			sessionId,
@@ -663,10 +647,7 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 				decodeEvent: (rawData) =>
 					decodeGenericSseJson(rawData).pipe(
 						Effect.mapBoth({
-							onSuccess: (parsed) =>
-								// Boundary cast: parsed JSON payload for generic `CheckfuApi[G][E]` SSE event.
-								// oxlint-disable-next-line typescript/no-unsafe-type-assertion
-								parsed as EndpointSseEvent<G, E>,
+							onSuccess: (parsed) => parsed as EndpointSseEvent<G, E>,
 							onFailure: (err) =>
 								new APIConnectionError({
 									message: `Invalid SSE event payload: ${err.message}`,
@@ -716,8 +697,6 @@ export const pollPending = <T>(
 	options?: WaitForPendingOptions<T>,
 ): Effect.Effect<T, CheckfuSdkError> =>
 	Effect.gen(function* () {
-		// A receipt that names its committed version is read at exactly that version, so any
-		// successful read is the resource it promised.
 		const readiness: PendingReadiness | undefined =
 			pending.type === "artifact_version" && "version" in pending
 				? { kind: "create" }

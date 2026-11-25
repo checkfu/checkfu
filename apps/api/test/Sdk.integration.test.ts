@@ -72,7 +72,6 @@ describe("@checkfu/sdk live API integration", () => {
 						yield* Effect.gen(function* () {
 							const client = yield* CheckfuClient
 
-							// 1. Agent create (with idempotency replay), retrieve, update, conflict, archive
 							const createdAgentRes = yield* client.agents.create(
 								{
 									name: "SDK Agent",
@@ -117,7 +116,6 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(conflictErr._tag).toBe("ConflictError")
 							expect(conflictErr).toBeInstanceOf(ConflictError)
 
-							// 2. Environment create, retrieve, update, delete
 							const env = yield* client.waitForPending(
 								yield* client.environments.create({ name: "sdk-env" }),
 							)
@@ -158,7 +156,6 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(Array.from(listedArtifacts, (entry) => entry.name)).toEqual(["sdk-artifact"])
 							expect(Array.from(listedArtifacts, (entry) => entry.id)).toEqual([artifact.id])
 
-							// Automation create, run on request, run list, archive
 							const automation = yield* client.automations.create(
 								{
 									name: "sdk-automation",
@@ -233,7 +230,6 @@ describe("@checkfu/sdk live API integration", () => {
 							}
 							expect(archivedAutomation.status).toBe("archived")
 
-							// 3. Session create, send events, live SSE stream, paginated list, archive, 204
 							const session = yield* client.waitForPending(
 								yield* client.sessions.create({
 									agent: agent.id,
@@ -260,7 +256,6 @@ describe("@checkfu/sdk live API integration", () => {
 								expect(firstReceipt.id).toBe("evt_user_1")
 							}
 
-							// Stream live until turn settles (session.status_idle)
 							const liveEvents = yield* client.sessions.events.stream(session.id).pipe(
 								Stream.takeUntil((ev: SessionEvent) => ev.type === "session.status_idle"),
 								Stream.runCollect,
@@ -272,13 +267,11 @@ describe("@checkfu/sdk live API integration", () => {
 								expect(agentMsg.content[0]?.text).toBe("Echo: Hello from Effect SDK")
 							}
 
-							// Paginate all events with small limit=2
 							const pagedEvents = yield* Stream.runCollect(
 								client.sessions.events.listStream(session.id, { limit: 2, order: "asc" }),
 							)
 							expect(Array.from(pagedEvents).map((e) => e.seq)).toEqual(liveArray.map((e) => e.seq))
 
-							// Archive session and verify stream finishes at session.archived, then 204 empty
 							const archivedSession = yield* client.waitForPending(
 								yield* client.sessions.archive(session.id),
 							)
@@ -297,14 +290,12 @@ describe("@checkfu/sdk live API integration", () => {
 							)
 							expect(Array.from(empty204)).toEqual([])
 
-							// Archive agent at end
 							const archivedAgent = yield* client.waitForPending(
 								yield* client.agents.archive(agent.id),
 							)
 							expect(archivedAgent.archived_at).not.toBeNull()
 						}).pipe(Effect.provide(sdkLayer))
 
-						// 4. Verify authentication rejection with bad API key
 						const badAuthErr = yield* Effect.gen(function* () {
 							const client = yield* CheckfuClient
 							return yield* Effect.flip(client.agents.retrieve("agent_any"))
@@ -387,7 +378,6 @@ describe("@checkfu/sdk live API integration", () => {
 								})
 								expect(receipt.data[0]?.type).toBe("user.message")
 
-								// Live stream via Promise facade
 								const stream = await client.sessions.events.stream(session.id)
 								const seen: Array<JsonSessionEvent> = []
 								for await (const event of stream) {
@@ -399,14 +389,12 @@ describe("@checkfu/sdk live API integration", () => {
 								expect(seen.some((e) => e.type === "agent.message")).toBe(true)
 								expect(typeof seen[0]?.created_at).toBe("string")
 
-								// Auto-paginated for-await over historical events
 								const allEvents: Array<JsonSessionEvent> = []
 								for await (const event of client.sessions.events.list(session.id, { limit: 2 })) {
 									allEvents.push(event)
 								}
 								expect(allEvents.length).toBeGreaterThanOrEqual(seen.length)
 
-								// Auto-paginated for-await over an automation's runs, with and without an order
 								const automation = await client.waitForPending(
 									await client.automations.create(
 										{
@@ -451,12 +439,10 @@ describe("@checkfu/sdk live API integration", () => {
 								}
 								expect(listedIds).toContain(automation.id)
 
-								// 404 unwraps directly to NotFoundError
 								await expect(client.sessions.retrieve("sess_does_not_exist")).rejects.toThrow(
 									NotFoundError,
 								)
 
-								// 202 Pending check
 								expect(isPendingResource(session)).toBe(false)
 							} finally {
 								await client.close()
@@ -478,8 +464,6 @@ describe("@checkfu/sdk live API integration", () => {
 					)
 
 					yield* Effect.gen(function* () {
-						// Zero wait timeout forces agents.create to return 202 Pending while the read
-						// endpoint still resolves once projected.
 						const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 							Effect.provideService(AgentVersionWaitTimeout, "0 millis"),
 						)

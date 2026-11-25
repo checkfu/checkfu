@@ -211,7 +211,6 @@ export const isObjectOrComplexUnion = (ty: Type): boolean => {
 		return isObjectOrComplexUnion(unwrapped.model.type)
 	}
 	if (unwrapped.kind === "union") {
-		// A number in a union needs parsing too, so the flag reads JSON or YAML.
 		return unwrapped.members.some((m) => isObjectOrComplexUnion(m) || isNumberScalar(m))
 	}
 	return false
@@ -425,8 +424,6 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 		sse !== undefined ? "sse" : pagination !== undefined ? "paginated" : "unary"
 
 	const explicitIdempotent = method.extension("x-checkfu-idempotent") === true
-	// An operation that takes a retry key needs one to be retried after it may have landed, whatever
-	// its method: a delete that a later call can undo is not safe to resend without it.
 	const retrySafety: SurfaceRetrySafety = explicitIdempotent
 		? "idempotent"
 		: supportsIdempotencyKey
@@ -514,7 +511,6 @@ const buildGroupNode = (
 		children.push(childNode)
 	}
 
-	// Also detect collision with Effect pagination helper names (`<method>Pages`, `<method>Stream`)
 	for (const op of operations) {
 		if (op.kind !== "paginated") {
 			continue

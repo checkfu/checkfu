@@ -41,22 +41,17 @@ const askOutput = (stage: string, profile = "default") => [
 	`Checkfu/${stage}/output`,
 ]
 
-// What Alchemy really prints on stdout ahead of a result when it takes credentials
-// from the environment (captured from alchemy 2.0.0-beta.87).
 const ALCHEMY_NOISE =
 	"[12:22:22.304] INFO: Cloudflare: using environment variables (CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN).\n"
 
 const fakeAlchemy = (
 	calls: Array<ReadonlyArray<string>>,
 	options: {
-		/** The account Alchemy resolves; `null` is a profile with no Cloudflare connection. */
 		readonly account?: string | null
-		/** The account that becomes connected once the sign-in has run. */
 		readonly accountAfterSignIn?: string
 		readonly accountError?: string
 		readonly output?: "missing" | "error" | "silent"
 		readonly url?: string
-		/** The MCP Worker's URL, for a stack that deploys one. */
 		readonly mcp?: string
 		readonly app?: string
 		readonly deployExitCode?: number
@@ -193,7 +188,6 @@ describe("checkfu deploy", () => {
 				api_key: TEST_API_KEY,
 			})
 			expect(result.stderr).toContain(`Checkfu is live at ${DEPLOYED_URL}`)
-			// The next steps are the plain resource commands, with a model the deployed key can run.
 			expect(result.stderr).toContain(
 				`${COMMAND} agents create --name Assistant --model claude-sonnet-5-5`,
 			)
@@ -230,7 +224,6 @@ describe("checkfu deploy", () => {
 			expect(generated[ENV_FILE]).toMatch(
 				/^CHECKFU_API_KEY=ck_[0-9a-f]{64}\nOPENAI_API_KEY=sk-proj-from-env\n$/,
 			)
-			// The in-memory API only accepts TEST_API_KEY, so the freshly generated key is rejected.
 			expect(rejected.errorMessage).toContain("rejected the API key")
 			expect(generated[CONFIG_FILE]).toBeUndefined()
 
@@ -399,8 +392,6 @@ describe("checkfu deploy", () => {
 			const cli = yield* makeTestServer()
 			const calls: Array<ReadonlyArray<string>> = []
 			const files = virtualFiles(checkout)
-			// No .env yet, so the check runs without one; the deploy gets the file that
-			// preparing the secrets created, under the same profile.
 			yield* cli.run(["deploy", "--yes"], {
 				env: { ...deployEnv, ALCHEMY_PROFILE: "work" },
 				files,
@@ -481,11 +472,9 @@ describe("checkfu deploy", () => {
 				expect(calls).toEqual([["query", "account", "default", ""]])
 				expect(files[RECORD_FILE]).toBe(record("live"))
 				expect(files[CONFIG_FILE]).toBe(saved)
-				// Refused before any secret was written, so "nothing was changed" is true.
 				expect(files[ENV_FILE]).toBeUndefined()
 			}
 
-			// A stage this checkout has not deployed is a new deployment, wherever it goes.
 			const other = yield* cli.run(["deploy", "--yes", "--stage", "staging"], {
 				env: deployEnv,
 				files,
@@ -538,7 +527,6 @@ describe("checkfu deploy", () => {
 				})
 				expect(result.exitCode).toBe(1)
 				expect(result.errorMessage).toContain(message)
-				// The stage is deployed, so it is recorded; only its URL is still unknown.
 				expect(files[RECORD_FILE]).toBe(record("live", "default", ACCOUNT, null))
 				expect(files[CONFIG_FILE]).toBeUndefined()
 			}
@@ -723,7 +711,6 @@ describe("checkfu destroy", () => {
 			expect(result.errorMessage).toBeUndefined()
 			expect(calls.at(-1)).toEqual(["destroy", "--stage", "staging", "--yes", ...SHARED])
 			expect(files[RECORD_FILE]).toBeUndefined()
-			// The saved login still belongs to the untouched "live" deployment.
 			expect(files[CONFIG_FILE]).toBe(savedLive)
 		}),
 	)
@@ -828,7 +815,6 @@ describe("saved connection", () => {
 			const cli = yield* makeTestServer()
 			const files = virtualFiles()
 			const requested: Array<string> = []
-			// A host that serves Checkfu under /team/v1, so its API lives at /team/v1/v1/...
 			const underPrefix = (next: (request: Request) => Promise<Response>, request: Request) => {
 				requested.push(request.url)
 				const url = new URL(request.url)

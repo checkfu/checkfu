@@ -39,8 +39,6 @@ import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
 
 describe("Provider refusals and OpenAI Responses codec", () => {
 	it("preserves provider refusals without draining queued prompts and keeps the session alive after a provider error", async () => {
-		// 2. End-to-end Anthropic refusal must NOT drain queued user prompts;
-		//    and a rate-limit error mentioning "Requested 401 tokens" must NOT terminate the session.
 		let turn1StartedResolve: (() => void) | undefined
 		const turn1Started = new Promise<void>((resolve) => {
 			turn1StartedResolve = resolve
@@ -97,7 +95,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					// Session A: Anthropic refusal with a queued follow-up message
 					const sessARes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -124,7 +121,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					})
 					yield* Effect.promise(() => turn1Started)
 
-					// Queue a second user prompt while Turn 1 is running
 					const queuedRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessA.id}/events`,
@@ -149,7 +145,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					expect(idleFrameA?.data.stop_reason).toEqual({ type: "refusal" })
 					expect(framesA.some((f) => f.event === "session.error")).toBe(false)
 
-					// Wait briefly and confirm queued prompt was NOT drained and session stays idle
 					yield* Effect.sleep("80 millis")
 					const getARes = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -160,7 +155,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					expect(getA.status).toBe("idle")
 					expect(refusalModelCalls).toBe(1)
 
-					// Session B: Rate-limit error mentioning "Requested 401 tokens" must NOT terminate session
 					const sessBRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -196,7 +190,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 						retry_status: { type: "exhausted" },
 					})
 
-					// Session B is still active (idle, not terminated) and can complete another turn!
 					const lastSeqB = framesB.at(-1)?.id
 					const streamB2 = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -421,7 +414,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					})
 					yield* Effect.promise(() => requestStarted)
 
-					// Queue a follow-up prompt while the OpenAI Responses request is in-flight
 					const queuedRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -450,7 +442,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					})
 					expect(frames.some((f) => f.event === "session.error")).toBe(false)
 
-					// Give any unintended auto-drain a chance to fire; queued prompt must stay paused.
 					yield* Effect.sleep("100 millis")
 					expect(fetchCalls).toBe(1)
 					const sessAfter = yield* sendRequest(apiFetch, {
@@ -471,10 +462,8 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 	})
 
 	it("preserves stream errors after a partial OpenAI refusal, and handles lagging version views non-terminally", async () => {
-		// 1. Interrupted/errored OpenAI Responses stream after a partial refusal delta MUST fail (never commit as refusal)
 		const originalFetch = globalThis.fetch
 		globalThis.fetch = async () => {
-			// Stream sends a refusal delta and then terminates prematurely without `response.completed`
 			const partialRefusalSse = [
 				`event: response.created\ndata: ${JSON.stringify({
 					type: "response.created",
@@ -538,7 +527,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			await partialBackend.close()
 		}
 
-		// 2. Lagging AgentVersionByNumberView + missing version -> non-terminal (never terminates session)
 		const { layer: baseLayer, closeAll } = makePiDurableTestLayer(async (model, context) =>
 			makeAssistantReply(model, null, `Reply ${extractLastUserText(context)}`, 5, 3),
 		)
@@ -551,7 +539,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				Effect.gen(function* () {
 					const provider = yield* Harness
 
-					// Missing/lagging version lookup must fail NON-TERMINALLY so lagging views never kill a valid session
 					const missingVersionErr = yield* Effect.flip(
 						provider.runTurn({
 							session_id: SessionId.make("sess_lagging_agent"),
@@ -875,7 +862,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			await backend.close()
 		}
 
-		// Clean response.incomplete(content_filter) without a trailing stream error still normalizes as a refusal.
 		globalThis.fetch = async () =>
 			new Response(
 				[
@@ -1052,8 +1038,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			if (rawBody.includes("<conversation>")) {
 				compactionCalls += 1
 				compactionInputs.push(rawBody)
-				// First compaction is refused by OpenAI; second succeeds so we can verify
-				// the original turns survived intact instead of being replaced by the refusal.
 				const sse =
 					compactionCalls === 1
 						? makeOpenAIRefusalResponse(`resp_compact_${responseSeq}`, refusalSummary)
@@ -1069,8 +1053,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				})
 			}
 			turnResponses += 1
-			// The second reply reports a request near gpt-4o-mini's 128,000-token window, so the
-			// next turn has to compact first.
 			const reportedInput = turnResponses === 2 ? 115_000 : Math.ceil(rawBody.length / 4)
 			return new Response(
 				makeOpenAITextResponse(`resp_turn_${responseSeq}`, "r".repeat(40_000), reportedInput, 1500),
@@ -1087,8 +1069,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 		})
 		const backend = await createInMemoryPiDurableBackend(realModels)
 		try {
-			// Run turns until blocking compaction triggers. Each exchange is about 20,000 estimated
-			// tokens, so Pi, which keeps the newest 20,000, has an older turn to summarize.
 			let failedTurn: PiTurnOutcome | undefined
 			for (let turn = 1; turn <= 4; turn++) {
 				const result = await Effect.runPromise(
@@ -1107,7 +1087,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				}
 			}
 			expect(compactionCalls).toBe(1)
-			// The refused compaction must fail the turn instead of accepting the refusal as a summary.
 			expect(failedTurn).toMatchObject({
 				ok: false,
 				error: {
@@ -1117,7 +1096,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 				},
 			})
 
-			// On the next turn, compaction runs again over the original preserved history — NOT refusal text.
 			const recovered = await Effect.runPromise(
 				runPiDurableTurn(backend, {
 					operationId: "turn:5",
@@ -1145,8 +1123,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			anthropic: null,
 		})
 
-		// 1. OpenAI emits ordinary text deltas then stops with response.incomplete(content_filter):
-		//    partial text MUST be discarded from both the published reply and Turn 2's model context.
 		const filteredSentBodies: Array<unknown> = []
 		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
@@ -1297,8 +1273,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 			await filterBackend.close()
 		}
 
-		// 2. OpenAI completed response mixing output_text and explicit refusal part:
-		//    preserve ONLY the provider-authored refusal part text, discarding mixed output_text.
 		const mixedSentBodies: Array<unknown> = []
 		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
@@ -1609,7 +1583,6 @@ describe("Provider refusals and OpenAI Responses codec", () => {
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
 					for (let turn = 1; turn <= 2; turn++) {
-						// One message may hold 16,384 characters, so the turn's text comes as three.
 						const part = "u".repeat(14_000)
 						yield* sendAndSettle(apiFetch, session.id, [`turn-${turn}:${part}`, part, part], turn)
 					}

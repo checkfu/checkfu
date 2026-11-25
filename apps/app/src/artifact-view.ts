@@ -41,7 +41,6 @@ export const publicationLabel = (
 		? undefined
 		: `Published · ${publication.version === null ? "latest" : `v${publication.version}`}`
 
-// A link made for another version, or answered after the picker moved on, is not shown.
 export const linkForVersion = <Link extends { readonly version: number }>(
 	link: Link | null,
 	version: number,

@@ -15,7 +15,6 @@ import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
-/** What differs between the session object and a test double; the engine does the rest on Pi. */
 export interface PiDurableBackend {
 	readonly withLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 	readonly hasApiKey: (provider: SupportedProvider) => boolean
@@ -59,12 +58,6 @@ const readAssistantMessage = async (
 	return firstMessage?.role === "assistant" ? firstMessage : null
 }
 
-/**
- * Omits a non-committed turn's placed user (and, if present, answer) entries
- * from Pi's live model context, so the model does not see a prompt the session
- * records as interrupted or failed, whether the interrupt or failure landed
- * before or after Pi placed the user entry.
- */
 const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input") {
@@ -101,12 +94,6 @@ const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> 
 
 const ZERO_MODEL_USAGE: ModelUsage = { input_tokens: 0, output_tokens: 0 }
 
-/**
- * Finalizes a settled turn whose original waiter disconnected before running
- * post-settlement cleanup. Keeps committed replies (including refusals) in Pi
- * context and omits unanswered or non-committable turns before admitting a
- * successor turn.
- */
 const finalizeSettledTurn = async (pi: Harness, operationId: string): Promise<void> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input") {
@@ -128,21 +115,12 @@ export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortG
 	defaultValue: () => "10 seconds",
 })
 
-/**
- * Pi's abort returns once the conversation is idle, so work that ignores its
- * abort signal would hold it, and every later turn of the session, forever.
- * Past the grace the object is reset: its in-flight work dies with the isolate,
- * and Pi, which has the abort on record, settles the operation when it reopens.
- */
 export const abortPiDurableTurn = (
 	backend: PiDurableBackend,
 	operationId: string,
 ): Effect.Effect<boolean> =>
 	Effect.gen(function* () {
 		const grace = yield* AbortGrace
-		// The abort cannot be interrupted, so it runs detached and only the wait for it is
-		// bounded. The bounded wait is detached too: a caller that stops waiting must not take
-		// the reset with it, or a stuck abort would hold the session's lock for good.
 		const watched = yield* Effect.forkDetach(
 			Effect.gen(function* () {
 				const aborting = yield* Effect.forkDetach(backend.abort(operationId))
@@ -154,9 +132,6 @@ export const abortPiDurableTurn = (
 		return yield* Fiber.join(watched)
 	})
 
-// Admissions in progress in this session object, by operation; a retry can overlap the call it
-// retries. Admission lets go of the lock while a predecessor drains, so a recovery probe for the
-// same operation waits until none is left instead of reporting the operation absent in that gap.
 const admitting = new WeakMap<PiDurableBackend, Map<string, Set<Deferred.Deferred<void>>>>()
 
 const admissionsOf = (backend: PiDurableBackend) => {
@@ -240,8 +215,6 @@ const admitPiTurnUnderWay = (
 						}
 						break
 					}
-					// A turn the session never published a reply for (abandoned, failed or interrupted)
-					// must not reach the model, whatever Pi made of it.
 					for (const unpublished of request.unpublishedOperationIds ?? []) {
 						await omitTurnEntries(pi, unpublished)
 					}
@@ -255,8 +228,6 @@ const admitPiTurnUnderWay = (
 			if (typeof admitted !== "object") {
 				return admitted
 			}
-			// The domain starts a turn only once it has ended the one before, so an
-			// operation still running here is one the domain gave up on.
 			yield* abortPiDurableTurn(backend, admitted.waitingFor)
 			yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
 		}
@@ -318,16 +289,10 @@ const resolveSettledPiTurn = (
 		}),
 	)
 
-/**
- * Recovers an already-admitted (in-flight or settled) operation from Pi without
- * creating a root conversation or submitting a new turn. Returns `null` when Pi
- * has never admitted `operationId` and it has not been cancelled.
- */
 export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(function* (
 	backend: PiDurableBackend,
 	operationId: string,
 ): Effect.fn.Return<PiTurnOutcome | null> {
-	// Another admission may start while this one waits, so look again until none is left.
 	let underWay = admissionsOf(backend).get(operationId)
 	while (underWay !== undefined && underWay.size > 0) {
 		yield* Effect.forEach([...underWay], Deferred.await, { discard: true })

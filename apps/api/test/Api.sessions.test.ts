@@ -290,7 +290,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-					// Oversized joined user.message (two 9,000-char blocks -> 18,001 > 16,384) -> 400
 					const oversizedRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -359,7 +358,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(overflowBody.failed_index).toBe(1)
 					expect(overflowBody.unconfirmed_index).toBeUndefined()
 
-					// Release any blocked turn and run a clean turn to test SSE Last-Event-ID precedence
 					releaseTurn?.()
 					const waitIdleStream = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -371,8 +369,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					)
 					expect(allSoFar.length).toBeGreaterThanOrEqual(4)
 
-					// Reconnect with BOTH ?after=1 AND Last-Event-ID=<3rd event id>:
-					// Last-Event-ID MUST win over ?after=1!
 					const thirdId = allSoFar[2]!.id
 					const resumedStream = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -384,8 +380,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					)
 					expect(resumedFrames.map((f) => f.id)).toEqual(allSoFar.slice(3).map((f) => f.id))
 
-					// Reconnect with ?after=invalid AND Last-Event-ID=<3rd event id>:
-					// Last-Event-ID MUST take precedence before cursor validation!
 					const overriddenInvalidQueryStream = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream?after=invalid`,
@@ -397,7 +391,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					)
 					expect(overriddenFrames.map((f) => f.id)).toEqual(allSoFar.slice(3).map((f) => f.id))
 
-					// Without Last-Event-ID, ?after=invalid is still rejected with 400.
 					const invalidQueryStream = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream?after=invalid`,
@@ -443,7 +436,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const agent = (yield* Effect.promise(() => agentRes.json())) as { id: string }
 
-					// Targeting a version that does not match the current snapshot -> 409 (never merges stale fields)
 					const mismatchAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/agents/${agent.id}`,
@@ -476,7 +468,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-					// Turn 1 fails with non-terminal error -> session returns to idle
 					const stream1 = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream`,
@@ -495,7 +486,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					)
 					const afterTurn1 = turn1Frames.at(-1)!.id
 
-					// Turn 2 sends a new prompt -> Pi must receive ONLY "Second prompt", NOT "First prompt\nSecond prompt"
 					const stream2 = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream?after=${afterTurn1}`,
@@ -596,7 +586,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						headers: AUTH_HEADERS,
 					})
 
-					// Start Turn 1 and wait until the model call is actively blocked inside Pi Durable
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -609,7 +598,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					yield* Effect.promise(() => turn1Started)
 
-					// Immediately interrupt Turn 1 AND send Turn 2 while Turn 1 is still blocked
 					const interruptRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -628,7 +616,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(turn2Res.status).toBe(200)
 
-					// Turn 2 must succeed with its assistant message (never withdrawn by Turn 1's abort)
 					const frames = yield* Effect.promise(() =>
 						readSseUntil(streamRes, (evt) => evt.type === "agent.message"),
 					)
@@ -645,7 +632,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 	})
 
 	it("pages SSE catch-up and percent-decodes route IDs", async () => {
-		// 2. Percent-decoded resource IDs + 400 on malformed escapes + bounded paged SSE catch-up
 		const listCalls: Array<{ after?: number; take?: number; returned?: number }> = []
 		const eventsCalls: Array<{ readonly after?: number }> = []
 
@@ -683,7 +669,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const sessions = yield* Session
 					const sessionViews = yield* SessionView
 
-					// Create two agents whose IDs differ only by space vs literal "%20"
 					const spaceReceipt = yield* createAgent.send(
 						new CreateAgent({
 							agent_id: AgentId.make("team A"),
@@ -713,7 +698,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						yield* agentViews.get(Agent.ref(AgentId.make("team%20A")), { atLeast: literalCommit })
 					}
 
-					// Wait for views to catch up
 					const getSpaceRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: "/v1/agents/team%20A",
@@ -738,7 +722,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					}
 					expect(literalAgent).toMatchObject({ id: "team%20A", name: "Literal Percent Team" })
 
-					// Updating /v1/agents/team%20A updates ONLY "team A", leaving "team%20A" untouched
 					const updateSpaceRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/agents/team%20A",
@@ -765,7 +748,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(malformedRes.status).toBe(404)
 
-					// Build a long session (> SSE_CATCHUP_PAGE_SIZE events) to verify bounded SSE catch-up
 					const envRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",
@@ -795,7 +777,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						yield* sessionViews.get(Session.ref(sessionId), { atLeast: lastReceipt })
 					}
 
-					// Catch-up reads bounded pages, then live events follow from the last one.
 					listCalls.length = 0
 					eventsCalls.length = 0
 					const streamRes = yield* sendRequest(apiFetch, {
@@ -804,7 +785,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						headers: AUTH_HEADERS,
 					})
 
-					// Append one more live event after catch-up completes
 					const readerPromise = readSseUntil(
 						streamRes,
 						(evt) =>
@@ -812,7 +792,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							(evt.error as { message?: string } | undefined)?.message === "Live after catchup",
 					)
 
-					// Append the live event once catch-up is done and the stream follows live events.
 					yield* Effect.sleep("5 millis").pipe(
 						Effect.repeat({ until: () => eventsCalls.length > 0 }),
 						Effect.timeout("5 seconds"),
@@ -823,20 +802,17 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 
 					const allFrames = yield* Effect.promise(() => readerPromise)
-					// SessionView emits extraErrors (115) + 1 live = 116 frames, strictly sequential with no gaps or duplicates
 					const expectedTotal = extraErrors + 1
 					expect(allFrames.length).toBe(expectedTotal)
 					for (let i = 0; i < allFrames.length; i++) {
 						expect(allFrames[i]?.id).toBe(String(i + 1))
 					}
 
-					// Every backlog RPC was bounded to <= SSE_CATCHUP_PAGE_SIZE
 					expect(listCalls.length).toBeGreaterThanOrEqual(2)
 					for (const call of listCalls) {
 						expect(call.take).toBeLessThanOrEqual(SSE_CATCHUP_PAGE_SIZE)
 					}
 					expect(eventsCalls).toEqual([{ after: extraErrors }])
-					// The live read starts right after a read that found nothing new at its cursor.
 					expect(listCalls.at(-1)).toMatchObject({ after: extraErrors, returned: 0 })
 				}).pipe(Effect.scoped, Effect.provide(spiedLayer)),
 			)
@@ -897,8 +873,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(caughtUp.status).toBe(204)
 
-					// A live SSE stream opened with a future cursor MUST stop polling and close once
-					// the session is archived below that cursor, rather than hanging until the 4m cap.
 					const futureSession = yield* createIdleSession(apiFetch)
 					const futureStream = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -981,8 +955,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							ref: Parameters<typeof realSessionViews.get>[0],
 							options?: Parameters<typeof realSessionViews.get>[1],
 						) => (lagMode !== "off" ? Effect.succeedNone : realSessionViews.get(ref, options)),
-						// A lagging projection lags for every read of the view: a request's first snapshot
-						// misses the session, and in "recover" mode the one after its wait finds it.
 						snapshot: (
 							ref: Parameters<typeof realSessionViews.snapshot>[0],
 							options?: Parameters<typeof realSessionViews.snapshot>[1],
@@ -1024,7 +996,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						},
 					})
 
-					// 1. Committed session whose SessionView stays lagging returns 503 (never false 404).
 					lagMode = "timeout"
 					for (const path of [
 						`/v1/sessions/${session.id}`,
@@ -1044,7 +1015,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					}
 					expect(waitCalls).toBe(3)
 
-					// 2. Truly uninitialized session still returns 404 without waiting.
 					const missingRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: "/v1/sessions/sess_does_not_exist_404",
@@ -1053,7 +1023,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(missingRes.status).toBe(404)
 					expect(waitCalls).toBe(3)
 
-					// 3. Committed session whose SessionView catches up during waitFor succeeds on get, listEvents, and streamEvents.
 					lagMode = "recover"
 					const getRes = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -1167,8 +1136,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const env = (yield* Effect.promise(() => createEnvRes.json())) as { id: string }
 
-					// 1. Even with AgentVersionByNumberView completely lagging/timing out, a concurrently
-					//    deleted environment returns 404 (not 503) and commits no session.
 					alwaysLagVersions = true
 					beforeAdmit = () =>
 						environments
@@ -1182,8 +1149,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(envDeletedRes.status).toBe(404)
 
-					// Create a second active environment, then test a valid create while the version view lags:
-					// it MUST admit the session and return 202 pending instead of failing 503 pre-admission.
 					alwaysLagVersions = false
 					const createEnv2Res = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1212,7 +1177,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						pending: true,
 					})
 
-					// 2. Agent is archived concurrently while the version view lags -> 409 (not 503).
 					beforeAdmit = () =>
 						agents
 							.send(new ArchiveAgent({ agent_id: AgentId.make(agent.id) }))
@@ -1225,7 +1189,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(agentArchivedRes.status).toBe(409)
 
-					// Rejected requests created no bogus session row.
 					expect(yield* realSessionViews.get(Session.ref(SessionId.make("sess_none")))).toEqual(
 						Option.none(),
 					)
@@ -1265,8 +1228,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							Effect.gen(function* () {
 								if (raceUpdateToV2) {
 									raceUpdateToV2 = false
-									// Concurrent agent update bumps v1 -> v2 right before AdmitSessionDecision
-									// selects the head version (v2).
 									yield* updateAgent.send(
 										new UpdateAgent({
 											agent_id: command.agent_id,
@@ -1334,7 +1295,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					// 1. Caller omits agent_version; concurrent update moves head to v2 whose view times out -> 202 pending.
 					raceUpdateToV2 = true
 					lagVersion2Mode = "timeout"
 					const pendingRes = yield* sendRequest(apiFetch, {
@@ -1352,8 +1312,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					}
 					expect(pendingBody).toEqual({ id: pendingBody.id, type: "session", pending: true })
 
-					// Confirm SessionView IS already projected, yet polling GET while v2 still lags
-					// MUST return 503 instead of prematurely reporting 200 ready!
 					const pendingSessionId = SessionId.make(pendingBody.id)
 					const projectedSession = yield* realSessionViews.waitFor(
 						Session.ref(pendingSessionId),
@@ -1370,7 +1328,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(stillPendingPoll.status).toBe(503)
 					expect(version2Waits).toBe(2)
 
-					// Once v2 finishes projecting during the GET wait -> 200 with pinned v2.
 					lagVersion2Mode = "recover"
 					const recoveredPoll = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -1383,7 +1340,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						agent: { id: agent.id, version: 2 },
 					})
 
-					// 2. When v2 catches up during the post-commit readiness wait -> 201 with pinned v2.
 					lagVersion2Mode = "recover"
 					const readyRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1437,12 +1393,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(archived.status).toBe(200)
 
-					// The SDK makes a fresh key for a new call: the committed event still replays.
 					const replay = yield* send("batch-2", "evt-1", "hello")
 					expect(replay.status).toBe(200)
 					expect(yield* Effect.promise(() => replay.json())).toEqual(accepted)
 
-					// A new event on the ended session is refused.
 					const fresh = yield* send("batch-3", "evt-2", "again")
 					expect(fresh.status).toBe(409)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
@@ -1520,7 +1474,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							throw new Error(`Session ${sessionId} did not settle to turn ${expectedTurn}`)
 						})
 
-					// 1. Per-event client `id`: second message commits then loses receipt -> unconfirmed_index: 1.
 					const sessA = yield* createIdleSession(apiFetch)
 					dropReceiptOnSend = sends + 2
 					const firstBatchRes = yield* sendRequest(apiFetch, {
@@ -1551,7 +1504,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(firstBatchBody.accepted[0]).toMatchObject({ id: "evt-a1", turn: 1 })
 					expect(firstBatchBody.unconfirmed_index).toBe(1)
 
-					// Retry ONLY the unconfirmed suffix with its client event id -> 200, no duplicate!
 					const suffixRetryRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessA.id}/events`,
@@ -1589,7 +1541,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const evtA2Queued = suffixRetryBody.data[0]?.queued
 
-					// Retrying the whole batch with the same client event ids also replays cleanly.
 					const fullRetryRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessA.id}/events`,
@@ -1650,7 +1601,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(userMessagesA).toEqual(["msg-a1", "msg-a2"])
 					expect(seenPrompts).toEqual(["msg-a1", "msg-a2"])
 
-					// Reusing a client event id with different content or type -> 409; duplicate id in batch -> 400.
 					const conflictTextRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessA.id}/events`,
@@ -1688,7 +1638,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(dupInBatchRes.status).toBe(400)
 
-					// 2. Idempotency-Key header scoped to session + batch index.
 					const sessB = yield* createIdleSession(apiFetch)
 					const batchPayloadB = {
 						events: [
@@ -1749,8 +1698,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					).toEqual(["msg-b1", "msg-b2"])
 					expect(seenPrompts).toEqual(["msg-a1", "msg-a2", "msg-b1", "msg-b2"])
 
-					// 3. user.interrupt with client event id: commits then loses receipt; retry succeeds
-					//    idempotently even after the session settles idle, without duplicating user.interrupt.
 					const sessC = yield* createIdleSession(apiFetch)
 					yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1780,7 +1727,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						unconfirmed_index: 0,
 					})
 
-					// Let the committed interrupt finish settling Turn 1 to idle before retrying.
 					yield* waitIdle(sessC.id, 1)
 
 					const interruptRetryRes = yield* sendRequest(apiFetch, {
@@ -1794,7 +1740,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						data: [{ id: "int-c1", type: "user.interrupt" }],
 					})
 
-					// Reusing an interrupt's client id for a user.message -> 409 Conflict (never 500).
 					const interruptConflictRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessC.id}/events`,
@@ -1823,10 +1768,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					).data
 					expect(eventsC.filter((e) => e.type === "user.interrupt")).toHaveLength(1)
 
-					// 4. Idempotency-Key binds to the whole batch fingerprint before sending any commands:
-					//    [A] then [A, B] with the same key MUST 409 without committing B; explicit event ids
-					//    cannot bypass the header; a different session can reuse the same key; nonexistent
-					//    sessions still return 404.
 					const sessD = yield* createIdleSession(apiFetch)
 					const batchD1 = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1838,7 +1779,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(batchD1.status).toBe(200)
 
-					// Extending [A] -> [A, B] under the same Idempotency-Key MUST 409 and NOT commit B.
 					const batchD1Extended = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessD.id}/events`,
@@ -1853,7 +1793,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(batchD1Extended.status).toBe(409)
 					yield* waitIdle(sessD.id, 1)
 
-					// Explicit event ids also participate in the Idempotency-Key batch fingerprint.
 					const batchD2 = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessD.id}/events`,
@@ -1892,8 +1831,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(batchD2Bypass.status).toBe(409)
 					yield* waitIdle(sessD.id, 2)
 
-					// Partial failure on a keyed batch: a shortened retry with the same key -> 409,
-					// while an identical retry resumes and completes cleanly with no duplicates.
 					const batchD3Payload = {
 						events: [
 							{
@@ -1948,7 +1885,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						eventsD.filter((e) => e.type === "user.message").map((e) => e.content?.[0]?.text),
 					).toEqual(["only-a", "explicit-1", "resume-a", "resume-b"])
 
-					// Reusing the same Idempotency-Key on a different session succeeds independently.
 					const sessE = yield* createIdleSession(apiFetch)
 					const batchE = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1962,7 +1898,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(batchE.status).toBe(200)
 
-					// Nonexistent session with Idempotency-Key still returns 404 without claiming a batch.
 					const missingSessionRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions/sess_does_not_exist/events",
@@ -1973,8 +1908,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(missingSessionRes.status).toBe(404)
 
-					// A lost claim receipt is retried like any other: the identical retry replays the
-					// claim, and concurrent requests under one key commit one batch and 409 the other body.
 					const sessG = yield* createIdleSession(apiFetch)
 					const batchG = {
 						events: [{ type: "user.message", content: [{ type: "text", text: "claim-lost" }] }],
@@ -2034,8 +1967,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(committedG).toHaveLength(3)
 					expect(["race-diff-a", "race-diff-b"]).toContain(committedG[2])
 
-					// 5. A SchemaError thrown when decoding a committed receipt MUST report 500 with
-					//    unconfirmed_index (NOT a confirmed 409 conflict), so the caller retries the same id.
 					const sessF = yield* createIdleSession(apiFetch)
 					const schemaFailure = yield* Effect.flip(
 						Schema.decodeUnknownEffect(Schema.Finite)("not-a-number"),
@@ -2076,7 +2007,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						unconfirmed_index: 0,
 					})
 
-					// Retrying the same event id replays cleanly without duplicating the message.
 					const recoveredFRes = yield* sendRequest(corruptFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessF.id}/events`,
@@ -2168,7 +2098,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							}),
 					).toThrow(/Schema validation failed/)
 
-					// A 256-character active agent + environment still admits cleanly.
 					const createAgent = yield* CreateAgentDecision
 					yield* createAgent.send(
 						new CreateAgent({
@@ -2251,7 +2180,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const session = yield* createIdleSession(apiFetch)
 					const sessionId = SessionId.make(session.id)
 
-					// Opening the stream of a projected session reads the view once before its headers.
 					snapshotCalls = 0
 					getCalls = 0
 					const streamRes = yield* sendRequest(apiFetch, {
@@ -2269,8 +2197,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							(evt.error as { message?: string } | undefined)?.message === "Wake idle stream",
 					)
 
-					// Reset counters once catch-up is done and the live read started, so only the idle
-					// stream is measured.
 					yield* Effect.sleep("5 millis").pipe(
 						Effect.repeat({ until: () => liveReads > 0 }),
 						Effect.timeout("5 seconds"),
@@ -2283,7 +2209,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(listCalls).toBe(0)
 					expect(getCalls).toBe(0)
 
-					// Emit one live event: it is pushed to the stream without any read.
 					yield* sessions.import(sessionId, [testNotice("Wake idle stream")], {
 						commandId: "test-notice-wake",
 						expectedVersion: 1,
@@ -2294,7 +2219,6 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(listCalls).toBe(0)
 					expect(getCalls).toBe(0)
 
-					// A future-cursor SSE stream closes when the session is archived below its cursor.
 					const futureStream = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream?after=9999`,

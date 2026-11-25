@@ -92,7 +92,6 @@ const settleTimeout = Effect.gen(function* () {
 
 const turnOperationId = (turn: number) => `turn:${turn}`
 
-// Every turn after the last published reply and before this one.
 const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<string> =>
 	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
 		turnOperationId(lastReplyTurn + 1 + i),
@@ -109,10 +108,6 @@ export const PiDurableHarnessLive = boundedHarness(
 				const settle = Effect.gen(function* () {
 					const operationId = turnOperationId(args.turn)
 
-					// Recover any already-admitted or settled Pi operation before checking
-					// mutable prerequisites (views, API keys) so a replay after a RunTurn
-					// restart always records Pi's actual outcome instead of diverging from
-					// Pi's live conversation history.
 					const recovered = yield* withRetry(executor.recoverTurn(conversation, operationId)).pipe(
 						Effect.tapError((error) =>
 							Effect.logError("Harness unreachable", conversation, error.cause),
@@ -172,11 +167,7 @@ export const PiDurableHarnessLive = boundedHarness(
 							? {}
 							: { unpublishedOperationIds: unpublishedTurns(args.last_reply_turn, args.turn) }),
 					}
-					// A turn is submitted under its operation id, so sending it again after a
-					// lost reply joins the turn already there instead of starting another. The
-					// last attempt has no next one to join it, so Pi is asked once, read-only.
 					const { attempts, baseDelay } = yield* HarnessLimits
-					// With no attempts allowed the turn is never submitted; Pi is only asked.
 					const submitted =
 						attempts > 0
 							? withRetry(executor.runTurn(conversation, request))
@@ -202,8 +193,6 @@ export const PiDurableHarnessLive = boundedHarness(
 					}
 					return outcome.reply
 				})
-				// One deadline for recovery and submission together, so the saga step that waits on
-				// them ends inside the alarm that runs it.
 				return Effect.flatMap(settleTimeout, (duration) =>
 					Effect.timeoutOrElse(settle, {
 						duration,

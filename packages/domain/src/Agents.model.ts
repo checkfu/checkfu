@@ -42,8 +42,6 @@ export class Agents extends Domain.Model("Agents", {
 				if (a.state.status === "") {
 					return true
 				}
-				// Rows are keyed agent@version, versions start at 1, and no row is above the head
-				// (checked below), so as many rows as the head's number means none is missing.
 				if (
 					m.AgentVersionByNumberView.filter((v) => v.state.agent_id === a.id).length !==
 					a.state.version
@@ -69,8 +67,6 @@ export class Agents extends Domain.Model("Agents", {
 		EveryRecordedVersionBelongsToItsAgent: (m) =>
 			m.AgentVersionByNumberView.every((v) =>
 				m.Agent.some((a) => {
-					// A pinned session reads its version's row, so every row, not only the head's,
-					// must say what the agent's own event for that version says.
 					const source = a.events
 						.filter((event) => event._tag === "agent.created" || event._tag === "agent.updated")
 						.find((event) => event.version === v.state.version)

@@ -9,7 +9,6 @@ import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { TurnInput } from "./TurnInput.view.ts"
 
-// The session policy handles running, idle and terminated in stream order.
 const TURN_DEADLINE = "turn-deadline"
 
 export class StartTurn extends Domain.Policy("StartTurn", {
@@ -26,7 +25,6 @@ export const StartTurnLive = StartTurn.toLayer(
 				return
 			}
 			if (event._tag !== "session.status_running") {
-				// An expired, previously cancelled or absent deadline needs no further work.
 				yield* sessions
 					.unschedule(source.id, TURN_DEADLINE)
 					.pipe(

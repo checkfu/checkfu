@@ -58,7 +58,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(eventsListHelp.stdout).toContain("selected order")
 					expect(eventsListHelp.stdout).toContain("desc")
 
-					// Global --version works on update commands without colliding with optimistic concurrency --current-version
 					const rootVer = yield* cli.run(["--version"], { env: {} })
 					expect(rootVer.exitCode).toBe(0)
 					expect(rootVer.stdout.trim()).toMatch(/^checkfu v\d+\.\d+\.\d+/)
@@ -104,8 +103,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(badKey.stdout).toBe("")
 					expect(badKey.stderr).toContain("401 authentication_error")
 
-					// TTY invalid invocation must not display literal escaped ANSI codes around ERROR,
-					// while still escaping untrusted control characters from the argument itself
 					const ttyInvalid = yield* cli.run(["agents", "bad\u001b]52;c;evil\u0007cmd"], {
 						stderrIsTerminal: true,
 					})
@@ -116,7 +113,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(ttyInvalid.stderr).not.toContain("\u001b")
 					expect(ttyInvalid.stderr).not.toContain("\u0007")
 
-					// Explicitly blank --base-url must fail rather than falling back to CHECKFU_API_URL
 					const blankUrl = yield* cli.run([
 						"environments",
 						"delete",
@@ -129,7 +125,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(blankUrl.stdout).toBe("")
 					expect(blankUrl.stderr).toContain("API base URL must not be empty")
 
-					// Dot-segment or slash path parameters fail cleanly as usage errors on stderr
 					for (const badId of [".", "..", "foo/bar"]) {
 						const badAgentPath = yield* cli.run(["agents", "retrieve", "--agent-id", badId])
 						expect(badAgentPath.exitCode).toBe(1)
@@ -152,7 +147,6 @@ describe("CLI help, errors, and resource commands", () => {
 				Effect.gen(function* () {
 					const cli = yield* makeTestServer()
 
-					// Create with flags + @file system prompt + --transform -r
 					const createdRaw = yield* cli.run(
 						[
 							"agents",
@@ -174,7 +168,6 @@ describe("CLI help, errors, and resource commands", () => {
 					const agentId = createdRaw.stdout.trim()
 					expect(agentId).toMatch(/^agent_/)
 
-					// Retrieve with global --format yaml placed before subcommand
 					const retrievedYaml = yield* cli.run([
 						"--format",
 						"yaml",
@@ -188,7 +181,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(retrievedYaml.stdout).toContain("system: Be concise.")
 					expect(retrievedYaml.stdout).toContain("version: 1")
 
-					// Update with flags
 					const updated = yield* cli.run([
 						"agents",
 						"update",
@@ -208,7 +200,6 @@ describe("CLI help, errors, and resource commands", () => {
 						version: 2,
 					})
 
-					// Stale version fails with 409
 					const conflict = yield* cli.run([
 						"agents",
 						"update",
@@ -223,7 +214,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(conflict.stdout).toBe("")
 					expect(conflict.stderr).toContain("409")
 
-					// Archive
 					const archived = yield* cli.run(["agents", "archive", "--agent-id", agentId])
 					expect(archived.exitCode).toBe(0)
 					expect(JSON.parse(archived.stdout).archived_at).not.toBeNull()
@@ -234,7 +224,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(defaultList.exitCode).toBe(0)
 					expect(listedIds(defaultList)).not.toContain(agentId)
 
-					// Create from YAML stdin with flag override
 					const fromYaml = yield* cli.run(["agents", "create", "--name", "OverrideName"], {
 						stdin: "name: Original\nmodel: claude-sonnet-5-5\ndescription: From YAML\n",
 					})
@@ -451,7 +440,6 @@ describe("CLI help, errors, and resource commands", () => {
 						"-r",
 					])).stdout.trim()
 
-					// Missing agent diagnosed specifically
 					const badAgent = yield* cli.run([
 						"sessions",
 						"create",
@@ -463,7 +451,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(badAgent.exitCode).toBe(1)
 					expect(badAgent.stderr).toContain('Agent "agt_missing_agent" was not found.')
 
-					// Missing environment diagnosed specifically
 					const badEnv = yield* cli.run([
 						"sessions",
 						"create",
@@ -475,7 +462,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(badEnv.exitCode).toBe(1)
 					expect(badEnv.stderr).toContain('Environment "env_missing_env" was not found.')
 
-					// Unroutable dot-segment IDs in create payload skip diagnostic probes and preserve the 404
 					for (const badArgs of [
 						["sessions", "create", "--agent", "..", "--environment-id", envId],
 						["sessions", "create", "--agent", agentId, "--environment-id", ".."],
@@ -489,7 +475,6 @@ describe("CLI help, errors, and resource commands", () => {
 						expect(dotRes.stderr).not.toContain("Invalid path parameter")
 					}
 
-					// Create session with object --agent and --title
 					const created = yield* cli.run(
 						[
 							"sessions",
@@ -585,7 +570,6 @@ describe("CLI help, errors, and resource commands", () => {
 					const session = JSON.parse(createdSession.stdout) as { agent: { id: string } }
 					expect(session.agent.id).toBe(agent.id)
 
-					// Single-line YAML mappings with quoted keys work for --model, --agent, and @file
 					const quotedModelAgent = yield* cli.run([
 						"agents",
 						"create",
@@ -630,7 +614,6 @@ describe("CLI help, errors, and resource commands", () => {
 						(JSON.parse(quotedAgentFileSession.stdout) as { agent: { id: string } }).agent.id,
 					).toBe(agent.id)
 
-					// Misspelled top-level or nested keys in request bodies are rejected instead of dropped
 					const typoTopLevel = yield* cli.run(["environments", "create"], {
 						stdin: "name: typo-env\nconfg:\n  type: cloud\n",
 					})
@@ -646,7 +629,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(typoNested.stdout).toBe("")
 					expect(typoNested.stderr).toContain("netwroking")
 
-					// YAML parser warnings route through sanitized stderr instead of raw process.emitWarning
 					const leakedWarnings: Array<string> = []
 					const onWarning = (warning: Error) => {
 						leakedWarnings.push(warning.message)
@@ -666,7 +648,6 @@ describe("CLI help, errors, and resource commands", () => {
 						process.off("warning", onWarning)
 					}
 
-					// Redirect responses on mutations fail instead of silently downgrading POST to GET
 					const redirectedUpdate = yield* cli.run(
 						[
 							"agents",
@@ -690,7 +671,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(redirectedUpdate.stdout).toBe("")
 					expect(redirectedUpdate.stderr).toContain("302")
 
-					// Oversized @file inputs fail while streaming chunks instead of buffering unbounded memory
 					const fileChunk64k = new TextEncoder().encode("x".repeat(64 * 1024))
 					let fileChunksPulled = 0
 					const hugeVirtualFile = Stream.unfold(0, (n) =>
@@ -728,7 +708,6 @@ describe("CLI help, errors, and resource commands", () => {
 					const cli = yield* makeTestServer()
 					const encoder = new TextEncoder()
 
-					// 1) Invalid UTF-8 bytes in --system @file fail before issuing any HTTP request
 					let fileRequests = 0
 					const badFileRes = yield* cli.run(
 						[
@@ -757,7 +736,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(badFileRes.stderr).toContain("not valid UTF-8")
 					expect(fileRequests).toBe(0)
 
-					// 2) Invalid UTF-8 byte inside a quoted JSON string on stdin fails before issuing any request
 					let stdinRequests = 0
 					const badJsonStdinBytes = new Uint8Array([
 						...encoder.encode('{"name":"Bad'),
@@ -777,7 +755,6 @@ describe("CLI help, errors, and resource commands", () => {
 					expect(badStdinRes.stderr).toContain("not valid UTF-8")
 					expect(stdinRequests).toBe(0)
 
-					// 3) Valid multi-byte UTF-8 split across chunks still decodes cleanly
 					const utf8PromptBytes = encoder.encode("Be concise: café 🚀")
 					const validFileRes = yield* cli.run(
 						[

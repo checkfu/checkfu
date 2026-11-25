@@ -61,7 +61,6 @@ export const makeTestServer = Effect.gen(function* () {
 	const apiRequests: Array<Request> = []
 	const apiFetch: typeof globalThis.fetch = (input, init) => {
 		const request = toWebRequest(input, init)
-		// Operation requests only: the credential check that precedes every MCP request is not one.
 		if (new URL(request.url).pathname !== CREDENTIAL_CHECK_PATH) {
 			apiRequests.push(request.clone())
 		}

@@ -15,12 +15,6 @@ const ABORTED_ERROR: TurnFailed = {
 	terminal: false,
 }
 
-/**
- * Single provider-specific, case-sensitive predicate for confirmed provider
- * refusal stop reasons. Shared by the stream wrappers in `PiModels.ts` and the
- * downstream refusal hooks/recovery logic so unconfirmed stop reasons (such as
- * an Anthropic `content_filter` or case-mismatched value) stay on the error path.
- */
 export const isProviderRefusalStopReason = (
 	api: Api,
 	provider: string,
@@ -53,25 +47,11 @@ const refusalFallbackText = (message: AssistantMessage): string => {
 	return DEFAULT_REFUSAL_TEXT
 }
 
-/**
- * Only completed OpenAI Responses `refusal` parts contain provider-authored
- * refusal text in `message.content`. Filter stops (`incomplete.content_filter`,
- * Anthropic `sensitive`, Anthropic `refusal`) can contain partial generated
- * output streamed before the safety filter cut off the response and must have
- * their partial content discarded in favor of a refusal notice.
- */
 const preservesExplicitRefusalContent = (message: AssistantMessage): boolean =>
 	message.api === "openai-responses" &&
 	message.provider === "openai" &&
 	message.rawStopReason === "refusal"
 
-/**
- * Returns a model-context-eligible (`stopReason: "stop"`) copy of a confirmed
- * refusal message carrying the published refusal text, with `errorMessage`
- * cleared so Pi includes it in subsequent turns' conversation context.
- * Discards partial generated text/thinking for filter stops and preserves
- * provider-authored text only for explicit OpenAI `refusal` parts.
- */
 export const normalizeRefusalAssistantMessage = (message: AssistantMessage): AssistantMessage => {
 	const explicitText = preservesExplicitRefusalContent(message)
 		? message.content.filter((block) => block.type === "text" && block.text.length > 0)
@@ -88,13 +68,6 @@ export const normalizeRefusalAssistantMessage = (message: AssistantMessage): Ass
 	}
 }
 
-/**
- * Normalizes confirmed provider refusals (Anthropic `refusal`/`sensitive` and
- * OpenAI `incomplete.content_filter` or textless completed refusals) into
- * completed `stopReason: "stop"` answers with published text before Pi
- * classifies or persists them. Keeps the published refusal in Pi's live
- * conversation history and avoids retrying refusals as provider errors.
- */
 export const createCheckfuRegistry = () => {
 	const registry = createRegistry()
 	registry.install(

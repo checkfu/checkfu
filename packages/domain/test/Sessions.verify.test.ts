@@ -6,10 +6,6 @@ import { Sessions, SessionsApi } from "../src/Sessions.model.ts"
 import { PROVED, STANDING } from "./Sessions.verify.standing.ts"
 
 describe("Sessions Z3 formal verification", () => {
-	// Split into two untruncated checks until @alchemy.run/domain fixes rerun story replay
-	// for external-call-only saga steps (ModelSearch.ts drops call.again when no command
-	// entry has again: true, and Script.redelivers ignores step.asked) and walk replay for
-	// StopModelRequest's intentional Effect.orDie retry on HarnessUnavailable.
 	it.live(
 		"proves every Session invariant and transition in Z3 and verifies turn execution with step reruns",
 		() =>

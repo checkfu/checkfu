@@ -13,8 +13,6 @@ import { ArtifactReadWaitTimeout } from "../Http/ArtifactsHandlers.ts"
 const has = (state: ArtifactState, version: number) =>
 	state.status === "active" && version <= state.version
 
-// The manifest of a version of the artifact in `state`, or null when the artifact does not have it.
-// The head comes from the aggregate; only an older version is read from the view.
 export const ArtifactManifestAt = Effect.gen(function* () {
 	const artifacts = yield* Artifact
 	const versionViews = yield* ArtifactVersionView

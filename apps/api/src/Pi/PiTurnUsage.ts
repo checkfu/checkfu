@@ -49,10 +49,6 @@ export type BeginTurnUsageResult =
 	| { readonly status: "finalize"; readonly operationId: string }
 	| { readonly status: "stale" }
 
-// A turn older than one already admitted is stale: the session moved on without it.
-// If a different operation is still working, the caller stops it outside the admission
-// lock. If it settled after losing its RPC waiter, finalize its context cleanup before
-// sealing its usage and admitting a successor.
 export const beginTurnUsage = (
 	pi: Harness,
 	operation: string,
@@ -109,7 +105,6 @@ export const settleTurnUsage = async (pi: Harness, operation: string): Promise<M
 	if (closed !== undefined) {
 		return closed
 	}
-	// Another waiter or the next admission already sealed this operation.
 	const saved = await pi.snapshot(SettledUsage, operation, BACKGROUND_CONTEXT)
 	if (saved === undefined) {
 		throw new Error("Missing Pi operation usage receipt")

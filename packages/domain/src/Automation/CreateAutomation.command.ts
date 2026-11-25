@@ -12,7 +12,6 @@ import {
 
 export class AutomationCreated extends Domain.Event("automation.created", {
 	name: AutomationName,
-	// Events recorded before automations had a description read as having none.
 	description: Schema.NullOr(AutomationDescription).pipe(
 		Schema.withDecodingDefaultKey(Effect.succeed(null)),
 	),

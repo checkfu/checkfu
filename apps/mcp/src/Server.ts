@@ -69,11 +69,8 @@ const McpLive = Layer.mergeAll(
 	HealthLive,
 )
 
-// The API is addressed by path only; a service binding ignores the origin.
 const API_ORIGIN = "https://api.checkfu.internal"
 
-// The API's own credential check: it runs the authentication every operation runs and reads
-// no stored data, so verifying a key costs nothing beyond that.
 export const CREDENTIAL_CHECK_PATH = "/v1/auth/verify"
 
 const isVerified = Schema.is(Schema.Struct({ type: Schema.Literal("authentication_verified") }))
@@ -98,18 +95,13 @@ const unauthorizedResponse = errorResponse(
 	{ "www-authenticate": "Bearer" },
 )
 
-// Room for the JSON-RPC envelope around a tool's arguments.
 const MCP_ENVELOPE_BYTES = 64 * 1024
 
-// The body is bounded before the tool it calls is known, so the bound is the largest API request
-// body, an artifact upload, plus the envelope. The API still holds each operation to its own limit.
 export const MAX_MCP_BODY_BYTES = Math.max(
 	2 * 1024 * 1024,
 	MAX_ARTIFACT_BODY_BYTES + MCP_ENVELOPE_BYTES,
 )
 
-// Everything but the health check needs a credential, so no spelling of a route that the
-// router accepts can reach a handler without one.
 const admission = <E, R>(
 	app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ): Effect.Effect<
@@ -119,8 +111,6 @@ const admission = <E, R>(
 > =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest
-		// The health check is the one thing answered without a credential, and only as a GET under
-		// its exact spelling. It is answered before anything else, so its body is never read.
 		if (
 			request.method === "GET" &&
 			(request.url === HEALTH_PATH || request.url.startsWith(`${HEALTH_PATH}?`))
@@ -128,8 +118,6 @@ const admission = <E, R>(
 			return yield* app
 		}
 		const api = yield* ApiBinding
-		// The API is the authenticator: nothing is read or answered until it has accepted
-		// this request's credential. A missing credential is refused without asking it.
 		if (!hasCredential(request.headers)) {
 			return yield* unauthorizedResponse
 		}
@@ -150,8 +138,6 @@ const admission = <E, R>(
 		if (verdict === "rejected") {
 			return yield* unauthorizedResponse
 		}
-		// Only the API's own confirmation proves it accepted the credential. Any other
-		// answer, such as its 503 when no key is configured, proves nothing.
 		if (verdict === "unverified") {
 			return yield* errorResponse(
 				503,
@@ -163,8 +149,6 @@ const admission = <E, R>(
 			HttpIncomingMessage.MaxBodySize,
 			ByteSize.bytes(MAX_MCP_BODY_BYTES),
 		)
-		// The body is read here, once and within the limit, so an oversized request is refused as
-		// one however it is framed. The transport's own read reuses this result.
 		const oversized = yield* request.text.pipe(
 			Effect.as(false),
 			Effect.catch((error) =>
@@ -180,16 +164,12 @@ const admission = <E, R>(
 		return yield* app.pipe(
 			Effect.provideService(FetchHttpClient.Fetch, (input, init) => api.fetch(input, init)),
 			bodyLimit,
-			// Same storage rule as the API these responses come from. The response is written
-			// before this middleware resumes, so the header is set through the response hook.
 			HttpEffect.withPreResponseHandler((_, response) =>
 				Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
 			),
 		)
 	})
 
-// Built once per isolate. Each request supplies its own ApiBinding, so a call always goes to
-// the API the current request is bound to; without one there is nowhere to send it.
 export const makeMcpWebHandler = () =>
 	HttpRouter.toWebHandler(
 		McpLive.pipe(

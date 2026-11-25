@@ -38,7 +38,6 @@ export type AutomationState = typeof AutomationState.Type
 
 export const AUTOMATION_STATE_SCHEMA_VERSION = 2 as const
 
-/** Version 1 had no revision; a created automation was at its first configuration. */
 const AutomationStateV1 = AutomationState.mapFields(({ revision: _revision, ...fields }) => fields)
 
 export const AutomationStateSnapshot = versionedSnapshot({

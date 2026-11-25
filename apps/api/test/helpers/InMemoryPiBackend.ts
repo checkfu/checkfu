@@ -16,7 +16,6 @@ import { CHECKFU_PI_DOCS } from "../../src/Pi/PiTurnUsage.ts"
 export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly storage: InMemoryStorage
 	readonly close: () => Promise<void>
-	/** Ends this object as a reset does: nothing it does afterwards reaches the storage. */
 	readonly retire: () => void
 }
 
@@ -49,14 +48,9 @@ class InstrumentedMemoryStorage extends MemoryStorage {
 	}
 }
 
-// The overload that names the conversation; the other takes the entry id and the context.
 type EntryLookup = Parameters<Storage["entry"]>
 type EntryResult = ReturnType<Storage["entry"]>
 
-/**
- * One session object's view of the storage. A reset object's isolate is gone, so a call it
- * was still running can neither read nor write what the next object owns.
- */
 class ObjectStorage implements Storage {
 	readonly #shared: InstrumentedMemoryStorage
 	#retired = false
@@ -69,7 +63,6 @@ class ObjectStorage implements Storage {
 		this.#retired = true
 	}
 
-	/** The session object's fence table, which survives a reset with the rest of its storage. */
 	fence(): Set<string> {
 		return this.#live().cancelledOps
 	}
@@ -134,25 +127,18 @@ class ObjectStorage implements Storage {
 	}
 }
 
-/**
- * In-process `pi-durable` backend backed by `MemoryStorage`.
- * Runs the real `@earendil-works/pi-durable` `Harness.open` loop (conversations,
- * submissions, generation task, retries, abort, and durable entries) for Node/Bun tests.
- */
 export const createInMemoryPiDurableBackend = async (
 	models: Models,
 	retryBaseDelayMs = 1,
 	registry = createCheckfuRegistry(),
 	hasApiKey: PiDurableBackend["hasApiKey"] = () => true,
 	object: {
-		/** Reopen Pi over another backend's storage, as a reset Durable Object does. */
 		readonly storage?: InMemoryStorage
 		readonly reset?: PiDurableBackend["reset"]
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
 	const shared = object.storage ?? new InstrumentedMemoryStorage()
 	const storage = new ObjectStorage(shared)
-	// Kept with the storage, as the session object's fence table is, so it survives a reset.
 	const cancelledOps = {
 		has: (operationId: string) => storage.fence().has(operationId),
 		add: (operationId: string) => storage.fence().add(operationId),
@@ -221,9 +207,6 @@ export const createInMemoryPiDurableBackend = async (
 			return { status: "done" }
 		},
 		abort: (operationId) =>
-			// Match `PiSession.do.ts`: once cancellation is recorded, keep permit
-			// acquisition and abort delivery uninterruptible so an interrupted
-			// abort cannot strand an in-flight `submit`.
 			Effect.uninterruptible(
 				Effect.suspend(() => {
 					cancelledOps.add(operationId)

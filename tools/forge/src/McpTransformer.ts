@@ -73,7 +73,6 @@ const withDefinitions = (schema: JsonRecord, components: JsonRecord, label: stri
 		if (component === undefined) {
 			throw new Error(`${label}: unresolved schema reference ${SCHEMA_REF_PREFIX}${name}.`)
 		}
-		// Rewriting a definition may reference more components; the Set keeps iterating over them.
 		definitions[name] = rewriteRefs(component, referenced)
 	}
 	if (!isJsonRecord(rewritten)) {
@@ -94,8 +93,6 @@ const readParameters = (
 	operation: JsonRecord,
 	label: string,
 ): Array<Parameter> => {
-	// The document is always the one Effect exports from CheckfuApi, which declares parameters
-	// on the operation. Anything else is refused rather than interpreted.
 	if (pathItem["parameters"] !== undefined) {
 		throw new Error(`${label}: parameters declared on the path item are not supported.`)
 	}
@@ -174,7 +171,6 @@ const projectOperation = (
 	if (exposure === undefined) {
 		return undefined
 	}
-	// A tool result is a JSON object, so every success response has to be one.
 	if (
 		!method.responses.every(
 			(response) =>
@@ -194,8 +190,6 @@ const projectOperation = (
 	}
 
 	const parameters = readParameters(pathItem, rawOperation, label)
-	// A parameter the runtime does not forward would be dropped from the tool without a trace,
-	// so every parameter has to be one of the kinds it does.
 	for (const parameter of parameters) {
 		const type = parameter.schema["type"]
 		const forwarded =
@@ -222,8 +216,6 @@ const projectOperation = (
 			pathParameters.map((parameter) => {
 				const own = parameter.schema["pattern"]
 				const clauses = parameter.schema["allOf"]
-				// One segment always; a parameter's own pattern too, kept beside its other clauses,
-				// since a schema has one `pattern`.
 				return {
 					...parameter,
 					schema: {
@@ -275,7 +267,6 @@ const projectOperation = (
 		components,
 		label,
 	)
-	// The server checks every call against this schema, so it has to be one it can enforce.
 	try {
 		importInputSchema(inputSchema)
 	} catch (error) {
@@ -291,10 +282,7 @@ const projectOperation = (
 		method: httpMethod,
 		path: method.path,
 		readOnly,
-		// The same retry-safety rule the CLI and SDK are generated from. A required retry key is
-		// one of the tool's arguments, so repeating the same call repeats the same key.
 		idempotent: operation.retrySafety === "idempotent" || operation.requiresIdempotencyKey,
-		// MCP reads "not destructive" as "only adds", so an operation has to claim that itself.
 		destructive: !readOnly && exposure.destructive !== false,
 		inputSchema,
 	}

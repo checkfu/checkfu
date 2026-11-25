@@ -67,7 +67,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					const cli = yield* makeTestServer()
 					const sessionId = yield* createReadySession(cli)
 
-					// Send via --event with auto-generated Idempotency-Key printed to stderr
 					const sent = yield* cli.run([
 						"sessions:events",
 						"send",
@@ -84,7 +83,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sentBody.data[0]?.type).toBe("user.message")
 					expect(sentBody.data[0]?.turn).toBe(1)
 
-					// Wait for turn 1 to settle
 					for (let i = 0; i < 200; i++) {
 						const s = yield* cli.run(["sessions", "retrieve", "--session-id", sessionId])
 						const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
@@ -94,7 +92,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						yield* Effect.sleep("5 millis")
 					}
 
-					// Explicit idempotency key via YAML stdin + safe retry
 					const yamlEvent =
 						'type: user.message\ncontent:\n  - type: text\n    text: "Second turn"\n'
 					const sent2a = yield* cli.run(
@@ -124,7 +121,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(sent2b.exitCode).toBe(0)
 
-					// Wait for turn 2 to settle
 					for (let i = 0; i < 200; i++) {
 						const s = yield* cli.run(["sessions", "retrieve", "--session-id", sessionId])
 						const parsed = JSON.parse(s.stdout) as { status: string; turn: number }
@@ -134,7 +130,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						yield* Effect.sleep("5 millis")
 					}
 
-					// List with limit & order
 					const listed = yield* cli.run([
 						"sessions:events",
 						"list",
@@ -155,10 +150,8 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(page.has_more).toBe(true)
 					expect(page.next_cursor).toBe(page.data.at(-1)?.seq)
 
-					// Archive so SSE stream terminates naturally after replaying all events
 					yield* cli.run(["sessions", "archive", "--session-id", sessionId])
 
-					// Stream with --transform type -r and --after
 					const streamed = yield* cli.run([
 						"sessions:events",
 						"stream",
@@ -176,7 +169,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(eventTypes).toContain("session.status_idle")
 					expect(eventTypes.at(-1)).toBe("session.archived")
 
-					// Re-streaming past the last event returns 204 and exits cleanly with empty output
 					const caughtUp = yield* cli.run([
 						"sessions:events",
 						"stream",
@@ -288,7 +280,6 @@ describe("CLI sessions:events and sessions connect", () => {
 								seenLastEventIds.push(request.headers.get("last-event-id"))
 								const real = await next(request)
 								if (streamRequests === 1 && real.body !== null) {
-									// Emit only the first 2 SSE frames, then close connection cleanly (simulating rotation)
 									const reader = real.body.getReader()
 									const decoder = new TextDecoder()
 									const encoder = new TextEncoder()
@@ -329,7 +320,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(seenLastEventIds[1]).toBeTruthy()
 
 					const seqs = streamed.stdout.trim().split("\n").map(Number)
-					// Verify exact 1:1 match with zero duplicates and zero gaps across reconnect
 					expect(seqs.length).toBeGreaterThanOrEqual(5)
 					expect(seqs).toEqual(expectedSeqs)
 				}),
@@ -361,7 +351,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(result.stderr).toContain("[thinking] pondering")
 					expect(result.stdout).toContain("Reply(1): first prompt")
 					expect(result.stdout).toContain("second prompt")
-					// ANSI OSC52 and bidi control characters must be escaped on stdout
 					expect(result.stdout).not.toContain("\u001b")
 					expect(result.stdout).not.toContain("\u0007")
 					expect(result.stdout).not.toContain("\u202e")
@@ -401,9 +390,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						.pipe(Effect.forkChild)
 					yield* Deferred.await(started)
 
-					// The first SIGINT asks for an interrupt. Under `bun checkfu` the same Ctrl-C
-					// arrives again a millisecond later, which main.ts treats as a disconnect and
-					// answers by interrupting the whole command.
 					expect(sigintController.handleSigint()).toBe(true)
 					yield* Fiber.interrupt(connect)
 
@@ -451,8 +437,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						sigintController,
 						terminalReads: [
 							Effect.succeed("long running task"),
-							// Wait until model generation is actively running, then fire SIGINT once (consumed -> user.interrupt)
-							// and confirm a second SIGINT would fall through (not consumed -> disconnect).
 							Deferred.await(started).pipe(
 								Effect.andThen(Effect.sleep("25 millis")),
 								Effect.andThen(
@@ -528,7 +512,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						])).stdout,
 					) as Array<number>
 
-					// 1) Body read failure mid-stream (triggers WebHttpClientResponse DecodeError)
 					let bodyErrorRequests = 0
 					const bodyErrorLastIds: Array<string | null> = []
 					const recovered = yield* cli.run(
@@ -581,7 +564,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(bodyErrorLastIds[1]).toBeTruthy()
 					expect(recovered.stdout.trim().split("\n").map(Number)).toEqual(expectedSeqs)
 
-					// 2) Malformed SSE JSON payload fails immediately without retrying
 					let badJsonRequests = 0
 					const badJson = yield* cli.run(["sessions:events", "stream", "--session-id", sessionId], {
 						interceptFetch: async (next, request) => {
@@ -599,7 +581,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(badJsonRequests).toBe(1)
 					expect(badJson.stderr).toContain("Invalid SSE event payload")
 
-					// 3) >6 consecutive healthy long-lived idle keepalive rotations stay connected and deliver all events promptly
 					let rotationRequests = 0
 					let virtualRotationNanos = 1_000_000_000n
 					const rotationSleepsMs: Array<number> = []
@@ -659,8 +640,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					}
 					expect(yamlDocs.map((doc) => (doc.toJS() as { seq: number }).seq)).toEqual(expectedSeqs)
 
-					// 4) sessions:events stream deduplicates replayed sequences on reconnect (both without
-					//    and with --after) so JSONL output emits each event exactly once
 					let replayStreamRequests = 0
 					let savedPrefixFrames = ""
 					const deduped = yield* cli.run(
@@ -805,14 +784,12 @@ describe("CLI sessions:events and sessions connect", () => {
 					})
 					const sessionId = yield* createReadySession(cli)
 
-					// Complete turn 1 first
 					const firstTurn = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: "first message\n",
 					})
 					expect(firstTurn.exitCode).toBe(0)
 					expect(firstTurn.stdout).toContain("Turn 1: first message")
 
-					// 1) sessions connect --after 0 must count replayed turn 1 as turn 1 and wait for turn 2
 					const afterZero = yield* cli.run(
 						["sessions", "connect", "--session-id", sessionId, "--after", "0"],
 						{ stdin: "second message\n" },
@@ -821,7 +798,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(afterZero.stdout).toContain("Turn 1: first message")
 					expect(afterZero.stdout).toContain("Turn 2: second message")
 
-					// 2) sessions connect --after <mid-turn-seq> (after turn 1 status_running, before turn 1 status_idle)
 					const history = JSON.parse(
 						(yield* cli.run([
 							"sessions:events",
@@ -844,13 +820,11 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(afterMidTurn.exitCode).toBe(0)
 					expect(afterMidTurn.stdout).toContain("Turn 3: third message")
 
-					// 3) Piped /exit terminates immediately even when stdin remains open without EOF
 					const openPipeExit = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: Stream.concat(Stream.make(new TextEncoder().encode("/exit\n")), Stream.never),
 					})
 					expect(openPipeExit.exitCode).toBe(0)
 
-					// 4) Piped connect reports an error instead of hanging if the event stream ends (HTTP 204) before turn settles
 					let releaseStream204: (() => void) | undefined
 					const sentPrompt = new Promise<void>((resolve) => {
 						releaseStream204 = resolve
@@ -880,7 +854,6 @@ describe("CLI sessions:events and sessions connect", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					// 1) Non-SSE HTTP 200 HTML response fails immediately on first request (no reconnect loop)
 					const baseCli = yield* makeTestServer()
 					const baseSessionId = yield* createReadySession(baseCli)
 					let htmlRequests = 0
@@ -903,7 +876,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(htmlRequests).toBe(1)
 					expect(htmlRes.stderr).toContain("Expected text/event-stream")
 
-					// 2) Future --after cursor beyond session history is rejected before sending input
 					const futureCursor = yield* baseCli.run(
 						["sessions", "connect", "--session-id", baseSessionId, "--after", "99"],
 						{ stdin: "should not send\n" },
@@ -911,9 +883,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(futureCursor.exitCode).toBe(1)
 					expect(futureCursor.stderr).toContain("beyond the latest session event sequence")
 
-					// 3) Terminal model failure (session.status_terminated without session.archived):
-					//    a) wakes a blocked TTY readLine cleanly without hanging
-					//    b) connecting again to the already-terminated non-archived session exits cleanly (both --after 0 and --after <lastSeq>)
 					const terminalCli = yield* makeTestServer({
 						generate: () =>
 							Effect.fail({
@@ -929,11 +898,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						["sessions", "connect", "--session-id", termSessionId],
 						{
 							stdinIsTerminal: true,
-							terminalReads: [
-								Effect.succeed("trigger terminal failure"),
-								// Second readLine stays blocked forever until session.status_terminated wakes the race
-								Effect.never,
-							],
+							terminalReads: [Effect.succeed("trigger terminal failure"), Effect.never],
 						},
 					)
 					expect(ttyTerminated.exitCode).toBe(0)
@@ -942,7 +907,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(ttyTerminated.stderr).toContain("[session terminated]")
 
-					// Reconnect to already-terminated (non-archived) session from start: replays and exits without hanging
 					const replayTerminated = yield* terminalCli.run([
 						"sessions",
 						"connect",
@@ -952,7 +916,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(replayTerminated.exitCode).toBe(0)
 					expect(replayTerminated.stderr).toContain("[session terminated]")
 
-					// Reconnect to already-terminated (non-archived) session at last seq: exits immediately
 					const termHistory = JSON.parse(
 						(yield* terminalCli.run([
 							"sessions:events",
@@ -974,8 +937,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					])
 					expect(atEndTerminated.exitCode).toBe(0)
 
-					// 4) Non-terminal retries_exhausted fails piped connect with exit code 1,
-					//    while a subsequent piped turn replaying that historical error with --after 0 succeeds with exit code 0
 					const retryCli = yield* makeTestServer({
 						generate: (args) => {
 							if (args.turn === 1) {
@@ -1021,9 +982,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Two piped messages where turn 1 finishes with refusal (does not drain queue):
-					//    must not hang waiting for turn 2, and must exit non-zero reporting queued turn 2 did not start.
-					//    A subsequent piped message starting turn 2 cleanly on --after 0 must still succeed.
 					const turn1Started = yield* Deferred.make<void>()
 					const releaseTurn1 = yield* Deferred.make<void>()
 					const refusalCli = yield* makeTestServer({
@@ -1058,7 +1016,6 @@ describe("CLI sessions:events and sessions connect", () => {
 							interceptFetch: async (next, request) => {
 								const res = await next(request)
 								if (request.method === "POST" && request.url.endsWith("/events")) {
-									// Release turn 1 once the second message has been queued
 									const cloned = res.clone()
 									const body = (await cloned.json().catch(() => null)) as {
 										data?: Array<{ turn?: number }>
@@ -1077,7 +1034,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						"Queued turn 2 did not start because turn 1 stopped with refusal.",
 					)
 
-					// Replaying historical refusal with --after 0 while a fresh message starts turn 2 must succeed
 					const afterHistoricalRefusal = yield* refusalCli.run(
 						["sessions", "connect", "--session-id", refusalSessionId, "--after", "0"],
 						{ stdin: "fresh prompt after refusal\n" },
@@ -1085,8 +1041,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(afterHistoricalRefusal.exitCode).toBe(0)
 					expect(afterHistoricalRefusal.stdout).toContain("Turn 2 ok")
 
-					// 2) Archiving a session externally after a piped message was accepted but before it completes
-					//    must fail with exit code 1, while reconnecting only to replay the archived session succeeds.
 					const midTurnStarted = yield* Deferred.make<void>()
 					const archiveCli = yield* makeTestServer({
 						generate: () =>
@@ -1121,7 +1075,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(replayArchived.exitCode).toBe(0)
 					expect(replayArchived.stderr).toContain("[session archived]")
 
-					// Piping a message into an already-archived session must fail rather than returning success
 					const pipedToArchived = yield* archiveCli.run(
 						["sessions", "connect", "--session-id", archiveSessionId],
 						{ stdin: "message to dead session\n" },
@@ -1130,7 +1083,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(pipedToArchived.stdout).toBe("")
 					expect(pipedToArchived.stderr).toContain("already archived")
 
-					// Failure during queued-turn status verification must propagate rather than hanging
 					const lookupFailRelease = yield* Deferred.make<void>()
 					const lookupFailCli = yield* makeTestServer({
 						generate: () =>
@@ -1189,8 +1141,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(statusGetsAfterStart).toBe(3)
 					expect(lookupFailed.stderr).toContain("503")
 
-					// 3) Rejected /interrupt fails piped connect with exit code 1,
-					//    but interactive TTY mode reports the error and allows continuing until /exit
 					const idleCli = yield* makeTestServer()
 					const idleSessionId = yield* createReadySession(idleCli)
 
@@ -1220,7 +1170,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Indented code lines preserve leading/trailing whitespace and suppress local echo
 					const receivedInputs: Array<string> = []
 					const wsCli = yield* makeTestServer({
 						generate: (args) =>
@@ -1245,8 +1194,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(wsResult.stdout).toContain(`Got:[${indented}]`)
 					expect(wsResult.stdout).toContain(`[user] ${indented}`)
 
-					// 2) Connecting to an already-running session and pressing Ctrl-C before SSE replay catches up
-					//    must still send user.interrupt based on liveStatus rather than replay baseline idle status
 					const turn2Started = yield* Deferred.make<void>()
 					const turn2Interrupted = yield* Deferred.make<void>()
 					const sigintController = makeSigintController()
@@ -1274,14 +1221,12 @@ describe("CLI sessions:events and sessions connect", () => {
 					})
 					const runningSessionId = yield* createReadySession(replayCtrlCCli)
 
-					// Complete turn 1 so replay has historical idle events before turn 2
 					const t1 = yield* replayCtrlCCli.run(
 						["sessions", "connect", "--session-id", runningSessionId],
 						{ stdin: "finish turn 1\n" },
 					)
 					expect(t1.exitCode).toBe(0)
 
-					// Start turn 2 asynchronously without waiting for it to settle
 					yield* replayCtrlCCli.run([
 						"sessions:events",
 						"send",
@@ -1292,7 +1237,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					])
 					yield* Deferred.await(turn2Started)
 
-					// Hold the SSE response so replay has NOT delivered turn 2's status_running when Ctrl-C arrives
 					let releaseReplay: (() => void) | undefined
 					const replayGate = new Promise<void>((resolve) => {
 						releaseReplay = resolve
@@ -1330,8 +1274,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(firstSigintConsumed).toBe(true)
 					expect(ttyRes.stderr).toContain("Interrupt requested.")
 
-					// 3) Queued turn 2 receipt while turn 1 stops with refusal must NOT stick liveStatus as running:
-					//    pressing Ctrl-C after turn 1 returns to idle must fall through (disconnect), not interrupt
 					const queuedSigintController = makeSigintController()
 					const turn1QueuedGate = yield* Deferred.make<void>()
 					const releaseRefusalTurn1 = yield* Deferred.make<void>()
@@ -1362,14 +1304,12 @@ describe("CLI sessions:events and sessions connect", () => {
 								const res = await next(request)
 								if (request.method === "POST" && request.url.endsWith("/events")) {
 									const clone = res.clone()
-									try {
-										const parsed = (await clone.json()) as { data?: Array<{ turn?: number }> }
-										const turn = parsed.data?.[0]?.turn
-										if (turn !== undefined) {
-											queuedTurnReceipt = turn
-										}
-									} catch {
-										// ignore non-json error bodies
+									const parsed = (await clone.json().catch(() => undefined)) as
+										| { data?: Array<{ turn?: number }> }
+										| undefined
+									const turn = parsed?.data?.[0]?.turn
+									if (turn !== undefined) {
+										queuedTurnReceipt = turn
 									}
 									return res
 								}
@@ -1425,8 +1365,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(queuedTtyRes.stderr).toContain("[status: idle (refusal)]")
 					expect(queuedTtyRes.stderr).not.toContain("Interrupt requested.")
 
-					// 4) Live archive emitting session.status_terminated and session.archived in separate chunks
-					//    must drain and emit session.archived in structured output before disconnecting
 					const liveArchiveCli = yield* makeTestServer()
 					const liveArchiveSessionId = yield* createReadySession(liveArchiveCli)
 					const streamConnected = yield* Deferred.make<void>()
@@ -1504,8 +1442,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Starting from idle, pressing Ctrl-C right after POST acceptance (before SSE delivers
-					//    session.status_running) must still interrupt the accepted turn rather than disconnecting
 					const idleCtrlCSigint = makeSigintController()
 					const idleTurnStarted = yield* Deferred.make<void>()
 					const idleTurnInterrupted = yield* Deferred.make<void>()
@@ -1558,8 +1494,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sigintBeforeRunningConsumed).toBe(true)
 					expect(idleCtrlCRes.stderr).toContain("Interrupt requested.")
 
-					// 2a) Lost response after server commits message retries with the exact same Idempotency-Key
-					//     without duplicating the turn
 					let retryGenerateCalls = 0
 					const retrySendCli = yield* makeTestServer({
 						generate: (args) =>
@@ -1600,7 +1534,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(retryGenerateCalls).toBe(1)
 					expect(retryRes.stdout).toContain("Ack:only once")
 
-					// 2b) Persistent ambiguous send failure exposes the exact Idempotency-Key in stderr
 					const unconfirmedKeys: Array<string | null> = []
 					const unconfirmedRes = yield* retrySendCli.run(
 						["sessions", "connect", "--session-id", retrySessionId],
@@ -1622,8 +1555,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(usedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 					expect(unconfirmedRes.stderr).toContain(`Idempotency-Key: ${usedKey}`)
 
-					// 3) Sending the same text as an earlier historical message before replay reaches it must
-					//    NOT suppress the historical message or echo the new local message as remote
 					const echoCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -1671,8 +1602,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						"Reply-2:same text",
 					])
 
-					// 4a) Dropped/truncated 200 response body after commit (DecodeError) retries with the same
-					//     Idempotency-Key without duplicating the turn
 					let decodeRetryGenerates = 0
 					const decodeRetryCli = yield* makeTestServer({
 						generate: (args) =>
@@ -1715,8 +1644,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(decodeRetryGenerates).toBe(1)
 					expect(decodeRetryRes.stdout).toContain("Decoded:truncated body retry")
 
-					// 4a-2) Mid-body stream read error on HTTP 200 after commit (HttpClientError DecodeError)
-					//       retries with the same Idempotency-Key without duplicating the turn
 					const bodyDropKeys: Array<string | null> = []
 					const bodyDropRes = yield* decodeRetryCli.run(
 						["sessions", "connect", "--session-id", decodeRetrySessionId],
@@ -1749,8 +1676,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(decodeRetryGenerates).toBe(2)
 					expect(bodyDropRes.stdout).toContain("Decoded:dropped body stream")
 
-					// 4b) Persistent undeclared 502 Bad Gateway (DecodeError in HttpApiClient) retries with the
-					//     same key and reports Idempotency-Key on stderr
 					const gateway502Keys: Array<string | null> = []
 					const gateway502Res = yield* decodeRetryCli.run(
 						["sessions", "connect", "--session-id", decodeRetrySessionId],
@@ -1775,8 +1700,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(key502).toMatch(/^cli_[0-9a-f]{24}$/)
 					expect(gateway502Res.stderr).toContain(`Idempotency-Key: ${key502}`)
 
-					// 5) Failed archive status lookup after session.status_terminated propagates error
-					//    instead of silently treating the stream as cleanly terminated
 					const archiveLookupCli = yield* makeTestServer()
 					const archiveLookupSessionId = yield* createReadySession(archiveLookupCli)
 					const archiveLookupConnected = yield* Deferred.make<void>()
@@ -1818,8 +1741,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sessionGetCount).toBe(4)
 					expect(archiveLookupRes.stderr.length).toBeGreaterThan(0)
 
-					// 6) Ended session replay with a quiet stdin pipe waits for EOF, /exit, or actual
-					//    input instead of treating quietness after replay as EOF
 					const endedEncoder = new TextEncoder()
 					const replayFinishedForInput = yield* Deferred.make<void>()
 					const lateInputRes = yield* archiveLookupCli.run(
@@ -1910,8 +1831,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(delayedExitRes.exitCode).toBe(0)
 
-					// 7) Message receipts with empty data, missing type, mismatched type, or missing numeric turn
-					//    fail as unconfirmed delivery with the generated Idempotency-Key
 					for (const badBody of [
 						{ data: [] },
 						{ data: [{ type: "user.message" }] },
@@ -1949,8 +1868,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Delayed queued turn-2 receipt arriving AFTER SSE delivers turn 1's idle(refusal)
-					//    must NOT mark turn 2 as running
 					const delayedReceiptSigint = makeSigintController()
 					const delayedTurn1Running = yield* Deferred.make<void>()
 					const releaseDelayedTurn1 = yield* Deferred.make<void>()
@@ -1982,8 +1899,6 @@ describe("CLI sessions:events and sessions connect", () => {
 									delayedPosts++
 									const res = await next(request)
 									if (delayedPosts === 2) {
-										// Release turn 1 to stop with refusal and hold the queued receipt until
-										// SSE has delivered session.status_idle(refusal)
 										await runPromise(Deferred.succeed(releaseDelayedTurn1, undefined))
 										await runPromise(Deferred.await(delayedIdleDelivered))
 										await new Promise((resolve) => {
@@ -2036,8 +1951,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sigintAfterDelayedReceipt).toBe(false)
 					expect(delayedRes.stderr).not.toContain("Interrupt requested.")
 
-					// 9) Resuming near the head with --after N reads wire `turn` via a single descending
-					//    lookup from `after + 1` without scanning history from sequence 0 or forward
 					const resumeCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -2108,8 +2021,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Interrupted piped send (e.g. session archived mid-POST) prints the generated
-					//    Idempotency-Key to stderr and exits non-zero
 					const intCli = yield* makeTestServer()
 					const intSessionId = yield* createReadySession(intCli)
 					const postInFlight = yield* Deferred.make<void>()
@@ -2141,8 +2052,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(interruptedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 					expect(intRes.stderr).toContain(`Idempotency-Key: ${interruptedKey}`)
 
-					// 2) Oversized single-line piped input is rejected while streaming chunks (never buffered
-					//    until EOF), for both active and ended sessions
 					const encoder = new TextEncoder()
 					const chunk1k = encoder.encode("a".repeat(1024))
 					let activeChunksPulled = 0
@@ -2179,8 +2088,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			),
 		)
 
-		// 3) Real subprocess exits cleanly with code 0 on /exit\n even while the parent keeps
-		//    stdin open, and reports path-segment & redirect errors on stderr
 		const cliCommand = (cliArgs: ReadonlyArray<string>): readonly [string, Array<string>] => [
 			"bun",
 			[...PINNED_BUN_FLAGS, fileURLToPath(new URL("../src/main.ts", import.meta.url)), ...cliArgs],
@@ -2288,7 +2195,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					stderr += chunk
 					if (!sentExit && stderr.includes("Connected to sess_subproc")) {
 						sentExit = true
-						// Write /exit\n WITHOUT closing child.stdin!
 						child.stdin.write("/exit\n")
 					}
 				})
@@ -2338,7 +2244,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			expect(badDotSubproc.stdout).toBe("")
 			expect(badDotSubproc.stderr).toContain("Invalid --agent-id")
 
-			// A real subprocess must NOT follow a 302 redirect from POST update into GET retrieve
 			const redirectSubproc = await new Promise<{
 				readonly code: number | null
 				readonly stdout: string
@@ -2394,8 +2299,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) After turn 1 stops with refusal, sending turn 2 from idle while replaying turn 1
-					//    must NOT fail turn 2 even if sessions.get temporarily reports stale idle at turn 1
 					const replayRefusalCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -2458,7 +2361,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(turn2AfterRefusal.exitCode).toBe(0)
 					expect(turn2AfterRefusal.stdout).toContain("Accepted-2")
 
-					// 2) Ambiguous attempt 1 followed by definitive 401 on retry still reports Idempotency-Key
 					const rotatedKeys: Array<string> = []
 					const rotatedRes = yield* replayRefusalCli.run(
 						["sessions", "connect", "--session-id", replayRefusalSessionId],
@@ -2488,7 +2390,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(rotatedKeys[1]).toBe(rotatedKeys[0])
 					expect(rotatedRes.stderr).toContain(`Idempotency-Key: ${rotatedKeys[0]}`)
 
-					// 3) Stalled TTY dispatchUserLine is interrupted when SSE reports archival and exposes key
 					const stalledTtySessionId = yield* createReadySession(replayRefusalCli)
 					const ttyPostStalled = yield* Deferred.make<void>()
 					let ttyInterruptedKey = ""
@@ -2525,8 +2426,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(ttyInterruptedKey).toMatch(/^cli_[0-9a-f]{24}$/)
 					expect(stalledTtyRes.stderr).toContain(`Idempotency-Key: ${ttyInterruptedKey}`)
 
-					// 4) Completed lines earlier in the same chunk are emitted before failing on a later
-					//    oversized line (so /exit\n + oversized tail exits 0, and valid line is sent first)
 					const chunkExitSessId = yield* createReadySession(replayRefusalCli)
 					const exitBeforeOverflow = yield* replayRefusalCli.run(
 						["sessions", "connect", "--session-id", chunkExitSessId],
@@ -2552,8 +2451,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(sentPayloads).toHaveLength(1)
 					expect(sentPayloads[0]).toContain("valid first line")
 
-					// 5) Transient retrying session.error followed by successful turn settlement must NOT
-					//    cause a later archive while piped stdin is open to mark the settled turn as failed
 					const transientRecoverCli = yield* makeTestServer({
 						generate: () =>
 							Effect.succeed({
@@ -2661,9 +2558,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) With two piped messages, if turn 2's session.status_idle starts rendering before
-					//    the input loop installs its final waiter, resolving the current waiter after output
-					//    must wake the loop instead of hanging on a stale deferred
 					const waiterCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -2688,8 +2582,6 @@ describe("CLI sessions:events and sessions connect", () => {
 										if (chunk.includes('"session.status_idle"')) {
 											idleRenderCount += 1
 											if (idleRenderCount === 2) {
-												// Release POST #2 receipt so the input loop hits EOF and installs a fresh
-												// waiter while turn 2's session.status_idle is still blocked in output
 												yield* Deferred.succeed(turn2IdleRendering, undefined)
 												yield* Effect.sleep("50 millis")
 											}
@@ -2716,8 +2608,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(waiterRes.stdout).toContain("Reply-1:first")
 					expect(waiterRes.stdout).toContain("Reply-2:second")
 
-					// 2) Explicit /exit and /quit cancel a stalled ended-session replay cleanly in both
-					//    piped and interactive TTY modes without attempting to send messages
 					const archiveRes = yield* waiterCli.run([
 						"sessions",
 						"archive",
@@ -2800,8 +2690,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Ended session replay with buffered non-newline piped input (open pipe, no EOF)
-					//    reports unsent input instead of exiting 0
 					const encoder = new TextEncoder()
 					const cli = yield* makeTestServer({
 						generate: (args) =>
@@ -2852,7 +2740,6 @@ describe("CLI sessions:events and sessions connect", () => {
 						`Cannot send input: session ${endedSessionId} is already archived.`,
 					)
 
-					// Chunked /exit\n and /exit\n followed by trailing partial text in the same chunk exit 0
 					const chunkedExitRes = yield* cli.run(
 						["sessions", "connect", "--session-id", endedSessionId],
 						{
@@ -2872,8 +2759,6 @@ describe("CLI sessions:events and sessions connect", () => {
 					)
 					expect(exitThenPartialRes.exitCode).toBe(0)
 
-					// 2) Shared session: another client sends the same text while local POST is in flight
-					//    and then rejected -> the other client's committed message is NOT hidden
 					const sharedSessionId = yield* createReadySession(cli)
 					const localPostStarted = yield* Deferred.make<void>()
 					const otherMessageRendered = yield* Deferred.make<void>()
@@ -2952,7 +2837,6 @@ describe("CLI sessions:events and sessions connect", () => {
 			"bun --no-env-file --config=apps/cli/bunfig.toml apps/cli/src/main.ts",
 		)
 
-		// Children must not see a key the developer has exported, and must never print one.
 		const env = cliProcessEnv()
 		const start = (args: ReadonlyArray<string>, extraEnv: Record<string, string> = {}) =>
 			spawnSync("bun", [...args, "--help"], {
@@ -2965,7 +2849,6 @@ describe("CLI sessions:events and sessions connect", () => {
 		expect(help.status).toBe(0)
 		expect(help.stdout).toContain("sessions")
 
-		// Any flag besides the script's two could load a .env file or select another config.
 		for (const refused of [
 			start(["checkfu"], { BUN_OPTIONS: "--env-file=.env.example" }),
 			start(["checkfu"], { BUN_OPTIONS: "--config=bunfig.toml" }),
@@ -2977,13 +2860,9 @@ describe("CLI sessions:events and sessions connect", () => {
 		}
 	})
 
-	// Windows has no SIGTERM to forward: Node terminates the runner outright.
 	it.skipIf(process.platform === "win32")(
 		"stops a stream when SIGTERM is sent to `bun checkfu`'s PID",
 		async () => {
-			// `bun checkfu`'s PID is Bun's script runner, which passes SIGTERM on to the CLI. The
-			// CLI must stop, closing the caller's output and the stream connection. SIGKILL cannot
-			// be passed on; the README says to kill the process group, or to use the binary.
 			const repoRoot = fileURLToPath(new URL("../../..", import.meta.url))
 			const env = cliProcessEnv()
 			let streamClosed = false
@@ -3023,7 +2902,6 @@ describe("CLI sessions:events and sessions connect", () => {
 							cwd: repoRoot,
 							env: { ...env, CHECKFU_API_KEY: "ck_kill" },
 							stdio: ["ignore", "pipe", "pipe"],
-							// Its own process group, so a timeout can stop the runner and the CLI together.
 							detached: true,
 						},
 					)
@@ -3238,10 +3116,6 @@ print(json.dumps({"rc": p.returncode, "aliveAfterFirst": alive_after_first, "out
 					events: [{ type: "user.interrupt" }],
 				})
 
-				// Also verify PID-targeted SIGINT (`kill -INT <pid>`) with a real TTY:
-				// 1) `sessions connect` delivers exactly one interrupt on 1st SIGINT (stays alive)
-				//    and cleanly disconnects with code 130 on 2nd SIGINT.
-				// 2) `sessions:events stream` cleanly terminates with code 130 on 1st SIGINT.
 				postedEventBodies.length = 0
 				const pidSigintConnectScript = `
 import fcntl, json, os, pty, select, signal, subprocess, sys, termios, time
@@ -3428,7 +3302,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				expect(pidStreamResult.rc).toBe(130)
 				expect(pidStreamResult.output).toContain("session.status_running")
 
-				// 3) Non-TTY (all streams redirected) PID-targeted SIGINT cancels a long-lived stream cleanly
 				const nonTtyStreamResult = await new Promise<{
 					readonly code: number | null
 					readonly signal: NodeJS.Signals | null
@@ -3515,7 +3388,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							}),
 					})
 
-					// 1) Live session archived while non-newline piped input is buffered fails instead of exiting 0
 					const liveBufferedSessionId = yield* createReadySession(cli)
 					const streamReady = yield* Deferred.make<void>()
 					const archiver1 = yield* Deferred.await(streamReady).pipe(
@@ -3542,7 +3414,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(liveBufferedRes.exitCode).toBe(1)
 					expect(liveBufferedRes.stderr).toContain("ended before buffered input was submitted")
 
-					// 1b) Live session archived after first line sent, while second line is buffered without newline
 					const liveSecondSessionId = yield* createReadySession(cli)
 					const firstReplyRendered = yield* Deferred.make<void>()
 					const archiver2 = yield* Deferred.await(firstReplyRendered).pipe(
@@ -3567,8 +3438,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(liveSecondRes.exitCode).toBe(1)
 					expect(liveSecondRes.stderr).toContain("ended before buffered input was submitted")
 
-					// 2a) Confirmed 429 queue-full rejection (no unconfirmed_index) retries but does NOT claim
-					//     delivery is unconfirmed when all attempts are definitively rejected
 					const queueFullSessionId = yield* createReadySession(cli)
 					let confirmed429Calls = 0
 					const confirmed429Res = yield* cli.run(
@@ -3601,7 +3470,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(confirmed429Res.stderr).not.toContain("delivery unconfirmed")
 					expect(confirmed429Res.stderr).not.toContain("Idempotency-Key:")
 
-					// 2b) Unconfirmed transport error followed by confirmed 429 still preserves delivery uncertainty
 					const mixedKeys: Array<string | null> = []
 					const mixed429Res = yield* cli.run(
 						["sessions", "connect", "--session-id", queueFullSessionId],
@@ -3636,7 +3504,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(mixed429Res.stderr).toContain("delivery unconfirmed")
 					expect(mixed429Res.stderr).toContain(`Idempotency-Key: ${mixedKeys[0]}`)
 
-					// 2c) 429 WITH unconfirmed_index still reports uncertain delivery and Idempotency-Key
 					const unconfirmed429Keys: Array<string | null> = []
 					const unconfirmed429Res = yield* cli.run(
 						["sessions", "connect", "--session-id", queueFullSessionId],
@@ -3664,8 +3531,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(unconfirmed429Res.stderr).toContain("delivery unconfirmed")
 					expect(unconfirmed429Res.stderr).toContain(`Idempotency-Key: ${unconfirmed429Keys[0]}`)
 
-					// 3) Multi-turn TTY session runs without piped-turn bookkeeping overhead, and multi-turn
-					//    piped session retains first submitted turn failure even after later turns settle
 					const multiTtySessionId = yield* createReadySession(cli)
 					const multiTtyRes = yield* cli.run(
 						["sessions", "connect", "--session-id", multiTtySessionId],
@@ -3783,7 +3648,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					})
 					const sessionId = yield* createReadySession(cli)
 
-					// 1a) Piped /interrupt with empty or mismatched receipt fails as unconfirmed with Idempotency-Key
 					for (const badBody of [{ data: [] }, { data: [{ type: "user.message", turn: 1 }] }]) {
 						let capturedKey = ""
 						const badIntRes = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
@@ -3806,7 +3670,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						expect(badIntRes.stderr).not.toContain("Interrupt requested.")
 					}
 
-					// 1b) TTY /interrupt with empty receipt reports unconfirmed error and does not print Interrupt requested.
 					let ttyIntKey = ""
 					const ttyBadIntRes = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdinIsTerminal: true,
@@ -3828,7 +3691,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(ttyBadIntRes.stderr).toContain(`Idempotency-Key: ${ttyIntKey}`)
 					expect(ttyBadIntRes.stderr).not.toContain("Interrupt requested.")
 
-					// 2) TTY keeps session open after confirmed per-message rejections (oversized 400 and queue-full 429)
 					const ttyRecoverSessionId = yield* createReadySession(cli)
 					const validReplyRendered = yield* Deferred.make<void>()
 					let queueFullRejected = false
@@ -3876,8 +3738,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(ttyRecoverRes.stderr).toContain("Send failed: API error (429 rate_limit_error)")
 					expect(ttyRecoverRes.stdout).toContain("Ok:corrected follow-up")
 
-					// 3a) Retrying session.error followed by mid-turn archival attributes termination to archival,
-					//     not to the transient retrying error
 					const retryingTurnStarted = yield* Deferred.make<void>()
 					const releaseRetryingTurn = yield* Deferred.make<void>()
 					const retryingCli = yield* makeTestServer({
@@ -3972,8 +3832,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					)
 					expect(retryingArchivedRes.stderr).not.toContain("Turn 1 failed:")
 
-					// 3b) Terminal session.error (retry_status.type === "terminal") followed by termination
-					//     still attributes failure to the terminal provider error
 					const terminalErrCli = yield* makeTestServer({
 						generate: () =>
 							Effect.fail({
@@ -4001,10 +3859,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Piped message sent while CLI still sees turn 1 running, but arriving at the server
-					//    just after turn 1 stopped with refusal, actually starts turn 2 (queued: false).
-					//    Even if GET /sessions/:id lags showing turn 1 idle, connect must wait for turn 2
-					//    and print its reply rather than disconnecting with a false queued-turn failure.
 					const turn1Finished = yield* Deferred.make<void>()
 					const releaseSseAfterPost2 = yield* Deferred.make<void>()
 					const raceCli = yield* makeTestServer({
@@ -4038,8 +3892,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					const stagedStdin = Stream.concat(
 						Stream.make(encoder.encode("first turn\n")),
 						Stream.fromEffect(
-							// Wait until turn 1 has settled on the server (with refusal), while SSE still holds
-							// turn 1's session.status_idle so CLI still sees liveStatus === "running" at turn 1
 							Deferred.await(turn1Finished).pipe(
 								Effect.andThen(Effect.sleep("40 millis")),
 								Effect.as(encoder.encode("second starts fresh\n")),
@@ -4071,7 +3923,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									getSessionCount += 1
 									const res = await next(request)
 									if (getSessionCount > 1) {
-										// Simulate a lagging SessionView projection still showing turn 1 idle
 										const body = (await res.json()) as { status?: string; turn?: number }
 										return new Response(JSON.stringify({ ...body, status: "idle", turn: 1 }), {
 											status: 200,
@@ -4100,7 +3951,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										const text = decoder.decode(chunk.value, { stream: true })
 										if (!heldFirstIdle && text.includes("session.status_idle")) {
 											heldFirstIdle = true
-											// Hold turn 1's idle event until POST #2 has committed and returned its receipt
 											await runPromise(Deferred.await(releaseSseAfterPost2))
 										}
 										controller.enqueue(chunk.value)
@@ -4118,8 +3968,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(raceRes.stdout).toContain("Started turn 2:second starts fresh")
 					expect(raceRes.stderr).not.toContain("did not start")
 
-					// 2) Resuming near head on a busy session bounds the suffix scan to the captured head
-					//    sequence and falls back to the fixed prefix scan instead of paging indefinitely
 					const busyCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -4208,7 +4056,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 											const cursor = Number(afterParam)
 											const nextSeq1 = cursor + 1
 											const nextSeq2 = cursor + 2
-											// Simulate live traffic continuously extending the log beyond targetHeadSeq
 											syntheticHead = Math.max(syntheticHead + 2, nextSeq2 + 1)
 											return new Response(
 												JSON.stringify({
@@ -4261,9 +4108,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// 1) Message 2 queues turn 2 behind turn 1 (queued: true), turn 1 stops with refusal,
-					//    and message 3 starts turn 2 from idle (queued: false). Removing turn 2 from
-					//    unsettledQueuedTurns prevents a lagging GET snapshot from failing turn 2.
 					const turn1Started = yield* Deferred.make<void>()
 					const releaseTurn1 = yield* Deferred.make<void>()
 					const turn1SettledRefusal = yield* Deferred.make<void>()
@@ -4326,7 +4170,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									}
 									if (clearPosts === 2) {
 										post2Receipt = parsed.data?.[0]
-										// Release turn 1 to stop with refusal now that message 2 was queued
 										await runPromise(Deferred.succeed(releaseTurn1, undefined))
 									} else if (clearPosts === 3) {
 										post3Receipt = parsed.data?.[0]
@@ -4370,7 +4213,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										const text = decoder.decode(chunk.value, { stream: true })
 										if (sawFirstIdle && !heldAfterFirstIdle) {
 											heldAfterFirstIdle = true
-											// Hold turn 2 SSE events until POST #3 receipt has returned and EOF settled
 											await runPromise(Deferred.await(post3Returned))
 											await new Promise((resolve) => {
 												setTimeout(resolve, 40)
@@ -4396,8 +4238,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(clearRes.stdout).toContain("StartedAfterClear:")
 					expect(clearRes.stderr).not.toContain("did not start")
 
-					// 2) Initial GET shows idle at turn 0, another client starts turn 1, and local TTY send
-					//    receives { turn: 2, queued: true } before SSE catches up -> first Ctrl-C interrupts turn 1
 					const otherTurn1Started = yield* Deferred.make<void>()
 					const otherTurn1Interrupted = yield* Deferred.make<void>()
 					const releaseSseStream = yield* Deferred.make<void>()
@@ -4472,8 +4312,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(firstCtrlCConsumed).toBe(true)
 					expect(predRes.stderr).toContain("Interrupt requested.")
 
-					// 3) Transient 503 on initial connect GET (e.g. projection catching up after create)
-					//    retries via fetchSessionStatusWithRetry and connects cleanly
 					const startupRetryCli = yield* makeTestServer({
 						generate: (args) =>
 							Effect.succeed({
@@ -4616,7 +4454,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 				})
 			const retrieve = ["sessions", "retrieve", "--session-id", "sess_env"]
 
-			// With exported credentials, the planted .env files and preload are ignored.
 			const exported = await runBun([...PINNED_BUN_FLAGS, mainPath, ...retrieve], {
 				...baseEnv,
 				CHECKFU_API_KEY: "ck_dummy_exported_secret",
@@ -4627,14 +4464,12 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			expect(legitHits).toBe(1)
 			expect(evilHits).toBe(0)
 
-			// With nothing exported, the planted key is not picked up: it fails before any request.
 			const nothingExported = await runBun([...PINNED_BUN_FLAGS, mainPath, ...retrieve], baseEnv)
 			expect(nothingExported.status).toBe(1)
 			expect(nothingExported.stderr).toContain("Missing CHECKFU_API_KEY")
 			expect(nothingExported.stderr).not.toContain("PRELOAD_EXECUTED")
 			expect(evilHits).toBe(0)
 
-			// Started without both flags, the CLI refuses to run, even in a clean directory.
 			for (const unpinned of [[], ["--no-env-file"], [PINNED_BUN_FLAGS[1]]]) {
 				const direct = await runBun(
 					[...unpinned, mainPath, ...retrieve],
@@ -4673,8 +4508,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runPromise = Effect.runPromiseWith(yield* Effect.context())
-					// Replayed SSE frames (duplicate seq for session.status_running) on reconnect must NOT
-					// double-count observedTurn and prematurely settle queued turn 2
 					const turn1Gate = yield* Deferred.make<void>()
 					const replayCli = yield* makeTestServer({
 						generate: (args) =>
@@ -4740,7 +4573,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 									})
 									return new Response(dropping, { status: 200, headers: res.headers })
 								}
-								// Connection 2 replays the exact turn-1 running frames before streaming the real tail
 								let replayedPrefix = false
 								const replaying = new ReadableStream<Uint8Array>({
 									async pull(controller) {
@@ -4771,8 +4603,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(replayRes.stdout).toContain("Turn2:second")
 					expect(replayRes.stdout.split("[user] first")).toHaveLength(2)
 
-					// 3) After turn 1 stops with refusal while turn 2 is queued, a lagging GET snapshot that
-					//    still reports turn 1 as running is rechecked with a bound instead of hanging
 					const lagTurn1Running = yield* Deferred.make<void>()
 					const releaseLagTurn1 = yield* Deferred.make<void>()
 					const lagCli = yield* makeTestServer({
@@ -4814,8 +4644,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 								if (request.method === "GET" && request.url.endsWith(`/sessions/${lagSessionId}`)) {
 									lagGets += 1
 									const res = await next(request)
-									// Return lagging "running" at turn 1 for the first two post-refusal rechecks,
-									// then let the third recheck see the real idle snapshot
 									if (lagGets === 2 || lagGets === 3) {
 										const body = (await res.json()) as { status?: string; turn?: number }
 										return new Response(JSON.stringify({ ...body, status: "running", turn: 1 }), {
@@ -4836,10 +4664,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						"Queued turn 2 did not start because turn 1 stopped with refusal.",
 					)
 
-					// 4) While the halted-queue status GET is in flight, another client starts turn 2,
-					//    SSE delivers turn 2's completion, and the session is archived (finishing
-					//    streamEndedDeferred before the GET resolves) -> connect rechecks stateRef
-					//    and exits 0 with turn 2's reply instead of reporting an incomplete turn
 					const raceTurn1Running = yield* Deferred.make<void>()
 					const releaseRaceTurn1 = yield* Deferred.make<void>()
 					const lookupInFlight = yield* Deferred.make<void>()
@@ -4933,7 +4757,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 								) {
 									raceGets += 1
 									if (raceGets === 2) {
-										// Pause the halted-queue GET until aborted by SSE progress or archivedRendered
 										const paused = new Promise<void>((resolve) => {
 											if (request.signal.aborted) {
 												resolve()
@@ -4986,13 +4809,10 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						},
 					)
 					yield* Fiber.await(otherClientDone)
-					// 2 GETs: startup lookup and halted-queue lookup aborted once SSE confirms turn 2 started
 					expect(raceGets).toBe(2)
 					expect(raceRes.exitCode).toBe(0)
 					expect(raceRes.stdout).toContain("CompletedTurn2:")
 
-					// 5) Malformed / incomplete session SSE events (e.g. only `seq`) fail immediately
-					//    in both `sessions connect` and `sessions:events stream` before advancing cursor
 					const malformedCli = yield* makeTestServer()
 					const malformedSessionId = yield* createReadySession(malformedCli)
 					const malformedConnect = yield* malformedCli.run(
@@ -5041,9 +4861,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
 					const encoder = new TextEncoder()
 
-					// 1) Halted-queue GET fails with 403 after SSE already delivered session.status_running
-					//    for turn 2 (refreshed settlement action is "wait", not "settled"): must not fail
-					//    the piped session and must wait for turn 2's reply
 					const failTurn1Running = yield* Deferred.make<void>()
 					const releaseFailTurn1 = yield* Deferred.make<void>()
 					const releaseFailTurn2 = yield* Deferred.make<void>()
@@ -5168,8 +4985,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 										if (request.signal.aborted) {
 											throw new DOMException("Aborted", "AbortError")
 										}
-										// Release turn 2 slightly after returning 403 so unpatched code hits 403 while
-										// state is "wait" (turn 2 running, not yet settled)
 										setTimeout(() => {
 											void runPromise(Deferred.succeed(releaseFailTurn2, undefined))
 										}, 20)
@@ -5196,8 +5011,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(failRes.exitCode).toBe(0)
 					expect(failRes.stdout).toContain("RecoveredTurn2:")
 
-					// 2) Stalled halted-queue GET that never responds must be aborted once SSE confirms
-					//    turn 2 started so sessions connect exits promptly when turn 2 completes
 					const stallTurn1Running = yield* Deferred.make<void>()
 					const releaseStallTurn1 = yield* Deferred.make<void>()
 					const stallLookupInFlight = yield* Deferred.make<void>()
@@ -5299,7 +5112,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						expect(stallOutcome.res.stdout).toContain("UnblockedTurn2:")
 					}
 
-					// 3) When the queue truly remains halted (check_halted_queue), a lookup failure still propagates
 					const haltedTurn1Running = yield* Deferred.make<void>()
 					const releaseHaltedTurn1 = yield* Deferred.make<void>()
 					const haltedCli = yield* makeTestServer({
@@ -5368,7 +5180,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					expect(haltedRes.stderr).toContain("401")
 					expect(haltedRes.stderr).toContain("Halted lookup unauthorized")
 
-					// 4) Invalid UTF-8 on piped sessions connect stdin fails before issuing POST /events
 					const badUtf8Cli = yield* makeTestServer()
 					const badUtf8SessionId = yield* createReadySession(badUtf8Cli)
 					let badUtf8Posts = 0
@@ -5468,23 +5279,16 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 							return new Response(observed, { status: 200, headers: res.headers })
 						},
 						terminalReads: [
-							// 1) Start turn 1
 							Effect.succeed("first turn"),
-							// 2) Queue turn 2 while turn 1 is still running
 							Deferred.await(turn1Started).pipe(Effect.as("already queued turn 2")),
-							// 3) No further terminal lines arrive before Ctrl-C interrupts turn 1 and then turn 2
 							Effect.gen(function* () {
 								yield* Effect.sleep("25 millis")
-								// Interrupt turn 1
 								turn1FirstCtrlC = sigintController.handleSigint()
 								yield* Deferred.await(turn1Interrupted)
-								// Wait for queued turn 2 to start AND be observed over SSE
 								yield* Deferred.await(turn2Started)
 								yield* Deferred.await(turn2RunningObserved)
 								yield* Effect.sleep("25 millis")
-								// First Ctrl-C during turn 2 must interrupt turn 2 instead of disconnecting
 								turn2FirstCtrlC = sigintController.handleSigint()
-								// Second Ctrl-C during the same turn 2 must still allow disconnecting
 								turn2SecondCtrlC = sigintController.handleSigint()
 								if (turn2FirstCtrlC) {
 									yield* Deferred.await(turn2Interrupted)
@@ -5542,8 +5346,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						Effect.forkChild,
 					)
 
-					// Chunk 1 settles cleanly; chunk 2 becomes readable in the pipe right when session.archived arrives.
-					// Unpatched raceFirst cancels splitBoundedLines before chunk 2 is pulled and exits 0.
 					const pipedStdin = Stream.concat(
 						Stream.make(encoder.encode("first turn\n")),
 						Stream.fromEffect(
@@ -5675,7 +5477,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						return next(request)
 					}
 
-					// 1) Initial live connect against legacy status events without `turn`
 					const firstTurn = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: "hello legacy\n",
 						interceptFetch: stripTurnFromStatusEvents,
@@ -5698,7 +5499,6 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 					const headSeq = latestList.data[0]?.seq ?? 0
 					expect(headSeq).toBeGreaterThan(0)
 
-					// 2) Resume with --after headSeq falls back cleanly to prefix scan when `turn` is omitted
 					let prefixScanSeen = false
 					const resumed = yield* cli.run(
 						["sessions", "connect", "--session-id", sessionId, "--after", String(headSeq)],

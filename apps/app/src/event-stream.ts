@@ -80,7 +80,6 @@ export const follow = ({
 		source = current
 		for (const type of Object.keys(EVENT_TYPES)) {
 			current.addEventListener(type, (message) => {
-				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
 				const event = JSON.parse(message.data) as JsonSessionEvent
 				receive(event)
 				if (event.type === "session.archived") {

@@ -17,7 +17,6 @@ const write = (root: string, path: string, content = "") => {
 	writeFileSync(join(root, path), content)
 }
 
-// What `alchemy dev` leaves for one stage with one Worker, as seen on a real run.
 const stage = (
 	root: string,
 	name: string,

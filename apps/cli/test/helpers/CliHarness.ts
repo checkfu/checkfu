@@ -275,7 +275,6 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						if (options?.spawn === undefined) {
 							return Effect.die("unused")
 						}
-						// Calls to the Alchemy query script reach `spawn` as `query <question> ...`.
 						const [program = "", ...rest] = command.args.map(String)
 						const result = options.spawn(
 							program.endsWith("alchemy-query.ts")

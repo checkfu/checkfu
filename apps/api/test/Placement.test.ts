@@ -15,7 +15,6 @@ import {
 	storageScope,
 } from "../src/Placement.ts"
 
-// The Worker runtime reads its bindings the same way, so an empty binding arrives as "".
 const parse = (env: Record<string, string>) =>
 	placement.parse(ConfigProvider.fromUnknown(env, { preserveEmptyStrings: true }))
 

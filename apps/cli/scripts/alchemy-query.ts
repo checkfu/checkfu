@@ -11,17 +11,6 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
-// Answers the two things `checkfu deploy` and `checkfu destroy` need to know from
-// Alchemy, by calling the functions Alchemy itself uses, under the same env file and
-// profile the deploy gets:
-//
-//   account             which Cloudflare account these credentials act on
-//   output <state-path> the outputs a deployed stage recorded
-//
-// The answer is one line, `@checkfu <json>`, so nothing else Alchemy prints can be
-// mistaken for it. Neither question creates or changes anything: `account` never opens
-// the state store, and `output` is only asked after a deploy has created it.
-
 export const ANSWER_PREFIX = "@checkfu "
 
 const [question = "", profile = "default", envFile = "", statePath = ""] = argv.slice(2)
@@ -46,7 +35,6 @@ const output = Effect.gen(function* () {
 	const entries = yield* State.readState({ path: statePath }).pipe(
 		Effect.provideService(State.State, Effect.succeed(store)),
 	)
-	// A stage that was never deployed has no output: Alchemy answers with an empty value.
 	const value = entries[0]?.value ?? null
 	return value === null ? { status: "missing" as const } : { status: "found" as const, value }
 })

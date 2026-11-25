@@ -201,7 +201,6 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				`OPENAI_API_KEY=${TEST_OPENAI_KEY}`,
 				`ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}`,
 				`CHECKFU_OPENAI_BASE_URL=${openAIBaseUrl}`,
-				// Dev provisions no wildcard route, so publications must stay under /p/<address>/.
 				"CHECKFU_PUBLISH_DOMAIN=pages.example",
 				"CHECKFU_API_DOMAIN=none",
 				"CHECKFU_MCP_DOMAIN=none",
@@ -530,7 +529,6 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(await res.json()).toEqual(
 			JSON.parse(readFileSync(join(REPO_ROOT, "apps", "api", "public", "openapi.json"), "utf8")),
 		)
-		// The Worker stamps every response it handles with a request id.
 		expect(res.headers.get("request-id")).toBeNull()
 	})
 
@@ -888,7 +886,6 @@ describe("PiSession real Durable Object under workerd", () => {
 		const rest = await resumed.until("session.status_idle")
 		expect(rest.map((frame) => frame.id)).toEqual(["3", "4", "5", "6"])
 
-		// A cursor past the session's head reads nothing, and the stream still ends on archive.
 		const ahead = await openStream("100")
 		expect(ahead.res.status).toBe(200)
 

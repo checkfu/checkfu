@@ -26,7 +26,6 @@ export const listingDatabaseProps = ({
 				...(jurisdiction === undefined
 					? {}
 					: {
-							// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Cloudflare's D1 create API takes "us"; Alchemy's Jurisdiction type predates it
 							jurisdiction: jurisdiction as Cloudflare.D1.Jurisdiction,
 						}),
 			})

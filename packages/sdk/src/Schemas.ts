@@ -1,9 +1,5 @@
 import * as Schema from "effect/Schema"
 
-// ---------------------------------------------------------------------------
-// Shared limits & primitive schemas
-// ---------------------------------------------------------------------------
-
 export const MAX_AGENT_NAME_LENGTH = 256
 export const MAX_AGENT_DESCRIPTION_LENGTH = 2048
 export const MAX_AGENT_SYSTEM_LENGTH = 100_000
@@ -54,10 +50,6 @@ export const ResourceListCursor = Schema.String.check(
 		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
 })
 
-// ---------------------------------------------------------------------------
-// Branded resource IDs
-// ---------------------------------------------------------------------------
-
 export const AgentId = Schema.String.check(Schema.isMinLength(1), SinglePathSegmentCheck).pipe(
 	Schema.brand("AgentId"),
 )
@@ -89,10 +81,6 @@ export const AutomationId = Schema.String.check(
 ).pipe(Schema.brand("AutomationId"))
 export type AutomationId = typeof AutomationId.Type
 
-// ---------------------------------------------------------------------------
-// Agent schemas
-// ---------------------------------------------------------------------------
-
 export const AgentName = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxCodePoints(MAX_AGENT_NAME_LENGTH),
@@ -121,10 +109,6 @@ export const AgentSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type AgentSnapshot = typeof AgentSnapshot.Type
-
-// ---------------------------------------------------------------------------
-// Environment schemas
-// ---------------------------------------------------------------------------
 
 export const EnvironmentName = Schema.String.check(
 	Schema.isMinLength(1),
@@ -165,10 +149,6 @@ export const EnvironmentSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type EnvironmentSnapshot = typeof EnvironmentSnapshot.Type
-
-// ---------------------------------------------------------------------------
-// Session schemas
-// ---------------------------------------------------------------------------
 
 export const SessionTitle = Schema.String.check(Schema.isMaxLength(MAX_TITLE_LENGTH))
 export const MessageText = Schema.String.check(
@@ -229,10 +209,6 @@ export type ModelUsage = typeof ModelUsage.Type
 export const SessionStatus = Schema.Literals(["idle", "running", "terminated"])
 export type SessionStatus = typeof SessionStatus.Type
 
-/**
- * Canonical payload field definitions for every public session event, shared
- * between `@checkfu/domain` event classes and the wire `SessionEvent` union.
- */
 export const SessionEventFields = {
 	"user.message": {
 		content: TextBlocks,
@@ -284,10 +260,6 @@ export const SessionSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type SessionSnapshot = typeof SessionSnapshot.Type
-
-// ---------------------------------------------------------------------------
-// Automations
-// ---------------------------------------------------------------------------
 
 export const AutomationName = Schema.String.check(
 	Schema.isMinLength(1),
@@ -346,10 +318,6 @@ export const AutomationSnapshot = Schema.Struct({
 })
 export type AutomationSnapshot = typeof AutomationSnapshot.Type
 
-// ---------------------------------------------------------------------------
-// Artifact schemas
-// ---------------------------------------------------------------------------
-
 export const MAX_ARTIFACT_NAME_LENGTH = 256
 export const MAX_ARTIFACT_FILES = 64
 export const MAX_ARTIFACT_FILE_BYTES = 1024 * 1024
@@ -357,8 +325,6 @@ export const MAX_ARTIFACT_TOTAL_BYTES = 4 * 1024 * 1024
 export const MAX_ARTIFACT_PATH_LENGTH = 512
 export const MAX_ARTIFACT_CONTENT_TYPE_LENGTH = 128
 
-// The request body limit of the two upload endpoints: JSON escaping may triple the decoded total.
-// Content that escapes worse, such as control characters, has to be sent as base64.
 const JSON_ESCAPE_ALLOWANCE = 3
 export const MAX_ARTIFACT_BODY_BYTES =
 	MAX_ARTIFACT_TOTAL_BYTES * JSON_ESCAPE_ALLOWANCE +
@@ -376,8 +342,6 @@ export type ArtifactId = typeof ArtifactId.Type
 
 export const PUBLICATION_TOKEN_LENGTH = 25
 
-// One DNS label, so a publication can also be served at <address>.<domain>: "a", the artifact id's
-// hex, "-", and a token of 128 random bits in base 36.
 export const PublicationAddress = Schema.String.check(
 	Schema.isPattern(/^a[0-9a-f]{1,32}-[0-9a-z]{25}$/u),
 ).pipe(Schema.brand("PublicationAddress"))
@@ -388,8 +352,6 @@ export const ArtifactName = Schema.String.check(
 	Schema.isMaxCodePoints(MAX_ARTIFACT_NAME_LENGTH),
 )
 
-// Relative, with no empty, "." or ".." segment, no backslash, and no control character or line
-// separator. Published, so written without lookaround or Unicode property classes.
 const PATH_EXCLUDED = String.raw`/\\\u0000-\u001f\u007f-\u009f\u2028\u2029`
 const PATH_SEGMENT = String.raw`(?:[^.${PATH_EXCLUDED}][^${PATH_EXCLUDED}]*|\.[^.${PATH_EXCLUDED}][^${PATH_EXCLUDED}]*|\.\.[^${PATH_EXCLUDED}]+)`
 const ARTIFACT_PATH = new RegExp(String.raw`^${PATH_SEGMENT}(?:/${PATH_SEGMENT})*$`, "u")
@@ -397,14 +359,11 @@ const ARTIFACT_PATH = new RegExp(String.raw`^${PATH_SEGMENT}(?:/${PATH_SEGMENT})
 export const ArtifactPath = Schema.String.check(
 	Schema.isMinLength(1),
 	Schema.isMaxCodePoints(MAX_ARTIFACT_PATH_LENGTH),
-	// No unpaired surrogate: the one rule the pattern cannot state without a property class.
 	Schema.makeFilter((path) => (path.isWellFormed() ? undefined : "Expected well-formed Unicode")),
 	Schema.isPattern(ARTIFACT_PATH),
 )
 export type ArtifactPath = typeof ArtifactPath.Type
 
-// Published, so written with the u flag and no lookaround; the i flag would let [a-z] match
-// U+017F and U+212A under u.
 export const ArtifactContentType = Schema.String.check(
 	Schema.isMinCodePoints(3),
 	Schema.isMaxCodePoints(MAX_ARTIFACT_CONTENT_TYPE_LENGTH),

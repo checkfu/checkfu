@@ -28,8 +28,6 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 			content: openApiJson,
 		},
 		{
-			// Served by the API Worker as a static asset, so it is not part of the code every
-			// isolate loads.
 			relativePath: "apps/api/public/openapi.json",
 			content: openApiJson,
 		},

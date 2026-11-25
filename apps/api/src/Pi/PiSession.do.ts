@@ -58,10 +58,6 @@ export const makePiHarnessBackend = (
 					: { status: "unanswered", reason: result.reason }
 		},
 		abort: (operationId) =>
-			// Once the durable cancellation fence is written, keep both permit
-			// acquisition and `harness.abort` uninterruptible so an interrupted
-			// caller cannot leave a cancelled marker without stopping a turn
-			// that was already inside `submit`.
 			Effect.uninterruptible(
 				Effect.suspend(() => {
 					fence.markCancelled(operationId)
@@ -94,13 +90,11 @@ export const PiSessionLive = PiSession.make(
 		}),
 		({ state, apiKeys, baseUrls }) =>
 			Effect.promise(async () => {
-				// Load workerd-only modules after Alchemy has evaluated the stack.
 				const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
 					import("agents/lifecycle"),
 					import("agents/harness/pi"),
 				])
 
-				// PiHarness calls this factory again when it reopens after a storage error.
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
 						const models = createPiModels(apiKeys, baseUrls)

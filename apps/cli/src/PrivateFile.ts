@@ -31,11 +31,6 @@ export const removeIfPresent = (
 		),
 	)
 
-/**
- * Makes an existing file readable and writable by its owner only. That is POSIX
- * permissions: on Windows the mode is ignored and the file keeps the access control
- * of its directory, so it is as private as the user profile or checkout it lives in.
- */
 export const restrictToOwner = (
 	file: string,
 ): Effect.Effect<void, CliFailure, FileSystem.FileSystem> =>
@@ -49,11 +44,6 @@ export const restrictToOwner = (
 			),
 	)
 
-/**
- * Replaces `file` with an owner-only copy in one step: the contents are written to a
- * new 0600 file beside it and renamed over it, so they never sit in a file that
- * another local user can read and a crash never leaves a half-written file behind.
- */
 export const writePrivate = (
 	file: string,
 	contents: string,

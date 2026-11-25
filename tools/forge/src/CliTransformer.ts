@@ -239,7 +239,6 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 		}
 	}
 
-	// If Forge placed body fields separately in method.body.json, include any not yet collected
 	if (method.body?.json !== undefined) {
 		const extraBodyFields = new Map<string, Field>()
 		collectFieldsFromType(method.body.json.type, extraBodyFields)

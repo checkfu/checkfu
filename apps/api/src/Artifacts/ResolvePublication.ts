@@ -8,8 +8,6 @@ import { ArtifactManifestAt } from "./ResolveArtifactVersion.ts"
 
 const utf8 = new TextEncoder()
 
-// One read of the artifact the address names: it serves while the artifact is active and holds the
-// address's token, so a token cleared by unpublishing never serves again.
 export const PublicationResolver = Effect.gen(function* () {
 	const artifacts = yield* Artifact
 	const manifestAt = yield* ArtifactManifestAt

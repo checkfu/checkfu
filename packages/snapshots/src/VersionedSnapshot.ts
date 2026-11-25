@@ -22,15 +22,6 @@ export const snapshotVersion = <V extends number, S extends ServiceFreeSchema>(s
 	migrate: (state) => step.migrate(state),
 })
 
-/**
- * Wraps an aggregate state schema in a `{ schema_version, state }` wire envelope.
- *
- * Upgrades are lazy and bounded per snapshot (independent of event-history length):
- * older envelopes convert step-by-step on decode before `decide`, unknown future
- * versions fail decoding without overwriting storage, and commits always encode at
- * `current`. All migration step schemas must be service-free so decoding never
- * hides undeclared Effect service requirements.
- */
 export const versionedSnapshot = <Current extends number, S extends ServiceFreeSchema>(options: {
 	readonly current: Current
 	readonly schema: S

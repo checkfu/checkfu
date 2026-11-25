@@ -55,8 +55,6 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			environment_id: ResourceId,
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
-			// The last turn whose reply the session published; the model must not keep a later one's.
-			// Absent for a turn started before it was recorded, and then nothing is dropped.
 			last_reply_turn: Schema.optionalKey(NonNegativeInt),
 		},
 		success: {
@@ -140,11 +138,6 @@ const INTERNAL_PROVIDER_ERROR: TurnFailed = {
 	terminal: false,
 }
 
-/**
- * Wraps a raw model adapter so oversized reasoning traces, replies, or error
- * metadata are truncated before ExternalSystem schema validation and workflow
- * checkpointing, and empty replies are rejected as provider errors.
- */
 export const boundedHarness = <R = never>(
 	impl: Effect.Effect<
 		{

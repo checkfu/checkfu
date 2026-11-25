@@ -37,12 +37,6 @@ import { StopModelRequest } from "./Session/StopModelRequest.policy.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 import { SessionsHandlersLive } from "./Sessions.model.ts"
 
-/**
- * Unified hosted domain model.
- * Hosting Agents, Environments, and Sessions in one model allows two-phase
- * cross-aggregate decisions like {@link AdmitSessionDecision} to enforce
- * resource eligibility atomically on Cloudflare Durable Objects.
- */
 export class Checkfu extends Domain.Model("Checkfu", {
 	aggregates: [Agent, Environment, Session, Automation, AutomationCapacity, Artifact],
 	decisions: [
@@ -124,8 +118,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					if (a.state.status === "") {
 						return true
 					}
-					// Rows are keyed agent@version, versions start at 1, and no row is above the head
-					// (checked below), so as many rows as the head's number means none is missing.
 					if (
 						m.AgentVersionByNumberView.filter((v) => v.state.agent_id === a.id).length !==
 						a.state.version
@@ -150,8 +142,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 				}),
 				m.AgentVersionByNumberView.every((v) =>
 					m.Agent.some((a) => {
-						// A pinned session reads its version's row, so every row, not only the head's,
-						// must say what the agent's own event for that version says.
 						const source = a.events
 							.filter((event) => event._tag === "agent.created" || event._tag === "agent.updated")
 							.find((event) => event.version === v.state.version)

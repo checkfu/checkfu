@@ -6,8 +6,6 @@ export const UPCOMING_FIRINGS = 5
 
 const LOOKBACK_MILLIS = 3 * 60 * 60 * 1000
 
-// Cron's own search is slow in a named zone for sparse schedules, so it runs on local wall-clock
-// time in UTC, and each wall-clock firing is placed in the zone (later in a gap, earlier when repeated).
 const firings = Option.liftThrowable(
 	(
 		cron: Cron.Cron,

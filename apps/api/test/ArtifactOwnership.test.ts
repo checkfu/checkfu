@@ -73,7 +73,6 @@ const LEDGER_TABLES = new Set([
 	"artifact_orphan_candidates",
 ])
 
-// Rows a statement reads, from its query plan: a full scan reads the whole table, an index search one row.
 const readMeter = (db: DatabaseSync) => {
 	const meter = { reads: 0, scanned: new Set<string>() }
 	const observe = (query: string, values: ReadonlyArray<SQLInputValue>) => {

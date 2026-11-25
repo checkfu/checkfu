@@ -3,10 +3,7 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { CliFailure } from "./Errors.ts"
 
-// C0/C1 control characters (except tab and newline) and the bidirectional and line
-// separator characters that can reorder or hide what a terminal shows.
 const UNSAFE_FOR_HUMANS = /(?![\t\n])[\p{Cc}\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu
-// JSON.stringify already escapes C0 controls, so only the rest can reach the terminal.
 const UNSAFE_IN_JSON = /[\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g
 
 const unicodeEscape = (character: string): string =>

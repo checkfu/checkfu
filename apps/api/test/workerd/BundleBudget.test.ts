@@ -86,12 +86,9 @@ describe("bundle measurement", () => {
 		await expect(measureBundle(dir, "Entry.js", 500)).rejects.toThrow("SIGKILL")
 	})
 	it("names the largest sources of the eager code from the source maps", async () => {
-		// The euro sign is one column and three bytes.
 		const source = 'export const a = "€€";'
 		const dir = bundle({
 			"Entry.js": source,
-			// Columns 0-3 come from a dependency, 4-7 are unmapped, the rest come from the
-			// repository's own file.
 			"Entry.js.map": JSON.stringify({
 				version: 3,
 				sources: [

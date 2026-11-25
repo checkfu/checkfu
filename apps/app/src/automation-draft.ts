@@ -61,11 +61,6 @@ export const createBodyOf = (draft: AutomationDraft): CreateAutomationBody => ({
 	schedule: schedule(draft),
 })
 
-/**
- * The fields the user edited, measured against the draft the editor opened with, so the server
- * keeps everything else: changes another editor made meanwhile, and stored text the user never
- * touched. Only edited fields are normalized.
- */
 export const changesOf = (base: AutomationDraft, draft: AutomationDraft): UpdateAutomationBody => {
 	const next = createBodyOf(draft)
 	const edited = (field: keyof AutomationDraft) => draft[field] !== base[field]
@@ -75,7 +70,6 @@ export const changesOf = (base: AutomationDraft, draft: AutomationDraft): Update
 		...(edited("agentId") ? { agent: draft.agentId } : {}),
 		...(edited("environmentId") ? { environment_id: draft.environmentId } : {}),
 		...(edited("message") ? { initial_events: next.initial_events } : {}),
-		// Each schedule field on its own, so an edit to one keeps another editor's change to the other.
 		...(edited("expression") || edited("timezone")
 			? {
 					schedule: {
@@ -87,7 +81,6 @@ export const changesOf = (base: AutomationDraft, draft: AutomationDraft): Update
 	}
 }
 
-/** Whether a read of the automation already shows an update, so the editor can close on it. */
 export const showsChanges = (automation: JsonAutomation, changes: UpdateAutomationBody): boolean =>
 	[
 		changes.name === undefined || automation.name === changes.name,
@@ -120,10 +113,6 @@ const firingFormat = (timeZone: string, withYear: boolean) =>
 		timeZoneName: "short",
 	})
 
-/**
- * A firing time as the automation's own timezone shows it, with the year when it is not this one.
- * A zone the server knows but this browser does not falls back to UTC, labelled as such.
- */
 export const firingLabel = (iso: string, timezone: string, now = Date.now()): string => {
 	const at = new Date(iso)
 	const withYear = at.getUTCFullYear() !== new Date(now).getUTCFullYear()

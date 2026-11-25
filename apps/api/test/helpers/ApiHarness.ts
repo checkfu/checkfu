@@ -190,7 +190,6 @@ export const makePiDurableTestLayer = (
 ) => {
 	interface SessionObject {
 		readonly backend: InMemoryPiDurableBackend
-		/** Fails every call still running against this object once it is reset. */
 		readonly gone: Deferred.Deferred<never, HarnessCallFailed>
 	}
 	const objects = new Map<string, Promise<SessionObject>>()
@@ -207,11 +206,8 @@ export const makePiDurableTestLayer = (
 			(provider) => (envOverrides[PROVIDER_API_KEY_ENV[provider]] ?? "").length > 0,
 			{
 				...(storage === undefined ? {} : { storage }),
-				// A reset Durable Object: the isolate and every call it was serving are gone,
-				// and a new one opens Pi over the same storage.
 				reset: Effect.andThen(
 					Effect.promise(async () => {
-						// Only the object currently serving the session is replaced.
 						const serving = await objects.get(sessionId)
 						if (serving?.gone === gone) {
 							resets.push(sessionId)
@@ -242,8 +238,6 @@ export const makePiDurableTestLayer = (
 	): Effect.Effect<A, HarnessCallFailed> =>
 		Effect.gen(function* () {
 			const { backend, gone } = yield* Effect.promise(() => getObject(sessionId))
-			// Parts of a call cannot be interrupted, so it runs detached and the caller
-			// stops waiting when the object goes away.
 			const running = yield* Effect.forkDetach(harnessCall(call(backend)))
 			return yield* Effect.raceFirst(Fiber.join(running), Deferred.await(gone))
 		}).pipe(Effect.provideService(AbortGrace, "30 millis"))
@@ -346,7 +340,6 @@ export const makePiDurableTestLayer = (
 	}
 }
 
-// The OpenAPI document the API Worker serves as a static asset, as Forge generated it.
 export const openApiDocument = <Document>(): Document =>
 	JSON.parse(
 		readFileSync(new URL("../../public/openapi.json", import.meta.url), "utf8"),

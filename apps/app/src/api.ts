@@ -95,7 +95,6 @@ const call = async <T>(
 	}
 	const text = await response.text()
 	const json: unknown = text === "" ? undefined : JSON.parse(text)
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own JSON, typed by @checkfu/sdk
 	return json as T
 }
 
@@ -217,11 +216,6 @@ export const checkfu = {
 			automationAction(id, "/pause", (automation) => automation.status !== "active"),
 		unpause: (id: string) =>
 			automationAction(id, "/unpause", (automation) => automation.status !== "paused"),
-		/**
-		 * Starts a run and resolves once that run is listed, started or failed. The run is accepted
-		 * once the POST answers, so a run still not listed after the wait is reported as queued
-		 * (`listed: null`), never as a failed request a second click would repeat.
-		 */
 		run: async (
 			id: string,
 		): Promise<{ readonly run: number; readonly listed: JsonAutomationRun | null }> => {

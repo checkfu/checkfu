@@ -44,17 +44,14 @@ export const providerForKey = (key: string): ModelProvider =>
 
 export interface Checkout {
 	readonly root: string
-	/** The Bun that runs Alchemy, and what it needs in its environment to act as Bun. */
 	readonly runtime: string
 	readonly runtimeEnv: Readonly<Record<string, string>>
-	/** How long a fresh deployment gets to start answering before the deploy is reported as failed. */
 	readonly readyWithin: Duration.Input
 }
 
 export const Checkout = Context.Reference<Checkout>("@checkfu/cli/Checkout", {
 	defaultValue: () => ({
 		root: checkoutRoot,
-		// The binary runs Alchemy by starting itself as a plain Bun.
 		runtime: process.execPath,
 		runtimeEnv: isStandalone ? { BUN_BE_BUN: "1" } : {},
 		readyWithin: "90 seconds",
@@ -66,11 +63,6 @@ export const readDotEnvValue = (contents: string, name: string): Effect.Effect<s
 		.parse(ConfigProvider.fromDotEnvContents(contents))
 		.pipe(Effect.orElseSucceed(() => ""))
 
-/**
- * The value exactly as Alchemy will read and deploy it. A quoted entry keeps its
- * padding, and the Worker compares credentials byte for byte, so padding is refused
- * here instead of being trimmed into a different value than the one deployed.
- */
 const readDotEnvSecret = (contents: string, name: string) =>
 	Effect.filterOrFail(
 		readDotEnvValue(contents, name),
@@ -116,8 +108,6 @@ export const setDotEnvValue = (
 		return updated
 	})
 
-// The names Alchemy accepts for a stage, checked here so a typo is refused before
-// anything is signed in to, written, or printed back as a command.
 const STAGE_NAME = /^[a-z0-9]+[-_a-z0-9]*$/i
 
 const stageFlag = Flag.String("stage").pipe(
@@ -135,19 +125,11 @@ const yesFlag = Flag.Boolean("yes").pipe(
 	Flag.withDescription("Skip the confirmation prompt"),
 )
 
-/**
- * The deployment this checkout manages, identified by Cloudflare account and stage.
- * Written the moment Alchemy reports a successful deploy, so it always names the last
- * thing this checkout deployed. A bare `deploy` takes its stage from it; `destroy`
- * deletes nothing that it does not name. It is deliberately not part of the saved login;
- * which API the CLI talks to and what this checkout manages change independently.
- */
 const DeploymentRecord = Schema.fromJsonString(
 	Schema.Struct({
 		stage: Schema.String.check(Schema.isPattern(STAGE_NAME)),
 		profile: Schema.String,
 		account_id: Schema.String,
-		// Absent between a successful deploy and reading its URL back.
 		url: Schema.optional(Schema.String),
 	}),
 	{ space: "\t" },
@@ -192,11 +174,6 @@ const requireCheckout = Effect.gen(function* () {
 	return checkout
 })
 
-/**
- * One Alchemy invocation context. Every call in a run gets the same checkout, env
- * file, and profile, so the sign-in, the account lookup, and the deploy can never
- * disagree about which account they act on.
- */
 interface Target {
 	readonly checkout: Checkout
 	readonly profile: string
@@ -209,7 +186,6 @@ const inCheckout = (target: Target) => ({
 	extendEnv: true,
 })
 
-/** Runs an Alchemy command attached to the terminal and returns its exit code. */
 const run = (target: Target, args: ReadonlyArray<string>) =>
 	Effect.gen(function* () {
 		const path = yield* Path.Path
@@ -236,12 +212,6 @@ const run = (target: Target, args: ReadonlyArray<string>) =>
 
 const ANSWER_PREFIX = "@checkfu "
 
-/**
- * Asks Alchemy a question through `apps/cli/scripts/alchemy-query.ts`, which calls
- * Alchemy's own functions and answers on one marked line. Alchemy's console output is
- * never parsed, and a question that could not be answered is an `error` answer, never
- * a missing one.
- */
 const ask = <A>(
 	target: Target,
 	answers: Schema.Codec<A, unknown>,
@@ -380,7 +350,6 @@ const prepareEnvFile = (envFile: string, retry: string) =>
 				`${API_KEY_ENV} cannot be sent in an HTTP header: it must be printable ASCII with no spaces or line breaks. Nothing was deployed.`,
 			)
 		}
-		// Owner-only either way: a hand-written .env usually starts out world-readable.
 		yield* contents === original ? restrictToOwner(envFile) : writePrivate(envFile, contents)
 		return { apiKey, provider }
 	})
@@ -406,11 +375,6 @@ const OutputAnswer = Schema.Union([
 	AnswerError,
 ])
 
-/**
- * The Cloudflare account Alchemy will act on, as Alchemy itself resolves it. Finding
- * it out changes nothing in any account. At a terminal, a profile with no Cloudflare
- * connection gets Alchemy's browser sign-in first.
- */
 const requireAccount = (target: Target, signIn: Option.Option<{ readonly retry: string }>) =>
 	Effect.gen(function* () {
 		let answer = yield* ask(target, AccountAnswer, ["account"])
@@ -451,11 +415,6 @@ const requireAccount = (target: Target, signIn: Option.Option<{ readonly retry: 
 		}
 	})
 
-/**
- * A stage this checkout has deployed is only ever touched in the account it was
- * deployed to. Otherwise changed credentials would silently point the command at
- * another account's deployment of the same name.
- */
 const requireRecordedAccount = (
 	record: Option.Option<DeploymentRecord>,
 	stage: string,
@@ -494,10 +453,6 @@ const readDeployedUrl = (target: Target, stage: string, retry: string) =>
 		}
 	})
 
-/**
- * Ready means the deployed key is accepted, not merely that something answers: after a
- * redeploy the previous version can keep serving for a moment with the old key.
- */
 const waitUntilReady = (url: string, apiKey: string, within: Duration.Input, retry: string) =>
 	Effect.gen(function* () {
 		const lastFailure = yield* Ref.make("it did not answer")
@@ -528,12 +483,8 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			Option.match(record, { onNone: () => DEFAULT_STAGE, onSome: (known) => known.stage }),
 		)
 
-		// What to type to run this same deploy again; a bare retry could pick another stage.
 		const retry = `${COMMAND} deploy${Option.isSome(input.stage) ? ` --stage ${stage}` : ""}`
 
-		// The account is settled before any secret is written, so a refusal leaves the
-		// checkout exactly as it was. The profile it was checked under is the one the
-		// deploy then uses; the env file is not consulted again for it.
 		const checked = yield* resolveTarget(checkout, envFile, record)
 		const accountId = yield* requireAccount(checked, Option.some({ retry }))
 		yield* requireRecordedAccount(record, stage, accountId)
@@ -553,10 +504,6 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 			})
 		}
 
-		// Recorded before anything else can fail, so the record always names what was
-		// last deployed; its URL follows once Alchemy has been asked for it.
-		// A redeploy of the same target keeps the URL it already had, so `destroy` can
-		// still clear the saved login if this run never gets as far as reading it again.
 		const known = Option.filter(
 			record,
 			(previous) => previous.stage === stage && previous.account_id === accountId,
@@ -575,8 +522,6 @@ export const deployCommand = Command.make("deploy", { stage: stageFlag, yes: yes
 		yield* waitUntilReady(url, apiKey, checkout.readyWithin, retry)
 		const file = yield* writeSavedConnection({ url, api_key: apiKey })
 
-		// These commands go wherever CHECKFU_API_URL or CHECKFU_URL points, so say so when
-		// one of them names another deployment.
 		const exported = yield* explicitBaseUrl(Option.none())
 		const elsewhere =
 			Option.isSome(exported) &&
@@ -617,8 +562,6 @@ export const destroyCommand = Command.make("destroy", { stage: stageFlag, yes: y
 		const checkout = yield* requireCheckout
 		const record = Option.getOrUndefined(yield* readDeploymentRecord(checkout))
 
-		// Deleting takes two agreeing witnesses: the operator names the stage, and this
-		// checkout recorded deploying it. Nothing is ever chosen on the operator's behalf.
 		if (Option.isNone(input.stage)) {
 			return yield* usageError(
 				`Name the stage to delete: \`${COMMAND} destroy --stage <name>\`.${record === undefined ? "" : ` This checkout last deployed "${record.stage}".`}`,

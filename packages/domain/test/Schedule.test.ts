@@ -54,8 +54,6 @@ describe("schedule firings", () => {
 	})
 
 	it("still lists a firing that a daylight-saving gap moved past the starting point", () => {
-		// 02:15 does not exist on 8 March 2026 in New York and fires at 03:15 EDT instead. From 03:05 EDT
-		// that firing is still ahead; Effect's search in the zone skips it and returns the next day.
 		const ny = DateTime.zoneMakeNamedUnsafe("America/New_York")
 		const from = Date.parse("2026-03-08T07:05:00Z")
 		expect(

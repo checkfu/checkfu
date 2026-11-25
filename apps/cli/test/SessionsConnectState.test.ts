@@ -165,10 +165,8 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 					{ _tag: "begin_send", label: "m2" },
 					{ _tag: "receipt", label: "m2", receipt: { turn: 2, queued: true } },
 					{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
-					// Replayed running frame with duplicate seq 2 must NOT increment observedTurn to 2
 					{ _tag: "event", event: { seq: 2, type: "session.status_running" } },
 					{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
-					// Replayed idle frame with duplicate seq 4 must NOT settle turn 2
 					{ _tag: "event", event: { seq: 4, type: "session.status_idle", stopReason: "end_turn" } },
 					{ _tag: "event", event: { seq: 5, type: "session.status_running" } },
 					{ _tag: "event", event: { seq: 7, type: "session.status_idle", stopReason: "end_turn" } },
@@ -303,7 +301,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			})
 		}
 
-		// Interrupt latch is scoped to liveTurn: interrupting turn 1 still lets Ctrl-C interrupt turn 2
 		const { state: turn1Running } = runSequence(ttyIdleInitial(0), [
 			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
 		])
@@ -320,7 +317,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 	})
 
 	it("evaluates halted queued turns and lagging GET snapshots without false failures or hangs", () => {
-		// Message 2 queued behind turn 1, turn 1 stops with refusal
 		const { state: afterRefusal, wokeAtEvents } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
@@ -332,7 +328,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		expect(wokeAtEvents).toEqual([2])
 		expect(evaluatePipedSettlement(afterRefusal)).toBe("check_halted_queue")
 
-		// 1) Lagging snapshot still says running@turn 1 -> retries until exhausted, then fails
 		const lagRunning: SessionSnapshotSummary = { status: "running", turn: 1 }
 		expect(evaluateHaltedQueueSnapshot(afterRefusal, afterRefusal, lagRunning, false)).toEqual({
 			action: "retry_snapshot",
@@ -342,14 +337,12 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			message: "Queued turn 2 did not start because turn 1 stopped with refusal.",
 		})
 
-		// 2) Current snapshot says idle@turn 1 -> fails immediately
 		const idleTurn1: SessionSnapshotSummary = { status: "idle", turn: 1 }
 		expect(evaluateHaltedQueueSnapshot(afterRefusal, afterRefusal, idleTurn1, false)).toEqual({
 			action: "fail",
 			message: "Queued turn 2 did not start because turn 1 stopped with refusal.",
 		})
 
-		// 3) Snapshot shows turn 2 started -> continue waiting
 		expect(
 			evaluateHaltedQueueSnapshot(
 				afterRefusal,
@@ -359,7 +352,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			),
 		).toEqual({ action: "continue_waiting" })
 
-		// 4) Stale idle@turn 1 GET returning AFTER SSE already observed turn 2 starting -> continue waiting
 		const turn2RunningTransition = applySessionEvent(afterRefusal, {
 			seq: 3,
 			type: "session.status_running",
@@ -371,7 +363,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			action: "continue_waiting",
 		})
 
-		// 5) Later message starts turn 2 from idle (queued: false) -> clears queued marker; never checks halted queue
 		const { state: restartedTurn2 } = runSequence(afterRefusal, [
 			{ _tag: "begin_send", label: "m3" },
 			{ _tag: "receipt", label: "m3", receipt: { turn: 2, queued: false } },
@@ -382,7 +373,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			action: "continue_waiting",
 		})
 
-		// 6) Piped message sent while CLI saw turn 1 running, arrived after refusal and started turn 2 (queued: false)
 		const { state: startedInsteadOfQueued } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
@@ -395,7 +385,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 	})
 
 	it("attributes retries_exhausted and terminal vs retrying errors accurately regardless of receipt order", () => {
-		// 1) Turn fails with retries_exhausted BEFORE POST receipt arrives (recorded via pendingTurnErrors)
 		const { state: failedBeforeReceipt } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
@@ -418,7 +407,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			"Turn 1 failed: model_error: overloaded",
 		)
 
-		// 2) Turn has a retrying error then is archived -> reports termination, NOT the transient retrying error
 		const { state: archivedAfterRetrying } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
@@ -438,7 +426,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			"Session terminated before turn 1 completed.",
 		)
 
-		// 3) Turn has a terminal error then terminates -> reports the terminal error cause
 		const { state: terminatedAfterTerminalErr } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
@@ -458,7 +445,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			"Turn 1 failed: model_error: fatal auth",
 		)
 
-		// 4) Cancelled send never leaves stale pendingTurnErrors or unsettled turns
 		const { state: cancelled } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "event", event: { seq: 1, type: "session.status_running" } },
@@ -474,7 +460,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 	})
 
 	it("evaluates stream-ended errors from fresh settlement state instead of stale snapshots", () => {
-		// Turn 2 queued after turn 1 refusal, then another client runs turn 2 and archives session
 		const { state: completedAndArchived } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
@@ -490,7 +475,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 		expect(resolveStreamEndedError(completedAndArchived)).toBeUndefined()
 		expect(resolveFinalPipedError(completedAndArchived)).toBeUndefined()
 
-		// Stream ends unexpectedly (e.g. HTTP 204) before target turn 1 settles
 		const { state: endedBeforeSettling } = runSequence(pipedIdleInitial(), [
 			{ _tag: "begin_send", label: "m1" },
 			{ _tag: "receipt", label: "m1", receipt: { turn: 1, queued: false } },
@@ -499,7 +483,6 @@ describe("SessionsConnectState pure turn-tracking transitions", () => {
 			"Event stream ended before turn 1 completed.",
 		)
 
-		// Stream ends unexpectedly with no target turn
 		expect(resolveStreamEndedError(pipedIdleInitial())).toBe("Event stream ended unexpectedly.")
 	})
 

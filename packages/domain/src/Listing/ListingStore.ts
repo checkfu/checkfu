@@ -70,7 +70,6 @@ const compareIds = (a: string, b: string): number => {
 const compareRows = (a: ListingPosition, b: ListingPosition): number =>
 	a.created_at - b.created_at || compareIds(a.id, b.id)
 
-/** @effect-expect-leaking RuntimeContext */
 export class ListingStore extends Context.Service<
 	ListingStore,
 	{

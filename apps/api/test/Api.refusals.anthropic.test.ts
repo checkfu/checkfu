@@ -254,7 +254,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					})
 					yield* Effect.promise(() => turn1Started)
 
-					// Queue a follow-up while Turn 1 is in flight; refusal must NOT auto-drain it.
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -279,7 +278,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					).toEqual({ type: "refusal" })
 					expect(fetchCalls).toBe(1)
 
-					// Now send Turn 2 on the same live Pi conversation and inspect the real wire payload.
 					const stream2Res = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream`,
@@ -306,7 +304,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					])
 					expect(fetchCalls).toBe(2)
 
-					// Turn 2's outgoing Anthropic messages MUST contain Turn 1's published refusal.
 					const turn2Messages = sentRequests[1]?.messages ?? []
 					const assistantTurn1 = turn2Messages.find((m) => m.role === "assistant")
 					expect(assistantTurn1).toBeDefined()
@@ -505,7 +502,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					})
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-					// Start Turn 1 and queue a follow-up message while Turn 1 is running.
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -530,7 +526,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 					expect(queuedRes.status).toBe(200)
 					releaseTurn1?.()
 
-					// Wait for Turn 1 to settle idle.
 					for (let attempt = 0; attempt < 400; attempt++) {
 						const res = yield* sendRequest(apiFetch, {
 							method: "GET",
@@ -546,7 +541,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 						}
 						yield* Effect.sleep("5 millis")
 					}
-					// Confirm no second model call ran (refusal MUST NOT drain queued messages).
 					yield* Effect.sleep("40 millis")
 					expect(fetchCalls).toBe(1)
 
@@ -566,7 +560,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 						stop_reason: { type: "refusal" },
 					})
 
-					// Next explicit message carries the published refusal in Anthropic's model context.
 					yield* sendAndSettle(apiFetch, session.id, ["follow up after sensitive"], 2)
 					expect(fetchCalls).toBe(2)
 					const turn2Messages = sentRequests[1]?.messages ?? []
@@ -622,7 +615,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			anthropic: Redacted.make("sk-ant-test"),
 		})
 
-		// 1. Sensitive delta followed by overloaded_error before message_stop -> provider error (NOT published refusal).
 		globalThis.fetch = async () =>
 			new Response(makeFailingStream("sensitive", true), {
 				status: 200,
@@ -653,7 +645,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			await backend1.close()
 		}
 
-		// 2. Refusal delta followed by abrupt EOF before message_stop -> provider error (NOT published refusal).
 		globalThis.fetch = async () =>
 			new Response(makeFailingStream("refusal", false), {
 				status: 200,
@@ -684,9 +675,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			await backend2.close()
 		}
 
-		// 3. Sensitive delta -> message_stop -> named SSE error AFTER message_stop (where the
-		//    Anthropic SDK throws before onProviderStreamEvent runs) -> provider error, NOT refusal,
-		//    and must not contaminate a subsequent turn's context.
 		const sentAfterPostStopError: Array<unknown> = []
 		globalThis.fetch = async (_input: unknown, init?: RequestInit) => {
 			const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : null
@@ -922,11 +910,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 		}
 	})
 
-	it.each([
-		"Request blocked: timeout policy",
-		// The codec's own text for a sensitive stop, sent as a refusal's explanation.
-		"Provider stopped with: sensitive",
-	])(
+	it.each(["Request blocked: timeout policy", "Provider stopped with: sensitive"])(
 		"hands Pi a refusal without Anthropic's explanation %j, so a compaction neither stores nor retries it",
 		async (explanation) => {
 			const originalFetch = globalThis.fetch
@@ -961,7 +945,6 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				if (model === undefined) {
 					throw new Error("expected claude-sonnet-4-6")
 				}
-				// Pi's compaction asks for its summary this way, outside the generation hooks.
 				const summary = await models.completeSimple(model, {
 					messages: [{ role: "user", content: "summarize", timestamp: 0 }],
 				})

@@ -423,9 +423,6 @@ export const shouldRetryError = (error: CheckfuSdkError, safety: RetrySafety): b
 			return false
 		}
 		if (safety !== "idempotent") {
-			// For pre-commit-only operations, only retry a confirmed Checkfu 429 rate-limit
-			// rejection (with no partial/unconfirmed batch results). Positive retry hints from
-			// gateways or intermediaries cannot guarantee an unkeyed write did not commit.
 			return error.status === 429 && isApiErrorEnvelope(error.body)
 		}
 		if (shouldRetryHeader === "true") {

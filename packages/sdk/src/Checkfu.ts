@@ -100,7 +100,6 @@ export type EventPagePromise = PagePromise<CursorPage<JsonSessionEvent>, JsonSes
 export interface CheckfuOptions {
 	readonly apiKey?: string | undefined
 	readonly baseUrl?: string | undefined
-	/** Alias for `baseUrl`. */
 	readonly baseURL?: string | undefined
 	readonly allowInsecureHttp?: boolean | undefined
 	readonly maxRetries?: number | undefined

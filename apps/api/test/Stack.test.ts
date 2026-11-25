@@ -49,7 +49,6 @@ describe("Alchemy stack and worker entry", () => {
 		() =>
 			Effect.gen(function* () {
 				expect(ApiWorker).toBeDefined()
-				// 2026-11-17 makes enable_request_signal the default without emitting a redundant-flag warning.
 				expect(API_WORKER_PROPS.compatibility.date >= "2026-11-17").toBe(true)
 				expect(ARTIFACT_BUCKET_PROPS).toEqual({ forceDestroy: true })
 				expect("flags" in API_WORKER_PROPS.compatibility).toBe(false)
@@ -87,8 +86,6 @@ describe("Alchemy stack and worker entry", () => {
 				const devStateLayer = stack.state.pipe(
 					Layer.provide(
 						Layer.mergeAll(
-							// `stack.state` types the full `Alchemy.StackServices` union for its production branch,
-							// while `dev: true` only resolves `Alchemy.localState()` (`AlchemyContext | Stage | FileSystem | Path`).
 							Layer.succeedContext(
 								Context.makeUnsafe<
 									Exclude<

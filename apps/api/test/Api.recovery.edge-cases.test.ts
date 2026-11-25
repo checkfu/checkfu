@@ -101,10 +101,8 @@ describe("interrupted turns and turn recovery", () => {
 							throw new Error(`Session did not become idle at turn ${expectedTurn}`)
 						})
 
-					// Turn 1 succeeds.
 					yield* sendAndSettle(apiFetch, session.id, ["kept-1"], 1)
 
-					// Turn 2 is interrupted AFTER Pi places the user entry (mid-stream abort).
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -127,7 +125,6 @@ describe("interrupted turns and turn recovery", () => {
 					})
 					yield* waitIdle(2)
 
-					// Turn 3 must not see the interrupted Turn 2 prompt.
 					yield* sendAndSettle(apiFetch, session.id, ["kept-3"], 3)
 					const turn3Retained = contexts.at(-1)
 					expect(turn3Retained).toEqual([
@@ -246,7 +243,6 @@ describe("interrupted turns and turn recovery", () => {
 					const session = yield* createIdleSession(apiFetch)
 					yield* sendAndSettle(apiFetch, session.id, ["turn-1"], 1)
 
-					// Turn 2 is interrupted BEFORE Pi admits/submits it.
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -264,7 +260,6 @@ describe("interrupted turns and turn recovery", () => {
 						headers: AUTH_HEADERS,
 						body: { events: [{ type: "user.interrupt" }] },
 					})
-					// Wait deterministically for StopModelRequest to mark TurnFence cancelled before releasing Turn 2.
 					yield* Effect.promise(() => turn2Aborted)
 					releaseTurn2Admit?.()
 
@@ -284,7 +279,6 @@ describe("interrupted turns and turn recovery", () => {
 						yield* Effect.sleep("5 millis")
 					}
 
-					// Turn 3 does not see "before-submit-cut".
 					yield* sendAndSettle(apiFetch, session.id, ["turn-3"], 3)
 					expect(contexts.at(-1)).toEqual([
 						{ role: "user", text: "turn-1" },
@@ -421,7 +415,6 @@ describe("interrupted turns and turn recovery", () => {
 					})
 					const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-					// 1. Turn 1 runs and settles inside Pi.
 					const initialReply = yield* provider.runTurn({
 						session_id: SessionId.make(session.id),
 						agent_id: agent.id,
@@ -437,8 +430,6 @@ describe("interrupted turns and turn recovery", () => {
 					})
 					expect(modelCalls).toBe(1)
 
-					// 2. Now break views, take OPENAI_API_KEY away from the harness, and build a
-					//    restarted provider.
 					apiKeyConfigured = false
 					const restartedProviderLayer = Layer.fresh(PiDurableHarnessLive).pipe(
 						Layer.provide(BrokenVersionView),
@@ -457,8 +448,6 @@ describe("interrupted turns and turn recovery", () => {
 						),
 					)
 
-					// 3. Replaying turn 1 recovers Pi's saved reply even with broken views and a
-					//    missing OPENAI_API_KEY (and makes 0 new model calls).
 					breakViews = true
 					const replayed = yield* Harness.pipe(
 						Effect.flatMap((restarted) =>
@@ -476,9 +465,6 @@ describe("interrupted turns and turn recovery", () => {
 					expect(replayed).toEqual(initialReply)
 					expect(modelCalls).toBe(1)
 
-					// 4. An unsubmitted turn 2 on the same restarted provider hits the broken view,
-					//    then (once views recover) hits missing_api_key_error — proving every
-					//    prerequisite check was genuinely bypassed ONLY by turn 1 replay.
 					const brokenViewTurn2 = yield* Effect.flip(
 						Harness.pipe(
 							Effect.flatMap((restarted) =>
@@ -610,7 +596,6 @@ describe("interrupted turns and turn recovery", () => {
 				})
 				const session = (yield* Effect.promise(() => sessRes.json())) as { id: string }
 
-				// 1. With nothing to recover, a zero attempt budget skips runTurn and fails HarnessUnavailable.
 				const unavailable = yield* Effect.flip(
 					provider.runTurn({
 						session_id: SessionId.make(session.id),
@@ -625,7 +610,6 @@ describe("interrupted turns and turn recovery", () => {
 				expect(runTurnCalls).toBe(0)
 				expect(recoverCalls).toBe(2)
 
-				// 2. When the final read-only recovery probe finds a settled reply, it still recovers without calling runTurn.
 				recoverCalls = 0
 				recoverOnFinalProbe = true
 				const reply = yield* provider.runTurn({
@@ -717,10 +701,8 @@ describe("interrupted turns and turn recovery", () => {
 							}),
 						),
 					)
-					// Recovery spends most of the deadline and finds nothing, so the turn is submitted.
 					yield* TestClock.adjust("1 second")
 					yield* Deferred.await(submitted)
-					// The submission gets what is left of the deadline, not a deadline of its own.
 					yield* TestClock.adjust("500 millis")
 					return yield* TestClock.withLive(Effect.timeout(Fiber.join(turn), "2 seconds"))
 				}).pipe(Effect.provide(TestClock.layer()))

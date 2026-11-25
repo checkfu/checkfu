@@ -339,7 +339,6 @@ const renderConnectEvent = (
 		const eventSeq = event.seq
 		const eventType = event.type
 
-		// Check duplicate before emitting output so replayed frames never render twice.
 		const current = yield* Ref.get(stateRef)
 		if (eventSeq <= current.lastProcessedSeq) {
 			return
@@ -667,10 +666,6 @@ const resolveCursorBaseline = (
 		)
 	}
 	return Effect.gen(function* () {
-		// Walk backwards from `after` (`order: "desc"` with `after: cursor` yields `seq < cursor`):
-		// the nearest `session.status_running` or `session.status_idle` carries `turn` directly
-		// on updated servers; if talking to an older /v1 server that omits `turn`, fall back to
-		// an ascending prefix scan up to `after`.
 		let cursor = after + 1
 		let status: ConnectState["status"] | undefined
 		let sawMissingTurn = false
@@ -980,9 +975,6 @@ export const sessionsConnectCommand = Command.make(
 						),
 					).pipe(Effect.forkChild)
 
-					// A disconnect can follow the interrupt that asked for it within a millisecond,
-					// for example when Bun's script runner forwards the same Ctrl-C. An interrupt
-					// already requested is still delivered before the connection closes.
 					const deliverRequestedInterrupts = Effect.gen(function* () {
 						disconnecting = true
 						yield* Queue.end(interruptQueue)
@@ -1152,7 +1144,6 @@ export const sessionsConnectCommand = Command.make(
 						return
 					}
 
-					// First inspect anything already pulled by the concurrent stdin reader.
 					const bufferedItems = yield* Queue.clear(stdinQueue)
 					for (const item of bufferedItems) {
 						if ((yield* inspectPipedItemAfterStop(item)) === "done") {
@@ -1167,9 +1158,6 @@ export const sessionsConnectCommand = Command.make(
 						return
 					}
 
-					// The dispatch loop was cancelled before stdin reached EOF; briefly probe the
-					// still-attached stdin reader so unread input waiting in the next pipe chunk
-					// is detected rather than silently dropped with exit code 0.
 					const pendingSignal = yield* Deferred.make<void>()
 					postStopPending = pendingSignal
 					if (pendingPartial.trim().length > 0) {
@@ -1202,7 +1190,6 @@ export const sessionsConnectCommand = Command.make(
 								if (pendingNow.length > 0 && !isExitCommandPrefix(pendingNow)) {
 									return yield* failUnreadBufferedInput
 								}
-								// Wait for either the line/EOF to arrive or the probe window to finish
 								const afterPrefix = yield* Effect.race(
 									Queue.take(stdinQueue).pipe(
 										Effect.map((item) => ({ _tag: "item" as const, item })),
