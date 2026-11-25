@@ -529,6 +529,18 @@ describe("Artifacts API", () => {
 						files: invalid,
 					})).status,
 				).toBe(400)
+				expect(
+					(yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
+						version: 1,
+						files: [{ path: "a.txt", content: "b" }],
+					})).status,
+				).toBe(201)
+				expect(
+					(yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
+						version: 1,
+						files: invalid,
+					})).status,
+				).toBe(409)
 			}),
 		))
 
