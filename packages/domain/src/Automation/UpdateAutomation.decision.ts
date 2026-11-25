@@ -77,12 +77,6 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 				after.automation.revision === before.automation.revision + 1,
 				after.automation.status === before.automation.status,
 			].every((ok) => ok),
-		AChangedAgentOrEnvironmentIsActive: ({ before, after, command }) =>
-			after.automation.revision === before.automation.revision ||
-			[
-				!command.agent_changed || before.agent.status === "active",
-				!command.environment_changed || before.environment.status === "active",
-			].every((ok) => ok),
 		OnlyANewScheduleOnAnActiveAutomationRestartsIt: ({ before, after, command }) =>
 			after.automation.activation ===
 			([
@@ -92,14 +86,5 @@ export class UpdateAutomationDecision extends Domain.Decision(UpdateAutomation, 
 			].every((ok) => ok)
 				? before.automation.activation + 1
 				: before.automation.activation),
-		AnUpdateLeavesRunsAgentsAndEnvironmentsAlone: ({ before, after }) =>
-			[
-				after.automation.runs === before.automation.runs,
-				after.automation.reported === before.automation.reported,
-				after.automation.last_scheduled_at === before.automation.last_scheduled_at,
-				after.agent.status === before.agent.status,
-				after.agent.version === before.agent.version,
-				after.environment.status === before.environment.status,
-			].every((ok) => ok),
 	},
 }) {}

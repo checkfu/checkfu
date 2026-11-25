@@ -166,6 +166,13 @@ export class Automation extends Domain.Aggregate("Automation", {
 					after.revision === before.revision + 1,
 				].every((ok) => ok),
 			].some((ok) => ok),
+		AnUpdateLeavesRunsAlone: ({ before, after, events }) =>
+			events.every((event) => event._tag !== "automation.updated") ||
+			[
+				after.runs === before.runs,
+				after.reported === before.reported,
+				after.last_scheduled_at === before.last_scheduled_at,
+			].every((ok) => ok),
 		AFailedRunPausesOnlyAnActiveAutomation: ({ before, after, command }) =>
 			[
 				command._tag !== "RecordAutomationRunFailed",

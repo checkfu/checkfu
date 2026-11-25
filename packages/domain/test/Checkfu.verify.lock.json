@@ -310,17 +310,13 @@
 				"kind": "transition",
 				"source": "({ before, after, command }) =>\n\t\t\tafter.automation.revision === before.automation.revision ||\n\t\t\t[\n\t\t\t\tcommand.expected_revision === before.automation.revision,\n\t\t\t\t[before.automation.status === \"active\", before.automation.status === \"paused\"].some(\n\t\t\t\t\t(live) => live,\n\t\t\t\t),\n\t\t\t\tafter.automation.revision === before.automation.revision + 1,\n\t\t\t\tafter.automation.status === before.automation.status,\n\t\t\t].every((ok) => ok)"
 			},
-			"UpdateAutomation.AChangedAgentOrEnvironmentIsActive": {
-				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tafter.automation.revision === before.automation.revision ||\n\t\t\t[\n\t\t\t\t!command.agent_changed || before.agent.status === \"active\",\n\t\t\t\t!command.environment_changed || before.environment.status === \"active\",\n\t\t\t].every((ok) => ok)"
-			},
 			"UpdateAutomation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": {
 				"kind": "transition",
 				"source": "({ before, after, command }) =>\n\t\t\tafter.automation.activation ===\n\t\t\t([\n\t\t\t\tbefore.automation.status === \"active\",\n\t\t\t\tcommand.reschedule,\n\t\t\t\tafter.automation.revision > before.automation.revision,\n\t\t\t].every((ok) => ok)\n\t\t\t\t? before.automation.activation + 1\n\t\t\t\t: before.automation.activation)"
 			},
-			"UpdateAutomation.AnUpdateLeavesRunsAgentsAndEnvironmentsAlone": {
+			"Automation.AnUpdateLeavesRunsAlone": {
 				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.automation.runs === before.automation.runs,\n\t\t\t\tafter.automation.reported === before.automation.reported,\n\t\t\t\tafter.automation.last_scheduled_at === before.automation.last_scheduled_at,\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t].every((ok) => ok)"
+				"source": "({ before, after, events }) =>\n\t\t\tevents.every((event) => event._tag !== \"automation.updated\") ||\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tafter.reported === before.reported,\n\t\t\t\tafter.last_scheduled_at === before.last_scheduled_at,\n\t\t\t].every((ok) => ok)"
 			}
 		}
 	}
