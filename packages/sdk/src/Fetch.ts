@@ -75,15 +75,35 @@ export type FetchClient = <Op extends JsonOperationId>(
 	...input: FetchInputArgs<Op>
 ) => Promise<FetchResult<Op>>
 
+export interface CheckfuFetchErrorDetails {
+	readonly requestId?: string | undefined
+	readonly accepted?: ReadonlyArray<unknown> | undefined
+	readonly failedIndex?: number | undefined
+	readonly unconfirmedIndex?: number | undefined
+}
+
 export class CheckfuFetchError extends Error {
 	readonly status: number
 	readonly type: string | null
+	readonly requestId: string | undefined
+	readonly accepted: ReadonlyArray<unknown> | undefined
+	readonly failedIndex: number | undefined
+	readonly unconfirmedIndex: number | undefined
 
-	constructor(status: number, type: string | null, message: string) {
+	constructor(
+		status: number,
+		type: string | null,
+		message: string,
+		details: CheckfuFetchErrorDetails = {},
+	) {
 		super(message)
 		this.name = "CheckfuFetchError"
 		this.status = status
 		this.type = type
+		this.requestId = details.requestId
+		this.accepted = details.accepted
+		this.failedIndex = details.failedIndex
+		this.unconfirmedIndex = details.unconfirmedIndex
 	}
 }
 
@@ -104,7 +124,20 @@ interface RawInput {
 
 interface ErrorEnvelope {
 	readonly error?: { readonly type?: unknown; readonly message?: unknown }
+	readonly request_id?: unknown
+	readonly accepted?: unknown
+	readonly failed_index?: unknown
+	readonly unconfirmed_index?: unknown
 }
+
+const stringOr = (value: unknown): string | undefined =>
+	typeof value === "string" ? value : undefined
+
+const indexOr = (value: unknown): number | undefined =>
+	typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined
+
+const listOr = (value: unknown): ReadonlyArray<unknown> | undefined =>
+	Array.isArray(value) ? value : undefined
 
 const bindings: ReadonlyMap<string, Binding> = new Map(
 	SDK_OPERATION_BINDINGS.map((binding) => [binding.operationId, binding]),
@@ -132,28 +165,35 @@ const urlOf = (binding: Binding, input: RawInput): string => {
 	if (extraQuery.length > 0) {
 		throw new Error(`${binding.operationId} takes no query parameter ${extraQuery.join(", ")}.`)
 	}
+	const declaredQuery: ReadonlyArray<string> = binding.queryParams
 	const requiredQuery: ReadonlyArray<string> = binding.requiredQueryParams
-	const missingQuery = requiredQuery.filter(
-		(name) => input.query?.[name] === undefined || input.query[name] === null,
-	)
-	if (missingQuery.length > 0) {
-		throw new Error(`Missing ${missingQuery.join(", ")} for ${binding.operationId}.`)
-	}
+	const queryValues = declaredQuery.flatMap((name): ReadonlyArray<readonly [string, string]> => {
+		const value: unknown = input.query?.[name]
+		if (value === undefined || value === null) {
+			if (requiredQuery.includes(name)) {
+				throw new Error(`Missing ${name} for ${binding.operationId}.`)
+			}
+			return []
+		}
+		if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+			throw new Error(`Invalid ${name}: must be a string, number or boolean.`)
+		}
+		return [[name, String(value)]]
+	})
 	const path = binding.pathParams.reduce<string>((url, name) => {
-		const value = input.path?.[name]
-		if (value === undefined) {
+		const value: unknown = input.path?.[name]
+		if (value === undefined || value === null) {
 			throw new Error(`Missing ${name} for ${binding.operationId}.`)
+		}
+		if (typeof value !== "string" && typeof value !== "number") {
+			throw new Error(`Invalid ${name}: must be a string or a number.`)
 		}
 		if (!isSinglePathSegment(String(value))) {
 			throw new Error(`Invalid ${name}: ${SINGLE_PATH_SEGMENT_MESSAGE}.`)
 		}
 		return url.replace(`{${name}}`, encodeURIComponent(String(value)))
 	}, binding.path)
-	const search = new URLSearchParams(
-		Object.entries(input.query ?? {}).flatMap(([name, value]) =>
-			value === undefined || value === null ? [] : [[name, String(value)]],
-		),
-	).toString()
+	const search = new URLSearchParams(queryValues.map(([name, value]) => [name, value])).toString()
 	return search === "" ? path : `${path}?${search}`
 }
 
@@ -214,10 +254,14 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 				.catch((): ErrorEnvelope => ({}))
 			throw new CheckfuFetchError(
 				response.status,
-				typeof envelope.error?.type === "string" ? envelope.error.type : null,
-				typeof envelope.error?.message === "string"
-					? envelope.error.message
-					: `Request failed with status ${response.status}.`,
+				stringOr(envelope.error?.type) ?? null,
+				stringOr(envelope.error?.message) ?? `Request failed with status ${response.status}.`,
+				{
+					requestId: stringOr(envelope.request_id),
+					accepted: listOr(envelope.accepted),
+					failedIndex: indexOr(envelope.failed_index),
+					unconfirmedIndex: indexOr(envelope.unconfirmed_index),
+				},
 			)
 		}
 		const text = await response.text()

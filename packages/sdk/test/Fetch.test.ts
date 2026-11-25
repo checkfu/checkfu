@@ -42,6 +42,14 @@ type Requirement<T, K extends PropertyKey> = K extends keyof T
 			: "required"
 	: "absent"
 
+interface NonScalarQueryInput {
+	readonly query: Readonly<Record<string, { readonly by: string }>>
+}
+
+interface LoosePathInput {
+	readonly path: Readonly<Record<string, string | null | { readonly id: string }>>
+}
+
 type Assignable<A, B> = [A] extends [B] ? true : false
 
 interface LooseInput {
@@ -331,6 +339,79 @@ describe("the fetch client", () => {
 		await expect(
 			createFetchClient({ fetch })("artifacts.delete", { path: { artifact_id: "art_1" } }),
 		).rejects.toThrow("artifacts.delete answered 200 with an empty body.")
+	})
+
+	it("keeps a partial batch's outcome on the error, so a caller knows what was committed", async () => {
+		const accepted = [{ id: "evt_1", type: "user.message" }]
+		const { fetch } = recording(
+			500,
+			JSON.stringify({
+				type: "error",
+				error: { type: "api_error", message: "The second event was not confirmed." },
+				request_id: "req_1",
+				accepted,
+				unconfirmed_index: 1,
+			}),
+		)
+		const failure = await untyped(createFetchClient({ fetch }))("sessions.events.send", {
+			path: { session_id: "sess_1" },
+			body: { name: "x" },
+		}).catch((error: unknown) => error)
+		expect(failure).toMatchObject({
+			status: 500,
+			type: "api_error",
+			requestId: "req_1",
+			accepted,
+			failedIndex: undefined,
+			unconfirmedIndex: 1,
+		})
+		const refused = recording(
+			400,
+			JSON.stringify({
+				type: "error",
+				error: { type: "invalid_request_error", message: "Event 2 is invalid." },
+				request_id: "req_2",
+				accepted,
+				failed_index: 1,
+			}),
+		)
+		await expect(
+			untyped(createFetchClient({ fetch: refused.fetch }))("sessions.events.send", {
+				path: { session_id: "sess_1" },
+				body: { name: "x" },
+			}),
+		).rejects.toMatchObject({ accepted, failedIndex: 1, unconfirmedIndex: undefined })
+	})
+
+	it("validates and sends the same query values, read once from each declared field", () => {
+		class FileQuery {
+			get path(): string {
+				return "index.html"
+			}
+		}
+		const path = { artifact_id: "art_1", version: 1 }
+		expect(operationUrl("artifacts.versions.file", { path, query: new FileQuery() })).toBe(
+			"/v1/artifacts/art_1/versions/1/file?path=index.html",
+		)
+		const loose = operationUrl as (operationId: string, input: NonScalarQueryInput) => string
+		expect(() => loose("agents.list", { query: { order: { by: "name" } } })).toThrow(
+			"Invalid order: must be a string, number or boolean.",
+		)
+	})
+
+	it("refuses a null or non-scalar path value instead of sending its string form", async () => {
+		const { sent, fetch } = recording(200, "{}")
+		const request = untyped(createFetchClient({ fetch })) as unknown as (
+			operationId: string,
+			input: LoosePathInput,
+		) => Promise<void>
+		await expect(request("artifacts.delete", { path: { artifact_id: null } })).rejects.toThrow(
+			"Missing artifact_id for artifacts.delete.",
+		)
+		await expect(
+			request("artifacts.delete", { path: { artifact_id: { id: "art_1" } } }),
+		).rejects.toThrow("Invalid artifact_id: must be a string or a number.")
+		expect(sent).toEqual([])
 	})
 
 	it("keeps the status when an error reply's body cannot be read", async () => {
