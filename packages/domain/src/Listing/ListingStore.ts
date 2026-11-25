@@ -95,7 +95,11 @@ export class ListingStore extends Context.Service<
 							key,
 							row === undefined
 								? change
-								: { ...row, status: change.status > row.status ? change.status : row.status },
+								: {
+										...row,
+										agent_id: change.agent_id ?? row.agent_id,
+										status: change.status > row.status ? change.status : row.status,
+									},
 						)
 					}
 				}),

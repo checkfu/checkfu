@@ -1071,7 +1071,7 @@ const automationsListCommand = CommandMake(
 		),
 		agentId: FlagString("agent-id").pipe(
 			FlagWithMetavar("ID"),
-			FlagWithDescription("Only automations created with this agent"),
+			FlagWithDescription("Only automations that use this agent"),
 			FlagOptional,
 		),
 	},

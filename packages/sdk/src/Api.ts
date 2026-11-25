@@ -1455,7 +1455,7 @@ const Automations = HttpApiGroup.make("automations")
 			query: {
 				...resourceListQuery,
 				agent_id: Schema.optionalKey(
-					ResourceId.annotate({ description: "Only automations created with this agent" }),
+					ResourceId.annotate({ description: "Only automations that use this agent" }),
 				),
 			},
 			success: ListAutomationsResponse,

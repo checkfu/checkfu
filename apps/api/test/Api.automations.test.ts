@@ -564,6 +564,14 @@ describe("Automations API", () => {
 					ids.slice(0, 2).toSorted(),
 				)
 
+				yield* call(apiFetch, "POST", `/v1/automations/${ids[1]}`, { agent: otherAgent.body.id })
+				const stayed = yield* listed(apiFetch, `?agent_id=${agentId}`, 1)
+				expect(stayed.body.data.map((automation) => automation.id)).toEqual([ids[0]])
+				const moved = yield* listed(apiFetch, `?agent_id=${otherAgent.body.id}`, 2)
+				expect(moved.body.data.map((automation) => automation.id).toSorted()).toEqual(
+					ids.slice(1).toSorted(),
+				)
+
 				yield* call(apiFetch, "POST", `/v1/automations/${ids[1]}/pause`)
 				yield* call(apiFetch, "POST", `/v1/automations/${ids[0]}/archive`)
 				const remaining = yield* listed(apiFetch, "", 2)
