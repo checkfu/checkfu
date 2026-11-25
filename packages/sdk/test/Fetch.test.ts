@@ -35,15 +35,20 @@ const recording = (status: number, body: string) => {
 }
 
 type Requirement<T, K extends PropertyKey> = K extends keyof T
-	? Record<never, never> extends Pick<T, K>
-		? "optional"
-		: "required"
+	? [Exclude<T[K], undefined>] extends [never]
+		? "absent"
+		: Record<never, never> extends Pick<T, K>
+			? "optional"
+			: "required"
 	: "absent"
+
+type Assignable<A, B> = [A] extends [B] ? true : false
 
 interface LooseInput {
 	readonly path?: Readonly<Record<string, string>>
 	readonly body?: { readonly name: string }
 	readonly idempotencyKey?: string
+	readonly query?: Readonly<Record<string, string>>
 }
 
 const untyped = (request: ReturnType<typeof createFetchClient>) =>
@@ -190,6 +195,47 @@ describe("the fetch client", () => {
 		expectTypeOf<
 			Requirement<FetchInputArgs<"agents.create">[0], "body">
 		>().toEqualTypeOf<"required">()
+	})
+
+	it("does not accept a field the operation does not declare, from a literal or a variable", () => {
+		const retrieveWithBody = { path: { agent_id: "a" }, body: { version: 1, name: "x" } }
+		const createWithQuery = { query: { order: "desc" as const } }
+		const runWithKey = { path: { automation_id: "auto_1" }, idempotencyKey: "run-once" }
+		const urlWithBody = { path: { agent_id: "a" }, body: { name: "x" } }
+		expectTypeOf<
+			Assignable<typeof retrieveWithBody, FetchInput<"agents.retrieve">>
+		>().toEqualTypeOf<false>()
+		expectTypeOf<
+			Assignable<typeof createWithQuery, UrlInput<"agents.create">>
+		>().toEqualTypeOf<false>()
+		expectTypeOf<
+			Assignable<typeof runWithKey, FetchInput<"automations.run">>
+		>().toEqualTypeOf<false>()
+		expectTypeOf<
+			Assignable<typeof urlWithBody, UrlInput<"agents.retrieve">>
+		>().toEqualTypeOf<false>()
+		expectTypeOf<
+			Assignable<{ readonly path: { readonly agent_id: string } }, FetchInput<"agents.retrieve">>
+		>().toEqualTypeOf<true>()
+		expectTypeOf<
+			Assignable<{ readonly query: { readonly order: "desc" } }, UrlInput<"agents.list">>
+		>().toEqualTypeOf<true>()
+	})
+
+	it("refuses an undeclared body or query parameter at run time too, before sending", async () => {
+		const { sent, fetch } = recording(200, "{}")
+		const request = untyped(createFetchClient({ fetch }))
+		await expect(
+			request("agents.retrieve", { path: { agent_id: "a" }, body: { name: "x" } }),
+		).rejects.toThrow("agents.retrieve takes no body.")
+		const loose = operationUrl as (operationId: string, input: LooseInput) => string
+		expect(() => loose("agents.create", { query: { order: "desc" } })).toThrow(
+			"agents.create takes no query parameter order.",
+		)
+		expect(() => loose("agents.list", { query: { order: "desc", sort: "name" } })).toThrow(
+			"agents.list takes no query parameter sort.",
+		)
+		expect(sent).toEqual([])
 	})
 
 	it("offers the event stream only as a URL, since its reply is not JSON", () => {

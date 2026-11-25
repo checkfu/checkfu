@@ -18,17 +18,17 @@ export type JsonOperationId = Extract<
 type Shape<Op extends OperationId> = CheckfuOperations[Op]
 
 type PathField<Op extends OperationId> = BindingOf<Op>["pathParams"] extends readonly []
-	? Record<never, never>
+	? { readonly path?: never }
 	: { readonly path: PathOf<Shape<Op>> }
 
-type QueryField<Op extends OperationId> = [QueryOf<Shape<Op>>] extends [never]
-	? Record<never, never>
+type QueryField<Op extends OperationId> = BindingOf<Op>["queryParams"] extends readonly []
+	? { readonly query?: never }
 	: Record<never, never> extends QueryOf<Shape<Op>>
 		? { readonly query?: QueryOf<Shape<Op>> }
 		: { readonly query: QueryOf<Shape<Op>> }
 
-type BodyField<Op extends OperationId> = [BodyOf<Shape<Op>>] extends [never]
-	? Record<never, never>
+type BodyField<Op extends OperationId> = BindingOf<Op>["hasBody"] extends false
+	? { readonly body?: never }
 	: BindingOf<Op>["bodyRequired"] extends true
 		? { readonly body: BodyOf<Shape<Op>> }
 		: { readonly body?: BodyOf<Shape<Op>> }
@@ -37,11 +37,17 @@ type KeyField<Op extends OperationId> = BindingOf<Op>["requiresIdempotencyKey"] 
 	? { readonly idempotencyKey: string }
 	: BindingOf<Op>["supportsIdempotencyKey"] extends true
 		? { readonly idempotencyKey?: string }
-		: Record<never, never>
+		: { readonly idempotencyKey?: never }
 
-export type UrlInput<Op extends OperationId> = PathField<Op> & QueryField<Op>
+export type UrlInput<Op extends OperationId> = PathField<Op> &
+	QueryField<Op> & {
+		readonly body?: never
+		readonly idempotencyKey?: never
+		readonly signal?: never
+	}
 
-export type FetchInput<Op extends JsonOperationId> = UrlInput<Op> &
+export type FetchInput<Op extends JsonOperationId> = PathField<Op> &
+	QueryField<Op> &
 	BodyField<Op> &
 	KeyField<Op> & { readonly signal?: AbortSignal }
 
@@ -113,6 +119,11 @@ const bindingOf = (operationId: string): Binding => {
 }
 
 const urlOf = (binding: Binding, input: RawInput): string => {
+	const declared: ReadonlyArray<string> = binding.queryParams
+	const undeclared = Object.keys(input.query ?? {}).filter((name) => !declared.includes(name))
+	if (undeclared.length > 0) {
+		throw new Error(`${binding.operationId} takes no query parameter ${undeclared.join(", ")}.`)
+	}
 	const path = binding.pathParams.reduce<string>((url, name) => {
 		const value = input.path?.[name]
 		if (value === undefined) {
@@ -165,6 +176,9 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 			headers.set("idempotency-key", fields.idempotencyKey)
 		} else if (binding.requiresIdempotencyKey) {
 			throw new Error(`${operationId} needs an idempotency key.`)
+		}
+		if (!binding.hasBody && fields.body !== undefined) {
+			throw new Error(`${operationId} takes no body.`)
 		}
 		if (binding.bodyRequired && fields.body === undefined) {
 			throw new Error(`${operationId} needs a body.`)
