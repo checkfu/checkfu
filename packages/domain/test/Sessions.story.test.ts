@@ -39,6 +39,7 @@ import {
 	SessionAlreadyExists,
 	SessionCreated,
 } from "../src/Session/CreateSession.command.ts"
+import { DiscardWorkspace, DiscardWorkspaceLive } from "../src/Session/DiscardWorkspace.policy.ts"
 import { Harness, boundedHarness, clampHarnessReply } from "../src/Session/Harness.external.ts"
 import { FailModelRequest } from "../src/Session/FailModelRequest.command.ts"
 import { InterruptModelRequest } from "../src/Session/InterruptModelRequest.command.ts"
@@ -83,6 +84,7 @@ import { Sessions, SessionsHandlersLive } from "../src/Sessions.model.ts"
 const StartTurnNoopLayer = Layer.mergeAll(
 	StartTurn.toLayer(Effect.succeed(() => Effect.void)),
 	StopModelRequest.toLayer(Effect.succeed(() => Effect.void)),
+	DiscardWorkspace.toLayer(Effect.succeed(() => Effect.void)),
 )
 const aggregateStory = Story.make(Sessions, {
 	layer: Layer.mergeAll(StartTurnNoopLayer, RunTurnLive),
@@ -99,13 +101,22 @@ const retryCleanup = StopModelRequest.toLayer(StopModelRequest, {
 	retry: Schedule.recurs(1),
 }).pipe(Layer.provide(StopModelRequestLive))
 const redeliveryStory = Story.make(Sessions, {
-	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, retryCleanup),
+	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, retryCleanup, DiscardWorkspaceLive),
+	stub: [Harness],
+})
+
+const retryDiscard = DiscardWorkspace.toLayer(DiscardWorkspace, {
+	retry: Schedule.recurs(1),
+}).pipe(Layer.provide(DiscardWorkspaceLive))
+const discardStory = Story.make(Sessions, {
+	layer: Layer.mergeAll(StartTurnLive, RunTurnLive, StopModelRequestLive, retryDiscard),
 	stub: [Harness],
 })
 
 const HarnessNoopLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
+		discardWorkspace: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
@@ -1095,6 +1106,8 @@ describe("Sessions", () => {
 			),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 2 }),
 			Story.succeed(Harness.interrupt, undefined),
+			Story.call(Harness.discardWorkspace, { session_id: session.id }),
+			Story.succeed(Harness.discardWorkspace, undefined),
 			Story.saga(RunTurn, turn2Key, {
 				_tag: "Completed",
 				result: { status: "failed" },
@@ -1537,6 +1550,7 @@ describe("Sessions", () => {
 									boundedHarness(
 										Effect.succeed({
 											interrupt: () => Effect.void,
+											discardWorkspace: () => Effect.void,
 											runTurn: () => {
 												if (mode === "synchronous throw") {
 													throw new Error("secret adapter failure")
@@ -2368,6 +2382,7 @@ describe("Sessions", () => {
 		const handlers = Layer.mergeAll(
 			StartTurnLive,
 			StopModelRequestLive,
+			DiscardWorkspaceLive,
 			RunTurn.toLayer(Effect.succeed(() => Effect.succeed({ status: "completed" as const }))),
 		)
 		const state = await Effect.runPromise(
@@ -2662,6 +2677,7 @@ describe("Sessions", () => {
 								Harness.toLayer(
 									Effect.succeed({
 										interrupt: () => Effect.void,
+										discardWorkspace: () => Effect.void,
 										runTurn: () => Effect.die("Harness.runTurn must not be called"),
 									}),
 								),
@@ -2736,6 +2752,7 @@ describe("Sessions", () => {
 								Harness.toLayer(
 									Effect.succeed({
 										interrupt: () => Effect.void,
+										discardWorkspace: () => Effect.void,
 										runTurn: () => Effect.die("Harness.runTurn must not be called"),
 									}),
 								),
@@ -2747,6 +2764,39 @@ describe("Sessions", () => {
 		)
 		expect(result).toEqual({ status: "aborted" })
 	})
+
+	it.effect(
+		"discards the workspace of a terminated session, asking again until the harness answers",
+		() => {
+			const session = Session.ref("sess_discard_workspace")
+			return discardStory(
+				Story.clock(t0),
+				Story.when(
+					new CreateSession({
+						session_id: session.id,
+						agent_id: "agent_001",
+						agent_version: 1,
+						environment_id: "env_001",
+						title: null,
+					}),
+				),
+				Story.then(session, createdEvent),
+				Story.when(new ArchiveSession({ session_id: session.id })),
+				Story.then(
+					session,
+					new SessionStatusTerminated({ running_turn: null }),
+					new SessionArchived(),
+				),
+				Story.call(Harness.discardWorkspace, { session_id: session.id }),
+				Story.die(Harness.discardWorkspace, new Error("harness unreachable")),
+				Story.call(Harness.discardWorkspace, { session_id: session.id }),
+				Story.succeed(Harness.discardWorkspace, undefined),
+				Story.when(new ArchiveSession({ session_id: session.id })),
+				Story.then(session),
+				Story.state(session, { _tag: "Terminated", archived: true }),
+			)
+		},
+	)
 
 	it.effect("retries cancellation of the archived request when the harness is unavailable", () => {
 		const session = Session.ref("sess_e2e_archive")
@@ -2792,6 +2842,8 @@ describe("Sessions", () => {
 			),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.fail(Harness.interrupt, { _tag: "HarnessUnavailable" }),
+			Story.call(Harness.discardWorkspace, { session_id: session.id }),
+			Story.succeed(Harness.discardWorkspace, undefined),
 			Story.state(session, { _tag: "Terminated", archived: true }),
 			Story.call(Harness.interrupt, { session_id: session.id, turn: 1 }),
 			Story.succeed(Harness.interrupt, undefined),
@@ -3387,6 +3439,7 @@ describe("Sessions", () => {
 								boundedHarness(
 									Effect.succeed({
 										interrupt: () => Effect.void,
+										discardWorkspace: () => Effect.void,
 										runTurn: () => {
 											callCount += 1
 											if (callCount === 1) {

@@ -7,6 +7,9 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
+import { placedStub, placement } from "../Placement.ts"
+import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
+import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
@@ -31,11 +34,14 @@ class PiSessionHost {
 	}
 }
 
+const ADMITTED_TURN = "workspace-turn"
+
 export const makePiHarnessBackend = (
 	harness: PiHarness,
 	fence: SqliteTurnFence,
 	apiKeys: ProviderApiKeysInput,
 	reset: () => void,
+	enterWorkspace: (turn: number) => Promise<boolean>,
 	options?: { readonly aiBinding?: CloudflareAiBindingLike | null },
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
@@ -52,6 +58,7 @@ export const makePiHarnessBackend = (
 		},
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
 		isCancelled: (operationId) => fence.isCancelled(operationId),
+		enterWorkspace,
 		pi: () => harness.pi(),
 		ensureRoot: async (agent) => {
 			const pi = await harness.pi()
@@ -104,8 +111,10 @@ export const PiSessionLive = PiSession.make(
 			workerEnv: Effect.serviceOption(Cloudflare.Workers.WorkerEnvironment),
 			apiKeys: providerApiKeys,
 			baseUrls: providerBaseUrls,
+			workspaces: SessionWorkspace,
+			where: Effect.orDie(placement),
 		}),
-		({ state, workerEnv, apiKeys, baseUrls }) =>
+		({ state, workerEnv, apiKeys, baseUrls, workspaces, where }) =>
 			Effect.promise(async () => {
 				const aiBinding = extractAiBinding(Option.getOrUndefined(workerEnv))
 				const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
@@ -113,14 +122,33 @@ export const PiSessionLive = PiSession.make(
 					import("agents/harness/pi"),
 				])
 
+				const rawCtx = state.raw
+				const sessionId = rawCtx.id.name
+				if (sessionId === undefined) {
+					throw new Error("PiSession must be addressed by its session id.")
+				}
+				const workspaceStub = placedStub(workspaces, where)
+				const workspace = () => workspaceStub(sessionId)
+				const workspaceTools = await workspaceToolDeclarations()
+				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
+
 				const harness = new PiHarnessClass({
 					harness: ({ storage, context, onWake }) => {
 						const models = createPiModels(apiKeys, baseUrls, { aiBinding })
+						const registry = createCheckfuRegistry()
+						registry.install(
+							workspaceExtension(workspaceTools, (call, signal) =>
+								Effect.runPromise(
+									workspace().runTool(call, { turn: admittedTurn() }),
+									signal === undefined ? undefined : { signal },
+								),
+							),
+						)
 						return Harness.open(
 							storage,
 							{
 								models,
-								registry: createCheckfuRegistry(),
+								registry,
 								onWake,
 								settings: PI_HARNESS_SETTINGS,
 							},
@@ -128,7 +156,6 @@ export const PiSessionLive = PiSession.make(
 						)
 					},
 				})
-				const rawCtx = state.raw
 				const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
 				const fence = new SqliteTurnFence({
 					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
@@ -139,6 +166,13 @@ export const PiSessionLive = PiSession.make(
 					apiKeys,
 					() => {
 						rawCtx.abort("A turn did not stop when aborted")
+					},
+					async (turn) => {
+						const entered = await Effect.runPromise(workspace().enter({ turn }))
+						if (entered) {
+							rawCtx.storage.kv.put(ADMITTED_TURN, turn)
+						}
+						return entered
 					},
 					{ aiBinding },
 				)

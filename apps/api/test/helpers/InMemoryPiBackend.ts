@@ -167,6 +167,7 @@ export const createInMemoryPiDurableBackend = async (
 		hasApiKey,
 		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
 		isCancelled: (operationId) => cancelledOps.has(operationId),
+		enterWorkspace: () => Promise.resolve(true),
 		pi: () => Promise.resolve(pi),
 		ensureRoot: async (agent) => {
 			const existing = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)

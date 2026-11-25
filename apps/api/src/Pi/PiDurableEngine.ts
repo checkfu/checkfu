@@ -1,8 +1,23 @@
 import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
-import type { AssistantMessage } from "@earendil-works/pi-ai"
-import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
-import type { AgentChange, EntryId, Harness } from "@earendil-works/pi-durable"
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
+import {
+	AssistantEntry,
+	CompactionEntry,
+	ROOT_CONVERSATION_ID,
+	ResetEntry,
+	ToolResultEntry,
+	UserEntry,
+} from "@earendil-works/pi-durable"
+import type {
+	AgentChange,
+	ContextEdit,
+	Conversation,
+	Cursor,
+	EntryId,
+	EntryRecord,
+	Harness,
+} from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -19,6 +34,7 @@ export interface PiDurableBackend {
 	readonly hasApiKey: (provider: string) => boolean
 	readonly missingCredentialsMessage?: (provider: string) => string
 	readonly isCancelled: (operationId: string) => boolean
+	readonly enterWorkspace: (turn: number) => Promise<boolean>
 	readonly pi: () => Promise<Harness>
 	readonly ensureRoot: (agent: AgentChange) => Promise<void>
 	readonly submit: (text: string, operationId: string) => Promise<void>
@@ -58,34 +74,148 @@ const readAssistantMessage = async (
 	return firstMessage?.role === "assistant" ? firstMessage : null
 }
 
-const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> => {
+const TURN_ENTRY_PAGE_SIZE = 8
+
+interface TurnEntries {
+	readonly ids: ReadonlyArray<EntryId>
+	readonly compaction: EntryRecord | undefined
+}
+
+const readTurnEntries = async (
+	conversation: Conversation,
+	userEntryId: EntryId,
+): Promise<TurnEntries> => {
+	const ids: Array<EntryId> = [userEntryId]
+	let compaction: EntryRecord | undefined
+	let cursor: Cursor | undefined
+	do {
+		const page = await conversation.entries(
+			{ minEntryId: userEntryId, order: "ascending" },
+			TURN_ENTRY_PAGE_SIZE,
+			cursor,
+			BACKGROUND_CONTEXT,
+		)
+		for (const entry of page.items) {
+			if (entry.id <= userEntryId) {
+				continue
+			}
+			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
+				return { ids, compaction }
+			}
+			if (CompactionEntry.is(entry)) {
+				compaction = entry
+			} else if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
+				ids.push(entry.id)
+			}
+		}
+		cursor = page.next
+	} while (cursor !== undefined)
+	return { ids, compaction }
+}
+
+export const RestoredHistoryLimit = Context.Reference<number>("@checkfu/api/RestoredHistoryLimit", {
+	defaultValue: () => 1024 * 1024,
+})
+
+const EARLIER_HISTORY_GONE = "[Earlier messages of this conversation are no longer available.]"
+
+const byteLength = (message: Message): number =>
+	new TextEncoder().encode(JSON.stringify(message)).byteLength
+
+const newestTurnsWithin = (
+	messages: ReadonlyArray<Message>,
+	limit: number,
+): ReadonlyArray<Message> => {
+	const sizes = messages.map(byteLength)
+	if (sizes.reduce((total, size) => total + size, 0) <= limit) {
+		return messages
+	}
+	let start = messages.length
+	let kept = 0
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		kept += sizes[index] ?? 0
+		if (kept > limit) {
+			break
+		}
+		if (messages[index]?.role === "user") {
+			start = index
+		}
+	}
+	return [
+		{ role: "user", content: EARLIER_HISTORY_GONE, timestamp: messages[start]?.timestamp ?? 0 },
+		...messages.slice(start),
+	]
+}
+
+const publishedBefore = async (
+	conversation: Conversation,
+	userEntryId: EntryId,
+	compaction: EntryRecord,
+	limit: number,
+): Promise<ReadonlyArray<Message>> => {
+	const page = await conversation.entries(
+		{ maxEntryId: userEntryId },
+		2,
+		undefined,
+		BACKGROUND_CONTEXT,
+	)
+	const last = page.items.find((entry) => entry.id < userEntryId)
+	if (last === undefined) {
+		return []
+	}
+	const view = await conversation.context(BACKGROUND_CONTEXT, { at: last.id })
+	const cut = compaction.head
+	const messages = view.entries.flatMap((entry, index) =>
+		entry.head !== undefined || cut === undefined || entry.id < cut
+			? (view.contributions[index] ?? []).filter((message) => message.role !== "system")
+			: [],
+	)
+	return newestTurnsWithin(messages, limit)
+}
+
+const omitTurnEntries = async (
+	pi: Harness,
+	operationId: string,
+	restoredLimit: number,
+): Promise<void> => {
 	const record = await submissionOf(pi, operationId)
-	if (record?.type !== "input") {
+	if (record?.type !== "input" || record.entry === undefined) {
 		return
 	}
-	const targets: Array<EntryId> = []
-	if (record.status === "unanswered") {
-		if (record.entry !== undefined) {
-			targets.push(record.entry)
-		}
-	} else if (record.status === "done") {
-		targets.push(record.entry, record.answer)
+	if (record.status !== "unanswered" && record.status !== "done") {
+		return
 	}
-	if (targets.length === 0) {
+	const requestId = `omit:${operationId}`
+	const omitted = await pi.commit(
+		(tx) => tx.submissionByRequest(ROOT_CONVERSATION_ID, requestId),
+		BACKGROUND_CONTEXT,
+	)
+	if (omitted !== undefined) {
+		await (await pi.submission(omitted.id, BACKGROUND_CONTEXT))?.wait(BACKGROUND_CONTEXT)
 		return
 	}
 	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
 	if (conversation === undefined) {
 		return
 	}
+	const { ids, compaction } = await readTurnEntries(conversation, record.entry)
+	const edits: Array<ContextEdit> = [
+		...ids.map((target) => ({ target, action: "omit" as const })),
+		...(compaction === undefined
+			? []
+			: [
+					{
+						target: compaction.id,
+						action: "replace" as const,
+						messages: await publishedBefore(conversation, record.entry, compaction, restoredLimit),
+					},
+				]),
+	]
 	const submission = await conversation.submit(
 		{
 			type: "write",
-			requestId: `omit:${operationId}`,
-			entry: {
-				kind: "checkfu.omit_unanswered",
-				edits: targets.map((target) => ({ target, action: "omit" as const })),
-			},
+			requestId,
+			entry: { kind: "checkfu.omit_unanswered", edits },
 		},
 		BACKGROUND_CONTEXT,
 	)
@@ -94,19 +224,23 @@ const omitTurnEntries = async (pi: Harness, operationId: string): Promise<void> 
 
 const ZERO_MODEL_USAGE: ModelUsage = { input_tokens: 0, output_tokens: 0 }
 
-const finalizeSettledTurn = async (pi: Harness, operationId: string): Promise<void> => {
+const finalizeSettledTurn = async (
+	pi: Harness,
+	operationId: string,
+	restoredLimit: number,
+): Promise<void> => {
 	const record = await submissionOf(pi, operationId)
 	if (record?.type !== "input") {
 		return
 	}
 	if (record.status === "unanswered") {
-		await omitTurnEntries(pi, operationId)
+		await omitTurnEntries(pi, operationId, restoredLimit)
 		return
 	}
 	if (record.status === "done") {
 		const answer = await readAssistantMessage(pi, operationId)
 		if (answer === null || !mapAssistantMessageToOutcome(answer, ZERO_MODEL_USAGE).ok) {
-			await omitTurnEntries(pi, operationId)
+			await omitTurnEntries(pi, operationId, restoredLimit)
 		}
 	}
 }
@@ -182,6 +316,7 @@ const admitPiTurnUnderWay = (
 		instructions: request.system !== null && request.system.length > 0 ? request.system : null,
 	}
 	return Effect.gen(function* () {
+		const restoredLimit = yield* RestoredHistoryLimit
 		let finalizedPrevious: string | undefined
 		while (true) {
 			const admitted = yield* backend.withLock(
@@ -209,14 +344,18 @@ const admitPiTurnUnderWay = (
 							return { waitingFor: turnState.operationId }
 						}
 						if (turnState.status === "finalize") {
-							await finalizeSettledTurn(pi, turnState.operationId)
+							await finalizeSettledTurn(pi, turnState.operationId, restoredLimit)
 							finalizedPrevious = turnState.operationId
 							continue
 						}
 						break
 					}
+					if (!(await backend.enterWorkspace(request.turn))) {
+						await settleTurnUsage(pi, operationId)
+						return false
+					}
 					for (const unpublished of request.unpublishedOperationIds ?? []) {
-						await omitTurnEntries(pi, unpublished)
+						await omitTurnEntries(pi, unpublished, restoredLimit)
 					}
 					if (backend.isCancelled(operationId)) {
 						return false
@@ -245,13 +384,14 @@ const resolveSettledPiTurn = (
 	Effect.uninterruptible(
 		Effect.gen(function* () {
 			const pi = yield* Effect.promise(() => backend.pi())
+			const restoredLimit = yield* RestoredHistoryLimit
 			if (settled.status === "unanswered") {
 				if (settled.reason === "aborted") {
-					yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+					yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
 					const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 					return { ok: false, error: { _tag: "TurnInterrupted", model_usage: usage } }
 				}
-				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
 				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 				yield* Effect.logWarning("pi turn unanswered").pipe(
 					Effect.annotateLogs({
@@ -268,7 +408,7 @@ const resolveSettledPiTurn = (
 
 			const assistantMessage = yield* Effect.promise(() => readAssistantMessage(pi, operationId))
 			if (assistantMessage === null) {
-				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
 				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 				return {
 					ok: false,
@@ -282,7 +422,7 @@ const resolveSettledPiTurn = (
 				}
 			}
 			if (!mapAssistantMessageToOutcome(assistantMessage, ZERO_MODEL_USAGE).ok) {
-				yield* Effect.promise(() => omitTurnEntries(pi, operationId))
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
 			}
 			const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
 			return mapAssistantMessageToOutcome(assistantMessage, usage)

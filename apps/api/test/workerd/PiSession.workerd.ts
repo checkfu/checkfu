@@ -19,7 +19,7 @@ import { ARTIFACT_RECONCILE_CRON } from "../../src/Artifacts/ArtifactReconcile.t
 import { artifactReconcileCursorKey } from "../../src/Artifacts/ArtifactStore.ts"
 import { removeStage } from "./StageCleanup.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
-import type { FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
+import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..")
 const TEST_API_KEY = "ck_workerd_test_key"
@@ -722,6 +722,192 @@ describe("PiSession real Durable Object under workerd", () => {
 		])
 	}, 30_000)
 
+	it("keeps a file a workspace tool wrote for the turns that follow", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			if (req.lastUserText === "Save the launch code.") {
+				return output === undefined
+					? {
+							kind: "tool_call",
+							name: "write",
+							arguments: { path: "/workspace/notes/launch.txt", content: "PAPAYA-7" },
+						}
+					: { kind: "reply", text: "Saved." }
+			}
+			return output === undefined
+				? { kind: "tool_call", name: "read", arguments: { path: "/workspace/notes/launch.txt" } }
+				: { kind: "reply", text: `The file says: ${output}` }
+		})
+
+		const session = await createSession()
+		const startCount = fakeOpenAI.requests.length
+		const send = (text: string) =>
+			apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+
+		expect((await send("Save the launch code.")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+		expect((await send("What is in the launch file?")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+
+		const requests = fakeOpenAI.requests.slice(startCount)
+		expect(requests).toHaveLength(4)
+		expect(requests[0]?.toolNames).toEqual([
+			"read",
+			"ls",
+			"find",
+			"grep",
+			"write",
+			"edit",
+			"delete",
+		])
+		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
+
+		const events = await listAllEvents(session.id)
+		expect(events.map((e) => e.type)).toEqual([
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+		])
+		const replies = events.filter((e) => e.type === "agent.message").map((e) => e.content)
+		expect(replies[0]).toEqual([{ type: "text", text: "Saved." }])
+		expect(replies[1]?.[0]?.text).toContain("PAPAYA-7")
+		expect(
+			events.filter((e) => e.type === "span.model_request_end").map((e) => e.model_usage),
+		).toEqual([
+			{ input_tokens: 24, output_tokens: 12 },
+			{ input_tokens: 24, output_tokens: 12 },
+		])
+	}, 60_000)
+
+	it("finds and greps the workspace with globs", async () => {
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Make files.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/src/a.ts", content: "needle\n" },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/src/b.md", content: "needle\n" },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/workspace/node_modules/c.ts", content: "needle\n" },
+					},
+				],
+				"Find them.": [
+					{
+						kind: "tool_call",
+						name: "find",
+						arguments: { pattern: "**/*.ts", exclude: ["node_modules/**"] },
+					},
+				],
+				"Search them.": [
+					{
+						kind: "tool_call",
+						name: "grep",
+						arguments: {
+							query: "needle",
+							include: ["**/*.ts", "**/*.md"],
+							exclude: "node_modules/**",
+						},
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Result: ${req.toolOutputs.at(-1) ?? ""}`,
+				},
+		)
+		const session = await createSession()
+		let number = 0
+		const turn = async (text: string) => {
+			number += 1
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number)
+			return (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+				?.content?.[0]?.text
+		}
+		await turn("Make files.")
+		expect(await turn("Find them.")).toBe(
+			'Result: {"path":"/workspace","pattern":"**/*.ts","count":1,"entries":[{"path":"/workspace/src/a.ts","type":"file"}]}',
+		)
+		const searched = JSON.parse((await turn("Search them."))?.slice("Result: ".length) ?? "{}") as {
+			readonly matches: ReadonlyArray<{ readonly path: string }>
+		}
+		expect(searched.matches.map(({ path }) => path)).toEqual([
+			"/workspace/src/a.ts",
+			"/workspace/src/b.md",
+		])
+	}, 60_000)
+
+	it("gives the working directory back, empty, after the agent deletes it", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			if (output !== undefined) {
+				return { kind: "reply", text: `Result: ${output}` }
+			}
+			return req.lastUserText === "Delete it."
+				? { kind: "tool_call", name: "delete", arguments: { path: "/workspace", recursive: true } }
+				: { kind: "tool_call", name: "ls", arguments: { path: "/workspace" } }
+		})
+		const session = await createSession()
+		const send = (text: string) =>
+			apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+		expect((await send("Delete it.")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+		expect((await send("What is here?")).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2)
+		const reply = (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe('Result: {"path":"/workspace","count":0,"entries":[]}')
+	}, 60_000)
+
+	it("gives a new session an empty working directory it can list before writing anything", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const [output] = req.toolOutputs
+			return output === undefined
+				? { kind: "tool_call", name: "ls", arguments: { path: "/workspace" } }
+				: { kind: "reply", text: `Listing: ${output}` }
+		})
+		const session = await createSession()
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [{ type: "user.message", content: [{ type: "text", text: "What is here?" }] }],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1)
+		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
+	}, 60_000)
+
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
 		const queuedPrompt = "queued-after-interrupt"
@@ -993,6 +1179,17 @@ describe("PiSession real Durable Object under workerd", () => {
 			},
 		})
 		expect(afterArchive.status).toBe(409)
+
+		const recorded = (message: string) =>
+			stripAnsi(workerLogs.join(""))
+				.split("\n")
+				.some((line) => line.includes(message) && line.includes(session.id))
+		const discardDeadline = Date.now() + 10_000
+		while (!recorded("Workspace discarded") && Date.now() < discardDeadline) {
+			await sleep(100)
+		}
+		expect(recorded("Workspace discarded")).toBe(true)
+		expect(recorded("Workspace not discarded")).toBe(false)
 	}, 30_000)
 
 	it("stores artifact versions in R2, reads them back, and removes them on delete", async () => {
