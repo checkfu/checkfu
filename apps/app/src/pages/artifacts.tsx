@@ -196,7 +196,7 @@ function ArtifactView({
 		async () => {
 			await checkfu.artifacts.delete(artifact.id)
 		},
-		{ invalidates: [["artifacts", "page"]], then: () => void navigate({ to: "/artifacts" }) },
+		{ refreshes: [["artifacts", "page"]], then: () => void navigate({ to: "/artifacts" }) },
 	)
 	return (
 		<>
