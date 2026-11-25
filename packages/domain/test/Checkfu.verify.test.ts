@@ -263,6 +263,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				budget: 12_000,
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 120, length: 8 },
+				// It reads TurnInput, which the explorer cannot follow; StartTurn starts the same run.
+				allow: { skipped: ["EnsureTurnStarted"] },
 				opaque: [sessionIdOfNextRun, isUsableSchedule, upcomingOccurrences],
 				lock: "./Checkfu.verify.lock.json",
 				require: { proved: PROVED },
@@ -272,6 +274,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
+		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",

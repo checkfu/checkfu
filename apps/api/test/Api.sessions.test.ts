@@ -2343,7 +2343,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new UserInterrupt(),
+				event: new UserInterrupt({ turn: 1 }),
 				expectedJson: {
 					id: "evt_2",
 					seq: 2,
@@ -2469,7 +2469,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated(),
+				event: new SessionStatusTerminated({ running_turn: null }),
 				expectedJson: {
 					id: "evt_12",
 					seq: 12,

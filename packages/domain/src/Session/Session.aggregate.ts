@@ -297,7 +297,7 @@ export class Session extends Domain.Aggregate("Session", {
 			if (active._tag !== "Running") {
 				return new SessionNotRunning({ session_id: ctx.id, status: "idle" })
 			}
-			return [new UserInterrupt()]
+			return [new UserInterrupt({ turn: active.turn })]
 		},
 
 		RecordModelRequestStart: (state, cmd, ctx) => {
@@ -386,7 +386,7 @@ export class Session extends Domain.Aggregate("Session", {
 				},
 			})
 			if (cmd.disposition === "terminal") {
-				return [end, errorEvent, new SessionStatusTerminated()]
+				return [end, errorEvent, new SessionStatusTerminated({ running_turn: running.turn })]
 			}
 			return [end, errorEvent, ...endTurn(running, { type: "retries_exhausted" })]
 		},
@@ -434,11 +434,14 @@ export class Session extends Domain.Aggregate("Session", {
 						model_usage: { input_tokens: 0, output_tokens: 0 },
 						is_error: true,
 					}),
-					new SessionStatusTerminated(),
+					new SessionStatusTerminated({ running_turn: state.turn }),
 					new SessionArchived(),
 				]
 			}
-			return [new SessionStatusTerminated(), new SessionArchived()]
+			return [
+				new SessionStatusTerminated({ running_turn: state._tag === "Running" ? state.turn : null }),
+				new SessionArchived(),
+			]
 		},
 
 		// A batch key is claimed on an ended session too: a retry of events it already committed

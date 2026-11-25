@@ -264,7 +264,7 @@ describe("interrupted turns and turn recovery", () => {
 						headers: AUTH_HEADERS,
 						body: { events: [{ type: "user.interrupt" }] },
 					})
-					// Wait deterministically for StopModelRequest to mark TurnFence cancelled before releasing Turn 2.
+					// Wait deterministically for the interrupt to mark TurnFence cancelled before releasing Turn 2.
 					yield* Effect.promise(() => turn2Aborted)
 					releaseTurn2Admit?.()
 

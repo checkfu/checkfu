@@ -29,13 +29,13 @@ import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
 import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
-import { RunTurn } from "./Session/RunTurn.saga.ts"
+import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
-import { StartTurn } from "./Session/StartTurn.policy.ts"
-import { StopModelRequest } from "./Session/StopModelRequest.policy.ts"
+import { EnsureTurnStarted, EnsureTurnStartedLive } from "./Session/EnsureTurnStarted.policy.ts"
+import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
+import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
-import { SessionsHandlersLive } from "./Sessions.model.ts"
 
 /**
  * Unified hosted domain model.
@@ -64,7 +64,14 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		ArtifactView,
 		ArtifactVersionView,
 	],
-	policies: [StartTurn, StopModelRequest, ArmAutomation, StartAutomationRun, FreeAutomationSlot],
+	policies: [
+		StartTurn,
+		EnsureTurnStarted,
+		EnsureTurnStopped,
+		ArmAutomation,
+		StartAutomationRun,
+		FreeAutomationSlot,
+	],
 	sagas: [RunTurn],
 	projections: [Listing],
 	queries: [ListResources],
@@ -391,8 +398,13 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 	queries: ["ListResources"],
 }) {}
 
+// The hosted model forwards stops only from the session's own events, through EnsureTurnStopped,
+// so each stop has one outcome. The Sessions slice keeps StopModelRequest for its proofs.
 export const CheckfuHandlersLive = Layer.mergeAll(
-	SessionsHandlersLive,
+	StartTurnLive,
+	EnsureTurnStartedLive,
+	EnsureTurnStoppedLive,
+	RunTurnLive,
 	ArmAutomationLive,
 	StartAutomationRunLive,
 	FreeAutomationSlotLive,
