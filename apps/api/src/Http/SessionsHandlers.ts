@@ -7,6 +7,7 @@ import {
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
+import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
@@ -27,7 +28,6 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
@@ -35,12 +35,11 @@ import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
 import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
 import {
-	claimCreate,
-	claimIdempotency,
+	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
+	createCommandId,
 	currentRequestId,
 	handled,
-	idempotencyClaimId,
 	idempotentCommandId,
 	idempotentId,
 	isPending,
@@ -93,29 +92,6 @@ const sessionEventCommandId = (
 		scope.kind === "event"
 			? [sessionId, "event", scope.eventId]
 			: [sessionId, "batch", scope.key, scope.index],
-	)
-
-const sessionEventBatchId = (
-	digest: Digest.Digest["Service"],
-	sessionId: SessionId,
-	idempotencyKey: string,
-) => idempotencyClaimId(digest, "eb", [sessionId, "batch", idempotencyKey])
-
-const sessionEventClaimId = (
-	digest: Digest.Digest["Service"],
-	sessionId: SessionId,
-	eventId: string,
-) => idempotencyClaimId(digest, "ev", [sessionId, "event", eventId])
-
-const singleEventFingerprint = (
-	digest: Digest.Digest["Service"],
-	item:
-		| { readonly type: "user.interrupt" }
-		| { readonly type: "user.message"; readonly text: string },
-) =>
-	sha256Json(
-		digest,
-		item.type === "user.interrupt" ? { type: item.type } : { type: item.type, text: item.text },
 	)
 
 const eventBatchFingerprint = (
@@ -239,7 +215,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
-		const idempotencyClaims = yield* IdempotencyClaim
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
 		const digest = yield* Digest.Digest
@@ -347,35 +322,34 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						const commandId = yield* claimCreate(
-							idempotencyClaims,
-							digest,
-							"session",
-							idempotencyKey,
-							{
+						id = SessionId.make(
+							yield* idempotentId(digest, "sess", ["create", "session", "id", idempotencyKey]),
+						)
+						sendOptions = {
+							commandId: yield* createCommandId(digest, "session", idempotencyKey, {
 								agent_id: agentId,
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
-							},
-						)
-						id = SessionId.make(
-							yield* idempotentId(digest, "sess", ["create", "session", "id", idempotencyKey]),
-						)
-						sendOptions = { commandId }
+							}),
+						}
 					} else {
 						id = SessionId.make(yield* randomId(random, "sess"))
 					}
-					const receipt = yield* admitSession.send(
-						new AdmitSession({
-							session_id: id,
-							agent_id: agentId,
-							agent_version: agentVersion,
-							environment_id: environmentId,
-							title,
-						}),
-						sendOptions,
-					)
+					const receipt = yield* admitSession
+						.send(
+							new AdmitSession({
+								session_id: id,
+								agent_id: agentId,
+								agent_version: agentVersion,
+								environment_id: environmentId,
+								title,
+							}),
+							sendOptions,
+						)
+						.pipe(
+							Effect.catchTag("SessionAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+						)
 					const pinnedVersion = receipt.reply.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
 						agentId,
@@ -496,41 +470,30 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						prepared.push({ type: "user.message", eventId: event.id, commandId, text })
 					}
 
-					const hasClientEventIds = prepared.some((item) => item.eventId !== undefined)
-					if (idempotencyKey !== undefined || hasClientEventIds) {
-						const committedSession = yield* sessions.get(id)
-						if (committedSession._tag === "Uninitialized") {
-							return yield* reject(404, `Session ${id} not found.`)
-						}
-					}
 					if (idempotencyKey !== undefined) {
-						const batchId = yield* sessionEventBatchId(digest, id, idempotencyKey)
 						const fingerprint = yield* eventBatchFingerprint(digest, prepared)
-						yield* claimIdempotency(idempotencyClaims, batchId, fingerprint)
+						const claim = yield* sessions.send(
+							new ClaimIdempotencyKey({ session_id: id, fingerprint }),
+							{ commandId: yield* idempotentCommandId(digest, "batch", [id, idempotencyKey]) },
+						)
+						if (
+							!claim.events.some(
+								(event) =>
+									event._tag === "idempotency_key.claimed" && event.fingerprint === fingerprint,
+							)
+						) {
+							return yield* reject(409, IDEMPOTENCY_KEY_REUSED)
+						}
 					}
 
 					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
 						const sendOptions =
 							item.commandId === undefined ? undefined : { commandId: item.commandId }
-						const eventId = item.eventId
-						const claimEventId =
-							eventId === undefined
-								? Effect.void
-								: Effect.gen(function* () {
-										const claimId = yield* sessionEventClaimId(digest, id, eventId)
-										const fingerprint = yield* singleEventFingerprint(digest, item)
-										yield* claimIdempotency(idempotencyClaims, claimId, fingerprint).pipe(
-											Effect.catch(() => reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)),
-										)
-									})
 						const outcome =
 							item.type === "user.interrupt"
 								? yield* settled(
-										claimEventId.pipe(
-											Effect.andThen(
-												sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions),
-											),
+										sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions).pipe(
 											Effect.flatMap((receipt) =>
 												receipt.events.some((event) => event._tag === "user.interrupt")
 													? Effect.succeed({
@@ -542,38 +505,36 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										),
 									)
 								: yield* settled(
-										claimEventId.pipe(
-											Effect.andThen(
-												sessions.send(
-													new SendUserMessage({ session_id: id, text: item.text }),
-													sendOptions,
-												),
+										sessions
+											.send(new SendUserMessage({ session_id: id, text: item.text }), sendOptions)
+											.pipe(
+												Effect.flatMap((receipt) => {
+													const committed = receipt.events.find(
+														(event) => event._tag === "user.message",
+													)
+													if (
+														committed?._tag !== "user.message" ||
+														committed.content[0]?.text !== item.text
+													) {
+														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+													}
+													if (receipt.reply === undefined) {
+														return Effect.die(
+															new Error("SendUserMessage receipt is missing reply."),
+														)
+													}
+													const queued = !receipt.events.some(
+														(event) => event._tag === "session.status_running",
+													)
+													return Effect.succeed({
+														type: "user.message" as const,
+														...(item.eventId === undefined ? {} : { id: item.eventId }),
+														turn: receipt.reply.turn,
+														queued,
+														content: [{ type: "text" as const, text: item.text }],
+													})
+												}),
 											),
-											Effect.flatMap((receipt) => {
-												const committed = receipt.events.find(
-													(event) => event._tag === "user.message",
-												)
-												if (
-													committed?._tag !== "user.message" ||
-													committed.content[0]?.text !== item.text
-												) {
-													return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
-												}
-												if (receipt.reply === undefined) {
-													return Effect.die(new Error("SendUserMessage receipt is missing reply."))
-												}
-												const queued = !receipt.events.some(
-													(event) => event._tag === "session.status_running",
-												)
-												return Effect.succeed({
-													type: "user.message" as const,
-													...(item.eventId === undefined ? {} : { id: item.eventId }),
-													turn: receipt.reply.turn,
-													queued,
-													content: [{ type: "text" as const, text: item.text }],
-												})
-											}),
-										),
 									)
 						if (outcome._tag === "Failure") {
 							const { confirmed, error } = outcome.failure

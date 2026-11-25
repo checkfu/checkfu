@@ -162,22 +162,6 @@
 				"kind": "invariant",
 				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.description === null, s.config === null].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.config !== null].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
-			"IdempotencyClaim.ClaimNeverReturnsToUnclaimed": {
-				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" || after._tag === \"Claimed\""
-			},
-			"IdempotencyClaim.ClaimedFingerprintNeverChanges": {
-				"kind": "transition",
-				"source": "({ before, after }) =>\n\t\t\tbefore._tag !== \"Claimed\" ||\n\t\t\t(after._tag === \"Claimed\" && after.fingerprint === before.fingerprint)"
-			},
-			"IdempotencyClaim.ClaimOnlyEmitsFromUnclaimedWithCommandFingerprint": {
-				"kind": "transition",
-				"source": "({ before, after, command, events }) => {\n\t\t\tif (before._tag !== \"Unclaimed\" || after._tag !== \"Claimed\") {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\treturn [\n\t\t\t\tafter.fingerprint === command.fingerprint,\n\t\t\t\tevents.length === 1,\n\t\t\t\tevents.every((event) => event.fingerprint === command.fingerprint),\n\t\t\t].every((ok) => ok)\n\t\t}"
-			},
-			"Checkfu.AnIdempotencyKeyIsClaimed": {
-				"kind": "sometimes",
-				"source": "(m) => m.IdempotencyClaim.some((b) => b.state._tag === \"Claimed\")"
-			},
 			"Environment.UpdateKeepsWhatItDoesNotName": {
 				"kind": "transition",
 				"source": "({ before, after, command }) => {\n\t\t\tif (command._tag !== \"UpdateEnvironment\") {\n\t\t\t\treturn true\n\t\t\t}\n\t\t\tif (after.config === null || before.config === null) {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\tconst kept = after.config.networking\n\t\t\tconst asked =\n\t\t\t\tcommand.changes.config === undefined\n\t\t\t\t\t? before.config.networking\n\t\t\t\t\t: command.changes.config.networking\n\t\t\treturn [\n\t\t\t\tafter.name === (command.changes.name === undefined ? before.name : command.changes.name),\n\t\t\t\tafter.description ===\n\t\t\t\t\t(command.changes.description === undefined\n\t\t\t\t\t\t? before.description\n\t\t\t\t\t\t: command.changes.description),\n\t\t\t\tkept.type === asked.type,\n\t\t\t\tkept.type !== \"limited\" ||\n\t\t\t\t\tasked.type !== \"limited\" ||\n\t\t\t\t\t(kept.allow_mcp_servers === asked.allow_mcp_servers &&\n\t\t\t\t\t\tkept.allow_package_managers === asked.allow_package_managers),\n\t\t\t].every((ok) => ok)\n\t\t}"

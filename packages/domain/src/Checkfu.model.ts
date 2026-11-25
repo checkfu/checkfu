@@ -26,7 +26,6 @@ import {
 } from "./Automation/StartAutomationRun.policy.ts"
 import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
-import { IdempotencyClaim } from "./IdempotencyClaim/IdempotencyClaim.aggregate.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
 import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
@@ -45,7 +44,7 @@ import { SessionsHandlersLive } from "./Sessions.model.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [Agent, Environment, Session, IdempotencyClaim, Automation, AutomationCapacity],
+	aggregates: [Agent, Environment, Session, Automation, AutomationCapacity],
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
@@ -323,7 +322,6 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		},
 	},
 	sometimes: {
-		AnIdempotencyKeyIsClaimed: (m) => m.IdempotencyClaim.some((b) => b.state._tag === "Claimed"),
 		ASessionIsAdmitted: (m) => m.Session.some((s) => s.state._tag === "Idle"),
 		AnAdmittedSessionCompletesATurn: (m) =>
 			m.Session.some((s) => s.state._tag === "Idle" && s.state.turn >= 1),

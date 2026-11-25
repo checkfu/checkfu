@@ -1410,6 +1410,48 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 		}
 	})
 
+	it("replays a committed event under a fresh Idempotency-Key after the session has ended", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model, context) =>
+			makeAssistantReply(model, null, `ok:${extractLastUserText(context)}`, 4, 2),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const session = yield* createIdleSession(apiFetch)
+					const send = (key: string, id: string, text: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/sessions/${session.id}/events`,
+							headers: { ...AUTH_HEADERS, "idempotency-key": key },
+							body: { events: [{ id, type: "user.message", content: [{ type: "text", text }] }] },
+						})
+
+					const first = yield* send("batch-1", "evt-1", "hello")
+					expect(first.status).toBe(200)
+					const accepted = (yield* Effect.promise(() => first.json())) as unknown
+					const archived = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${session.id}/archive`,
+						headers: AUTH_HEADERS,
+					})
+					expect(archived.status).toBe(200)
+
+					// The SDK makes a fresh key for a new call: the committed event still replays.
+					const replay = yield* send("batch-2", "evt-1", "hello")
+					expect(replay.status).toBe(200)
+					expect(yield* Effect.promise(() => replay.json())).toEqual(accepted)
+
+					// A new event on the ended session is refused.
+					const fresh = yield* send("batch-3", "evt-2", "again")
+					expect(fresh.status).toBe(409)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("deduplicates retried user.message and user.interrupt events via client event id or Idempotency-Key after an unconfirmed send", async () => {
 		const seenPrompts: Array<string> = []
 		let markInterruptibleStarted: () => void = () => undefined
@@ -1654,7 +1696,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							{ type: "user.message", content: [{ type: "text", text: "msg-b2" }] },
 						],
 					}
-					dropReceiptOnSend = sends + 2
+					dropReceiptOnSend = sends + 3
 					const keyFirstRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessB.id}/events`,
@@ -1866,7 +1908,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							},
 						],
 					}
-					dropReceiptOnSend = sends + 2
+					dropReceiptOnSend = sends + 3
 					const batchD3Fail = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${sessD.id}/events`,
@@ -1930,6 +1972,67 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						},
 					})
 					expect(missingSessionRes.status).toBe(404)
+
+					// A lost claim receipt is retried like any other: the identical retry replays the
+					// claim, and concurrent requests under one key commit one batch and 409 the other body.
+					const sessG = yield* createIdleSession(apiFetch)
+					const batchG = {
+						events: [{ type: "user.message", content: [{ type: "text", text: "claim-lost" }] }],
+					}
+					dropReceiptOnSend = sends + 1
+					const claimLostRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${sessG.id}/events`,
+						headers: { ...AUTH_HEADERS, "idempotency-key": "claim-lost-key" },
+						body: batchG,
+					})
+					expect(claimLostRes.status).toBe(500)
+					const claimRetryRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/sessions/${sessG.id}/events`,
+						headers: { ...AUTH_HEADERS, "idempotency-key": "claim-lost-key" },
+						body: batchG,
+					})
+					expect(claimRetryRes.status).toBe(200)
+					yield* waitIdle(sessG.id, 1)
+
+					const racing = (key: string, text: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: `/v1/sessions/${sessG.id}/events`,
+							headers: { ...AUTH_HEADERS, "idempotency-key": key },
+							body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+						})
+					const sameBody = yield* Effect.all(
+						[racing("race-same", "race-same"), racing("race-same", "race-same")],
+						{ concurrency: "unbounded" },
+					)
+					expect(sameBody.map((res) => res.status)).toEqual([200, 200])
+					yield* waitIdle(sessG.id, 2)
+					const differentBody = yield* Effect.all(
+						[racing("race-diff", "race-diff-a"), racing("race-diff", "race-diff-b")],
+						{ concurrency: "unbounded" },
+					)
+					expect(differentBody.map((res) => res.status).toSorted((a, b) => a - b)).toEqual([
+						200, 409,
+					])
+					yield* waitIdle(sessG.id, 3)
+					const eventsGRes = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${sessG.id}/events`,
+						headers: AUTH_HEADERS,
+					})
+					const eventsG = (
+						(yield* Effect.promise(() => eventsGRes.json())) as {
+							data: ReadonlyArray<{ type: string; content?: ReadonlyArray<{ text: string }> }>
+						}
+					).data
+					const committedG = eventsG
+						.filter((e) => e.type === "user.message")
+						.map((e) => e.content?.[0]?.text)
+					expect(committedG.slice(0, 2)).toEqual(["claim-lost", "race-same"])
+					expect(committedG).toHaveLength(3)
+					expect(["race-diff-a", "race-diff-b"]).toContain(committedG[2])
 
 					// 5. A SchemaError thrown when decoding a committed receipt MUST report 500 with
 					//    unconfirmed_index (NOT a confirmed 409 conflict), so the caller retries the same id.
@@ -2700,7 +2803,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(yield* Effect.promise(() => retryAfterArchiveRes.json())).toEqual(sess1)
 					expect(new Set(admittedSessionIds)).toEqual(new Set([sess1.id]))
 
-					const admitsBeforeConflict = admittedSessionIds.length
+					const sessionBeforeConflict = yield* realSessions.get(SessionId.make(sess1.id))
 					const conflictSessRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/sessions",
@@ -2712,7 +2815,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						type: "error",
 						error: { type: "conflict_error" },
 					})
-					expect(admittedSessionIds).toHaveLength(admitsBeforeConflict)
+					expect(new Set(admittedSessionIds)).toEqual(new Set([sess1.id]))
+					expect(yield* realSessions.get(SessionId.make(sess1.id))).toEqual(sessionBeforeConflict)
 
 					const unkeyed1Res = yield* sendRequest(apiFetch, {
 						method: "POST",

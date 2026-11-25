@@ -31,6 +31,10 @@ import {
 	SpanModelRequestEnd,
 } from "../src/Session/CommitModelReply.command.ts"
 import {
+	ClaimIdempotencyKey,
+	IdempotencyKeyClaimed,
+} from "../src/Session/ClaimIdempotencyKey.command.ts"
+import {
 	CreateSession,
 	SessionAlreadyExists,
 	SessionCreated,
@@ -718,6 +722,48 @@ describe("Sessions", () => {
 			Story.rejected(new SessionTerminated({ session_id: session.id })),
 		)
 	})
+
+	it.effect(
+		"records the first fingerprint claimed under a command id, replays it for every later claim, and claims on an ended session",
+		() => {
+			const missing = Session.ref("sess_missing")
+			const session = Session.ref("sess_claims")
+			const claim = (fingerprint: string) =>
+				new ClaimIdempotencyKey({ session_id: session.id, fingerprint })
+			return story(
+				Story.when(new ClaimIdempotencyKey({ session_id: missing.id, fingerprint: "fp_alpha" })),
+				Story.rejected(new SessionNotFound({ session_id: missing.id })),
+				Story.given(session, createdEvent),
+				Story.when(claim("fp_alpha"), { commandId: "batch:key-1" }),
+				Story.then(session, new IdempotencyKeyClaimed({ fingerprint: "fp_alpha" })),
+				Story.state(session, { _tag: "Idle", turn: 0 }),
+				Story.when(claim("fp_beta"), { commandId: "batch:key-1" }),
+				Story.then(session),
+				Story.when(claim("fp_alpha"), { commandId: "batch:key-1" }),
+				Story.then(session),
+				Story.when(claim("fp_beta"), { commandId: "batch:key-2" }),
+				Story.then(session, new IdempotencyKeyClaimed({ fingerprint: "fp_beta" })),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Hi" })),
+				Story.then(
+					session,
+					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+					new SessionStatusRunning({ turn: 1 }),
+				),
+				Story.when(claim("fp_gamma"), { commandId: "batch:key-3" }),
+				Story.then(session, new IdempotencyKeyClaimed({ fingerprint: "fp_gamma" })),
+				Story.when(new ArchiveSession({ session_id: session.id })),
+				Story.then(session, new SessionStatusTerminated(), new SessionArchived()),
+				Story.when(claim("fp_alpha"), { commandId: "batch:key-1" }),
+				Story.then(session),
+				// An ended session still records a new key, so a retry of events it committed gets their
+				// receipts; the event commands refuse anything new.
+				Story.when(claim("fp_delta"), { commandId: "batch:key-4" }),
+				Story.then(session, new IdempotencyKeyClaimed({ fingerprint: "fp_delta" })),
+				Story.when(new SendUserMessage({ session_id: session.id, text: "Late" })),
+				Story.rejected(new SessionTerminated({ session_id: session.id })),
+			)
+		},
+	)
 
 	it.effect("replays in-flight requests from Session events and supports colon session IDs", () => {
 		const sessionA = Session.ref("s")

@@ -12,13 +12,13 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as Option from "effect/Option"
-import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
 	DEFAULT_ENVIRONMENT_CONFIG,
+	IDEMPOTENCY_KEY_REUSED,
 	bestEffortAfterCommit,
-	claimCreate,
+	createCommandId,
 	handled,
 	idempotentId,
 	isPending,
@@ -37,7 +37,6 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 	Effect.gen(function* () {
 		const environments = yield* Environment
 		const environmentViews = yield* EnvironmentView
-		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
@@ -75,33 +74,34 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					let id: EnvironmentId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
-						const commandId = yield* claimCreate(
-							idempotencyClaims,
-							digest,
-							"environment",
-							idempotencyKey,
-							{
-								name: payload.name,
-								description,
-								config,
-							},
-						)
 						id = EnvironmentId.make(
 							yield* idempotentId(digest, "env", ["create", "environment", "id", idempotencyKey]),
 						)
-						sendOptions = { commandId }
+						sendOptions = {
+							commandId: yield* createCommandId(digest, "environment", idempotencyKey, {
+								name: payload.name,
+								description,
+								config,
+							}),
+						}
 					} else {
 						id = EnvironmentId.make(yield* randomId(random, "env"))
 					}
-					const receipt = yield* environments.send(
-						new CreateEnvironment({
-							environment_id: id,
-							name: payload.name,
-							description,
-							config,
-						}),
-						sendOptions,
-					)
+					const receipt = yield* environments
+						.send(
+							new CreateEnvironment({
+								environment_id: id,
+								name: payload.name,
+								description,
+								config,
+							}),
+							sendOptions,
+						)
+						.pipe(
+							Effect.catchTag("EnvironmentAlreadyExists", () =>
+								reject(409, IDEMPOTENCY_KEY_REUSED),
+							),
+						)
 					const result = yield* environmentViews
 						.get(Environment.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "environment"))

@@ -21,9 +21,6 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
-import { ClaimIdempotencyKey } from "@checkfu/domain/IdempotencyClaim/ClaimIdempotencyKey.command"
-import { IdempotencyClaimId } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.id"
-import type { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import { optionalSecret } from "../Secrets.ts"
 import {
 	AgentBodyLimit,
@@ -254,13 +251,6 @@ export const sha256Json = (
 ): Effect.Effect<string> =>
 	digest.digestHex(Digest.sha256, utf8Encoder.encode(JSON.stringify(value)))
 
-export const idempotencyClaimId = (
-	digest: Digest.Digest["Service"],
-	prefix: string,
-	scope: ReadonlyArray<unknown>,
-): Effect.Effect<IdempotencyClaimId> =>
-	Effect.map(sha256Json(digest, scope), (hash) => IdempotencyClaimId.make(`${prefix}_${hash}`))
-
 export const idempotentId = (
 	digest: Digest.Digest["Service"],
 	prefix: string,
@@ -273,43 +263,20 @@ export const idempotentCommandId = (
 	scope: ReadonlyArray<unknown>,
 ): Effect.Effect<string> => Effect.map(sha256Json(digest, scope), (hash) => `${prefix}:${hash}`)
 
-export const createClaimId = (
-	digest: Digest.Digest["Service"],
-	resource: PendingResourceType,
-	idempotencyKey: string,
-) => idempotencyClaimId(digest, "cr", ["create", resource, idempotencyKey])
-
-export const createFingerprint = (digest: Digest.Digest["Service"], payload: unknown) =>
-	digest.digestHex(Digest.sha256, utf8Encoder.encode(stringifyCanonicalJson(payload)))
+export const IDEMPOTENCY_KEY_REUSED = "Idempotency-Key was already used for a different request."
 
 export const createCommandId = (
 	digest: Digest.Digest["Service"],
 	resource: PendingResourceType,
 	idempotencyKey: string,
-) => idempotentCommandId(digest, `create-${resource}`, ["create", resource, idempotencyKey])
-
-export const claimIdempotency = (
-	idempotencyClaims: Effect.Success<typeof IdempotencyClaim>,
-	batchId: IdempotencyClaimId,
-	fingerprint: string,
-) =>
-	idempotencyClaims.send(new ClaimIdempotencyKey({ claim_id: batchId, fingerprint }), {
-		commandId: `claim:${batchId}:${fingerprint}`,
-	})
-
-export const claimCreate = (
-	idempotencyClaims: Effect.Success<typeof IdempotencyClaim>,
-	digest: Digest.Digest["Service"],
-	resource: PendingResourceType,
-	idempotencyKey: string,
 	payload: unknown,
 ) =>
-	Effect.gen(function* () {
-		const claimId = yield* createClaimId(digest, resource, idempotencyKey)
-		const fingerprint = yield* createFingerprint(digest, payload)
-		yield* claimIdempotency(idempotencyClaims, claimId, fingerprint)
-		return yield* createCommandId(digest, resource, idempotencyKey)
-	})
+	idempotentCommandId(digest, `create-${resource}`, [
+		"create",
+		resource,
+		idempotencyKey,
+		stringifyCanonicalJson(payload),
+	])
 
 // Ephemeral-keyed HMAC-SHA-256 verification via `Mac.Mac` (`Mac.layerWebCrypto`)
 // delegates tag comparison to native `crypto.subtle.verify("HMAC", ...)` instead
