@@ -48,14 +48,17 @@ const generateOperationBindingsFile = (
 		out("readonly cliCommand: string")
 		out("readonly httpMethod: string")
 		out("readonly path: string")
+		out("readonly pathParams: ReadonlyArray<string>")
 		out("readonly kind: SdkOperationKind")
 		out("readonly retrySafety: SdkRetrySafety")
 		out("readonly supportsIdempotencyKey: boolean")
+		out("readonly requiresIdempotencyKey: boolean")
+		out("readonly bodyRequired: boolean")
 		out("readonly supportsPending: boolean")
 	})
 	out("}")
 	out()
-	out("export const SDK_OPERATION_BINDINGS: ReadonlyArray<SdkOperationBinding> = [")
+	out("export const SDK_OPERATION_BINDINGS = [")
 	out.indent(() => {
 		for (const op of operations) {
 			out("{")
@@ -67,15 +70,18 @@ const generateOperationBindingsFile = (
 				out("cliCommand: ", JSON.stringify(op.cliCommand), ",")
 				out("httpMethod: ", JSON.stringify(op.httpMethod), ",")
 				out("path: ", JSON.stringify(op.path), ",")
+				out("pathParams: ", JSON.stringify(op.pathParams.map((param) => param.wireName)), ",")
 				out("kind: ", JSON.stringify(op.kind), ",")
 				out("retrySafety: ", JSON.stringify(op.retrySafety), ",")
 				out("supportsIdempotencyKey: ", op.supportsIdempotencyKey, ",")
+				out("requiresIdempotencyKey: ", op.requiresIdempotencyKey, ",")
+				out("bodyRequired: ", op.bodyRequired, ",")
 				out("supportsPending: ", op.supportsPending, ",")
 			})
 			out("},")
 		}
 	})
-	out("]")
+	out("] as const satisfies ReadonlyArray<SdkOperationBinding>")
 
 	return {
 		path: "OperationBindings.ts",

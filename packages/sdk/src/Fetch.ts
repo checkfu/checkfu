@@ -1,24 +1,58 @@
 import { parseJsonAs } from "./Boundary.ts"
 import { SDK_OPERATION_BINDINGS } from "./generated/OperationBindings.ts"
 import type { CheckfuOperations } from "./generated/Resources.ts"
+import { SINGLE_PATH_SEGMENT_MESSAGE, isSinglePathSegment } from "./PathSegment.ts"
 import type { BodyOf, JsonResultOf, PathOf, QueryOf } from "./Runtime.ts"
 
-export type OperationId = keyof CheckfuOperations
+type Binding = (typeof SDK_OPERATION_BINDINGS)[number]
+type BindingOf<Op extends OperationId> = Extract<Binding, { readonly operationId: Op }>
 
-type Field<K extends string, T> = [T] extends [never]
+export type OperationId = Binding["operationId"] & keyof CheckfuOperations
+export type JsonOperationId = Extract<
+	Binding,
+	{ readonly kind: "unary" | "paginated" }
+>["operationId"] &
+	OperationId
+
+type Shape<Op extends OperationId> = CheckfuOperations[Op]
+
+type PathField<Op extends OperationId> = BindingOf<Op>["pathParams"] extends readonly []
 	? Record<never, never>
-	: Record<never, never> extends T
-		? { readonly [P in K]?: T }
-		: { readonly [P in K]: T }
+	: { readonly path: PathOf<Shape<Op>> }
 
-export type FetchInput<Op extends OperationId> = Field<"path", PathOf<CheckfuOperations[Op]>> &
-	Field<"query", QueryOf<CheckfuOperations[Op]>> &
-	Field<"body", BodyOf<CheckfuOperations[Op]>> & {
-		readonly idempotencyKey?: string
-		readonly signal?: AbortSignal
-	}
+type QueryField<Op extends OperationId> = [QueryOf<Shape<Op>>] extends [never]
+	? Record<never, never>
+	: Record<never, never> extends QueryOf<Shape<Op>>
+		? { readonly query?: QueryOf<Shape<Op>> }
+		: { readonly query: QueryOf<Shape<Op>> }
 
-export type FetchResult<Op extends OperationId> = JsonResultOf<CheckfuOperations[Op]>
+type BodyField<Op extends OperationId> = [BodyOf<Shape<Op>>] extends [never]
+	? Record<never, never>
+	: BindingOf<Op>["bodyRequired"] extends true
+		? { readonly body: BodyOf<Shape<Op>> }
+		: { readonly body?: BodyOf<Shape<Op>> }
+
+type KeyField<Op extends OperationId> = BindingOf<Op>["requiresIdempotencyKey"] extends true
+	? { readonly idempotencyKey: string }
+	: BindingOf<Op>["supportsIdempotencyKey"] extends true
+		? { readonly idempotencyKey?: string }
+		: Record<never, never>
+
+export type UrlInput<Op extends OperationId> = PathField<Op> & QueryField<Op>
+
+export type FetchInput<Op extends JsonOperationId> = UrlInput<Op> &
+	BodyField<Op> &
+	KeyField<Op> & { readonly signal?: AbortSignal }
+
+export type FetchResult<Op extends JsonOperationId> = JsonResultOf<Shape<Op>>
+
+type OptionalWhenEmpty<Input> =
+	Record<never, never> extends Input ? [input?: Input] : [input: Input]
+
+export type FetchClient = <Op extends JsonOperationId>(
+	operationId: Op,
+	...input: OptionalWhenEmpty<FetchInput<Op>>
+) => Promise<FetchResult<Op>>
 
 export class CheckfuFetchError extends Error {
 	readonly status: number
@@ -33,70 +67,79 @@ export class CheckfuFetchError extends Error {
 }
 
 export interface FetchClientOptions {
-	readonly baseUrl?: string
 	readonly fetch?: typeof globalThis.fetch
 	readonly headers?: HeadersInit
 }
 
-export type FetchClient = <Op extends OperationId>(
-	operationId: Op,
-	...input: Record<never, never> extends FetchInput<Op>
-		? [input?: FetchInput<Op>]
-		: [input: FetchInput<Op>]
-) => Promise<FetchResult<Op>>
-
 type QueryValue = string | number | boolean | null | undefined
+
+interface RawInput {
+	readonly path?: Readonly<Record<string, string | number>>
+	readonly query?: Readonly<Record<string, QueryValue>>
+	readonly body?: unknown
+	readonly idempotencyKey?: string
+	readonly signal?: AbortSignal
+}
 
 interface ErrorEnvelope {
 	readonly error?: { readonly type?: unknown; readonly message?: unknown }
 }
 
-const bindings = new Map(SDK_OPERATION_BINDINGS.map((binding) => [binding.operationId, binding]))
+const bindings: ReadonlyMap<string, Binding> = new Map(
+	SDK_OPERATION_BINDINGS.map((binding) => [binding.operationId, binding]),
+)
 
-export const operationUrl = (
-	operationId: OperationId,
-	path: Readonly<Record<string, string | number>> = {},
-	query: Readonly<Record<string, QueryValue>> = {},
-): string => {
+const bindingOf = (operationId: string): Binding => {
 	const binding = bindings.get(operationId)
 	if (binding === undefined) {
 		throw new Error(`Unknown operation ${operationId}.`)
 	}
-	const resolved = Object.entries(path).reduce(
-		(url, [name, value]) => url.replace(`{${name}}`, encodeURIComponent(String(value))),
-		binding.path,
-	)
+	return binding
+}
+
+const urlOf = (binding: Binding, input: RawInput): string => {
+	const path = binding.pathParams.reduce<string>((url, name) => {
+		const value = input.path?.[name]
+		if (value === undefined) {
+			throw new Error(`Missing ${name} for ${binding.operationId}.`)
+		}
+		if (!isSinglePathSegment(String(value))) {
+			throw new Error(`Invalid ${name}: ${SINGLE_PATH_SEGMENT_MESSAGE}.`)
+		}
+		return url.replace(`{${name}}`, encodeURIComponent(String(value)))
+	}, binding.path)
 	const search = new URLSearchParams(
-		Object.entries(query).flatMap(([name, value]) =>
+		Object.entries(input.query ?? {}).flatMap(([name, value]) =>
 			value === undefined || value === null ? [] : [[name, String(value)]],
 		),
 	).toString()
-	return search === "" ? resolved : `${resolved}?${search}`
+	return search === "" ? path : `${path}?${search}`
 }
+
+export const operationUrl = <Op extends OperationId>(
+	operationId: Op,
+	...[input]: OptionalWhenEmpty<UrlInput<Op>>
+): string => urlOf(bindingOf(operationId), input ?? {})
 
 export const createFetchClient = (options: FetchClientOptions = {}): FetchClient => {
 	const send = options.fetch ?? globalThis.fetch.bind(globalThis)
-	const base = options.baseUrl ?? ""
 	return async (operationId, ...[input]) => {
-		const binding = bindings.get(operationId)
-		if (binding === undefined) {
-			throw new Error(`Unknown operation ${operationId}.`)
-		}
-		const fields: {
-			readonly path?: Readonly<Record<string, string | number>>
-			readonly query?: Readonly<Record<string, QueryValue>>
-			readonly body?: unknown
-			readonly idempotencyKey?: string
-			readonly signal?: AbortSignal
-		} = input ?? {}
+		const binding = bindingOf(operationId)
+		const fields: RawInput = input ?? {}
 		const headers = new Headers(options.headers)
-		if (fields.body !== undefined) {
-			headers.set("content-type", "application/json")
-		}
 		if (fields.idempotencyKey !== undefined) {
 			headers.set("idempotency-key", fields.idempotencyKey)
 		}
-		const response = await send(`${base}${operationUrl(operationId, fields.path, fields.query)}`, {
+		if (binding.requiresIdempotencyKey && !headers.has("idempotency-key")) {
+			throw new Error(`${operationId} needs an idempotency key.`)
+		}
+		if (binding.bodyRequired && fields.body === undefined) {
+			throw new Error(`${operationId} needs a body.`)
+		}
+		if (fields.body !== undefined) {
+			headers.set("content-type", "application/json")
+		}
+		const response = await send(urlOf(binding, fields), {
 			method: binding.httpMethod,
 			headers,
 			...(fields.signal === undefined ? {} : { signal: fields.signal }),

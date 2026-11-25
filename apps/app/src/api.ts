@@ -215,7 +215,7 @@ export const checkfu = {
 				...withSignal(signal),
 			}),
 		streamUrl: (session_id: string, after: number) =>
-			operationUrl("sessions.events.stream", { session_id }, { after }),
+			operationUrl("sessions.events.stream", { path: { session_id }, query: { after } }),
 	},
 	artifacts: {
 		list: (after?: string, signal?: AbortSignal) =>
