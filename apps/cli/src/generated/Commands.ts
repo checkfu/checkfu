@@ -764,7 +764,9 @@ const automationsUpdateCommand = CommandMake(
 		),
 		name: FlagString("name").pipe(FlagWithDescription("New automation name"), FlagOptional),
 		description: FlagString("description").pipe(
-			FlagWithDescription("New description, or null to clear it"),
+			FlagWithDescription(
+				"New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text.",
+			),
 			FlagOptional,
 		),
 		agent: FlagString("agent").pipe(

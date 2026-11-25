@@ -18,6 +18,7 @@ import { UpdateAgentDecision } from "../src/Agent/UpdateAgent.decision.ts"
 import { Automation } from "../src/Automation/Automation.aggregate.ts"
 import { AdmitAutomation } from "../src/Automation/AdmitAutomation.command.ts"
 import { AdmitAutomationDecision } from "../src/Automation/AdmitAutomation.decision.ts"
+import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
 import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
 import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
 import { RunAutomation } from "../src/Automation/RunAutomation.command.ts"
@@ -124,9 +125,7 @@ const STANDING = {
 	"Automation.FiredCarriesTheNewRun": "proved",
 	"Automation.RunsAreReportedInOrder": "proved",
 	"Automation.AFailedRunPausesOnlyAnActiveAutomation": "proved",
-	"Automation.OnlyAnUpdateOfTheCurrentRevisionRevisesIt": "proved",
-	"Automation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": "proved",
-	"Automation.AnUpdateLeavesRunsAlone": "proved",
+	"Automation.OnlyCreationOrAnUpdateRevisesIt": "proved",
 	"AutomationCapacity.ReservedSlotsStayWithinTheLimit": "proved",
 	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
@@ -143,6 +142,10 @@ const STANDING = {
 	"OpenAutomationSession.AnAutomationSessionOpensOnItsFirstTurnWithNothingQueued": "proved",
 	"OpenAutomationSession.AnAutomationSessionPinsAVersionWithinTheAgentHead": "proved",
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"UpdateAutomation.AnUpdateNeedsTheCurrentRevisionOfALiveAutomation": "proved",
+	"UpdateAutomation.AChangedAgentOrEnvironmentIsActive": "proved",
+	"UpdateAutomation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": "proved",
+	"UpdateAutomation.AnUpdateLeavesRunsAgentsAndEnvironmentsAlone": "proved",
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
@@ -209,7 +212,6 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"UnpauseAutomation",
 			"ArchiveAutomation",
 			"RunAutomation",
-			"UpdateAutomation",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
 		expect(hostedCommands).not.toContain("CreateAutomation")
@@ -329,6 +331,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					const updateAgent = yield* UpdateAgentDecision
 					const admitSession = yield* AdmitSessionDecision
 					const admitAutomation = yield* AdmitAutomationDecision
+					const updateAutomation = yield* UpdateAutomationDecision
 					const automations = yield* Automation
 
 					const agentRef = Agent.ref(AgentId.make("agent_post_1"))
@@ -561,16 +564,18 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 					)
 					yield* automations.send(new RunAutomation({ automation_id: automationRef.id }))
 					const automationWorld = yield* recordStep("automation-admitted-and-run")
-					yield* automations.send(
+					yield* updateAutomation.send(
 						new UpdateAutomation({
 							automation_id: automationRef.id,
 							expected_revision: 1,
 							reschedule: true,
+							agent_changed: true,
+							environment_changed: false,
 							name: "Updated Automation",
 							description: "Moved to noon.",
-							agent_id: agentRef.id,
+							agent_id: BoundedAgentId.make(agentRef.id),
 							agent_version: 1,
-							environment_id: envRef.id,
+							environment_id: BoundedEnvironmentId.make(envRef.id),
 							text: "Run the updated automation",
 							schedule: { type: "cron", expression: "0 12 * * *", timezone: "UTC" },
 						}),

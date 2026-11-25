@@ -667,11 +667,18 @@ describe("Automations API", () => {
 				})
 				expect(renamed.status).toBe(200)
 				const views = yield* AutomationView
-				const activationOf = views.get(Automation.ref(AutomationId.make(id))).pipe(
-					Effect.map((found) => Option.getOrNull(found)?.activation),
+				const viewed = views.get(Automation.ref(AutomationId.make(id))).pipe(
+					Effect.map((found) => Option.getOrNull(found)),
 					Effect.orDie,
 				)
+				const activationOf = Effect.map(viewed, (found) => found?.activation)
+				const revisionOf = Effect.map(viewed, (found) => found?.revision)
 				expect(yield* activationOf).toBe(0)
+				const again = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					name: "Weekday report",
+				})
+				expect([again.status, again.body]).toEqual([200, renamed.body])
+				expect(yield* revisionOf).toBe(2)
 				expect(renamed.body).toEqual({
 					...created.body,
 					name: "Weekday report",

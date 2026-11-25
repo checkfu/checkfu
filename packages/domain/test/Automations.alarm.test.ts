@@ -1,3 +1,5 @@
+import { UpdateAutomation } from "../src/Automation/UpdateAutomation.command.ts"
+import { UpdateAutomationDecision } from "../src/Automation/UpdateAutomation.decision.ts"
 import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
@@ -111,18 +113,22 @@ describe("Automation alarms", () => {
 			yield* settle
 			yield* domain.PauseAutomation({ automation_id: id })
 			yield* settle
-			yield* domain.UpdateAutomation({
-				automation_id: id,
-				expected_revision: 1,
-				reschedule: true,
-				name: "Morning report",
-				description: null,
-				agent_id: "agent_alarm",
-				agent_version: null,
-				environment_id: "env_alarm",
-				text: "Write the morning report.",
-				schedule: { type: "cron", expression: "0 12 * * *", timezone: "UTC" },
-			})
+			yield* (yield* UpdateAutomationDecision).send(
+				new UpdateAutomation({
+					automation_id: id,
+					expected_revision: 1,
+					reschedule: true,
+					agent_changed: false,
+					environment_changed: false,
+					name: "Morning report",
+					description: null,
+					agent_id: BoundedAgentId.make("agent_alarm"),
+					agent_version: null,
+					environment_id: BoundedEnvironmentId.make("env_alarm"),
+					text: "Write the morning report.",
+					schedule: { type: "cron", expression: "0 12 * * *", timezone: "UTC" },
+				}),
+			)
 			yield* settle
 			const cancelled = yield* Effect.flip(automations.unschedule(id, NEXT_FIRING))
 			expect(cancelled._tag).toBe("AlreadyCancelled")

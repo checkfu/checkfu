@@ -433,7 +433,8 @@ export const UpdateAutomationBody = Schema.Struct({
 	name: Schema.optionalKey(AutomationName.annotate({ description: "New automation name" })),
 	description: Schema.optionalKey(
 		Schema.NullOr(AutomationDescription).annotate({
-			description: "New description, or null to clear it",
+			description:
+				"New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text.",
 		}),
 	),
 	agent: Schema.optionalKey(

@@ -90,17 +90,9 @@
 				"kind": "invariant",
 				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.revision === 0].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.revision > 0].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			},
-			"Automation.OnlyAnUpdateOfTheCurrentRevisionRevisesIt": {
+			"Automation.OnlyCreationOrAnUpdateRevisesIt": {
 				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.revision === before.revision,\n\t\t\t\t[before.status === \"\", after.revision === 1].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tcommand._tag === \"UpdateAutomation\",\n\t\t\t\t\t[before.status === \"active\", before.status === \"paused\"].some((live) => live),\n\t\t\t\t\tcommand._tag !== \"UpdateAutomation\" || command.expected_revision === before.revision,\n\t\t\t\t\tafter.revision === before.revision + 1,\n\t\t\t\t\tafter.status === before.status,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
-			},
-			"Automation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": {
-				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateAutomation\" ||\n\t\t\tafter.activation ===\n\t\t\t\t([before.status === \"active\", command.reschedule, after.revision > before.revision].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t)\n\t\t\t\t\t? before.activation + 1\n\t\t\t\t\t: before.activation)"
-			},
-			"Automation.AnUpdateLeavesRunsAlone": {
-				"kind": "transition",
-				"source": "({ before, after, command }) =>\n\t\t\tcommand._tag !== \"UpdateAutomation\" ||\n\t\t\t[\n\t\t\t\tafter.runs === before.runs,\n\t\t\t\tafter.reported === before.reported,\n\t\t\t\tafter.last_scheduled_at === before.last_scheduled_at,\n\t\t\t].every((ok) => ok)"
+				"source": "({ before, after, events }) =>\n\t\t\t[\n\t\t\t\tafter.revision === before.revision,\n\t\t\t\t[before.status === \"\", after.revision === 1].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tevents.some((event) => event._tag === \"automation.updated\"),\n\t\t\t\t\tafter.revision === before.revision + 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
 			}
 		}
 	}

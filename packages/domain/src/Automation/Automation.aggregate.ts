@@ -24,11 +24,7 @@ import {
 import { AutomationFired, RunAutomation } from "./RunAutomation.command.ts"
 import { SuspendAutomation } from "./SuspendAutomation.command.ts"
 import { AutomationUnpaused, UnpauseAutomation } from "./UnpauseAutomation.command.ts"
-import {
-	AutomationRevisionConflict,
-	AutomationUpdated,
-	UpdateAutomation,
-} from "./UpdateAutomation.command.ts"
+import { AutomationUpdated } from "./UpdateAutomation.command.ts"
 
 export const AutomationState = Schema.Struct({
 	status: Schema.String,
@@ -81,8 +77,8 @@ export class Automation extends Domain.Aggregate("Automation", {
 		SuspendAutomation,
 		RecordAutomationRunStarted,
 		RecordAutomationRunFailed,
-		UpdateAutomation,
 	],
+	events: [AutomationUpdated],
 	keyOf: (cmd) => cmd.automation_id,
 	invariants: {
 		StatusIsKnown: (s) =>
@@ -161,33 +157,15 @@ export class Automation extends Domain.Aggregate("Automation", {
 			events.every((event) => event._tag !== "automation.fired" || event.run === after.runs),
 		RunsAreReportedInOrder: ({ before, after }) =>
 			[after.reported === before.reported, after.reported === before.reported + 1].some((ok) => ok),
-		OnlyAnUpdateOfTheCurrentRevisionRevisesIt: ({ before, after, command }) =>
+		OnlyCreationOrAnUpdateRevisesIt: ({ before, after, events }) =>
 			[
 				after.revision === before.revision,
 				[before.status === "", after.revision === 1].every((ok) => ok),
 				[
-					command._tag === "UpdateAutomation",
-					[before.status === "active", before.status === "paused"].some((live) => live),
-					command._tag !== "UpdateAutomation" || command.expected_revision === before.revision,
+					events.some((event) => event._tag === "automation.updated"),
 					after.revision === before.revision + 1,
-					after.status === before.status,
 				].every((ok) => ok),
 			].some((ok) => ok),
-		OnlyANewScheduleOnAnActiveAutomationRestartsIt: ({ before, after, command }) =>
-			command._tag !== "UpdateAutomation" ||
-			after.activation ===
-				([before.status === "active", command.reschedule, after.revision > before.revision].every(
-					(ok) => ok,
-				)
-					? before.activation + 1
-					: before.activation),
-		AnUpdateLeavesRunsAlone: ({ before, after, command }) =>
-			command._tag !== "UpdateAutomation" ||
-			[
-				after.runs === before.runs,
-				after.reported === before.reported,
-				after.last_scheduled_at === before.last_scheduled_at,
-			].every((ok) => ok),
 		AFailedRunPausesOnlyAnActiveAutomation: ({ before, after, command }) =>
 			[
 				command._tag !== "RecordAutomationRunFailed",
@@ -266,36 +244,6 @@ export class Automation extends Domain.Aggregate("Automation", {
 		},
 		SuspendAutomation: (state, cmd) =>
 			state.status === "active" ? [new AutomationPaused({ reason: cmd.reason })] : [],
-		UpdateAutomation: (state, cmd, ctx) => {
-			if (state.status === "") {
-				return new AutomationNotFound({ automation_id: ctx.id })
-			}
-			if (state.status === "archived") {
-				return new AutomationArchivedError({ automation_id: ctx.id })
-			}
-			if (cmd.expected_revision !== state.revision) {
-				return new AutomationRevisionConflict({
-					automation_id: ctx.id,
-					expected_revision: cmd.expected_revision,
-					current_revision: state.revision,
-				})
-			}
-			const rescheduled = state.status === "active" && cmd.reschedule
-			return [
-				new AutomationUpdated({
-					name: cmd.name,
-					description: cmd.description,
-					agent_id: cmd.agent_id,
-					agent_version: cmd.agent_version,
-					environment_id: cmd.environment_id,
-					text: cmd.text,
-					schedule: cmd.schedule,
-					revision: state.revision + 1,
-					activation: rescheduled ? state.activation + 1 : state.activation,
-					rescheduled,
-				}),
-			]
-		},
 		RecordAutomationRunStarted: (state, cmd, ctx) =>
 			cmd.run === state.reported + 1 && cmd.run <= state.runs
 				? [

@@ -141,14 +141,22 @@ const admit = (overrides: Partial<typeof config> = {}, id = automation.id) =>
 		environment_id: BoundedEnvironmentId.make(overrides.environment_id ?? config.environment_id),
 	})
 
-const update = (changes: Partial<typeof config>, expected_revision = 1) =>
-	new UpdateAutomation({
+const update = (changes: Partial<typeof config>, expected_revision = 1) => {
+	const next = { ...config, ...changes }
+	return new UpdateAutomation({
 		automation_id: automation.id,
 		expected_revision,
-		reschedule: !sameSchedule(changes.schedule ?? config.schedule, config.schedule),
-		...config,
-		...changes,
+		...next,
+		agent_id: BoundedAgentId.make(next.agent_id),
+		environment_id: BoundedEnvironmentId.make(next.environment_id),
+		reschedule: !sameSchedule(next.schedule, config.schedule),
+		agent_changed: [
+			next.agent_id === config.agent_id,
+			next.agent_version === config.agent_version,
+		].includes(false),
+		environment_changed: next.environment_id !== config.environment_id,
 	})
+}
 
 const updated = (
 	changes: Partial<typeof config>,
@@ -319,21 +327,37 @@ describe("Checkfu automations", () => {
 		),
 	)
 
-	it.effect("updates a paused automation without starting it, and refuses an archived one", () =>
-		story(
-			...created(),
-			Story.when(new PauseAutomation({ automation_id: automation.id })),
-			Story.then(automation, new AutomationPaused({ reason: "manual" })),
-			Story.when(update(noon)),
-			Story.then(automation, updated(noon, { activation: 0, rescheduled: false })),
-			Story.view(AutomationView, automation, { ...noon, status: "paused", activation: 0 }),
-			Story.clock(at("2026-01-01T12:00:00.000Z")),
-			Story.when(new ArchiveAutomation({ automation_id: automation.id })),
-			Story.then(automation, new AutomationArchived()),
-			Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
-			Story.when(update(noon)),
-			Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
-		),
+	it.effect(
+		"updates a paused automation without starting it, and refuses a dependency or schedule it cannot run, or an archived automation",
+		() =>
+			story(
+				...created(),
+				Story.when(new PauseAutomation({ automation_id: automation.id })),
+				Story.then(automation, new AutomationPaused({ reason: "manual" })),
+				Story.when(update(noon)),
+				Story.then(automation, updated(noon, { activation: 0, rescheduled: false })),
+				Story.view(AutomationView, automation, { ...noon, status: "paused", activation: 0 }),
+				Story.clock(at("2026-01-01T12:00:00.000Z")),
+				Story.when(
+					update({ schedule: { type: "cron", expression: "* * * * *", timezone: "UTC" } }, 2),
+				),
+				Story.rejected(
+					new AutomationScheduleUnusable({ expression: "* * * * *", timezone: "UTC" }),
+				),
+				Story.when(update({ agent_id: AgentId.make("agent_missing") }, 2)),
+				Story.rejected(new AgentNotFound({ agent_id: AgentId.make("agent_missing") })),
+				Story.when(update({ agent_version: 2 }, 2)),
+				Story.rejected(new AgentVersionNotFound({ agent_id: agent.id, version: 2 })),
+				Story.when(update({ environment_id: EnvironmentId.make("env_missing") }, 2)),
+				Story.rejected(
+					new EnvironmentNotFound({ environment_id: EnvironmentId.make("env_missing") }),
+				),
+				Story.when(new ArchiveAutomation({ automation_id: automation.id })),
+				Story.then(automation, new AutomationArchived()),
+				Story.then(capacity, new AutomationSlotReleased({ automation_id: automation.id })),
+				Story.when(update(noon)),
+				Story.rejected(new AutomationArchivedError({ automation_id: automation.id })),
+			),
 	)
 
 	it.effect("keeps the armed firing when an update leaves the schedule as it was", () =>

@@ -741,7 +741,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 									type: "null",
 								},
 							],
-							description: "New description, or null to clear it",
+							description:
+								"New description. To clear it, send null for description in a JSON or YAML body on stdin; the --description flag always sends text.",
 						},
 						agent: {
 							anyOf: [
