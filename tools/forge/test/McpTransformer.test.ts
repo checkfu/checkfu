@@ -253,12 +253,12 @@ describe("MCP tool projection", () => {
 						name: "agent_id",
 						in: "path",
 						required: true,
-						schema: { type: "string", pattern: "^agent_" },
+						schema: { type: "string", pattern: "^agent_", allOf: [{ minLength: 2 }] },
 					},
 				],
 			}),
 		)
-		expect(JSON.stringify(patterned)).toContain('"allOf":[{"pattern":"^agent_"}]')
+		expect(JSON.stringify(patterned)).toContain('"allOf":[{"minLength":2},{"pattern":"^agent_"}]')
 
 		const spec = JSON.parse(withOperation("/v1/agents", "get", exposed)) as {
 			paths: Record<string, Record<string, Json>>
