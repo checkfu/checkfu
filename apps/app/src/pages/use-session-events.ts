@@ -1,11 +1,18 @@
 import type { JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
 import { useMountEffect } from "@checkfu/ui/use-mount-effect"
-import { useState, useSyncExternalStore } from "react"
-import { useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query"
+import { useRef, useState } from "react"
+import { useQuery, useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query"
 import { checkfu, errorMessage, isSignedOut } from "../api.ts"
-import { EventTail, progressOf, transcriptEvents } from "../event-tail.ts"
-import { eventsOf, isFinal, sessionQuery, transcriptQuery } from "../queries.ts"
+import { EventBatch, mergeBySeq, progressOf, transcriptEvents } from "../event-tail.ts"
+import {
+	eventsOf,
+	isFinal,
+	liveQuery,
+	newestSeqOf,
+	sessionQuery,
+	transcriptQuery,
+} from "../queries.ts"
 
 const QUIET_RECONNECT_MS = 5000
 const REFRESH_MS = 250
@@ -24,16 +31,23 @@ const EVENT_TYPES: Record<SessionEventType, true> = {
 	"session.archived": true,
 }
 
-const readAfter = async (sessionId: string, from: number, tail: EventTail): Promise<void> => {
+const isTransition = (event: JsonSessionEvent): boolean =>
+	event.type === "session.status_idle" || event.type === "session.archived"
+
+const readAfter = async (
+	sessionId: string,
+	from: number,
+	intake: (events: ReadonlyArray<JsonSessionEvent>) => void,
+	signal: AbortSignal | undefined,
+): Promise<void> => {
 	let after = from
 	let more = true
 	while (more) {
-		const page = await checkfu.sessions.eventsAfter(sessionId, after)
-		tail.add(page.data)
+		const page = await checkfu.sessions.eventsAfter(sessionId, after, signal)
+		intake(page.data)
 		after = page.data.at(-1)?.seq ?? after
 		more = page.has_more
 	}
-	tail.flush()
 }
 
 export function useSessionEvents({
@@ -45,47 +59,68 @@ export function useSessionEvents({
 }) {
 	const queryClient = useQueryClient()
 	const transcript = transcriptQuery(session.id)
+	const live = liveQuery(session.id)
 	const history = useSuspenseInfiniteQuery(transcript)
-	const [tail] = useState(() => new EventTail())
-	const live = useSyncExternalStore(tail.subscribe, tail.snapshot)
+	const tail = useQuery(live).data ?? []
 	const [error, setError] = useState<string>()
-	const events = transcriptEvents(eventsOf(history.data), live)
-	const newestSeq = () => Math.max(events.at(-1)?.seq ?? 0, tail.newestSeq())
-	const readNewer = () => readAfter(session.id, newestSeq(), tail)
+	const [batch] = useState(
+		() =>
+			new EventBatch((events) =>
+				queryClient.setQueryData(live.queryKey, (seen = []) => mergeBySeq(seen, events)),
+			),
+	)
+	const refresh = useRef<ReturnType<typeof setTimeout>>(undefined)
+	const lifetime = useRef<AbortController>(undefined)
+	const events = transcriptEvents(eventsOf(history.data), tail)
+	const newestSeq = () =>
+		Math.max(
+			newestSeqOf(queryClient.getQueryData(transcript.queryKey)),
+			queryClient.getQueryData(live.queryKey)?.at(-1)?.seq ?? 0,
+			batch.newestSeq(),
+		)
+	const intake = (incoming: ReadonlyArray<JsonSessionEvent>) => {
+		batch.add(incoming)
+		if (incoming.some(isTransition) && refresh.current === undefined) {
+			refresh.current = setTimeout(() => {
+				refresh.current = undefined
+				onTransition()
+			}, REFRESH_MS)
+		}
+	}
+	const readNewer = async () => {
+		await readAfter(session.id, newestSeq(), intake, lifetime.current?.signal)
+		batch.flush()
+	}
+	const report = (error_: unknown) => {
+		if (!isSignedOut(error_) && !lifetime.current?.signal.aborted) {
+			setError(errorMessage(error_))
+		}
+	}
 	const catchUp = (): void => {
-		readNewer().catch((error_: unknown) => {
-			if (!isSignedOut(error_)) {
-				setError(errorMessage(error_))
-			}
-		})
+		readNewer().catch(report)
 	}
 	useMountEffect(() => {
-		if (isFinal(events)) {
-			return () => tail.dispose()
+		const controller = new AbortController()
+		lifetime.current = controller
+		const stop = () => {
+			controller.abort()
+			clearTimeout(refresh.current)
+			refresh.current = undefined
+			batch.dispose()
 		}
-		let disposed = false
+		if (isFinal(events)) {
+			return stop
+		}
 		let source: EventSource | undefined
 		let slowReconnect: ReturnType<typeof setTimeout> | undefined
-		let refresh: ReturnType<typeof setTimeout> | undefined
 		const settle = () => {
 			clearTimeout(slowReconnect)
 			slowReconnect = undefined
 		}
-		const transitioned = () => {
-			if (refresh === undefined) {
-				refresh = setTimeout(() => {
-					refresh = undefined
-					onTransition()
-				}, REFRESH_MS)
-			}
-		}
 		const receive = (message: MessageEvent<string>) => {
 			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- boundary: the API's own event JSON, typed by @checkfu/sdk
 			const event = JSON.parse(message.data) as JsonSessionEvent
-			tail.add([event])
-			if (event.type === "session.status_idle" || event.type === "session.archived") {
-				transitioned()
-			}
+			intake([event])
 			if (event.type === "session.archived") {
 				settle()
 				source?.close()
@@ -100,7 +135,8 @@ export function useSessionEvents({
 			}
 		}
 		const listen = () => {
-			if (disposed || isFinal(tail.snapshot())) {
+			const seen = queryClient.getQueryData(live.queryKey) ?? []
+			if (controller.signal.aborted || isFinal(seen)) {
 				return
 			}
 			const stream = new EventSource(checkfu.sessions.streamUrl(session.id, newestSeq()))
@@ -115,7 +151,7 @@ export function useSessionEvents({
 			stream.addEventListener("error", () => {
 				if (stream.readyState === EventSource.CLOSED) {
 					settle()
-					ended().catch((error_: unknown) => setError(errorMessage(error_)))
+					ended().catch(report)
 				} else if (slowReconnect === undefined) {
 					slowReconnect = setTimeout(
 						() => setError("Live updates were interrupted. Reconnecting…"),
@@ -125,22 +161,19 @@ export function useSessionEvents({
 			})
 		}
 		readNewer().then(listen, (error_: unknown) => {
-			if (!isSignedOut(error_)) {
-				setError(errorMessage(error_))
-			}
+			report(error_)
 			listen()
 		})
 		return () => {
-			disposed = true
 			settle()
-			clearTimeout(refresh)
 			source?.close()
-			tail.dispose()
+			stop()
 		}
 	})
 	return {
 		events,
 		...progressOf(events, session),
+		final: isFinal(events),
 		error,
 		catchUp,
 		earlier: history.hasNextPage

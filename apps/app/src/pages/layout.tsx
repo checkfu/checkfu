@@ -15,11 +15,13 @@ import { useAction } from "../use-action.ts"
 export function Layout(): React.JSX.Element {
 	const navigate = useNavigate()
 	const queryClient = useQueryClient()
-	const signOutAction = useAction(async () => {
-		await signOut()
-		queryClient.clear()
-		await navigate({ to: "/sign-in" })
-	})
+	const signOutAction = useAction(
+		async () => {
+			await signOut()
+			queryClient.clear()
+		},
+		{ then: () => void navigate({ to: "/sign-in" }) },
+	)
 	return (
 		<AppShell
 			brand={

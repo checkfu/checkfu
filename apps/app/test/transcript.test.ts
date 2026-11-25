@@ -2,8 +2,8 @@ import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import { infiniteQueryOptions, QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 import type { EventPage } from "../src/api.ts"
-import { EventTail, progressOf, transcriptEvents } from "../src/event-tail.ts"
-import { eventsOf, isFinal, transcriptQuery } from "../src/queries.ts"
+import { EventBatch, mergeBySeq, progressOf, transcriptEvents } from "../src/event-tail.ts"
+import { eventsOf, isFinal, liveQuery, newestSeqOf, transcriptQuery } from "../src/queries.ts"
 import type { Transcript } from "../src/queries.ts"
 
 const at = "2026-11-24T00:00:00.000Z"
@@ -57,17 +57,12 @@ describe("transcript", () => {
 		expect(seqs(eventsOf(transcript(page([4, 3], 3), page([2, 1], null))))).toEqual([1, 2, 3, 4])
 	})
 
-	it("merges the live tail after the history by seq, once", () => {
-		const tail = new EventTail()
-		tail.add([message(5), message(4), message(6)])
-		tail.add([message(5)])
-		tail.flush()
-		tail.add([message(3)])
-		tail.flush()
-		expect(seqs(tail.snapshot())).toEqual([3, 4, 5, 6])
-		expect(seqs(transcriptEvents([1, 2, 3, 4].map(message), tail.snapshot()))).toEqual([
-			1, 2, 3, 4, 5, 6,
+	it("merges live events after the history by seq, once", () => {
+		const merged = mergeBySeq(mergeBySeq([], [message(5), message(4), message(6), message(5)]), [
+			message(3),
 		])
+		expect(seqs(merged)).toEqual([3, 4, 5, 6])
+		expect(seqs(transcriptEvents([1, 2, 3, 4].map(message), merged))).toEqual([1, 2, 3, 4, 5, 6])
 	})
 
 	it("keeps a live event that arrives while an older page is loading", async () => {
@@ -78,7 +73,7 @@ describe("transcript", () => {
 			started = resolve
 		})
 		const options = infiniteQueryOptions({
-			queryKey: ["transcripts", "sess_race"],
+			queryKey: transcriptQuery("sess_race").queryKey,
 			queryFn: ({ pageParam }): Promise<EventPage> =>
 				pageParam === undefined
 					? Promise.resolve(page([4, 3], 3))
@@ -90,28 +85,43 @@ describe("transcript", () => {
 			getNextPageParam: (last) => last.next_cursor ?? undefined,
 		})
 		await client.fetchInfiniteQuery(options)
-		const tail = new EventTail()
+		const live = liveQuery("sess_race").queryKey
+		const batch = new EventBatch((events) =>
+			client.setQueryData(live, (seen = []) => mergeBySeq(seen, events)),
+		)
 		const older = client.fetchInfiniteQuery({ ...options, pages: 2 })
 		await olderRequested
-		tail.add([message(5)])
-		tail.flush()
+		batch.add([message(5)])
+		batch.flush()
 		release(page([2, 1], null))
 		const history = await older
-		expect(seqs(transcriptEvents(eventsOf(history), tail.snapshot()))).toEqual([1, 2, 3, 4, 5])
+		expect(seqs(transcriptEvents(eventsOf(history), client.getQueryData(live) ?? []))).toEqual([
+			1, 2, 3, 4, 5,
+		])
 	})
 
-	it("notifies once per batch however many events a catch-up delivers", () => {
-		const tail = new EventTail()
-		let notified = 0
-		tail.subscribe(() => {
-			notified += 1
-		})
+	it("writes once per batch however many events a catch-up delivers", () => {
+		const writes: Array<number> = []
+		const batch = new EventBatch((events) => writes.push(events.length))
 		for (let seq = 1; seq <= 2000; seq += 1) {
-			tail.add([message(seq)])
+			batch.add([message(seq)])
 		}
-		tail.flush()
-		expect(notified).toBe(1)
-		expect(tail.snapshot()).toHaveLength(2000)
+		expect(batch.newestSeq()).toBe(2000)
+		batch.flush()
+		expect(writes).toEqual([2000])
+	})
+
+	it("keeps live events in the cache through refetches, and resumes after the newest one seen", async () => {
+		const client = new QueryClient()
+		const history = transcriptQuery("sess_1").queryKey
+		const live = liveQuery("sess_1").queryKey
+		client.setQueryData(history, transcript(page([2, 1], null)))
+		client.setQueryData(live, [message(3), message(4)])
+		await client.invalidateQueries()
+		await client.refetchQueries()
+		expect(seqs(client.getQueryData(live) ?? [])).toEqual([3, 4])
+		expect(newestSeqOf(client.getQueryData(history))).toBe(2)
+		expect(newestSeqOf(undefined)).toBe(0)
 	})
 
 	it("keeps streamed events when session metadata is refreshed", async () => {

@@ -168,10 +168,13 @@ export const checkfu = {
 				undefined,
 				signal,
 			),
-		eventsAfter: (id: string, after: number) =>
+		eventsAfter: (id: string, after: number, signal?: AbortSignal) =>
 			call<EventPage>(
 				"GET",
 				`/v1/sessions/${encodeURIComponent(id)}/events?order=asc&limit=100&after=${after}`,
+				undefined,
+				undefined,
+				signal,
 			),
 		streamUrl: (id: string, after: number) =>
 			`/v1/sessions/${encodeURIComponent(id)}/events/stream?after=${after}`,

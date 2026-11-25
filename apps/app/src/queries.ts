@@ -1,4 +1,4 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
+import { infiniteQueryOptions, queryOptions, skipToken } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
 import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import { ApiError, checkfu } from "./api.ts"
@@ -64,6 +64,17 @@ export const transcriptQuery = (id: string) =>
 	})
 
 export type Transcript = InfiniteData<EventPage, unknown>
+
+export const liveQuery = (id: string) =>
+	queryOptions<ReadonlyArray<JsonSessionEvent>>({
+		queryKey: ["live-events", id],
+		queryFn: skipToken,
+		staleTime: Number.POSITIVE_INFINITY,
+		structuralSharing: false,
+	})
+
+export const newestSeqOf = (transcript: Transcript | undefined): number =>
+	transcript?.pages[0]?.data[0]?.seq ?? 0
 
 export const eventsOf = (transcript: Transcript): ReadonlyArray<JsonSessionEvent> =>
 	transcript.pages.toReversed().flatMap((page) => page.data.toReversed())

@@ -188,19 +188,29 @@ export function NewSessionPage(): React.JSX.Element {
 	const ready = agentId !== "" && environmentId !== ""
 	const [title, setTitle] = useState("")
 	const startKey = useSubmissionKey()
-	const start = useAction(async () => {
-		if (!ready) {
-			return
-		}
-		const body = {
-			agent: agentId,
-			environment_id: environmentId,
-			title: title.trim() === "" ? null : title.trim(),
-		}
-		const session = await checkfu.sessions.create(body, startKey.keyFor(body))
-		startKey.settle()
-		await navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
-	}, ["sessions"])
+	const start = useAction(
+		async () => {
+			if (!ready) {
+				return undefined
+			}
+			const body = {
+				agent: agentId,
+				environment_id: environmentId,
+				title: title.trim() === "" ? null : title.trim(),
+			}
+			const session = await checkfu.sessions.create(body, startKey.keyFor(body))
+			startKey.settle()
+			return session
+		},
+		{
+			invalidates: ["sessions"],
+			then: (session) => {
+				if (session !== undefined) {
+					void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } })
+				}
+			},
+		},
+	)
 	return (
 		<>
 			<PageHeader title="New session" breadcrumb={<Link to="/sessions">Sessions</Link>} />
@@ -266,7 +276,7 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, status, turn, error, earlier, catchUp } = useSessionEvents({
+	const { events, status, turn, final, error, earlier, catchUp } = useSessionEvents({
 		session,
 		onTransition: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
@@ -281,29 +291,39 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 			}
 			await checkfu.sessions.send(session.id, body, sendKey.keyFor(body))
 			sendKey.settle()
-			catchUp()
-			setText((current) => (current === message ? "" : current))
 		},
-		["sessions", "one", session.id],
+		{
+			invalidates: ["sessions", "one", session.id],
+			then: (_, message) => {
+				catchUp()
+				setText((current) => (current === message ? "" : current))
+			},
+		},
 	)
 	const interruptKey = useSubmissionKey()
-	const interrupt = useAction(async () => {
-		const body = { events: [{ type: "user.interrupt" as const }] }
-		await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
-		interruptKey.settle()
-		catchUp()
-	}, ["sessions", "one", session.id])
-	const archive = useAction(async () => {
-		await checkfu.sessions.archive(session.id)
-	}, ["sessions"])
-	const open = session.archived_at === null && status !== "terminated"
+	const interrupt = useAction(
+		async () => {
+			const body = { events: [{ type: "user.interrupt" as const }] }
+			await checkfu.sessions.send(session.id, body, interruptKey.keyFor({ ...body, turn }))
+			interruptKey.settle()
+		},
+		{ invalidates: ["sessions", "one", session.id], then: catchUp },
+	)
+	const archive = useAction(
+		async () => {
+			await checkfu.sessions.archive(session.id)
+		},
+		{ invalidates: ["sessions"] },
+	)
+	const archived = session.archived_at !== null || final
+	const open = !archived && status !== "terminated"
 	return (
 		<>
 			<PageHeader
 				title={session.title ?? "Untitled session"}
 				id={session.id}
 				breadcrumb={<Link to="/sessions">Sessions</Link>}
-				accessory={<Status status={session.archived_at === null ? status : "archived"} />}
+				accessory={<Status status={archived ? "archived" : status} />}
 				description={
 					<>
 						<Link
@@ -325,7 +345,7 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					</>
 				}
 				actions={
-					session.archived_at === null ? (
+					!archived ? (
 						<Button
 							variant="destructive"
 							size="sm"

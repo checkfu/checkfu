@@ -122,19 +122,21 @@ const changesFrom = (from: JsonAgent, draft: AgentDraft) => {
 	}
 }
 
-function AgentForm({
+function AgentForm<Saved>({
 	initial,
 	submitLabel,
 	onSubmit,
+	onSaved,
 	onCancel,
 }: {
 	readonly initial: AgentDraft
 	readonly submitLabel: string
-	readonly onSubmit: (draft: AgentDraft) => Promise<void>
+	readonly onSubmit: (draft: AgentDraft) => Promise<Saved>
+	readonly onSaved: (saved: Saved) => void
 	readonly onCancel?: () => void
 }): React.JSX.Element {
 	const [draft, setDraft] = useState(initial)
-	const action = useAction(onSubmit, ["agents"])
+	const action = useAction(onSubmit, { invalidates: ["agents"], then: onSaved })
 	const set =
 		(field: keyof AgentDraft) =>
 		(event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -189,8 +191,11 @@ export function NewAgentPage(): React.JSX.Element {
 					const body = bodyOf(draft)
 					const agent = await checkfu.agents.create(body, createKey.keyFor(body))
 					createKey.settle()
-					await navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
+					return agent
 				}}
+				onSaved={(agent) =>
+					void navigate({ to: "/agents/$agentId", params: { agentId: agent.id } })
+				}
 			/>
 		</>
 	)
@@ -204,9 +209,12 @@ export function AgentPage(): React.JSX.Element {
 
 function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element {
 	const [editingFrom, setEditingFrom] = useState<JsonAgent | null>(null)
-	const archive = useAction(async () => {
-		await checkfu.agents.archive(agent.id)
-	}, ["agents"])
+	const archive = useAction(
+		async () => {
+			await checkfu.agents.archive(agent.id)
+		},
+		{ invalidates: ["agents"] },
+	)
 	const archived = agent.archived_at !== null
 	return (
 		<>
@@ -265,8 +273,8 @@ function AgentView({ agent }: { readonly agent: JsonAgent }): React.JSX.Element 
 								...changes,
 							})
 						}
-						setEditingFrom(null)
 					}}
+					onSaved={() => setEditingFrom(null)}
 				/>
 			)}
 		</>

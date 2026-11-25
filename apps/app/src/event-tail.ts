@@ -2,7 +2,7 @@ import type { JsonSession, JsonSessionEvent } from "@checkfu/sdk/client"
 
 const FLUSH_MS = 50
 
-const mergeBySeq = (
+export const mergeBySeq = (
 	tail: ReadonlyArray<JsonSessionEvent>,
 	incoming: ReadonlyArray<JsonSessionEvent>,
 ): ReadonlyArray<JsonSessionEvent> => {
@@ -18,21 +18,18 @@ const mergeBySeq = (
 	return [...bySeq.values()].toSorted((a, b) => a.seq - b.seq)
 }
 
-export class EventTail {
-	private events: ReadonlyArray<JsonSessionEvent> = []
+export class EventBatch {
 	private pending: Array<JsonSessionEvent> = []
 	private timer: ReturnType<typeof setTimeout> | undefined
-	private readonly listeners = new Set<() => void>()
 
-	readonly subscribe = (listener: () => void): (() => void) => {
-		this.listeners.add(listener)
-		return () => this.listeners.delete(listener)
+	private readonly write: (events: ReadonlyArray<JsonSessionEvent>) => void
+
+	constructor(write: (events: ReadonlyArray<JsonSessionEvent>) => void) {
+		this.write = write
 	}
 
-	readonly snapshot = (): ReadonlyArray<JsonSessionEvent> => this.events
-
 	newestSeq(): number {
-		return Math.max(this.events.at(-1)?.seq ?? 0, ...this.pending.map((event) => event.seq))
+		return Math.max(0, ...this.pending.map((event) => event.seq))
 	}
 
 	add(events: ReadonlyArray<JsonSessionEvent>): void {
@@ -45,20 +42,15 @@ export class EventTail {
 	flush(): void {
 		clearTimeout(this.timer)
 		this.timer = undefined
-		if (this.pending.length === 0) {
-			return
-		}
-		this.events = mergeBySeq(this.events, this.pending)
-		this.pending = []
-		for (const listener of this.listeners) {
-			listener()
+		if (this.pending.length > 0) {
+			const batch = this.pending
+			this.pending = []
+			this.write(batch)
 		}
 	}
 
 	dispose(): void {
-		clearTimeout(this.timer)
-		this.timer = undefined
-		this.pending = []
+		this.flush()
 	}
 }
 

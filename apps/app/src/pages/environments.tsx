@@ -87,15 +87,22 @@ export function NewEnvironmentPage(): React.JSX.Element {
 	const [name, setName] = useState("")
 	const [description, setDescription] = useState("")
 	const createKey = useSubmissionKey()
-	const create = useAction(async () => {
-		const body = { name: name.trim(), description: description === "" ? null : description }
-		const environment = await checkfu.environments.create(body, createKey.keyFor(body))
-		createKey.settle()
-		await navigate({
-			to: "/environments/$environmentId",
-			params: { environmentId: environment.id },
-		})
-	}, ["environments"])
+	const create = useAction(
+		async () => {
+			const body = { name: name.trim(), description: description === "" ? null : description }
+			const environment = await checkfu.environments.create(body, createKey.keyFor(body))
+			createKey.settle()
+			return environment
+		},
+		{
+			invalidates: ["environments"],
+			then: (environment) =>
+				void navigate({
+					to: "/environments/$environmentId",
+					params: { environmentId: environment.id },
+				}),
+		},
+	)
 	return (
 		<>
 			<PageHeader
@@ -129,9 +136,12 @@ export function NewEnvironmentPage(): React.JSX.Element {
 export function EnvironmentPage(): React.JSX.Element {
 	const { environmentId } = detail.useParams()
 	const environment = present(useSuspenseQuery(environmentQuery(environmentId)))
-	const archive = useAction(async () => {
-		await checkfu.environments.archive(environment.id)
-	}, ["environments"])
+	const archive = useAction(
+		async () => {
+			await checkfu.environments.archive(environment.id)
+		},
+		{ invalidates: ["environments"] },
+	)
 	const networking = environment.config.networking
 	return (
 		<>

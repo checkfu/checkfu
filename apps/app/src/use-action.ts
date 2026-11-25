@@ -3,9 +3,15 @@ import type { QueryKey } from "@tanstack/react-query"
 import { useRef } from "react"
 import { errorMessage, isSignedOut, newIdempotencyKey } from "./api.ts"
 
-export function useAction<Args extends ReadonlyArray<unknown>>(
-	action: (...args: Args) => Promise<void>,
-	invalidates?: QueryKey,
+export function useAction<Args extends ReadonlyArray<unknown>, Result = void>(
+	action: (...args: Args) => Promise<Result>,
+	{
+		invalidates,
+		then,
+	}: {
+		readonly invalidates?: QueryKey
+		readonly then?: (result: Result, ...args: Args) => void
+	} = {},
 ) {
 	const queryClient = useQueryClient()
 	const mutation = useMutation({
@@ -16,7 +22,13 @@ export function useAction<Args extends ReadonlyArray<unknown>>(
 				: queryClient.invalidateQueries({ queryKey: invalidates }),
 	})
 	return {
-		run: (...args: Args): void => mutation.mutate(args),
+		run: (...args: Args): void => {
+			if (then === undefined) {
+				mutation.mutate(args)
+			} else {
+				mutation.mutate(args, { onSuccess: (result) => then(result, ...args) })
+			}
+		},
 		pending: mutation.isPending,
 		error:
 			mutation.error === null || isSignedOut(mutation.error)
