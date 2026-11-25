@@ -974,12 +974,25 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const realSessionViews = yield* SessionView
 					let lagMode: "off" | "timeout" | "recover" = "off"
 					let waitCalls = 0
+					let snapshotLagged = false
 					const laggingSessionViews = {
 						...realSessionViews,
 						get: (
 							ref: Parameters<typeof realSessionViews.get>[0],
 							options?: Parameters<typeof realSessionViews.get>[1],
 						) => (lagMode !== "off" ? Effect.succeedNone : realSessionViews.get(ref, options)),
+						// A lagging projection lags for every read of the view: a request's first snapshot
+						// misses the session, and in "recover" mode the one after its wait finds it.
+						snapshot: (
+							ref: Parameters<typeof realSessionViews.snapshot>[0],
+							options?: Parameters<typeof realSessionViews.snapshot>[1],
+						) => {
+							const lagging = lagMode === "timeout" || (lagMode === "recover" && !snapshotLagged)
+							snapshotLagged = lagMode === "recover" && lagging
+							return realSessionViews
+								.snapshot(ref, options)
+								.pipe(Effect.map((real) => (lagging ? { ...real, state: null, cursor: 0 } : real)))
+						},
 						waitFor: (
 							ref: Parameters<typeof realSessionViews.waitFor>[0],
 							filter: Parameters<typeof realSessionViews.waitFor>[1],
@@ -2135,12 +2148,16 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const session = yield* createIdleSession(apiFetch)
 					const sessionId = SessionId.make(session.id)
 
+					// Opening the stream of a projected session reads the view once before its headers.
+					snapshotCalls = 0
+					getCalls = 0
 					const streamRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events/stream`,
 						headers: AUTH_HEADERS,
 					})
 					expect(streamRes.status).toBe(200)
+					expect([snapshotCalls, getCalls]).toEqual([1, 0])
 
 					const readerPromise = readSseUntil(
 						streamRes,

@@ -613,7 +613,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handleRaw("streamEvents", ({ params, query, request }) =>
 				Effect.gen(function* () {
 					const id = params.session_id
-					yield* existing(id)
+					const ref = Session.ref(id)
+					// One view read answers both whether the session exists and where its log ends. Only a
+					// session the view has not projected yet needs the aggregate and a second read.
+					const projected = yield* sessionViews.snapshot(ref)
+					const head =
+						projected.state !== null
+							? projected
+							: yield* Effect.andThen(existing(id), sessionViews.snapshot(ref))
 					const header = request.headers["last-event-id"]
 					const rawCursor = header !== undefined && header.length > 0 ? header : query.after
 					const after =
@@ -622,9 +629,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							: yield* decodeCursor(rawCursor).pipe(
 									Effect.catch(() => reject(400, "Cursor must be a non-negative integer.")),
 								)
-					const ref = Session.ref(id)
 					const from = after ?? 0
-					const head = yield* sessionViews.snapshot(ref)
 					if (head.state !== null && head.state.archived_at !== null && head.cursor <= from) {
 						return HttpServerResponse.empty({ status: 204 })
 					}
