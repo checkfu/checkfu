@@ -12,7 +12,6 @@ import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
 import type { WritePrecondition } from "@checkfu/domain/Memory/MemoryTypes"
 import { MemoryView } from "@checkfu/domain/Memory/MemoryView.view"
 import { UpdateMemoryStore } from "@checkfu/domain/Memory/UpdateMemoryStore.command"
-import { IdempotencyClaim } from "@checkfu/domain/IdempotencyClaim/IdempotencyClaim.aggregate"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -26,6 +25,7 @@ import {
 	bestEffortAfterCommit,
 	commitForStream,
 	createIdentity,
+	IDEMPOTENCY_KEY_REUSED,
 	handled,
 	isPending,
 	measureContent,
@@ -52,7 +52,6 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 		const memoryViews = yield* MemoryView
 		const access = yield* MemoryAccess
 		const deleteMemory = yield* DeleteMemoryDecision
-		const idempotencyClaims = yield* IdempotencyClaim
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 
@@ -153,17 +152,23 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 				Effect.gen(function* () {
 					const description = payload.description ?? ""
 					const identity = yield* createIdentity(
-						{ idempotencyClaims, digest, random },
+						{ digest, random },
 						"memory_store",
 						"memstore",
 						request.headers["idempotency-key"],
 						{ name: payload.name, description },
 					)
 					const id = MemoryStoreId.make(identity.id)
-					const receipt = yield* stores.send(
-						new CreateMemoryStore({ memory_store_id: id, name: payload.name, description }),
-						identity.sendOptions,
-					)
+					const receipt = yield* stores
+						.send(
+							new CreateMemoryStore({ memory_store_id: id, name: payload.name, description }),
+							identity.sendOptions,
+						)
+						.pipe(
+							Effect.catchTag("MemoryStoreAlreadyExists", () =>
+								reject(409, IDEMPOTENCY_KEY_REUSED),
+							),
+						)
 					const result = yield* storeViews
 						.get(MemoryStore.ref(id), { atLeast: receipt })
 						.pipe(orPending(id, "memory_store"))

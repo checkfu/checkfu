@@ -52,15 +52,7 @@ import { SessionsHandlersLive } from "./Sessions.model.ts"
  * resource eligibility atomically on Cloudflare Durable Objects.
  */
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [
-		Agent,
-		Environment,
-		Session,
-		Automation,
-		AutomationCapacity,
-		MemoryStore,
-		Memory,
-	],
+	aggregates: [Agent, Environment, Session, Automation, AutomationCapacity, MemoryStore, Memory],
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
