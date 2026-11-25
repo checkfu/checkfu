@@ -6,7 +6,14 @@ import { ThemeToggle } from "@checkfu/ui/theme"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link, Navigate, Outlet, useNavigate, useRouter } from "@tanstack/react-router"
 import type { ErrorComponentProps } from "@tanstack/react-router"
-import { BotIcon, BoxIcon, CalendarClockIcon, LogOutIcon, MessagesSquareIcon } from "lucide-react"
+import {
+	BotIcon,
+	BoxIcon,
+	CalendarClockIcon,
+	FileStackIcon,
+	LogOutIcon,
+	MessagesSquareIcon,
+} from "lucide-react"
 import type * as React from "react"
 import { errorMessage, isSignedOut, signOut } from "../api.ts"
 import { signInSearch } from "../return-to.ts"
@@ -49,6 +56,11 @@ export function Layout(): React.JSX.Element {
 					<NavItem>
 						<Link to="/automations">
 							<CalendarClockIcon /> Automations
+						</Link>
+					</NavItem>
+					<NavItem>
+						<Link to="/artifacts">
+							<FileStackIcon /> Artifacts
 						</Link>
 					</NavItem>
 				</>

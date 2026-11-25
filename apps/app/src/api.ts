@@ -1,10 +1,14 @@
 import type {
+	ArtifactFileContent,
+	ArtifactLink,
 	AutomationRun,
 	AutomationRunQueued,
 	CreateAgentBody,
+	CreateArtifactLinkBody,
 	CreateAutomationBody,
 	CreateEnvironmentBody,
 	CreateSessionBody,
+	PublishArtifactBody,
 	SendSessionEventsBody,
 	UpdateAgentBody,
 	UpdateAutomationBody,
@@ -13,6 +17,8 @@ import { showsChanges } from "./automation-draft.ts"
 import type {
 	IsoDateTimes,
 	JsonAgent,
+	JsonArtifact,
+	JsonArtifactVersion,
 	JsonAutomation,
 	JsonEnvironment,
 	JsonSession,
@@ -54,7 +60,7 @@ interface Pending {
 }
 
 const call = async <T>(
-	method: "GET" | "POST",
+	method: "GET" | "POST" | "DELETE",
 	path: string,
 	body?: unknown,
 	idempotencyKey?: string,
@@ -144,9 +150,7 @@ const isArchived = (value: unknown): boolean =>
 
 export const newIdempotencyKey = (): string => crypto.randomUUID()
 
-const resource = <T, Create, Update extends { readonly version: number } = never>(
-	collection: string,
-) => ({
+const readable = <T>(collection: string) => ({
 	list: (after?: string, signal?: AbortSignal) =>
 		call<Page<T>>(
 			"GET",
@@ -157,6 +161,12 @@ const resource = <T, Create, Update extends { readonly version: number } = never
 		),
 	retrieve: (id: string, signal?: AbortSignal) =>
 		call<T>("GET", `${collection}/${encodeURIComponent(id)}`, undefined, undefined, signal),
+})
+
+const resource = <T, Create, Update extends { readonly version: number } = never>(
+	collection: string,
+) => ({
+	...readable<T>(collection),
 	create: async (body: Create, idempotencyKey: string) =>
 		settled(collection, await call<T | Pending>("POST", collection, body, idempotencyKey)),
 	update: async (id: string, body: Update) =>
@@ -186,6 +196,11 @@ const automationAction = async (
 		await call<JsonAutomation | Pending>("POST", automationPath(id, action)),
 		done,
 	)
+
+export type JsonArtifactLink = IsoDateTimes<ArtifactLink>
+
+const artifactPath = (id: string) => `/v1/artifacts/${encodeURIComponent(id)}`
+const versionPath = (id: string, version: number) => `${artifactPath(id)}/versions/${version}`
 
 export const checkfu = {
 	agents: resource<JsonAgent, CreateAgentBody, UpdateAgentBody>("/v1/agents"),
@@ -240,6 +255,26 @@ export const checkfu = {
 			),
 		streamUrl: (id: string, after: number) =>
 			`/v1/sessions/${encodeURIComponent(id)}/events/stream?after=${after}`,
+	},
+	artifacts: {
+		...readable<JsonArtifact>("/v1/artifacts"),
+		version: (id: string, version: number, signal?: AbortSignal) =>
+			call<JsonArtifactVersion>("GET", versionPath(id, version), undefined, undefined, signal),
+		file: (id: string, version: number, path: string, signal?: AbortSignal) =>
+			call<ArtifactFileContent>(
+				"GET",
+				`${versionPath(id, version)}/file?path=${encodeURIComponent(path)}`,
+				undefined,
+				undefined,
+				signal,
+			),
+		link: (id: string, version: number, body: CreateArtifactLinkBody) =>
+			call<JsonArtifactLink>("POST", `${versionPath(id, version)}/links`, body),
+		publish: (id: string, body: PublishArtifactBody, idempotencyKey: string) =>
+			call<JsonArtifact>("POST", `${artifactPath(id)}/publication`, body, idempotencyKey),
+		unpublish: (id: string, idempotencyKey: string) =>
+			call<JsonArtifact>("DELETE", `${artifactPath(id)}/publication`, undefined, idempotencyKey),
+		delete: (id: string) => call<unknown>("DELETE", artifactPath(id)),
 	},
 }
 

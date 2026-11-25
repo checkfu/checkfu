@@ -15,6 +15,8 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAgentsIndexRouteImport } from './routes/_app/agents/index'
 import { Route as AppAgentsAgentIdRouteImport } from './routes/_app/agents/$agentId'
 import { Route as AppAgentsNewRouteImport } from './routes/_app/agents/new'
+import { Route as AppArtifactsIndexRouteImport } from './routes/_app/artifacts/index'
+import { Route as AppArtifactsArtifactIdRouteImport } from './routes/_app/artifacts/$artifactId'
 import { Route as AppAutomationsIndexRouteImport } from './routes/_app/automations/index'
 import { Route as AppAutomationsAutomationIdRouteImport } from './routes/_app/automations/$automationId'
 import { Route as AppAutomationsNewRouteImport } from './routes/_app/automations/new'
@@ -52,6 +54,16 @@ const AppAgentsAgentIdRoute = AppAgentsAgentIdRouteImport.update({
 const AppAgentsNewRoute = AppAgentsNewRouteImport.update({
   id: '/agents/new',
   path: '/agents/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppArtifactsIndexRoute = AppArtifactsIndexRouteImport.update({
+  id: '/artifacts/',
+  path: '/artifacts/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppArtifactsArtifactIdRoute = AppArtifactsArtifactIdRouteImport.update({
+  id: '/artifacts/$artifactId',
+  path: '/artifacts/$artifactId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAutomationsIndexRoute = AppAutomationsIndexRouteImport.update({
@@ -107,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/agents/new': typeof AppAgentsNewRoute
+  '/artifacts/$artifactId': typeof AppArtifactsArtifactIdRoute
   '/automations/$automationId': typeof AppAutomationsAutomationIdRoute
   '/automations/new': typeof AppAutomationsNewRoute
   '/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
@@ -114,6 +127,7 @@ export interface FileRoutesByFullPath {
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
   '/agents/': typeof AppAgentsIndexRoute
+  '/artifacts/': typeof AppArtifactsIndexRoute
   '/automations/': typeof AppAutomationsIndexRoute
   '/environments/': typeof AppEnvironmentsIndexRoute
   '/sessions/': typeof AppSessionsIndexRoute
@@ -123,6 +137,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/agents/new': typeof AppAgentsNewRoute
+  '/artifacts/$artifactId': typeof AppArtifactsArtifactIdRoute
   '/automations/$automationId': typeof AppAutomationsAutomationIdRoute
   '/automations/new': typeof AppAutomationsNewRoute
   '/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
@@ -130,6 +145,7 @@ export interface FileRoutesByTo {
   '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/sessions/new': typeof AppSessionsNewRoute
   '/agents': typeof AppAgentsIndexRoute
+  '/artifacts': typeof AppArtifactsIndexRoute
   '/automations': typeof AppAutomationsIndexRoute
   '/environments': typeof AppEnvironmentsIndexRoute
   '/sessions': typeof AppSessionsIndexRoute
@@ -141,6 +157,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/agents/$agentId': typeof AppAgentsAgentIdRoute
   '/_app/agents/new': typeof AppAgentsNewRoute
+  '/_app/artifacts/$artifactId': typeof AppArtifactsArtifactIdRoute
   '/_app/automations/$automationId': typeof AppAutomationsAutomationIdRoute
   '/_app/automations/new': typeof AppAutomationsNewRoute
   '/_app/environments/$environmentId': typeof AppEnvironmentsEnvironmentIdRoute
@@ -148,6 +165,7 @@ export interface FileRoutesById {
   '/_app/sessions/$sessionId': typeof AppSessionsSessionIdRoute
   '/_app/sessions/new': typeof AppSessionsNewRoute
   '/_app/agents/': typeof AppAgentsIndexRoute
+  '/_app/artifacts/': typeof AppArtifactsIndexRoute
   '/_app/automations/': typeof AppAutomationsIndexRoute
   '/_app/environments/': typeof AppEnvironmentsIndexRoute
   '/_app/sessions/': typeof AppSessionsIndexRoute
@@ -159,6 +177,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/agents/$agentId'
     | '/agents/new'
+    | '/artifacts/$artifactId'
     | '/automations/$automationId'
     | '/automations/new'
     | '/environments/$environmentId'
@@ -166,6 +185,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/sessions/new'
     | '/agents/'
+    | '/artifacts/'
     | '/automations/'
     | '/environments/'
     | '/sessions/'
@@ -175,6 +195,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agents/$agentId'
     | '/agents/new'
+    | '/artifacts/$artifactId'
     | '/automations/$automationId'
     | '/automations/new'
     | '/environments/$environmentId'
@@ -182,6 +203,7 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
     | '/sessions/new'
     | '/agents'
+    | '/artifacts'
     | '/automations'
     | '/environments'
     | '/sessions'
@@ -192,6 +214,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/agents/$agentId'
     | '/_app/agents/new'
+    | '/_app/artifacts/$artifactId'
     | '/_app/automations/$automationId'
     | '/_app/automations/new'
     | '/_app/environments/$environmentId'
@@ -199,6 +222,7 @@ export interface FileRouteTypes {
     | '/_app/sessions/$sessionId'
     | '/_app/sessions/new'
     | '/_app/agents/'
+    | '/_app/artifacts/'
     | '/_app/automations/'
     | '/_app/environments/'
     | '/_app/sessions/'
@@ -251,6 +275,20 @@ declare module '@tanstack/react-router' {
       path: '/agents/new'
       fullPath: '/agents/new'
       preLoaderRoute: typeof AppAgentsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/artifacts/': {
+      id: '/_app/artifacts/'
+      path: '/artifacts'
+      fullPath: '/artifacts/'
+      preLoaderRoute: typeof AppArtifactsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/artifacts/$artifactId': {
+      id: '/_app/artifacts/$artifactId'
+      path: '/artifacts/$artifactId'
+      fullPath: '/artifacts/$artifactId'
+      preLoaderRoute: typeof AppArtifactsArtifactIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/automations/': {
@@ -323,6 +361,7 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppAgentsAgentIdRoute: typeof AppAgentsAgentIdRoute
   AppAgentsNewRoute: typeof AppAgentsNewRoute
+  AppArtifactsArtifactIdRoute: typeof AppArtifactsArtifactIdRoute
   AppAutomationsAutomationIdRoute: typeof AppAutomationsAutomationIdRoute
   AppAutomationsNewRoute: typeof AppAutomationsNewRoute
   AppEnvironmentsEnvironmentIdRoute: typeof AppEnvironmentsEnvironmentIdRoute
@@ -330,6 +369,7 @@ interface AppRouteChildren {
   AppSessionsSessionIdRoute: typeof AppSessionsSessionIdRoute
   AppSessionsNewRoute: typeof AppSessionsNewRoute
   AppAgentsIndexRoute: typeof AppAgentsIndexRoute
+  AppArtifactsIndexRoute: typeof AppArtifactsIndexRoute
   AppAutomationsIndexRoute: typeof AppAutomationsIndexRoute
   AppEnvironmentsIndexRoute: typeof AppEnvironmentsIndexRoute
   AppSessionsIndexRoute: typeof AppSessionsIndexRoute
@@ -339,6 +379,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppAgentsAgentIdRoute: AppAgentsAgentIdRoute,
   AppAgentsNewRoute: AppAgentsNewRoute,
+  AppArtifactsArtifactIdRoute: AppArtifactsArtifactIdRoute,
   AppAutomationsAutomationIdRoute: AppAutomationsAutomationIdRoute,
   AppAutomationsNewRoute: AppAutomationsNewRoute,
   AppEnvironmentsEnvironmentIdRoute: AppEnvironmentsEnvironmentIdRoute,
@@ -346,6 +387,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSessionsSessionIdRoute: AppSessionsSessionIdRoute,
   AppSessionsNewRoute: AppSessionsNewRoute,
   AppAgentsIndexRoute: AppAgentsIndexRoute,
+  AppArtifactsIndexRoute: AppArtifactsIndexRoute,
   AppAutomationsIndexRoute: AppAutomationsIndexRoute,
   AppEnvironmentsIndexRoute: AppEnvironmentsIndexRoute,
   AppSessionsIndexRoute: AppSessionsIndexRoute,
