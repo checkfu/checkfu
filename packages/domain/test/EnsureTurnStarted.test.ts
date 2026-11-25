@@ -10,8 +10,7 @@ import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { ArmAutomationLive } from "../src/Automation/ArmAutomation.policy.ts"
 import { FreeAutomationSlotLive } from "../src/Automation/FreeAutomationSlot.policy.ts"
 import { StartAutomationRunLive } from "../src/Automation/StartAutomationRun.policy.ts"
-import { Checkfu, CheckfuDomainApi } from "../src/Checkfu.model.ts"
-import type { CheckfuHandlersLive } from "../src/Checkfu.model.ts"
+import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { ListingLive } from "../src/Listing/Listing.projection.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
@@ -21,12 +20,11 @@ import { SessionStatusTerminated } from "../src/Session/ArchiveSession.command.t
 import { EnsureTurnStarted, ensureTurnStarted } from "../src/Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStoppedLive } from "../src/Session/EnsureTurnStopped.policy.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, Harness } from "../src/Session/Harness.external.ts"
-import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
+import { RunTurnLive } from "../src/Session/RunTurn.saga.ts"
 import { UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
 import { StartTurn, StartTurnLive } from "../src/Session/StartTurn.policy.ts"
-import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModelRequest.policy.ts"
 
 type Platform = ReturnType<typeof InMemory.make>
 
@@ -112,21 +110,17 @@ const harnessOf =
 		)
 
 interface Handlers {
-	// As if every event reached the view-fed policy only as history, while its view rebuilt.
+	// As if every event reached StartTurn only as history, while its view rebuilt.
 	readonly missStartTurn?: boolean
-	readonly missStopModelRequest?: boolean
 	// Holds every EnsureTurnStarted delivery until released.
 	readonly delayEnsure?: Deferred.Deferred<void>
 }
 
 const handlersOf =
-	({ missStartTurn = false, missStopModelRequest = false, delayEnsure }: Handlers) =>
+	({ missStartTurn = false, delayEnsure }: Handlers) =>
 	(platform: Platform): typeof CheckfuHandlersLive =>
 		Layer.mergeAll(
 			missStartTurn ? StartTurn.toLayer(Effect.succeed(() => Effect.void)) : StartTurnLive,
-			missStopModelRequest
-				? StopModelRequest.toLayer(Effect.succeed(() => Effect.void))
-				: StopModelRequestLive,
 			EnsureTurnStarted.toLayer(
 				Effect.map(
 					ensureTurnStarted,
@@ -259,7 +253,8 @@ describe("EnsureTurnStarted", () => {
 })
 
 describe("turn deadlines with a late EnsureTurnStarted delivery", () => {
-	const lateDelivery = (missStartTurn: boolean) => {
+	// Both start paths count a turn's deadline from when the run starts, as the harness bounds a run.
+	const lateDelivery = (missStartTurn: boolean, endsAt: number) => {
 		const calls: Array<string> = []
 		return Effect.flatMap(
 			Effect.all([Deferred.make<void>(), Deferred.make<void>()]),
@@ -268,13 +263,16 @@ describe("turn deadlines with a late EnsureTurnStarted delivery", () => {
 					Effect.gen(function* () {
 						const domain = yield* CheckfuDomainApi.clientInProcess
 						const sessions = yield* Session
+						yield* moveTo(clock, T0)
 						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
 						yield* settle(platform)
 						yield* moveTo(clock, T0 + DEFAULT_TURN_TIMEOUT_MS - 60 * 1000)
 						yield* Deferred.succeed(delayEnsure, undefined)
 						yield* settle(platform)
+						yield* moveTo(clock, endsAt - 1000)
+						yield* settle(platform)
 						expect(yield* sessions.get(sessionId)).toMatchObject({ _tag: "Running", turn: 1 })
-						yield* moveTo(clock, T0 + DEFAULT_TURN_TIMEOUT_MS + 1000)
+						yield* moveTo(clock, endsAt + 1000)
 						yield* settle(platform)
 						expect(yield* sessions.get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
 						expect(calls).not.toContain("reply:1")
@@ -284,81 +282,47 @@ describe("turn deadlines with a late EnsureTurnStarted delivery", () => {
 		)
 	}
 
-	it.effect("does not move the deadline StartTurn armed", () => lateDelivery(false))
+	it.effect("does not move the deadline StartTurn armed when its run started", () =>
+		lateDelivery(false, T0 + DEFAULT_TURN_TIMEOUT_MS),
+	)
 
-	it.effect("still ends a recovered turn on time", () => lateDelivery(true))
+	it.effect("gives a recovered run its full deadline from when it starts", () =>
+		lateDelivery(true, T0 + DEFAULT_TURN_TIMEOUT_MS - 60 * 1000 + DEFAULT_TURN_TIMEOUT_MS),
+	)
 })
 
 describe("EnsureTurnStopped", () => {
-	it.effect(
-		"honors an interrupt StopModelRequest never saw, sent before the recovered run starts",
-		() => {
-			const calls: Array<string> = []
-			return Effect.flatMap(Deferred.make<void>(), (delayEnsure) =>
-				run(
-					handlersOf({ missStartTurn: true, missStopModelRequest: true, delayEnsure }),
-					harnessOf(calls),
-					(platform) =>
-						Effect.gen(function* () {
-							const domain = yield* CheckfuDomainApi.clientInProcess
-							yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
-							yield* domain.SendUserInterrupt({ session_id: sessionId })
-							yield* settle(platform)
-							yield* Deferred.succeed(delayEnsure, undefined)
-							yield* settle(platform)
-							expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
-							expect(calls).toEqual(["interrupt:1", "refused:1"])
-							expect(platform.control.failures).toEqual([])
-						}),
-				),
-			)
-		},
-	)
-
-	it.effect(
-		"honors an interrupt StopModelRequest never saw, sent while the recovered run is under way",
-		() => {
-			const calls: Array<string> = []
-			return Effect.flatMap(Deferred.make<void>(), (hold) =>
-				run(
-					handlersOf({ missStartTurn: true, missStopModelRequest: true }),
-					harnessOf(calls, hold),
-					(platform) =>
-						Effect.gen(function* () {
-							const domain = yield* CheckfuDomainApi.clientInProcess
-							yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
-							yield* settle(platform)
-							yield* domain.SendUserInterrupt({ session_id: sessionId })
-							yield* settle(platform)
-							expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
-							expect(calls).toEqual(["run:1", "interrupt:1"])
-							expect(platform.control.failures).toEqual([])
-						}),
-				),
-			)
-		},
-	)
-})
-
-describe("an expired turn", () => {
-	it.effect("is ended, not started, when its recovery arrives after the deadline", () => {
+	it.effect("honors an interrupt sent before the recovered run starts", () => {
 		const calls: Array<string> = []
 		return Effect.flatMap(Deferred.make<void>(), (delayEnsure) =>
-			run(handlersOf({ missStartTurn: true, delayEnsure }), harnessOf(calls), (platform, clock) =>
+			run(handlersOf({ missStartTurn: true, delayEnsure }), harnessOf(calls), (platform) =>
 				Effect.gen(function* () {
 					const domain = yield* CheckfuDomainApi.clientInProcess
-					yield* moveTo(clock, T0)
 					yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+					yield* domain.SendUserInterrupt({ session_id: sessionId })
 					yield* settle(platform)
-					yield* moveTo(clock, T0 + DEFAULT_TURN_TIMEOUT_MS + 1000)
 					yield* Deferred.succeed(delayEnsure, undefined)
 					yield* settle(platform)
 					expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
-					// No run was started for it, so nothing could reach the harness before the abandon.
-					expect((yield* (yield* RunTurn).get(turnKey(sessionId, 1)).status)._tag).toBe(
-						"NotStarted",
-					)
-					expect(calls.filter((call) => !call.startsWith("interrupt:"))).toEqual([])
+					expect(calls).toEqual(["interrupt:1", "refused:1"])
+					expect(platform.control.failures).toEqual([])
+				}),
+			),
+		)
+	})
+
+	it.effect("honors an interrupt sent while the recovered run is under way", () => {
+		const calls: Array<string> = []
+		return Effect.flatMap(Deferred.make<void>(), (hold) =>
+			run(handlersOf({ missStartTurn: true }), harnessOf(calls, hold), (platform) =>
+				Effect.gen(function* () {
+					const domain = yield* CheckfuDomainApi.clientInProcess
+					yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+					yield* settle(platform)
+					yield* domain.SendUserInterrupt({ session_id: sessionId })
+					yield* settle(platform)
+					expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 1 })
+					expect(calls).toEqual(["run:1", "interrupt:1"])
 					expect(platform.control.failures).toEqual([])
 				}),
 			),
@@ -367,47 +331,41 @@ describe("an expired turn", () => {
 })
 
 describe("EnsureTurnStopped on termination", () => {
-	it.effect(
-		"stops a run under way when the session is archived and StopModelRequest never saw it",
-		() => {
-			const calls: Array<string> = []
-			return Effect.flatMap(Deferred.make<void>(), (hold) =>
-				run(handlersOf({ missStopModelRequest: true }), harnessOf(calls, hold), (platform) =>
-					Effect.gen(function* () {
-						const domain = yield* CheckfuDomainApi.clientInProcess
-						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
-						yield* settle(platform)
-						yield* domain.ArchiveSession({ session_id: sessionId })
-						yield* settle(platform)
-						expect(yield* (yield* Session).get(sessionId)).toEqual({
-							_tag: "Terminated",
-							archived: true,
-						})
-						expect(calls).toEqual(["run:1", "interrupt:1"])
-						expect(platform.control.failures).toEqual([])
-					}),
-				),
-			)
-		},
-	)
+	it.effect("stops a run under way when the session is archived", () => {
+		const calls: Array<string> = []
+		return Effect.flatMap(Deferred.make<void>(), (hold) =>
+			run(handlersOf({}), harnessOf(calls, hold), (platform) =>
+				Effect.gen(function* () {
+					const domain = yield* CheckfuDomainApi.clientInProcess
+					yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+					yield* settle(platform)
+					yield* domain.ArchiveSession({ session_id: sessionId })
+					yield* settle(platform)
+					expect(yield* (yield* Session).get(sessionId)).toEqual({
+						_tag: "Terminated",
+						archived: true,
+					})
+					expect(calls).toEqual(["run:1", "interrupt:1"])
+					expect(platform.control.failures).toEqual([])
+				}),
+			),
+		)
+	})
 
 	it.effect("refuses the recovered run of a session archived before it started", () => {
 		const calls: Array<string> = []
 		return Effect.flatMap(Deferred.make<void>(), (delayEnsure) =>
-			run(
-				handlersOf({ missStartTurn: true, missStopModelRequest: true, delayEnsure }),
-				harnessOf(calls),
-				(platform) =>
-					Effect.gen(function* () {
-						const domain = yield* CheckfuDomainApi.clientInProcess
-						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
-						yield* domain.ArchiveSession({ session_id: sessionId })
-						yield* settle(platform)
-						yield* Deferred.succeed(delayEnsure, undefined)
-						yield* settle(platform)
-						expect(calls).toEqual(["interrupt:1"])
-						expect(platform.control.failures).toEqual([])
-					}),
+			run(handlersOf({ missStartTurn: true, delayEnsure }), harnessOf(calls), (platform) =>
+				Effect.gen(function* () {
+					const domain = yield* CheckfuDomainApi.clientInProcess
+					yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+					yield* domain.ArchiveSession({ session_id: sessionId })
+					yield* settle(platform)
+					yield* Deferred.succeed(delayEnsure, undefined)
+					yield* settle(platform)
+					expect(calls).toEqual(["interrupt:1"])
+					expect(platform.control.failures).toEqual([])
+				}),
 			),
 		)
 	})
@@ -417,27 +375,24 @@ describe("EnsureTurnStopped per turn", () => {
 	it.effect("stops a later turn while an earlier turn's stop is still unacknowledged", () => {
 		const calls: Array<string> = []
 		return Effect.flatMap(Deferred.make<void>(), (hold) =>
-			run(
-				handlersOf({ missStopModelRequest: true }),
-				harnessOf(calls, hold, { heldTurns: [1, 2], slowStop: 1 }),
-				(platform) =>
-					Effect.gen(function* () {
-						const domain = yield* CheckfuDomainApi.clientInProcess
-						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
-						yield* settle(platform)
-						yield* domain.SendUserMessage({ session_id: sessionId, text: "second" })
-						yield* domain.SendUserInterrupt({ session_id: sessionId })
-						yield* settle(platform)
-						expect(yield* (yield* Session).get(sessionId)).toMatchObject({
-							_tag: "Running",
-							turn: 2,
-						})
-						yield* domain.SendUserInterrupt({ session_id: sessionId })
-						yield* settle(platform)
-						expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 2 })
-						expect(calls).toEqual(["run:1", "interrupt:1", "run:2", "interrupt:2"])
-						expect(platform.control.failures).toEqual([])
-					}),
+			run(handlersOf({}), harnessOf(calls, hold, { heldTurns: [1, 2], slowStop: 1 }), (platform) =>
+				Effect.gen(function* () {
+					const domain = yield* CheckfuDomainApi.clientInProcess
+					yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+					yield* settle(platform)
+					yield* domain.SendUserMessage({ session_id: sessionId, text: "second" })
+					yield* domain.SendUserInterrupt({ session_id: sessionId })
+					yield* settle(platform)
+					expect(yield* (yield* Session).get(sessionId)).toMatchObject({
+						_tag: "Running",
+						turn: 2,
+					})
+					yield* domain.SendUserInterrupt({ session_id: sessionId })
+					yield* settle(platform)
+					expect(yield* (yield* Session).get(sessionId)).toEqual({ _tag: "Idle", turn: 2 })
+					expect(calls).toEqual(["run:1", "interrupt:1", "run:2", "interrupt:2"])
+					expect(platform.control.failures).toEqual([])
+				}),
 			),
 		)
 	})
@@ -457,5 +412,31 @@ describe("stop events recorded before they named a turn", () => {
 				_tag: "session.status_terminated",
 			}),
 		).toMatchObject({ running_turn: null })
+	})
+})
+
+describe("the hosted model's handlers", () => {
+	it.effect("send each stop to the harness once", () => {
+		const calls: Array<string> = []
+		return Effect.flatMap(Deferred.make<void>(), (hold) =>
+			run(
+				() => CheckfuHandlersLive,
+				harnessOf(calls, hold, { heldTurns: [1, 2] }),
+				(platform) =>
+					Effect.gen(function* () {
+						const domain = yield* CheckfuDomainApi.clientInProcess
+						yield* domain.SendUserMessage({ session_id: sessionId, text: "first" })
+						yield* settle(platform)
+						yield* domain.SendUserInterrupt({ session_id: sessionId })
+						yield* settle(platform)
+						yield* domain.SendUserMessage({ session_id: sessionId, text: "second" })
+						yield* settle(platform)
+						yield* domain.ArchiveSession({ session_id: sessionId })
+						yield* settle(platform)
+						expect(calls).toEqual(["run:1", "interrupt:1", "run:2", "interrupt:2"])
+						expect(platform.control.failures).toEqual([])
+					}),
+			),
+		)
 	})
 })

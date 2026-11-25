@@ -581,9 +581,8 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		Effect.gen(function* () {
 			const viewId = "view:Checkfu.TurnInput@v3"
 			const startDeliveryId = policyDeliveryShapeId("Checkfu", "StartTurn", "TurnInput")
-			const stopDeliveryId = policyDeliveryShapeId("Checkfu", "StopModelRequest", "TurnInput")
 			expect(persistedShapes.map((shape) => shape.id)).toEqual(
-				expect.arrayContaining([viewId, startDeliveryId, stopDeliveryId]),
+				expect.arrayContaining([viewId, startDeliveryId]),
 			)
 
 			const shipped = yield* cutBaseline("shipped", "2026-01-01T00:00:00.000Z")
@@ -598,7 +597,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							schema: nextState as unknown as PersistedShape["schema"],
 						}
 					}
-					if (shape.id === startDeliveryId || shape.id === stopDeliveryId) {
+					if (shape.id === startDeliveryId) {
 						return { ...shape, schema: nextState as unknown as PersistedShape["schema"] }
 					}
 					return shape
@@ -609,16 +608,11 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				Schema.NullOr(Schema.Struct({ ...TurnInputState.fields, required_later: Schema.String })),
 			)
 			const breakingProblems = yield* lockProblems(lock, breaking)
-			expect(breakingProblems.length).toBe(2)
-			expect(breakingProblems).toEqual(
-				expect.arrayContaining([
-					expect.stringContaining(startDeliveryId),
-					expect.stringContaining(stopDeliveryId),
-				]),
-			)
+			expect(breakingProblems.length).toBe(1)
+			expect(breakingProblems).toEqual([expect.stringContaining(startDeliveryId)])
 			expect(breakingProblems.every((p) => p.includes("Queued policy deliveries"))).toBe(true)
 
-			// A backward-compatible optional field passes once both policy deliveries are reviewed.
+			// A backward-compatible optional field passes once the policy delivery is reviewed.
 			const compatible = upgradedTurnInput(
 				Schema.NullOr(
 					Schema.Struct({
@@ -628,10 +622,10 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				),
 			)
 			const unreviewed = yield* lockProblems(lock, compatible)
-			expect(unreviewed.length).toBe(2)
+			expect(unreviewed.length).toBe(1)
 			expect(unreviewed.every((p) => p.includes("has not been reviewed"))).toBe(true)
 
-			const reviewedEntries = yield* Effect.forEach([startDeliveryId, stopDeliveryId], (id) =>
+			const reviewedEntries = yield* Effect.forEach([startDeliveryId], (id) =>
 				Effect.gen(function* () {
 					const shape = compatible.find((candidate) => candidate.id === id)
 					if (shape === undefined) {

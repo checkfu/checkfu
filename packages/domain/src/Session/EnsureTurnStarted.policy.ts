@@ -1,7 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
 import type * as Policy from "@alchemy.run/domain/Policy"
-import * as Clock from "effect/Clock"
-import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { AbandonTurn } from "./AbandonTurn.command.ts"
@@ -13,8 +11,8 @@ import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { TurnInput } from "./TurnInput.view.ts"
 
-// Its own timer, so it never replaces the one StartTurn arms; due a fixed time after the
-// turn started, so a late delivery cannot move it.
+// Its own timer, so it never replaces the one StartTurn arms. Like StartTurn's, it counts from when
+// the run starts, as the harness's own bound on a run does; the earlier of the two ends the turn.
 export const ENSURED_TURN_DEADLINE = "ensured-turn-deadline"
 
 // StartTurn is fed by TurnInput so the verifier can follow a turn, but a view that is
@@ -55,22 +53,15 @@ export const ensureTurnStarted = Effect.gen(function* () {
 		if (state === null || state.turn !== event.turn || state.input.length === 0) {
 			return
 		}
-		const abandon = new AbandonTurn({
-			session_id: source.id,
-			turn: state.turn,
-			error_type: TURN_TIMEOUT,
-			message: TURN_TIMEOUT_MESSAGE,
-		})
-		const due = DateTime.toEpochMillis(envelope.at) + DEFAULT_TURN_TIMEOUT_MS
-		// Arrived after the turn's deadline: end it now, or the run could reply before the timer fires.
-		if ((yield* Clock.currentTimeMillis) >= due) {
-			yield* sessions.send(abandon)
-			return
-		}
-		yield* sessions.schedule(abandon, {
-			at: DateTime.makeUnsafe(due),
-			commandId: ENSURED_TURN_DEADLINE,
-		})
+		yield* sessions.schedule(
+			new AbandonTurn({
+				session_id: source.id,
+				turn: state.turn,
+				error_type: TURN_TIMEOUT,
+				message: TURN_TIMEOUT_MESSAGE,
+			}),
+			{ after: DEFAULT_TURN_TIMEOUT_MS, commandId: ENSURED_TURN_DEADLINE },
+		)
 		yield* runs.start(turnKey(source.id, state.turn), {
 			session_id: source.id,
 			agent_id: state.agent_id,
