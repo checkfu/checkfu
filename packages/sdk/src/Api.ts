@@ -304,6 +304,10 @@ export class EventBatchBodyLimit extends HttpApiMiddleware.Service<EventBatchBod
 	"@checkfu/api/EventBatchBodyLimit",
 ) {}
 
+export class MemoryBodyLimit extends HttpApiMiddleware.Service<MemoryBodyLimit>()(
+	"@checkfu/api/MemoryBodyLimit",
+) {}
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -1679,7 +1683,8 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 					groupDescription: "Read and edit the memories in a store",
 					fileFields: ["content"],
 				},
-			}),
+			})
+			.middleware(MemoryBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("listMemories", "/v1/memory_stores/:memory_store_id/memories", {
@@ -1741,7 +1746,8 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "updateMemory" },
 				"x-checkfu-mcp": { name: "memoryStores_updateMemory" },
 				"x-checkfu-cli": { fileFields: ["content"] },
-			}),
+			})
+			.middleware(MemoryBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.delete(
@@ -1767,6 +1773,9 @@ const MemoryStores = HttpApiGroup.make("memory_stores")
 				"x-forge-method-name": "delete",
 				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "deleteMemory" },
 				"x-checkfu-mcp": { name: "memoryStores_deleteMemory" },
+				// A memory's id is its store and path, so a retry after a delete that committed could
+				// delete a memory written there since.
+				"x-checkfu-idempotent": false,
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage memory stores")

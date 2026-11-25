@@ -95,8 +95,8 @@ describe("MCP tool projection", () => {
 			},
 		})
 
-		// Repeating is safe for reads, for DELETE, and for writes the API declares idempotent.
-		// A write that is only safe with a retry key is not.
+		// Repeating is safe for reads, for DELETE unless the API says otherwise, and for writes the
+		// API declares idempotent. A write that is only safe with a retry key is not.
 		expect(
 			tools.filter((tool) => tool.idempotent && !tool.readOnly).map((tool) => tool.name),
 		).toEqual([
@@ -106,7 +106,6 @@ describe("MCP tool projection", () => {
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
 			"memoryStores_archiveMemoryStore",
-			"memoryStores_deleteMemory",
 			"memoryStores_deleteMemoryStore",
 			"sessions_archiveSession",
 		])

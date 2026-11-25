@@ -234,6 +234,33 @@ describe("Memory stores", () => {
 			}),
 		))
 
+	it("takes any memory within its size however it escapes, and refuses text that is not Unicode", () =>
+		withApi((apiFetch) =>
+			Effect.gen(function* () {
+				const store = yield* json<StoreBody>(
+					yield* request(apiFetch, "POST", "/v1/memory_stores", { name: "Edges" }),
+				)
+				const base = `/v1/memory_stores/${store.id}/memories`
+				// 90,000 tabs are within the 100 kB limit but take 180 kB as JSON.
+				const tabs = yield* request(apiFetch, "POST", base, {
+					path: "/tabs.md",
+					content: "\t".repeat(90_000),
+				})
+				expect(tabs.status).toBe(201)
+				const written = yield* json<MemoryBody>(tabs)
+				const updated = yield* request(apiFetch, "POST", `${base}/${written.id}`, {
+					content: "\t".repeat(89_999),
+				})
+				expect(updated.status).toBe(200)
+				// Half a surrogate pair has no UTF-8 form, so no hash or size would describe it.
+				const broken = yield* request(apiFetch, "POST", base, {
+					path: "/broken.md",
+					content: "half a pair: \ud800",
+				})
+				expect(broken.status).toBe(400)
+			}),
+		))
+
 	it("refuses a path that would be both a memory and a directory of memories, in either order", () =>
 		withApi((apiFetch) =>
 			Effect.gen(function* () {

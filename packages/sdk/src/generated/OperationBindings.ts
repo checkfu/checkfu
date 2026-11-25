@@ -352,7 +352,7 @@ export const SDK_OPERATION_BINDINGS: ReadonlyArray<SdkOperationBinding> = [
 		httpMethod: "DELETE",
 		path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
 		kind: "unary",
-		retrySafety: "idempotent",
+		retrySafety: "pre-commit-only",
 		supportsIdempotencyKey: false,
 		supportsPending: false,
 	},

@@ -387,6 +387,14 @@ describe("Cloudflare Forge pipeline", () => {
 		const sdkResources = sdkFiles.find((f) => f.path === "Resources.ts")?.content ?? ""
 		const sdkBindings = sdkFiles.find((f) => f.path === "OperationBindings.ts")?.content ?? ""
 
+		// A delete is retried after it may have committed unless it says it must not be: a memory's id
+		// is its path, so a retried delete could remove a memory written there since.
+		const safety = (group: string, endpoint: string) =>
+			catalog.operations.find((op) => op.apiGroup === group && op.apiEndpoint === endpoint)
+				?.retrySafety
+		expect(safety("memory_stores", "deleteMemory")).toBe("pre-commit-only")
+		expect(safety("memory_stores", "delete")).toBe("idempotent")
+
 		// Catalog matches non-skipped OpenAPI operations 1:1
 		expect(sortUnique(catalog.operations.map((op) => `${op.apiGroup}.${op.apiEndpoint}`))).toEqual(
 			expectedEndpoints,

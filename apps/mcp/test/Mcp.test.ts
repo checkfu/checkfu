@@ -232,7 +232,7 @@ describe("Checkfu MCP server", () => {
 				memoryStores_archiveMemoryStore: "writes, destructive, repeatable",
 				memoryStores_createMemory: "writes, additive, not repeatable",
 				memoryStores_createMemoryStore: "writes, additive, not repeatable",
-				memoryStores_deleteMemory: "writes, destructive, repeatable",
+				memoryStores_deleteMemory: "writes, destructive, not repeatable",
 				memoryStores_deleteMemoryStore: "writes, destructive, repeatable",
 				memoryStores_getMemory: "read-only, additive, repeatable",
 				memoryStores_getMemoryStore: "read-only, additive, repeatable",

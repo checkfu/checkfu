@@ -19319,8 +19319,7 @@
 									},
 									"content": {
 										"type": "string",
-										"maxLength": 100000,
-										"description": "Text of the memory, up to 100 kB"
+										"maxLength": 100000
 									}
 								},
 								"required": ["path", "content"],
@@ -20769,8 +20768,7 @@
 								"properties": {
 									"content": {
 										"type": "string",
-										"maxLength": 100000,
-										"description": "New text of the memory"
+										"maxLength": 100000
 									},
 									"precondition": {
 										"type": "object",
@@ -21202,7 +21200,8 @@
 				},
 				"x-checkfu-mcp": {
 					"name": "memoryStores_deleteMemory"
-				}
+				},
+				"x-checkfu-idempotent": false
 			}
 		}
 	},

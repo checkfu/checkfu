@@ -5,6 +5,7 @@ import {
 } from "@checkfu/domain/Agent/AgentTypes"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
+import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
 import * as Digest from "effect/crypto/Digest"
@@ -28,6 +29,7 @@ import {
 	AgentBodyLimit,
 	Authentication,
 	EventBatchBodyLimit,
+	MemoryBodyLimit,
 	RequestId,
 	RequestValidation,
 	apiError,
@@ -48,6 +50,8 @@ export const MAX_REQUEST_BODY_BYTES = 160 * 1024
 export const MAX_AGENT_BODY_BYTES =
 	(MAX_AGENT_NAME_LENGTH + MAX_AGENT_DESCRIPTION_LENGTH + MAX_AGENT_SYSTEM_LENGTH) * 12 + 16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
+// A memory's content escaped as JSON: at most six bytes for each of its UTF-16 units.
+export const MAX_MEMORY_BODY_BYTES = MAX_MEMORY_CONTENT_BYTES * 6 + 16 * 1024
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
 	type: "cloud",
@@ -406,6 +410,14 @@ export const AgentBodyLimitLive = Layer.succeed(AgentBodyLimit, (httpEffect) =>
 		httpEffect,
 		HttpIncomingMessage.MaxBodySize,
 		ByteSize.bytes(MAX_AGENT_BODY_BYTES),
+	),
+)
+
+export const MemoryBodyLimitLive = Layer.succeed(MemoryBodyLimit, (httpEffect) =>
+	Effect.provideService(
+		httpEffect,
+		HttpIncomingMessage.MaxBodySize,
+		ByteSize.bytes(MAX_MEMORY_BODY_BYTES),
 	),
 )
 

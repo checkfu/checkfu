@@ -423,9 +423,11 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 	const kind: SurfaceOperationKind =
 		sse !== undefined ? "sse" : pagination !== undefined ? "paginated" : "unary"
 
-	const explicitIdempotent = method.extension("x-checkfu-idempotent") === true
+	// An operation can say it is idempotent whatever its method, or that it is not although its
+	// method usually is: a delete by an id that a later create can reuse.
+	const declared = method.extension("x-checkfu-idempotent")
 	const retrySafety: SurfaceRetrySafety =
-		explicitIdempotent || IDEMPOTENT_HTTP_METHODS.has(httpMethod)
+		declared === true || (declared !== false && IDEMPOTENT_HTTP_METHODS.has(httpMethod))
 			? "idempotent"
 			: supportsIdempotencyKey
 				? "idempotency-key-gated"

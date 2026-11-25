@@ -1101,7 +1101,6 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						content: {
 							type: "string",
 							maxLength: 100000,
-							description: "Text of the memory, up to 100 kB",
 						},
 					},
 					required: ["path", "content"],
@@ -1162,7 +1161,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		method: "DELETE",
 		path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
 		readOnly: false,
-		idempotent: true,
+		idempotent: false,
 		destructive: true,
 		inputSchema: {
 			type: "object",
@@ -1391,7 +1390,6 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						content: {
 							type: "string",
 							maxLength: 100000,
-							description: "New text of the memory",
 						},
 						precondition: {
 							type: "object",

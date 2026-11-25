@@ -1277,7 +1277,7 @@ export class EffectMemoryStoresMemoriesResource {
 					executeWithRetries(
 						this.#runtime,
 						"checkfu.memoryStores.memories.delete",
-						"idempotent",
+						"pre-commit-only",
 						options,
 						() =>
 							this.#runtime.raw.memory_stores.deleteMemory({

@@ -1285,7 +1285,7 @@ const memoryStoresMemoriesCreateCommand = CommandMake(
 		),
 		content: FlagString("content").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("Text of the memory, up to 100 kB (supports @file)"),
+			FlagWithDescription("Body field content (supports @file)"),
 			FlagOptional,
 		),
 	},
@@ -1485,7 +1485,7 @@ const memoryStoresMemoriesUpdateCommand = CommandMake(
 		memoryId: FlagString("memory-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Memory ID")),
 		content: FlagString("content").pipe(
 			FlagWithMetavar("TEXT|@FILE"),
-			FlagWithDescription("New text of the memory (supports @file)"),
+			FlagWithDescription("Body field content (supports @file)"),
 			FlagOptional,
 		),
 		precondition: FlagString("precondition").pipe(

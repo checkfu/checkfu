@@ -503,7 +503,16 @@ export const RecordedMemoryPath = Schema.String.check(
 export const RecordedSha256 = Schema.String.check(Schema.isMinLength(64), Schema.isMaxLength(64))
 
 // 100 kB of UTF-8 is at most 100,000 UTF-16 units; the byte count is checked where it is measured.
-export const MemoryContent = Schema.String.check(Schema.isMaxLength(MAX_MEMORY_CONTENT_BYTES))
+// Text whose every UTF-16 surrogate is paired: the only text that has one UTF-8 encoding, so its
+// hash and size are those of what is stored.
+const isWellFormedText = Schema.makeFilter((text: string) => text.isWellFormed(), {
+	expected: "well-formed Unicode text (no unpaired surrogates)",
+})
+
+export const MemoryContent = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_CONTENT_BYTES),
+	isWellFormedText,
+)
 
 export const ContentSha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 
