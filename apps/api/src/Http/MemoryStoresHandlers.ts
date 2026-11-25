@@ -118,7 +118,19 @@ export const MemoryStoresLive = HttpApiBuilder.group(CheckfuApi, "memory_stores"
 				if (isPending(result)) {
 					return result
 				}
-				return yield* present(result, 404, `Memory ${memoryId} not found.`)
+				const written = yield* present(result, 404, `Memory ${memoryId} not found.`)
+				// Another writer's version can land before this read. Its hash is not this write's, and
+				// a caller using it as a precondition would overwrite that change; as for an
+				// environment, the answer is that the write is pending.
+				if (written.version !== receipt.reply.version) {
+					return {
+						id: memoryId,
+						type: "memory" as const,
+						pending: true as const,
+						memory_store_id: storeId,
+					}
+				}
+				return written
 			})
 
 		// A memory read through its own id must belong to the store in the path, and be there as

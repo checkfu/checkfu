@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { describe, expect, it } from "@effect/vitest"
+import { MemoryView } from "@checkfu/domain/Memory/MemoryView.view"
 import * as Effect from "effect/Effect"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import {
@@ -260,6 +261,59 @@ describe("Memory stores", () => {
 				expect(broken.status).toBe(400)
 			}),
 		))
+
+	it("answers pending, not another writer's version, when a later write lands before the read", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const views = yield* MemoryView
+					let other: (() => Effect.Effect<unknown>) | undefined
+					// Writer B's change commits after writer A's, before A reads the view.
+					const racing = {
+						...views,
+						get: (
+							ref: Parameters<typeof views.get>[0],
+							options?: Parameters<typeof views.get>[1],
+						) =>
+							Effect.gen(function* () {
+								const before = other
+								if (before !== undefined && options?.atLeast !== undefined) {
+									other = undefined
+									yield* before()
+								}
+								return yield* views.get(ref, options)
+							}),
+					} as unknown as typeof views
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(MemoryView, racing),
+					)
+					const store = yield* json<StoreBody>(
+						yield* request(apiFetch, "POST", "/v1/memory_stores", { name: "Notes" }),
+					)
+					const created = yield* json<MemoryBody>(
+						yield* request(apiFetch, "POST", `/v1/memory_stores/${store.id}/memories`, {
+							path: "/a.md",
+							content: "One.",
+						}),
+					)
+					const path = `/v1/memory_stores/${store.id}/memories/${created.id}`
+					other = () => request(apiFetch, "POST", path, { content: "Writer B." })
+					const answer = yield* request(apiFetch, "POST", path, { content: "Writer A." })
+					expect([answer.status, yield* json(answer)]).toEqual([
+						202,
+						{ id: created.id, type: "memory", pending: true, memory_store_id: store.id },
+					])
+					const now = yield* json<MemoryBody>(yield* request(apiFetch, "GET", path))
+					expect([now.content, now.version]).toEqual(["Writer B.", 3])
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
 
 	it("refuses a path that would be both a memory and a directory of memories, in either order", () =>
 		withApi((apiFetch) =>
