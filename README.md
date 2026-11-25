@@ -261,7 +261,7 @@ claude mcp add --transport http checkfu "https://<your-mcp-worker>.workers.dev/m
 
 - `bun run generate`: Regenerate `openapi.json` and Forge-derived CLI, SDK, and MCP code from `CheckfuApi`.
 - `bun run check`: Verify generated artifacts, formatting (`oxfmt`), type-aware lint (`oxlint`), and TypeScript (`effect-tsgo`).
-- `bun run test`: Run unit tests and Z3 domain proofs (`--filter=@checkfu/domain` runs the Z3 proofs alone).
+- `bun run test`: Run unit tests. The Z3 domain proofs (`packages/domain/test/*.verify.test.ts`) run in CI; set `CHECKFU_PROVE=1` to run them locally.
 - `bun run test:bun` and `bun run test:workerd`: Run Bun and Cloudflare `workerd` integration tests.
 - `bun run checkfu:build`: Compile the standalone CLI binary at `apps/cli/dist/checkfu`.
 
