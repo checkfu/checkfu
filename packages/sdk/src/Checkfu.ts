@@ -15,6 +15,8 @@ import type {
 	PendingResourceType,
 	Session,
 	SessionEvent,
+	SessionEventPreview,
+	SessionStreamEvent,
 	Vault,
 	VaultCredential,
 } from "./Api.ts"
@@ -94,6 +96,8 @@ export type JsonArtifactVersion = IsoDateTimes<ArtifactVersion>
 export type JsonVault = IsoDateTimes<Vault>
 export type JsonVaultCredential = IsoDateTimes<VaultCredential>
 export type JsonSessionEvent = IsoDateTimes<SessionEvent>
+export type JsonSessionEventPreview = IsoDateTimes<SessionEventPreview>
+export type JsonSessionStreamEvent = IsoDateTimes<SessionStreamEvent>
 export type JsonListSessionEventsResponse = IsoDateTimes<ListSessionEventsResponse>
 export type EventsPage = CursorPage<JsonSessionEvent>
 export type EventPagePromise = PagePromise<CursorPage<JsonSessionEvent>, JsonSessionEvent>
@@ -360,3 +364,5 @@ export class Checkfu extends PromiseResources {
 }
 
 export default Checkfu
+
+export { accumulateSessionEvent, type SessionMessagePreview } from "./SessionEventPreview.ts"

@@ -42,6 +42,7 @@ export const PiTurnRequest = Schema.Struct({
 export type PiTurnRequest = typeof PiTurnRequest.Type
 
 export const PiTurnReply = Schema.Struct({
+	response_started_at: Schema.optionalKey(Schema.Int),
 	thinking: Schema.NullOr(Schema.String),
 	text: Schema.String,
 	input_tokens: Schema.Finite,

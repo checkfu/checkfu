@@ -295,7 +295,7 @@ export function SessionPage(): React.JSX.Element {
 
 function SessionView({ session }: { readonly session: JsonSession }): React.JSX.Element {
 	const queryClient = useQueryClient()
-	const { events, calls, reconnecting, earlier, findingCalls } = useSessionEvents({
+	const { events, preview, calls, reconnecting, earlier, findingCalls } = useSessionEvents({
 		session,
 		onSnapshotChange: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
 	})
@@ -411,7 +411,12 @@ function SessionView({ session }: { readonly session: JsonSession }): React.JSX.
 					{earlier.error === undefined ? null : <Callout tone="error">{earlier.error}</Callout>}
 				</div>
 			)}
-			<Transcript events={events} calls={calls.fold} send={open ? sendAnswer : undefined} />
+			<Transcript
+				events={events}
+				preview={preview}
+				calls={calls.fold}
+				send={open ? sendAnswer : undefined}
+			/>
 			{open && findingCalls !== null ? (
 				findingCalls.error !== undefined ? (
 					<div className="space-y-2">

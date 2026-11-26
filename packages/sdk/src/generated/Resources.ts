@@ -4,6 +4,7 @@ import { flatMap as EffectFlatMap } from "effect/Effect"
 import type { Effect } from "effect/Effect"
 import type { Stream } from "effect/Stream"
 
+import type { SessionEvent } from "../Api.ts"
 import type { CheckfuSdkError } from "../Errors.ts"
 import {
 	executePaginatedPromise,
@@ -360,7 +361,9 @@ export interface CheckfuOperations {
 	>
 	readonly "sessions.events.stream": OperationShape<
 		EndpointParams<"sessions", "streamEvents">,
-		{ readonly after?: number | undefined },
+		Omit<EndpointQuery<"sessions", "streamEvents">, "after"> & {
+			readonly after?: number | undefined
+		},
 		never,
 		EndpointSseEvent<"sessions", "streamEvents">
 	>
@@ -2186,6 +2189,16 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
+	stream(
+		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
+		params?: { readonly after?: number | undefined },
+		options?: SessionEventsStreamOptions & { readonly event_deltas?: undefined },
+	): Stream<SessionEvent, CheckfuSdkError>
+	stream(
+		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
+		params?: { readonly after?: number | undefined },
+		options?: SessionEventsStreamOptions,
+	): Stream<EndpointSseEvent<"sessions", "streamEvents">, CheckfuSdkError>
 	/** Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number. */
 	stream(
 		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
@@ -3658,6 +3671,16 @@ export class SessionsEventsResource {
 		)
 	}
 
+	stream(
+		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
+		params?: { readonly after?: number | undefined },
+		options?: PromiseStreamOptions & { readonly event_deltas?: undefined },
+	): EventStreamPromise<IsoDateTimes<SessionEvent>>
+	stream(
+		sessionId: PathParam<"sessions", "streamEvents", "session_id">,
+		params?: { readonly after?: number | undefined },
+		options?: PromiseStreamOptions,
+	): EventStreamPromise<IsoDateTimes<EndpointSseEvent<"sessions", "streamEvents">>>
 	/** Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number. */
 	stream(
 		sessionId: PathParam<"sessions", "streamEvents", "session_id">,

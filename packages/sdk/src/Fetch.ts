@@ -115,7 +115,13 @@ export interface FetchClientOptions {
 	readonly headers?: HeadersInit
 }
 
-type QueryValue = string | number | boolean | null | undefined
+type QueryValue =
+	| string
+	| number
+	| boolean
+	| ReadonlyArray<string | number | boolean>
+	| null
+	| undefined
 
 interface RawInput {
 	readonly path?: Readonly<Record<string, string | number>>
@@ -178,10 +184,13 @@ const urlOf = (binding: Binding, input: RawInput): string => {
 			}
 			return []
 		}
-		if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
-			throw new Error(`Invalid ${name}: must be a string, number or boolean.`)
-		}
-		return [[name, String(value)]]
+		const values: ReadonlyArray<unknown> = Array.isArray(value) ? value : [value]
+		return values.map((item) => {
+			if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean") {
+				throw new Error(`Invalid ${name}: must be a string, number or boolean.`)
+			}
+			return [name, String(item)] as const
+		})
 	})
 	const path = binding.pathParams.reduce<string>((url, name) => {
 		const value: unknown = input.path?.[name]

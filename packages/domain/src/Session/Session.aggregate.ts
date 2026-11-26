@@ -647,7 +647,12 @@ export class Session extends Domain.Aggregate("Session", {
 					model_request_start_id: cmd.model_request_start_id,
 				})
 			}
+			const preview =
+				cmd.response_started_at === undefined
+					? {}
+					: { preview_origin: { turn: cmd.turn, started_at: cmd.response_started_at } }
 			const msg = new AgentMessage({
+				...preview,
 				content: [{ type: "text", text: cmd.text }],
 				...(cmd.truncated === true ? { truncated: true as const } : {}),
 			})
@@ -658,7 +663,7 @@ export class Session extends Domain.Aggregate("Session", {
 			})
 			const settled = endTurn(running, cmd.stop_reason)
 			if (cmd.thinking !== null) {
-				return [new AgentThinking({ thinking: cmd.thinking }), msg, end, ...settled]
+				return [new AgentThinking({ ...preview, thinking: cmd.thinking }), msg, end, ...settled]
 			}
 			return [msg, end, ...settled]
 		},

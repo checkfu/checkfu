@@ -1,3 +1,5 @@
+import { Checkfu, accumulateSessionEvent } from "@checkfu/sdk"
+import type { SessionMessagePreview } from "@checkfu/sdk"
 import { spawn } from "node:child_process"
 import { createHash, createHmac } from "node:crypto"
 import type { ChildProcess } from "node:child_process"
@@ -1643,6 +1645,55 @@ describe("PiSession real Durable Object under workerd", () => {
 
 		const turn2Request = fakeOpenAI.requests.find((req) => req.lastUserText === queuedPrompt)
 		expect(turn2Request?.userTexts).toEqual([queuedPrompt])
+	}, 30_000)
+
+	it("previews model text live and reconciles it to the buffered event", async () => {
+		fakeOpenAI.setHandler(async () => {
+			await sleep(300)
+			return { kind: "reply", text: "Live preview." }
+		})
+		const session = await createSession()
+		const client = new Checkfu({ baseUrl, apiKey: TEST_API_KEY })
+		try {
+			const stream = await client.sessions.events.stream(session.id, undefined, {
+				event_deltas: ["agent.message"],
+			})
+			await client.sessions.events.send(session.id, {
+				events: [
+					{ type: "user.message", content: [{ type: "text", text: "Show a live preview" }] },
+				],
+			})
+			let eventId: string | undefined
+			let preview: SessionMessagePreview | undefined
+			let final:
+				| { readonly id: string; readonly content: ReadonlyArray<{ readonly text: string }> }
+				| undefined
+			for await (const event of stream) {
+				if (event.type === "event_start" && event.event.type === "agent.message") {
+					eventId = event.event.id
+				}
+				if (event.type === "event_start" || event.type === "event_delta") {
+					expect(final).toBeUndefined()
+					preview = accumulateSessionEvent(preview, event)
+				}
+				if (event.type === "agent.message") {
+					final = event
+				}
+				if (event.type === "session.status_idle") {
+					break
+				}
+			}
+			expect(preview?.content[0]?.text).toBe("Live preview.")
+			expect(final?.id).toBe(eventId)
+			expect(final?.content).toEqual([{ type: "text", text: "Live preview." }])
+			const saved = await listAllEvents(session.id)
+			expect(
+				saved.some((event) => event.type === "event_start" || event.type === "event_delta"),
+			).toBe(false)
+			expect(saved.find((event) => event.type === "agent.message")?.id).toBe(eventId)
+		} finally {
+			await client.close()
+		}
 	}, 30_000)
 
 	it("streams committed events over SSE as they happen, resumes from a cursor and ends on archive", async () => {

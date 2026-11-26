@@ -2292,6 +2292,14 @@ const sessionsEventsStreamCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
+			propName: "eventDeltas",
+			flagName: "event-deltas",
+			wireName: "event_deltas[]",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
 			propName: "after",
 			flagName: "after",
 			wireName: "after",
@@ -2309,6 +2317,10 @@ const sessionsEventsStreamCommand = CommandMake(
 		sessionId: FlagString("session-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Session ID"),
+		),
+		eventDeltas: FlagString("event-deltas").pipe(
+			FlagWithDescription("Event types to preview on this connection."),
+			FlagOptional,
 		),
 		after: FlagInt("after").pipe(
 			FlagWithMetavar("SEQ"),

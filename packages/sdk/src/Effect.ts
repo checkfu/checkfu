@@ -76,6 +76,8 @@ export {
 	SendSessionEventsBody,
 	SendSessionEventsResponse,
 	SessionEvent,
+	SessionEventPreview,
+	SessionStreamEvent,
 	SessionResource,
 	UpdateAgentBody,
 	UpdateEnvironmentBody,
@@ -114,3 +116,5 @@ export {
 	parseNormalizedApiUrl,
 } from "./Transport.ts"
 export type { HeaderMap, NormalizeApiUrlOptions } from "./Transport.ts"
+
+export { accumulateSessionEvent, type SessionMessagePreview } from "./SessionEventPreview.ts"

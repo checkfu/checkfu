@@ -878,7 +878,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		const streamData = resolve(streamMedia?.schema?.properties?.["data"])
 		expect(streamData?.type).toBe("string")
 		expect(streamData?.contentMediaType).toBe("application/json")
-		expect(streamData?.contentSchema?.$ref).toBe("#/components/schemas/SessionEvent")
+		expect(streamData?.contentSchema?.anyOf).toEqual([
+			{ $ref: "#/components/schemas/SessionEvent" },
+			{ $ref: "#/components/schemas/SessionEventPreview" },
+		])
 
 		const sessionEventSchema = resolve(listItemsRef)
 		const members = (sessionEventSchema?.anyOf ?? []).map((member) => resolve(member))

@@ -755,7 +755,7 @@ export const SDK_OPERATION_BINDINGS = [
 		httpMethod: "GET",
 		path: "/v1/sessions/{session_id}/events/stream",
 		pathParams: ["session_id"],
-		queryParams: ["after"],
+		queryParams: ["event_deltas[]", "after"],
 		requiredQueryParams: [],
 		kind: "sse",
 		retrySafety: "idempotent",

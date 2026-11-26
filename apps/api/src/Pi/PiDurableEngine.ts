@@ -686,7 +686,10 @@ const settledOutcome = (
 			yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
 		}
 		const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
-		return mapAssistantMessageToOutcome(assistantMessage, usage)
+		const outcome = mapAssistantMessageToOutcome(assistantMessage, usage)
+		return outcome.ok === true
+			? { ...outcome, reply: { ...outcome.reply, response_started_at: assistantMessage.timestamp } }
+			: outcome
 	})
 
 export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(function* (

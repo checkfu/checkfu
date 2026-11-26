@@ -289,7 +289,10 @@ export const checkfu = {
 				...withSignal(signal),
 			}),
 		streamUrl: (session_id: string, after: number) =>
-			operationUrl("sessions.events.stream", { path: { session_id }, query: { after } }),
+			operationUrl("sessions.events.stream", {
+				path: { session_id },
+				query: { after, "event_deltas[]": ["agent.message"] },
+			}),
 	},
 	artifacts: {
 		list: (page?: string, signal?: AbortSignal) =>
