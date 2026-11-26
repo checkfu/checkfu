@@ -52,7 +52,10 @@ export const remoteBody = (resource: Resource): Definition => {
 					environment_id,
 					initial_events,
 					schedule,
-					agent: agent.version === null ? agent.id : { id: agent.id, version: agent.version },
+					agent:
+						agent.version === null
+							? agent.id
+							: { type: "agent", id: agent.id, version: agent.version },
 				},
 			}
 		}
@@ -123,9 +126,6 @@ export const configurationChanges = (
 export const resourceRevision = (resource: Resource): number | undefined =>
 	resource.type === "automation" ? resource.revision : resource.version
 
-export const missingAutomationRevision =
-	"The API did not return an automation revision. Upgrade the API deployment before applying updates or pruning this automation."
-
 export const automationBindings = (body: {
 	readonly agent: string | { readonly id: string; readonly version?: number | null }
 	readonly environment_id: string
@@ -173,7 +173,7 @@ const retrieve = (
 ): Effect.Effect<Resource, ClientError> => {
 	switch (kind) {
 		case "agent":
-			return api.agents.get({ params: { agent_id: AgentId.make(id) } })
+			return api.agents.get({ params: { agent_id: AgentId.make(id) }, query: {} })
 		case "environment":
 			return api.environments.get({ params: { environment_id: EnvironmentId.make(id) } })
 		case "automation":
@@ -301,9 +301,6 @@ export const updateResource = (
 				Effect.mapError(formatClientError),
 			)
 		case "automation":
-			if (current.revision === undefined) {
-				return Effect.fail(usageError(missingAutomationRevision))
-			}
 			return Schema.decodeEffect(UpdateAutomationBody)({
 				...changes,
 				revision: current.revision,
@@ -336,9 +333,6 @@ export const archiveResource = (
 				})
 				.pipe(Effect.mapError(formatClientError))
 		case "automation":
-			if (current.revision === undefined) {
-				return Effect.fail(usageError(missingAutomationRevision))
-			}
 			return api.automations
 				.archiveIfCurrent({
 					params: { automation_id: current.id },

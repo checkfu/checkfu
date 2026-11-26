@@ -13980,6 +13980,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -14005,11 +14010,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -14089,6 +14089,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -14857,6 +14858,11 @@
 															}
 														]
 													},
+													"revision": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
+													},
 													"last_run_at": {
 														"anyOf": [
 															{
@@ -14882,11 +14888,6 @@
 																"type": "null"
 															}
 														]
-													},
-													"revision": {
-														"type": "integer",
-														"minimum": 1,
-														"maximum": 9007199254740991
 													},
 													"agent": {
 														"type": "object",
@@ -14966,6 +14967,7 @@
 													"schedule",
 													"status",
 													"pause_reason",
+													"revision",
 													"last_run_at",
 													"created_at",
 													"updated_at",
@@ -15457,6 +15459,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -15482,11 +15489,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -15566,6 +15568,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -16026,6 +16029,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -16051,11 +16059,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -16135,6 +16138,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -16857,6 +16861,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -16882,11 +16891,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -16966,6 +16970,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -17453,6 +17458,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -17478,11 +17488,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -17562,6 +17567,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -18049,6 +18055,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -18074,11 +18085,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -18158,6 +18164,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -18646,6 +18653,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -18671,11 +18683,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"revision": {
-											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
 										},
 										"agent": {
 											"type": "object",
@@ -18755,6 +18762,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",

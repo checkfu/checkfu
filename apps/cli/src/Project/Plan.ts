@@ -8,7 +8,6 @@ import {
 	desiredBody,
 	fingerprint,
 	listLiveAutomations,
-	missingAutomationRevision,
 	readRemote,
 	remoteBody,
 } from "./Resources.ts"
@@ -110,13 +109,6 @@ export const planProject = (
 					reason: "Remote configuration changed. Use --force to apply the file.",
 					fields: Object.keys(configurationChanges(current, desired.body)),
 				}
-			} else if (current.type === "automation" && current.revision === undefined) {
-				row = {
-					file,
-					action: "blocked",
-					id: current.id,
-					reason: missingAutomationRevision,
-				}
 			} else {
 				row = {
 					file,
@@ -177,11 +169,6 @@ export const planProject = (
 							id: entry.id,
 							reason: "Remote configuration changed. Use --force with --prune to archive it.",
 						},
-						remote,
-					})
-				} else if (remote.type === "automation" && remote.revision === undefined) {
-					removed.push({
-						row: { file, action: "blocked", id: entry.id, reason: missingAutomationRevision },
 						remote,
 					})
 				} else {

@@ -461,40 +461,6 @@ it.each([
 		),
 )
 
-it("reads older automation responses but blocks writes that require a revision", () =>
-	Effect.runPromise(
-		testProject((project) =>
-			Effect.gen(function* () {
-				const { apply, write, file, fs, readLock } = project
-				yield* standardProject(project)
-				const id = idOf(rows(yield* apply([report])), report)
-				const legacy: CliRunOptions = {
-					interceptFetch: async (next, request) => {
-						expect(request.method).toBe("GET")
-						const response = await next(request)
-						if (!request.url.endsWith(`/v1/automations/${id}`)) {
-							return response
-						}
-						const { revision: _, ...body } = (await response.json()) as { revision: number }
-						return Response.json(body, { status: response.status })
-					},
-				}
-				expect(rows(yield* apply([report], ["--yes"], legacy)).at(-1)?.action).toBe("unchanged")
-
-				yield* write(report, reportSource("Updated report"))
-				const update = yield* apply([report], ["--yes"], legacy)
-				expect(update.exitCode).toBe(1)
-				expect(update.stderr).toContain("Upgrade the API deployment")
-
-				yield* fs.remove(file(report))
-				const archive = yield* apply([report], ["--yes", "--prune"], legacy)
-				expect(archive.exitCode).toBe(1)
-				expect(archive.stderr).toContain("Upgrade the API deployment")
-				expect(yield* readLock).toMatchObject({ resources: { [`./${report}`]: { id } } })
-			}),
-		),
-	))
-
 it("blocks pruning IDs used by retained automations, including outside a selected scope", () =>
 	Effect.runPromise(
 		testProject((project) =>
@@ -506,7 +472,7 @@ it("blocks pruning IDs used by retained automations, including outside a selecte
 					report,
 					reportSource(
 						"By ID",
-						`{id: ${idOf(dependencies, reporter)}, version: 1}`,
+						`{type: agent, id: ${idOf(dependencies, reporter)}, version: 1}`,
 						idOf(dependencies, cloud),
 					),
 				)

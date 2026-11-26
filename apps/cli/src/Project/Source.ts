@@ -268,7 +268,7 @@ export const withReferenceIds = (
 		} else {
 			const explicitVersion = typeof body.agent === "string" ? undefined : body.agent.version
 			const version = explicitVersion ?? matched.version
-			body.agent = version === undefined ? matched.id : { id: matched.id, version }
+			body.agent = version === undefined ? matched.id : { type: "agent", id: matched.id, version }
 		}
 	}
 	return { kind: "automation", body }
@@ -408,7 +408,7 @@ export const loadProject = (
 					body[reference.field] = placeholder
 				} else {
 					const { path: _sourcePath, ...fields } = reference.object
-					body[reference.field] = { ...fields, id: placeholder }
+					body[reference.field] = { ...fields, type: "agent", id: placeholder }
 				}
 			}
 			const definition = yield* decodeDefinition(source.kind, body, key)
