@@ -6,6 +6,7 @@ import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
+import { SessionTurnCompletion } from "./Session/SessionTurnCompletion.view.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
 import { StopModelRequest, StopModelRequestLive } from "./Session/StopModelRequest.policy.ts"
@@ -15,7 +16,7 @@ import { TurnInput } from "./Session/TurnInput.view.ts"
 export class Sessions extends Domain.Model("Sessions", {
 	aggregates: [Session, ToolConfirmation],
 	decisions: [RequestToolActionDecision, ConfirmToolDecision, ReturnCustomToolResultDecision],
-	views: [SessionView, TurnInput],
+	views: [SessionView, SessionTurnCompletion, TurnInput],
 	policies: [StartTurn, StopModelRequest, DiscardWorkspace],
 	sagas: [RunTurn],
 	invariants: {
