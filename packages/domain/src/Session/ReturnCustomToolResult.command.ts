@@ -10,10 +10,10 @@ import { ToolResultReturned } from "./ToolConfirmation.aggregate.ts"
 import { ToolConfirmationId } from "./ToolConfirmation.id.ts"
 import { ToolConfirmationNotPending } from "./ToolConfirmationNotPending.rejection.ts"
 
-export class UserCustomToolResult extends Domain.Event(
-	"user.custom_tool_result",
-	SessionEventFields["user.custom_tool_result"],
-) {}
+export class UserCustomToolResult extends Domain.Event("user.custom_tool_result", {
+	...SessionEventFields["user.custom_tool_result"],
+	processed_at: Schema.optionalKey(Schema.DateTimeUtc),
+}) {}
 
 export class ReturnCustomToolResult extends Domain.Command("ReturnCustomToolResult", {
 	input: {

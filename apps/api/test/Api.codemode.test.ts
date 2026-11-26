@@ -137,23 +137,23 @@ const runTurn = async (
 				const session = yield* createIdleSession(apiFetch)
 				yield* sendAndSettle(apiFetch, session.id, ["go"], 1)
 				const events: Array<Schema.JsonObject> = []
-				let after: number | null = null
+				let token: string | null = null
 				while (true) {
 					const res = yield* sendRequest(apiFetch, {
 						method: "GET",
-						path: `/v1/sessions/${session.id}/events?limit=100${after === null ? "" : `&after=${after}`}`,
+						path: `/v1/sessions/${session.id}/events?limit=100${token === null ? "" : `&page=${encodeURIComponent(token)}`}`,
 						headers: AUTH_HEADERS,
 					})
 					const body = (yield* Effect.promise(() => res.json())) as {
 						readonly data: ReadonlyArray<Schema.JsonObject>
-						readonly has_more: boolean
-						readonly next_cursor: number | null
+
+						readonly next_page: string | null
 					}
 					events.push(...body.data)
-					if (!body.has_more || body.next_cursor === null) {
+					if (body.next_page === null) {
 						break
 					}
-					after = body.next_cursor
+					token = body.next_page
 				}
 				return events.filter((event) => String(event["type"]).startsWith("agent."))
 			}).pipe(Effect.scoped, Effect.provide(layer)),

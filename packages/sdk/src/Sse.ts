@@ -9,8 +9,8 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { CursorFromString, SessionEvent, statusOfErrorType } from "./Api.ts"
-import type { ApiError, CheckfuHttpApiClient } from "./Api.ts"
+import { CursorFromString, SessionStreamEvent, statusOfErrorType } from "./Api.ts"
+import type { ApiError, CheckfuHttpApiClient, SessionEvent, SessionPreviewType } from "./Api.ts"
 import {
 	APIConnectionError,
 	BadRequestError,
@@ -59,6 +59,7 @@ export interface StreamSseOptions {
 
 export interface StreamSessionEventsOptions extends StreamSseOptions {
 	readonly after?: number | undefined
+	readonly event_deltas?: ReadonlyArray<SessionPreviewType> | undefined
 }
 
 export interface ApiSseStreamConfig<Event, E extends ApiSseError = ApiSseError> {
@@ -82,7 +83,7 @@ class IncompleteSseFrameError extends Data.TaggedError("IncompleteSseFrameError"
 const decodeUnknownJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 const decodeCursorOption = Schema.decodeUnknownOption(CursorFromString)
 const decodeSessionEventFromJsonString = Schema.decodeUnknownEffect(
-	Schema.fromJsonString(Schema.toCodecJson(SessionEvent)),
+	Schema.fromJsonString(Schema.toCodecJson(SessionStreamEvent)),
 )
 
 const mapSseError = (
@@ -615,13 +616,25 @@ export const streamApiSse = <Event, E extends ApiSseError = ApiSseError>(
 	})
 }
 
-export const streamSessionEvents = (
+export function streamSessionEvents(
+	api: CheckfuHttpApiClient,
+	sessionId: string,
+	options?: StreamSessionEventsOptions & { readonly event_deltas?: undefined },
+	defaultHeaders?: HeaderMap,
+): Stream.Stream<SessionEvent, CheckfuSdkError>
+export function streamSessionEvents(
 	api: CheckfuHttpApiClient,
 	sessionId: string,
 	options?: StreamSessionEventsOptions,
 	defaultHeaders?: HeaderMap,
-): Stream.Stream<SessionEvent, CheckfuSdkError> =>
-	Stream.unwrap(
+): Stream.Stream<SessionStreamEvent, CheckfuSdkError>
+export function streamSessionEvents(
+	api: CheckfuHttpApiClient,
+	sessionId: string,
+	options?: StreamSessionEventsOptions,
+	defaultHeaders?: HeaderMap,
+): Stream.Stream<SessionStreamEvent, CheckfuSdkError> {
+	return Stream.unwrap(
 		Effect.gen(function* () {
 			const parsedSessionId = yield* Schema.decodeEffect(SessionId)(sessionId).pipe(
 				Effect.mapError(
@@ -655,14 +668,18 @@ export const streamSessionEvents = (
 			}
 			const sendQueryAfterOnInitialOpen = headerLastEventId === undefined
 			let lastEmittedSeq: number | undefined = effectiveCursor
-			return streamApiSse<SessionEvent>({
+			return streamApiSse<SessionStreamEvent>({
 				open: ({ cursor, reconnect }) =>
 					api.sessions.streamEvents({
 						params: { session_id: parsedSessionId },
-						query:
-							sendQueryAfterOnInitialOpen && !reconnect && cursor !== undefined
+						query: {
+							...(sendQueryAfterOnInitialOpen && !reconnect && cursor !== undefined
 								? { after: cursor }
-								: {},
+								: {}),
+							...(options?.event_deltas === undefined
+								? {}
+								: { "event_deltas[]": options.event_deltas }),
+						},
 						responseMode: "response-only",
 					}),
 				decodeEvent: (rawData) =>
@@ -677,13 +694,16 @@ export const streamSessionEvents = (
 						),
 					),
 				...(effectiveCursor !== undefined ? { initialCursor: String(effectiveCursor) } : {}),
-				getCursor: (event) => String(event.seq),
+				getCursor: (event) => ("seq" in event ? String(event.seq) : undefined),
 				isCursorAdvance: (prev, next) => prev === undefined || Number(next) > Number(prev),
 				isTerminal: (event) => event.type === "session.archived",
 				defaultHeaders,
 				options,
 			}).pipe(
 				Stream.filter((event) => {
+					if (!("seq" in event)) {
+						return (options?.event_deltas?.length ?? 0) > 0
+					}
 					if (lastEmittedSeq !== undefined && event.seq <= lastEmittedSeq) {
 						return false
 					}
@@ -693,3 +713,4 @@ export const streamSessionEvents = (
 			)
 		}),
 	)
+}

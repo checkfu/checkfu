@@ -359,7 +359,15 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 				),
 				Effect.retry(Schedule.max([Schedule.spaced("20 millis"), Schedule.recurs(200)])),
 			)
-			expect(events["has_more"]).toBe(false)
+			expect(events["next_page"]).toBeNull()
+			const filtered = yield* callOk(client, "sessions_listEvents", {
+				path,
+				query: { types: ["user.message", "agent.message"] },
+			})
+			expect(filtered["data"]).toEqual([
+				expect.objectContaining({ type: "user.message" }),
+				expect.objectContaining({ type: "agent.message" }),
+			])
 		}).pipe(Effect.scoped),
 	)
 
@@ -396,9 +404,9 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 			})
 			const illFormedQuery = yield* callError(client, "sessions_listEvents", {
 				path: { session_id: "sess_1" },
-				query: { after: "\uD800" },
+				query: { page: "\uD800" },
 			})
-			expect(illFormedQuery.error.message).toContain('["query"]["after"]')
+			expect(illFormedQuery.error.message).toContain('["query"]["page"]')
 			expect(server.apiRequests.length).toBe(before)
 		}).pipe(Effect.scoped),
 	)
@@ -550,7 +558,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 					sessions_getSession: session,
 					sessions_listEvents: { ...session, query: { limit: "5" } },
 					sessions_listResources: session,
-					sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
+					sessions_listSessions: { query: { agent_id: "agent_1", page: "3:sess_1" } },
 					sessions_sendSessionEvents: {
 						...session,
 						body: {
@@ -970,7 +978,7 @@ describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 			const client = yield* server.connect()
 			const refused = yield* callError(client, "sessions_createSession", {
 				body: {
-					agent: { id: "agent_1", version: 1 },
+					agent: { type: "agent", id: "agent_1", version: 1 },
 					environment_id: "env_1",
 					resources: [
 						{

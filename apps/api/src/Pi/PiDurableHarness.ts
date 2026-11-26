@@ -530,6 +530,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						provider: resolved.provider,
 						modelId: resolved.modelId,
 						system,
+						...(args.system_context === undefined ? {} : { systemContext: args.system_context }),
 						text: userText,
 						...(mcp === undefined ? {} : { mcp }),
 						...(tools === undefined ? {} : { tools }),

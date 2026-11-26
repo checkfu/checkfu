@@ -23,7 +23,7 @@ export function Pager({
 			) : null}
 			{next === null ? null : (
 				<Button variant="outline" size="sm" asChild>
-					<Link to="." search={{ after: next }}>
+					<Link to="." search={{ page: next }}>
 						Older
 					</Link>
 				</Button>

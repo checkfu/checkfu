@@ -9,6 +9,7 @@ export const RepositoryMount = Schema.Struct({
 	url: Schema.String,
 	mount_path: Schema.String,
 	checkout: Schema.NullOr(RepositoryCheckout),
+	requires_token: Schema.optionalKey(Schema.Literal(true)),
 })
 export type RepositoryMount = typeof RepositoryMount.Type
 

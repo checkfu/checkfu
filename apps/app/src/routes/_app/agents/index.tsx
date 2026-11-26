@@ -6,6 +6,6 @@ import { AgentsPage } from "../../../pages/agents.tsx"
 export const Route = createFileRoute("/_app/agents/")({
 	validateSearch: pageSearch,
 	loaderDeps: ({ search }) => search,
-	loader: ({ context, deps }) => context.queryClient.ensureQueryData(agentsPage(deps.after)),
+	loader: ({ context, deps }) => context.queryClient.ensureQueryData(agentsPage(deps.page)),
 	component: AgentsPage,
 })

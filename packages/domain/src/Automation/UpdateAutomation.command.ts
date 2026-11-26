@@ -25,13 +25,13 @@ import {
 const AutomationConfiguration = {
 	name: AutomationName,
 	description: Schema.NullOr(AutomationDescription),
-	agent_version: Schema.NullOr(PositiveInt),
 	text: MessageText,
 	schedule: AutomationSchedule,
 }
 
 export class AutomationUpdated extends Domain.Event("automation.updated", {
 	...AutomationConfiguration,
+	agent_version: PositiveInt,
 	agent_id: ResourceId,
 	environment_id: ResourceId,
 	revision: PositiveInt,
@@ -57,7 +57,9 @@ export class UpdateAutomation extends Domain.Command("UpdateAutomation", {
 		environment_id: BoundedEnvironmentId,
 		changed: Schema.Boolean,
 		reschedule: Schema.Boolean,
-		agent_changed: Schema.Boolean,
+		agent_id_changed: Schema.Boolean,
+		agent_version: Schema.NullOr(PositiveInt),
+		previous_agent_version: PositiveInt,
 		environment_changed: Schema.Boolean,
 	},
 	events: [AutomationUpdated],

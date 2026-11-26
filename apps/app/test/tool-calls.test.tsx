@@ -22,11 +22,14 @@ import {
 
 const at = "2026-11-24T00:00:00.000Z"
 type Of<T extends JsonSessionEvent["type"]> = Extract<JsonSessionEvent, { readonly type: T }>
-type Body<T extends JsonSessionEvent["type"]> = Omit<Of<T>, "id" | "seq" | "created_at">
+type Body<T extends JsonSessionEvent["type"]> = Omit<
+	Of<T>,
+	"id" | "seq" | "created_at" | "processed_at"
+>
 let seq = 0
 const event = <T extends JsonSessionEvent["type"]>(body: Body<T>): Of<T> => {
 	seq += 1
-	return { id: `evt_${seq}`, seq, created_at: at, ...body } as Of<T>
+	return { id: `evt_${seq}`, seq, created_at: at, processed_at: at, ...body } as Of<T>
 }
 
 const use = (id: string, name: string, extra: Partial<Body<"agent.tool_use">> = {}) =>

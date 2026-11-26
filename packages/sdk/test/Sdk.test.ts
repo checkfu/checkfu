@@ -138,7 +138,7 @@ const sampleAutomation = (overrides?: {
 	type: "automation" as const,
 	name: "Morning report",
 	description: null,
-	agent: { id: "agent_1", version: null },
+	agent: { id: "agent_1", version: 1 },
 	environment_id: "env_1",
 	initial_events: [
 		{ type: "user.message" as const, content: [{ type: "text" as const, text: "Report." }] },
@@ -232,6 +232,7 @@ const sampleUserMessageEvent = (seq: number, text = `msg-${seq}`) => ({
 	seq,
 	type: "user.message",
 	created_at: ISO_NOW,
+	processed_at: ISO_NOW,
 	content: [{ type: "text", text }],
 })
 
@@ -240,6 +241,7 @@ const sampleArchivedEvent = (seq: number) => ({
 	seq,
 	type: "session.archived",
 	created_at: ISO_NOW,
+	processed_at: ISO_NOW,
 })
 
 const sseFrame = (event: { readonly seq: number; readonly type: string }) =>
@@ -452,11 +454,12 @@ describe("@checkfu/sdk", () => {
 									{
 										type: "user.message",
 										id: "evt_c1",
+										processed_at: null,
 										turn: 1,
 										queued: false,
 										content: [{ type: "text", text: "hi" }],
 									},
-									{ type: "user.interrupt", id: "evt_interrupt" },
+									{ type: "user.interrupt", id: "evt_interrupt", processed_at: null },
 								],
 							})
 						}
@@ -582,7 +585,7 @@ describe("@checkfu/sdk", () => {
 						{
 							status: 429,
 							body: apiErrorBody("rate_limit_error", "slow down", {
-								accepted: [{ type: "user.interrupt", id: "evt_interrupt" }],
+								accepted: [{ type: "user.interrupt", id: "evt_interrupt", processed_at: null }],
 								failed_index: 1,
 							}),
 							tag: "RateLimitError",
@@ -631,7 +634,9 @@ describe("@checkfu/sdk", () => {
 						if (err._tag === "RateLimitError") {
 							expect(err.requestId).toBe("req_err_456")
 							expect(err.requestID).toBe("req_err_456")
-							expect(err.accepted).toEqual([{ type: "user.interrupt", id: "evt_interrupt" }])
+							expect(err.accepted).toEqual([
+								{ type: "user.interrupt", id: "evt_interrupt", processed_at: null },
+							])
 							expect(err.failedIndex).toBe(1)
 						}
 					}
@@ -800,29 +805,26 @@ describe("@checkfu/sdk", () => {
 			Effect.gen(function* () {
 				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 					const url = new URL(toWebRequest(input, init).url)
-					const after = url.searchParams.get("after")
+					const token = url.searchParams.get("page")
 					if (url.pathname.includes("sess_stalled")) {
 						return jsonResponse({
 							data: [sampleUserMessageEvent(2)],
-							has_more: true,
-							next_cursor: 2,
+							next_page: "2",
 						})
 					}
-					if (after === null) {
+					if (token === null) {
 						return jsonResponse({
 							data: [sampleUserMessageEvent(1), sampleUserMessageEvent(2)],
-							has_more: true,
-							next_cursor: 2,
+							next_page: "2",
 						})
 					}
-					if (after === "2") {
+					if (token === "2") {
 						return jsonResponse({
 							data: [sampleUserMessageEvent(3)],
-							has_more: false,
-							next_cursor: null,
+							next_page: null,
 						})
 					}
-					return jsonResponse({ data: [], has_more: false, next_cursor: null })
+					return jsonResponse({ data: [], next_page: null })
 				}) as typeof globalThis.fetch
 
 				yield* Effect.gen(function* () {
@@ -833,7 +835,7 @@ describe("@checkfu/sdk", () => {
 					expect(Array.from(all).map((e) => e.seq)).toEqual([1, 2, 3])
 
 					const stalledErr = yield* Effect.flip(
-						Stream.runDrain(client.sessions.events.listStream("sess_stalled", { after: 2 })),
+						Stream.runDrain(client.sessions.events.listStream("sess_stalled", { page: "2" })),
 					)
 					expect(stalledErr._tag).toBe("PaginationCursorCycleError")
 					expect(stalledErr).toBeInstanceOf(PaginationCursorCycleError)
@@ -1080,6 +1082,49 @@ describe("@checkfu/sdk", () => {
 						requestOptions: { maxRetries: 0 },
 					})
 					expect(ready.custody).toBe("erased")
+					expect(polls).toBe(2)
+				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
+			}),
+		)
+
+		it.live("waitForPending settles a vault archive only once every custody count is 0", () =>
+			Effect.gen(function* () {
+				let polls = 0
+				const vault = {
+					id: "vlt_archived",
+					type: "vault",
+					display_name: "Ops",
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+					archived_at: ISO_NOW,
+				}
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (req.method === "POST" && url.pathname === "/v1/vaults/vlt_archived/archive") {
+						return jsonResponse({ id: "vlt_archived", type: "vault", pending: true }, 202)
+					}
+					if (req.method === "GET" && url.pathname === "/v1/vaults/vlt_archived") {
+						polls += 1
+						return jsonResponse({
+							...vault,
+							custody: { storing: 0, held: 0, erasing: polls === 1 ? 2 : 0 },
+						})
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const archived = yield* client.vaults.archive("vlt_archived")
+					expect(isPendingResource(archived)).toBe(true)
+					const ready = yield* client.waitForPending(archived, {
+						initialDelay: "1 millis",
+						maxDelay: "2 millis",
+						timeout: "2 seconds",
+						requestOptions: { maxRetries: 0 },
+					})
+					expect(ready.custody).toEqual({ storing: 0, held: 0, erasing: 0 })
 					expect(polls).toBe(2)
 				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
 			}),
@@ -1416,22 +1461,20 @@ describe("@checkfu/sdk", () => {
 				if (url.pathname.includes("sess_cycle")) {
 					return jsonResponse({
 						data: [sampleUserMessageEvent(2)],
-						has_more: true,
-						next_cursor: 2,
+						next_page: "2",
 					})
 				}
-				const after = url.searchParams.get("after")
-				if (after === null) {
+				const token = url.searchParams.get("page")
+				if (token === null) {
 					return jsonResponse({
 						data: [sampleUserMessageEvent(1), sampleUserMessageEvent(2)],
-						has_more: true,
-						next_cursor: 2,
+
+						next_page: "2",
 					})
 				}
 				return jsonResponse({
 					data: [sampleUserMessageEvent(3)],
-					has_more: false,
-					next_cursor: null,
+					next_page: null,
 				})
 			}) as typeof globalThis.fetch
 
@@ -1445,9 +1488,12 @@ describe("@checkfu/sdk", () => {
 				const firstPage = await client.sessions.events.list("sess_1", { limit: 2 })
 				expect(firstPage.data.map((e) => e.seq)).toEqual([1, 2])
 				expect(firstPage.hasNextPage()).toBe(true)
+				expect(firstPage.next_page).toBe("2")
 				const secondPage = await firstPage.getNextPage()
 				expect(secondPage.data.map((e) => e.seq)).toEqual([3])
 				expect(secondPage.hasNextPage()).toBe(false)
+				const selected = await client.sessions.events.list("sess_1", { page: "2" })
+				expect(selected.data.map((event) => event.seq)).toEqual([3])
 
 				const all: Array<JsonSessionEvent> = []
 				for await (const event of client.sessions.events.list("sess_1", { limit: 2 })) {
@@ -1459,7 +1505,7 @@ describe("@checkfu/sdk", () => {
 				await expect(
 					(async () => {
 						const seen: Array<unknown> = []
-						for await (const event of client.sessions.events.list("sess_cycle", { after: 2 })) {
+						for await (const event of client.sessions.events.list("sess_cycle", { page: "2" })) {
 							seen.push(event)
 						}
 					})(),
@@ -1830,7 +1876,10 @@ describe("@checkfu/sdk", () => {
 								{ "retry-after-ms": "1" },
 							)
 						}
-						return jsonResponse({ data: [{ type: "user.interrupt", id: "evt_interrupt" }] }, 200)
+						return jsonResponse(
+							{ data: [{ type: "user.interrupt", id: "evt_interrupt", processed_at: null }] },
+							200,
+						)
 					}) as typeof globalThis.fetch
 
 					yield* Effect.gen(function* () {
@@ -3286,25 +3335,22 @@ describe("@checkfu/sdk", () => {
 				if (url.pathname === "/v1/agents/agent_lazy") {
 					return jsonResponse(sampleAgent({ id: "agent_lazy" }))
 				}
-				const after = url.searchParams.get("after")
-				if (after === null) {
+				const token = url.searchParams.get("page")
+				if (token === null) {
 					return jsonResponse({
 						data: [sampleUserMessageEvent(1)],
-						has_more: true,
-						next_cursor: 1,
+						next_page: "1",
 					})
 				}
-				if (after === "1") {
+				if (token === "1") {
 					return jsonResponse({
 						data: [sampleUserMessageEvent(2)],
-						has_more: true,
-						next_cursor: 2,
+						next_page: "2",
 					})
 				}
 				return jsonResponse({
 					data: [sampleUserMessageEvent(3)],
-					has_more: false,
-					next_cursor: null,
+					next_page: null,
 				})
 			}) as typeof globalThis.fetch
 
@@ -3342,12 +3388,11 @@ describe("@checkfu/sdk", () => {
 				const pagePromise = executePaginatedPromise(
 					spyRuntime,
 					undefined,
-					"asc",
 					undefined,
-					(effectRuntime, after: number | undefined, opts) =>
+					(effectRuntime, token: string | undefined, opts) =>
 						new EffectSessionsEventsResource(effectRuntime).list(
 							"sess_lazy",
-							after === undefined ? {} : { after },
+							token === undefined ? {} : { page: token },
 							{ ...opts, withResponse: true },
 						),
 				)

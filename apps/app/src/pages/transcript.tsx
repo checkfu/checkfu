@@ -1,5 +1,5 @@
 import { cn } from "@checkfu/ui/cn"
-import type { JsonSessionEvent } from "@checkfu/sdk/client"
+import type { JsonSessionEvent, SessionMessagePreview } from "@checkfu/sdk/client"
 import type * as React from "react"
 import { toolCallsOf } from "../tool-calls.ts"
 import type { ToolCalls } from "../tool-calls.ts"
@@ -32,6 +32,8 @@ const entryOf = (
 	send: SendAnswer | undefined,
 ): React.JSX.Element | null => {
 	switch (event.type) {
+		case "system.message":
+			return <p className="text-control text-muted-foreground">{text(event.content)}</p>
 		case "user.message":
 			return (
 				<Bubble from="You" className="rounded-lg bg-muted/60 px-4 py-3">
@@ -81,13 +83,21 @@ const entryOf = (
 
 export function Transcript({
 	events,
+	preview,
 	calls = toolCallsOf(events),
 	send,
 }: {
 	readonly events: ReadonlyArray<JsonSessionEvent>
 	readonly calls?: ToolCalls | undefined
 	readonly send?: SendAnswer | undefined
+	readonly preview?: SessionMessagePreview | undefined
 }): React.JSX.Element {
+	const previewText =
+		preview === undefined
+			? ""
+			: Object.values(preview.content)
+					.map((block) => block?.text ?? "")
+					.join("")
 	const rows = events.flatMap((event) => {
 		const entry = entryOf(event, calls, send)
 		return entry === null ? [] : [<li key={event.seq}>{entry}</li>]
@@ -98,6 +108,11 @@ export function Transcript({
 				<li className="text-sm text-muted-foreground">No messages yet.</li>
 			) : (
 				rows
+			)}
+			{preview === undefined || previewText === "" ? null : (
+				<li key={preview.id}>
+					<Bubble from="Agent">{previewText}</Bubble>
+				</li>
 			)}
 		</ol>
 	)

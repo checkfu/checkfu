@@ -82,6 +82,7 @@ export const ensureTurnStarted = Effect.gen(function* () {
 			turn: state.turn,
 			input: state.input,
 			resources: state.resources,
+			...(state.system_context === undefined ? {} : { system_context: state.system_context }),
 			...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
 			...(segment === 1 ? {} : { segment }),
 		})
