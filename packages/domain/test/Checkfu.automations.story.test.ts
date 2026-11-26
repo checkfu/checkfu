@@ -120,7 +120,7 @@ const config = {
 	name: "Morning report",
 	description: null as string | null,
 	agent_id: agent.id,
-	agent_version: 1 as number | null,
+	agent_version: 1,
 	environment_id: environment.id,
 	text: "Write the morning report.",
 	schedule: { type: "cron" as const, expression: "0 9 * * *", timezone: "UTC" },
@@ -140,7 +140,10 @@ const world = [
 	),
 ]
 
-const admit = (overrides: Partial<typeof config> = {}, id = automation.id) =>
+const admit = (
+	overrides: Partial<Omit<typeof config, "agent_version">> & { agent_version?: number | null } = {},
+	id = automation.id,
+) =>
 	new AdmitAutomation({
 		automation_id: id,
 		capacity_id: AUTOMATION_CAPACITY,
@@ -162,10 +165,8 @@ const update = (changes: Partial<typeof config>, expected_revision = 1, base = c
 			(key) => next[key as keyof typeof next] !== base[key as keyof typeof base],
 		),
 		reschedule: !sameSchedule(next.schedule, base.schedule),
-		agent_changed: [
-			next.agent_id === base.agent_id,
-			next.agent_version === base.agent_version,
-		].includes(false),
+		agent_id_changed: next.agent_id !== base.agent_id,
+		previous_agent_version: base.agent_version,
 		environment_changed: next.environment_id !== base.environment_id,
 	})
 }
