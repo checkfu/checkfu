@@ -9,8 +9,8 @@
 			"tools/*"
 		],
 		"catalog": {
-			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/d49aab2e8f5ab9abbec4b4bcbd8d4d7b428c14143eb0e20a07eba6b5194ade5d.tgz",
-			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/300073173839ac69f7f76fd46021bdc13ce7386471bda71ff2b930b6f319f117.tgz",
+			"@alchemy.run/cloudflare": "https://pkg.alchemy.run/@alchemy.run/cloudflare/-/934b80b15c5ae2bf2be4dd44e478713f9755b51b53f8218ab22eec555b2bae72.tgz",
+			"@alchemy.run/domain": "https://pkg.alchemy.run/@alchemy.run/domain/-/d3c8dbf7b350aa08ddf41791ae5d834f2eb57f96df420795f5ec9a5db1b45b96.tgz",
 			"@cloudflare/computer": "0.11.4",
 			"@cloudflare/forge": "0.2.0",
 			"@distilled.cloud/cloudflare": "https://pkg.alchemy.run/@distilled.cloud/cloudflare/-/8ce7588c1725c1b71f5cdbf5fed6c7fdac2192f915d16e06e03dfe9a8e36a464.tgz",
@@ -23,7 +23,7 @@
 			"@effect/vitest": "4.1.5",
 			"@types/node": "26.6.6",
 			"agents": "0.34.0",
-			"alchemy": "https://pkg.alchemy.run/alchemy/-/3882966d5d3b5229ec2df019a1d53902e85bd720a17326cf3e24c6bba3cb78bc.tgz",
+			"alchemy": "https://pkg.alchemy.run/alchemy/-/099477e46ca2063d281240b2b9f220fa2bfb094de47f1dddc26cc7b067248cab.tgz",
 			"effect": "4.1.5",
 			"fast-check": "4.9.0",
 			"typescript": "7.0.2",

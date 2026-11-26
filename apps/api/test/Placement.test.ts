@@ -1,9 +1,11 @@
 import type * as Cloudflare from "@alchemy.run/cloudflare"
+import { retentionWindows } from "@alchemy.run/domain/DurableObjects"
 import { describe, expect, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { expectTypeOf } from "vitest"
+import { DOMAIN_RETENTION } from "../src/PlacedDurableObjects.ts"
 import {
 	DEFAULT_STORAGE_SCOPE,
 	JURISDICTION_ENV,
@@ -95,4 +97,12 @@ describe("Durable Object placement", () => {
 			expect(Jurisdiction.literals).not.toContain(DEFAULT_STORAGE_SCOPE)
 		}),
 	)
+
+	it("keeps every receipt and delivery mark the domain dedupes with, so a late retry stays a retry", () => {
+		expect(retentionWindows(DOMAIN_RETENTION)).toEqual({
+			receipts: undefined,
+			deliveries: undefined,
+			cancelled: undefined,
+		})
+	})
 })
