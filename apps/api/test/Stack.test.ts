@@ -378,7 +378,7 @@ describe("Alchemy stack and worker entry", () => {
 	)
 
 	it.live(
-		"keeps every planned Worker within Cloudflare's 100-export script limit",
+		"keeps planned Worker entrypoints and local classes within the export budget",
 		() =>
 			Effect.gen(function* () {
 				const scratch = yield* Effect.acquireRelease(
@@ -398,30 +398,24 @@ describe("Alchemy stack and worker entry", () => {
 					Effect.map(({ native }) => {
 						const byWorker: Record<string, number> = {}
 						for (const [id, entry] of Object.entries(native.resources)) {
-							if (!Cloudflare.Workers.isWorker(entry.resource)) {
+							if (entry.action !== "create" || !Cloudflare.Workers.isWorker(entry.resource)) {
 								continue
 							}
-							const exports = new Set<string>(["default"])
-							for (const binding of entry.bindings) {
-								const data = binding.data
-								const items =
-									typeof data === "object" &&
-									data !== null &&
-									"bindings" in data &&
-									Array.isArray(data.bindings)
-										? data.bindings
-										: []
-								for (const item of items) {
-									if (typeof item !== "object" || item === null || !("type" in item)) {
-										continue
-									}
+							const exports = new Set(["default", ...Object.keys(entry.props.exports ?? {})])
+							// Workers with a raw entry module declare local classes through their bindings.
+							for (const { data } of entry.bindings) {
+								const bindings: ReadonlyArray<Cloudflare.Workers.WorkerBinding> =
+									data.bindings ?? []
+								for (const binding of bindings) {
 									if (
-										(item.type === "durable_object_namespace" || item.type === "workflow") &&
-										"className" in item &&
-										typeof item.className === "string" &&
-										(!("scriptName" in item) || item.scriptName === undefined)
+										(binding.type === "durable_object_namespace" || binding.type === "workflow") &&
+										"className" in binding &&
+										typeof binding.className === "string" &&
+										(!("scriptName" in binding) ||
+											binding.scriptName === undefined ||
+											binding.scriptName === entry.props.name)
 									) {
-										exports.add(item.className)
+										exports.add(binding.className)
 									}
 								}
 							}
@@ -437,13 +431,11 @@ describe("Alchemy stack and worker entry", () => {
 						adopt: false,
 					}),
 				)
-				expect(Object.keys(counts)).toContain("ApiWorker")
-				expect(Object.keys(counts)).toContain("PiHarnessWorker")
+				expect(counts["ApiWorker"]).toBeGreaterThan(1)
+				expect(counts["PiHarnessWorker"]).toBeGreaterThan(1)
+				const exportBudget = 100
 				for (const [worker, count] of Object.entries(counts)) {
-					expect(
-						count,
-						`${worker} exports ${count} classes (Cloudflare limit is 100)`,
-					).toBeLessThanOrEqual(100)
+					expect(count, `${worker} has ${count} planned exports`).toBeLessThanOrEqual(exportBudget)
 				}
 			}),
 		60_000,
