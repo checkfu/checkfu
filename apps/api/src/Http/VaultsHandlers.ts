@@ -157,10 +157,11 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 		const revoked = (vaultId: VaultId, id: CredentialId) =>
 			revokeSecret(vaultId, id).pipe(
 				inRuntime,
-				Effect.catchDefect(() =>
-					reject(
-						503,
-						`Credential ${id} has ended, but its secret is not yet confirmed erased. Send the request again.`,
+				Effect.as(true),
+				Effect.catchDefect((defect) =>
+					Effect.as(
+						Effect.logWarning("Credential secret erasure left to its policy", id, defect),
+						false,
 					),
 				),
 			)
@@ -168,15 +169,13 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 		const sealed = (id: VaultId) =>
 			secrets.seal({ vault_id: id }).pipe(
 				inRuntime,
-				Effect.catchDefect(() =>
-					reject(
-						503,
-						`Vault ${id} has ended, but its secrets are not yet confirmed erased. Send the request again.`,
-					),
+				Effect.as(true),
+				Effect.catchDefect((defect) =>
+					Effect.as(Effect.logWarning("Vault seal left to its policy", id, defect), false),
 				),
 			)
 
-		const erasedCredential = (vaultId: VaultId, id: CredentialId) =>
+		const erasedCredential = (vaultId: VaultId, id: CredentialId, confirmed: boolean) =>
 			Effect.gen(function* () {
 				const pending = {
 					id,
@@ -184,13 +183,15 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 					vault_id: vaultId,
 					pending: true as const,
 				}
-				const projected = yield* credentialViews
-					.waitFor(
-						Credential.ref(id),
-						{ custody: "erased" },
-						{ timeout: yield* VaultReadWaitTimeout },
-					)
-					.pipe(Effect.catchTag("WaitTimeout", () => Effect.succeed(null)))
+				const projected = confirmed
+					? yield* credentialViews
+							.waitFor(
+								Credential.ref(id),
+								{ custody: "erased" },
+								{ timeout: yield* VaultReadWaitTimeout },
+							)
+							.pipe(Effect.catchTag("WaitTimeout", () => Effect.succeed(null)))
+					: null
 				if (projected !== null) {
 					return projected
 				}
@@ -282,17 +283,24 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 				Effect.gen(function* () {
 					const id = params.vault_id
 					const receipt = yield* vaults.send(new DeleteVault({ vault_id: id }))
-					yield* sealed(id)
+					const confirmed = yield* sealed(id)
 					yield* vaultViews.get(Vault.ref(id), { atLeast: receipt }).pipe(bestEffortAfterCommit)
 					const { storing, held, erasing } = yield* vaults.get(id)
-					return { id, type: "vault_deleted" as const, custody: { storing, held, erasing } }
+					return {
+						id,
+						type: "vault_deleted" as const,
+						secrets: confirmed ? ("erased" as const) : ("erasing" as const),
+						custody: { storing, held, erasing },
+					}
 				}).pipe(handled),
 			)
 			.handle("archive", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.vault_id
 					const receipt = yield* vaults.send(new ArchiveVault({ vault_id: id }))
-					yield* sealed(id)
+					if (!(yield* sealed(id))) {
+						return { id, type: "vault" as const, pending: true as const }
+					}
 					const result = yield* vaultAfter(id, receipt)
 					if (isPending(result)) {
 						return result
@@ -487,8 +495,8 @@ export const VaultsLive = HttpApiBuilder.group(CheckfuApi, "vaults", (handlers) 
 							mcp_server_url: yield* urlOf(params.vault_id, id),
 						}),
 					)
-					yield* revoked(params.vault_id, id)
-					return yield* erasedCredential(params.vault_id, id)
+					const confirmed = yield* revoked(params.vault_id, id)
+					return yield* erasedCredential(params.vault_id, id, confirmed)
 				}).pipe(handled),
 			)
 	}),
