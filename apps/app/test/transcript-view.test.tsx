@@ -8,6 +8,7 @@ const reply = (seq: number, truncated: boolean): JsonSessionEvent => ({
 	seq,
 	type: "agent.message",
 	created_at: "2026-11-24T00:00:00.000Z",
+	processed_at: "2026-11-24T00:00:00.000Z",
 	content: [{ type: "text", text: `reply ${seq}` }],
 	...(truncated ? { truncated: true as const } : {}),
 })

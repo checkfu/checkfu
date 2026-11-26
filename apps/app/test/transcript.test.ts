@@ -13,6 +13,7 @@ const message = (seq: number): JsonSessionEvent => ({
 	seq,
 	type: "agent.message",
 	created_at: at,
+	processed_at: at,
 	content: [{ type: "text", text: `message ${seq}` }],
 })
 
@@ -21,6 +22,7 @@ const archived = (seq: number): JsonSessionEvent => ({
 	seq,
 	type: "session.archived",
 	created_at: at,
+	processed_at: at,
 })
 
 const page = (seqs: ReadonlyArray<number>, next: number | null): EventPage => ({

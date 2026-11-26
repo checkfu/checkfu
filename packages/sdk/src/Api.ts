@@ -1098,7 +1098,7 @@ export const isPendingResource = <T extends { readonly type: string }>(
 export const UserMessageEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.message"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	turn: PositiveInt,
 	queued: Schema.Boolean,
 	content: TextBlocks,
@@ -1108,14 +1108,14 @@ export type UserMessageEventReceipt = typeof UserMessageEventReceipt.Type
 export const UserInterruptEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.interrupt"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
 export const UserToolConfirmationEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.tool_confirmation"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	tool_use_id: ToolUseEventId,
 	result: ToolConfirmationResult,
 	deny_message: Schema.optionalKey(DenyMessage),
@@ -1125,7 +1125,7 @@ export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventR
 export const UserCustomToolResultEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.custom_tool_result"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	custom_tool_use_id: ToolUseEventId,
 	content: Schema.optionalKey(TextBlocks),
 	is_error: Schema.optionalKey(Schema.Boolean),
@@ -1154,7 +1154,7 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		seq: PositiveInt,
 		type: Schema.Literal(type),
 		created_at: Schema.DateTimeUtc,
-		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+		processed_at: Schema.NullOr(Schema.DateTimeUtc),
 		...fields,
 	})
 

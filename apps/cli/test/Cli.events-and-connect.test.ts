@@ -2695,6 +2695,7 @@ describe("CLI sessions:events and sessions connect", () => {
 													seq: errSeq,
 													type: "session.error",
 													created_at: "2026-11-22T00:00:00.000Z",
+													processed_at: "2026-11-22T00:00:00.000Z",
 													error: {
 														type: "upstream_overloaded",
 														message: "transient overload",
@@ -3993,6 +3994,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 													seq: errSeq,
 													type: "session.error",
 													created_at: "2026-11-22T00:00:00.000Z",
+													processed_at: "2026-11-22T00:00:00.000Z",
 													error: {
 														type: "upstream_overloaded",
 														message: "temporary retryable error",
@@ -4224,6 +4226,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 															seq: syntheticHead,
 															type: "user.message",
 															created_at: "2026-11-22T00:00:00.000Z",
+															processed_at: "2026-11-22T00:00:00.000Z",
 															content: [{ type: "text", text: "busy" }],
 														},
 													],
@@ -4249,6 +4252,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 															seq: nextSeq1,
 															type: "user.message",
 															created_at: "2026-11-22T00:00:00.000Z",
+															processed_at: "2026-11-22T00:00:00.000Z",
 															content: [{ type: "text", text: "live-1" }],
 														},
 														{
@@ -4256,6 +4260,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 															seq: nextSeq2,
 															type: "user.message",
 															created_at: "2026-11-22T00:00:00.000Z",
+															processed_at: "2026-11-22T00:00:00.000Z",
 															content: [{ type: "text", text: "live-2" }],
 														},
 													],

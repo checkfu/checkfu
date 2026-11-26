@@ -31559,7 +31559,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "A user message in the session conversation, with text content blocks."
 					},
@@ -31592,7 +31592,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "An interrupt that stops the agent's current turn."
 					},
@@ -31638,7 +31638,15 @@
 								"maxLength": 4096
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "result"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"result"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -31695,7 +31703,15 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "custom_tool_use_id", "content"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"custom_tool_use_id",
+							"content"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -31732,7 +31748,7 @@
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "The agent is processing a turn."
 					},
@@ -31769,7 +31785,14 @@
 								"minLength": 1
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "model_request_start_id"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"model_request_start_id"
+						],
 						"additionalProperties": false,
 						"description": "A model request started."
 					},
@@ -31820,7 +31843,16 @@
 								"enum": [true]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"name",
+							"input"
+						],
 						"additionalProperties": false,
 						"description": "The agent called a tool. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -31886,7 +31918,16 @@
 								"enum": ["unavailable", "invalid_arguments", "blocked"]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"content",
+							"is_error"
+						],
 						"additionalProperties": false,
 						"description": "The result of a tool call, including why the call was rejected when applicable. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -31952,6 +31993,7 @@
 							"seq",
 							"type",
 							"created_at",
+							"processed_at",
 							"tool_use_id",
 							"mcp_server_name",
 							"name",
@@ -32022,7 +32064,16 @@
 								"enum": ["unavailable", "invalid_arguments", "blocked"]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"content",
+							"is_error"
+						],
 						"additionalProperties": false,
 						"description": "Records what an MCP call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
@@ -32068,7 +32119,16 @@
 								"type": "object"
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"required": [
+							"id",
+							"seq",
+							"type",
+							"created_at",
+							"processed_at",
+							"tool_use_id",
+							"name",
+							"input"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -32100,7 +32160,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false,
 						"description": "The agent is thinking."
 					},
@@ -32155,7 +32215,7 @@
 								"enum": [true]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "content"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "content"],
 						"additionalProperties": false,
 						"description": "The agent's response, with text content blocks."
 					},
@@ -32224,6 +32284,7 @@
 							"seq",
 							"type",
 							"created_at",
+							"processed_at",
 							"model_request_start_id",
 							"model_usage",
 							"is_error"
@@ -32311,7 +32372,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "stop_reason"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "stop_reason"],
 						"additionalProperties": false,
 						"description": "The agent stopped processing a turn. See stop_reason for why it stopped."
 					},
@@ -32368,7 +32429,7 @@
 								"additionalProperties": false
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "error"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "error"],
 						"additionalProperties": false,
 						"description": "An error occurred while processing a turn. Includes the error and its retry status."
 					},
@@ -32408,7 +32469,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false
 					},
 					{
@@ -32440,7 +32501,7 @@
 								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at"],
 						"additionalProperties": false
 					}
 				]
@@ -32494,7 +32555,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["type", "id", "turn", "queued", "content"],
+						"required": ["type", "id", "processed_at", "turn", "queued", "content"],
 						"additionalProperties": false
 					},
 					{
@@ -32518,7 +32579,7 @@
 								]
 							}
 						},
-						"required": ["type", "id"],
+						"required": ["type", "id", "processed_at"],
 						"additionalProperties": false
 					},
 					{
@@ -32555,7 +32616,7 @@
 								"maxLength": 4096
 							}
 						},
-						"required": ["type", "id", "tool_use_id", "result"],
+						"required": ["type", "id", "processed_at", "tool_use_id", "result"],
 						"additionalProperties": false
 					},
 					{
@@ -32605,7 +32666,7 @@
 								"type": "boolean"
 							}
 						},
-						"required": ["type", "id", "custom_tool_use_id"],
+						"required": ["type", "id", "processed_at", "custom_tool_use_id"],
 						"additionalProperties": false
 					}
 				]
