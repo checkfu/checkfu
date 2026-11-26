@@ -328,7 +328,7 @@ export const makePiDurableTestLayer = (
 		readonly sessionId: string
 		readonly paths: ReadonlyArray<string>
 	}> = []
-	let beforeOutputsRead: ((sessionId: string) => void) | undefined
+	let beforeOutputsRead: ((sessionId: string) => void | Promise<void>) | undefined
 	const enteredTurns = new Map<string, number>()
 	const superseded = (sessionId: string, turn: number) => (enteredTurns.get(sessionId) ?? 0) > turn
 	const publishedTurns: Array<string> = []
@@ -383,6 +383,7 @@ export const makePiDurableTestLayer = (
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
+					workspaces.get(sessionId)?.clear()
 				}),
 			listOutputs: (sessionId, turn) =>
 				Effect.tryPromise({
@@ -396,7 +397,7 @@ export const makePiDurableTestLayer = (
 				Effect.tryPromise({
 					try: async () => {
 						outputReads.push({ sessionId, paths })
-						beforeOutputsRead?.(sessionId)
+						await beforeOutputsRead?.(sessionId)
 						return superseded(sessionId, turn) ? null : sessionOutputs(sessionId).read(paths)
 					},
 					catch: (cause) => new HarnessCallFailed({ cause }),
@@ -479,7 +480,7 @@ export const makePiDurableTestLayer = (
 		failingOutputReads,
 		publishedTurns,
 		publishOutputs,
-		setBeforeOutputsRead: (run: (sessionId: string) => void) => {
+		setBeforeOutputsRead: (run: (sessionId: string) => void | Promise<void>) => {
 			beforeOutputsRead = run
 		},
 	}

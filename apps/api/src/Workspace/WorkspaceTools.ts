@@ -6,7 +6,7 @@ import {
 	MAX_ARTIFACT_FILE_BYTES,
 	MAX_ARTIFACT_TOTAL_BYTES,
 } from "../Artifacts/ArtifactFiles.ts"
-import { SESSION_OUTPUTS_PATH } from "./SessionOutputs.ts"
+import { SESSION_OUTPUTS_PATH, MAX_OUTPUT_ENTRIES } from "./SessionOutputs.ts"
 
 export type WorkspaceTool = PiTool
 export type WorkspaceToolCall = Required<PiToolCall>
@@ -18,7 +18,7 @@ const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 
 const MEBIBYTE = 1024 * 1024
 
-const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths. Files you leave in ${SESSION_OUTPUTS_PATH} are published as this session's artifact each time your turn ends, so put there what the user should keep. The directory holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / MEBIBYTE} MiB in total; beyond that, nothing is published. An empty directory publishes nothing either, so the last version stays.`
+const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths. Files you leave in ${SESSION_OUTPUTS_PATH} are published as this session's artifact each time your turn ends, so put there what the user should keep. The directory holds at most ${MAX_ARTIFACT_FILES} files, ${MAX_ARTIFACT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_ARTIFACT_TOTAL_BYTES / MEBIBYTE} MiB in total, and at most ${MAX_OUTPUT_ENTRIES} files and folders counted together; beyond that, nothing is published. An empty directory publishes nothing either, so the last version stays.`
 
 export const MAX_INLINE_IMAGE_BYTES = 1024 * 1024
 

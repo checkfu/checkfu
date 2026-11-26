@@ -95,6 +95,7 @@ const withSessions = async (
 			| "failingOutputReads"
 			| "publishedTurns"
 			| "publishOutputs"
+			| "discardedWorkspaces"
 			| "requests"
 		> & {
 			readonly onTurn: (edit: Edit) => void
@@ -1203,6 +1204,42 @@ describe("A session's outputs", () => {
 					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
 						version: 5,
 						files: ours,
+					})
+				}),
+		))
+
+	it("publishes a reply's outputs before an archive right after it discards the workspace", () =>
+		withSessions(
+			(
+				apiFetch,
+				{
+					workspaceFiles,
+					setBeforeOutputsRead,
+					discardedWorkspaces,
+					onTurn,
+					createSession,
+					outputs,
+				},
+			) =>
+				Effect.gen(function* () {
+					const session = yield* createSession()
+					onTurn(() => void workspaceFiles(session.id).set(`${OUTPUTS}/a.txt`, "last words"))
+					setBeforeOutputsRead(
+						() =>
+							new Promise((resolve) => {
+								setTimeout(resolve, 200)
+							}),
+					)
+					yield* sendAndSettle(apiFetch, session.id, ["Write it."], 1)
+					expect(
+						(yield* request(apiFetch, "POST", `/v1/sessions/${session.id}/archive`)).status,
+					).toBe(200)
+					while (!discardedWorkspaces.includes(session.id)) {
+						yield* Effect.sleep("5 millis")
+					}
+					expect(yield* json<ArtifactBody>(yield* outputs(session.id))).toMatchObject({
+						version: 1,
+						files: [fileOf("a.txt", "last words", "text/plain")],
 					})
 				}),
 		))
