@@ -44,8 +44,10 @@ export default PiHarnessWorker.make(
 			answerCall: (conversation, toolUseId, answer) =>
 				Effect.orDie(piSession(conversation).answerCall(toolUseId, answer)),
 			customToolFaults: (tools, taken) => Effect.sync(() => customToolFaults(tools, taken)),
-			prepareWorkspace: (sessionId, token, allowedHosts) =>
-				Effect.orDie(workspace(sessionId).prepare(token, allowedHosts)),
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				Effect.orDie(workspace(sessionId).prepare(token, repositories, allowedHosts)),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token, replace)),
 			interruptWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).interrupt(token)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard(sessionId)),
 			fetch: yield* sandboxEgress((sessionId, request) =>

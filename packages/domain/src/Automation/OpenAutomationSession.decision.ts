@@ -30,6 +30,7 @@ export class OpenAutomationSessionDecision extends Domain.Decision(OpenAutomatio
 					agent_version: pinnedVersion,
 					environment_id: environment.id,
 					title: cmd.title,
+					resources: cmd.resources,
 					...(cmd.mcp_server_credentials === undefined
 						? {}
 						: { mcp_server_credentials: cmd.mcp_server_credentials }),

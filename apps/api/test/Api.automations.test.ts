@@ -1,5 +1,6 @@
 import { MAX_LIVE_AUTOMATIONS } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
 import * as InMemory from "@alchemy.run/domain/InMemory"
+import type { RuntimeContext } from "alchemy/RuntimeContext"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
@@ -28,7 +29,7 @@ import {
 type ApiFetch = Effect.Effect<
 	HttpServerResponse.HttpServerResponse,
 	never,
-	HttpServerRequest.HttpServerRequest
+	HttpServerRequest.HttpServerRequest | RuntimeContext
 >
 
 interface AutomationBody {

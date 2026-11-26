@@ -27,7 +27,7 @@ import { Session } from "./Session.aggregate.ts"
 export { SessionSnapshot }
 
 export class SessionView extends Domain.View("SessionView", {
-	version: 4,
+	version: 5,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(SessionSnapshot),
@@ -64,6 +64,7 @@ export class SessionView extends Domain.View("SessionView", {
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,
 						title: e.title,
+						resources: e.resources,
 						turn: 0,
 						usage: {
 							input_tokens: 0,

@@ -185,6 +185,7 @@ const sampleSession = (overrides?: {
 	agent: sampleAgent(),
 	environment_id: "env_1",
 	title: "Demo",
+	resources: [],
 	turn: 0,
 	usage: { input_tokens: 0, output_tokens: 0 },
 	created_at: ISO_NOW,

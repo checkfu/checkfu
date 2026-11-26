@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { AgentId } from "../Agent/Agent.id.ts"
 import { AgentArchivedError } from "../Agent/AgentArchived.rejection.ts"
@@ -8,6 +9,7 @@ import { EnvironmentNotFound } from "../Environment/EnvironmentNotFound.rejectio
 import { McpServerCredentialsText } from "../Mcp/McpServers.ts"
 import { SessionAlreadyExists, SessionCreated } from "./CreateSession.command.ts"
 import { SessionId } from "./Session.id.ts"
+import { SessionResources } from "./SessionResource.ts"
 import { MAX_IDENTIFIER_LENGTH, PositiveInt, SessionTitle } from "./SessionTypes.ts"
 
 export const BoundedAgentId = Schema.String.check(
@@ -37,6 +39,7 @@ export class AdmitSession extends Domain.Command("AdmitSession", {
 		environment_id: BoundedEnvironmentId,
 		title: Schema.NullOr(SessionTitle),
 		mcp_server_credentials: McpServerCredentialsText,
+		resources: SessionResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 	},
 	events: [SessionCreated],
 	rejects: [

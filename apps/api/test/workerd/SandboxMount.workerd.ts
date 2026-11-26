@@ -6,6 +6,8 @@ import * as Predicate from "effect/Predicate"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { SandboxError } from "../../src/Sandbox/Sandboxes.ts"
 import type { Sandbox } from "../../src/Sandbox/Sandboxes.ts"
+import { cloneCommand } from "../../src/Workspace/Repositories.ts"
+import type { RepositoryMount } from "../../src/Workspace/WorkspaceShapes.ts"
 import { WRITE_FILE } from "../../src/Sandbox/WriteFile.ts"
 import { makeSandboxMount } from "../../src/Workspace/SandboxMount.ts"
 import type { InSandbox } from "../../src/Workspace/SandboxMount.ts"
@@ -174,6 +176,8 @@ describe("a session's machine, in a container of its image", () => {
 				},
 			}),
 		)
+	const clone = (repository: RepositoryMount) =>
+		Effect.runPromise(sandbox.exec(cloneCommand(repository), { cwd: "/" }))
 	const sh = async (script: string): Promise<string> => {
 		const ran = await Effect.runPromise(sandbox.exec(["bash", "-c", script]))
 		return ran.stdout
@@ -454,6 +458,42 @@ describe("a session's machine, in a container of its image", () => {
 		await mount.rm?.("w/a", { recursive: true })
 		expect(await sh("ls -A /workspace/w")).toBe("new\n")
 	}, 120_000)
+
+	it("clones a repository only where its checkout is missing, and leaves nothing behind when a clone fails", async () => {
+		await sh(
+			"git init -q -b main /srv/origin && git -C /srv/origin -c user.email=a@b -c user.name=a commit -q --allow-empty -m first",
+		)
+		const mount = {
+			id: "sesrsc_1",
+			type: "github_repository" as const,
+			url: "file:///srv/origin",
+			mount_path: "/workspace/repos/api",
+			checkout: { type: "branch" as const, name: "main" },
+		}
+		expect((await clone(mount)).exitCode).toBe(0)
+		expect(await sh("git -C /workspace/repos/api branch --show-current")).toBe("main\n")
+		await sh("echo edit > /workspace/repos/api/notes.txt")
+		expect((await clone(mount)).exitCode).toBe(0)
+		expect(await sh("cat /workspace/repos/api/notes.txt")).toBe("edit\n")
+		await sh("rm -rf /workspace/repos/api")
+		expect((await clone(mount)).exitCode).toBe(0)
+		expect(await sh("ls -A /workspace/repos")).toBe("api\n")
+		const missing = {
+			...mount,
+			mount_path: "/workspace/repos/gone",
+			checkout: { type: "branch" as const, name: "nope" },
+		}
+		expect((await clone(missing)).exitCode).not.toBe(0)
+		expect((await clone(missing)).exitCode).not.toBe(0)
+		expect(await sh("ls -A /workspace/repos")).toBe("api\n")
+		const sibling = { ...mount, mount_path: "/workspace/repos/.cloning-web" }
+		expect((await clone(sibling)).exitCode).toBe(0)
+		await sh("rm -rf /workspace/repos/web")
+		expect((await clone({ ...mount, mount_path: "/workspace/repos/web" })).exitCode).toBe(0)
+		expect(await sh("ls -A /workspace/repos")).toBe(".cloning-web\napi\nweb\n")
+		expect(await sh("stat -c %a /workspace/repos/web")).toBe("755\n")
+		await sh("rm -rf /workspace/repos /srv/origin")
+	})
 
 	it("runs a command to its end, its limit or its last output, whichever a call can hold", async () => {
 		const kept = new Map<string, unknown>()

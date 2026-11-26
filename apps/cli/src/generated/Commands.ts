@@ -2384,6 +2384,118 @@ const sessionsOutputsRetrieveCommand = CommandMake(
 	),
 )
 
+const sessionsResourcesListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:resources list",
+	apiGroup: "sessions",
+	apiEndpoint: "listResources",
+	hasBody: false,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const sessionsResourcesListCommand = CommandMake(
+	"list",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsResourcesListCommandSpec, flags),
+).pipe(CommandWithDescription("List what is mounted in a session's workspace"))
+
+const sessionsResourcesRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:resources retrieve",
+	apiGroup: "sessions",
+	apiEndpoint: "getResource",
+	hasBody: false,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "resourceId",
+			flagName: "resource-id",
+			wireName: "resource_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const sessionsResourcesRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+		resourceId: FlagString("resource-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session resource ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsResourcesRetrieveCommandSpec, flags),
+).pipe(CommandWithDescription("Retrieve one resource mounted in a session's workspace"))
+
+const sessionsResourcesUpdateCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "sessions:resources update",
+	apiGroup: "sessions",
+	apiEndpoint: "updateResource",
+	hasBody: true,
+	flags: [
+		{
+			propName: "sessionId",
+			flagName: "session-id",
+			wireName: "session_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "resourceId",
+			flagName: "resource-id",
+			wireName: "resource_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const sessionsResourcesUpdateCommand = CommandMake(
+	"update",
+	{
+		sessionId: FlagString("session-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session ID"),
+		),
+		resourceId: FlagString("resource-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("Session resource ID"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(sessionsResourcesUpdateCommandSpec, flags),
+).pipe(
+	CommandWithDescription(
+		"Replace the GitHub token a mounted repository clones and pushes with (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
+
 const vaultsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "vaults archive",
 	apiGroup: "vaults",
@@ -2968,6 +3080,7 @@ export const buildGeneratedResourceCommands = <
 	const SessionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsEventsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const SessionsOutputsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const SessionsResourcesExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const VaultsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const VaultsCredentialsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
@@ -2981,6 +3094,7 @@ export const buildGeneratedResourceCommands = <
 	readonly sessions?: SessionsExtras
 	readonly "sessions:events"?: SessionsEventsExtras
 	readonly "sessions:outputs"?: SessionsOutputsExtras
+	readonly "sessions:resources"?: SessionsResourcesExtras
 	readonly vaults?: VaultsExtras
 	readonly "vaults:credentials"?: VaultsCredentialsExtras
 }) =>
@@ -3083,6 +3197,15 @@ export const buildGeneratedResourceCommands = <
 			CommandWithSubcommands([
 				sessionsOutputsRetrieveCommand,
 				...(extras?.["sessions:outputs"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("sessions:resources").pipe(
+			CommandWithDescription("List session resources and rotate their credentials"),
+			CommandWithSubcommands([
+				sessionsResourcesListCommand,
+				sessionsResourcesRetrieveCommand,
+				sessionsResourcesUpdateCommand,
+				...(extras?.["sessions:resources"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("vaults").pipe(

@@ -185,42 +185,57 @@ const readLoopbackOverrides = Effect.gen(function* () {
 	return overrides
 })
 
-export const providerBaseUrls = Effect.gen(function* () {
-	const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
-	if (Option.isSome(alchemyContext)) {
-		if (!alchemyContext.value.dev) {
-			return EMPTY_BASE_URLS
+const localDev = <A, E>(read: Effect.Effect<A, E>, present: (value: A) => boolean, none: A) =>
+	Effect.gen(function* () {
+		const alchemyContext = yield* Effect.serviceOption(AlchemyContext)
+		if (Option.isSome(alchemyContext)) {
+			if (!alchemyContext.value.dev) {
+				return none
+			}
+			const stage = yield* Effect.serviceOption(Stage)
+			if (Option.isSome(stage) && stage.value === "production") {
+				return none
+			}
+			const value = yield* read
+			if (!present(value)) {
+				return none
+			}
+			const runtimeContext = yield* CurrentRuntimeContext
+			yield* (
+				runtimeContext?.set(LOCAL_DEV_SIGNAL_ENV, Output.literal(LOCAL_DEV_SIGNAL_VALUE)) ??
+				Effect.void
+			)
+			return value
 		}
-		const stage = yield* Effect.serviceOption(Stage)
-		if (Option.isSome(stage) && stage.value === "production") {
-			return EMPTY_BASE_URLS
+		const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
+		if (runtimeStage === "production") {
+			return none
 		}
-		const overrides = yield* readLoopbackOverrides
-		const hasAny =
-			overrides.openai !== null ||
-			overrides.openrouter !== undefined ||
-			overrides["cloudflare-ai-gateway"] !== undefined ||
-			overrides["cloudflare-workers-ai"] !== undefined
-		if (!hasAny) {
-			return EMPTY_BASE_URLS
+		const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
+		if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) {
+			return none
 		}
-		const runtimeContext = yield* CurrentRuntimeContext
-		yield* (
-			runtimeContext?.set(LOCAL_DEV_SIGNAL_ENV, Output.literal(LOCAL_DEV_SIGNAL_VALUE)) ??
-			Effect.void
-		)
-		return overrides
-	}
-	const runtimeStage = yield* optionalConfigString("ALCHEMY_STAGE")
-	if (runtimeStage === "production") {
-		return EMPTY_BASE_URLS
-	}
-	const localDevSignal = yield* optionalConfigString(LOCAL_DEV_SIGNAL_ENV)
-	if (localDevSignal !== LOCAL_DEV_SIGNAL_VALUE) {
-		return EMPTY_BASE_URLS
-	}
-	return yield* readLoopbackOverrides
-}).pipe(Effect.orDie)
+		return yield* read
+	}).pipe(Effect.orDie)
+
+export const providerBaseUrls = localDev(
+	readLoopbackOverrides,
+	(overrides) =>
+		overrides.openai !== null ||
+		overrides.openrouter !== undefined ||
+		overrides["cloudflare-ai-gateway"] !== undefined ||
+		overrides["cloudflare-workers-ai"] !== undefined,
+	EMPTY_BASE_URLS,
+)
+
+export const localDevBaseUrl = (envName: string) =>
+	localDev(
+		Effect.map(optionalConfigString(envName), (raw) =>
+			raw === null ? null : parseProviderLoopbackBaseUrl(raw, envName),
+		),
+		(baseUrl) => baseUrl !== null,
+		null,
+	)
 
 export interface ProviderApiKeysInput {
 	readonly env?: Readonly<Record<string, string | undefined>>

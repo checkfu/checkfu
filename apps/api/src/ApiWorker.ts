@@ -54,10 +54,16 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
-			prepareWorkspace: (sessionId, token, allowedHosts) =>
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
 				harnessCall(
-					Effect.suspend(() => harness.prepareWorkspace(sessionId, token, allowedHosts)),
+					Effect.suspend(() =>
+						harness.prepareWorkspace(sessionId, token, repositories, allowedHosts),
+					),
 				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				harnessCall(
+					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
+				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
 			interruptWorkspace: (sessionId, token) =>
 				harnessCall(Effect.suspend(() => harness.interruptWorkspace(sessionId, token))).pipe(
 					Effect.withSpan("PiHarness.interruptWorkspace"),
@@ -160,6 +166,11 @@ const VaultsLive = Vaults.layer(VaultsHandlersLive.pipe(Layer.provide(ListingLiv
 	Layer.provide(PlacedDurableObjects),
 )
 
+const HarnessLive = PiDurableHarnessLive.pipe(
+	Layer.provide(PiHarnessExecutorLive),
+	Layer.provide(CheckfuLive),
+)
+
 const ApiWorkerLive = Layer.mergeAll(
 	VaultsLive,
 	vaultListingQueriesFrom(VaultsLive),
@@ -168,6 +179,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	CustomToolFaultsLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
+	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 ).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))

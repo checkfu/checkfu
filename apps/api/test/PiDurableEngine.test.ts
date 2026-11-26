@@ -140,6 +140,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 							agent_id: openaiAgent.id,
 							agent_version: 1,
 							environment_id: env.id,
+							resources: [],
 							turn: 1,
 							input: ["Hi"],
 						}),
@@ -153,6 +154,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 							agent_id: geminiAgent.id,
 							agent_version: 1,
 							environment_id: "env_1",
+							resources: [],
 							turn: 1,
 							input: ["Hi"],
 						}),
@@ -179,6 +181,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 							environment_id: env.id,
 							turn: 1,
 							input: ["Hi"],
+							resources: [],
 						}),
 					)
 					expect(providerError(missingOpenRouter).error_type).toBe("missing_api_key_error")
@@ -200,6 +203,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 							environment_id: env.id,
 							turn: 1,
 							input: ["Hi"],
+							resources: [],
 						}),
 					)
 					expect(providerError(missingGateway).error_type).toBe("missing_api_key_error")
@@ -260,6 +264,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 						environment_id: env.id,
 						turn: 1,
 						input: ["Hello OpenRouter"],
+						resources: [],
 					})
 					expect(orReply.text).toBe("reply from openrouter/anthropic/claude-sonnet-5.5")
 
@@ -278,6 +283,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 						environment_id: env.id,
 						turn: 1,
 						input: ["Hello Gateway"],
+						resources: [],
 					})
 					expect(gwReply.text).toBe("reply from cloudflare-ai-gateway/claude-sonnet-5-5")
 
@@ -301,6 +307,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 						environment_id: env.id,
 						turn: 1,
 						input: ["Hello Fine-tune"],
+						resources: [],
 					})
 					expect(gwFineTuneReply.text).toBe(
 						"reply from cloudflare-ai-gateway/ft:gpt-4o-mini:org:pilot:id",
@@ -381,6 +388,7 @@ describe("PiDurableEngine storage, compaction, and provider error classification
 						environment_id: env.id,
 						turn: 1,
 						input: ["Hello xAI"],
+						resources: [],
 					})
 					expect(reply.text).toBe("custom reply: xai/grok-4")
 				}).pipe(Effect.scoped, Effect.provide(layer)),

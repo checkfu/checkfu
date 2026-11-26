@@ -207,6 +207,24 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/sessions/{session_id}/outputs",
 			},
 			{
+				group: "sessions:resources",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/sessions/{session_id}/resources",
+			},
+			{
+				group: "sessions:resources",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/sessions/{session_id}/resources/{resource_id}",
+			},
+			{
+				group: "sessions:resources",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/sessions/{session_id}/resources/{resource_id}",
+			},
+			{
 				group: "vaults",
 				name: "archive",
 				httpMethod: "POST",
@@ -319,6 +337,8 @@ describe("Cloudflare Forge pipeline", () => {
 		expect(cliCommands).toContain('FlagInt("current-version")')
 		expect(cliCommands).toContain('"flagName":"current-version","wireName":"version"')
 		expect(cliCommands).not.toContain('FlagInt("version")')
+		expect(cliCommands).not.toContain('FlagString("authorization-token")')
+		expect(cliCommands).not.toContain('flagName: "resources"')
 	})
 
 	it("bypasses OpenApi.fromApi caching so nondeterministic OpenAPI generation is detected", () => {
@@ -617,7 +637,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(52)
+		expect(inspectedMethods.length).toBe(55)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

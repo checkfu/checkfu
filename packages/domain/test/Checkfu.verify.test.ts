@@ -53,6 +53,7 @@ import { SendUserMessage } from "../src/Session/SendUserMessage.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
+import { SessionResourceId } from "../src/Session/SessionResource.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -79,6 +80,14 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 	],
 	views: ["AgentView", "AgentVersionByNumberView", "EnvironmentView", "SessionView"],
 }) {}
+
+const REPOSITORY = {
+	id: SessionResourceId.make("sesrsc_post_1"),
+	type: "github_repository" as const,
+	url: "https://github.com/acme/api",
+	mount_path: "/workspace/api",
+	checkout: { type: "branch" as const, name: "main" },
+}
 
 const STANDING = {
 	"Agent.StatusIsKnown": "proved",
@@ -228,6 +237,7 @@ const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
 		discardWorkspace: () => Effect.void,
+		storeRepositoryToken: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
@@ -585,6 +595,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							environment_id: BoundedEnvironmentId.make(envRef.id),
 							title: "Pinned v1",
 							mcp_server_credentials: "[]",
+							resources: [REPOSITORY],
 						}),
 					)
 					yield* recordStep("admitted-v1")
@@ -1031,5 +1042,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			EveryArtifactVersionIsRecorded: true,
 			ReservedSlotsEqualLiveAutomations: true,
 		})
+
+		expect(
+			results.finalWorld.SessionView.find((row) => row.id === "sess_post_v1")?.state.resources,
+		).toEqual([REPOSITORY])
+		expect(
+			results.finalWorld.TurnInput.find((row) => row.id === "sess_post_v1")?.state.resources,
+		).toEqual([REPOSITORY])
 	})
 })
