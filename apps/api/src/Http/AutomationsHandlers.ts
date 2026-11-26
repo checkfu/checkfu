@@ -35,7 +35,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Schedule from "effect/Schedule"
 import { CheckfuApi } from "./Api.ts"
-import { makeLister } from "./Listing.ts"
+import { listPage, makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
@@ -368,16 +368,16 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				Effect.gen(function* () {
 					const id = params.automation_id
 					yield* committed(id)
+					const after = query.page === undefined ? undefined : Number(query.page)
 					const page = yield* automationRuns.list(Automation.ref(id), {
-						...(query.after === undefined ? {} : { after: query.after }),
+						...(after === undefined ? {} : { after }),
 						take: query.limit ?? 50,
 						order: query.order ?? "asc",
 					})
-					return {
-						data: page.entries.map((entry) => automationRunResource(id, entry)),
-						has_more: page.cursor !== null,
-						next_cursor: page.cursor,
-					}
+					return listPage(
+						page.entries.map((entry) => automationRunResource(id, entry)),
+						page.cursor,
+					)
 				}).pipe(handled),
 			)
 			.handle("getRun", ({ params }) =>

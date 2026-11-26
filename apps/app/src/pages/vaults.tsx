@@ -35,7 +35,7 @@ const detail = getRouteApi("/_app/vaults/$vaultId")
 
 export function VaultsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(vaultsPage(search.after)).data
+	const page = useSuspenseQuery(vaultsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -86,7 +86,7 @@ export function VaultsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_page} paged={search.page !== undefined} />
 		</>
 	)
 }

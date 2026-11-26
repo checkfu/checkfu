@@ -85,7 +85,7 @@ const render = (
 	},
 ) => {
 	const queryClient = newQueryClient()
-	const page = { has_more: false, next_cursor: null }
+	const page = { next_page: null }
 	queryClient.setQueryData(credentialsQuery("vlt_a").queryKey, { ...page, data: held.a })
 	queryClient.setQueryData(credentialsQuery("vlt_b").queryKey, { ...page, data: held.b })
 	queryClient.setQueryData(vaultQuery("vlt_a").queryKey, vault("vlt_a"))

@@ -95,10 +95,10 @@ const isStored = (credential: FetchResult<"vaults.credentials.retrieve">): boole
 
 export const newIdempotencyKey = (): string => crypto.randomUUID()
 
-const newestFirst = (after: string | undefined) => ({
+const newestFirst = (page: string | undefined) => ({
 	limit: 100,
 	order: "desc" as const,
-	...(after === undefined ? {} : { after }),
+	...(page === undefined ? {} : { page }),
 })
 
 const retrieveAgent = (agent_id: string, signal?: AbortSignal): Promise<JsonAgent> =>
@@ -137,9 +137,9 @@ const credentialOf = (vault_id: string) => (credential_id: string) =>
 	retrieveCredential(vault_id, credential_id)
 
 const vaults = {
-	list: (after?: string, signal?: AbortSignal, includeArchived = false) =>
+	list: (token?: string, signal?: AbortSignal, includeArchived = false) =>
 		request("vaults.list", {
-			query: { ...newestFirst(after), ...(includeArchived ? { include_archived: true } : {}) },
+			query: { ...newestFirst(token), ...(includeArchived ? { include_archived: true } : {}) },
 			...withSignal(signal),
 		}),
 	retrieve: retrieveVault,
@@ -149,10 +149,10 @@ const vaults = {
 		settled(retrieveVault, await request("vaults.archive", { path: { vault_id } }), isArchived),
 	delete: (vault_id: string) => request("vaults.delete", { path: { vault_id } }),
 	credentials: {
-		list: (vault_id: string, includeArchived: boolean, after?: string, signal?: AbortSignal) =>
+		list: (vault_id: string, includeArchived: boolean, token?: string, signal?: AbortSignal) =>
 			request("vaults.credentials.list", {
 				path: { vault_id },
-				query: { ...newestFirst(after), ...(includeArchived ? { include_archived: true } : {}) },
+				query: { ...newestFirst(token), ...(includeArchived ? { include_archived: true } : {}) },
 				...withSignal(signal),
 			}),
 		retrieve: retrieveCredential,
@@ -192,8 +192,8 @@ const vaults = {
 
 export const checkfu = {
 	agents: {
-		list: (after?: string, signal?: AbortSignal) =>
-			request("agents.list", { query: newestFirst(after), ...withSignal(signal) }),
+		list: (page?: string, signal?: AbortSignal) =>
+			request("agents.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: retrieveAgent,
 		create: async (body: CreateAgentBody, idempotencyKey: string) =>
 			settled(retrieveAgent, await request("agents.create", { body, idempotencyKey })),
@@ -207,8 +207,8 @@ export const checkfu = {
 			settled(retrieveAgent, await request("agents.archive", { path: { agent_id } }), isArchived),
 	},
 	environments: {
-		list: (after?: string, signal?: AbortSignal) =>
-			request("environments.list", { query: newestFirst(after), ...withSignal(signal) }),
+		list: (page?: string, signal?: AbortSignal) =>
+			request("environments.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: retrieveEnvironment,
 		create: async (body: CreateEnvironmentBody, idempotencyKey: string) =>
 			settled(retrieveEnvironment, await request("environments.create", { body, idempotencyKey })),
@@ -220,8 +220,8 @@ export const checkfu = {
 			),
 	},
 	automations: {
-		list: (after?: string, signal?: AbortSignal) =>
-			request("automations.list", { query: newestFirst(after), ...withSignal(signal) }),
+		list: (page?: string, signal?: AbortSignal) =>
+			request("automations.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: retrieveAutomation,
 		create: async (body: CreateAutomationBody, idempotencyKey: string) =>
 			settled(retrieveAutomation, await request("automations.create", { body, idempotencyKey })),
@@ -260,17 +260,17 @@ export const checkfu = {
 			).catch(() => null)
 			return { run: queued.run, listed }
 		},
-		runs: (automation_id: string, before?: number, signal?: AbortSignal) =>
+		runs: (automation_id: string, page?: string, signal?: AbortSignal) =>
 			request("automations.runs.list", {
 				path: { automation_id },
-				query: { order: "desc", limit: 20, ...(before === undefined ? {} : { after: before }) },
+				query: { order: "desc", limit: 20, ...(page === undefined ? {} : { page }) },
 				...withSignal(signal),
 			}),
 	},
 	vaults,
 	sessions: {
-		list: (after?: string, signal?: AbortSignal) =>
-			request("sessions.list", { query: newestFirst(after), ...withSignal(signal) }),
+		list: (page?: string, signal?: AbortSignal) =>
+			request("sessions.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: retrieveSession,
 		create: async (body: BodyOf<"sessions.create">, idempotencyKey: string) =>
 			settled(retrieveSession, await request("sessions.create", { body, idempotencyKey })),
@@ -282,18 +282,18 @@ export const checkfu = {
 			),
 		send: (session_id: string, body: SendSessionEventsBody, idempotencyKey: string) =>
 			request("sessions.events.send", { path: { session_id }, body, idempotencyKey }),
-		events: (session_id: string, before?: number, signal?: AbortSignal) =>
+		events: (session_id: string, page?: string, signal?: AbortSignal) =>
 			request("sessions.events.list", {
 				path: { session_id },
-				query: { order: "desc", limit: 100, ...(before === undefined ? {} : { after: before }) },
+				query: { order: "desc", limit: 100, ...(page === undefined ? {} : { page }) },
 				...withSignal(signal),
 			}),
 		streamUrl: (session_id: string, after: number) =>
 			operationUrl("sessions.events.stream", { path: { session_id }, query: { after } }),
 	},
 	artifacts: {
-		list: (after?: string, signal?: AbortSignal) =>
-			request("artifacts.list", { query: newestFirst(after), ...withSignal(signal) }),
+		list: (page?: string, signal?: AbortSignal) =>
+			request("artifacts.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: (artifact_id: string, signal?: AbortSignal): Promise<JsonArtifact> =>
 			request("artifacts.retrieve", { path: { artifact_id }, ...withSignal(signal) }),
 		version: (artifact_id: string, version: number, signal?: AbortSignal) =>

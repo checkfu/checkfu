@@ -41,8 +41,7 @@ const credential: JsonVaultCredential = {
 
 const pageOf = (credentials: ReadonlyArray<JsonVaultCredential>) => ({
 	data: credentials,
-	has_more: false,
-	next_cursor: null,
+	next_page: null,
 })
 
 const withCredentials = (credentials: ReadonlyArray<JsonVaultCredential>) => {
@@ -400,13 +399,13 @@ describe("vault pages", () => {
 	it("reaches a credential older than the first page", async () => {
 		const older = { ...credential, id: "vcrd_old", display_name: "Older" }
 		const sent = stubApi((request) =>
-			request.path.includes("after=cursor-1")
+			request.path.includes("page=cursor-1")
 				? { body: pageOf([older]) }
-				: { body: { data: [credential], has_more: true, next_cursor: "cursor-1" } },
+				: { body: { data: [credential], next_page: "cursor-1" } },
 		)
 		const queryClient = newQueryClient()
 		queryClient.setQueryData(credentialPages(vault.id).queryKey, {
-			pages: [{ data: [credential], has_more: true, next_cursor: "cursor-1" }],
+			pages: [{ data: [credential], next_page: "cursor-1" }],
 			pageParams: [undefined],
 		})
 		const page = await mount(<VaultView vault={vault} />, queryClient)
@@ -418,7 +417,7 @@ describe("vault pages", () => {
 			limit: "100",
 			order: "desc",
 			include_archived: "true",
-			after: "cursor-1",
+			page: "cursor-1",
 		})
 		const rows = [...page.container.querySelectorAll<HTMLElement>("tbody tr")]
 		expect(rows.map((row) => row.querySelector("td")?.textContent)).toEqual(["GitHub", "Older"])
@@ -526,7 +525,7 @@ describe("vault pages", () => {
 	})
 
 	it("lists archived vaults on the vaults page, and only active ones to choose for a session", async () => {
-		const sent = stubApi(() => ({ body: { data: [], has_more: false, next_cursor: null } }))
+		const sent = stubApi(() => ({ body: { data: [], next_page: null } }))
 		const queryClient = newQueryClient()
 		await queryClient.fetchQuery(vaultsPage())
 		await queryClient.fetchInfiniteQuery(vaultChoices)

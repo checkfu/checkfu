@@ -45,7 +45,7 @@ const credential = (id: string, vaultId: string): JsonVaultCredential => ({
 	archived_at: null,
 })
 
-const page = (data: ReadonlyArray<unknown>) => ({ data, has_more: false, next_cursor: null })
+const page = (data: ReadonlyArray<unknown>) => ({ data, next_page: null })
 
 const server = () => {
 	const state = {

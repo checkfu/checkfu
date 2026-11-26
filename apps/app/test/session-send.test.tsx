@@ -66,7 +66,7 @@ const open = async (events: ReadonlyArray<unknown>) => {
 		method === "POST"
 			? { body: {} }
 			: path.includes("/events")
-				? { body: { data: events, has_more: false, next_cursor: null } }
+				? { body: { data: events, next_page: null } }
 				: { body: session },
 	)
 	const queryClient = newQueryClient()

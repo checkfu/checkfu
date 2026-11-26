@@ -6,6 +6,6 @@ import { vaultsPage } from "../../../queries.ts"
 export const Route = createFileRoute("/_app/vaults/")({
 	validateSearch: pageSearch,
 	loaderDeps: ({ search }) => search,
-	loader: ({ context, deps }) => context.queryClient.ensureQueryData(vaultsPage(deps.after)),
+	loader: ({ context, deps }) => context.queryClient.ensureQueryData(vaultsPage(deps.page)),
 	component: VaultsPage,
 })

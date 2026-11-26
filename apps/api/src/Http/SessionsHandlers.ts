@@ -93,7 +93,7 @@ import {
 	sha256Json,
 	toApiError,
 } from "./HttpHelpers.ts"
-import { makeLister } from "./Listing.ts"
+import { listPage, makeLister } from "./Listing.ts"
 import { ViewEventsOverObjectSockets, objectSocketChanges } from "./ObjectSocketEvents.ts"
 
 export const SSE_CATCHUP_PAGE_SIZE = 100
@@ -873,16 +873,16 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("listEvents", ({ params, query }) =>
 				Effect.gen(function* () {
 					yield* existing(params.session_id)
+					const after = query.page === undefined ? undefined : Number(query.page)
 					const page = yield* sessionViews.list(Session.ref(params.session_id), {
-						...(query.after === undefined ? {} : { after: query.after }),
+						...(after === undefined ? {} : { after }),
 						take: query.limit ?? 50,
 						order: query.order ?? "asc",
 					})
-					return {
-						data: page.entries.map((entry) => serializeSessionEvent(entry)),
-						has_more: page.cursor !== null,
-						next_cursor: page.cursor,
-					}
+					return listPage(
+						page.entries.map((entry) => serializeSessionEvent(entry)),
+						page.cursor,
+					)
 				}).pipe(handled),
 			)
 			.handleRaw("streamEvents", ({ params, query, request }) =>
