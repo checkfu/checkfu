@@ -594,6 +594,154 @@ describe("PiProviderRuntime", () => {
 			}),
 	)
 
+	it.live(
+		"waits for an overlapping retry before reporting credential failure so a failed attempt cannot diverge from a submitting retry",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) =>
+							makeAssistantReply(model, null, "reply from surviving sibling", 7, 3),
+						),
+					),
+				)
+				let checkCall = 0
+				let markSiblingEntered!: () => void
+				const siblingEntered = new Promise<void>((resolve) => {
+					markSiblingEntered = resolve
+				})
+				let releaseSibling!: () => void
+				const siblingGate = new Promise<void>((resolve) => {
+					releaseSibling = resolve
+				})
+				let failingAttemptSettled = false
+
+				const backend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: async () => {
+						checkCall += 1
+						if (checkCall === 1) {
+							markSiblingEntered()
+							await siblingGate
+							return { ok: true }
+						}
+						throw new Error("transient lookup failure on retry")
+					},
+				}
+
+				try {
+					const request = makeTurnRequest(1, "openai")
+					const siblingTurn = yield* Effect.forkChild(runPiDurableTurn(backend, request), {
+						startImmediately: true,
+					})
+					yield* Effect.promise(() => siblingEntered)
+
+					const failingTurn = yield* Effect.forkChild(
+						runPiDurableTurn(backend, request).pipe(
+							Effect.tap(() =>
+								Effect.sync(() => {
+									failingAttemptSettled = true
+								}),
+							),
+						),
+						{ startImmediately: true },
+					)
+
+					yield* Effect.sleep("25 millis")
+					expect(failingAttemptSettled).toBe(false)
+
+					releaseSibling()
+					const [siblingOutcome, failingOutcome] = yield* Effect.all([
+						Fiber.join(siblingTurn),
+						Fiber.join(failingTurn),
+					])
+					expect(siblingOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply from surviving sibling" },
+					})
+					expect(failingOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply from surviving sibling" },
+					})
+				} finally {
+					releaseSibling()
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
+	it.live(
+		"does not wake an unrelated pending admission when replaying an existing receipt with a higher turn number",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model, context) => {
+							const last = context.messages.at(-1)
+							const text =
+								last !== undefined && typeof last.content === "string" ? last.content : "reply"
+							return makeAssistantReply(model, null, `echo:${text}`, 4, 2)
+						}),
+					),
+				)
+				let turn2Signal: AbortSignal | undefined
+				let markTurn2Entered!: () => void
+				const turn2Entered = new Promise<void>((resolve) => {
+					markTurn2Entered = resolve
+				})
+				let releaseTurn2!: () => void
+				const turn2Gate = new Promise<void>((resolve) => {
+					releaseTurn2 = resolve
+				})
+				let checkCall = 0
+
+				const backend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: async (_provider, signal) => {
+						checkCall += 1
+						if (checkCall === 2) {
+							turn2Signal = signal
+							markTurn2Entered()
+							await turn2Gate
+						}
+						return { ok: true }
+					},
+				}
+
+				try {
+					const turn1 = yield* runPiDurableTurn(backend, {
+						...makeTurnRequest(1, "openai"),
+						text: "turn-one",
+					})
+					expect(turn1).toMatchObject({ ok: true, reply: { text: "echo:turn-one" } })
+
+					const turn2Fiber = yield* Effect.forkChild(
+						runPiDurableTurn(backend, {
+							...makeTurnRequest(2, "openai"),
+							text: "turn-two",
+						}),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => turn2Entered)
+
+					const replayed = yield* runPiDurableTurn(backend, {
+						...makeTurnRequest(3, "openai"),
+						operationId: "turn:1",
+						text: "turn-one",
+					})
+					expect(replayed).toMatchObject({ ok: true, reply: { text: "echo:turn-one" } })
+					expect(turn2Signal?.aborted).toBe(false)
+
+					releaseTurn2()
+					const turn2 = yield* Fiber.join(turn2Fiber)
+					expect(turn2).toMatchObject({ ok: true, reply: { text: "echo:turn-two" } })
+				} finally {
+					releaseTurn2()
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
 	it.effect(
 		"preserves the receiver when runPiDurableTurn invokes a class-based PiDurableBackend.checkCredentials",
 		() =>

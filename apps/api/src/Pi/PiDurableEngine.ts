@@ -305,9 +305,7 @@ const notifyAdmissionAbort = (
 const notifyAdmissionSubmitted = (
 	backend: PiDurableBackend,
 	operationId: string,
-	turn: number,
-): Effect.Effect<void> =>
-	wakePendingChecks(backend, (entry) => entry.operationId === operationId || entry.turn < turn)
+): Effect.Effect<void> => wakePendingChecks(backend, (entry) => entry.operationId === operationId)
 
 const notifyTurnFenceAdvanced = (backend: PiDurableBackend, turn: number): Effect.Effect<void> =>
 	wakePendingChecks(backend, (entry) => entry.turn < turn)
@@ -344,11 +342,12 @@ const admissionsOf = (backend: PiDurableBackend) => {
 	return created
 }
 
-type AdmitPiTurnResult =
-	| boolean
+type CredentialFailureResult =
 	| { readonly _tag: "missing_key"; readonly message: string | undefined }
 	| { readonly _tag: "credential_timeout"; readonly message: string }
 	| { readonly _tag: "credential_error"; readonly message: string }
+
+type AdmitPiTurnResult = boolean | CredentialFailureResult
 
 type AdmitLockOutcome =
 	| AdmitPiTurnResult
@@ -357,8 +356,21 @@ type AdmitLockOutcome =
 const admitPiTurn = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
-): Effect.Effect<AdmitPiTurnResult> =>
-	Effect.acquireUseRelease(
+): Effect.Effect<AdmitPiTurnResult> => {
+	const releaseAdmission = (done: Deferred.Deferred<void>): Effect.Effect<void> =>
+		Effect.andThen(
+			Effect.sync(() => {
+				const admissions = admissionsOf(backend)
+				const active = admissions.get(request.operationId)
+				active?.delete(done)
+				if (active?.size === 0) {
+					admissions.delete(request.operationId)
+				}
+			}),
+			Deferred.succeed(done, undefined),
+		)
+
+	return Effect.acquireUseRelease(
 		Effect.sync(() => {
 			const done = Deferred.makeUnsafe<void>()
 			const admissions = admissionsOf(backend)
@@ -367,30 +379,71 @@ const admitPiTurn = (
 			admissions.set(request.operationId, active)
 			return done
 		}),
-		() => admitPiTurnUnderWay(backend, request),
-		(done) =>
-			Effect.andThen(
-				Effect.sync(() => {
-					const admissions = admissionsOf(backend)
-					const active = admissions.get(request.operationId)
-					active?.delete(done)
-					if (active?.size === 0) {
-						admissions.delete(request.operationId)
-					}
-				}),
-				Deferred.succeed(done, undefined),
-			),
+		(done) => admitPiTurnUnderWay(backend, request, releaseAdmission(done)),
+		releaseAdmission,
 	)
+}
 
 const admitPiTurnUnderWay = (
 	backend: PiDurableBackend,
 	request: PiTurnRequest,
+	releaseOwnAdmission: Effect.Effect<void>,
 ): Effect.Effect<AdmitPiTurnResult> => {
 	const operationId = request.operationId
 	const agent: AgentChange = {
 		model: { provider: request.provider, modelId: request.modelId },
 		instructions: request.system !== null && request.system.length > 0 ? request.system : null,
 	}
+	const finalizeCredentialFailure = (
+		failure: CredentialFailureResult,
+	): Effect.Effect<AdmitPiTurnResult> =>
+		Effect.gen(function* () {
+			yield* releaseOwnAdmission
+			while (true) {
+				const others = admissionsOf(backend).get(operationId)
+				if (others !== undefined && others.size > 0) {
+					yield* Effect.forEach([...others], Deferred.await, { discard: true })
+					continue
+				}
+				const probe = yield* backend.withLock(
+					Effect.gen(function* () {
+						const active = admissionsOf(backend).get(operationId)
+						if (active !== undefined && active.size > 0) {
+							return "retry" as const
+						}
+						const status = yield* Effect.promise(
+							async (): Promise<"submitted" | "cancelled" | "unresolved"> => {
+								const pi = await backend.pi()
+								if ((await submissionOf(pi, operationId)) !== undefined) {
+									return "submitted"
+								}
+								if (
+									backend.isCancelled(operationId) ||
+									(await isStaleTurn(pi, operationId, request.turn))
+								) {
+									return "cancelled"
+								}
+								return "unresolved"
+							},
+						)
+						if (status === "submitted") {
+							yield* notifyAdmissionSubmitted(backend, operationId)
+						}
+						return status
+					}),
+				)
+				if (probe === "retry") {
+					continue
+				}
+				if (probe === "submitted") {
+					return true
+				}
+				if (probe === "cancelled") {
+					return false
+				}
+				return failure
+			}
+		})
 	return Effect.gen(function* () {
 		const restoredLimit = yield* RestoredHistoryLimit
 		const credentialTimeout = yield* CredentialCheckTimeout
@@ -429,7 +482,7 @@ const admitPiTurnUnderWay = (
 										},
 									)
 									if (status === "submitted") {
-										yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
+										yield* notifyAdmissionSubmitted(backend, operationId)
 									}
 									return status
 								}),
@@ -478,48 +531,28 @@ const admitPiTurnUnderWay = (
 				if (credentialOutcome === "cancelled") {
 					return false
 				}
-				if (
-					credentialOutcome === "woken" ||
-					credentialOutcome === "timed_out" ||
-					typeof credentialOutcome === "object"
-				) {
+				if (credentialOutcome === "woken") {
 					const raced = yield* backend.withLock(
 						Effect.gen(function* () {
-							const status = yield* Effect.promise(
-								async (): Promise<"submitted" | "cancelled" | "unresolved"> => {
-									const pi = await backend.pi()
-									if ((await submissionOf(pi, operationId)) !== undefined) {
-										return "submitted"
-									}
-									if (
-										credentialOutcome === "woken" ||
-										backend.isCancelled(operationId) ||
-										(await isStaleTurn(pi, operationId, request.turn))
-									) {
-										return "cancelled"
-									}
-									return "unresolved"
-								},
+							const submitted = yield* Effect.promise(
+								async () => (await submissionOf(await backend.pi(), operationId)) !== undefined,
 							)
-							if (status === "submitted") {
-								yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
+							if (submitted) {
+								yield* notifyAdmissionSubmitted(backend, operationId)
 							}
-							return status
+							return submitted
 						}),
 					)
-					if (raced === "submitted") {
-						return true
-					}
-					if (raced === "cancelled") {
-						return false
-					}
-					if (credentialOutcome === "timed_out") {
-						return {
-							_tag: "credential_timeout",
-							message: `Timed out checking credentials for provider "${request.provider}".`,
-						}
-					}
-					return credentialOutcome === "woken" ? false : credentialOutcome
+					return raced
+				}
+				if (credentialOutcome === "timed_out") {
+					return yield* finalizeCredentialFailure({
+						_tag: "credential_timeout",
+						message: `Timed out checking credentials for provider "${request.provider}".`,
+					})
+				}
+				if (typeof credentialOutcome === "object") {
+					return yield* finalizeCredentialFailure(credentialOutcome)
 				}
 				credentialsVerified = true
 			}
@@ -589,7 +622,7 @@ const admitPiTurnUnderWay = (
 						),
 					)
 					if (outcome === true) {
-						yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
+						yield* notifyAdmissionSubmitted(backend, operationId)
 					}
 					return outcome
 				}),
@@ -598,7 +631,7 @@ const admitPiTurnUnderWay = (
 				return admitted
 			}
 			if (admitted._tag !== "waiting") {
-				return admitted
+				return yield* finalizeCredentialFailure(admitted)
 			}
 			yield* abortPiDurableTurn(backend, admitted.waitingFor)
 			yield* Effect.promise((signal) => backend.wait(admitted.waitingFor, signal))
