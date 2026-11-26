@@ -5,13 +5,10 @@ import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
 import { SessionTerminated } from "./SessionTerminated.rejection.ts"
-import { MAX_AGENT_SYSTEM_LENGTH, NonNegativeInt, SessionEventFields } from "./SessionTypes.ts"
+import { SessionEventFields } from "./SessionTypes.ts"
+import { SystemContextAppended } from "./SystemContext.aggregate.ts"
 
 const content = SessionEventFields["system.message"].content
-
-export const SystemContextLength = NonNegativeInt.check(
-	Schema.isLessThanOrEqualTo(MAX_AGENT_SYSTEM_LENGTH),
-)
 
 export const systemMessageText = (blocks: typeof content.Type): string =>
 	blocks.map((block) => block.text).join("\n")
@@ -19,7 +16,6 @@ export const systemMessageText = (blocks: typeof content.Type): string =>
 export class SystemMessage extends Domain.Event("system.message", {
 	...SessionEventFields["system.message"],
 	processed_at: Schema.DateTimeUtc,
-	context_length: SystemContextLength,
 }) {}
 
 export class SystemContextFull extends Domain.Rejection(
@@ -30,7 +26,7 @@ export class SystemContextFull extends Domain.Rejection(
 
 export class SendSystemMessage extends Domain.Command("SendSystemMessage", {
 	input: { session_id: SessionId, content },
-	events: [SystemMessage],
+	events: [SystemMessage, SystemContextAppended],
 	rejects: [
 		SessionNotFound,
 		SessionTerminated,

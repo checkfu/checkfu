@@ -1,3 +1,5 @@
+import { SendSystemMessageDecision } from "./Session/SendSystemMessage.decision.ts"
+import { SystemContext } from "./Session/SystemContext.aggregate.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { Agent } from "./Agent/Agent.aggregate.ts"
@@ -63,6 +65,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		Agent,
 		Environment,
 		Session,
+		SystemContext,
 		ToolConfirmation,
 		Automation,
 		AutomationCapacity,
@@ -77,6 +80,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		OpenAutomationSessionDecision,
 		UpdateAutomationDecision,
 		RequestToolActionDecision,
+		SendSystemMessageDecision,
 		ConfirmToolDecision,
 		ReturnCustomToolResultDecision,
 	],
