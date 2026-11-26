@@ -605,6 +605,68 @@ describe("PiSession real Durable Object under workerd", () => {
 		return replies.at(-1)?.content?.[0]?.text ?? ""
 	}
 
+	it("serializes a conditional archive with a competing automation repoint", async () => {
+		const target = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Prune target",
+		})
+		const creation = await fetch(`${baseUrl}/v1/automations`, {
+			method: "POST",
+			headers: {
+				...AUTH_HEADERS,
+				"content-type": "application/json",
+				"idempotency-key": "guarded-archive-race",
+			},
+			body: JSON.stringify({
+				name: "Guarded archive race",
+				agent: agentId,
+				environment_id: environmentId,
+				initial_events: [
+					{ type: "user.message", content: [{ type: "text", text: "Write a report." }] },
+				],
+				schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+			}),
+		})
+		const raw = await creation.text()
+		expect([201, 202], raw).toContain(creation.status)
+		const { id } = parseResponseJson<{ readonly id: string }>(
+			"POST",
+			"/v1/automations",
+			creation.status,
+			raw,
+		)
+		const automationPath = `/v1/automations/${id}`
+		const environmentPath = `/v1/environments/${target.id}`
+		await pollResourceReady<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+			"/v1/automations",
+			(page) => page.data.some((row) => row.id === id),
+		)
+
+		const [archive, repoint] = await Promise.all([
+			apiJson(`${environmentPath}/archive-if-current`, { method: "POST", body: { version: 1 } }),
+			apiJson(automationPath, { method: "POST", body: { environment_id: target.id } }),
+		])
+		const archived = archive.status === 200 || archive.status === 202
+		if (archived) {
+			expect(repoint.status, JSON.stringify(repoint.body)).toBe(409)
+		} else {
+			expect([409, 503], JSON.stringify(archive.body)).toContain(archive.status)
+			expect([200, 202], JSON.stringify(repoint.body)).toContain(repoint.status)
+		}
+		await pollResourceReady<{ readonly archived_at: string | null }>(
+			environmentPath,
+			(environment) => (environment.archived_at !== null) === archived,
+		)
+		const automation = await pollResourceReady<{
+			readonly environment_id: string
+			readonly revision: number
+		}>(automationPath, (row) => row.environment_id === (archived ? environmentId : target.id))
+		const cleanup = await apiJson(`${automationPath}/archive-if-current`, {
+			method: "POST",
+			body: { revision: automation.revision },
+		})
+		expect([200, 202], JSON.stringify(cleanup.body)).toContain(cleanup.status)
+	}, 30_000)
+
 	it("stores uploaded bytes in R2 only when they match their sha256, and serves them raw", async () => {
 		const opened = await apiJson<{ readonly id: string; readonly version: number }>(
 			"/v1/artifacts",

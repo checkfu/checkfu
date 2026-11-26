@@ -2,6 +2,7 @@ interface Env {
 	readonly API: { readonly fetch: typeof globalThis.fetch }
 	readonly ASSETS: { readonly fetch: typeof globalThis.fetch }
 	readonly CHECKFU_API_KEY?: string
+	readonly CHECKFU_PUBLIC_API_URL?: string
 }
 
 const COOKIE = "__Host-checkfu_session"
@@ -182,6 +183,15 @@ export default {
 				status: (await signedIn(request, env, now)) ? 204 : 401,
 				headers: NO_STORE,
 			})
+		}
+		if (url.pathname === "/auth/deployment" && request.method === "GET") {
+			if (!(await signedIn(request, env, now))) {
+				return new Response(null, { status: 401, headers: NO_STORE })
+			}
+			const apiUrl = env.CHECKFU_PUBLIC_API_URL
+			return apiUrl === undefined || apiUrl === ""
+				? new Response(null, { status: 503, headers: NO_STORE })
+				: Response.json({ api_url: apiUrl }, { headers: NO_STORE })
 		}
 		if (url.pathname === "/auth/sign-in" && request.method === "POST") {
 			return signIn(request, env, now)

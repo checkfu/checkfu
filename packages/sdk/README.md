@@ -4,8 +4,10 @@ Effect-native TypeScript SDK for the Checkfu API, with a thin Promise / `AsyncIt
 
 - **Single-source contract:** shares `CheckfuApi` (`effect/http-api/HttpApi`) and Effect `Schema` definitions directly with the Checkfu API server.
 - **Forge-generated resources:** resource classes (`EffectResources` / `PromiseResources`), `CheckfuOperations` (`Op<Id>` / `BodyOf` / `QueryOf` / `ResultOf`), and `SDK_OPERATION_BINDINGS` are generated directly from `openapi.json` via `@cloudflare/forge` in lockstep with the CLI.
-- **Zero non-Effect dependencies:** depends only on `effect` and standard Web APIs (`fetch`, `ReadableStream`, `AbortController`, WebCrypto).
+- **Core clients:** use `effect` and standard Web APIs (`fetch`, `ReadableStream`, `AbortController`, WebCrypto).
 - **Full API coverage:** `agents`, `environments`, `sessions`, `sessions.events.{send, list, listPages, listStream, stream}`, plus `waitForPending` for `202 Pending` mutations.
+
+Use a model ID configured for your deployment in the examples below.
 
 ## Effect-native usage
 
@@ -20,7 +22,7 @@ const program = Effect.gen(function* () {
 	const agent = yield* client.waitForPending(
 		yield* client.agents.create({
 			name: "Assistant",
-			model: "gpt-6.2-sol",
+			model: "your-model-id",
 			system: "You are concise and helpful.",
 		}),
 	)
@@ -87,7 +89,7 @@ const client = new Checkfu({
 })
 
 const agent = await client.waitForPending(
-	await client.agents.create({ name: "Assistant", model: "gpt-6.2-sol" }),
+	await client.agents.create({ name: "Assistant", model: "your-model-id" }),
 )
 const env = await client.waitForPending(await client.environments.create({ name: "default" }))
 const session = await client.waitForPending(

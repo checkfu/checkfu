@@ -10,10 +10,12 @@
 		"test": "vitest run --pool=threads --no-allowOnly"
 	},
 	"dependencies": {
+		"@checkfu/authoring": "workspace:*",
 		"@checkfu/sdk": "workspace:*",
 		"@checkfu/ui": "workspace:*",
 		"@tanstack/react-query": "5.108.3",
 		"@tanstack/react-router": "1.170.46",
+		"fflate": "0.8.3",
 		"lucide-react": "1.77.0",
 		"react": "19.3.1",
 		"react-dom": "19.3.1"

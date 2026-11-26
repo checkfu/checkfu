@@ -59,10 +59,12 @@
       "name": "@checkfu/app",
       "version": "0.0.0",
       "dependencies": {
+        "@checkfu/authoring": "workspace:*",
         "@checkfu/sdk": "workspace:*",
         "@checkfu/ui": "workspace:*",
         "@tanstack/react-query": "5.108.3",
         "@tanstack/react-router": "1.170.46",
+        "fflate": "0.8.3",
         "lucide-react": "1.77.0",
         "react": "19.3.1",
         "react-dom": "19.3.1",
@@ -86,6 +88,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@alchemy.run/cloudflare": "catalog:",
+        "@checkfu/authoring": "workspace:*",
         "@checkfu/pi-providers": "workspace:*",
         "@checkfu/sdk": "workspace:*",
         "@effect/platform-bun": "catalog:",
@@ -116,6 +119,15 @@
         "@effect/vitest": "catalog:",
         "alchemy": "catalog:",
         "vitest": "catalog:",
+      },
+    },
+    "packages/authoring": {
+      "name": "@checkfu/authoring",
+      "version": "0.0.0",
+      "dependencies": {
+        "@checkfu/sdk": "workspace:*",
+        "effect": "catalog:",
+        "yaml": "catalog:",
       },
     },
     "packages/domain": {
@@ -192,6 +204,7 @@
       "name": "@checkfu/forge",
       "version": "0.0.0",
       "dependencies": {
+        "@checkfu/authoring": "workspace:*",
         "@checkfu/mcp": "workspace:*",
         "@checkfu/sdk": "workspace:*",
         "@cloudflare/forge": "catalog:",
@@ -353,6 +366,8 @@
     "@checkfu/api": ["@checkfu/api@workspace:apps/api"],
 
     "@checkfu/app": ["@checkfu/app@workspace:apps/app"],
+
+    "@checkfu/authoring": ["@checkfu/authoring@workspace:packages/authoring"],
 
     "@checkfu/cli": ["@checkfu/cli@workspace:apps/cli"],
 

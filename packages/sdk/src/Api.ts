@@ -666,6 +666,12 @@ export const CreateAutomationBody = Schema.Struct({
 export type CreateAutomationBody = typeof CreateAutomationBody.Type
 
 export const UpdateAutomationBody = Schema.Struct({
+	revision: Schema.optionalKey(
+		PositiveInt.annotate({
+			description:
+				"Current automation revision. If supplied, the update fails when the revision has changed.",
+		}),
+	),
 	name: Schema.optionalKey(AutomationName.annotate({ description: "New automation name" })),
 	description: Schema.optionalKey(
 		Schema.NullOr(AutomationDescription).annotate({
@@ -854,9 +860,10 @@ export const AutomationResource = Schema.Struct({
 		"text",
 		"runs",
 		"activation",
-		"revision",
 		"upcoming",
+		"revision",
 	]),
+	revision: Schema.optionalKey(PositiveInt),
 	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
 	initial_events: AutomationInitialEvents,
 	run_count: Schema.Int,
@@ -1508,6 +1515,16 @@ const Agents = HttpApiGroup.make("agents")
 				"x-checkfu-idempotent": true,
 			}),
 	)
+	.add(
+		HttpApiEndpoint.post("archiveIfCurrent", "/v1/agents/:agent_id/archive-if-current", {
+			params: agentParams,
+			payload: Schema.Struct({ version: PositiveInt }),
+			success: [AgentResource, PendingAgent],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Archive an agent at the expected version")
+			.annotate(OpenApi.Override, { "x-forge-skip": true }),
+	)
 	.annotate(OpenApi.Description, "Manage agents")
 	.middleware(Authentication)
 
@@ -1621,6 +1638,20 @@ const Environments = HttpApiGroup.make("environments")
 				"x-checkfu-mcp": { name: "environments_archiveEnvironment" },
 				"x-checkfu-idempotent": true,
 			}),
+	)
+	.add(
+		HttpApiEndpoint.post(
+			"archiveIfCurrent",
+			"/v1/environments/:environment_id/archive-if-current",
+			{
+				params: environmentParams,
+				payload: Schema.Struct({ version: PositiveInt }),
+				success: [EnvironmentSnapshot, PendingEnvironment],
+				error: BodyErrors,
+			},
+		)
+			.annotate(OpenApi.Summary, "Archive an environment at the expected version")
+			.annotate(OpenApi.Override, { "x-forge-skip": true }),
 	)
 	.annotate(OpenApi.Description, "Manage environments")
 	.middleware(Authentication)
@@ -1986,6 +2017,16 @@ const Automations = HttpApiGroup.make("automations")
 				"x-checkfu-mcp": { name: "automations_archiveAutomation" },
 				"x-checkfu-idempotent": true,
 			}),
+	)
+	.add(
+		HttpApiEndpoint.post("archiveIfCurrent", "/v1/automations/:automation_id/archive-if-current", {
+			params: automationParams,
+			payload: Schema.Struct({ revision: PositiveInt }),
+			success: [AutomationResource, PendingAutomation],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Archive an automation at the expected revision")
+			.annotate(OpenApi.Override, { "x-forge-skip": true }),
 	)
 	.add(
 		HttpApiEndpoint.post("run", "/v1/automations/:automation_id/run", {

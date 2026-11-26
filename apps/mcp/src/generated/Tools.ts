@@ -1546,6 +1546,13 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				body: {
 					type: "object",
 					properties: {
+						revision: {
+							type: "integer",
+							minimum: 1,
+							maximum: 9007199254740991,
+							description:
+								"Current automation revision. If supplied, the update fails when the revision has changed.",
+						},
 						name: {
 							type: "string",
 							minLength: 1,

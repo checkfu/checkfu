@@ -1,4 +1,12 @@
 import { MAX_LIVE_AUTOMATIONS } from "@checkfu/domain/Automation/AutomationCapacity.aggregate"
+import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import {
+	ArchiveAgentIfCurrent,
+	ArchiveAgentIfCurrentDecision,
+	ArchiveEnvironmentIfCurrent,
+	ArchiveEnvironmentIfCurrentDecision,
+} from "@checkfu/domain/Automation/GuardedArchives"
+import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import * as InMemory from "@alchemy.run/domain/InMemory"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
@@ -47,6 +55,7 @@ interface AutomationBody {
 	}
 	readonly status: string
 	readonly pause_reason: string | null
+	readonly revision: number
 	readonly run_count: number
 	readonly last_run_at: string | null
 	readonly upcoming_runs_at: ReadonlyArray<string>
@@ -65,7 +74,7 @@ interface RunBody {
 }
 
 interface ErrorBody {
-	readonly error: { readonly type: string; readonly message: string }
+	readonly error: { readonly type: string; readonly message: string; readonly code?: string }
 }
 
 const weekdayMornings = { type: "cron", expression: "0 9 * * 1-5", timezone: "America/New_York" }
@@ -175,6 +184,81 @@ const settledRuns = (apiFetch: ApiFetch, automationId: string, count: number) =>
 	)
 
 describe("Automations API", () => {
+	it("guards dependency archives against a missed create or an automation repoint", () =>
+		run((apiFetch) =>
+			Effect.gen(function* () {
+				const target = yield* prerequisites(apiFetch)
+				const other = yield* prerequisites(apiFetch)
+				const archiveAgent = yield* ArchiveAgentIfCurrentDecision
+				const archiveEnvironment = yield* ArchiveEnvironmentIfCurrentDecision
+				const agent = AgentId.make(target.agentId)
+				const environment = EnvironmentId.make(target.environmentId)
+
+				const created = yield* call<AutomationBody>(apiFetch, "POST", "/v1/automations", {
+					name: "Morning report",
+					agent: other.agentId,
+					environment_id: other.environmentId,
+					initial_events: message("Write the report."),
+					schedule: weekdayMornings,
+				})
+				expect(created.status).toBe(201)
+				const omitted = yield* Effect.result(
+					archiveAgent.send(
+						new ArchiveAgentIfCurrent({
+							agent_id: agent,
+							expected_version: 1,
+							inventory: [],
+						}),
+					),
+				)
+				expect(omitted).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "AutomationInventoryChanged" },
+				})
+
+				const id = AutomationId.make(created.body.id)
+				const inventory = [
+					{
+						id,
+						revision: created.body.revision,
+						agent_id: AgentId.make(other.agentId),
+						environment_id: EnvironmentId.make(other.environmentId),
+					},
+				]
+				const url = `/v1/automations/${id}`
+				const repointed = yield* call<AutomationBody>(apiFetch, "POST", url, {
+					agent,
+					environment_id: environment,
+				})
+				expect(repointed.status).toBe(200)
+				const stale = yield* Effect.result(
+					archiveEnvironment.send(
+						new ArchiveEnvironmentIfCurrent({
+							environment_id: environment,
+							expected_version: 1,
+							inventory,
+						}),
+					),
+				)
+				expect(stale).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "AutomationInventoryChanged" },
+				})
+				const paused = yield* call<AutomationBody>(apiFetch, "POST", `${url}/pause`)
+				expect(paused.body.status).toBe("paused")
+
+				for (const path of [`/v1/agents/${agent}`, `/v1/environments/${environment}`]) {
+					const refused = yield* call<ErrorBody>(apiFetch, "POST", `${path}/archive-if-current`, {
+						version: 1,
+					})
+					expect(refused.status).toBe(409)
+					expect(refused.body.error.message).toContain(`Automation ${id} still references`)
+					const live = yield* call<{ archived_at: string | null }>(apiFetch, "GET", path)
+					expect(live.body.archived_at).toBeNull()
+				}
+			}),
+		))
+
 	it("creates an automation, reads it back, and shows when it will next fire", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
@@ -785,11 +869,20 @@ describe("Automations API", () => {
 				expect(renamed.body).toEqual({
 					...created.body,
 					name: "Weekday report",
+					revision: 2,
 					updated_at: renamed.body.updated_at,
 				})
 
+				const stale = yield* call<ErrorBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					revision: created.body.revision,
+					description: "Replace with a stale edit.",
+				})
+				expect(stale.status).toBe(409)
+				expect(stale.body.error.message).toContain("automation changed")
+
 				const noon = { type: "cron", expression: "0 13 * * *", timezone: "UTC" }
 				const changed = yield* call<AutomationBody>(apiFetch, "POST", `/v1/automations/${id}`, {
+					revision: renamed.body.revision,
 					description: null,
 					agent: { id: agentId, version: 1 },
 					initial_events: message("Write the noon report."),
@@ -1146,6 +1239,7 @@ describe("Automations API", () => {
 					corrected,
 				)
 				expect(unusable.status).toBe(400)
+				expect(unusable.body.error.code).toBe("automation_schedule_unusable")
 				const afterCorrection = yield* call<AutomationBody>(
 					apiFetch,
 					"POST",
@@ -1188,6 +1282,7 @@ describe("Automations API", () => {
 					key,
 				)
 				expect(unusableUnderTheSameKey.status).toBe(400)
+				expect(unusableUnderTheSameKey.body.error.code).toBeUndefined()
 			}),
 		))
 

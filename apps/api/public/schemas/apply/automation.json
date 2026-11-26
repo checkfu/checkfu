@@ -1,0 +1,144 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"properties": {
+		"name": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 256,
+			"description": "Human-readable automation name"
+		},
+		"description": {
+			"anyOf": [
+				{
+					"type": "string",
+					"maxLength": 2048
+				},
+				{
+					"type": "null"
+				}
+			],
+			"description": "What the automation is for, up to 2048 characters"
+		},
+		"agent": {
+			"anyOf": [
+				{
+					"anyOf": [
+						{
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256
+						},
+						{
+							"type": "object",
+							"properties": {
+								"id": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 256
+								},
+								"version": {
+									"type": "integer",
+									"minimum": 1,
+									"maximum": 9007199254740991
+								}
+							},
+							"required": ["id"],
+							"additionalProperties": false
+						}
+					],
+					"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+				},
+				{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"minLength": 1
+						},
+						"version": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 9007199254740991
+						}
+					},
+					"required": ["path"],
+					"additionalProperties": false
+				}
+			]
+		},
+		"environment_id": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 256,
+			"description": "Environment ID each run's session uses"
+		},
+		"initial_events": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"properties": {
+					"type": {
+						"type": "string",
+						"enum": ["user.message"]
+					},
+					"content": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"type": {
+									"type": "string",
+									"enum": ["text"]
+								},
+								"text": {
+									"type": "string",
+									"minLength": 1
+								}
+							},
+							"required": ["type", "text"],
+							"additionalProperties": false
+						},
+						"minItems": 1
+					}
+				},
+				"required": ["type", "content"],
+				"additionalProperties": false
+			},
+			"minItems": 1,
+			"maxItems": 1,
+			"description": "The one user message each run's session starts with"
+		},
+		"schedule": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"enum": ["cron"]
+				},
+				"expression": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 256
+				},
+				"timezone": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 64
+				}
+			},
+			"required": ["type", "expression", "timezone"],
+			"additionalProperties": false,
+			"description": "When the automation fires: a cron expression that names a single minute, so it fires at most once per clock hour, read in an IANA time zone name such as America/New_York"
+		},
+		"type": {
+			"type": "string",
+			"enum": ["automation"]
+		},
+		"$schema": {
+			"type": "string"
+		}
+	},
+	"required": ["name", "agent", "environment_id", "initial_events", "schedule"],
+	"additionalProperties": false
+}

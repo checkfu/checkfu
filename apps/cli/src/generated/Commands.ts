@@ -1283,6 +1283,14 @@ const automationsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
+			propName: "revision",
+			flagName: "revision",
+			wireName: "revision",
+			location: "body",
+			kind: "int",
+			required: false,
+		},
+		{
 			propName: "name",
 			flagName: "name",
 			wireName: "name",
@@ -1341,6 +1349,13 @@ const automationsUpdateCommand = CommandMake(
 		automationId: FlagString("automation-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
+		),
+		revision: FlagInt("revision").pipe(
+			FlagWithMetavar("INT"),
+			FlagWithDescription(
+				"Current automation revision. If supplied, the update fails when the revision has changed.",
+			),
+			FlagOptional,
 		),
 		name: FlagString("name").pipe(FlagWithDescription("New automation name"), FlagOptional),
 		description: FlagString("description").pipe(

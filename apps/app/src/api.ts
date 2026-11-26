@@ -253,6 +253,23 @@ export const errorMessage = (error: unknown): string =>
 export const isSignedOut = (error: unknown): boolean =>
 	error instanceof CheckfuFetchError && error.status === 401
 
+export const deploymentApiUrl = async (): Promise<string> => {
+	const response = await fetch("/auth/deployment")
+	if (!response.ok) {
+		throw new Error("Could not get this deployment’s API URL for the export.")
+	}
+	const body: unknown = await response.json()
+	if (
+		typeof body !== "object" ||
+		body === null ||
+		!("api_url" in body) ||
+		typeof body.api_url !== "string"
+	) {
+		throw new Error("This deployment did not return its API URL.")
+	}
+	return body.api_url
+}
+
 export const signedIn = async (): Promise<boolean> => {
 	const response = await fetch("/auth/session")
 	if (response.status !== 401 && !response.ok) {

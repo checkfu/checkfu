@@ -78,6 +78,22 @@ describe("CLI help, errors, and resource commands", () => {
 		)
 	})
 
+	it("rejects a YAML stream passed to a resource command", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const cli = yield* makeTestServer()
+					const result = yield* cli.run(["environments", "create"], {
+						stdin: "name: First\n---\nname: Second\n",
+					})
+					expect(result.exitCode).toBe(1)
+					expect(result.stderr).toContain("multiple documents")
+					expect(result.stdout).toBe("")
+				}),
+			),
+		)
+	})
+
 	it("writes parse, config, and auth errors strictly to stderr with empty stdout", async () => {
 		await Effect.runPromise(
 			Effect.scoped(

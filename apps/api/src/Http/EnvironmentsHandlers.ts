@@ -1,3 +1,9 @@
+import {
+	ArchiveEnvironmentIfCurrent,
+	ArchiveEnvironmentIfCurrentDecision,
+} from "@checkfu/domain/Automation/GuardedArchives"
+import { makeArchiveInventory } from "./ArchiveInventory.ts"
+import { DEFAULT_ENVIRONMENT_CONFIG } from "@checkfu/sdk/Schemas"
 import { ArchiveEnvironment } from "@checkfu/domain/Environment/ArchiveEnvironment.command"
 import { CreateEnvironment } from "@checkfu/domain/Environment/CreateEnvironment.command"
 import { DeleteEnvironment } from "@checkfu/domain/Environment/DeleteEnvironment.command"
@@ -15,9 +21,9 @@ import * as Option from "effect/Option"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
-	DEFAULT_ENVIRONMENT_CONFIG,
 	IDEMPOTENCY_KEY_REUSED,
 	bestEffortAfterCommit,
+	commitForStream,
 	createIdentity,
 	handled,
 	isPending,
@@ -38,6 +44,8 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const list = yield* makeLister
+		const inventory = yield* makeArchiveInventory
+		const guardedArchive = yield* ArchiveEnvironmentIfCurrentDecision
 
 		const retrieve = (id: EnvironmentId) =>
 			Effect.gen(function* () {
@@ -62,6 +70,32 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 				}
 				return projected
 			})
+
+		const archive = (id: EnvironmentId, version?: number) =>
+			Effect.gen(function* () {
+				const commit =
+					version === undefined
+						? yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
+						: commitForStream(
+								(yield* inventory((inventory) =>
+									guardedArchive.send(
+										new ArchiveEnvironmentIfCurrent({
+											environment_id: id,
+											expected_version: version,
+											inventory,
+										}),
+									),
+								)).commits,
+								`Environment/${id}`,
+							)
+				const result = yield* environmentViews
+					.get(Environment.ref(id), commit === undefined ? {} : { atLeast: commit })
+					.pipe(orPending(id, "environment"))
+				if (isPending(result)) {
+					return result
+				}
+				return yield* present(result, 404, `Environment ${id} not found.`)
+			}).pipe(handled)
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -89,7 +123,7 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 						)
 						.pipe(
 							Effect.catchTag("EnvironmentAlreadyExists", () =>
-								reject(409, IDEMPOTENCY_KEY_REUSED),
+								reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" }),
 							),
 						)
 					const result = yield* environmentViews
@@ -191,18 +225,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					return { id, type: "environment_deleted" as const }
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.environment_id
-					const receipt = yield* environments.send(new ArchiveEnvironment({ environment_id: id }))
-					const result = yield* environmentViews
-						.get(Environment.ref(id), { atLeast: receipt })
-						.pipe(orPending(id, "environment"))
-					if (isPending(result)) {
-						return result
-					}
-					return yield* present(result, 404, `Environment ${id} not found.`)
-				}).pipe(handled),
+			.handle("archive", ({ params }) => archive(params.environment_id))
+			.handle("archiveIfCurrent", ({ params, payload }) =>
+				archive(params.environment_id, payload.version),
 			)
 	}),
 )

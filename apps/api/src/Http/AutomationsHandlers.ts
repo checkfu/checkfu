@@ -1,5 +1,14 @@
 import {
+	ArchiveAutomationIfCurrent,
+	ArchiveAutomationIfCurrentDecision,
+} from "@checkfu/domain/Automation/GuardedArchives"
+import { AgentNotFound } from "@checkfu/domain/Agent/AgentNotFound.rejection"
+import { EnvironmentNotFound } from "@checkfu/domain/Environment/EnvironmentNotFound.rejection"
+import { AgentArchivedError } from "@checkfu/domain/Agent/AgentArchived.rejection"
+import { EnvironmentArchivedError } from "@checkfu/domain/Environment/EnvironmentArchived.rejection"
+import {
 	AdmitAutomation,
+	AutomationLimitReached,
 	AutomationScheduleUnusable,
 } from "@checkfu/domain/Automation/AdmitAutomation.command"
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
@@ -16,9 +25,16 @@ import type { AutomationRunStarted } from "@checkfu/domain/Automation/RecordAuto
 import { RunAutomation } from "@checkfu/domain/Automation/RunAutomation.command"
 import { firingsAhead, isUsableSchedule, sameSchedule } from "@checkfu/domain/Automation/Schedule"
 import { UnpauseAutomation } from "@checkfu/domain/Automation/UnpauseAutomation.command"
-import { UpdateAutomation } from "@checkfu/domain/Automation/UpdateAutomation.command"
+import {
+	AutomationRevisionConflict,
+	UpdateAutomation,
+} from "@checkfu/domain/Automation/UpdateAutomation.command"
 import { UpdateAutomationDecision } from "@checkfu/domain/Automation/UpdateAutomation.decision"
-import { BoundedAgentId, BoundedEnvironmentId } from "@checkfu/domain/Session/AdmitSession.command"
+import {
+	AgentVersionNotFound,
+	BoundedAgentId,
+	BoundedEnvironmentId,
+} from "@checkfu/domain/Session/AdmitSession.command"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
@@ -142,6 +158,9 @@ const textOf = (
 		),
 	)
 
+const rejectUnavailableReference = (status: 404 | 409, description: string | undefined) =>
+	reject(status, description ?? "Request rejected.", { code: "automation_reference_unavailable" })
+
 const UPDATE_RETRIES = 3
 
 const present = (snapshot: AutomationSnapshot) =>
@@ -152,6 +171,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 		const admission = yield* AdmitAutomationDecision
 		const updates = yield* UpdateAutomationDecision
 		const automations = yield* Automation
+		const guardedArchive = yield* ArchiveAutomationIfCurrentDecision
 		const automationViews = yield* AutomationView
 		const automationRuns = yield* AutomationRunView
 		const list = yield* makeLister
@@ -169,11 +189,11 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 
 		const after = (
 			id: AutomationId,
-			receipt: { readonly stream: string; readonly version: number },
+			receipt: { readonly stream: string; readonly version: number } | undefined,
 		) =>
 			Effect.gen(function* () {
 				const result = yield* automationViews
-					.get(Automation.ref(id), { atLeast: receipt })
+					.get(Automation.ref(id), receipt === undefined ? {} : { atLeast: receipt })
 					.pipe(orPending(id, "automation"))
 				if (isPending(result)) {
 					return result
@@ -213,15 +233,29 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				return yield* projected(id)
 			})
 
+		const archive = (id: AutomationId, revision?: number) =>
+			Effect.gen(function* () {
+				const commit =
+					revision === undefined
+						? yield* automations.send(new ArchiveAutomation({ automation_id: id }))
+						: commitForStream(
+								(yield* guardedArchive.send(
+									new ArchiveAutomationIfCurrent({
+										automation_id: id,
+										expected_revision: revision,
+									}),
+								)).commits,
+								`Automation/${id}`,
+							)
+				return yield* after(id, commit)
+			}).pipe(handled)
+
 		return handlers
 			.handle("create", ({ payload, headers }) =>
 				Effect.gen(function* () {
 					const idempotencyKey = headers["idempotency-key"]
 					const { agent_id, agent_version } = yield* agentOf(payload.agent)
 					const environment_id = yield* environmentOf(payload.environment_id)
-					if (!isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)) {
-						return yield* new AutomationScheduleUnusable(payload.schedule)
-					}
 					const command = {
 						capacity_id: AUTOMATION_CAPACITY,
 						name: payload.name,
@@ -242,7 +276,38 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const receipt = yield* admission
 						.send(new AdmitAutomation({ automation_id: id, ...command }), identity.options)
 						.pipe(
-							Effect.catchTag("AutomationAlreadyExists", () => reject(409, IDEMPOTENCY_KEY_REUSED)),
+							Effect.catchTags({
+								AutomationAlreadyExists: () =>
+									isUsableSchedule(payload.schedule.expression, payload.schedule.timezone)
+										? reject(409, IDEMPOTENCY_KEY_REUSED, { code: "idempotency_key_reused" })
+										: Effect.fail(new AutomationScheduleUnusable(payload.schedule)),
+								AutomationScheduleUnusable: () =>
+									reject(
+										400,
+										AutomationScheduleUnusable.annotations.description ?? "Invalid schedule.",
+										{
+											code: "automation_schedule_unusable",
+										},
+									),
+								AgentNotFound: () =>
+									rejectUnavailableReference(404, AgentNotFound.annotations.description),
+								AgentVersionNotFound: () =>
+									rejectUnavailableReference(404, AgentVersionNotFound.annotations.description),
+								EnvironmentNotFound: () =>
+									rejectUnavailableReference(404, EnvironmentNotFound.annotations.description),
+								AgentArchivedError: () =>
+									rejectUnavailableReference(409, AgentArchivedError.annotations.description),
+								EnvironmentArchivedError: () =>
+									rejectUnavailableReference(409, EnvironmentArchivedError.annotations.description),
+								AutomationLimitReached: () =>
+									reject(
+										429,
+										AutomationLimitReached.annotations.description ?? "Request rejected.",
+										{
+											code: "automation_capacity_reached",
+										},
+									),
+							}),
 						)
 					const committed = commitForStream(receipt.commits, `Automation/${id}`)
 					return committed === undefined
@@ -264,6 +329,13 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const timeout = yield* AutomationReadWaitTimeout
 					const send = Effect.gen(function* () {
 						const current = yield* currentOf(id)
+						if (payload.revision !== undefined && payload.revision !== current.revision) {
+							return yield* new AutomationRevisionConflict({
+								automation_id: id,
+								expected_revision: payload.revision,
+								current_revision: current.revision,
+							})
+						}
 						const next = {
 							name: payload.name ?? current.name,
 							description:
@@ -309,6 +381,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const committed = yield* Effect.retry(send, {
 						schedule: Schedule.recurs(UPDATE_RETRIES),
 						while: (error) =>
+							payload.revision === undefined &&
 							Predicate.isTagged(error, "AutomationRevisionConflict")
 								? automationViews
 										.waitFor(ref, { revision: { gte: error.current_revision } }, { timeout })
@@ -346,14 +419,9 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					)
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) =>
-				Effect.gen(function* () {
-					const id = params.automation_id
-					return yield* after(
-						id,
-						yield* automations.send(new ArchiveAutomation({ automation_id: id })),
-					)
-				}).pipe(handled),
+			.handle("archive", ({ params }) => archive(params.automation_id))
+			.handle("archiveIfCurrent", ({ params, payload }) =>
+				archive(params.automation_id, payload.revision),
 			)
 			.handle("run", ({ params }) =>
 				Effect.gen(function* () {

@@ -3,8 +3,6 @@ import {
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
-import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
-import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
@@ -60,11 +58,6 @@ export const MAX_AGENT_BODY_BYTES =
 	(MAX_MCP_SERVERS_TEXT_LENGTH + MAX_AGENT_TOOLS_TEXT_LENGTH) * ESCAPED_UNIT_BYTES +
 	16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
-
-export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
-	type: "cloud",
-	networking: { type: "unrestricted" },
-}
 
 const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined => {
 	switch (status) {
@@ -151,9 +144,13 @@ export const toApiError = (err: unknown, request_id: RequestId): HandlerError =>
 	return apiError(500, "Internal server error.", request_id)
 }
 
-export const reject = <S extends ErrorStatus>(status: S, message: string) =>
+export const reject = <S extends ErrorStatus>(
+	status: S,
+	message: string,
+	extra?: Parameters<typeof apiError>[3],
+) =>
 	Effect.flatMap(currentRequestId, (request_id) =>
-		Effect.fail(apiError(status, message, request_id)),
+		Effect.fail(apiError(status, message, request_id, extra)),
 	)
 
 export const present = <A, S extends HandlerErrorStatus>(
@@ -244,9 +241,6 @@ export const commitForStream = (
 	commits: ReadonlyArray<{ readonly stream: string; readonly version: number }>,
 	stream: string,
 ) => commits.find((commit) => commit.stream === stream)
-
-export const normalizeModel = (input: string | AgentModel): AgentModel =>
-	typeof input === "string" ? { id: input } : input
 
 const utf8Encoder = new TextEncoder()
 

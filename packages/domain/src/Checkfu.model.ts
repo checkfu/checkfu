@@ -7,6 +7,11 @@ import { CreateAgentDecision } from "./Agent/CreateAgent.decision.ts"
 import { UpdateAgentDecision } from "./Agent/UpdateAgent.decision.ts"
 import { ArmAutomation, ArmAutomationLive } from "./Automation/ArmAutomation.policy.ts"
 import { Automation } from "./Automation/Automation.aggregate.ts"
+import {
+	ArchiveAgentIfCurrentDecision,
+	ArchiveAutomationIfCurrentDecision,
+	ArchiveEnvironmentIfCurrentDecision,
+} from "./Automation/GuardedArchives.ts"
 import { AutomationCapacity } from "./Automation/AutomationCapacity.aggregate.ts"
 import { AdmitAutomationDecision } from "./Automation/AdmitAutomation.decision.ts"
 import { UpdateAutomationDecision } from "./Automation/UpdateAutomation.decision.ts"
@@ -72,6 +77,9 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		RequestToolActionDecision,
 		ConfirmToolDecision,
 		ReturnCustomToolResultDecision,
+		ArchiveAgentIfCurrentDecision,
+		ArchiveAutomationIfCurrentDecision,
+		ArchiveEnvironmentIfCurrentDecision,
 	],
 	views: [
 		AgentView,

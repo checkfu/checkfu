@@ -730,6 +730,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/agents",
 						"/v1/agents/{agent_id}",
 						"/v1/agents/{agent_id}/archive",
+						"/v1/agents/{agent_id}/archive-if-current",
 						"/v1/artifacts",
 						"/v1/artifacts/{artifact_id}",
 						"/v1/artifacts/{artifact_id}/blobs/{sha256}",
@@ -743,6 +744,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/automations",
 						"/v1/automations/{automation_id}",
 						"/v1/automations/{automation_id}/archive",
+						"/v1/automations/{automation_id}/archive-if-current",
 						"/v1/automations/{automation_id}/pause",
 						"/v1/automations/{automation_id}/run",
 						"/v1/automations/{automation_id}/runs",
@@ -751,6 +753,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/environments",
 						"/v1/environments/{environment_id}",
 						"/v1/environments/{environment_id}/archive",
+						"/v1/environments/{environment_id}/archive-if-current",
 						"/v1/sessions",
 						"/v1/sessions/{session_id}",
 						"/v1/sessions/{session_id}/archive",
@@ -764,6 +767,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/vaults/{vault_id}/credentials/{credential_id}",
 						"/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
 					])
+					for (const [path, operations] of Object.entries(spec.paths)) {
+						if (path.endsWith("/archive-if-current")) {
+							expect(Object.keys(operations["post"]?.responses ?? {})).toEqual(
+								expect.arrayContaining(["413", "415"]),
+							)
+						}
+					}
 					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(
 						expect.arrayContaining(["200", "204"]),
