@@ -182,7 +182,10 @@ export function NewSessionPage(): React.JSX.Element {
 				return undefined
 			}
 			const body = {
-				agent: shown === undefined ? agentId : { id: shown.id, version: shown.version },
+				agent:
+					shown === undefined
+						? agentId
+						: { type: "agent" as const, id: shown.id, version: shown.version },
 				environment_id: environmentId,
 				title: title.trim() === "" ? null : title.trim(),
 				...bindingsOf(servers, chosenVaults, chosenCredentials, choices.credentials),

@@ -174,7 +174,7 @@ describe("starting a session", () => {
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
 			{
-				agent: { id: "agent_1", version: 1 },
+				agent: { type: "agent", id: "agent_1", version: 1 },
 				environment_id: "env_1",
 				title: null,
 				vault_ids: ["vlt_work"],
@@ -206,7 +206,11 @@ describe("switching to an agent with no MCP servers", () => {
 		expect(button(mounted.container, START).disabled).toBe(false)
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
-			{ agent: { id: "agent_plain", version: 1 }, environment_id: "env_1", title: null },
+			{
+				agent: { type: "agent", id: "agent_plain", version: 1 },
+				environment_id: "env_1",
+				title: null,
+			},
 		])
 		mounted.unmount()
 	})
@@ -234,7 +238,11 @@ describe("switching between agents with MCP servers", () => {
 		expect(credentialSelect(mounted.container).value).toBe("")
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
-			{ agent: { id: "agent_second", version: 1 }, environment_id: "env_1", title: null },
+			{
+				agent: { type: "agent", id: "agent_second", version: 1 },
+				environment_id: "env_1",
+				title: null,
+			},
 		])
 		mounted.unmount()
 	})
@@ -317,7 +325,7 @@ describe("starting a session with a choice that stops existing", () => {
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
 			{
-				agent: { id: "agent_1", version: 1 },
+				agent: { type: "agent", id: "agent_1", version: 1 },
 				environment_id: "env_1",
 				title: null,
 				vault_ids: ["vlt_work", "vlt_personal"],
@@ -346,7 +354,7 @@ describe("starting a session with a choice that stops existing", () => {
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
 			{
-				agent: { id: "agent_1", version: 1 },
+				agent: { type: "agent", id: "agent_1", version: 1 },
 				environment_id: "env_1",
 				title: null,
 				vault_ids: ["vlt_personal"],
@@ -384,7 +392,7 @@ describe("starting a session with a choice that stops existing", () => {
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
 			{
-				agent: { id: "agent_1", version: 1 },
+				agent: { type: "agent", id: "agent_1", version: 1 },
 				environment_id: "env_1",
 				title: null,
 				vault_ids: ["vlt_work", "vlt_personal"],
@@ -407,7 +415,7 @@ describe("starting a session with a choice that stops existing", () => {
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
 			{
-				agent: { id: "agent_1", version: 1 },
+				agent: { type: "agent", id: "agent_1", version: 1 },
 				environment_id: "env_1",
 				title: null,
 				mcp_server_credentials: [{ mcp_server_name: "github", credential_id: "vcrd_work" }],
@@ -605,7 +613,7 @@ describe("reading a chosen vault by its id", () => {
 		expect(button(mounted.container, START).disabled).toBe(false)
 		await submit(mounted.container.querySelector("form"))
 		expect(api.started().map((request) => request.body)).toEqual([
-			{ agent: { id: "agent_1", version: 1 }, environment_id: "env_1", title: null },
+			{ agent: { type: "agent", id: "agent_1", version: 1 }, environment_id: "env_1", title: null },
 		])
 		mounted.unmount()
 	})
