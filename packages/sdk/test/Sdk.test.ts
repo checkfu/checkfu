@@ -1084,6 +1084,49 @@ describe("@checkfu/sdk", () => {
 			}),
 		)
 
+		it.live("waitForPending settles a vault archive only once every custody count is 0", () =>
+			Effect.gen(function* () {
+				let polls = 0
+				const vault = {
+					id: "vlt_archived",
+					type: "vault",
+					display_name: "Ops",
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+					archived_at: ISO_NOW,
+				}
+				const mockFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (req.method === "POST" && url.pathname === "/v1/vaults/vlt_archived/archive") {
+						return jsonResponse({ id: "vlt_archived", type: "vault", pending: true }, 202)
+					}
+					if (req.method === "GET" && url.pathname === "/v1/vaults/vlt_archived") {
+						polls += 1
+						return jsonResponse({
+							...vault,
+							custody: { storing: 0, held: 0, erasing: polls === 1 ? 2 : 0 },
+						})
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const archived = yield* client.vaults.archive("vlt_archived")
+					expect(isPendingResource(archived)).toBe(true)
+					const ready = yield* client.waitForPending(archived, {
+						initialDelay: "1 millis",
+						maxDelay: "2 millis",
+						timeout: "2 seconds",
+						requestOptions: { maxRetries: 0 },
+					})
+					expect(ready.custody).toEqual({ storing: 0, held: 0, erasing: 0 })
+					expect(polls).toBe(2)
+				}).pipe(Effect.provide(makeEffectLayer(mockFetch, { maxRetries: 0 })))
+			}),
+		)
+
 		it.effect("waitForPending fails with a configuration error for an unknown receipt type", () =>
 			Effect.gen(function* () {
 				const client = yield* CheckfuClient

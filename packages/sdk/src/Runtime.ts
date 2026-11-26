@@ -81,6 +81,13 @@ type JsonPayloadOf<P> =
 			? P["Type"]
 			: never
 
+type JsonPayloadEncodedOf<P> =
+	P extends ReadonlyMap<string, { readonly schemas: ReadonlyArray<Schema.Top> }>
+		? never
+		: P extends Schema.Top
+			? P["Encoded"]
+			: never
+
 export type PathParam<
 	G extends ApiGroupName,
 	E extends ApiEndpointName<G>,
@@ -98,6 +105,11 @@ export type EndpointQuery<G extends ApiGroupName, E extends ApiEndpointName<G>> 
 export type EndpointBody<G extends ApiGroupName, E extends ApiEndpointName<G>> = JsonPayloadOf<
 	EndpointProp<ApiEndpoint<G, E>, "~Payload">
 >
+
+export type EndpointJsonBody<
+	G extends ApiGroupName,
+	E extends ApiEndpointName<G>,
+> = JsonPayloadEncodedOf<EndpointProp<ApiEndpoint<G, E>, "~Payload">>
 
 export type EndpointJsonSuccess<
 	G extends ApiGroupName,
@@ -128,12 +140,14 @@ export interface OperationShape<
 	Body = never,
 	Result = unknown,
 	JsonResult = IsoDateTimes<Result>,
+	JsonBody = Body,
 > {
 	readonly path: Path
 	readonly query: Query
 	readonly body: Body
 	readonly result: Result
 	readonly jsonResult: JsonResult
+	readonly jsonBody: JsonBody
 }
 
 export type PathOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
@@ -142,6 +156,9 @@ export type QueryOf<O extends OperationShape<unknown, unknown, unknown, unknown,
 	O["query"]
 export type BodyOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
 	O["body"]
+export type JsonBodyOf<
+	O extends OperationShape<unknown, unknown, unknown, unknown, unknown, unknown>,
+> = O["jsonBody"]
 export type ResultOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
 	O["result"]
 export type JsonResultOf<O extends OperationShape<unknown, unknown, unknown, unknown, unknown>> =
@@ -627,6 +644,13 @@ export const executeEndpointSseEffect = <G extends ApiGroupName, E extends ApiEn
 	)
 }
 
+const custodySettled = (custody: unknown): boolean =>
+	typeof custody === "string"
+		? custody === "erased"
+		: typeof custody !== "object" ||
+			custody === null ||
+			Object.values(custody).every((count) => typeof count !== "number" || count === 0)
+
 const isResourceReadyForMutation = <T>(
 	resource: T,
 	readiness: PendingReadiness | undefined,
@@ -650,9 +674,7 @@ const isResourceReadyForMutation = <T>(
 			"archived_at" in resource &&
 			resource.archived_at !== null &&
 			resource.archived_at !== undefined &&
-			(!("custody" in resource) ||
-				typeof resource.custody !== "string" ||
-				resource.custody === "erased")
+			(!("custody" in resource) || custodySettled(resource.custody))
 		)
 	}
 	return (
