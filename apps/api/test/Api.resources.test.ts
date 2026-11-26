@@ -1,3 +1,5 @@
+import { WaitTimeout } from "@alchemy.run/domain"
+import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
@@ -196,13 +198,28 @@ describe("Session resources", () => {
 	})
 
 	it("gives a retried create the same resources, and stores its token only where none is stored", async () => {
-		const { layer, closeAll, repositoryTokens } = makePiDurableTestLayer(async (model) =>
-			makeAssistantReply(model, null, "ok", 1, 1),
-		)
+		const { layer, closeAll, repositoryTokens, unreachable, tokenDeliveries } =
+			makePiDurableTestLayer(async (model) => makeAssistantReply(model, null, "ok", 1, 1))
 		try {
 			await Effect.runPromise(
 				Effect.gen(function* () {
-					const { fetch: apiFetch } = yield* makeApiHandler
+					const sessionViews = yield* SessionView
+					let lagging = true
+					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
+						Effect.provideService(SessionView, {
+							...sessionViews,
+							get: (ref, options) =>
+								!lagging
+									? sessionViews.get(ref, options)
+									: options?.atLeast === undefined
+										? Effect.succeedNone
+										: Effect.fail(new WaitTimeout({ view: "SessionView", key: ref.id })),
+							waitFor: (ref, filter, options) =>
+								lagging
+									? Effect.fail(new WaitTimeout({ view: "SessionView", key: ref.id }))
+									: sessionViews.waitFor(ref, filter, options),
+						}),
+					)
 					const base = yield* createAgentAndEnvironment(apiFetch)
 					const create = (token: string) =>
 						sendRequest(apiFetch, {
@@ -220,7 +237,27 @@ describe("Session resources", () => {
 								],
 							},
 						})
-					const first = yield* json<SessionBody>(yield* create(TOKEN))
+					unreachable.add("*")
+					for (let attempt = 0; attempt < 2; attempt++) {
+						const unavailable = yield* create(TOKEN)
+						expect(unavailable.status).toBe(503)
+						const message = yield* Effect.promise(() => unavailable.text())
+						expect(message).toContain("could not be stored")
+						expect(message).not.toContain(TOKEN)
+					}
+					expect(repositoryTokens.size).toBe(0)
+					unreachable.delete("*")
+					const repaired = yield* create(TOKEN)
+					expect(repaired.status).toBe(202)
+					const pending = yield* json<{ id: string }>(repaired)
+					expect(pending).toEqual({ id: pending.id, type: "session", pending: true })
+					expect([...repositoryTokens.values()]).toEqual([TOKEN])
+
+					lagging = false
+					const first = yield* json<SessionBody>(
+						yield* request(apiFetch, "GET", `/v1/sessions/${pending.id}`),
+					)
+					expect(first.id).toBe(pending.id)
 					const key = `${first.id}/${first.resources[0]?.id}`
 					const second = yield* json<SessionBody>(yield* create("ghp_sent_with_a_retry"))
 					expect(second.id).toBe(first.id)
@@ -234,12 +271,12 @@ describe("Session resources", () => {
 						body: { authorization_token: "ghp_rotated" },
 					})
 					expect(rotated.status).toBe(200)
-					yield* create("ghp_from_a_late_retry")
+					lagging = true
+					const late = yield* create("ghp_from_a_late_retry")
+					expect(late.status).toBe(202)
+					expect(yield* json(late)).toEqual(pending)
 					expect(repositoryTokens.get(key)).toBe("ghp_rotated")
-
-					repositoryTokens.delete(key)
-					yield* create("ghp_after_a_failed_store")
-					expect(repositoryTokens.get(key)).toBe("ghp_after_a_failed_store")
+					const delivered = tokenDeliveries.length
 
 					const changed = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -247,10 +284,17 @@ describe("Session resources", () => {
 						headers: { ...AUTH_HEADERS, "idempotency-key": "session-with-repo" },
 						body: {
 							...base,
-							resources: [{ type: "github_repository", url: "https://github.com/acme/other" }],
+							resources: [
+								{
+									type: "github_repository",
+									url: "https://github.com/acme/other",
+									authorization_token: TOKEN,
+								},
+							],
 						},
 					})
 					expect(changed.status).toBe(409)
+					expect(tokenDeliveries).toHaveLength(delivered)
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

@@ -888,6 +888,49 @@ describe("PiSession real Durable Object under workerd", () => {
 		}
 	}, 60_000)
 
+	it("replays a keyed session admission after its agent is archived", async () => {
+		const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+			name: "Keyed session agent",
+			model: "gpt-4o-mini",
+		})
+		const title = "Keyed session"
+		const path = "/v1/sessions"
+		const create = (requestedTitle: string) =>
+			fetch(`${baseUrl}${path}`, {
+				method: "POST",
+				headers: {
+					...AUTH_HEADERS,
+					"content-type": "application/json",
+					"idempotency-key": `create-${agent.id}`,
+				},
+				body: JSON.stringify({
+					agent: agent.id,
+					environment_id: environmentId,
+					title: requestedTitle,
+				}),
+			})
+		const idOf = async (response: Response) => {
+			const raw = await response.text()
+			expect([201, 202], raw).toContain(response.status)
+			return parseResponseJson<{ readonly id: string }>("POST", path, response.status, raw).id
+		}
+
+		const [first, concurrent] = await Promise.all([create(title), create(title)])
+		const id = await idOf(first)
+		expect(await idOf(concurrent)).toBe(id)
+		const archived = await apiJson(`/v1/agents/${agent.id}/archive`, { method: "POST" })
+		expect([200, 202]).toContain(archived.status)
+		await pollResourceReady<{ readonly archived_at: string | null }>(
+			`/v1/agents/${agent.id}`,
+			(row) => row.archived_at !== null,
+		)
+		expect(await idOf(await create(title))).toBe(id)
+		const changed = await create("Different title")
+		expect(changed.status, await changed.text()).toBe(409)
+		const session = await pollResourceReady<{ readonly title: string }>(`${path}/${id}`)
+		expect(session.title).toBe(title)
+	}, 30_000)
+
 	it("serializes a conditional archive with a competing automation repoint", async () => {
 		const target = await createResource<{ readonly id: string }>("/v1/environments", {
 			name: "Prune target",

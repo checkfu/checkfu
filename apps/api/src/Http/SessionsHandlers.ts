@@ -68,6 +68,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Struct from "effect/Struct"
+import * as Unify from "effect/Unify"
 import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
@@ -855,40 +856,39 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					})
 					const id = SessionId.make(identity.id)
 					const sendOptions = identity.options
-					const given =
-						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
-							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
-							: yield* credentialsFor(agentId, agentVersion, environmentId, payload).pipe(
-									Effect.catchTags(missing),
-								)
-					const prior =
-						idempotencyKey === undefined || (yield* sessions.get(id))._tag === "Uninitialized"
-							? undefined
-							: yield* existing(id).pipe(orPending(id, "session"))
-					if (prior !== undefined && isPending(prior)) {
-						return prior
-					}
-					const admitted = prior?.resources
-					const resources =
-						admitted ??
-						(yield* decodeResources(
-							yield* Effect.forEach(
-								yield* Effect.forEach(payload.resources ?? [], requestedResource),
-								(resource, index) =>
-									Effect.map(
-										idempotencyKey === undefined
-											? randomId(random, "sesrsc")
-											: idempotentId(digest, "sesrsc", [
-													"create",
-													"session",
-													"resource",
-													idempotencyKey,
-													index,
-												]),
-										(resourceId) => ({ id: resourceId, ...resource }),
-									),
-							),
-						).pipe(Effect.catchTag("SchemaError", (error) => reject(400, error.message))))
+					const unverified = reject(
+						503,
+						`The creation receipt for session ${id} is unavailable. Retry the request.`,
+					)
+					const replay =
+						sendOptions !== undefined &&
+						(yield* sessions.get(id).pipe(Effect.catchDefect(() => unverified)))._tag !==
+							"Uninitialized"
+					const given = replay
+						? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
+						: yield* credentialsFor(agentId, agentVersion, environmentId, payload).pipe(
+								Effect.catchTags(missing),
+							)
+					const resources = replay
+						? []
+						: yield* decodeResources(
+								yield* Effect.forEach(
+									yield* Effect.forEach(payload.resources ?? [], requestedResource),
+									(resource, index) =>
+										Effect.map(
+											idempotencyKey === undefined
+												? randomId(random, "sesrsc")
+												: idempotentId(digest, "sesrsc", [
+														"create",
+														"session",
+														"resource",
+														idempotencyKey,
+														index,
+													]),
+											(resourceId) => ({ id: resourceId, ...resource }),
+										),
+								),
+							).pipe(Effect.catchTag("SchemaError", (error) => reject(400, error.message)))
 					const admission = {
 						session_id: id,
 						agent_id: agentId,
@@ -899,65 +899,72 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						resources,
 					}
 					const refused = { SessionAlreadyExists: rejectReusedSessionKey, ...missing }
-					const receipt =
+					// The host looks up the original command receipt before deciding against the current state.
+					const send =
 						initialPlan !== undefined
-							? yield* admitWithMessages
-									.send(
-										new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
+							? admitWithMessages.send(
+									new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
+									sendOptions,
+								)
+							: initialMessage === undefined
+								? admitSession.send(new AdmitSession(admission), sendOptions)
+								: startSession.send(
+										new OpenAutomationSession({ ...admission, text: initialMessage }),
 										sendOptions,
 									)
-									.pipe(Effect.catchTags(refused))
-							: initialMessage === undefined
-								? yield* admitSession
-										.send(new AdmitSession(admission), sendOptions)
-										.pipe(Effect.catchTags(refused))
-								: yield* startSession
-										.send(
-											new OpenAutomationSession({ ...admission, text: initialMessage }),
-											sendOptions,
-										)
-										.pipe(Effect.catchTags(refused))
-					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
-						const stored = resources[index]
-						return resource.type !== "github_repository" ||
-							resource.authorization_token === undefined ||
-							stored === undefined
-							? Effect.succeed([])
-							: harness
-									.storeRepositoryToken({
-										session_id: id,
-										resource_id: stored.id,
-										authorization_token: Redacted.make(resource.authorization_token),
-										replace: false,
-									})
-									.pipe(
-										Effect.as([]),
-										Effect.catchTag("HarnessUnavailable", () => Effect.succeed([stored.id])),
-									)
-					})
+					const receipt = yield* Unify.unify(send).pipe(
+						Effect.catchTags(refused),
+						Effect.catchDefect((cause) => (replay ? unverified : Effect.die(cause))),
+					)
+					const created = receipt.events.find((event) => event._tag === "session.created")
+					if (created?._tag !== "session.created") {
+						return yield* unverified
+					}
+					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) =>
+						Effect.gen(function* () {
+							if (
+								resource.type !== "github_repository" ||
+								resource.authorization_token === undefined
+							) {
+								return []
+							}
+							const stored = created.resources[index]
+							if (stored?.type !== "github_repository" || stored.requires_token !== true) {
+								return yield* unverified
+							}
+							return yield* harness
+								.storeRepositoryToken({
+									session_id: id,
+									resource_id: stored.id,
+									authorization_token: Redacted.make(resource.authorization_token),
+									replace: false,
+								})
+								.pipe(
+									Effect.as([]),
+									Effect.catchTag("HarnessUnavailable", () => Effect.succeed([stored.id])),
+								)
+						}),
+					)
 					if (unstored.flat().length > 0) {
 						return yield* reject(
 							503,
 							`The tokens for resources ${unstored.flat().join(", ")} of session ${id} could not be stored. Send each again with POST /v1/sessions/${id}/resources/{resource_id}.`,
 						)
 					}
-					const created = receipt.events.find((event) => event._tag === "session.created")
-					if (created?._tag !== "session.created") {
-						return yield* reject(500, "Failed to load created session.")
-					}
-					const pinnedVersion = created.agent_version
 					const pinnedReady = yield* waitForPinnedAgentVersion(
-						agentId,
-						pinnedVersion,
+						created.agent_id,
+						created.agent_version,
 						yield* AgentVersionWaitTimeout,
 					).pipe(orPending(id, "session"))
 					if (isPending(pinnedReady)) {
 						return pinnedReady
 					}
 					const finished =
-						initialPlan === undefined
+						created.initial_messages === undefined
 							? undefined
-							: (yield* recordInitialMessages(sessions, id, initialPlan.messages)).at(-1)
+							: (yield* recordInitialMessages(sessions, id, created.initial_messages.messages)).at(
+									-1,
+								)
 					const sessionCommit = commitForStream(
 						finished?.commits ?? receipt.commits,
 						`Session/${id}`,

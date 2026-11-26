@@ -1096,6 +1096,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					const realSessionViews = yield* SessionView
+					const realSessions = yield* Session
+					let aggregateUnavailable = false
 					let lagMode: "off" | "timeout" | "recover" = "off"
 					let waitCalls = 0
 					let snapshotLagged = false
@@ -1104,7 +1106,14 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						get: (
 							ref: Parameters<typeof realSessionViews.get>[0],
 							options?: Parameters<typeof realSessionViews.get>[1],
-						) => (lagMode !== "off" ? Effect.succeedNone : realSessionViews.get(ref, options)),
+						) => {
+							if (lagMode === "off") {
+								return realSessionViews.get(ref, options)
+							}
+							return options?.atLeast === undefined
+								? Effect.succeedNone
+								: Effect.fail(new Domain.WaitTimeout({ view: "SessionView", key: ref.id }))
+						},
 
 						snapshot: (
 							ref: Parameters<typeof realSessionViews.snapshot>[0],
@@ -1136,6 +1145,13 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 
 					const { fetch: apiFetch } = yield* makeApiHandler.pipe(
 						Effect.provideService(SessionView, laggingSessionViews),
+						Effect.provideService(Session, {
+							...realSessions,
+							get: (target) =>
+								aggregateUnavailable
+									? Effect.die(new Error("Session host is unavailable."))
+									: realSessions.get(target),
+						}),
 					)
 					const session = yield* createIdleSession(apiFetch)
 					const created = <A>(path: string, body: Readonly<Record<string, string>>) =>
@@ -1148,15 +1164,21 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						model: "gpt-4o-mini",
 					})
 					const environment = yield* created<{ id: string }>("/v1/environments", { name: "Keyed" })
-					const keyedCreate = sendRequest(apiFetch, {
-						method: "POST",
-						path: "/v1/sessions",
-						headers: { ...AUTH_HEADERS, "idempotency-key": "lagging-retry" },
-						body: { agent: agent.id, environment_id: environment.id },
-					})
-					const keyed = yield* Effect.flatMap(keyedCreate, (res) =>
-						Effect.promise(() => res.json() as Promise<{ id: string }>),
-					)
+					const keyedCreate = (key: string, messages: ReadonlyArray<string>, title = "Keyed") =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: { ...AUTH_HEADERS, "idempotency-key": key },
+							body: {
+								agent: agent.id,
+								environment_id: environment.id,
+								title,
+								initial_events: messages.map((text) => ({
+									type: "user.message",
+									content: [{ type: "text", text }],
+								})),
+							},
+						})
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -1184,15 +1206,35 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						})
 					}
 					expect(waitCalls).toBe(3)
-					const retried = yield* keyedCreate
-					expect(retried.status).toBe(202)
-					expect(yield* Effect.promise(() => retried.json())).toEqual({
-						id: keyed.id,
-						type: "session",
-						pending: true,
+					const admitted = yield* Effect.forEach(
+						[[], ["one"], ["first", "second"]],
+						(messages, index) =>
+							Effect.gen(function* () {
+								const key = `lagging-retry-${index}`
+								const first = yield* keyedCreate(key, messages)
+								expect(first.status).toBe(202)
+								const pending = (yield* Effect.promise(() => first.json())) as { id: string }
+								expect(pending).toEqual({ id: pending.id, type: "session", pending: true })
+								const conflict = yield* keyedCreate(key, messages, "Different title")
+								expect(conflict.status).toBe(409)
+								const differentCommand = yield* keyedCreate(key, [...messages, "extra"])
+								expect(differentCommand.status).toBe(409)
+								const retried = yield* keyedCreate(key, messages)
+								expect(retried.status).toBe(202)
+								expect(yield* Effect.promise(() => retried.json())).toEqual(pending)
+								return { key, id: pending.id, messages }
+							}),
+					)
+					aggregateUnavailable = true
+					const unavailable = yield* keyedCreate("lagging-retry-0", [])
+					expect(unavailable.status).toBe(503)
+					expect(yield* Effect.promise(() => unavailable.json())).toMatchObject({
+						error: {
+							type: "service_unavailable",
+							message: expect.stringContaining("creation receipt"),
+						},
 					})
-					waitCalls = 3
-
+					aggregateUnavailable = false
 					const missingRes = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: "/v1/sessions/sess_does_not_exist_404",
@@ -1226,6 +1268,35 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const sseText = yield* Effect.promise(() => streamRes.text())
 					expect(sseText).toContain("event: user.message")
 					expect(waitCalls).toBe(6)
+
+					lagMode = "off"
+					for (const { key, id, messages } of admitted) {
+						const recovered = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${id}`,
+							headers: AUTH_HEADERS,
+						})
+						expect(recovered.status).toBe(200)
+						expect(yield* Effect.promise(() => recovered.json())).toMatchObject({
+							id,
+							title: "Keyed",
+						})
+						expect((yield* keyedCreate(key, messages, "Different title")).status).toBe(409)
+						const listed = yield* sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/sessions/${id}/events`,
+							headers: AUTH_HEADERS,
+						})
+						expect(listed.status).toBe(200)
+						const events = (yield* Effect.promise(() => listed.json())) as {
+							data: ReadonlyArray<{ type: string; content?: ReadonlyArray<{ text: string }> }>
+						}
+						expect(
+							events.data
+								.filter(({ type }) => type === "user.message")
+								.map(({ content }) => content?.[0]?.text),
+						).toEqual(messages)
+					}
 				}).pipe(
 					Effect.scoped,
 					Effect.provide(
