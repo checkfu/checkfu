@@ -61,7 +61,7 @@ import {
 	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "./SessionsConnectState.ts"
-import type { ConnectState, ConnectStopReason } from "./SessionsConnectState.ts"
+import type { ConnectState } from "./SessionsConnectState.ts"
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
@@ -359,11 +359,6 @@ const renderConnectEvent = (
 			yield* renderOutput(event, { streaming: true })
 		}
 
-		let formattedError: string | undefined
-		let errorRetryStatus: string | undefined
-		let stopReason: ConnectStopReason | undefined
-		let eventTurn: number | undefined
-
 		switch (event.type) {
 			case "user.message": {
 				const text = event.content.map((block) => block.text).join("\n")
@@ -417,20 +412,13 @@ const renderConnectEvent = (
 				break
 			}
 			case "session.error": {
-				formattedError = `${event.error.type}: ${event.error.message}`
-				errorRetryStatus = event.error.retry_status.type
 				if (!rawStructuredMode) {
-					yield* writeStderrLine(`[error] ${formattedError}`)
+					yield* writeStderrLine(`[error] ${event.error.type}: ${event.error.message}`)
 				}
 				break
 			}
-			case "session.status_running": {
-				eventTurn = event.turn
-				break
-			}
 			case "session.status_idle": {
-				eventTurn = event.turn
-				stopReason = event.stop_reason.type
+				const stopReason = event.stop_reason.type
 				if (!rawStructuredMode && stopReason !== "end_turn") {
 					yield* writeStderrLine(`[status: idle (${stopReason})]`)
 				}
@@ -450,16 +438,7 @@ const renderConnectEvent = (
 		}
 
 		const transition = yield* Ref.modify(stateRef, (state) => {
-			const res = applySessionEvent(state, {
-				seq: eventSeq,
-				type: eventType,
-				...(eventTurn !== undefined ? { turn: eventTurn } : {}),
-				...(stopReason !== undefined ? { stopReason } : {}),
-				source: event,
-				...(formattedError !== undefined
-					? { error: { message: formattedError, retryStatus: errorRetryStatus } }
-					: {}),
-			})
+			const res = applySessionEvent(state, event)
 			return [res, res.state] as const
 		})
 		if (transition.duplicate) {

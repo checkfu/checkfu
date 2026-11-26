@@ -1,8 +1,5 @@
 import { emptySessionFold, foldSessionEvent } from "@checkfu/sdk/SessionFold"
 import type { SessionFold, SessionFoldEvent } from "@checkfu/sdk/SessionFold"
-import type { StopReason } from "@checkfu/sdk/Schemas"
-
-export type ConnectStopReason = StopReason["type"] | "requires_action"
 
 export interface TurnFailure {
 	readonly turn: number
@@ -77,19 +74,7 @@ export interface SessionSnapshotSummary {
 	readonly turn: number
 }
 
-export interface ConnectSessionEvent {
-	readonly seq: number | undefined
-	readonly type: string
-	readonly turn?: number | undefined
-	readonly stopReason?: ConnectStopReason | undefined
-	readonly source?: SessionFoldEvent | undefined
-	readonly error?:
-		| {
-				readonly message: string
-				readonly retryStatus: string | undefined
-		  }
-		| undefined
-}
+export type ConnectSessionEvent = SessionFoldEvent
 
 export interface EventTransitionResult {
 	readonly state: ConnectState
@@ -298,25 +283,16 @@ export const applySessionEvent = (
 	if (event.seq !== undefined && event.seq <= state.lastProcessedSeq) {
 		return { state, duplicate: true, shouldWakeWaiter: false }
 	}
-	const folded = (turn: number | undefined): SessionFold => {
-		const source = event.source ?? statusOnly(event)
-		return source === undefined
-			? state.calls
-			: foldSessionEvent(
-					state.calls,
-					turn !== undefined &&
-						(source.type === "session.status_running" || source.type === "session.status_idle")
-						? { ...source, turn }
-						: source,
-				)
+	const seen: ConnectState = {
+		...state,
+		lastProcessedSeq: event.seq ?? state.lastProcessedSeq,
+		calls: foldSessionEvent(state.calls, event),
 	}
-	const seen: ConnectState =
-		event.seq !== undefined ? { ...state, lastProcessedSeq: event.seq } : state
 
 	switch (event.type) {
 		case "session.status_running": {
-			const nextObserved = event.turn ?? observedTurnOf(seen) + 1
-			const baseState: ConnectState = { ...seen, calls: folded(nextObserved) }
+			const nextObserved = event.turn
+			const baseState = seen
 			const reachedLive =
 				nextObserved > baseState.liveTurn ||
 				(nextObserved === baseState.liveTurn && pausedTurnOf(state) === nextObserved)
@@ -335,7 +311,7 @@ export const applySessionEvent = (
 		}
 		case "session.error": {
 			const baseState = seen
-			if (!baseState.trackPipedTurns || event.error === undefined) {
+			if (!baseState.trackPipedTurns) {
 				return { state: baseState, duplicate: false, shouldWakeWaiter: false }
 			}
 			return {
@@ -343,8 +319,8 @@ export const applySessionEvent = (
 					...baseState,
 					latestTurnError: {
 						turn: observedTurnOf(baseState),
-						message: event.error.message,
-						retryStatus: event.error.retryStatus,
+						message: `${event.error.type}: ${event.error.message}`,
+						retryStatus: event.error.retry_status.type,
 					},
 				},
 				duplicate: false,
@@ -352,9 +328,9 @@ export const applySessionEvent = (
 			}
 		}
 		case "session.status_idle": {
-			const stopReason = event.stopReason
-			const turn = event.turn ?? observedTurnOf(seen)
-			const baseState: ConnectState = { ...seen, calls: folded(turn) }
+			const stopReason = event.stop_reason.type
+			const turn = event.turn
+			const baseState = seen
 			const nextSettledTurn = settledTurnOf(baseState)
 			const reachedLiveIdle =
 				turn > baseState.liveTurn ||
@@ -436,7 +412,7 @@ export const applySessionEvent = (
 		}
 		case "session.status_terminated":
 		case "session.archived": {
-			const baseState: ConnectState = { ...seen, calls: folded(undefined) }
+			const baseState = seen
 			if (!baseState.trackPipedTurns) {
 				return {
 					state: {
@@ -480,34 +456,10 @@ export const applySessionEvent = (
 		}
 		default:
 			return {
-				state: { ...seen, calls: folded(undefined) },
+				state: seen,
 				duplicate: false,
 				shouldWakeWaiter: false,
 			}
-	}
-}
-
-const statusOnly = (event: ConnectSessionEvent): SessionFoldEvent | undefined => {
-	switch (event.type) {
-		case "session.status_running":
-			return { type: event.type, seq: event.seq }
-		case "session.status_idle":
-			return event.stopReason === "requires_action"
-				? {
-						type: event.type,
-						seq: event.seq,
-						stop_reason: { type: "requires_action", event_ids: [] },
-					}
-				: {
-						type: event.type,
-						seq: event.seq,
-						stop_reason: { type: event.stopReason ?? "end_turn" },
-					}
-		case "session.status_terminated":
-		case "session.archived":
-			return { type: event.type, seq: event.seq }
-		default:
-			return undefined
 	}
 }
 
