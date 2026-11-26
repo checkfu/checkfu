@@ -24,7 +24,7 @@ const detail = getRouteApi("/_app/agents/$agentId")
 
 export function AgentsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(agentsPage(search.after)).data
+	const page = useSuspenseQuery(agentsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -87,7 +87,7 @@ export function AgentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_cursor} paged={search.page !== undefined} />
 		</>
 	)
 }

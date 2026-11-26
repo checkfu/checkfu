@@ -240,8 +240,11 @@ export const checkfu = {
 			}),
 	},
 	memoryStores: {
-		list: (after?: string, signal?: AbortSignal) =>
-			request("memoryStores.list", { query: newestFirst(after), ...withSignal(signal) }),
+		list: (page?: string, signal?: AbortSignal) =>
+			request("memoryStores.list", {
+				query: { order: "desc", limit: 100, ...(page === undefined ? {} : { page }) },
+				...withSignal(signal),
+			}),
 		retrieve: retrieveMemoryStore,
 		create: async (body: typeof CreateMemoryStoreBody.Type, idempotencyKey: string) =>
 			settled(retrieveMemoryStore, await request("memoryStores.create", { body, idempotencyKey })),

@@ -34,7 +34,7 @@ export const sizeOf = (bytes: number): string =>
 
 export function MemoryStoresPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(memoryStoresPage(search.after)).data
+	const page = useSuspenseQuery(memoryStoresPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -85,7 +85,7 @@ export function MemoryStoresPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_page} paged={search.page !== undefined} />
 		</>
 	)
 }

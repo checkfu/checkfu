@@ -6,6 +6,6 @@ import { memoryStoresPage } from "../../../queries.ts"
 export const Route = createFileRoute("/_app/memory-stores/")({
 	validateSearch: pageSearch,
 	loaderDeps: ({ search }) => search,
-	loader: ({ context, deps }) => context.queryClient.ensureQueryData(memoryStoresPage(deps.after)),
+	loader: ({ context, deps }) => context.queryClient.ensureQueryData(memoryStoresPage(deps.page)),
 	component: MemoryStoresPage,
 })

@@ -21,7 +21,7 @@ const detail = getRouteApi("/_app/environments/$environmentId")
 
 export function EnvironmentsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(environmentsPage(search.after)).data
+	const page = useSuspenseQuery(environmentsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -77,7 +77,7 @@ export function EnvironmentsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_cursor} paged={search.page !== undefined} />
 		</>
 	)
 }

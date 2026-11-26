@@ -43,7 +43,7 @@ const detail = getRouteApi("/_app/automations/$automationId")
 
 export function AutomationsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(automationsPage(search.after)).data
+	const page = useSuspenseQuery(automationsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -103,7 +103,7 @@ export function AutomationsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_cursor} paged={search.page !== undefined} />
 		</>
 	)
 }

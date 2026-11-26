@@ -62,10 +62,10 @@ export const automationRunsQuery = (id: string) =>
 		getNextPageParam: (page) => (page.has_more ? (page.next_cursor ?? undefined) : undefined),
 	})
 
-export const memoryStoresPage = (after?: string) =>
+export const memoryStoresPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["memory-stores", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.memoryStores.list(after, signal),
+		queryKey: ["memory-stores", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.memoryStores.list(token, signal),
 	})
 
 export const memoryStoreQuery = (id: string) =>
@@ -78,7 +78,7 @@ export const memoryStoreChoices = infiniteQueryOptions({
 	queryKey: ["memory-stores", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.memoryStores.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
 })
 
 export const artifactChoices = infiniteQueryOptions({
