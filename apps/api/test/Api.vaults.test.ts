@@ -48,8 +48,7 @@ interface CredentialBody {
 }
 interface CredentialPage {
 	readonly data: ReadonlyArray<CredentialBody>
-	readonly has_more: boolean
-	readonly next_cursor: string | null
+	readonly next_page: string | null
 }
 
 const world = (options: Parameters<typeof makeVaultsTestLayer>[0] = {}) => {
@@ -203,8 +202,8 @@ describe("Vaults", () => {
 							expect(res.status).toBe(200)
 							return res.body as {
 								readonly data: ReadonlyArray<VaultBody>
-								readonly has_more: boolean
-								readonly next_cursor: string | null
+
+								readonly next_page: string | null
 							}
 						}),
 					)
@@ -215,12 +214,12 @@ describe("Vaults", () => {
 
 				const page = yield* listed("?limit=1")
 				expect(names(page)).toEqual(["First"])
-				expect(page.has_more).toBe(true)
-				const next = yield* listed(`?limit=1&after=${encodeURIComponent(page.next_cursor ?? "")}`)
+				expect(page.next_page).not.toBeNull()
+				const next = yield* listed(`?limit=1&page=${encodeURIComponent(page.next_page ?? "")}`)
 				expect(names(next)).toEqual(["Third"])
 				expect(first.id).not.toBe(third.id)
 
-				expect((yield* call("GET", "/v1/vaults?after=not-a-cursor")).status).toBe(400)
+				expect((yield* call("GET", "/v1/vaults?page=not-a-cursor")).status).toBe(400)
 			}),
 		)
 	})
@@ -349,8 +348,6 @@ describe("Vaults", () => {
 				expect(read).toEqual({ status: 200, body: credential })
 				expect(yield* listCredentials(call, vault.id, "", 1)).toEqual({
 					data: [credential],
-					has_more: false,
-					next_cursor: null,
 					next_page: null,
 				})
 				expect(((yield* call("GET", `/v1/vaults/${vault.id}`)).body as VaultBody).custody).toEqual({
@@ -600,7 +597,7 @@ describe("Vaults", () => {
 						.reverse()
 						.map(({ id }) => id),
 				)
-				expect(page.has_more).toBe(true)
+				expect(page.next_page).not.toBeNull()
 
 				const freed = held[0]?.id ?? ""
 				expect((yield* call("DELETE", `/v1/vaults/${vault.id}/credentials/${freed}`)).status).toBe(

@@ -1272,22 +1272,12 @@
 				"operationId": "agents.list",
 				"parameters": [
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -1542,21 +1532,6 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -1565,10 +1540,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -5397,22 +5373,12 @@
 				"operationId": "environments.list",
 				"parameters": [
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -5581,21 +5547,6 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -5604,10 +5555,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -9193,22 +9145,12 @@
 				"operationId": "sessions.list",
 				"parameters": [
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -9566,21 +9508,6 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -9589,10 +9516,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -12062,16 +11990,6 @@
 						"required": true
 					},
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
@@ -12124,19 +12042,6 @@
 												"$ref": "#/components/schemas/SessionEvent"
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -12145,10 +12050,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -12504,10 +12410,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,
@@ -14374,22 +14276,12 @@
 				"operationId": "automations.list",
 				"parameters": [
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -14637,21 +14529,6 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -14660,10 +14537,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -18622,16 +18500,6 @@
 						"required": true
 					},
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}$",
-							"description": "Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
@@ -18808,19 +18676,6 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -18829,10 +18684,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -19188,10 +19044,6 @@
 				},
 				"x-checkfu-cli": {
 					"intQueryParams": {
-						"after": {
-							"min": 0,
-							"metavar": "SEQ"
-						},
 						"limit": {
 							"min": 1,
 							"max": 100,
@@ -20418,22 +20270,12 @@
 				"operationId": "artifacts.list",
 				"parameters": [
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -20565,21 +20407,6 @@
 												"additionalProperties": false
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -20588,10 +20415,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -26580,22 +26408,12 @@
 				"operationId": "vaults.list",
 				"parameters": [
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -26652,21 +26470,6 @@
 												"$ref": "#/components/schemas/Vault"
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -26675,10 +26478,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}
@@ -29377,22 +29181,12 @@
 						"required": true
 					},
 					{
-						"name": "after",
-						"in": "query",
-						"schema": {
-							"type": "string",
-							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-						},
-						"required": false
-					},
-					{
 						"name": "page",
 						"in": "query",
 						"schema": {
 							"type": "string",
 							"pattern": "^\\d{1,15}:[^/\\\\]+$",
-							"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
+							"description": "Opaque page token from the previous response's next_page."
 						},
 						"required": false
 					},
@@ -29449,21 +29243,6 @@
 												"$ref": "#/components/schemas/VaultCredential"
 											}
 										},
-										"has_more": {
-											"type": "boolean"
-										},
-										"next_cursor": {
-											"anyOf": [
-												{
-													"type": "string",
-													"pattern": "^\\d{1,15}:[^/\\\\]+$",
-													"description": "Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
 										"next_page": {
 											"anyOf": [
 												{
@@ -29472,10 +29251,11 @@
 												{
 													"type": "null"
 												}
-											]
+											],
+											"description": "Token for the next page, or null when there are no more results."
 										}
 									},
-									"required": ["data", "has_more", "next_cursor"],
+									"required": ["data", "next_page"],
 									"additionalProperties": false
 								}
 							}

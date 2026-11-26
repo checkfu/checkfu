@@ -377,7 +377,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				Effect.gen(function* () {
 					const id = params.automation_id
 					yield* committed(id)
-					const after = query.after ?? (query.page === undefined ? undefined : Number(query.page))
+					const after = query.page === undefined ? undefined : Number(query.page)
 					const page = yield* automationRuns.list(Automation.ref(id), {
 						...(after === undefined ? {} : { after }),
 						take: query.limit ?? 50,
