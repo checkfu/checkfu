@@ -254,31 +254,53 @@ export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortG
 	defaultValue: () => "10 seconds",
 })
 
-const admissionAborts = new WeakMap<PiDurableBackend, Map<string, Set<Deferred.Deferred<void>>>>()
+interface PendingCredentialCheck {
+	readonly operationId: string
+	readonly turn: number
+	readonly wake: Deferred.Deferred<void>
+}
 
-const abortSignalsOf = (backend: PiDurableBackend) => {
-	const existing = admissionAborts.get(backend)
+const pendingCredentialChecks = new WeakMap<PiDurableBackend, Set<PendingCredentialCheck>>()
+
+const pendingChecksOf = (backend: PiDurableBackend) => {
+	const existing = pendingCredentialChecks.get(backend)
 	if (existing !== undefined) {
 		return existing
 	}
-	const created = new Map<string, Set<Deferred.Deferred<void>>>()
-	admissionAborts.set(backend, created)
+	const created = new Set<PendingCredentialCheck>()
+	pendingCredentialChecks.set(backend, created)
 	return created
 }
+
+const wakePendingChecks = (
+	backend: PiDurableBackend,
+	predicate: (entry: PendingCredentialCheck) => boolean,
+): Effect.Effect<void> =>
+	Effect.suspend(() => {
+		const active = pendingCredentialChecks.get(backend)
+		if (active === undefined || active.size === 0) {
+			return Effect.void
+		}
+		const matching = [...active].filter(predicate)
+		if (matching.length === 0) {
+			return Effect.void
+		}
+		return Effect.forEach(matching, (entry) => Deferred.succeed(entry.wake, undefined), {
+			discard: true,
+		})
+	})
 
 const notifyAdmissionAbort = (
 	backend: PiDurableBackend,
 	operationId: string,
+): Effect.Effect<void> => wakePendingChecks(backend, (entry) => entry.operationId === operationId)
+
+const notifyAdmissionSubmitted = (
+	backend: PiDurableBackend,
+	operationId: string,
+	turn: number,
 ): Effect.Effect<void> =>
-	Effect.suspend(() => {
-		const active = admissionAborts.get(backend)?.get(operationId)
-		if (active === undefined || active.size === 0) {
-			return Effect.void
-		}
-		return Effect.forEach([...active], (signal) => Deferred.succeed(signal, undefined), {
-			discard: true,
-		})
-	})
+	wakePendingChecks(backend, (entry) => entry.operationId === operationId || entry.turn < turn)
 
 export const abortPiDurableTurn = (
 	backend: PiDurableBackend,
@@ -363,84 +385,105 @@ const admitPiTurnUnderWay = (
 		let credentialsVerified = false
 		while (true) {
 			if (!credentialsVerified) {
-				const precheck = yield* backend.withLock(
-					Effect.promise(async (): Promise<"submitted" | "cancelled" | "check_credentials"> => {
-						const pi = await backend.pi()
-						if ((await submissionOf(pi, operationId)) !== undefined) {
-							return "submitted"
-						}
-						if (
-							backend.isCancelled(operationId) ||
-							(await isStaleTurn(pi, operationId, request.turn))
-						) {
-							return "cancelled"
-						}
-						return "check_credentials"
-					}),
-				)
-				if (precheck === "submitted") {
-					return true
-				}
-				if (precheck === "cancelled") {
-					return false
-				}
 				const credentialOutcome = yield* Effect.acquireUseRelease(
-					Effect.gen(function* () {
-						const cancelled = Deferred.makeUnsafe<void>()
-						const byOp = abortSignalsOf(backend)
-						const active = byOp.get(operationId) ?? new Set()
-						active.add(cancelled)
-						byOp.set(operationId, active)
-						if (backend.isCancelled(operationId)) {
-							yield* Deferred.succeed(cancelled, undefined)
+					Effect.sync(() => {
+						const entry: PendingCredentialCheck = {
+							operationId,
+							turn: request.turn,
+							wake: Deferred.makeUnsafe<void>(),
 						}
-						return cancelled
+						pendingChecksOf(backend).add(entry)
+						return entry
 					}),
-					(cancelled) =>
-						Effect.raceFirst(
-							Deferred.await(cancelled).pipe(Effect.as("aborted" as const)),
-							Effect.promise(async (signal): Promise<AdmitPiTurnResult> => {
-								if (backend.checkCredentials !== undefined) {
-									const check = await backend.checkCredentials(request.provider, signal)
-									return check.ok ? true : { _tag: "missing_key", message: check.message }
-								}
-								if (await backend.hasApiKey(request.provider)) {
-									return true
-								}
-								return {
-									_tag: "missing_key",
-									message:
-										backend.missingCredentialsMessage === undefined
-											? undefined
-											: await backend.missingCredentialsMessage(request.provider),
-								}
-							}),
-						),
-					(cancelled) =>
+					(entry) =>
+						Effect.gen(function* () {
+							const precheck = yield* backend.withLock(
+								Effect.gen(function* () {
+									const status = yield* Effect.promise(
+										async (): Promise<"submitted" | "cancelled" | "check_credentials"> => {
+											const pi = await backend.pi()
+											if ((await submissionOf(pi, operationId)) !== undefined) {
+												return "submitted"
+											}
+											if (
+												backend.isCancelled(operationId) ||
+												(await isStaleTurn(pi, operationId, request.turn))
+											) {
+												return "cancelled"
+											}
+											return "check_credentials"
+										},
+									)
+									if (status === "submitted") {
+										yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
+									}
+									return status
+								}),
+							)
+							if (precheck === "submitted") {
+								return "submitted" as const
+							}
+							if (precheck === "cancelled") {
+								return "cancelled" as const
+							}
+							return yield* Effect.raceFirst(
+								Deferred.await(entry.wake).pipe(Effect.as("woken" as const)),
+								Effect.promise(async (signal): Promise<AdmitPiTurnResult> => {
+									if (backend.checkCredentials !== undefined) {
+										const check = await backend.checkCredentials(request.provider, signal)
+										return check.ok ? true : { _tag: "missing_key", message: check.message }
+									}
+									if (await backend.hasApiKey(request.provider)) {
+										return true
+									}
+									return {
+										_tag: "missing_key",
+										message:
+											backend.missingCredentialsMessage === undefined
+												? undefined
+												: await backend.missingCredentialsMessage(request.provider),
+									}
+								}),
+							)
+						}),
+					(entry) =>
 						Effect.sync(() => {
-							const byOp = admissionAborts.get(backend)
-							const active = byOp?.get(operationId)
-							active?.delete(cancelled)
+							const active = pendingCredentialChecks.get(backend)
+							active?.delete(entry)
 							if (active?.size === 0) {
-								byOp?.delete(operationId)
+								pendingCredentialChecks.delete(backend)
 							}
 						}),
 				)
-				if (credentialOutcome === "aborted" || typeof credentialOutcome === "object") {
+				if (credentialOutcome === "submitted") {
+					return true
+				}
+				if (credentialOutcome === "cancelled") {
+					return false
+				}
+				if (credentialOutcome === "woken" || typeof credentialOutcome === "object") {
 					const raced = yield* backend.withLock(
-						Effect.promise(async (): Promise<"submitted" | "cancelled" | "missing"> => {
-							const pi = await backend.pi()
-							if ((await submissionOf(pi, operationId)) !== undefined) {
-								return "submitted"
+						Effect.gen(function* () {
+							const status = yield* Effect.promise(
+								async (): Promise<"submitted" | "cancelled" | "missing"> => {
+									const pi = await backend.pi()
+									if ((await submissionOf(pi, operationId)) !== undefined) {
+										return "submitted"
+									}
+									if (
+										credentialOutcome === "woken" ||
+										backend.isCancelled(operationId) ||
+										(await isStaleTurn(pi, operationId, request.turn))
+									) {
+										return "cancelled"
+									}
+									return "missing"
+								},
+							)
+							if (status === "submitted") {
+								yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
 							}
-							if (
-								credentialOutcome === "aborted" ||
-								backend.isCancelled(operationId) ||
-								(await isStaleTurn(pi, operationId, request.turn))
-							) {
-								return "cancelled"
-							}
-							return "missing"
+							return status
 						}),
 					)
 					if (raced === "submitted") {
@@ -449,54 +492,65 @@ const admitPiTurnUnderWay = (
 					if (raced === "cancelled") {
 						return false
 					}
-					return credentialOutcome === "aborted" ? false : credentialOutcome
+					return credentialOutcome === "woken" ? false : credentialOutcome
 				}
 				credentialsVerified = true
 			}
 
 			const admitted: AdmitLockOutcome = yield* backend.withLock(
-				Effect.promise(async (): Promise<AdmitLockOutcome> => {
-					const pi = await backend.pi()
-					if ((await submissionOf(pi, operationId)) !== undefined) {
-						return true
-					}
-					if (
-						backend.isCancelled(operationId) ||
-						(await isStaleTurn(pi, operationId, request.turn))
-					) {
-						return false
-					}
-					await backend.ensureRoot(agent)
-					if (backend.isCancelled(operationId)) {
-						return false
-					}
-					while (true) {
-						const turnState = await beginTurnUsage(pi, operationId, request.turn, finalizedPrevious)
-						if (turnState.status === "stale") {
+				Effect.gen(function* () {
+					const outcome = yield* Effect.promise(async (): Promise<AdmitLockOutcome> => {
+						const pi = await backend.pi()
+						if ((await submissionOf(pi, operationId)) !== undefined) {
+							return true
+						}
+						if (
+							backend.isCancelled(operationId) ||
+							(await isStaleTurn(pi, operationId, request.turn))
+						) {
 							return false
 						}
-						if (turnState.status === "waiting") {
-							return { _tag: "waiting", waitingFor: turnState.operationId }
+						await backend.ensureRoot(agent)
+						if (backend.isCancelled(operationId)) {
+							return false
 						}
-						if (turnState.status === "finalize") {
-							await finalizeSettledTurn(pi, turnState.operationId, restoredLimit)
-							finalizedPrevious = turnState.operationId
-							continue
+						while (true) {
+							const turnState = await beginTurnUsage(
+								pi,
+								operationId,
+								request.turn,
+								finalizedPrevious,
+							)
+							if (turnState.status === "stale") {
+								return false
+							}
+							if (turnState.status === "waiting") {
+								return { _tag: "waiting", waitingFor: turnState.operationId }
+							}
+							if (turnState.status === "finalize") {
+								await finalizeSettledTurn(pi, turnState.operationId, restoredLimit)
+								finalizedPrevious = turnState.operationId
+								continue
+							}
+							break
 						}
-						break
+						if (!(await backend.enterWorkspace(request.turn))) {
+							await settleTurnUsage(pi, operationId)
+							return false
+						}
+						for (const unpublished of request.unpublishedOperationIds ?? []) {
+							await omitTurnEntries(pi, unpublished, restoredLimit)
+						}
+						if (backend.isCancelled(operationId)) {
+							return false
+						}
+						await backend.submit(request.text, operationId)
+						return true
+					})
+					if (outcome === true) {
+						yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
 					}
-					if (!(await backend.enterWorkspace(request.turn))) {
-						await settleTurnUsage(pi, operationId)
-						return false
-					}
-					for (const unpublished of request.unpublishedOperationIds ?? []) {
-						await omitTurnEntries(pi, unpublished, restoredLimit)
-					}
-					if (backend.isCancelled(operationId)) {
-						return false
-					}
-					await backend.submit(request.text, operationId)
-					return true
+					return outcome
 				}),
 			)
 			if (typeof admitted === "boolean") {

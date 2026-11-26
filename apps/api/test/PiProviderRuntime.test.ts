@@ -322,6 +322,75 @@ describe("PiProviderRuntime", () => {
 	)
 
 	it.live(
+		"wakes a stalled credential check when an overlapping retry submits the turn so recovery returns the reply",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) =>
+							makeAssistantReply(model, null, "reply from overlapping retry", 7, 4),
+						),
+					),
+				)
+				let checkCall = 0
+				let stalledSignal: AbortSignal | undefined
+				let markStalledEntered!: () => void
+				const stalledEntered = new Promise<void>((resolve) => {
+					markStalledEntered = resolve
+				})
+
+				const backend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: (_provider, signal) => {
+						checkCall += 1
+						if (checkCall === 1) {
+							stalledSignal = signal
+							markStalledEntered()
+							return new Promise(() => {
+								// intentionally unsettled
+							})
+						}
+						return { ok: true }
+					},
+				}
+
+				try {
+					const request = makeTurnRequest(1, "openai")
+					const stalledTurn = yield* Effect.forkChild(runPiDurableTurn(backend, request), {
+						startImmediately: true,
+					})
+					yield* Effect.promise(() => stalledEntered)
+
+					const recovery = yield* Effect.forkChild(recoverPiDurableTurn(backend, "turn:1"), {
+						startImmediately: true,
+					})
+
+					const retryOutcome = yield* runPiDurableTurn(backend, request)
+					expect(retryOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply from overlapping retry" },
+					})
+
+					const [stalledOutcome, recoveredOutcome] = yield* Effect.all([
+						Fiber.join(stalledTurn),
+						Fiber.join(recovery),
+					])
+					expect(stalledSignal?.aborted).toBe(true)
+					expect(stalledOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply from overlapping retry" },
+					})
+					expect(recoveredOutcome).toMatchObject({
+						ok: true,
+						reply: { text: "reply from overlapping retry" },
+					})
+				} finally {
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
+	it.live(
 		"rejects a stale turn before reconfiguring the root agent when a newer turn submits during credential checks",
 		() =>
 			Effect.gen(function* () {
