@@ -820,7 +820,7 @@ export const SDK_OPERATION_BINDINGS = [
 		requiresIdempotencyKey: false,
 		hasBody: false,
 		bodyRequired: false,
-		supportsPending: false,
+		supportsPending: true,
 	},
 	{
 		operationId: "vaults.list",
@@ -934,7 +934,7 @@ export const SDK_OPERATION_BINDINGS = [
 		requiresIdempotencyKey: false,
 		hasBody: false,
 		bodyRequired: false,
-		supportsPending: false,
+		supportsPending: true,
 	},
 	{
 		operationId: "vaults.credentials.list",
