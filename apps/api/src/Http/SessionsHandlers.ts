@@ -12,7 +12,11 @@ import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
-import { SessionId } from "@checkfu/domain/Session/Session.id"
+import {
+	SessionId,
+	sessionEventId,
+	submittedSessionEventId,
+} from "@checkfu/domain/Session/Session.id"
 import { MAX_MESSAGE_TEXT_LENGTH, MessageText } from "@checkfu/domain/Session/SessionTypes"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
@@ -129,7 +133,12 @@ const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnaps
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
 
 export interface SessionEventEntry {
-	readonly envelope: { readonly seq: number; readonly at: DateTime.Utc }
+	readonly envelope: {
+		readonly id: string
+		readonly commandId: string
+		readonly seq: number
+		readonly at: DateTime.Utc
+	}
 	readonly event: DomainSessionEvent
 }
 
@@ -141,10 +150,25 @@ const sessionEventEnvelope = <const T extends SessionEvent["type"]>(
 	entry: SessionEventEntry,
 	type: T,
 ) => ({
-	id: `evt_${entry.envelope.seq}`,
+	id: sessionEventId(entry.envelope.id, entry.envelope.seq),
 	seq: entry.envelope.seq,
 	type,
 	created_at: entry.envelope.at,
+	processed_at: entry.envelope.at,
+})
+
+const inputSessionEventEnvelope = <const T extends "user.message" | "user.interrupt">(
+	entry: SessionEventEntry,
+	type: T,
+	eventId: string | undefined,
+) => ({
+	...sessionEventEnvelope(entry, type),
+	id:
+		eventId ??
+		(entry.envelope.commandId.startsWith("evt:")
+			? submittedSessionEventId(entry.envelope.id, entry.envelope.commandId)
+			: sessionEventId(entry.envelope.id, entry.envelope.seq)),
+	processed_at: null,
 })
 
 export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent => {
@@ -152,11 +176,11 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 	switch (event._tag) {
 		case "user.message":
 			return {
-				...sessionEventEnvelope(entry, "user.message"),
+				...inputSessionEventEnvelope(entry, "user.message", event.event_id),
 				content: event.content.map((block) => ({ type: block.type, text: block.text })),
 			}
 		case "user.interrupt":
-			return sessionEventEnvelope(entry, "user.interrupt")
+			return inputSessionEventEnvelope(entry, "user.interrupt", event.event_id)
 		case "session.status_running":
 			return {
 				...sessionEventEnvelope(entry, "session.status_running"),
@@ -185,10 +209,7 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
 			}
 		case "agent.thinking":
-			return {
-				...sessionEventEnvelope(entry, "agent.thinking"),
-				thinking: event.thinking,
-			}
+			return sessionEventEnvelope(entry, "agent.thinking")
 		case "agent.message":
 			return {
 				...sessionEventEnvelope(entry, "agent.message"),
@@ -479,12 +500,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						| {
 								readonly type: "user.interrupt"
 								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
+								readonly commandId: string
 						  }
 						| {
 								readonly type: "user.message"
 								readonly eventId: ClientEventId | undefined
-								readonly commandId: string | undefined
+								readonly commandId: string
 								readonly text: typeof MessageText.Type
 						  }
 					> = []
@@ -504,7 +525,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 											key: idempotencyKey,
 											index,
 										})
-									: undefined
+									: yield* randomId(random, "evt")
 						if (event.type === "user.interrupt") {
 							prepared.push({ type: "user.interrupt", eventId: event.id, commandId })
 							continue
@@ -539,25 +560,38 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 
 					const accepted: Array<SendSessionEventReceipt> = []
 					for (const [index, item] of prepared.entries()) {
-						const sendOptions =
-							item.commandId === undefined ? undefined : { commandId: item.commandId }
+						const sendOptions = { commandId: item.commandId }
+						const eventId = submittedSessionEventId(id, item.commandId)
 						const outcome =
 							item.type === "user.interrupt"
 								? yield* settled(
-										sessions.send(new SendUserInterrupt({ session_id: id }), sendOptions).pipe(
-											Effect.flatMap((receipt) =>
-												receipt.events.some((event) => event._tag === "user.interrupt")
-													? Effect.succeed({
-															type: "user.interrupt" as const,
-															...(item.eventId === undefined ? {} : { id: item.eventId }),
-														})
-													: reject(409, IDEMPOTENCY_CONFLICT_MESSAGE),
+										sessions
+											.send(
+												new SendUserInterrupt({ session_id: id, event_id: eventId }),
+												sendOptions,
+											)
+											.pipe(
+												Effect.flatMap((receipt) => {
+													const committed = receipt.events.find(
+														(event) => event._tag === "user.interrupt",
+													)
+													if (committed?._tag !== "user.interrupt") {
+														return reject(409, IDEMPOTENCY_CONFLICT_MESSAGE)
+													}
+													return Effect.succeed({
+														type: "user.interrupt" as const,
+														id: committed.event_id ?? eventId,
+														processed_at: null,
+													})
+												}),
 											),
-										),
 									)
 								: yield* settled(
 										sessions
-											.send(new SendUserMessage({ session_id: id, text: item.text }), sendOptions)
+											.send(
+												new SendUserMessage({ session_id: id, text: item.text, event_id: eventId }),
+												sendOptions,
+											)
 											.pipe(
 												Effect.flatMap((receipt) => {
 													const committed = receipt.events.find(
@@ -579,7 +613,8 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 													)
 													return Effect.succeed({
 														type: "user.message" as const,
-														...(item.eventId === undefined ? {} : { id: item.eventId }),
+														id: committed.event_id ?? eventId,
+														processed_at: null,
 														turn: receipt.reply.turn,
 														queued,
 														content: [{ type: "text" as const, text: item.text }],

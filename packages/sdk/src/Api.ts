@@ -780,7 +780,8 @@ export const isPendingResource = <T extends { readonly type: string }>(
 
 export const UserMessageEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.message"),
-	id: Schema.optionalKey(ClientEventId),
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 	turn: PositiveInt,
 	queued: Schema.Boolean,
 	content: TextBlocks,
@@ -789,7 +790,8 @@ export type UserMessageEventReceipt = typeof UserMessageEventReceipt.Type
 
 export const UserInterruptEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.interrupt"),
-	id: Schema.optionalKey(ClientEventId),
+	id: Schema.String,
+	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
@@ -813,6 +815,7 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		seq: PositiveInt,
 		type: Schema.Literal(type),
 		created_at: Schema.DateTimeUtc,
+		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
 		...fields,
 	})
 

@@ -22527,6 +22527,16 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"content": {
 								"type": "array",
 								"items": {
@@ -22567,6 +22577,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -22590,6 +22610,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"turn": {
 								"type": "integer",
@@ -22619,6 +22649,16 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"model_request_start_id": {
 								"type": "string",
 								"minLength": 1
@@ -22645,6 +22685,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"tool_use_id": {
 								"type": "string",
@@ -22686,6 +22736,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"tool_use_id": {
 								"type": "string",
@@ -22743,11 +22803,18 @@
 							"created_at": {
 								"type": "string"
 							},
-							"thinking": {
-								"type": "string"
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "thinking"],
+						"required": ["id", "seq", "type", "created_at"],
 						"additionalProperties": false,
 						"description": "The agent's thinking text when the model returns it."
 					},
@@ -22768,6 +22835,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"content": {
 								"type": "array",
@@ -22813,6 +22890,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"model_request_start_id": {
 								"type": "string",
@@ -22876,6 +22963,16 @@
 							"created_at": {
 								"type": "string"
 							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
 							"stop_reason": {
 								"type": "object",
 								"properties": {
@@ -22920,6 +23017,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"error": {
 								"type": "object",
@@ -22967,6 +23074,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -22989,6 +23106,16 @@
 							},
 							"created_at": {
 								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -23006,10 +23133,17 @@
 								"enum": ["user.message"]
 							},
 							"id": {
-								"type": "string",
-								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-								"minLength": 1,
-								"maxLength": 128
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							},
 							"turn": {
 								"type": "integer",
@@ -23038,7 +23172,7 @@
 								"minItems": 1
 							}
 						},
-						"required": ["type", "turn", "queued", "content"],
+						"required": ["type", "id", "turn", "queued", "content"],
 						"additionalProperties": false
 					},
 					{
@@ -23049,13 +23183,20 @@
 								"enum": ["user.interrupt"]
 							},
 							"id": {
-								"type": "string",
-								"pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-								"minLength": 1,
-								"maxLength": 128
+								"type": "string"
+							},
+							"processed_at": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
 							}
 						},
-						"required": ["type"],
+						"required": ["type", "id"],
 						"additionalProperties": false
 					}
 				]

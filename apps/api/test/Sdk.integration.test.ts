@@ -265,7 +265,8 @@ describe("@checkfu/sdk live API integration", () => {
 							expect(firstReceipt?.type).toBe("user.message")
 							if (firstReceipt?.type === "user.message") {
 								expect(firstReceipt.turn).toBe(1)
-								expect(firstReceipt.id).toBe("evt_user_1")
+								expect(firstReceipt.id).toMatch(/^sevt_/)
+								expect(firstReceipt.processed_at).toBeNull()
 							}
 
 							const liveEvents = yield* client.sessions.events.stream(session.id).pipe(
@@ -273,6 +274,9 @@ describe("@checkfu/sdk live API integration", () => {
 								Stream.runCollect,
 							)
 							const liveArray = Array.from(liveEvents)
+							expect(liveArray.find((event) => event.type === "user.message")?.id).toBe(
+								firstReceipt?.id,
+							)
 							const agentMsg = liveArray.find((e) => e.type === "agent.message")
 							expect(agentMsg?.type).toBe("agent.message")
 							if (agentMsg?.type === "agent.message") {

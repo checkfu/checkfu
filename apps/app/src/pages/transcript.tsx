@@ -42,12 +42,7 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 				</Bubble>
 			)
 		case "agent.thinking":
-			return event.thinking === "" ? null : (
-				<details className="text-control text-muted-foreground">
-					<summary className="cursor-pointer">Thinking</summary>
-					<p className="mt-1 whitespace-pre-wrap">{event.thinking}</p>
-				</details>
-			)
+			return <p className="text-control text-muted-foreground">Thinking</p>
 		case "user.interrupt":
 			return <p className="text-control text-muted-foreground">You interrupted the turn.</p>
 		case "session.error":
