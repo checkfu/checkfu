@@ -58,6 +58,9 @@ export class ConfirmToolDecision extends Domain.Decision(ConfirmTool, {
 			: answered
 	},
 	transitions: {
+		AnAnswerMatchesItsSessionAndCall: ({ before, command }) =>
+			before.call.session_id === command.session_id &&
+			before.call.tool_use_id === command.tool_use_id,
 		OnlyAPendingCallOfTheRunningTurnIsConfirmed: ({ before, after }) =>
 			before.call.status === "pending" &&
 			before.call.awaits === "confirmation" &&

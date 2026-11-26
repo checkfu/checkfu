@@ -54,6 +54,9 @@ export class ReturnCustomToolResultDecision extends Domain.Decision(ReturnCustom
 			: returned
 	},
 	transitions: {
+		AResultMatchesItsSessionAndCall: ({ before, command }) =>
+			before.call.session_id === command.session_id &&
+			before.call.tool_use_id === command.custom_tool_use_id,
 		OnlyAPendingCallOfTheRunningTurnGetsAResult: ({ before, after }) =>
 			before.call.status === "pending" &&
 			before.call.awaits === "result" &&
