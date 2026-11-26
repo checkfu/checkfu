@@ -685,6 +685,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					}
 					const agentId = decodedAgentId.value
 					const environmentId = decodedEnvironmentId.value
+					const missing = {
+						AgentNotFound: () => reject(404, `Agent ${agentId} not found.`),
+						AgentVersionNotFound: ({ version }: { readonly version: number }) =>
+							reject(404, `Agent ${agentId} has no version ${version}.`),
+						EnvironmentNotFound: () => reject(404, `Environment ${environmentId} not found.`),
+					}
 					const agentVersion = typeof agent === "string" ? null : (agent.version ?? null)
 					const title = payload.title ?? null
 					const messages = yield* Effect.forEach(
@@ -725,7 +731,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const given =
 						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
 							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
-							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
+							: yield* credentialsFor(agentId, agentVersion, environmentId, payload).pipe(
+									Effect.catchTags(missing),
+								)
 					const prior =
 						idempotencyKey === undefined || (yield* sessions.get(id))._tag === "Uninitialized"
 							? undefined
@@ -763,6 +771,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						title,
 						resources,
 					}
+					const refused = { SessionAlreadyExists: rejectReusedSessionKey, ...missing }
 					const receipt =
 						initialPlan !== undefined
 							? yield* admitWithMessages
@@ -770,17 +779,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
 										sendOptions,
 									)
-									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+									.pipe(Effect.catchTags(refused))
 							: initialMessage === undefined
 								? yield* admitSession
 										.send(new AdmitSession(admission), sendOptions)
-										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+										.pipe(Effect.catchTags(refused))
 								: yield* startSession
 										.send(
 											new OpenAutomationSession({ ...admission, text: initialMessage }),
 											sendOptions,
 										)
-										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+										.pipe(Effect.catchTags(refused))
 					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
 						const stored = resources[index]
 						return resource.type !== "github_repository" ||
