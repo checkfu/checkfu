@@ -15,8 +15,11 @@ import {
 	sessionQuery,
 	transcriptQuery,
 } from "../queries.ts"
+import { loadUntilWaitingCallsSeen, sessionCallsOf } from "../tool-calls.ts"
 
 const REFRESH_MS = 250
+
+const NO_EVENTS: ReadonlyArray<JsonSessionEvent> = []
 
 const CHANGES_SNAPSHOT: ReadonlySet<SessionEventType> = new Set([
 	"session.status_running",
@@ -37,7 +40,7 @@ export function useSessionEvents({
 	const transcript = transcriptQuery(session.id)
 	const live = liveQuery(session.id)
 	const history = useSuspenseInfiniteQuery(transcript)
-	const tail = useQuery(live).data ?? []
+	const tail = useQuery(live).data ?? NO_EVENTS
 	const [connection, setConnection] = useState<Connection>("live")
 	const [batch] = useState(
 		() =>
@@ -47,6 +50,22 @@ export function useSessionEvents({
 	)
 	const refresh = useRef<ReturnType<typeof setTimeout>>(undefined)
 	const events = transcriptEvents(eventsOf(history.data), tail)
+	const calls = sessionCallsOf(events)
+	const { unseen } = calls
+	const findingCalls = useQuery({
+		queryKey: ["waiting-calls", session.id, unseen],
+		enabled: unseen.length > 0 && history.hasNextPage,
+		queryFn: () =>
+			loadUntilWaitingCallsSeen(async () => {
+				const older = await history.fetchNextPage()
+				return {
+					events: transcriptEvents(older.data === undefined ? [] : eventsOf(older.data), tail),
+					more: older.hasNextPage,
+					failure: older.isFetchNextPageError ? older.error : undefined,
+				}
+			}),
+		staleTime: Number.POSITIVE_INFINITY,
+	})
 	useMountEffect(() => {
 		const resync = () => {
 			if (refresh.current === undefined) {
@@ -94,7 +113,19 @@ export function useSessionEvents({
 	})
 	return {
 		events,
+		calls,
 		reconnecting: connection === "reconnecting",
+		findingCalls:
+			unseen.length === 0
+				? null
+				: {
+						pending: history.hasNextPage && !findingCalls.isError,
+						error:
+							findingCalls.error === null || isSignedOut(findingCalls.error)
+								? undefined
+								: errorMessage(findingCalls.error),
+						retry: () => void findingCalls.refetch(),
+					},
 		earlier: history.hasNextPage
 			? {
 					run: () => void history.fetchNextPage(),
