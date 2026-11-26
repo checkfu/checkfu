@@ -5,6 +5,7 @@ import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Effect from "effect/Effect"
 import * as Base64Url from "effect/encoding/Base64Url"
+import * as Headers from "effect/http/Headers"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
@@ -144,7 +145,11 @@ const withContent = <A>(
 					Effect.map(serve(webRequest(url, method, ifNoneMatch)), HttpServerResponse.toWeb),
 				openIn: (scope, url) =>
 					Effect.map(serveWith(scope)(webRequest(url)), HttpServerResponse.toWeb),
-				openUrl: (url) => Effect.map(serve({ method: "GET", url }), HttpServerResponse.toWeb),
+				openUrl: (url) =>
+					Effect.map(
+						serve({ method: "GET", url, headers: Headers.empty }),
+						HttpServerResponse.toWeb,
+					),
 				openLagging: (lag, url) =>
 					Effect.map(
 						serveWith(DEFAULT_STORAGE_SCOPE, lagging[lag])(webRequest(url)),
@@ -672,7 +677,7 @@ describe("Artifact viewing links", () => {
 				expect(request).toEqual({
 					method: "HEAD",
 					url: "https://x.example/a/token/docs/a%20b.md?tab=2",
-					ifNoneMatch: '"tag"',
+					headers: { "if-none-match": '"tag"' },
 				})
 				const { id } = yield* createArtifact(api, [{ path: "index.html", content: "home" }])
 				const link = yield* createLink(api, id)
@@ -803,8 +808,8 @@ describe("Artifact viewing links", () => {
 					readonly auth: string | undefined
 				}> = []
 				const { send, manifestReads } = makeAuthorized((target, req) => {
-					seen.push({ target, auth: req.headers?.authorization })
-					return req.headers?.authorization === "Bearer allow"
+					seen.push({ target, auth: req.headers.authorization })
+					return req.headers.authorization === "Bearer allow"
 						? Effect.succeed(null)
 						: Effect.succeed(HttpServerResponse.text("Forbidden.", { status: 403 }))
 				})

@@ -110,8 +110,7 @@ const LISTING_TYPE = "text/html; charset=utf-8"
 export interface ContentRequest {
 	readonly method: string
 	readonly url: string
-	readonly ifNoneMatch?: string | undefined
-	readonly headers?: Readonly<Record<string, string | undefined>> | undefined
+	readonly headers: HttpServerRequest.HttpServerRequest["headers"]
 }
 
 export type ContentAccessTarget =
@@ -129,7 +128,6 @@ export type ContentAccessTarget =
 export const contentRequestOf = (request: HttpServerRequest.HttpServerRequest): ContentRequest => ({
 	method: request.method,
 	url: request.originalUrl,
-	ifNoneMatch: request.headers["if-none-match"],
 	headers: request.headers,
 })
 
@@ -181,7 +179,6 @@ export const serveContent = (options: {
 								address: name,
 								artifactId: found.artifact_id,
 							},
-							artifactId: found.artifact_id,
 							manifest: found.manifest,
 						}
 			}
@@ -198,7 +195,6 @@ export const serveContent = (options: {
 							artifactId: claims.artifactId,
 							version: claims.version,
 						},
-						artifactId: claims.artifactId,
 						manifest,
 					}
 		})
@@ -249,7 +245,8 @@ export const serveContent = (options: {
 					return denied
 				}
 			}
-			const manifest = yield* store.getManifest(found.artifactId, found.manifest)
+			const { artifactId } = found.access
+			const manifest = yield* store.getManifest(artifactId, found.manifest)
 			if (manifest === null) {
 				return notFound
 			}
@@ -289,11 +286,11 @@ export const serveContent = (options: {
 				"cache-control": FILE_CACHE_CONTROL,
 				etag: `"${file.sha256}-${typeDigest.slice(0, 16)}"`,
 			}
-			if (matchesETag(request.ifNoneMatch, fileHeaders.etag)) {
+			if (matchesETag(request.headers["if-none-match"], fileHeaders.etag)) {
 				return HttpServerResponse.empty({ status: 304, headers: fileHeaders })
 			}
 			if (request.method === "HEAD") {
-				return (yield* store.hasBlob(found.artifactId, file.sha256))
+				return (yield* store.hasBlob(artifactId, file.sha256))
 					? HttpServerResponse.empty({
 							status: 200,
 							headers: {
@@ -304,7 +301,7 @@ export const serveContent = (options: {
 						})
 					: notFound
 			}
-			const body = yield* store.blobStream(found.artifactId, file.sha256)
+			const body = yield* store.blobStream(artifactId, file.sha256)
 			if (body === null) {
 				return notFound
 			}
