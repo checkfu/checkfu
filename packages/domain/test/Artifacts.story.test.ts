@@ -35,6 +35,7 @@ import {
 	ArtifactVersionNotFound,
 	PublishArtifact,
 } from "../src/Artifact/PublishArtifact.command.ts"
+import { ArtifactOpened, OpenArtifact } from "../src/Artifact/OpenArtifact.command.ts"
 import { ArtifactReserved, ReserveArtifact } from "../src/Artifact/ReserveArtifact.command.ts"
 import {
 	ArtifactUnpublished,
@@ -55,6 +56,59 @@ const manifestC = "c".repeat(64)
 describe("Artifacts", () => {
 	it.effect("is well defined", () =>
 		Effect.scoped(Layer.build(Artifacts.layer(Layer.empty))).pipe(Effect.provide(Domain.InMemory)),
+	)
+
+	it.effect(
+		"opens an empty artifact at version 0, refuses to publish it, and takes version 1",
+		() => {
+			const artifact = Artifact.ref("art_empty")
+			return story(
+				Story.clock(t0),
+				Story.when(new ReserveArtifact({ artifact_id: artifact.id })),
+				Story.then(artifact, new ArtifactReserved({ reservation: 1 })),
+				Story.when(new OpenArtifact({ artifact_id: artifact.id, name: "Data", reservation: 1 })),
+				Story.then(artifact, new ArtifactOpened({ name: "Data" })),
+				Story.replied({ version: 0 }),
+				Story.state(artifact, {
+					status: "active",
+					version: 0,
+					name: "Data",
+					manifest: "",
+					file_count: 0,
+					open_reservation: 0,
+				}),
+				Story.view(ArtifactVersionView, artifactVersionLookupKey(artifact.id, 0), Story.none),
+				Story.when(
+					new PublishArtifact({
+						artifact_id: artifact.id,
+						token: "t".repeat(25),
+						pinned_version: 0,
+					}),
+				),
+				Story.rejected(new ArtifactVersionNotFound({ artifact_id: artifact.id, version: 0 })),
+				Story.when(new OpenArtifact({ artifact_id: artifact.id, name: "Again", reservation: 1 })),
+				Story.rejected(new ArtifactAlreadyExists({ artifact_id: artifact.id })),
+				Story.when(
+					new AddArtifactVersion({
+						artifact_id: artifact.id,
+						expected_version: 0,
+						manifest: manifestA,
+						file_count: 1,
+						total_bytes: 10,
+					}),
+				),
+				Story.then(
+					artifact,
+					new ArtifactVersionAdded({
+						version: 1,
+						manifest: manifestA,
+						file_count: 1,
+						total_bytes: 10,
+					}),
+				),
+				Story.state(artifact, { version: 1, manifest: manifestA, replaced_manifest: "" }),
+			)
+		},
 	)
 
 	it.effect("creates an artifact, adds a version and projects the head and each version", () => {

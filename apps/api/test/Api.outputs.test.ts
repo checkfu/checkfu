@@ -10,10 +10,10 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import {
-	MAX_ARTIFACT_FILES,
-	MAX_ARTIFACT_FILE_BYTES,
-	MAX_ARTIFACT_TOTAL_BYTES,
-} from "../src/Artifacts/ArtifactFiles.ts"
+	MAX_OUTPUT_FILES,
+	MAX_OUTPUT_FILE_BYTES,
+	MAX_OUTPUT_TOTAL_BYTES,
+} from "../src/Workspace/SessionOutputs.ts"
 import { makeApiHandler } from "../src/Http/Router.ts"
 import { OutputsPublishTimeout } from "../src/Artifacts/SessionOutputsLive.ts"
 import { DEFAULT_STORAGE_SCOPE as SCOPE } from "../src/Placement.ts"
@@ -508,7 +508,7 @@ describe("A session's outputs", () => {
 
 					expect(
 						yield* after(() => {
-							for (let index = 0; index <= MAX_ARTIFACT_FILES; index++) {
+							for (let index = 0; index <= MAX_OUTPUT_FILES; index++) {
 								files.set(`${OUTPUTS}/part-${index}.txt`, `${index}`)
 							}
 						}),
@@ -519,7 +519,7 @@ describe("A session's outputs", () => {
 
 					expect(yield* after(() => void files.delete(`${OUTPUTS}/part-0.txt`))).toEqual([1, 64])
 
-					const full = "x".repeat(MAX_ARTIFACT_FILE_BYTES)
+					const full = "x".repeat(MAX_OUTPUT_FILE_BYTES)
 					expect(yield* after(() => void files.set(`${OUTPUTS}/part-1.txt`, `${full}x`))).toEqual([
 						1, 0,
 					])
@@ -530,7 +530,7 @@ describe("A session's outputs", () => {
 
 					expect(
 						yield* after(() => {
-							for (let index = 2; index <= MAX_ARTIFACT_FILES; index++) {
+							for (let index = 2; index <= MAX_OUTPUT_FILES; index++) {
 								files.set(`${OUTPUTS}/part-${index}.txt`, index <= 4 ? full : "")
 							}
 						}),
@@ -538,7 +538,7 @@ describe("A session's outputs", () => {
 					expect(outputReads.at(-1)).toEqual({ sessionId: session.id, paths: ["part-10.txt"] })
 					expect(yield* after(() => void files.set(`${OUTPUTS}/part-5.txt`, "x"))).toEqual([3, 0])
 					expect(warnings.at(-1)).toBe(
-						`Outputs not published Files total more than ${MAX_ARTIFACT_TOTAL_BYTES} bytes.`,
+						`Outputs not published Files total more than ${MAX_OUTPUT_TOTAL_BYTES} bytes.`,
 					)
 
 					expect(

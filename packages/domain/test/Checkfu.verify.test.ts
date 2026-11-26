@@ -128,6 +128,7 @@ const STANDING = {
 	"Artifact.PublishServesAVersionTheArtifactHas": "proved",
 	"Artifact.ReservationsAreNumberedInOrder": "proved",
 	"Artifact.CreatingTakesTheOpenReservation": "proved",
+	"Artifact.OpeningTakesTheOpenReservation": "proved",
 	"Artifact.ClaimingAKeyChangesNoState": "proved",
 	"Automation.StatusIsKnown": "proved",
 	"Automation.NothingRunsBeforeCreation": "proved",

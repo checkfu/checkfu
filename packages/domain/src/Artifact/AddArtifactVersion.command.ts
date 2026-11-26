@@ -14,8 +14,8 @@ export class ArtifactVersionConflict extends Domain.Rejection(
 	"ArtifactVersionConflict",
 	{
 		artifact_id: ArtifactId,
-		expected_version: PositiveInt,
-		current_version: PositiveInt,
+		expected_version: NonNegativeInt,
+		current_version: NonNegativeInt,
 	},
 	{ httpApiStatus: 409, description: "Artifact version does not match." },
 ) {}
@@ -23,7 +23,7 @@ export class ArtifactVersionConflict extends Domain.Rejection(
 export class AddArtifactVersion extends Domain.Command("AddArtifactVersion", {
 	input: {
 		artifact_id: ArtifactId,
-		expected_version: PositiveInt,
+		expected_version: NonNegativeInt,
 		manifest: ManifestHash,
 		file_count: PositiveInt,
 		total_bytes: NonNegativeInt,

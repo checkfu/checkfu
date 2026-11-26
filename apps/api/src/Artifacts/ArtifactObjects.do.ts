@@ -16,7 +16,9 @@ import {
 	ArtifactBucket,
 	ArtifactStore,
 	ArtifactStoreError,
+	artifactBlobKey,
 	artifactReads,
+	isChecksumMismatch,
 } from "./ArtifactStore.ts"
 
 const LIST_PAGE_SIZE = 1000
@@ -113,7 +115,7 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 export const ArtifactStoreR2 = Layer.effect(
 	ArtifactStore,
 	Effect.gen(function* () {
-		const bucket = yield* Cloudflare.R2.ReadBucket(yield* ArtifactBucket)
+		const bucket = yield* Cloudflare.R2.ReadWriteBucket(yield* ArtifactBucket)
 		const placed = yield* placement
 		const scope = storageScopeOf(placed)
 		const owners = placedStub(yield* ArtifactObjects, placed)
@@ -147,6 +149,18 @@ export const ArtifactStoreR2 = Layer.effect(
 					),
 				),
 			...artifactReads(scope, bucket, run),
+			putBlob: (artifactId, sha256, body, size) =>
+				bucket
+					.put(artifactBlobKey(scope, artifactId, sha256), body, { sha256, contentLength: size })
+					.pipe(
+						Effect.as("stored" as const),
+						Effect.catch((error) =>
+							isChecksumMismatch(error)
+								? Effect.succeed("mismatch" as const)
+								: Effect.fail(storeError(error)),
+						),
+						Effect.provideService(RuntimeContext, runtime),
+					),
 			purge: (artifactId) => call(() => owners(artifactId).purge(artifactId)),
 			release: (artifactId, reservation) =>
 				call(() => owners(artifactId).release(artifactId, reservation)),

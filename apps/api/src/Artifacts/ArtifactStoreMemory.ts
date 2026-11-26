@@ -2,6 +2,7 @@ import * as Digest from "effect/crypto/Digest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { DEFAULT_STORAGE_SCOPE } from "../Placement.ts"
 import { ArtifactManifestJson } from "./ArtifactFiles.ts"
 import { UNMARKED, makeArtifactOwner } from "./ArtifactOwnership.ts"
@@ -134,6 +135,42 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 				read(() => {
 					blobChecks += 1
 					return objects.has(artifactBlobKey(scope, artifactId, sha256))
+				}),
+			blobSize: (artifactId, sha256) =>
+				read(() => {
+					blobChecks += 1
+					return objects.get(artifactBlobKey(scope, artifactId, sha256))?.byteLength ?? null
+				}),
+			blobStream: (artifactId, sha256) =>
+				read(() => {
+					blobReads += 1
+					const bytes = objects.get(artifactBlobKey(scope, artifactId, sha256))
+					return bytes === undefined ? null : Stream.make(bytes)
+				}),
+			putBlob: (artifactId, sha256, body, size) =>
+				Effect.gen(function* () {
+					yield* Effect.suspend(() => beforePut)
+					const chunks = yield* Stream.runCollect(body).pipe(
+						Effect.mapError((cause) => new ArtifactStoreError({ cause })),
+					)
+					const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+					let offset = 0
+					for (const chunk of chunks) {
+						bytes.set(chunk, offset)
+						offset += chunk.byteLength
+					}
+					if (bytes.byteLength !== size) {
+						return yield* offline(`expected ${size} bytes, received ${bytes.byteLength}`)
+					}
+					return yield* bucket
+						.put(artifactBlobKey(scope, artifactId, sha256), bytes, { sha256 })
+						.pipe(
+							Effect.as("stored" as const),
+							Effect.catchIf(
+								(error) => String(error.cause).includes("does not match its sha256"),
+								() => Effect.succeed("mismatch" as const),
+							),
+						)
 				}),
 			purge: (artifactId) => ownerOf(scope, artifactId).purge(artifactId),
 			release: (artifactId, reservation) =>

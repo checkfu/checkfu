@@ -10,9 +10,9 @@ import {
 	ArtifactPath,
 	MAX_ARTIFACT_BODY_BYTES,
 	MAX_ARTIFACT_CONTENT_TYPE_LENGTH,
-	MAX_ARTIFACT_FILE_BYTES,
+	MAX_INLINE_FILE_BYTES,
 	MAX_ARTIFACT_PATH_LENGTH,
-	MAX_ARTIFACT_TOTAL_BYTES,
+	MAX_INLINE_TOTAL_BYTES,
 } from "@checkfu/sdk/Schemas"
 import { MAX_AGENT_SYSTEM_LENGTH } from "@checkfu/domain/Agent/AgentTypes"
 import { describe, expect, it } from "@effect/vitest"
@@ -1028,20 +1028,20 @@ describe("Checkfu MCP server", () => {
 			expect(largest["type"]).toBe("agent")
 
 			expect(MAX_MCP_BODY_BYTES).toBeGreaterThanOrEqual(MAX_ARTIFACT_BODY_BYTES + 64 * 1024)
-			const escaped = `${String.fromCodePoint(0x5c)}u0436`.repeat(MAX_ARTIFACT_FILE_BYTES / 2)
+			const escaped = `${String.fromCodePoint(0x5c)}u0436`.repeat(MAX_INLINE_FILE_BYTES / 2)
 			const files = Array.from(
-				{ length: MAX_ARTIFACT_TOTAL_BYTES / MAX_ARTIFACT_FILE_BYTES },
+				{ length: MAX_INLINE_TOTAL_BYTES / MAX_INLINE_FILE_BYTES },
 				(_, index) => `{"path":"f${index}.txt","content":"${escaped}"}`,
 			)
 			const upload = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"artifacts_createArtifact","arguments":{"body":{"name":"A","files":[${files.join(",")}]}},"_meta":${JSON.stringify(CLIENT_META)}}}`
-			expect(upload.length).toBeGreaterThan(MAX_ARTIFACT_TOTAL_BYTES * 2.9)
+			expect(upload.length).toBeGreaterThan(MAX_INLINE_TOTAL_BYTES * 2.9)
 			const template = callToolRequest("artifacts_createArtifact", {}, { authorization })
 			const uploaded = yield* server.fetch(
 				new Request(template.url, { method: "POST", headers: template.headers, body: upload }),
 			)
 			expect(uploaded.status).toBe(200)
 			const uploadedText = yield* Effect.promise(() => uploaded.text())
-			expect(uploadedText).toContain(`"total_bytes":${MAX_ARTIFACT_TOTAL_BYTES}`)
+			expect(uploadedText).toContain(`"total_bytes":${MAX_INLINE_TOTAL_BYTES}`)
 		}).pipe(Effect.scoped),
 	)
 

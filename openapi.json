@@ -10019,8 +10019,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
+											"minimum": 0,
+											"maximum": 9007199254740991,
+											"description": "Current version; 0 while an artifact has no versions yet"
 										},
 										"file_count": {
 											"type": "integer",
@@ -16412,8 +16413,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
+											"minimum": 0,
+											"maximum": 9007199254740991,
+											"description": "Current version; 0 while an artifact has no versions yet"
 										},
 										"file_count": {
 											"type": "integer",
@@ -16946,7 +16948,7 @@
 						}
 					}
 				},
-				"description": "Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with \"encoding\": \"base64\".",
+				"description": "Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
 				"summary": "Create an artifact",
 				"requestBody": {
 					"content": {
@@ -16993,11 +16995,11 @@
 											"additionalProperties": false
 										},
 										"minItems": 1,
-										"maxItems": 64,
-										"description": "Every file of the version; a new version replaces the whole set"
+										"maxItems": 1000,
+										"description": "Every file of version 1. Leave it out to create an empty artifact at version 0, upload large files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}, then add version 1"
 									}
 								},
-								"required": ["name", "files"],
+								"required": ["name"],
 								"additionalProperties": false
 							}
 						}
@@ -17015,7 +17017,7 @@
 					"destructive": false
 				},
 				"x-checkfu-cli": {
-					"maxInputBytes": 12828672,
+					"maxInputBytes": 16183296,
 					"repeatArrayField": {
 						"field": "files",
 						"flag": "file",
@@ -17098,8 +17100,9 @@
 													},
 													"version": {
 														"type": "integer",
-														"minimum": 1,
-														"maximum": 9007199254740991
+														"minimum": 0,
+														"maximum": 9007199254740991,
+														"description": "Current version; 0 while an artifact has no versions yet"
 													},
 													"file_count": {
 														"type": "integer",
@@ -17575,8 +17578,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
+											"minimum": 0,
+											"maximum": 9007199254740991,
+											"description": "Current version; 0 while an artifact has no versions yet"
 										},
 										"file_count": {
 											"type": "integer",
@@ -18916,7 +18920,7 @@
 						}
 					}
 				},
-				"description": "Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with \"encoding\": \"base64\".",
+				"description": "Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256.",
 				"summary": "Create an artifact version",
 				"requestBody": {
 					"content": {
@@ -18926,9 +18930,9 @@
 								"properties": {
 									"version": {
 										"type": "integer",
-										"minimum": 1,
+										"minimum": 0,
 										"maximum": 9007199254740991,
-										"description": "Current artifact version for optimistic concurrency"
+										"description": "Current artifact version for optimistic concurrency (0 for an empty artifact)"
 									},
 									"files": {
 										"type": "array",
@@ -18977,7 +18981,7 @@
 														"sha256": {
 															"type": "string",
 															"pattern": "^[0-9a-f]{64}$",
-															"description": "sha256 of a file in the version being replaced, to keep its bytes without sending them again"
+															"description": "sha256 of bytes this artifact already holds: a file of an earlier version, or bytes uploaded with PUT /v1/artifacts/{artifact_id}/blobs/{sha256}"
 														},
 														"content_type": {
 															"type": "string",
@@ -18993,8 +18997,8 @@
 											]
 										},
 										"minItems": 1,
-										"maxItems": 64,
-										"description": "Every file of the version; a new version replaces the whole set. Send a file's content, or keep a file of the version being replaced by its sha256 without sending it again"
+										"maxItems": 1000,
+										"description": "Every file of the version; a new version replaces the whole set. Send a small file's content inline, or name bytes the artifact already holds by their sha256"
 									}
 								},
 								"required": ["version", "files"],
@@ -19016,7 +19020,7 @@
 				},
 				"x-checkfu-cli": {
 					"groupDescription": "Create and read artifact versions",
-					"maxInputBytes": 12828672,
+					"maxInputBytes": 16183296,
 					"repeatArrayField": {
 						"field": "files",
 						"flag": "file",
@@ -19891,6 +19895,887 @@
 				}
 			}
 		},
+		"/v1/artifacts/{artifact_id}/versions/{version}/content": {
+			"get": {
+				"tags": ["artifacts"],
+				"operationId": "artifacts.getFileContent",
+				"parameters": [
+					{
+						"name": "artifact_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Artifact ID"
+						},
+						"required": true
+					},
+					{
+						"name": "version",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9]\\d{0,8}$",
+							"description": "Artifact version number"
+						},
+						"required": true
+					},
+					{
+						"name": "file",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 512,
+							"pattern": "^(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+)(?:\\/(?:[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.[^./\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029][^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]+))*$",
+							"description": "Path of the file inside the version, for example index.html"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/octet-stream": {
+								"schema": {
+									"type": "string",
+									"format": "binary"
+								},
+								"x-effect-stream": {
+									"encoding": "uint8array"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Download one file of an artifact version as its raw bytes, with its content type",
+				"summary": "Download an artifact file",
+				"x-forge-skip": true,
+				"x-checkfu-endpoint": {
+					"group": "artifacts",
+					"endpoint": "getFileContent"
+				}
+			}
+		},
+		"/v1/artifacts/{artifact_id}/blobs/{sha256}": {
+			"put": {
+				"tags": ["artifacts"],
+				"operationId": "artifacts.uploadBlob",
+				"parameters": [
+					{
+						"name": "artifact_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Artifact ID"
+						},
+						"required": true
+					},
+					{
+						"name": "sha256",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"pattern": "^[0-9a-f]{64}$",
+							"description": "sha256 of the bytes, as lowercase hex"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["artifact_blob"]
+										},
+										"artifact_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"sha256": {
+											"type": "string",
+											"pattern": "^[0-9a-f]{64}$"
+										},
+										"size": {
+											"type": "integer",
+											"minimum": 0,
+											"maximum": 9007199254740991
+										}
+									},
+									"required": ["type", "artifact_id", "sha256", "size"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["payload_too_large"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"415": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["unsupported_media_type"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Store raw bytes in an artifact under their sha256, with a Content-Length header, so a version can name them by sha256 without sending them inline. The bytes must match the sha256 and be at most 100 MiB. Uploading bytes the artifact already holds succeeds without storing them again.",
+				"summary": "Upload file bytes to an artifact",
+				"requestBody": {
+					"content": {
+						"application/octet-stream": {
+							"schema": {
+								"type": "string",
+								"format": "binary"
+							},
+							"x-effect-stream": {
+								"encoding": "uint8array"
+							}
+						}
+					},
+					"required": true
+				},
+				"x-forge-skip": true,
+				"x-checkfu-endpoint": {
+					"group": "artifacts",
+					"endpoint": "uploadBlob"
+				}
+			}
+		},
 		"/v1/artifacts/{artifact_id}/versions/{version}/links": {
 			"post": {
 				"tags": ["artifacts"],
@@ -20462,8 +21347,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
+											"minimum": 0,
+											"maximum": 9007199254740991,
+											"description": "Current version; 0 while an artifact has no versions yet"
 										},
 										"file_count": {
 											"type": "integer",
@@ -21074,8 +21960,9 @@
 										},
 										"version": {
 											"type": "integer",
-											"minimum": 1,
-											"maximum": 9007199254740991
+											"minimum": 0,
+											"maximum": 9007199254740991,
+											"description": "Current version; 0 while an artifact has no versions yet"
 										},
 										"file_count": {
 											"type": "integer",

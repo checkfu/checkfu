@@ -521,7 +521,7 @@ export class EffectArtifactsVersionsResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
+	/** Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. */
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
@@ -704,7 +704,7 @@ export class EffectArtifactsResource {
 		this.versions = new EffectArtifactsVersionsResource(runtime)
 	}
 
-	/** Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
+	/** Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. */
 	create(
 		params: EndpointBody<"artifacts", "create">,
 		options: WithResponseRequestOptions,
@@ -2233,7 +2233,7 @@ export class ArtifactsVersionsResource {
 		this.#runtime = runtime
 	}
 
-	/** Add a new immutable version to an artifact. A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
+	/** Add a new immutable version to an artifact. A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. */
 	create(
 		artifactId: PathParam<"artifacts", "createVersion", "artifact_id">,
 		params: EndpointBody<"artifacts", "createVersion">,
@@ -2301,7 +2301,7 @@ export class ArtifactsResource {
 		this.versions = new ArtifactsVersionsResource(runtime)
 	}
 
-	/** Create an artifact from a set of files (version 1). A version holds at most 64 files, 1 MiB each and 4 MiB in total. The JSON request body may be at most 12828672 bytes; send large or heavily escaped file content with "encoding": "base64". */
+	/** Create an artifact from a set of files (version 1). A version holds at most 1000 files, 100 MiB each and 1024 MiB in total. Content sent inline in JSON is at most 1 MiB per file and 4 MiB per request, in a body of at most 16183296 bytes; upload larger files with PUT /v1/artifacts/{artifact_id}/blobs/{sha256} and name them by sha256. */
 	create(
 		params: EndpointBody<"artifacts", "create">,
 		options?: PromiseRequestOptions,
