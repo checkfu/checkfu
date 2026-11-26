@@ -11,9 +11,20 @@ import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
 import { ArchiveAgent } from "@checkfu/domain/Agent/ArchiveAgent.command"
 import { CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
 import { CreateAgentDecision } from "@checkfu/domain/Agent/CreateAgent.decision"
-import { UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
+import { AgentArchivedError } from "@checkfu/domain/Agent/AgentArchived.rejection"
+import { AgentNotFound } from "@checkfu/domain/Agent/AgentNotFound.rejection"
+import { AgentVersionConflict, UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.command"
 import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
+import {
+	MAX_AGENT_TOOLS_TEXT_LENGTH,
+	decodeAgentTools,
+	decodeMcpServers,
+	encodeAgentTools,
+	encodeMcpServers,
+} from "@checkfu/domain/Mcp/McpServers"
+import type { AgentTool, McpServer } from "@checkfu/domain/Mcp/McpServers"
+import { RESERVED_TOOL_NAMES } from "@checkfu/sdk/Api"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -24,6 +35,7 @@ import * as Option from "effect/Option"
 import { configuredApiCustomProviders, resolveCatalogModel } from "../Pi/PiCatalog.ts"
 import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
+import { CustomToolFaults } from "./ToolSchemas.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
 	commitForStream,
@@ -57,6 +69,57 @@ const unsupportedModel = (model: AgentModel) =>
 
 const versionPage = (id: AgentId, version: number): string =>
 	`page_${encodeURIComponent(id)}:${version}`
+
+const declaredMcpServers = (servers: ReadonlyArray<McpServer>) =>
+	Effect.gen(function* () {
+		const text = encodeMcpServers(servers)
+		if (text === undefined) {
+			return yield* reject(400, "The MCP servers are too long once their URLs are normalized.")
+		}
+		return { servers, text }
+	})
+
+const toolsetsNameServers = (tools: ReadonlyArray<AgentTool>, servers: ReadonlyArray<string>) =>
+	Effect.gen(function* () {
+		for (const tool of tools) {
+			if (tool.type === "mcp_toolset" && !servers.includes(tool.mcp_server_name)) {
+				return yield* reject(
+					400,
+					`mcp_toolset names "${tool.mcp_server_name}", which is not one of the agent's MCP servers.`,
+				)
+			}
+		}
+	})
+
+const declaredTools = (tools: ReadonlyArray<AgentTool>, servers: ReadonlyArray<string>) =>
+	Effect.gen(function* () {
+		yield* toolsetsNameServers(tools, servers)
+		const customTools = tools.filter((tool) => tool.type === "custom")
+		if (customTools.length > 0) {
+			const faults = yield* (yield* CustomToolFaults)(
+				customTools.map(({ name, input_schema }) => ({ name, input_schema })),
+				RESERVED_TOOL_NAMES,
+			).pipe(
+				Effect.catchTag("CustomToolsUncheckable", () =>
+					reject(503, "The custom tools could not be checked. Try again."),
+				),
+			)
+			for (const [index, tool] of customTools.entries()) {
+				const fault = faults[index]
+				if (fault !== null && fault !== undefined) {
+					return yield* reject(400, `The custom tool "${tool.name}" cannot be declared: ${fault}`)
+				}
+			}
+		}
+		const text = encodeAgentTools(tools)
+		if (text === undefined) {
+			return yield* reject(
+				400,
+				`The agent's tools are more than ${MAX_AGENT_TOOLS_TEXT_LENGTH} characters of JSON.`,
+			)
+		}
+		return { tools, text }
+	})
 
 export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) =>
 	Effect.gen(function* () {
@@ -120,6 +183,8 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					model: snapshot.model,
 					system: snapshot.system,
 					description: snapshot.description,
+					mcp_servers: snapshot.mcp_servers,
+					tools: snapshot.tools,
 					updated_at: snapshot.created_at,
 				}
 			})
@@ -194,6 +259,8 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					model: minted.model,
 					system: minted.system,
 					description: minted.description,
+					mcp_servers: minted.mcp_servers,
+					tools: minted.tools,
 					created_at: head.created_at,
 					updated_at: minted.created_at,
 					archived_at: null,
@@ -207,11 +274,23 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					const model = normalizeModel(payload.model)
 					const system = payload.system ?? null
 					const description = payload.description ?? null
+					const mcpServers = yield* declaredMcpServers(payload.mcp_servers ?? [])
+					const tools = yield* declaredTools(
+						payload.tools ?? [],
+						(payload.mcp_servers ?? []).map((server) => server.name),
+					)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "agent",
 						prefix: "agent",
 						key: idempotencyKey,
-						body: { name: payload.name, model, system, description },
+						body: {
+							name: payload.name,
+							model,
+							system,
+							description,
+							mcp_servers: mcpServers.servers,
+							tools: tools.tools,
+						},
 					})
 					const id = AgentId.make(identity.id)
 					const versionId = AgentVersionId.make(
@@ -234,6 +313,8 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 								model,
 								system,
 								description,
+								mcp_servers: mcpServers.text,
+								tools: tools.text,
 							}),
 							sendOptions,
 						)
@@ -286,15 +367,53 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
-					const { version, model: modelInput, ...fields } = payload
+					const {
+						version,
+						model: modelInput,
+						mcp_servers: servers,
+						tools: toolsInput,
+						...named
+					} = payload
 					const model = modelInput === undefined ? undefined : normalizeModel(modelInput)
 					if (model !== undefined) {
 						yield* supported(model)
 					}
+					const declared = servers === undefined ? undefined : yield* declaredMcpServers(servers)
+					const head =
+						servers === undefined && toolsInput === undefined ? undefined : yield* agents.get(id)
+					if (head !== undefined) {
+						if (head.status === "") {
+							return yield* new AgentNotFound({ agent_id: id })
+						}
+						if (head.status !== "active") {
+							return yield* new AgentArchivedError({ agent_id: id })
+						}
+						if (version !== undefined && head.version !== version) {
+							return yield* new AgentVersionConflict({
+								agent_id: id,
+								expected_version: version,
+								current_version: head.version,
+							})
+						}
+					}
+					const serverNames = (
+						declared?.servers ?? (head === undefined ? [] : decodeMcpServers(head.mcp_servers))
+					).map((server) => server.name)
+					const tools =
+						toolsInput === undefined ? undefined : yield* declaredTools(toolsInput, serverNames)
+					if (toolsInput === undefined && head !== undefined) {
+						yield* toolsetsNameServers(decodeAgentTools(head.tools), serverNames)
+					}
+					const fields = {
+						...named,
+						...(declared === undefined ? {} : { mcp_servers: declared.text }),
+						...(tools === undefined ? {} : { tools: tools.text }),
+					}
+					const expectedVersion = version ?? head?.version
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,
-							...(version === undefined ? {} : { expected_version: version }),
+							...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
 							next_version_id: AgentVersionId.make(yield* randomId(random, "aver")),
 							changes: model === undefined ? fields : { ...fields, model },
 						}),

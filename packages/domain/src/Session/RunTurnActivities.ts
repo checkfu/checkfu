@@ -27,6 +27,10 @@ export const TurnOutcome = Schema.Union([
 		stop_reason: ModelStopReason,
 	}),
 	Schema.Struct({
+		ok: Schema.Literal("paused"),
+		model_usage: ModelUsage,
+	}),
+	Schema.Struct({
 		ok: Schema.Literal(false),
 		interrupted: Schema.Literal(true),
 		model_usage: ModelUsage,
@@ -44,6 +48,7 @@ export const TurnOutcome = Schema.Union([
 export const RUN_TURN_ACTIVITIES = {
 	startModelRequest: { name: "start-model-request", success: StepOutcome },
 	runHarnessTurn: { name: "run-harness-turn", success: TurnOutcome },
+	pauseTurn: { name: "pause-turn", success: StepOutcome },
 	interruptModelRequest: { name: "interrupt-model-request", success: StepOutcome },
 	failModelRequest: { name: "fail-model-request", success: StepOutcome },
 	commitModelReply: { name: "commit-model-reply", success: StepOutcome },

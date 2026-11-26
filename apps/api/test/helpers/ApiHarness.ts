@@ -33,9 +33,19 @@ import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
+import { CustomToolFaults } from "../../src/Http/ToolSchemas.ts"
+import { customToolFaults } from "../../src/Pi/PiToolSchema.ts"
+import { decodeAgentTools } from "@checkfu/domain/Mcp/McpServers"
+import type { CustomTool } from "@checkfu/domain/Mcp/McpServers"
+import { defineExtension } from "@earendil-works/pi-durable"
+import { actionsExtension, customToolsExtension } from "../../src/Pi/PiActions.ts"
+import { mcpRegistry } from "../../src/Pi/PiMcp.ts"
+import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
 import {
 	AbortGrace,
 	abortPiDurableTurn,
+	answerPiDurableCall,
+	pausePiDurableTurn,
 	recoverPiDurableTurn,
 	runPiDurableTurn,
 } from "../../src/Pi/PiDurableEngine.ts"
@@ -186,25 +196,115 @@ export const makeScriptedPiModels = (
 	})
 }
 
+export interface PauseHook {
+	before?: (conversation: string) => Effect.Effect<void>
+}
+
+export interface TestMcpTool {
+	readonly server: string
+	readonly name: string
+	readonly readOnly?: boolean
+	readonly parameters?: JsonObject
+	readonly run: (args: unknown) => string | Promise<string>
+}
+
 export const makePiDurableTestLayer = (
 	handler: (
 		model: Model<Api>,
 		context: TranscriptContext,
 		signal?: AbortSignal,
 	) => Promise<AssistantMessage>,
-	envOverrides: Record<string, string> = {
-		CHECKFU_API_KEY: TEST_API_KEY,
-		OPENAI_API_KEY: "sk-openai-test",
-		ANTHROPIC_API_KEY: "sk-anthropic-test",
-	},
-	platform = Domain.InMemory,
-	registry?: () => Registry,
-	options: {
-		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
-		readonly env?: ExecutionEnv
+	{
+		env: envOverrides = {
+			CHECKFU_API_KEY: TEST_API_KEY,
+			OPENAI_API_KEY: "sk-openai-test",
+			ANTHROPIC_API_KEY: "sk-anthropic-test",
+		},
+		platform = Domain.InMemory,
+		registry,
+		executionEnv,
+		vaults = VaultsTestLive,
+		harnessSessions = (sessions) => sessions,
+		mcpTools,
+	}: {
+		readonly env?: Record<string, string>
+		readonly platform?: typeof Domain.InMemory
+		readonly registry?: () => Registry
+		readonly executionEnv?: ExecutionEnv
 		readonly vaults?: typeof VaultsTestLive
+		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
+		readonly mcpTools?: ReadonlyArray<TestMcpTool>
 	} = {},
 ) => {
+	const agentToolsBySession = new Map<string, string>()
+	const sessionTools = (sessionId: string) => {
+		if (mcpTools === undefined) {
+			return {}
+		}
+		const declared = () => decodeAgentTools(agentToolsBySession.get(sessionId))
+		const servers = [...new Set(mcpTools.map((tool) => tool.server))].map((server) => ({
+			binding: {
+				name: server,
+				url: `https://${server}.mcp.example/mcp`,
+				credential_id: null,
+				vault_id: null,
+			},
+			tools: {
+				status: "listed" as const,
+				tools: mcpTools
+					.filter((tool) => tool.server === server)
+					.map((tool) => ({
+						name: tool.name,
+						description: `${tool.name} on ${tool.server}`,
+						inputSchema: tool.parameters ?? { type: "object" },
+						...(tool.readOnly === undefined
+							? {}
+							: { annotations: { readOnlyHint: tool.readOnly } }),
+					})),
+			},
+		}))
+		let tools = mcpRegistry(servers, declared())
+		const toolOf = (name: string) => tools.toolOf(name)
+		const custom = () => declared().filter((tool): tool is CustomTool => tool.type === "custom")
+		const built = createCheckfuRegistry()
+		const install = () => {
+			tools = mcpRegistry(servers, declared())
+			built.install(
+				defineExtension({
+					name: "test.mcp",
+					tools: [...tools.byName].map(([name, { binding, tool }]) => ({
+						name,
+						description: tool.description,
+						parameters: tool.inputSchema,
+						execute: async (args: unknown) => ({
+							output: [
+								{
+									type: "text" as const,
+									text: await (mcpTools
+										.find((given) => given.server === binding.name && given.name === tool.name)
+										?.run(args) ?? ""),
+								},
+							],
+						}),
+					})),
+				}),
+			)
+			built.install(customToolsExtension(custom()))
+			built.install(actionsExtension(toolOf))
+		}
+		install()
+		return {
+			registry: built,
+			mcpToolOf: toolOf,
+			publishMcp: async (request: PiTurnRequest) => {
+				if (request.tools !== undefined && !agentToolsBySession.has(sessionId)) {
+					agentToolsBySession.set(sessionId, request.tools)
+					install()
+				}
+				return false
+			},
+		}
+	}
 	interface SessionObject {
 		readonly backend: InMemoryPiDurableBackend
 		readonly gone: Deferred.Deferred<never, HarnessCallFailed>
@@ -222,15 +322,18 @@ export const makePiDurableTestLayer = (
 		storage?: InMemoryPiDurableBackend["storage"],
 	): Promise<SessionObject> => {
 		const gone = Deferred.makeUnsafe<never, HarnessCallFailed>()
+		const tools = sessionTools(sessionId)
 		const backend = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(handler, customProviders),
 			undefined,
-			registry?.(),
+			tools.registry ?? registry?.(),
 			(provider) =>
 				checkCatalogProviderCredentials(provider, { env: envOverrides }, customProviders).ok,
 			{
 				...(storage === undefined ? {} : { storage }),
-				...(options.env === undefined ? {} : { env: options.env }),
+				...(executionEnv === undefined ? {} : { env: executionEnv }),
+				...(tools.publishMcp === undefined ? {} : { publishMcp: tools.publishMcp }),
+				...(tools.mcpToolOf === undefined ? {} : { mcpToolOf: tools.mcpToolOf }),
 				reset: Effect.andThen(
 					Effect.promise(async () => {
 						const serving = await objects.get(sessionId)
@@ -275,6 +378,7 @@ export const makePiDurableTestLayer = (
 	}
 
 	const unreachable = new Set<string>()
+	const pausing: PauseHook = {}
 	const conversations: Array<string> = []
 	const discardedWorkspaces: Array<string> = []
 	const workspaces = new Map<string, Map<string, string>>()
@@ -386,6 +490,16 @@ export const makePiDurableTestLayer = (
 					)
 					return onObject(conversation, (backend) => runPiDurableTurn(backend, request))
 				}),
+			pauseUsage: (conversation, operationId, pause) =>
+				onObject(conversation, (backend) => pausePiDurableTurn(backend, operationId, pause)).pipe(
+					Effect.tap(() => pausing.before?.(conversation) ?? Effect.void),
+				),
+			answerCall: (conversation, toolUseId, answer) =>
+				Effect.suspend(() =>
+					unreachable.has(conversation)
+						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+						: onObject(conversation, (backend) => answerPiDurableCall(backend, toolUseId, answer)),
+				),
 			abortTurn: (conversation, operationId) =>
 				Effect.suspend(() =>
 					unreachable.has(conversation)
@@ -422,13 +536,12 @@ export const makePiDurableTestLayer = (
 	)
 
 	const artifactStore = makeArtifactStoreMemory()
-	const wrapSessions = options.harnessSessions ?? ((sessions) => sessions)
 	const HarnessLive = PiDurableHarnessLive.pipe(
 		Layer.provide(
 			Layer.effect(
 				Session,
 				Effect.gen(function* () {
-					return wrapSessions(yield* Session)
+					return harnessSessions(yield* Session)
 				}),
 			),
 		),
@@ -462,7 +575,15 @@ export const makePiDurableTestLayer = (
 		}
 	}
 
-	const layer = Layer.mergeAll(CheckfuLive, PiProviderLive, ArtifactLinksTest).pipe(
+	const CustomToolFaultsLive = Layer.succeed(CustomToolFaults, (tools, taken) =>
+		Effect.succeed(customToolFaults(tools, taken)),
+	)
+	const layer = Layer.mergeAll(
+		CheckfuLive,
+		PiProviderLive,
+		CustomToolFaultsLive,
+		ArtifactLinksTest,
+	).pipe(
 		Layer.provideMerge(artifactStore.layer),
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
@@ -474,19 +595,32 @@ export const makePiDurableTestLayer = (
 		),
 		Layer.provide(platform),
 		Layer.provide(Layer.effectDiscard(Effect.addFinalizer(() => Effect.promise(closeAll)))),
-		Layer.provideMerge(options.vaults ?? VaultsTestLive),
+		Layer.provideMerge(vaults),
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 		Layer.provideMerge(TestRuntimeContext),
 	)
 
+	const restartPi = async (sessionId: string) => {
+		const serving = await objects.get(sessionId)
+		if (serving === undefined) {
+			return
+		}
+		serving.backend.retire()
+		const reopened = open(sessionId, serving.backend.storage)
+		objects.set(sessionId, reopened)
+		await reopened
+	}
+
 	return {
 		layer,
 		closeAll,
+		restartPi,
 		requests,
 		forgetPiState,
 		unreachable,
+		pausing,
 		conversations,
 		resets,
 		artifactStore,
@@ -519,17 +653,20 @@ export const sendRequest = (
 		readonly method: string
 		readonly path: string
 		readonly body?: unknown
+		readonly rawBody?: string
 		readonly headers?: Record<string, string>
 	},
 ) =>
 	Effect.gen(function* () {
+		const body =
+			input.rawBody ?? (input.body === undefined ? undefined : JSON.stringify(input.body))
 		const init: RequestInit = {
 			method: input.method,
 			headers: {
-				...(input.body === undefined ? {} : { "content-type": "application/json" }),
+				...(body === undefined ? {} : { "content-type": "application/json" }),
 				...input.headers,
 			},
-			...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+			...(body === undefined ? {} : { body }),
 		}
 		const webRequest = new Request(`http://localhost${input.path}`, init)
 		const response = yield* fetchEffect.pipe(

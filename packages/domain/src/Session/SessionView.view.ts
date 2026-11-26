@@ -10,15 +10,24 @@ import {
 	SpanModelRequestEnd,
 } from "./CommitModelReply.command.ts"
 import { SpanModelRequestStart } from "./RecordModelRequestStart.command.ts"
-import { AgentToolResult, AgentToolUse } from "./RecordToolCall.command.ts"
+import { UserToolConfirmation } from "./ConfirmTool.command.ts"
+import { UserCustomToolResult } from "./ReturnCustomToolResult.command.ts"
+import {
+	AgentCustomToolUse,
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+} from "./RecordToolCall.command.ts"
 import { UserInterrupt } from "./SendUserInterrupt.command.ts"
 import { SessionStatusRunning, UserMessage } from "./SendUserMessage.command.ts"
+import { decodeMcpServerCredentials } from "../Mcp/McpServers.ts"
 import { Session } from "./Session.aggregate.ts"
 
 export { SessionSnapshot }
 
 export class SessionView extends Domain.View("SessionView", {
-	version: 2,
+	version: 4,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(SessionSnapshot),
@@ -26,10 +35,15 @@ export class SessionView extends Domain.View("SessionView", {
 	events: [
 		UserMessage,
 		UserInterrupt,
+		UserToolConfirmation,
+		UserCustomToolResult,
 		SessionStatusRunning,
 		SpanModelRequestStart,
 		AgentToolUse,
 		AgentToolResult,
+		AgentMcpToolUse,
+		AgentMcpToolResult,
+		AgentCustomToolUse,
 		AgentThinking,
 		AgentMessage,
 		SpanModelRequestEnd,
@@ -55,12 +69,19 @@ export class SessionView extends Domain.View("SessionView", {
 							input_tokens: 0,
 							output_tokens: 0,
 						},
+						mcp_server_credentials: decodeMcpServerCredentials(e.mcp_server_credentials),
 						created_at: ctx.at,
 						updated_at: ctx.at,
 						archived_at: null,
 					},
 		"user.message": (state, _e, ctx) => (state === null ? null : { ...state, updated_at: ctx.at }),
 		"user.interrupt": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"user.tool_confirmation": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"user.custom_tool_result": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.custom_tool_use": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"session.status_running": (state, e, ctx) =>
 			state === null
@@ -76,6 +97,10 @@ export class SessionView extends Domain.View("SessionView", {
 		"agent.tool_use": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"agent.tool_result": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.mcp_tool_use": (state, _e, ctx) =>
+			state === null ? null : { ...state, updated_at: ctx.at },
+		"agent.mcp_tool_result": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },
 		"agent.thinking": (state, _e, ctx) =>
 			state === null ? null : { ...state, updated_at: ctx.at },

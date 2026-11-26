@@ -24,8 +24,17 @@ import {
 	SpanModelRequestEnd,
 } from "@checkfu/domain/Session/CommitModelReply.command"
 import { SpanModelRequestStart } from "@checkfu/domain/Session/RecordModelRequestStart.command"
-import { AgentToolResult, AgentToolUse } from "@checkfu/domain/Session/RecordToolCall.command"
+import {
+	AgentMcpToolResult,
+	AgentMcpToolUse,
+	AgentToolResult,
+	AgentToolUse,
+	AgentCustomToolUse,
+} from "@checkfu/domain/Session/RecordToolCall.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
+import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.command"
+import { UserCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
+import { encodeToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
@@ -1226,9 +1235,24 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const realAdmit = yield* AdmitSessionDecision
 					const realVersionsByNumber = yield* AgentVersionByNumberView
 					const realSessionViews = yield* SessionView
-					let raceUpdateToV2 = false
+					let raceUpdateFrom: number | null = null
 					let lagVersion2Mode: "off" | "timeout" | "recover" = "off"
 					let version2Waits = 0
+
+					const updateTo = (agentId: string, from: number) =>
+						updateAgent.send(
+							new UpdateAgent({
+								agent_id: AgentId.make(agentId),
+								expected_version: from,
+								next_version_id: AgentVersionId.make(`aver_race_v${from + 1}`),
+								changes: {
+									name: `Agent v${from + 1}`,
+									model: { id: "gpt-4o-mini" },
+									system: "Updated system",
+									description: null,
+								},
+							}),
+						)
 
 					const racingAdmit = {
 						...realAdmit,
@@ -1237,22 +1261,10 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							options?: Parameters<typeof realAdmit.send>[1],
 						) =>
 							Effect.gen(function* () {
-								if (raceUpdateToV2) {
-									raceUpdateToV2 = false
-
-									yield* updateAgent.send(
-										new UpdateAgent({
-											agent_id: command.agent_id,
-											expected_version: 1,
-											next_version_id: AgentVersionId.make("aver_race_v2"),
-											changes: {
-												name: "Agent v2",
-												model: { id: "gpt-4o-mini" },
-												system: "Updated system",
-												description: null,
-											},
-										}),
-									)
+								if (raceUpdateFrom !== null) {
+									const from = raceUpdateFrom
+									raceUpdateFrom = null
+									yield* updateTo(command.agent_id, from)
 								}
 								return yield* realAdmit.send(command, options)
 							}),
@@ -1307,7 +1319,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					const env = (yield* Effect.promise(() => envRes.json())) as { id: string }
 
-					raceUpdateToV2 = true
+					yield* updateTo(agent.id, 1)
 					lagVersion2Mode = "timeout"
 					const pendingRes = yield* sendRequest(apiFetch, {
 						method: "POST",
@@ -1361,6 +1373,18 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					})
 					expect(readyRes.status).toBe(201)
 					expect(yield* Effect.promise(() => readyRes.json())).toMatchObject({
+						agent: { id: agent.id, version: 2 },
+					})
+
+					raceUpdateFrom = 2
+					const plannedRes = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: AUTH_HEADERS,
+						body: { agent: agent.id, environment_id: env.id },
+					})
+					expect(plannedRes.status).toBe(201)
+					expect(yield* Effect.promise(() => plannedRes.json())).toMatchObject({
 						agent: { id: agent.id, version: 2 },
 					})
 				}).pipe(
@@ -2094,6 +2118,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							agent_version: null,
 							environment_id: "env_1",
 							title: null,
+							mcp_server_credentials: "[]",
 						}),
 					)
 					expect(badAgent._tag).toBe("Failure")
@@ -2106,6 +2131,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							agent_version: null,
 							environment_id: overLimit,
 							title: null,
+							mcp_server_credentials: "[]",
 						}),
 					)
 					expect(badEnv._tag).toBe("Failure")
@@ -2118,6 +2144,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 								agent_version: null,
 								environment_id: EnvironmentId.make("env_1"),
 								title: null,
+								mcp_server_credentials: "[]",
 							}),
 					).toThrow(/Schema validation failed/)
 
@@ -2129,6 +2156,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 								agent_version: null,
 								environment_id: EnvironmentId.make(overLimit),
 								title: null,
+								mcp_server_credentials: "[]",
 							}),
 					).toThrow(/Schema validation failed/)
 
@@ -2163,6 +2191,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							agent_version: null,
 							environment_id: atLimitEnv,
 							title: null,
+							mcp_server_credentials: "[]",
 						}),
 					)
 					expect(receipt.reply.agent_version).toBe(1)
@@ -2441,7 +2470,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				event: new SessionStatusIdle({
+					stop_reason: { type: "end_turn" },
+					turn: 1,
+					event_ids: "[]",
+				}),
 				expectedJson: {
 					id: `sevt_${sessionId}_12`,
 					seq: 12,
@@ -2474,10 +2507,113 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated({ running_turn: null }),
+				event: new AgentMcpToolUse({
+					tool_use_id: "tu_9",
+					mcp_server_name: "docs",
+					name: "search",
+					input: { query: "rate limits" },
+				}),
 				expectedJson: {
 					id: `sevt_${sessionId}_14`,
 					seq: 14,
+					type: "agent.mcp_tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "tu_9",
+					mcp_server_name: "docs",
+					name: "search",
+					input: { query: "rate limits" },
+				},
+			},
+			{
+				event: new AgentMcpToolResult({
+					tool_use_id: "tu_9",
+					content: [{ type: "text", text: "60 per minute" }],
+					is_error: false,
+				}),
+				expectedJson: {
+					id: `sevt_${sessionId}_15`,
+					seq: 15,
+					type: "agent.mcp_tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "tu_9",
+					content: [{ type: "text", text: "60 per minute" }],
+					is_error: false,
+				},
+			},
+			{
+				event: new AgentCustomToolUse({
+					tool_use_id: "tu_20",
+					name: "lookup_order",
+					input: { order: 42 },
+				}),
+				expectedJson: {
+					id: `sevt_${sessionId}_16`,
+					seq: 16,
+					type: "agent.custom_tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "tu_20",
+					name: "lookup_order",
+					input: { order: 42 },
+				},
+			},
+			{
+				event: new SessionStatusIdle({
+					stop_reason: { type: "requires_action" },
+					event_ids: encodeToolUseIds(["tu_20", "tu_21"]),
+					turn: 1,
+				}),
+				expectedJson: {
+					id: `sevt_${sessionId}_17`,
+					seq: 17,
+					type: "session.status_idle",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: "2026-01-01T00:00:00.000Z",
+					stop_reason: { type: "requires_action", event_ids: ["tu_20", "tu_21"] },
+					turn: 1,
+				},
+			},
+			{
+				event: new UserToolConfirmation({
+					tool_use_id: "tu_21",
+					result: "deny",
+					deny_message: "No",
+				}),
+				expectedJson: {
+					id: `sevt_${sessionId}_18`,
+					seq: 18,
+					type: "user.tool_confirmation",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: null,
+					tool_use_id: "tu_21",
+					result: "deny",
+					deny_message: "No",
+				},
+			},
+			{
+				event: new UserCustomToolResult({
+					custom_tool_use_id: "tu_20",
+					content: [{ type: "text", text: "shipped" }],
+					is_error: true,
+				}),
+				expectedJson: {
+					id: `sevt_${sessionId}_19`,
+					seq: 19,
+					type: "user.custom_tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					processed_at: null,
+					custom_tool_use_id: "tu_20",
+					content: [{ type: "text", text: "shipped" }],
+					is_error: true,
+				},
+			},
+			{
+				event: new SessionStatusTerminated({ running_turn: null, event_ids: "[]" }),
+				expectedJson: {
+					id: `sevt_${sessionId}_20`,
+					seq: 20,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
@@ -2486,8 +2622,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: `sevt_${sessionId}_15`,
-					seq: 15,
+					id: `sevt_${sessionId}_21`,
+					seq: 21,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 					processed_at: "2026-01-01T00:00:00.000Z",
@@ -2529,6 +2665,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const snapshot = {
 						id: sessionId,
 						type: "session" as const,
+						mcp_server_credentials: [],
 						status: "terminated" as const,
 						agent_id: "agent_1",
 						agent_version: 1,

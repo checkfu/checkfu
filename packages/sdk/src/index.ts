@@ -33,3 +33,19 @@ export {
 	SessionsEventsResource,
 	SessionsResource,
 } from "./generated/Resources.ts"
+export {
+	emptySessionFold,
+	foldSessionEvent,
+	foldSessionEvents,
+	outstandingCalls,
+} from "./SessionFold.ts"
+export type {
+	SessionFold,
+	SessionFoldEvent,
+	SessionFoldRetention,
+	ToolCall,
+	ToolCallAnswer,
+	ToolCallOutcome,
+	ToolCallStatus,
+	TurnState,
+} from "./SessionFold.ts"

@@ -1,4 +1,9 @@
 import * as Domain from "@alchemy.run/domain"
+import {
+	decodeAgentTools,
+	decodeMcpServerCredentials,
+	decodeMcpServers,
+} from "../src/Mcp/McpServers.ts"
 import { Story } from "@alchemy.run/domain/Story"
 import * as Verify from "@alchemy.run/domain/Verify"
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -73,7 +78,13 @@ describe("Automations Z3 formal verification", () => {
 					instances: 1,
 					walks: { count: 50 },
 					allow: { skipped: ["ArmAutomation"] },
-					opaque: [sessionIdOfNextRun, upcomingOccurrences],
+					opaque: [
+						sessionIdOfNextRun,
+						upcomingOccurrences,
+						decodeMcpServers,
+						decodeMcpServerCredentials,
+						decodeAgentTools,
+					],
 					lock: "./Automations.verify.lock.json",
 					require: { proved: PROVED },
 				})

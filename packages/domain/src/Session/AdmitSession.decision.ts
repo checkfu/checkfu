@@ -29,6 +29,7 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 					agent_version: pinnedVersion,
 					environment_id: environment.id,
 					title: cmd.title,
+					mcp_server_credentials: cmd.mcp_server_credentials,
 				}),
 			),
 		]
@@ -55,6 +56,8 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 				)
 			)
 		},
+		AdmissionKeepsTheCredentialsItWasGiven: ({ command, events }) =>
+			events.every((event) => event.mcp_server_credentials === command.mcp_server_credentials),
 		AdmissionLeavesAgentAndEnvironmentUnchanged: ({ before, after }) =>
 			[
 				after.agent.status === before.agent.status,

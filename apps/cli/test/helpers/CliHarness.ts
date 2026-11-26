@@ -19,10 +19,14 @@ import type {
 	TurnInterrupted,
 } from "@checkfu/domain/Session/Harness.external"
 import { recordToolEvents } from "@checkfu/domain/Session/RecordToolEvents"
+import { RequestToolAction } from "@checkfu/domain/Session/RequestToolAction.command"
+import { RequestToolActionDecision } from "@checkfu/domain/Session/RequestToolAction.decision"
+import { segmentKey } from "@checkfu/domain/Session/RunTurn.saga"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as ByteSize from "effect/ByteSize"
+import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Clock from "effect/Clock"
 import { RuntimeContext } from "alchemy/RuntimeContext"
@@ -96,6 +100,12 @@ export interface ModelHandler {
 		readonly turn: number
 	}) => Effect.Effect<void, HarnessUnavailable>
 	readonly toolEvents?: (args: ModelTurnInput) => ReadonlyArray<ToolEvent>
+	readonly asks?: (args: ModelTurnInput) => ReadonlyArray<{
+		readonly tool_use_id: string
+		readonly name: string
+		readonly mcp_server_name: string
+		readonly input: Record<string, string>
+	}>
 }
 
 export interface CliRunOptions {
@@ -140,6 +150,7 @@ const defaultModelHandler: Required<ModelHandler> = {
 		}),
 	interrupt: () => Effect.void,
 	toolEvents: () => [],
+	asks: () => [],
 }
 
 export const makeTestServer = (handler?: ModelHandler) =>
@@ -148,21 +159,52 @@ export const makeTestServer = (handler?: ModelHandler) =>
 			generate: handler?.generate ?? defaultModelHandler.generate,
 			interrupt: handler?.interrupt ?? defaultModelHandler.interrupt,
 			toolEvents: handler?.toolEvents ?? defaultModelHandler.toolEvents,
+			asks: handler?.asks ?? defaultModelHandler.asks,
 		}
 		const HarnessLive = boundedHarness(
-			Effect.map(Session, (sessions) => ({
-				runTurn: (args: ModelTurnInput) =>
-					Effect.andThen(
-						recordToolEvents({
-							session_id: args.session_id,
-							turn: args.turn,
-							events: effective.toolEvents(args),
-						}).pipe(Effect.provideService(Session, sessions)),
-						effective.generate(args),
-					),
-				interrupt: effective.interrupt,
-				discardWorkspace: () => Effect.void,
-			})),
+			Effect.gen(function* () {
+				const sessions = yield* Session
+				const requestAction = yield* RequestToolActionDecision
+				return {
+					runTurn: (args: ModelTurnInput & { readonly segment?: number }) =>
+						Effect.gen(function* () {
+							const segment = args.segment ?? 1
+							const asks = segment === 1 ? effective.asks(args) : []
+							if (asks.length === 0) {
+								yield* recordToolEvents({
+									session_id: args.session_id,
+									turn: args.turn,
+									events: effective.toolEvents(args),
+								}).pipe(Effect.provideService(Session, sessions))
+								return yield* effective.generate(args)
+							}
+							for (const call of asks) {
+								yield* requestAction
+									.send(
+										new RequestToolAction({
+											session_id: args.session_id,
+											confirmation_id: toolConfirmationId(args.session_id, call.tool_use_id),
+											turn: args.turn,
+											model_request_start_id: `${segmentKey(args.session_id, args.turn, segment)}:req:${segment}`,
+											tool_use_id: call.tool_use_id,
+											name: call.name,
+											input: call.input,
+											awaits: "confirmation",
+											mcp_server_name: call.mcp_server_name,
+										}),
+										{ commandId: `action:${args.session_id}:${call.tool_use_id}` },
+									)
+									.pipe(Effect.orDie)
+							}
+							return yield* Effect.fail({
+								_tag: "TurnPaused" as const,
+								model_usage: { input_tokens: 1, output_tokens: 1 },
+							})
+						}),
+					interrupt: effective.interrupt,
+					discardWorkspace: () => Effect.void,
+				}
+			}),
 		)
 		const CheckfuLive = Checkfu.layer(
 			CheckfuHandlersLive.pipe(

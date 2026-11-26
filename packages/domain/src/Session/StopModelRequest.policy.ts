@@ -30,14 +30,21 @@ export const StopModelRequestLive = StopModelRequest.toLayer(
 			if (event._tag === "user.interrupt") {
 				yield* interrupt.pipe(
 					Effect.catchTag("HarnessUnavailable", () =>
-						sessions.send(
-							new AbandonTurn({
-								session_id: source.id,
-								turn: state.turn,
-								error_type: HARNESS_UNAVAILABLE,
-								message: HARNESS_UNAVAILABLE_MESSAGE,
-							}),
-						),
+						sessions
+							.send(
+								new AbandonTurn({
+									session_id: source.id,
+									turn: state.turn,
+									segment: state.segment ?? 1,
+									error_type: HARNESS_UNAVAILABLE,
+									message: HARNESS_UNAVAILABLE_MESSAGE,
+								}),
+							)
+							.pipe(
+								Effect.flatMap((receipt) =>
+									receipt.events.length === 0 ? Effect.orDie(interrupt) : Effect.void,
+								),
+							),
 					),
 				)
 				return

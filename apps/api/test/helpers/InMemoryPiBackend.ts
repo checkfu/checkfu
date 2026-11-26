@@ -9,6 +9,7 @@ import type { Id, Storage } from "@earendil-works/pi-durable"
 import * as Effect from "effect/Effect"
 import * as Semaphore from "effect/Semaphore"
 import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
+import { abortOperation } from "../../src/Pi/PiDurableEngine.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiTurnUsage.ts"
@@ -171,6 +172,9 @@ export const createInMemoryPiDurableBackend = async (
 		readonly storage?: InMemoryStorage
 		readonly reset?: PiDurableBackend["reset"]
 		readonly env?: ExecutionEnv
+		readonly turnCalls?: PiDurableBackend["turnCalls"]
+		readonly publishMcp?: PiDurableBackend["publishMcp"]
+		readonly mcpToolOf?: PiDurableBackend["mcpToolOf"]
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
 	const shared = object.storage ?? new InstrumentedMemoryStorage()
@@ -203,6 +207,10 @@ export const createInMemoryPiDurableBackend = async (
 		withLock,
 		hasApiKey,
 		reset: object.reset ?? Effect.die(new Error("The Pi session object was reset")),
+		...(object.turnCalls === undefined ? {} : { turnCalls: object.turnCalls }),
+		...(object.publishMcp === undefined ? {} : { publishMcp: object.publishMcp }),
+		...(object.mcpToolOf === undefined ? {} : { mcpToolOf: object.mcpToolOf }),
+		signal: (taskId, token, key, value) => pi.signal(taskId, token, key, value, BACKGROUND_CONTEXT),
 		isCancelled: (operationId) => cancelledOps.has(operationId),
 		enterWorkspace: () => Promise.resolve(true),
 		pi: () => Promise.resolve(pi),
@@ -248,33 +256,7 @@ export const createInMemoryPiDurableBackend = async (
 			Effect.uninterruptible(
 				Effect.suspend(() => {
 					cancelledOps.add(operationId)
-					return withLock(
-						Effect.promise(async () => {
-							const record = await storage.submissionByRequest(
-								ROOT_CONVERSATION_ID,
-								operationId,
-								BACKGROUND_CONTEXT,
-							)
-							if (
-								record === undefined ||
-								record.status === "done" ||
-								record.status === "unanswered"
-							) {
-								return true
-							}
-							const outcome = await pi.abortSubmission(
-								record.id,
-								BACKGROUND_CONTEXT,
-								ROOT_CONVERSATION_ID,
-							)
-							if (outcome === "already_placed") {
-								const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
-								await conversation?.abort(BACKGROUND_CONTEXT)
-								return true
-							}
-							return outcome === "aborted"
-						}),
-					)
+					return withLock(Effect.promise(() => abortOperation(pi, operationId)))
 				}),
 			),
 		close: () => pi.close(BACKGROUND_CONTEXT),

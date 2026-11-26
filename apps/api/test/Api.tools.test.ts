@@ -191,9 +191,7 @@ describe("Tool calls on the session log", () => {
 							])
 						: makeAssistantReply(model, null, "Both done.", 5, 4),
 				),
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -284,9 +282,7 @@ describe("Tool calls on the session log", () => {
 							}
 						: makeAssistantReply(model, null, "Done.", 5, 4),
 				),
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -325,9 +321,7 @@ describe("Tool calls on the session log", () => {
 							])
 						: makeAssistantReply(model, null, "Done twice.", 5, 4),
 				),
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -360,9 +354,7 @@ describe("Tool calls on the session log", () => {
 						? callTools(model, [{ id: "call", name: "lookup", key: "k" }])
 						: makeAssistantReply(model, null, "Done.", 5, 4),
 				),
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -401,9 +393,7 @@ describe("Tool calls on the session log", () => {
 								errorMessage: "upstream failure",
 							},
 				),
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -448,9 +438,7 @@ describe("Tool calls on the session log", () => {
 				})
 				return { ...makeAssistantReply(model, null, "", 0, 0), stopReason: "aborted" as const }
 			},
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -503,10 +491,8 @@ describe("Tool calls on the session log", () => {
 						? callTools(model, [{ id: "call-1", name: "lookup", key: "alpha" }])
 						: makeAssistantReply(model, null, "Looked.", 5, 4),
 				),
-			undefined,
-			undefined,
-			registryWithTools,
 			{
+				registry: registryWithTools,
 				harnessSessions: (sessions) => ({
 					...sessions,
 					send: (command: unknown, options?: unknown) => {
@@ -551,10 +537,8 @@ describe("Tool calls on the session log", () => {
 						? callTools(model, [{ id: "call-1", name: "lookup", key: "alpha" }])
 						: makeAssistantReply(model, null, "Looked.", 5, 4),
 				),
-			undefined,
-			undefined,
-			registryWithTools,
 			{
+				registry: registryWithTools,
 				harnessSessions: (sessions) =>
 					({
 						...sessions,
@@ -620,9 +604,7 @@ describe("Tool calls on the session log", () => {
 				}
 				return Promise.resolve(makeAssistantReply(model, null, "Read it.", 5, 4))
 			},
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
@@ -662,9 +644,7 @@ describe("Tool calls on the session log", () => {
 				}
 				return Promise.resolve(makeAssistantReply(model, null, "Saw it.", 5, 4))
 			},
-			undefined,
-			undefined,
-			registryWithTools,
+			{ registry: registryWithTools },
 		)
 		try {
 			await Effect.runPromise(
