@@ -1070,6 +1070,36 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "automationRuns_retrieve",
+		title: "Retrieve an automation run by ID",
+		description: "Retrieve a run by the ID returned in run results and webhook events.",
+		method: "GET",
+		path: "/v1/automation_runs/{automation_run_id}",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						automation_run_id: {
+							type: "string",
+							minLength: 1,
+							maxLength: 256,
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["automation_run_id"],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "automations_archiveAutomation",
 		title: "Archive an automation",
 		description: "Archive an automation so it never runs again",

@@ -907,6 +907,36 @@ const artifactsVersionsRetrieveCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(artifactsVersionsRetrieveCommandSpec, flags),
 ).pipe(CommandWithDescription("Retrieve one version of an artifact and its file list"))
 
+const automationRunsRetrieveCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "automation-runs retrieve",
+	apiGroup: "automations",
+	apiEndpoint: "getRunById",
+	hasBody: false,
+	flags: [
+		{
+			propName: "automationRunId",
+			flagName: "automation-run-id",
+			wireName: "automation_run_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+	],
+}
+
+const automationRunsRetrieveCommand = CommandMake(
+	"retrieve",
+	{
+		automationRunId: FlagString("automation-run-id").pipe(
+			FlagWithMetavar("ID"),
+			FlagWithDescription("automation run id parameter"),
+		),
+	},
+	(flags) => invokeGeneratedOperation(automationRunsRetrieveCommandSpec, flags),
+).pipe(
+	CommandWithDescription("Retrieve a run by the ID returned in run results and webhook events."),
+)
+
 const automationsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "automations archive",
 	apiGroup: "automations",
@@ -3450,6 +3480,7 @@ export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const AutomationRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsRunsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const EnvironmentsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -3464,6 +3495,7 @@ export const buildGeneratedResourceCommands = <
 	readonly agents?: AgentsExtras
 	readonly artifacts?: ArtifactsExtras
 	readonly "artifacts:versions"?: ArtifactsVersionsExtras
+	readonly "automation-runs"?: AutomationRunsExtras
 	readonly automations?: AutomationsExtras
 	readonly "automations:runs"?: AutomationsRunsExtras
 	readonly environments?: EnvironmentsExtras
@@ -3507,6 +3539,13 @@ export const buildGeneratedResourceCommands = <
 				artifactsVersionsLinkCommand,
 				artifactsVersionsRetrieveCommand,
 				...(extras?.["artifacts:versions"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("automation-runs").pipe(
+			CommandWithDescription("Manage automation-runs"),
+			CommandWithSubcommands([
+				automationRunsRetrieveCommand,
+				...(extras?.["automation-runs"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("automations").pipe(

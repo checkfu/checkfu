@@ -6,6 +6,11 @@ import { AgentId } from "../src/Agent/Agent.id.ts"
 import { AgentVersionId } from "../src/Agent/AgentVersion.id.ts"
 import { ArtifactId } from "../src/Artifact/Artifact.id.ts"
 import { ArtifactBytesKept } from "../src/Artifact/ArtifactBytes.external.ts"
+import { AutomationId, automationRunId } from "../src/Automation/Automation.id.ts"
+import { AUTOMATION_CAPACITY } from "../src/Automation/AutomationCapacity.id.ts"
+import { FireAutomation } from "../src/Automation/FireAutomation.command.ts"
+import { Automation } from "../src/Automation/Automation.aggregate.ts"
+import { MessageText } from "../src/Session/SessionTypes.ts"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
@@ -59,6 +64,8 @@ describe("PublishWebhookEvents policy", () => {
 				const envId = EnvironmentId.make("env_pub_1")
 				const sessionId = SessionId.make("sess_pub_1")
 				const artifactId = ArtifactId.make("art_pub_1")
+				const automationId = AutomationId.make("auto_pub_1")
+				const automations = yield* Automation
 
 				yield* domain.CreateAgent({
 					agent_id: agentId,
@@ -96,6 +103,26 @@ describe("PublishWebhookEvents policy", () => {
 					pinned_version: 1,
 					token: "pub_secret_token_never_leak",
 				})
+				yield* domain.AdmitAutomation({
+					automation_id: automationId,
+					capacity_id: AUTOMATION_CAPACITY,
+					name: "Daily report",
+					description: null,
+					agent_id: BoundedAgentId.make(agentId),
+					agent_version: 1,
+					environment_id: BoundedEnvironmentId.make(envId),
+					text: MessageText.make("Write a report."),
+					schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+				})
+				yield* domain.RunAutomation({ automation_id: automationId })
+				yield* automations.send(
+					new FireAutomation({
+						automation_id: automationId,
+						activation: 0,
+						scheduled_at: 1,
+					}),
+				)
+
 				// Allow asynchronous in-memory policy delivery to settle.
 				for (let i = 0; i < 10; i++) {
 					yield* Effect.yieldNow
@@ -107,6 +134,18 @@ describe("PublishWebhookEvents policy", () => {
 				expect([...byType.keys()]).not.toContain("session.created")
 				expect(byType.has("artifact.created")).toBe(true)
 				expect(byType.has("artifact.published")).toBe(true)
+
+				const runEvents = published.filter((event) =>
+					event.event_type.startsWith("automation_run."),
+				)
+				expect(runEvents.map((event) => event.event_type).sort()).toEqual([
+					"automation_run.started",
+					"automation_run.succeeded",
+				])
+				expect(
+					runEvents.every((event) => event.resource_id === automationRunId(automationId, 2)),
+				).toBe(true)
+				expect(new Set(runEvents.map((event) => event.event_id)).size).toBe(2)
 
 				const agentEvent = byType.get("agent.created")
 				expect(agentEvent?.event_id).toMatch(/^evt_agent_agent_pub_1_\d+$/)

@@ -5,7 +5,7 @@ import {
 import { AdmitAutomationDecision } from "@checkfu/domain/Automation/AdmitAutomation.decision"
 import { ArchiveAutomation } from "@checkfu/domain/Automation/ArchiveAutomation.command"
 import { Automation } from "@checkfu/domain/Automation/Automation.aggregate"
-import { AutomationId } from "@checkfu/domain/Automation/Automation.id"
+import { AutomationId, automationRunId } from "@checkfu/domain/Automation/Automation.id"
 import { AUTOMATION_CAPACITY } from "@checkfu/domain/Automation/AutomationCapacity.id"
 import { AutomationRunView } from "@checkfu/domain/Automation/AutomationRunView.view"
 import { AutomationView } from "@checkfu/domain/Automation/AutomationView.view"
@@ -81,6 +81,7 @@ const automationRunResource = (
 	},
 ) => ({
 	type: "automation_run" as const,
+	id: automationRunId(automation_id, entry.event.run),
 	automation_id,
 	run: entry.event.run,
 	status:
@@ -165,6 +166,16 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					return yield* reject(404, `Automation ${id} not found.`)
 				}
 				return state
+			})
+
+		const findRun = (id: AutomationId, run: number) =>
+			Effect.gen(function* () {
+				const page = yield* automationRuns.list(Automation.ref(id), { after: run - 1, take: 1 })
+				const entry = page.entries[0]
+				if (entry === undefined || entry.event.run !== run) {
+					return yield* reject(404, `Run ${run} of automation ${id} not found.`)
+				}
+				return automationRunResource(id, entry)
 			})
 
 		const after = (
@@ -361,6 +372,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					const receipt = yield* automations.send(new RunAutomation({ automation_id: id }))
 					return {
 						type: "automation_run" as const,
+						id: automationRunId(id, receipt.reply.run),
 						automation_id: id,
 						run: receipt.reply.run,
 						status: "queued" as const,
@@ -385,18 +397,43 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 				}).pipe(handled),
 			)
 			.handle("getRun", ({ params }) =>
+				Effect.andThen(
+					committed(params.automation_id),
+					findRun(params.automation_id, params.run),
+				).pipe(handled),
+			)
+			.handle("getRunById", ({ params }) =>
 				Effect.gen(function* () {
-					const id = params.automation_id
-					yield* committed(id)
-					const page = yield* automationRuns.list(Automation.ref(id), {
-						after: params.run - 1,
-						take: 1,
-					})
-					const entry = page.entries[0]
-					if (entry === undefined || entry.event.run !== params.run) {
-						return yield* reject(404, `Run ${params.run} of automation ${id} not found.`)
+					const raw = params.automation_run_id
+					const separator = raw.lastIndexOf("_")
+					const id = Schema.decodeOption(AutomationId)(raw.slice("arun_".length, separator))
+					const run = Number(raw.slice(separator + 1))
+					if (
+						Option.isNone(id) ||
+						!Number.isSafeInteger(run) ||
+						run < 1 ||
+						automationRunId(id.value, run) !== raw
+					) {
+						return yield* reject(404, `Automation run ${raw} not found.`)
 					}
-					return automationRunResource(id, entry)
+					const state = yield* committed(id.value)
+					if (run > state.runs) {
+						return yield* reject(404, `Automation run ${raw} not found.`)
+					}
+					yield* automationRuns
+						.waitFor(
+							Automation.ref(id.value),
+							{ recorded: { gte: run } },
+							{
+								timeout: yield* AutomationReadWaitTimeout,
+							},
+						)
+						.pipe(
+							Effect.catchTag("WaitTimeout", () =>
+								reject(503, `Automation run ${raw} is still starting.`),
+							),
+						)
+					return yield* findRun(id.value, run)
 				}).pipe(handled),
 			)
 	}),
