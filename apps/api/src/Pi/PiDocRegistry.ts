@@ -58,7 +58,19 @@ export const SettledUsage = defineDocFamily<SettledUsageState, SettledUsageState
 	initial: (usage: SettledUsageState): SettledUsageState => ({ ...usage }),
 })
 
+const SystemContextState = Schema.Struct({ text: Schema.String, updated_at: NonNegativeInt })
+type SystemContextState = typeof SystemContextState.Type
+
+export const SessionSystemContext = defineDoc<SystemContextState>({
+	kind: "checkfu.session-system-context",
+	version: 1,
+	checkpointWhen: () => true,
+	scope: "session",
+	initial: (): SystemContextState => ({ text: "", updated_at: 0 }),
+})
+
 export const CHECKFU_PI_DOCS: ReadonlyArray<CheckfuPiDocSpec> = Object.freeze([
 	{ token: ActiveUsage, schema: ActiveUsageState },
 	{ token: SettledUsage, schema: SettledUsageState },
+	{ token: SessionSystemContext, schema: SystemContextState },
 ])

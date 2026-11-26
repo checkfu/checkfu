@@ -2,6 +2,7 @@ import * as Domain from "@alchemy.run/domain"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { McpServerCredentialsText } from "../Mcp/McpServers.ts"
+import { InitialMessages } from "./InitialMessages.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionResources } from "./SessionResource.ts"
 import { PositiveInt, ResourceId, SessionTitle } from "./SessionTypes.ts"
@@ -13,6 +14,7 @@ export class SessionCreated extends Domain.Event("session.created", {
 	title: Schema.NullOr(Schema.String),
 	mcp_server_credentials: Schema.optionalKey(McpServerCredentialsText),
 	resources: SessionResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
+	initial_messages: Schema.optionalKey(InitialMessages),
 }) {}
 
 export class SessionAlreadyExists extends Domain.Rejection(

@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import * as Schema from "effect/Schema"
 import { TurnContinued } from "./PauseTurn.command.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { SessionId } from "./Session.id.ts"
@@ -14,10 +15,10 @@ import { ToolConfirmationAnswered } from "./ToolConfirmation.aggregate.ts"
 import { ToolConfirmationId } from "./ToolConfirmation.id.ts"
 import { ToolConfirmationNotPending } from "./ToolConfirmationNotPending.rejection.ts"
 
-export class UserToolConfirmation extends Domain.Event(
-	"user.tool_confirmation",
-	SessionEventFields["user.tool_confirmation"],
-) {}
+export class UserToolConfirmation extends Domain.Event("user.tool_confirmation", {
+	...SessionEventFields["user.tool_confirmation"],
+	processed_at: Schema.optionalKey(Schema.DateTimeUtc),
+}) {}
 
 export class ConfirmTool extends Domain.Command("ConfirmTool", {
 	input: {

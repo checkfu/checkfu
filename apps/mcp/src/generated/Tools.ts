@@ -301,11 +301,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1006,11 +1005,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1225,7 +1223,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+								'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -1395,11 +1393,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1461,11 +1458,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}$",
-							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -1661,7 +1657,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								},
 							],
 							description:
-								'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+								'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
 						environment_id: {
 							type: "string",
@@ -1947,11 +1943,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -2130,7 +2125,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_createSession",
 		title: "Create a session",
 		description:
-			"Create an agent instance in an environment. Send a user.message event to start work.",
+			"Create an agent instance in an environment. Include initial user messages to start work immediately.",
 		method: "POST",
 		path: "/v1/sessions",
 		readOnly: false,
@@ -2205,8 +2200,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 								required: ["type", "content"],
 								additionalProperties: false,
 							},
-							maxItems: 1,
-							description: "A text user message to send when the session is created.",
+							maxItems: 50,
+							description: "User messages to send in order when the session is created.",
 						},
 						environment_id: {
 							type: "string",
@@ -2455,7 +2450,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_listEvents",
 		title: "List session events",
 		description:
-			"List persisted events for a session. Use the returned cursor to continue through its history.",
+			"List persisted events for a session. Use next_page to continue through its history.",
 		method: "GET",
 		path: "/v1/sessions/{session_id}/events",
 		readOnly: true,
@@ -2481,16 +2476,43 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}$",
-							description:
-								"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
+							description: "Opaque pagination cursor from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
 							pattern: "^(?:[1-9]\\d?|100)$",
 							description: "Maximum number of events to return (1-100)",
+						},
+						types: {
+							type: "array",
+							items: {
+								type: "string",
+								enum: [
+									"system.message",
+									"user.message",
+									"user.interrupt",
+									"user.tool_confirmation",
+									"user.custom_tool_result",
+									"session.status_running",
+									"span.model_request_start",
+									"agent.tool_use",
+									"agent.tool_result",
+									"agent.mcp_tool_use",
+									"agent.mcp_tool_result",
+									"agent.custom_tool_use",
+									"agent.thinking",
+									"agent.message",
+									"span.model_request_end",
+									"session.status_idle",
+									"session.error",
+									"session.status_terminated",
+									"session.archived",
+								],
+							},
+							description: "Return events with one of these types.",
 						},
 						order: {
 							type: "string",
@@ -2553,11 +2575,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -2674,6 +2695,42 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											},
 										},
 										required: ["type"],
+										additionalProperties: false,
+									},
+									{
+										type: "object",
+										properties: {
+											id: {
+												type: "string",
+												pattern: "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+												minLength: 1,
+												maxLength: 128,
+											},
+											type: {
+												type: "string",
+												enum: ["system.message"],
+											},
+											content: {
+												type: "array",
+												items: {
+													type: "object",
+													properties: {
+														type: {
+															type: "string",
+															enum: ["text"],
+														},
+														text: {
+															type: "string",
+														},
+													},
+													required: ["type", "text"],
+													additionalProperties: false,
+												},
+												minItems: 1,
+												maxItems: 1000,
+											},
+										},
+										required: ["type", "content"],
 										additionalProperties: false,
 									},
 									{
@@ -3046,11 +3103,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",
@@ -3092,11 +3148,10 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				query: {
 					type: "object",
 					properties: {
-						after: {
+						page: {
 							type: "string",
 							pattern: "^\\d{1,15}:[^/\\\\]+$",
-							description:
-								"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+							description: "Opaque page token from the previous response's next_page.",
 						},
 						limit: {
 							type: "string",

@@ -61,6 +61,7 @@ import {
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
+	MAX_SESSION_INITIAL_EVENTS,
 	CancelledEventIds,
 	RequiresActionStopReason,
 	StopReason,
@@ -83,6 +84,7 @@ import {
 	SessionSnapshot,
 	SessionTitle,
 	Sha256Hex,
+	SystemMessageContent,
 	TextBlocks,
 	VaultCustody,
 	VaultDisplayName,
@@ -625,15 +627,15 @@ const SessionAgentReference = AgentReference.annotate({
 
 const AutomationAgentReference = AgentReference.annotate({
 	description:
-		'Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type "agent", id, and version to pin a specific version.',
+		'Agent to run in each session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 })
 
 export const CreateSessionBody = Schema.Struct({
 	agent: SessionAgentReference,
 	initial_events: Schema.optionalKey(
 		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
-			.check(Schema.isMaxLength(1))
-			.annotate({ description: "A text user message to send when the session is created." }),
+			.check(Schema.isMaxLength(MAX_SESSION_INITIAL_EVENTS))
+			.annotate({ description: "User messages to send in order when the session is created." }),
 	),
 	environment_id: ResourceId.annotate({ description: "Environment ID for the session" }),
 	title: Schema.optionalKey(
@@ -753,6 +755,11 @@ export const SendSessionEventsBody = Schema.Struct({
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
 				type: Schema.Literal("user.interrupt"),
+			}),
+			Schema.Struct({
+				id: Schema.optionalKey(ClientEventId),
+				type: Schema.Literal("system.message"),
+				content: SystemMessageContent,
 			}),
 			Schema.Struct({
 				id: Schema.optionalKey(ClientEventId),
@@ -916,7 +923,7 @@ export const AutomationResource = Schema.Struct({
 		"revision",
 		"upcoming",
 	]),
-	agent: Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
+	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
 	initial_events: AutomationInitialEvents,
 	run_count: Schema.Int,
 	upcoming_runs_at: Schema.Array(Schema.DateTimeUtc),
@@ -932,11 +939,8 @@ export const AutomationRunResource = Schema.Struct({
 		Schema.Struct({ type: Schema.Literal("schedule"), scheduled_at: Schema.DateTimeUtc }),
 		Schema.Struct({ type: Schema.Literal("manual") }),
 	]),
-	agent: Schema.NullOr(
-		Schema.Struct({ id: Schema.String, version: Schema.NullOr(PositiveInt) }),
-	).annotate({
-		description:
-			"The agent the run used, with the version its session opened on, or for a failed run the version the automation pinned (null when it follows the latest). Null for runs recorded before runs named their agent.",
+	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }).annotate({
+		description: "The agent and version pinned for this run.",
 	}),
 	session_id: Schema.NullOr(Schema.String),
 	error: Schema.NullOr(AutomationRunError),
@@ -1126,7 +1130,7 @@ export const isPendingResource = <T extends { readonly type: string }>(
 export const UserMessageEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.message"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	turn: PositiveInt,
 	queued: Schema.Boolean,
 	content: TextBlocks,
@@ -1136,14 +1140,14 @@ export type UserMessageEventReceipt = typeof UserMessageEventReceipt.Type
 export const UserInterruptEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.interrupt"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type UserInterruptEventReceipt = typeof UserInterruptEventReceipt.Type
 
 export const UserToolConfirmationEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.tool_confirmation"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	tool_use_id: ToolUseEventId,
 	result: ToolConfirmationResult,
 	deny_message: Schema.optionalKey(DenyMessage),
@@ -1153,14 +1157,22 @@ export type UserToolConfirmationEventReceipt = typeof UserToolConfirmationEventR
 export const UserCustomToolResultEventReceipt = Schema.Struct({
 	type: Schema.Literal("user.custom_tool_result"),
 	id: Schema.String,
-	processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+	processed_at: Schema.NullOr(Schema.DateTimeUtc),
 	custom_tool_use_id: ToolUseEventId,
 	content: Schema.optionalKey(TextBlocks),
 	is_error: Schema.optionalKey(Schema.Boolean),
 })
 export type UserCustomToolResultEventReceipt = typeof UserCustomToolResultEventReceipt.Type
 
+export const SystemMessageEventReceipt = Schema.Struct({
+	type: Schema.Literal("system.message"),
+	id: Schema.String,
+	processed_at: Schema.DateTimeUtc,
+	content: TextBlocks,
+})
+
 export const SendSessionEventReceipt = Schema.Union([
+	SystemMessageEventReceipt,
 	UserMessageEventReceipt,
 	UserInterruptEventReceipt,
 	UserToolConfirmationEventReceipt,
@@ -1182,9 +1194,14 @@ const wireSessionEvent = <const T extends SessionEventType, const F extends Sche
 		seq: PositiveInt,
 		type: Schema.Literal(type),
 		created_at: Schema.DateTimeUtc,
-		processed_at: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtc)),
+		processed_at: Schema.NullOr(Schema.DateTimeUtc),
 		...fields,
 	})
+
+export const SystemMessageSessionEvent = wireSessionEvent(
+	"system.message",
+	SessionEventFields["system.message"],
+).annotate({ description: "Privileged context appended to the session's system instructions." })
 
 export const UserMessageSessionEvent = wireSessionEvent(
 	"user.message",
@@ -1272,6 +1289,7 @@ export const SessionArchivedEvent = wireSessionEvent(
 )
 
 export const SessionEvent = Schema.Union([
+	SystemMessageSessionEvent,
 	UserMessageSessionEvent,
 	UserInterruptSessionEvent,
 	UserToolConfirmationSessionEvent,
@@ -1294,26 +1312,46 @@ export const SessionEvent = Schema.Union([
 
 export type SessionEvent = typeof SessionEvent.Type
 
-export const ListSessionEventsResponse = Schema.Struct({
-	data: Schema.Array(SessionEvent),
-	has_more: Schema.Boolean,
-	next_cursor: Schema.NullOr(Schema.Finite),
-})
-export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
+const SessionPreviewType = Schema.Literals(["agent.message", "agent.thinking"])
+export type SessionPreviewType = typeof SessionPreviewType.Type
 
-export const ListAutomationRunsResponse = Schema.Struct({
-	data: Schema.Array(AutomationRunResource),
-	has_more: Schema.Boolean,
-	next_cursor: Schema.NullOr(Schema.Finite),
-})
-export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
+export const SessionEventPreview = Schema.Union([
+	Schema.Struct({
+		type: Schema.Literal("event_start"),
+		event: Schema.Struct({ id: Schema.String, type: SessionPreviewType }),
+	}),
+	Schema.Struct({
+		type: Schema.Literal("event_delta"),
+		event_id: Schema.String,
+		delta: Schema.Struct({
+			type: Schema.Literal("content_delta"),
+			index: NonNegativeInt,
+			content: Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+		}),
+	}),
+]).annotate({ identifier: "SessionEventPreview" })
+export type SessionEventPreview = typeof SessionEventPreview.Type
 
-const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, cursor: C) =>
+export const SessionStreamEvent = Schema.Union([SessionEvent, SessionEventPreview])
+export type SessionStreamEvent = typeof SessionStreamEvent.Type
+
+const SessionPreviewTypes = Schema.Array(SessionPreviewType)
+	.check(Schema.isMaxLength(100))
+	.annotate({ description: "Event types to preview on this connection." })
+
+const listResponse = <A extends Schema.Top>(resource: A) =>
 	Schema.Struct({
 		data: Schema.Array(resource),
-		has_more: Schema.Boolean,
-		next_cursor: Schema.NullOr(cursor),
+		next_page: Schema.NullOr(Schema.String).annotate({
+			description: "Token for the next page, or null when there are no more results.",
+		}),
 	})
+
+export const ListSessionEventsResponse = listResponse(SessionEvent)
+export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
+
+export const ListAutomationRunsResponse = listResponse(AutomationRunResource)
+export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
 const AgentVersionPage = Schema.String.check(
 	Schema.isMinLength(1),
@@ -1325,25 +1363,25 @@ export const ListAgentVersionsResponse = Schema.Struct({
 	next_page: Schema.NullOr(AgentVersionPage),
 })
 
-export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
+export const ListAgentsResponse = listResponse(AgentResource)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
-export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot, ResourceListCursor)
+export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot)
 export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
-export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
+export const ListSessionsResponse = listResponse(SessionResource)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
-export const ListArtifactsResponse = listResponse(ArtifactSummaryResource, ResourceListCursor)
+export const ListArtifactsResponse = listResponse(ArtifactSummaryResource)
 export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
 
-export const ListVaultsResponse = listResponse(VaultResource, ResourceListCursor)
+export const ListVaultsResponse = listResponse(VaultResource)
 export type ListVaultsResponse = typeof ListVaultsResponse.Type
 
-export const ListCredentialsResponse = listResponse(CredentialResource, ResourceListCursor)
+export const ListCredentialsResponse = listResponse(CredentialResource)
 export type ListCredentialsResponse = typeof ListCredentialsResponse.Type
 
-export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
+export const ListAutomationsResponse = listResponse(AutomationResource)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
@@ -1356,20 +1394,9 @@ export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$
 	),
 )
 
-const EventListAfterFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u))
-	.annotate({
-		description:
-			"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-	})
-	.pipe(
-		Schema.decodeTo(
-			Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
-			{
-				decode: SchemaGetter.transform(Number),
-				encode: SchemaGetter.transform(String),
-			},
-		),
-	)
+const EventListPage = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).annotate({
+	description: "Opaque pagination cursor from the previous response's next_page.",
+})
 
 const EventListLimitFromString = Schema.String.check(Schema.isPattern(/^(?:[1-9]\d?|100)$/u))
 	.annotate({ description: "Maximum number of events to return (1-100)" })
@@ -1418,7 +1445,7 @@ const AgentVersionFromString = positiveIntegerFromString(
 )
 
 const resourceListQuery = {
-	after: Schema.optionalKey(ResourceListCursor),
+	page: Schema.optionalKey(ResourceListCursor),
 	limit: Schema.optionalKey(ListLimitFromString),
 	order: Schema.optionalKey(
 		Schema.Literals(["asc", "desc"]).annotate({
@@ -1763,7 +1790,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "Create a session")
 			.annotate(
 				OpenApi.Description,
-				"Create an agent instance in an environment. Send a user.message event to start work.",
+				"Create an agent instance in an environment. Include initial user messages to start work immediately.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions",
@@ -1775,7 +1802,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					repeatArrayField: {
 						field: "initial_events",
 						flag: "initial-event",
-						description: "Initial user message as JSON, YAML, or @file",
+						description: "Initial user message as JSON, YAML, or @file (repeatable, up to 50)",
 					},
 					examples: [
 						{
@@ -1887,8 +1914,15 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("listEvents", "/v1/sessions/:session_id/events", {
 			params: sessionParams,
 			query: {
-				after: Schema.optionalKey(EventListAfterFromString),
+				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
+				types: Schema.optionalKey(
+					Schema.Array(
+						Schema.Literals(SessionEvent.members.map((event) => event.fields.type.literal)),
+					).annotate({
+						description: "Return events with one of these types.",
+					}),
+				),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
 				),
@@ -1899,7 +1933,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "List session events")
 			.annotate(
 				OpenApi.Description,
-				"List persisted events for a session. Use the returned cursor to continue through its history.",
+				"List persisted events for a session. Use next_page to continue through its history.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",
@@ -1907,8 +1941,8 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "listEvents" },
 				"x-checkfu-mcp": { name: "sessions_listEvents" },
 				"x-checkfu-cli": {
+					repeatArrayField: { field: "types", flag: "type" },
 					intQueryParams: {
-						after: { min: 0, metavar: "SEQ" },
 						limit: { min: 1, max: 100, metavar: "N" },
 					},
 				},
@@ -1918,13 +1952,14 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("streamEvents", "/v1/sessions/:session_id/events/stream", {
 			params: sessionParams,
 			query: {
+				"event_deltas[]": Schema.optionalKey(SessionPreviewTypes),
 				after: Schema.optionalKey(
 					Schema.String.annotate({
 						description: "Resume stream strictly after this sequence number",
 					}),
 				),
 			},
-			success: [HttpApiSchema.StreamSse({ data: SessionEvent }), HttpApiSchema.NoContent],
+			success: [HttpApiSchema.StreamSse({ data: SessionStreamEvent }), HttpApiSchema.NoContent],
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Stream session events")
@@ -2207,7 +2242,7 @@ const Automations = HttpApiGroup.make("automations")
 		HttpApiEndpoint.get("listRuns", "/v1/automations/:automation_id/runs", {
 			params: automationParams,
 			query: {
-				after: Schema.optionalKey(EventListAfterFromString),
+				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
@@ -2228,7 +2263,6 @@ const Automations = HttpApiGroup.make("automations")
 				"x-checkfu-mcp": { name: "automations_listRuns" },
 				"x-checkfu-cli": {
 					intQueryParams: {
-						after: { min: 0, metavar: "SEQ" },
 						limit: { min: 1, max: 100, metavar: "N" },
 					},
 				},

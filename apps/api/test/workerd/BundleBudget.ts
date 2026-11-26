@@ -172,8 +172,8 @@ export const measureBundle = async (
 }
 
 export const API_WORKER_BUDGET = {
-	eagerBytes: 1_525_000,
-	totalBytes: 1_525_000,
+	eagerBytes: 1_535_000,
+	totalBytes: 1_535_000,
 	startupCpuMs: 500,
 } as const
 
@@ -184,8 +184,8 @@ export const CONTENT_WORKER_BUDGET = {
 } as const
 
 export const PI_HARNESS_WORKER_BUDGET = {
-	eagerBytes: 2_165_000,
-	totalBytes: 3_050_000,
+	eagerBytes: 2_170_000,
+	totalBytes: 3_065_000,
 	startupCpuMs: 500,
 } as const
 

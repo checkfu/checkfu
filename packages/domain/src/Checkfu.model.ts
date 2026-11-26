@@ -1,3 +1,5 @@
+import { SendSystemMessageDecision } from "./Session/SendSystemMessage.decision.ts"
+import { SystemContext } from "./Session/SystemContext.aggregate.ts"
 import * as Domain from "@alchemy.run/domain"
 import * as Layer from "effect/Layer"
 import { Agent } from "./Agent/Agent.aggregate.ts"
@@ -35,6 +37,11 @@ import { Environment } from "./Environment/Environment.aggregate.ts"
 import { EnvironmentView } from "./Environment/EnvironmentView.view.ts"
 import { Listing, ListingLive } from "./Listing/Listing.projection.ts"
 import { ListResources, ListResourcesLive } from "./Listing/ListResources.query.ts"
+import {
+	RecordInitialMessages,
+	RecordInitialMessagesLive,
+} from "./Session/RecordInitialMessages.policy.ts"
+import { AdmitSessionWithMessagesDecision } from "./Session/AdmitSessionWithMessages.decision.ts"
 import { AdmitSessionDecision } from "./Session/AdmitSession.decision.ts"
 import {
 	PublishSessionOutputs,
@@ -45,6 +52,7 @@ import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.
 import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
+import { SessionTurnCompletion } from "./Session/SessionTurnCompletion.view.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { EnsureTurnStarted, EnsureTurnStartedLive } from "./Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
@@ -57,6 +65,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		Agent,
 		Environment,
 		Session,
+		SystemContext,
 		ToolConfirmation,
 		Automation,
 		AutomationCapacity,
@@ -66,10 +75,12 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		CreateAgentDecision,
 		UpdateAgentDecision,
 		AdmitSessionDecision,
+		AdmitSessionWithMessagesDecision,
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
 		UpdateAutomationDecision,
 		RequestToolActionDecision,
+		SendSystemMessageDecision,
 		ConfirmToolDecision,
 		ReturnCustomToolResultDecision,
 	],
@@ -78,12 +89,14 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AgentVersionByNumberView,
 		EnvironmentView,
 		SessionView,
+		SessionTurnCompletion,
 		TurnInput,
 		AutomationView,
 		AutomationRunView,
 		ArtifactVersionView,
 	],
 	policies: [
+		RecordInitialMessages,
 		StartTurn,
 		EnsureTurnStarted,
 		EnsureTurnStopped,
@@ -390,6 +403,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"DeleteEnvironment",
 		"AdmitSession",
 		"SendUserMessage",
+		"SendSystemMessage",
 		"SendUserInterrupt",
 		"ConfirmTool",
 		"ReturnCustomToolResult",
@@ -422,6 +436,7 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 }) {}
 
 export const CheckfuHandlersLive = Layer.mergeAll(
+	RecordInitialMessagesLive,
 	StartTurnLive,
 	EnsureTurnStartedLive,
 	EnsureTurnStoppedLive,

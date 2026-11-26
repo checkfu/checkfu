@@ -360,10 +360,13 @@ const renderConnectEvent = (
 		}
 
 		switch (event.type) {
+			case "system.message":
 			case "user.message": {
 				const text = event.content.map((block) => block.text).join("\n")
 				if (!rawStructuredMode && text.length > 0) {
-					yield* writeStdoutLine(`[user] ${escapeTerminalControlCharacters(text)}`)
+					yield* writeStdoutLine(
+						`[${event.type === "system.message" ? "system" : "user"}] ${escapeTerminalControlCharacters(text)}`,
+					)
 				}
 				break
 			}
@@ -672,7 +675,7 @@ const resolveCursorBaseline = (
 		)
 	}
 	return Effect.gen(function* () {
-		let cursor = after + 1
+		let pageToken = String(after + 1)
 		let ended = false
 		let nearestTurn: number | undefined
 		const walked: Array<SessionStreamEvent> = []
@@ -684,7 +687,7 @@ const resolveCursorBaseline = (
 			const page = yield* client.api.sessions
 				.listEvents({
 					params: { session_id: sessionId },
-					query: { after: cursor, limit: 100, order: "desc" },
+					query: { page: pageToken, limit: 100, order: "desc" },
 				})
 				.pipe(Effect.mapError(formatClientError))
 			for (const entry of page.data) {
@@ -712,10 +715,10 @@ const resolveCursorBaseline = (
 				}
 				walked.push(entry)
 			}
-			if (!page.has_more || page.next_cursor === null || page.next_cursor >= cursor) {
+			if (page.next_page === null || Number(page.next_page) >= Number(pageToken)) {
 				return baseline()
 			}
-			cursor = page.next_cursor
+			pageToken = page.next_page
 		}
 	})
 }
@@ -1236,7 +1239,7 @@ export const sessionsConnectCommand = Command.make(
 									.listEvents({
 										params: { session_id: sessionId },
 										query: {
-											...(pause.seq === undefined ? {} : { after: pause.seq }),
+											...(pause.seq === undefined ? {} : { page: String(pause.seq) }),
 											limit: 100,
 											order: "asc",
 										},
@@ -1256,7 +1259,7 @@ export const sessionsConnectCommand = Command.make(
 							const stands =
 								pause.seq === undefined
 									? pause
-									: !later.success.has_more &&
+									: later.success.next_page === null &&
 										  since?.seq === pause.seq &&
 										  since.toolUseIds.length > 0
 										? since

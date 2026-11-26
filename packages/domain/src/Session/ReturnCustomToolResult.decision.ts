@@ -11,7 +11,7 @@ import { ToolConfirmationNotPending } from "./ToolConfirmationNotPending.rejecti
 export class ReturnCustomToolResultDecision extends Domain.Decision(ReturnCustomToolResult, {
 	reads: { call: ToolConfirmation, session: Session },
 	keyOf: (cmd) => ({ call: cmd.confirmation_id, session: cmd.session_id }),
-	decide: ({ call, session }, cmd) => {
+	decide: ({ call, session }, cmd, { now }) => {
 		const state = session.state
 		if (state._tag === "Uninitialized") {
 			return new SessionNotFound({ session_id: session.id })
@@ -36,6 +36,7 @@ export class ReturnCustomToolResultDecision extends Domain.Decision(ReturnCustom
 			call.record(new ToolResultReturned({ text: cmd.text, is_error: cmd.is_error })),
 			session.record(
 				new UserCustomToolResult({
+					processed_at: now,
 					custom_tool_use_id: cmd.custom_tool_use_id,
 					content: [{ type: "text", text: cmd.text }],
 					...(cmd.is_error ? { is_error: true } : {}),

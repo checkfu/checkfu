@@ -214,13 +214,24 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					})
 					expect(listRes.status).toBe(200)
 					const page1 = (yield* Effect.promise(() => listRes.json())) as {
-						data: ReadonlyArray<{ type: string }>
-						has_more: boolean
-						next_cursor: number | null
+						data: ReadonlyArray<{ type: string; processed_at: string | null }>
+						next_page: string | null
 					}
 					expect(page1.data).toHaveLength(3)
-					expect(page1.has_more).toBe(true)
-					expect(page1.next_cursor).toBe(3)
+					expect(page1.next_page).toBe("3")
+					expect(page1.data[0]).toMatchObject({
+						type: "user.message",
+						processed_at: expect.any(String),
+					})
+					const page2 = yield* sendRequest(apiFetch, {
+						method: "GET",
+						path: `/v1/sessions/${session.id}/events?limit=3&page=${page1.next_page}`,
+						headers: AUTH_HEADERS,
+					})
+					expect(yield* Effect.promise(() => page2.json())).toMatchObject({
+						data: [{ seq: 4 }, { seq: 5 }, { seq: 6 }],
+						next_page: "6",
+					})
 
 					const getSessRes = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -602,7 +613,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 				Effect.gen(function* () {
 					const { fetch: apiFetch } = yield* makeApiHandler
 					const session = yield* createIdleSession(apiFetch)
-					for (const query of ["after=1e2", "after=0x10", "after=%20", "limit=5.0", "limit=1e1"]) {
+					for (const query of ["page=1e2", "page=0x10", "page=%20", "limit=5.0", "limit=1e1"]) {
 						const res = yield* sendRequest(apiFetch, {
 							method: "GET",
 							path: `/v1/sessions/${session.id}/events?${query}`,
@@ -612,7 +623,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					}
 					const plain = yield* sendRequest(apiFetch, {
 						method: "GET",
-						path: `/v1/sessions/${session.id}/events?after=0&limit=10`,
+						path: `/v1/sessions/${session.id}/events?page=0&limit=10`,
 						headers: AUTH_HEADERS,
 					})
 					expect(plain.status).toBe(200)
@@ -870,7 +881,10 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 		const streamData = resolve(streamMedia?.schema?.properties?.["data"])
 		expect(streamData?.type).toBe("string")
 		expect(streamData?.contentMediaType).toBe("application/json")
-		expect(streamData?.contentSchema?.$ref).toBe("#/components/schemas/SessionEvent")
+		expect(streamData?.contentSchema?.anyOf).toEqual([
+			{ $ref: "#/components/schemas/SessionEvent" },
+			{ $ref: "#/components/schemas/SessionEventPreview" },
+		])
 
 		const sessionEventSchema = resolve(listItemsRef)
 		const members = (sessionEventSchema?.anyOf ?? []).map((member) => resolve(member))
@@ -908,11 +922,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			expect(Object.keys(byType.get(type)?.properties ?? {}).toSorted()).toEqual(
 				[...envelope, ...fields].toSorted(),
 			)
+			expect(byType.get(type)?.required).toContain("processed_at")
 		}
 		expect(byType.get("agent.message")?.required?.toSorted()).toEqual([
 			"content",
 			"created_at",
 			"id",
+			"processed_at",
 			"seq",
 			"type",
 		])
