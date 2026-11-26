@@ -143,6 +143,12 @@ export interface CheckfuOperations {
 		EndpointBody<"artifacts", "getVersion">,
 		EndpointSuccess<"artifacts", "getVersion">
 	>
+	readonly "automationRuns.retrieve": OperationShape<
+		EndpointParams<"automations", "getRunById">,
+		EndpointQuery<"automations", "getRunById">,
+		EndpointBody<"automations", "getRunById">,
+		EndpointSuccess<"automations", "getRunById">
+	>
 	readonly "automations.archive": OperationShape<
 		EndpointParams<"automations", "archive">,
 		EndpointQuery<"automations", "archive">,
@@ -1027,6 +1033,51 @@ export class EffectArtifactsResource {
 									responseMode: "decoded-and-response",
 								}),
 						),
+					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectAutomationRunsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Retrieve a run by the ID returned in run results and webhook events. */
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "getRunById">>, CheckfuSdkError>
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "getRunById">, CheckfuSdkError>
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "getRunById">
+		| WithResponse<EndpointSuccess<"automations", "getRunById">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "getRunById", { automation_run_id: automationRunId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automationRuns.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.automations.getRunById({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
 					),
 			),
 			options,
@@ -2742,6 +2793,7 @@ export class EffectWebhooksResource {
 export class EffectResources {
 	readonly agents: EffectAgentsResource
 	readonly artifacts: EffectArtifactsResource
+	readonly automationRuns: EffectAutomationRunsResource
 	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
 	readonly sessions: EffectSessionsResource
@@ -2750,6 +2802,7 @@ export class EffectResources {
 	constructor(runtime: EffectSdkRuntime) {
 		this.agents = new EffectAgentsResource(runtime)
 		this.artifacts = new EffectArtifactsResource(runtime)
+		this.automationRuns = new EffectAutomationRunsResource(runtime)
 		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
@@ -2998,6 +3051,27 @@ export class ArtifactsResource {
 	): APIPromise<EndpointJsonSuccess<"artifacts", "unpublish">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsResource(effectRuntime).unpublish(artifactId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class AutomationRunsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Retrieve a run by the ID returned in run results and webhook events. */
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "getRunById">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationRunsResource(effectRuntime).retrieve(automationRunId, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -3637,6 +3711,7 @@ export class WebhooksResource {
 export class PromiseResources {
 	readonly agents: AgentsResource
 	readonly artifacts: ArtifactsResource
+	readonly automationRuns: AutomationRunsResource
 	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
 	readonly sessions: SessionsResource
@@ -3645,6 +3720,7 @@ export class PromiseResources {
 	constructor(runtime: PromiseSdkRuntime) {
 		this.agents = new AgentsResource(runtime)
 		this.artifacts = new ArtifactsResource(runtime)
+		this.automationRuns = new AutomationRunsResource(runtime)
 		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
 		this.sessions = new SessionsResource(runtime)

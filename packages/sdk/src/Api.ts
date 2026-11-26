@@ -579,6 +579,7 @@ export const AutomationResource = Schema.Struct({
 export type Automation = typeof AutomationResource.Type
 
 export const AutomationRunResource = Schema.Struct({
+	id: ResourceId,
 	type: Schema.Literal("automation_run"),
 	automation_id: AutomationId,
 	run: PositiveInt,
@@ -600,6 +601,7 @@ export const AutomationRunResource = Schema.Struct({
 export type AutomationRun = typeof AutomationRunResource.Type
 
 export const AutomationRunQueued = Schema.Struct({
+	id: ResourceId,
 	type: Schema.Literal("automation_run"),
 	automation_id: AutomationId,
 	run: PositiveInt,
@@ -1813,6 +1815,24 @@ const Automations = HttpApiGroup.make("automations")
 				"x-forge-method-name": "retrieve",
 				"x-checkfu-endpoint": { group: "automations", endpoint: "getRun" },
 				"x-checkfu-mcp": { name: "automations_getRun" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getRunById", "/v1/automation_runs/:automation_run_id", {
+			params: { automation_run_id: ResourceId },
+			success: AutomationRunResource,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve an automation run by ID")
+			.annotate(
+				OpenApi.Description,
+				"Retrieve a run by the ID returned in run results and webhook events.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "automationRuns",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "automations", endpoint: "getRunById" },
+				"x-checkfu-mcp": { name: "automationRuns_retrieve" },
 			}),
 	)
 	.annotate(OpenApi.Description, "Manage automations")
