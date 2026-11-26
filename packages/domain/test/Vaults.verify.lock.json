@@ -1,0 +1,239 @@
+{
+	"version": 1,
+	"rules": {
+		"Vaults": {
+			"Vault.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"archived\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Vault.NamedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.display_name === \"\"].every((ok) => ok),\n\t\t\t\t[s.status !== \"\", s.display_name !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Vault.OnlyAnActiveVaultHoldsCredentials": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"active\", [s.held === 0, s.storing === 0].every((none) => none)].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Vault.HoldsAtMostTheCredentialLimit": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.held >= 0, s.storing >= 0, s.held + s.storing <= MAX_VAULT_CREDENTIALS].every((ok) => ok)"
+			},
+			"Vault.NeverCountsFewerThanNoSecretsErasing": {
+				"kind": "invariant",
+				"source": "(s) => s.erasing >= 0"
+			},
+			"Vault.OnlyAnEndedVaultReleasesCredentials": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[s.status === \"archived\", s.status === \"deleted\", s.releasing === \"\"].some((ok) => ok)"
+			},
+			"Vault.CreatedVaultNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Vault.ArchivedNeverReactivates": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.status === \"archived\", after.status === \"deleted\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Vault.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"deleted\", after.status === \"deleted\"].some((ok) => ok)"
+			},
+			"Vault.OnlyRenamingChangesTheName": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.status === \"\",\n\t\t\t\tcommand._tag === \"UpdateVault\",\n\t\t\t\tafter.display_name === before.display_name,\n\t\t\t].some((ok) => ok)"
+			},
+			"Vault.AnEndedVaultKeepsWhatItAttachedLast": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[before.status === \"\", before.status === \"active\"].some((open) => open),\n\t\t\t\tafter.last_attached === before.last_attached,\n\t\t\t].some((ok) => ok)"
+			},
+			"Vault.AnEndingVaultStillOwesEverySecretItHeld": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tbefore.status !== \"active\",\n\t\t\t\tafter.status === \"active\",\n\t\t\t\t[\n\t\t\t\t\tafter.erasing === before.erasing + before.held + before.storing,\n\t\t\t\t\tafter.releasing === before.last_attached,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Credential.StatusIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.status === \"\",\n\t\t\t\ts.status === \"active\",\n\t\t\t\ts.status === \"archived\",\n\t\t\t\ts.status === \"deleted\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Credential.CustodyIsKnown": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\ts.custody === \"\",\n\t\t\t\ts.custody === \"storing\",\n\t\t\t\ts.custody === \"held\",\n\t\t\t\ts.custody === \"erasing\",\n\t\t\t\ts.custody === \"erased\",\n\t\t\t].some((ok) => ok)"
+			},
+			"Credential.OwnedExactlyWhenCreated": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t[s.status === \"\", s.vault_id === \"\", s.mcp_server_url === \"\", s.previous === \"\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t\t[s.status !== \"\", s.vault_id !== \"\", s.mcp_server_url !== \"\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Credential.ASecretIsHeldExactlyWhileActive": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t[\n\t\t\t\t(s.status === \"active\") ===\n\t\t\t\t\t[s.custody === \"held\", s.custody === \"storing\"].some((live) => live),\n\t\t\t\t(s.status === \"\") === (s.custody === \"\"),\n\t\t\t].every((ok) => ok)"
+			},
+			"Credential.CreatedCredentialNeverReturnsToUninitialized": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.status !== \"\"].some((ok) => ok)"
+			},
+			"Credential.CredentialNeverChangesVault": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.vault_id === before.vault_id].some((ok) => ok)"
+			},
+			"Credential.CredentialNeverChangesTheOneBeforeIt": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.previous === before.previous].some((ok) => ok)"
+			},
+			"Credential.CredentialNeverChangesUrl": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status === \"\", after.mcp_server_url === before.mcp_server_url].some((ok) => ok)"
+			},
+			"Credential.ArchivedNeverReactivates": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"archived\", after.status === \"archived\", after.status === \"deleted\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"Credential.DeletedStaysDeleted": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.status !== \"deleted\", after.status === \"deleted\"].some((ok) => ok)"
+			},
+			"Credential.AnArchivedOrDeletedCredentialIsNeverHeldAgain": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[before.custody !== \"erasing\", before.custody !== \"erased\"].every((ok) => ok),\n\t\t\t\t[after.custody !== \"held\", after.custody !== \"storing\"].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Credential.ErasedStaysErased": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.custody !== \"erased\", after.custody === \"erased\"].some((ok) => ok)"
+			},
+			"Credential.OnlyASecretBeingErasedBecomesErased": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.custody === \"erased\", after.custody !== \"erased\", before.custody === \"erasing\"].some(\n\t\t\t\t(ok) => ok,\n\t\t\t)"
+			},
+			"CredentialUrlClaim.AHeldUrlIsNeverTakenOver": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.holder === \"\", after.holder === before.holder, after.holder === \"\"].some((ok) => ok)"
+			},
+			"CreateCredential.OnlyAnActiveVaultTakesANewCredential": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.vault.status === \"active\",\n\t\t\t\tbefore.credential.status === \"\",\n\t\t\t\tbefore.vault.held + before.vault.storing < MAX_VAULT_CREDENTIALS,\n\t\t\t\tafter.vault.storing === before.vault.storing + 1,\n\t\t\t\tafter.vault.held === before.vault.held,\n\t\t\t\tafter.credential.status === \"active\",\n\t\t\t\tafter.credential.custody === \"storing\",\n\t\t\t\tafter.credential.vault_id === command.vault_id,\n\t\t\t\tafter.credential.mcp_server_url === command.auth.mcp_server_url,\n\t\t\t].every((ok) => ok)"
+			},
+			"CreateCredential.ANewCredentialNamesTheOneAttachedBeforeIt": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.credential.previous === before.vault.last_attached,\n\t\t\t\tafter.vault.last_attached === command.credential_id,\n\t\t\t].every((ok) => ok)"
+			},
+			"CreateCredential.OnlyAFreeUrlTakesANewCredential": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[before.url.holder === \"\", after.url.holder === command.credential_id].every((ok) => ok)"
+			},
+			"ArchiveCredential.AnArchivedCredentialLeavesItsVault": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.credential.status === \"archived\",\n\t\t\t\tafter.credential.vault_id === command.vault_id,\n\t\t\t\t[after.credential.custody !== \"held\", after.credential.custody !== \"storing\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t\t[\n\t\t\t\t\t[before.credential.custody !== \"held\", before.credential.custody !== \"storing\"].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t),\n\t\t\t\t\tafter.credential.custody === \"erasing\",\n\t\t\t\t].some((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.status !== \"active\",\n\t\t\t\t\tbefore.vault.status !== \"active\",\n\t\t\t\t\t[before.credential.custody === \"held\", before.vault.held === 0].every((ok) => ok),\n\t\t\t\t\t[before.credential.custody === \"storing\", before.vault.storing === 0].every((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\tbefore.credential.custody === \"held\",\n\t\t\t\t\t\tafter.vault.held === before.vault.held - 1,\n\t\t\t\t\t\tafter.vault.storing === before.vault.storing,\n\t\t\t\t\t\tafter.vault.erasing === before.vault.erasing + 1,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\tbefore.credential.custody === \"storing\",\n\t\t\t\t\t\tafter.vault.storing === before.vault.storing - 1,\n\t\t\t\t\t\tafter.vault.held === before.vault.held,\n\t\t\t\t\t\tafter.vault.erasing === before.vault.erasing + 1,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t].some((ok) => ok),\n\t\t\t].every((ok) => ok)"
+			},
+			"ArchiveCredential.AnArchivedCredentialFreesItsUrl": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.status !== \"active\",\n\t\t\t\t\tbefore.vault.status !== \"active\",\n\t\t\t\t\tafter.url.holder !== command.credential_id,\n\t\t\t\t].some((ok) => ok),\n\t\t\t\t[after.url.holder === before.url.holder, before.url.holder === command.credential_id].some(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"DeleteCredential.ADeletedCredentialLeavesItsVault": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.credential.status === \"deleted\",\n\t\t\t\t[after.credential.custody !== \"held\", after.credential.custody !== \"storing\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t\t[\n\t\t\t\t\t[before.credential.custody !== \"held\", before.credential.custody !== \"storing\"].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t),\n\t\t\t\t\tafter.credential.custody === \"erasing\",\n\t\t\t\t].some((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.status !== \"active\",\n\t\t\t\t\tbefore.vault.status !== \"active\",\n\t\t\t\t\t[before.credential.custody === \"held\", before.vault.held === 0].every((ok) => ok),\n\t\t\t\t\t[before.credential.custody === \"storing\", before.vault.storing === 0].every((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\tbefore.credential.custody === \"held\",\n\t\t\t\t\t\tafter.vault.held === before.vault.held - 1,\n\t\t\t\t\t\tafter.vault.storing === before.vault.storing,\n\t\t\t\t\t\tafter.vault.erasing === before.vault.erasing + 1,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\tbefore.credential.custody === \"storing\",\n\t\t\t\t\t\tafter.vault.storing === before.vault.storing - 1,\n\t\t\t\t\t\tafter.vault.held === before.vault.held,\n\t\t\t\t\t\tafter.vault.erasing === before.vault.erasing + 1,\n\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t].some((ok) => ok),\n\t\t\t].every((ok) => ok)"
+			},
+			"DeleteCredential.ADeletedCredentialFreesItsUrl": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.status !== \"active\",\n\t\t\t\t\tbefore.vault.status !== \"active\",\n\t\t\t\t\tafter.url.holder !== command.credential_id,\n\t\t\t\t].some((ok) => ok),\n\t\t\t\t[after.url.holder === before.url.holder, before.url.holder === command.credential_id].some(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"RetireCredential.OnlyAnEndedVaultRetiresItsCredential": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.credential.status === before.credential.status,\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.vault_id !== \"\",\n\t\t\t\t\t[before.vault.status === \"archived\", before.vault.status === \"deleted\"].some(\n\t\t\t\t\t\t(ended) => ended,\n\t\t\t\t\t),\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"RetireCredential.AnEndedVaultLeavesNoCredentialHeld": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tbefore.credential.vault_id !== command.vault_id,\n\t\t\t\t[before.vault.status !== \"archived\", before.vault.status !== \"deleted\"].every((ok) => ok),\n\t\t\t\t[after.credential.custody !== \"held\", after.credential.custody !== \"storing\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"RetireCredential.TheCredentialBeingReleasedHandsOnTheOneBeforeIt": {
+				"kind": "transition",
+				"source": "({ before, after, command }) =>\n\t\t\t[\n\t\t\t\tafter.vault.releasing === before.vault.releasing,\n\t\t\t\t[\n\t\t\t\t\tbefore.vault.releasing === command.credential_id,\n\t\t\t\t\tbefore.credential.vault_id === command.vault_id,\n\t\t\t\t\tafter.vault.releasing === before.credential.previous,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"ConfirmCredentialErased.OnlyASecretBeingErasedIsConfirmedErased": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.credential.custody === before.credential.custody,\n\t\t\t\t[before.credential.custody === \"erasing\", after.credential.custody === \"erased\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"ConfirmCredentialErased.AConfirmedErasureIsCountedAtMostOnce": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.vault.erasing === before.vault.erasing,\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.custody === \"erasing\",\n\t\t\t\t\tafter.credential.custody === \"erased\",\n\t\t\t\t\tafter.vault.erasing === before.vault.erasing - 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Vaults.VaultViewMatchesVault": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Vault.every((vault) => {\n\t\t\t\t\tconst view = m.VaultView.find((v) => v.id === vault.id)\n\t\t\t\t\tif ([vault.state.status === \"\", vault.state.status === \"deleted\"].some((gone) => gone)) {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === vault.id,\n\t\t\t\t\t\tview.state.display_name === vault.state.display_name,\n\t\t\t\t\t\tview.state.custody.storing === vault.state.storing,\n\t\t\t\t\t\tview.state.custody.held === vault.state.held,\n\t\t\t\t\t\tview.state.custody.erasing === vault.state.erasing,\n\t\t\t\t\t\t!!view.state.archived_at === (vault.state.status === \"archived\"),\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.VaultView.every((view) =>\n\t\t\t\t\tm.Vault.some((vault) =>\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tvault.id === view.id,\n\t\t\t\t\t\t\tvault.state.status !== \"\",\n\t\t\t\t\t\t\tvault.state.status !== \"deleted\",\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Vaults.CredentialViewMatchesCredential": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\t[\n\t\t\t\tm.Credential.every((credential) => {\n\t\t\t\t\tconst view = m.CredentialView.find((v) => v.id === credential.id)\n\t\t\t\t\tif (\n\t\t\t\t\t\t[credential.state.status === \"\", credential.state.status === \"deleted\"].some(\n\t\t\t\t\t\t\t(gone) => gone,\n\t\t\t\t\t\t)\n\t\t\t\t\t) {\n\t\t\t\t\t\treturn view === undefined\n\t\t\t\t\t}\n\t\t\t\t\tif (view === undefined) {\n\t\t\t\t\t\treturn false\n\t\t\t\t\t}\n\t\t\t\t\treturn [\n\t\t\t\t\t\tview.state.id === credential.id,\n\t\t\t\t\t\tview.state.vault_id === credential.state.vault_id,\n\t\t\t\t\t\tview.state.auth.mcp_server_url === credential.state.mcp_server_url,\n\t\t\t\t\t\tview.state.custody === credential.state.custody,\n\t\t\t\t\t\t!!view.state.archived_at === (credential.state.status === \"archived\"),\n\t\t\t\t\t].every((ok) => ok)\n\t\t\t\t}),\n\t\t\t\tm.CredentialView.every((view) =>\n\t\t\t\t\tm.Credential.some((credential) =>\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tcredential.id === view.id,\n\t\t\t\t\t\t\tcredential.state.status !== \"\",\n\t\t\t\t\t\t\tcredential.state.status !== \"deleted\",\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t),\n\t\t\t].every((ok) => ok)"
+			},
+			"Vaults.EveryActiveCredentialIsHeldByItsVault": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.Credential.every((credential) =>\n\t\t\t\t[\n\t\t\t\t\tcredential.state.status !== \"active\",\n\t\t\t\t\tm.Vault.some((vault) =>\n\t\t\t\t\t\t[\n\t\t\t\t\t\t\tvault.id === credential.state.vault_id,\n\t\t\t\t\t\t\tvault.state.status === \"active\",\n\t\t\t\t\t\t\tvault.state.held + vault.state.storing >= 1,\n\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t),\n\t\t\t\t].some((ok) => ok),\n\t\t\t)"
+			},
+			"Vaults.AVaultCountsItsActiveCredentials": {
+				"kind": "model invariant",
+				"source": "(m) =>\n\t\t\tm.Vault.every((vault) =>\n\t\t\t\t[\n\t\t\t\t\tvault.state.held ===\n\t\t\t\t\t\tm.Credential.filter((credential) =>\n\t\t\t\t\t\t\t[\n\t\t\t\t\t\t\t\tcredential.state.vault_id === vault.id,\n\t\t\t\t\t\t\t\tcredential.state.status === \"active\",\n\t\t\t\t\t\t\t\tcredential.state.custody === \"held\",\n\t\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t\t).length,\n\t\t\t\t\tvault.state.storing ===\n\t\t\t\t\t\tm.Credential.filter((credential) =>\n\t\t\t\t\t\t\t[\n\t\t\t\t\t\t\t\tcredential.state.vault_id === vault.id,\n\t\t\t\t\t\t\t\tcredential.state.status === \"active\",\n\t\t\t\t\t\t\t\tcredential.state.custody === \"storing\",\n\t\t\t\t\t\t\t].every((ok) => ok),\n\t\t\t\t\t\t).length,\n\t\t\t\t].every((ok) => ok),\n\t\t\t)"
+			},
+			"Vaults.AnArchivedOrDeletedCredentialIsErased": {
+				"kind": "eventually",
+				"source": "(m) =>\n\t\t\tm.Credential.every((credential) =>\n\t\t\t\t[\n\t\t\t\t\tcredential.state.status === \"\",\n\t\t\t\t\tcredential.state.status === \"active\",\n\t\t\t\t\tcredential.state.custody === \"erased\",\n\t\t\t\t].some((ok) => ok),\n\t\t\t)"
+			},
+			"Vaults.NoVaultIsLeftOwingASecret": {
+				"kind": "eventually",
+				"source": "(m) => m.Vault.every((vault) => vault.state.erasing === 0)"
+			},
+			"Vaults.AVaultHoldsACredential": {
+				"kind": "sometimes",
+				"source": "(m) => m.Vault.some((vault) => vault.state.held >= 1)"
+			},
+			"Vaults.ACredentialIsArchived": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Credential.some((credential) => credential.state.status === \"archived\")"
+			},
+			"Vaults.ACredentialIsDeleted": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Credential.some((credential) => credential.state.status === \"deleted\")"
+			},
+			"Vaults.AVaultIsArchived": {
+				"kind": "sometimes",
+				"source": "(m) => m.Vault.some((vault) => vault.state.status === \"archived\")"
+			},
+			"Vaults.AVaultIsDeleted": {
+				"kind": "sometimes",
+				"source": "(m) => m.Vault.some((vault) => vault.state.status === \"deleted\")"
+			},
+			"Vaults.ASecretIsErased": {
+				"kind": "sometimes",
+				"source": "(m) =>\n\t\t\tm.Credential.some((credential) => credential.state.custody === \"erased\")"
+			},
+			"Vaults.ACredentialAVaultNamesIsItsOwn": {
+				"kind": "relation",
+				"source": "({ vault, credential }) =>\n\t\t\t\t[\n\t\t\t\t\t[\n\t\t\t\t\t\tvault.state.last_attached === \"\",\n\t\t\t\t\t\tvault.state.last_attached !== credential.id,\n\t\t\t\t\t\t[credential.state.status !== \"\", credential.state.vault_id === vault.id].every(\n\t\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t\t),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t\t[\n\t\t\t\t\t\tvault.state.releasing === \"\",\n\t\t\t\t\t\tvault.state.releasing !== credential.id,\n\t\t\t\t\t\t[credential.state.status !== \"\", credential.state.vault_id === vault.id].every(\n\t\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t\t),\n\t\t\t\t\t].some((ok) => ok),\n\t\t\t\t].every((ok) => ok)"
+			},
+			"Vaults.TheCredentialBeforeAnotherIsInTheSameVault": {
+				"kind": "relation",
+				"source": "({ later, earlier }) =>\n\t\t\t\t[\n\t\t\t\t\tlater.state.previous === \"\",\n\t\t\t\t\tlater.state.previous !== earlier.id,\n\t\t\t\t\t[earlier.state.status !== \"\", earlier.state.vault_id === later.state.vault_id].every(\n\t\t\t\t\t\t(ok) => ok,\n\t\t\t\t\t),\n\t\t\t\t].some((ok) => ok)"
+			},
+			"Vaults.AClaimedUrlIsHeldByACredentialThatExists": {
+				"kind": "relation",
+				"source": "({ url, credential }) =>\n\t\t\t\t[\n\t\t\t\t\turl.state.holder === \"\",\n\t\t\t\t\turl.state.holder !== credential.id,\n\t\t\t\t\tcredential.state.status !== \"\",\n\t\t\t\t].some((ok) => ok)"
+			},
+			"UpdateCredential.OnlyAnActiveCredentialInAnActiveVaultIsRenamed": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\t[\n\t\t\t\tevents.length === 0,\n\t\t\t\t[\n\t\t\t\t\tbefore.vault.status === \"active\",\n\t\t\t\t\tbefore.credential.status === \"active\",\n\t\t\t\t\tbefore.credential.vault_id === command.vault_id,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"RotateCredential.OnlyAnActiveCredentialInAnActiveVaultIsRotated": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\t[\n\t\t\t\tevents.length === 0,\n\t\t\t\t[\n\t\t\t\t\tbefore.vault.status === \"active\",\n\t\t\t\t\tbefore.credential.status === \"active\",\n\t\t\t\t\tbefore.credential.vault_id === command.vault_id,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			},
+			"Credential.AHeldSecretIsNeverStoringAgain": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[before.custody !== \"held\", after.custody !== \"storing\"].some((ok) => ok)"
+			},
+			"ConfirmCredentialStored.OnlyASecretBeingStoredIsConfirmedHeld": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.credential.custody === before.credential.custody,\n\t\t\t\t[before.credential.custody === \"storing\", after.credential.custody === \"held\"].every(\n\t\t\t\t\t(ok) => ok,\n\t\t\t\t),\n\t\t\t].some((ok) => ok)"
+			},
+			"ConfirmCredentialStored.AConfirmedStorageIsCountedAtMostOnce": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\t[\n\t\t\t\t\tafter.vault.held === before.vault.held,\n\t\t\t\t\tafter.vault.storing === before.vault.storing,\n\t\t\t\t].every((ok) => ok),\n\t\t\t\t[\n\t\t\t\t\tbefore.credential.custody === \"storing\",\n\t\t\t\t\tafter.credential.custody === \"held\",\n\t\t\t\t\tafter.vault.held === before.vault.held + 1,\n\t\t\t\t\tafter.vault.storing === before.vault.storing - 1,\n\t\t\t\t].every((ok) => ok),\n\t\t\t].some((ok) => ok)"
+			}
+		}
+	}
+}

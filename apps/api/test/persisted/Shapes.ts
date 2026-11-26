@@ -7,9 +7,11 @@ import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import { Checkfu } from "@checkfu/domain/Checkfu.model"
 import { ApiCalls } from "../../src/Api.ts"
+import { CUSTODY_TABLES } from "../../src/Connection/SecretCustody.ts"
 import { ArtifactManifest } from "../../src/Artifacts/ArtifactFiles.ts"
 import { ArtifactMarks } from "../../src/Artifacts/ArtifactOwnership.ts"
 import { ArtifactLinkClaims } from "../../src/Content/ArtifactLink.ts"
+import { Vaults } from "@checkfu/domain/Vaults.model"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiDocRegistry.ts"
 import type { CheckfuPiDocSpec } from "../../src/Pi/PiDocRegistry.ts"
 import { PiHarnessCalls } from "../../src/Pi/PiTurn.ts"
@@ -30,6 +32,7 @@ export type PersistedKind =
 	| "pi-doc"
 	| "harness-call"
 	| "session-table"
+	| "vault-table"
 	| "artifact-object"
 	| "artifact-marks"
 	| "signed-link"
@@ -57,6 +60,8 @@ export const RULES: Readonly<Record<PersistedKind, string>> = {
 		"Pi durable documents survive deployments and are read when resuming or replaying turns. Keep the document's scope and family fixed, and bump its `version` with a `migrate` handler whenever its fields change.",
 	"session-table":
 		"The table already exists in every session object, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
+	"vault-table":
+		"The table already exists in every vault's connection object and holds its secrets, and `CREATE TABLE IF NOT EXISTS` leaves an existing table as it is. Add a column with a separate `ALTER TABLE` step, or use a new table.",
 	"artifact-object":
 		"Artifact manifests stay in R2 across deploys and are read back by later builds. Add a field only with a decoding default; for any other change, write it under a new key and keep reading the old one.",
 	"artifact-marks":
@@ -450,6 +455,14 @@ const SESSION_TABLES: ReadonlyArray<PersistedShape> = [
 	},
 ]
 
+const VAULT_TABLES: ReadonlyArray<PersistedShape> = Object.entries(CUSTODY_TABLES).map(
+	([name, table]): PersistedShape => ({
+		id: `vault-table:${name}`,
+		kind: "vault-table",
+		schema: Schema.Literal(table),
+	}),
+)
+
 const ARTIFACT_OBJECTS: ReadonlyArray<PersistedShape> = [
 	{ id: "artifact-object:manifest", kind: "artifact-object", schema: ArtifactManifest },
 ]
@@ -472,10 +485,12 @@ const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMa
 
 export const persistedShapes: ReadonlyArray<PersistedShape> = [
 	...shapesOfModel(Checkfu as unknown as ModelClass),
+	...shapesOfModel(Vaults as unknown as ModelClass),
 	...SAGA_STEPS,
 	...PI_DOCS,
 	...HARNESS_CALLS,
 	...SESSION_TABLES,
+	...VAULT_TABLES,
 	...ARTIFACT_OBJECTS,
 	...ARTIFACT_MARKS,
 	...SIGNED_LINKS,
@@ -512,6 +527,7 @@ export const registryProblems = (
 		"pi-doc",
 		"harness-call",
 		"session-table",
+		"vault-table",
 		"artifact-object",
 		"artifact-marks",
 		"signed-link",

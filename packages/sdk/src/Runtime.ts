@@ -623,12 +623,16 @@ const isResourceReadyForMutation = <T>(
 	resource: T,
 	readiness: PendingReadiness | undefined,
 ): boolean => {
-	if (
-		readiness === undefined ||
-		readiness.kind === "create" ||
-		readiness.kind === "requires-until"
-	) {
+	if (readiness === undefined || readiness.kind === "requires-until") {
 		return true
+	}
+	if (readiness.kind === "create") {
+		return (
+			typeof resource !== "object" ||
+			resource === null ||
+			!("custody" in resource) ||
+			resource.custody !== "storing"
+		)
 	}
 	if (typeof resource !== "object" || resource === null) {
 		return false
@@ -637,7 +641,10 @@ const isResourceReadyForMutation = <T>(
 		return (
 			"archived_at" in resource &&
 			resource.archived_at !== null &&
-			resource.archived_at !== undefined
+			resource.archived_at !== undefined &&
+			(!("custody" in resource) ||
+				typeof resource.custody !== "string" ||
+				resource.custody === "erased")
 		)
 	}
 	return (

@@ -282,6 +282,39 @@ export const createCommandId = (
 		stringifyCanonicalJson(payload),
 	])
 
+export const createIdentity = (
+	digest: Digest.Digest["Service"],
+	random: SecureRandom.SecureRandom["Service"],
+	create: {
+		readonly resource: PendingResourceType
+		readonly prefix: string
+		readonly key: string | undefined
+		readonly body: unknown
+		readonly scope?: ReadonlyArray<string>
+	},
+): Effect.Effect<{
+	readonly id: string
+	readonly options: { readonly commandId: string } | undefined
+}> =>
+	Effect.gen(function* () {
+		if (create.key === undefined) {
+			return { id: yield* randomId(random, create.prefix), options: undefined }
+		}
+		const id = yield* idempotentId(digest, create.prefix, [
+			"create",
+			create.resource,
+			"id",
+			...(create.scope ?? []),
+			create.key,
+		])
+		return {
+			id,
+			options: {
+				commandId: yield* createCommandId(digest, create.resource, create.key, create.body),
+			},
+		}
+	})
+
 const prepareConfiguredCredential = (mac: Mac.Mac["Service"], secret: Redacted.Redacted<string>) =>
 	Effect.gen(function* () {
 		const key = yield* mac.generateKey(Mac.hmacSha256)

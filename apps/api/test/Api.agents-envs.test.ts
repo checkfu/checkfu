@@ -90,10 +90,12 @@ import {
 	sendAndSettle,
 	sendRequest,
 	TEST_API_KEY,
+	TestRuntimeContext,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./helpers/InMemoryPiBackend.ts"
+import { VaultsTestLive } from "./helpers/VaultsHarness.ts"
 
 describe("Agent and environment lifecycle, versioning, and projection consistency", () => {
 	it("resolves arbitrary stored AgentVersionIds (not synthetic agentId:vN) and rejects missing/archived resources", async () => {
@@ -1533,6 +1535,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 			),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
+			Layer.provideMerge(VaultsTestLive),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(Digest.layerWebCrypto),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
@@ -1677,6 +1681,8 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						settleMargin: "5 seconds",
 					}),
 				),
+				Layer.provideMerge(VaultsTestLive),
+				Layer.provideMerge(TestRuntimeContext),
 				Layer.provideMerge(Digest.layerWebCrypto),
 				Layer.provideMerge(SecureRandom.layerWebCrypto),
 				Layer.provideMerge(
