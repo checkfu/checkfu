@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
@@ -8,10 +9,18 @@ import { SessionTerminated } from "./SessionTerminated.rejection.ts"
 import { SessionEventFields } from "./SessionTypes.ts"
 import { SystemContextAppended } from "./SystemContext.aggregate.ts"
 
-const content = SessionEventFields["system.message"].content
+const ContentJson = Schema.fromJsonString(SessionEventFields["system.message"].content)
+const readContent = Schema.decodeUnknownOption(ContentJson)
 
-export const systemMessageText = (blocks: typeof content.Type): string =>
-	blocks.map((block) => block.text).join("\n")
+export const encodeSystemMessage = Schema.encodeSync(ContentJson)
+export const decodeSystemMessage = Schema.decodeSync(ContentJson)
+
+const SystemMessageJson = Schema.String.check(
+	Schema.isMinLength(2),
+	Schema.makeFilter(
+		(value) => Option.isSome(readContent(value)) || "Expected system message text blocks.",
+	),
+)
 
 export class SystemMessage extends Domain.Event("system.message", {
 	...SessionEventFields["system.message"],
@@ -25,7 +34,7 @@ export class SystemContextFull extends Domain.Rejection(
 ) {}
 
 export class SendSystemMessage extends Domain.Command("SendSystemMessage", {
-	input: { session_id: SessionId, content },
+	input: { session_id: SessionId, content_json: SystemMessageJson },
 	events: [SystemMessage, SystemContextAppended],
 	rejects: [
 		SessionNotFound,
