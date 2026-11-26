@@ -2215,7 +2215,7 @@ export class EffectSessionsResource {
 		)
 	}
 
-	/** Create an agent instance in an environment. Send a user.message event to start work. */
+	/** Create an agent instance in an environment. Include initial user messages to start work immediately. */
 	create(
 		params: EndpointBody<"sessions", "create">,
 		options: WithResponseRequestOptions,
@@ -3642,7 +3642,7 @@ export class SessionsResource {
 		)
 	}
 
-	/** Create an agent instance in an environment. Send a user.message event to start work. */
+	/** Create an agent instance in an environment. Include initial user messages to start work immediately. */
 	create(
 		params: EndpointBody<"sessions", "create">,
 		options?: PromiseRequestOptions,

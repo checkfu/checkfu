@@ -11,6 +11,8 @@ import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomation
 import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
+import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
+import { recordInitialMessages } from "@checkfu/domain/Session/RecordInitialMessages.policy"
 import { ClaimIdempotencyKey } from "@checkfu/domain/Session/ClaimIdempotencyKey.command"
 import { SendUserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
 import { SendUserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
@@ -45,7 +47,11 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
-import { AdmitSession } from "@checkfu/domain/Session/AdmitSession.command"
+import {
+	AdmitSession,
+	AdmitSessionWithMessages,
+} from "@checkfu/domain/Session/AdmitSession.command"
+import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
@@ -245,6 +251,8 @@ export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): S
 	const base = { id: eventId, seq, created_at: at, processed_at: input ? null : at }
 
 	switch (type) {
+		case "user.message":
+			return { ...base, type, content: event.content }
 		case "user.interrupt":
 		case "agent.thinking":
 			return { ...base, type }
@@ -306,6 +314,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const admitSession = yield* AdmitSessionDecision
+		const admitWithMessages = yield* AdmitSessionWithMessagesDecision
 		const startSession = yield* OpenAutomationSessionDecision
 		const confirmTool = yield* ConfirmToolDecision
 		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
@@ -517,20 +526,23 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
-					const first = payload.initial_events?.[0]
-					const initialMessage =
-						first === undefined
-							? undefined
-							: yield* Schema.decodeEffect(MessageText)(
-									first.content.map(({ text }) => text).join("\n"),
-								).pipe(
-									Effect.catch(() =>
-										reject(
-											400,
-											`initial_events[0] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
-										),
+					const messages = yield* Effect.forEach(
+						payload.initial_events ?? [],
+						({ content }, index) =>
+							Schema.decodeEffect(MessageText)(content.map(({ text }) => text).join("\n")).pipe(
+								Effect.catch(() =>
+									reject(
+										400,
+										`initial_events[${index}] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
 									),
-								)
+								),
+							),
+					)
+					const [initialMessage, ...queuedMessages] = messages
+					const initialPlan =
+						queuedMessages.length === 0
+							? undefined
+							: { count: messages.length, messages: encodeInitialMessages(messages) }
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
 						prefix: "sess",
@@ -541,6 +553,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							environment_id: environmentId,
 							title,
 							...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
+							...(queuedMessages.length === 0 ? {} : { queued_messages: queuedMessages }),
 							vault_ids: payload.vault_ids,
 							mcp_server_credentials: payload.mcp_server_credentials,
 						},
@@ -560,16 +573,23 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						title,
 					}
 					const receipt =
-						initialMessage === undefined
-							? yield* admitSession
-									.send(new AdmitSession(admission), sendOptions)
-									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
-							: yield* startSession
+						initialPlan !== undefined
+							? yield* admitWithMessages
 									.send(
-										new OpenAutomationSession({ ...admission, text: initialMessage }),
+										new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
 										sendOptions,
 									)
 									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+							: initialMessage === undefined
+								? yield* admitSession
+										.send(new AdmitSession(admission), sendOptions)
+										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+								: yield* startSession
+										.send(
+											new OpenAutomationSession({ ...admission, text: initialMessage }),
+											sendOptions,
+										)
+										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
 					const created = receipt.events.find((event) => event._tag === "session.created")
 					if (created?._tag !== "session.created") {
 						return yield* reject(500, "Failed to load created session.")
@@ -583,7 +603,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(pinnedReady)) {
 						return pinnedReady
 					}
-					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
+					const finished =
+						initialPlan === undefined
+							? undefined
+							: (yield* recordInitialMessages(sessions, id, initialPlan.messages)).at(-1)
+					const sessionCommit = commitForStream(
+						finished?.commits ?? receipt.commits,
+						`Session/${id}`,
+					)
 					const result = yield* sessionViews
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
 						.pipe(orPending(id, "session"))

@@ -2158,7 +2158,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		name: "sessions_createSession",
 		title: "Create a session",
 		description:
-			"Create an agent instance in an environment. Send a user.message event to start work.",
+			"Create an agent instance in an environment. Include initial user messages to start work immediately.",
 		method: "POST",
 		path: "/v1/sessions",
 		readOnly: false,
@@ -2241,8 +2241,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										required: ["type", "content"],
 										additionalProperties: false,
 									},
-									maxItems: 1,
-									description: "A text user message to send when the session is created.",
+									maxItems: 50,
+									description: "User messages to send in order when the session is created.",
 								},
 								agent_version: {
 									type: "integer",
@@ -2377,8 +2377,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										required: ["type", "content"],
 										additionalProperties: false,
 									},
-									maxItems: 1,
-									description: "A text user message to send when the session is created.",
+									maxItems: 50,
+									description: "User messages to send in order when the session is created.",
 								},
 								agent_version: {
 									type: "integer",

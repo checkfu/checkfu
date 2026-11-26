@@ -97,9 +97,12 @@ const STANDING = {
 	"Environment.VersionGrowsByOneOrNotAtAll": "proved",
 	"Session.RunningTurnIsPositive": "proved",
 	"Session.IdleTurnIsNonNegative": "proved",
+	"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": "proved",
 	"Session.ModelRequestsStartedNonNegative": "proved",
 	"Session.PendingUserMessagesWithinBounds": "proved",
 	"Session.OpenModelRequestRequiresStartedCount": "proved",
+	"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": "proved",
+	"Session.OnlyTheLastInitialMessageStartsTheTurn": "proved",
 	"Session.TerminatedSessionStaysTerminated": "proved",
 	"Session.ArchivedSessionStaysArchived": "proved",
 	"Session.CreatedSessionNeverReturnsToUninitialized": "proved",
@@ -190,6 +193,11 @@ const STANDING = {
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
+	"AdmitSessionWithMessages.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
+	"AdmitSessionWithMessages.PinnedVersionWithinAgentHead": "proved",
+	"AdmitSessionWithMessages.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
+	"AdmitSessionWithMessages.AdmissionKeepsTheCredentialsItWasGiven": "proved",
+	"AdmitSessionWithMessages.AdmissionKeepsTheInitialPlan": "proved",
 	"AdmitSession.OnlyActiveAgentAndEnvironmentAdmitSession": "proved",
 	"AdmitSession.PinnedVersionWithinAgentHead": "proved",
 	"AdmitSession.AdmissionLeavesAgentAndEnvironmentUnchanged": "proved",
@@ -307,7 +315,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 400, length: 12 },
 
-				allow: { skipped: ["EnsureTurnStarted"] },
+				allow: { skipped: ["RecordInitialMessages", "EnsureTurnStarted"] },
 				opaque: [
 					sessionIdOfNextRun,
 					isUsableSchedule,
@@ -326,7 +334,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
-		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
+		expect(report.explored.skipped.map((skipped) => skipped.policy).toSorted()).toEqual([
+			"EnsureTurnStarted",
+			"RecordInitialMessages",
+		])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",
