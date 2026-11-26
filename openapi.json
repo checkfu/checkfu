@@ -11847,7 +11847,7 @@
 														"tool_use_id": {
 															"type": "string",
 															"minLength": 1,
-															"maxLength": 256,
+															"maxLength": 523,
 															"description": "The agent.mcp_tool_use event that waits for this answer"
 														},
 														"result": {
@@ -11879,7 +11879,7 @@
 														"custom_tool_use_id": {
 															"type": "string",
 															"minLength": 1,
-															"maxLength": 256,
+															"maxLength": 523,
 															"description": "The agent.custom_tool_use event this result answers"
 														},
 														"content": {
@@ -31667,7 +31667,7 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"result": {
 								"type": "string",
@@ -31712,7 +31712,7 @@
 							"custom_tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"content": {
 								"type": "array",
@@ -31844,7 +31844,7 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"name": {
 								"type": "string",
@@ -31895,7 +31895,7 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"content": {
 								"type": "array",
@@ -31961,7 +31961,7 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"mcp_server_name": {
 								"type": "string",
@@ -32031,7 +32031,7 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"content": {
 								"type": "array",
@@ -32097,7 +32097,7 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"name": {
 								"type": "string",
@@ -32142,7 +32142,7 @@
 						},
 						"required": ["id", "seq", "type", "created_at"],
 						"additionalProperties": false,
-						"description": "The agent's thinking text when the model returns it."
+						"description": "The agent is thinking."
 					},
 					{
 						"type": "object",
@@ -32330,7 +32330,7 @@
 												"items": {
 													"type": "string"
 												},
-												"description": "The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use."
+												"description": "The IDs of the tool call events waiting for an answer. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use."
 											}
 										},
 										"required": ["type", "event_ids"],
@@ -32348,7 +32348,7 @@
 								"items": {
 									"type": "string"
 								},
-								"description": "The tool calls that still waited for an answer when the turn ended, by tool_use_id. The end of the turn cancelled them: they can no longer be answered."
+								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "stop_reason"],
@@ -32445,7 +32445,7 @@
 								"items": {
 									"type": "string"
 								},
-								"description": "The tool calls that still waited for an answer when the turn ended, by tool_use_id. The end of the turn cancelled them: they can no longer be answered."
+								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
@@ -32584,11 +32584,15 @@
 							"tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
 							},
 							"result": {
 								"type": "string",
 								"enum": ["allow", "deny"]
+							},
+							"deny_message": {
+								"type": "string",
+								"maxLength": 4096
 							}
 						},
 						"required": ["type", "id", "tool_use_id", "result"],
@@ -32617,7 +32621,28 @@
 							"custom_tool_use_id": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 523
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								},
+								"minItems": 1
+							},
+							"is_error": {
+								"type": "boolean"
 							}
 						},
 						"required": ["type", "id", "custom_tool_use_id"],

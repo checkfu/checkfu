@@ -1015,6 +1015,7 @@ describe("CLI sessions:events and sessions connect", () => {
 								: [],
 					})
 					const sessionId = yield* createReadySession(cli)
+					const deploy = `sevt_${sessionId}_tool_tu_deploy`
 
 					const paused = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: "deploy it\n",
@@ -1022,15 +1023,14 @@ describe("CLI sessions:events and sessions connect", () => {
 					expect(paused.exitCode).toBe(ACTION_REQUIRED_EXIT_CODE)
 					expect(paused.stdout).not.toContain("Echo")
 					expect(paused.stderr).toContain("[status: idle (requires_action)]")
-					const shown = paused.stderr.indexOf("[waits] docs: deploy (tu_deploy)")
+					const shown = paused.stderr.indexOf(`[waits] docs: deploy (${deploy})`)
 					const args = paused.stderr.indexOf('  arguments: {"target":"prod"}')
 					const allow = paused.stderr.indexOf("  allow: checkfu sessions:events send")
 					expect(shown).toBeGreaterThan(-1)
 					expect(args).toBeGreaterThan(shown)
 					expect(allow).toBeGreaterThan(args)
-					expect(paused.stderr).toMatch(
-						/Turn 1 waits on tool call tu_deploy\. Answer it, then reconnect with --after \d+ to read the reply\./u,
-					)
+					expect(paused.stderr).toContain(`Turn 1 waits on tool call ${deploy}. Answer it`)
+					expect(paused.stderr).toMatch(/reconnect with --after \d+ to read the reply\./u)
 					expect(paused.stderr).not.toContain("did not start")
 
 					const answered = yield* cli.run([
@@ -1039,7 +1039,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"--session-id",
 						sessionId,
 						"--event",
-						'{"type":"user.tool_confirmation","tool_use_id":"tu_deploy","result":"allow"}',
+						`{"type":"user.tool_confirmation","tool_use_id":"${deploy}","result":"allow"}`,
 					])
 					expect(answered.exitCode).toBe(0)
 					const replayed = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
@@ -1077,11 +1077,13 @@ describe("CLI sessions:events and sessions connect", () => {
 								: [],
 					})
 					const sessionId = yield* createReadySession(cli)
+					const deploy = `sevt_${sessionId}_tool_tu_deploy`
+					const notify = `sevt_${sessionId}_tool_tu_notify`
 					const paused = yield* cli.run(["sessions", "connect", "--session-id", sessionId], {
 						stdin: "deploy it\n",
 					})
 					expect(paused.exitCode).toBe(ACTION_REQUIRED_EXIT_CODE)
-					expect(paused.stderr).toMatch(/Turn 1 waits on tool calls tu_deploy, tu_notify\./u)
+					expect(paused.stderr).toContain(`Turn 1 waits on tool calls ${deploy}, ${notify}.`)
 
 					const answered = yield* cli.run([
 						"sessions:events",
@@ -1089,7 +1091,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						"--session-id",
 						sessionId,
 						"--event",
-						'{"type":"user.tool_confirmation","tool_use_id":"tu_deploy","result":"allow"}',
+						`{"type":"user.tool_confirmation","tool_use_id":"${deploy}","result":"allow"}`,
 					])
 					expect(answered.exitCode).toBe(0)
 					const history = JSON.parse(
@@ -1114,15 +1116,15 @@ describe("CLI sessions:events and sessions connect", () => {
 						{ stdin: "" },
 					)
 					expect(atPause.exitCode).toBe(0)
-					expect(atPause.stderr).toContain("[waits] docs: deploy (tu_deploy)")
-					expect(atPause.stderr).toContain("[waits] docs: notify (tu_notify)")
+					expect(atPause.stderr).toContain(`[waits] docs: deploy (${deploy})`)
+					expect(atPause.stderr).toContain(`[waits] docs: notify (${notify})`)
 
 					const pastAnswer = yield* cli.run(
 						["sessions", "connect", "--session-id", sessionId, "--after", String(answerSeq)],
 						{ stdin: "" },
 					)
 					expect(pastAnswer.exitCode).toBe(0)
-					expect(pastAnswer.stderr).toContain("[waits] docs: notify (tu_notify)")
+					expect(pastAnswer.stderr).toContain(`[waits] docs: notify (${notify})`)
 					expect(pastAnswer.stderr).toContain('  arguments: {"channel":"ops"}')
 					expect(pastAnswer.stderr).not.toContain("tu_deploy")
 				}),

@@ -6,3 +6,11 @@ export const sessionEventId = (sessionId: string, position: string | number): st
 // Each send command records one user event, and its command ID survives view replay.
 export const submittedSessionEventId = (sessionId: string, commandId: string): string =>
 	sessionEventId(sessionId, `input_${commandId.slice(4)}`)
+
+export const toolUseEventId = (sessionId: string, toolUseId: string): string =>
+	sessionEventId(sessionId, `tool_${toolUseId}`)
+
+export const toolUseIdFromEvent = (sessionId: string, eventId: string): string => {
+	const prefix = toolUseEventId(sessionId, "")
+	return eventId.startsWith(prefix) ? eventId.slice(prefix.length) : eventId
+}
