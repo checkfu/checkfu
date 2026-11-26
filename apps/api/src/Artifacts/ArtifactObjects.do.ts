@@ -65,13 +65,10 @@ const makeWriter = (
 		),
 	putStream: (key, body, size, sha256) =>
 		bucket
-			.put(
-				key,
-				size === 0
-					? new Uint8Array(0)
-					: Stream.fromReadableStream({ evaluate: () => body, onError: storeError }),
-				{ sha256, contentLength: size },
-			)
+			.put(key, Stream.fromReadableStream({ evaluate: () => body, onError: storeError }), {
+				sha256,
+				contentLength: size,
+			})
 			.pipe(
 				Effect.as("stored" as const),
 				Effect.catch((error) =>

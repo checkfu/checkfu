@@ -159,7 +159,8 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 							if (empty === "mismatch") {
 								return empty
 							}
-							return yield* bucket.putStream(key, new ReadableStream(), 0, sha256)
+							yield* bucket.put(key, new Uint8Array(0), { sha256 })
+							return "stored" as const
 						}
 						return yield* bucket.putStream(key, body, size, sha256)
 					}),
