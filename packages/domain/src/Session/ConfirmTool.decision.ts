@@ -11,7 +11,7 @@ import { ToolConfirmationNotPending } from "./ToolConfirmationNotPending.rejecti
 export class ConfirmToolDecision extends Domain.Decision(ConfirmTool, {
 	reads: { call: ToolConfirmation, session: Session },
 	keyOf: (cmd) => ({ call: cmd.confirmation_id, session: cmd.session_id }),
-	decide: ({ call, session }, cmd) => {
+	decide: ({ call, session }, cmd, { now }) => {
 		const state = session.state
 		if (state._tag === "Uninitialized") {
 			return new SessionNotFound({ session_id: session.id })
@@ -38,6 +38,7 @@ export class ConfirmToolDecision extends Domain.Decision(ConfirmTool, {
 			),
 			session.record(
 				new UserToolConfirmation({
+					processed_at: now,
 					tool_use_id: cmd.tool_use_id,
 					result: cmd.result,
 					...(cmd.result === "deny" && cmd.deny_message !== ""

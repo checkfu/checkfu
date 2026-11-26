@@ -333,6 +333,11 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				name: "Listing",
 				reason: "is not declared in a file the model's file imports",
 			},
+			{
+				kind: "view",
+				name: "SessionTurnCompletion",
+				reason: "no rule reads it and no policy reacts to it",
+			},
 			{ kind: "query", name: "ListResources", reason: "what a query answers is not checked" },
 		])
 		expect(report.explored.truncated).toBe(false)

@@ -29,6 +29,10 @@ import {
 	ResourceId,
 	decodeToolUseIds,
 } from "@checkfu/domain/Session/SessionTypes"
+import {
+	SessionTurnCompletion,
+	sessionTurnKey,
+} from "@checkfu/domain/Session/SessionTurnCompletion.view"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
 import * as Context from "effect/Context"
@@ -234,7 +238,10 @@ const encodeSessionEventJson = Schema.encodeSync(
 
 const isSessionEvent = Schema.is(SessionEvent)
 
-export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): SessionEvent => {
+export const serializeSessionEvent = (
+	{ envelope, event }: SessionEventEntry,
+	completedAt?: DateTime.Utc | null,
+): SessionEvent => {
 	const { id, commandId, seq, at } = envelope
 	const { _tag: type, ...fields } = event
 	const input = type.startsWith("user.")
@@ -242,9 +249,13 @@ export const serializeSessionEvent = ({ envelope, event }: SessionEventEntry): S
 		input && (commandId.startsWith("evt:") || commandId.startsWith("evt_"))
 			? submittedSessionEventId(id, commandId)
 			: sessionEventId(id, seq)
-	const base = { id: eventId, seq, created_at: at, processed_at: input ? null : at }
+	const processedAt =
+		event._tag === "user.message" || event._tag === "user.interrupt" ? (completedAt ?? null) : at
+	const base = { id: eventId, seq, created_at: at, processed_at: processedAt }
 
 	switch (type) {
+		case "user.message":
+			return { ...base, type, content: event.content }
 		case "user.interrupt":
 		case "agent.thinking":
 			return { ...base, type }
@@ -311,6 +322,17 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const returnCustomToolResult = yield* ReturnCustomToolResultDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const completions = yield* SessionTurnCompletion
+		const publishedEvent = (entry: SessionEventEntry) => {
+			const event = entry.event
+			const turn =
+				event._tag === "user.message" || event._tag === "user.interrupt" ? event.turn : undefined
+			return turn === null || turn === undefined
+				? Effect.succeed(serializeSessionEvent(entry))
+				: Effect.map(completions.get(sessionTurnKey(entry.envelope.id, turn)), (finished) =>
+						serializeSessionEvent(entry, Option.getOrNull(finished)),
+					)
+		}
 		const digest = yield* Digest.Digest
 		const random = yield* SecureRandom.SecureRandom
 		const sseKeepaliveInterval = yield* SseKeepaliveInterval
@@ -765,14 +787,16 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 													sendOptions,
 												),
 											),
-											Effect.as({
+											Effect.map((receipt) => ({
 												type: "user.tool_confirmation" as const,
 												id: eventId,
-												processed_at: null,
+												processed_at:
+													receipt.events.find((event) => event._tag === "user.tool_confirmation")
+														?.processed_at ?? null,
 												tool_use_id: toolUseEventId(id, item.tool_use_id),
 												result: item.result,
 												...(item.deny_message === "" ? {} : { deny_message: item.deny_message }),
-											}),
+											})),
 										),
 									)
 								: item.type === "user.custom_tool_result"
@@ -790,14 +814,16 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 														sendOptions,
 													),
 												),
-												Effect.as({
+												Effect.map((receipt) => ({
 													type: "user.custom_tool_result" as const,
 													id: eventId,
-													processed_at: null,
+													processed_at:
+														receipt.events.find((event) => event._tag === "user.custom_tool_result")
+															?.processed_at ?? null,
 													custom_tool_use_id: toolUseEventId(id, item.custom_tool_use_id),
 													content: [{ type: "text" as const, text: item.text }],
 													...(item.is_error ? { is_error: true } : {}),
-												}),
+												})),
 											),
 										)
 									: item.type === "user.interrupt"
@@ -880,7 +906,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						order: query.order ?? "asc",
 					})
 					return listPage(
-						page.entries.map((entry) => serializeSessionEvent(entry)),
+						yield* Effect.forEach(page.entries, publishedEvent, { concurrency: 8 }),
 						page.cursor,
 					)
 				}).pipe(handled),
@@ -946,11 +972,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const frames = Stream.concat(catchUp, live).pipe(
 						Stream.takeUntil((entry) => entry.event._tag === "session.archived"),
 						Stream.filter((entry) => entry.envelope.seq > from),
-						Stream.map((entry) => {
-							const payload = serializeSessionEvent(entry)
+						Stream.mapEffect(publishedEvent),
+						Stream.map((payload) => {
 							return Sse.encoder.write({
 								_tag: "Event",
-								id: String(entry.envelope.seq),
+								id: String(payload.seq),
 								event: payload.type,
 								data: encodeSessionEventJson(payload),
 							})

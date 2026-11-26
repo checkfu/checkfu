@@ -214,11 +214,15 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 					})
 					expect(listRes.status).toBe(200)
 					const page1 = (yield* Effect.promise(() => listRes.json())) as {
-						data: ReadonlyArray<{ type: string }>
+						data: ReadonlyArray<{ type: string; processed_at: string | null }>
 						next_page: string | null
 					}
 					expect(page1.data).toHaveLength(3)
 					expect(page1.next_page).toBe("3")
+					expect(page1.data[0]).toMatchObject({
+						type: "user.message",
+						processed_at: expect.any(String),
+					})
 					const page2 = yield* sendRequest(apiFetch, {
 						method: "GET",
 						path: `/v1/sessions/${session.id}/events?limit=3&page=${page1.next_page}`,
@@ -912,11 +916,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			expect(Object.keys(byType.get(type)?.properties ?? {}).toSorted()).toEqual(
 				[...envelope, ...fields].toSorted(),
 			)
+			expect(byType.get(type)?.required).toContain("processed_at")
 		}
 		expect(byType.get("agent.message")?.required?.toSorted()).toEqual([
 			"content",
 			"created_at",
 			"id",
+			"processed_at",
 			"seq",
 			"type",
 		])

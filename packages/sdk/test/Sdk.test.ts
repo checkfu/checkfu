@@ -231,6 +231,7 @@ const sampleUserMessageEvent = (seq: number, text = `msg-${seq}`) => ({
 	seq,
 	type: "user.message",
 	created_at: ISO_NOW,
+	processed_at: ISO_NOW,
 	content: [{ type: "text", text }],
 })
 
@@ -239,6 +240,7 @@ const sampleArchivedEvent = (seq: number) => ({
 	seq,
 	type: "session.archived",
 	created_at: ISO_NOW,
+	processed_at: ISO_NOW,
 })
 
 const sseFrame = (event: { readonly seq: number; readonly type: string }) =>
@@ -451,11 +453,12 @@ describe("@checkfu/sdk", () => {
 									{
 										type: "user.message",
 										id: "evt_c1",
+										processed_at: null,
 										turn: 1,
 										queued: false,
 										content: [{ type: "text", text: "hi" }],
 									},
-									{ type: "user.interrupt", id: "evt_interrupt" },
+									{ type: "user.interrupt", id: "evt_interrupt", processed_at: null },
 								],
 							})
 						}
@@ -581,7 +584,7 @@ describe("@checkfu/sdk", () => {
 						{
 							status: 429,
 							body: apiErrorBody("rate_limit_error", "slow down", {
-								accepted: [{ type: "user.interrupt", id: "evt_interrupt" }],
+								accepted: [{ type: "user.interrupt", id: "evt_interrupt", processed_at: null }],
 								failed_index: 1,
 							}),
 							tag: "RateLimitError",
@@ -630,7 +633,9 @@ describe("@checkfu/sdk", () => {
 						if (err._tag === "RateLimitError") {
 							expect(err.requestId).toBe("req_err_456")
 							expect(err.requestID).toBe("req_err_456")
-							expect(err.accepted).toEqual([{ type: "user.interrupt", id: "evt_interrupt" }])
+							expect(err.accepted).toEqual([
+								{ type: "user.interrupt", id: "evt_interrupt", processed_at: null },
+							])
 							expect(err.failedIndex).toBe(1)
 						}
 					}
@@ -1870,7 +1875,10 @@ describe("@checkfu/sdk", () => {
 								{ "retry-after-ms": "1" },
 							)
 						}
-						return jsonResponse({ data: [{ type: "user.interrupt", id: "evt_interrupt" }] }, 200)
+						return jsonResponse(
+							{ data: [{ type: "user.interrupt", id: "evt_interrupt", processed_at: null }] },
+							200,
+						)
 					}) as typeof globalThis.fetch
 
 					yield* Effect.gen(function* () {

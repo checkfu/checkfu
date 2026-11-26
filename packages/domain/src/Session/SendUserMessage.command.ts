@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema"
 import { MessageText, PositiveInt, SessionEventFields } from "./SessionTypes.ts"
 
 export class UserMessage extends Domain.Event("user.message", {
+	turn: Schema.optionalKey(PositiveInt),
 	content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: MessageText })).check(
 		Schema.isMinLength(1),
 	),
