@@ -507,7 +507,10 @@ export const GitHubRepositoryResource = Schema.Struct({
 })
 export type GitHubRepositoryResource = typeof GitHubRepositoryResource.Type
 
-export const SessionMount = GitHubRepositoryResource
+export const SessionMount = GitHubRepositoryResource.mapFields((fields) => ({
+	...fields,
+	requires_token: Schema.optionalKey(Schema.Literal(true)),
+}))
 export type SessionMount = typeof SessionMount.Type
 
 export const mountsOverlap = (a: string, b: string): boolean =>

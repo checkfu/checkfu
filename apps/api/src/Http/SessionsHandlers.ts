@@ -198,7 +198,11 @@ const serializeResources = (
 	resources: SessionResources,
 	created_at: DateTime.Utc,
 ): ReadonlyArray<SessionResourceItem> =>
-	resources.map((resource) => ({ ...resource, created_at, updated_at: created_at }))
+	resources.map(({ requires_token: _requiresToken, ...resource }) => ({
+		...resource,
+		created_at,
+		updated_at: created_at,
+	}))
 
 const pinnedAgent = ({
 	agent_id,
@@ -567,6 +571,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						url: resource.url,
 						mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
 						checkout: resource.checkout ?? null,
+						...(resource.authorization_token === undefined
+							? {}
+							: { requires_token: true as const }),
 					}))
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
