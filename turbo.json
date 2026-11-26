@@ -19,11 +19,6 @@
 			"dependsOn": ["^typecheck"],
 			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/alchemy.run.ts"]
 		},
-		"@checkfu/domain#test": {
-			"dependsOn": ["^typecheck"],
-			"env": ["CHECKFU_PROVE"],
-			"passThroughEnv": ["GITHUB_ACTIONS"]
-		},
 		"@checkfu/cli#test": {
 			"dependsOn": ["^typecheck"],
 			"inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/package.json", "$TURBO_ROOT$/bunfig.toml"]

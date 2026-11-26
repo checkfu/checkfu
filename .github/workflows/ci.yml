@@ -81,8 +81,6 @@ jobs:
         with:
           turbo-cache: domain
       - run: bun x turbo run test --filter=@checkfu/domain -- --exclude test/Checkfu.verify.test.ts
-        env:
-          CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code
@@ -99,8 +97,6 @@ jobs:
         with:
           turbo-cache: domain-checkfu
       - run: bun x turbo run test --filter=@checkfu/domain -- test/Checkfu.verify.test.ts
-        env:
-          CHECKFU_PROVE: "1"
       - if: ${{ !cancelled() }}
         name: Fail if a test changed any tracked file
         run: git diff --exit-code

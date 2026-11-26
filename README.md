@@ -154,7 +154,7 @@ for await (const event of await client.sessions.events.stream(session.id)) {
 
 - `bun run generate`: Regenerate `openapi.json`, CLI, SDK, and MCP from `CheckfuApi`
 - `bun run check`: Check generated files, `oxfmt`, `oxlint`, directives, and `effect-tsgo`
-- `bun run test`: Run unit tests. CI also runs the Z3 proofs. Set `CHECKFU_PROVE=1` to include them locally.
+- `bun run test`: Run unit tests and Z3 proofs (`--filter=@checkfu/domain` for Z3 only)
 - `bun run test:bun` / `bun run test:workerd`: Bun and `workerd` integration tests
 - `bun run checkfu:build`: Build standalone binary at `apps/cli/dist/checkfu`
 
