@@ -12,6 +12,7 @@ import { PI_HARNESS_SETTINGS } from "../../src/Pi/PiContextBudget.ts"
 import type { PiDurableBackend } from "../../src/Pi/PiDurableEngine.ts"
 import { createCheckfuRegistry } from "../../src/Pi/PiRefusals.ts"
 import { CHECKFU_PI_DOCS } from "../../src/Pi/PiTurnUsage.ts"
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
 
 export interface InMemoryPiDurableBackend extends PiDurableBackend {
 	readonly storage: InMemoryStorage
@@ -38,6 +39,9 @@ class InstrumentedMemoryStorage extends MemoryStorage {
 		switch (write.type) {
 			case "entry":
 				storedWrites.push({ kind: write.value.kind, bytes: writtenBytes(write.value) })
+				break
+			case "task":
+				storedWrites.push({ kind: "task", bytes: writtenBytes(write.value) })
 				break
 			case "document.create":
 				this.#documentKinds.set(write.record.id, write.record.kind)
@@ -166,6 +170,7 @@ export const createInMemoryPiDurableBackend = async (
 	object: {
 		readonly storage?: InMemoryStorage
 		readonly reset?: PiDurableBackend["reset"]
+		readonly env?: ExecutionEnv
 	} = {},
 ): Promise<InMemoryPiDurableBackend> => {
 	const shared = object.storage ?? new InstrumentedMemoryStorage()
@@ -187,6 +192,7 @@ export const createInMemoryPiDurableBackend = async (
 				...PI_HARNESS_SETTINGS,
 				retry: { ...PI_HARNESS_SETTINGS.retry, baseDelayMs: retryBaseDelayMs },
 			},
+			...(object.env === undefined ? {} : { env: () => object.env }),
 		},
 		BACKGROUND_CONTEXT,
 	)

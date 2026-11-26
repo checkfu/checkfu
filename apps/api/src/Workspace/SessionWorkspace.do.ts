@@ -11,6 +11,10 @@ import type { WorkspaceToolCall, WorkspaceToolResult } from "./WorkspaceTools.ts
 const DISCARDED = "discarded"
 const NEWEST_TURN = "newest-turn"
 const WORKING_DIRECTORY = "/workspace"
+export const SCRIPT_OUTPUT_DIRECTORY = "/workspace/.scripts"
+
+const isScriptOutputPath = (path: string): boolean =>
+	path.startsWith(`${SCRIPT_OUTPUT_DIRECTORY}/`) && !path.split("/").includes("..")
 
 const failed = (text: string): WorkspaceToolResult => ({
 	content: [{ type: "text", text }],
@@ -80,6 +84,28 @@ export class SessionWorkspace extends Cloudflare.DurableObject<SessionWorkspace>
 						return (
 							result ?? failed("This turn has ended; the workspace no longer accepts its calls.")
 						)
+					}),
+				writeScriptOutput: (
+					path: string,
+					content: string | Uint8Array,
+					token: TurnToken,
+				): Effect.Effect<string | undefined> =>
+					Effect.promise(async () => {
+						if (!isScriptOutputPath(path)) {
+							return `Scripts can only save files under ${SCRIPT_OUTPUT_DIRECTORY}.`
+						}
+						if (storage.kv.get(DISCARDED) === true) {
+							return "The session has ended and its workspace was discarded."
+						}
+						const written = await fence.run(token, async () => {
+							const { fs } = await workspace()
+							await fs.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true })
+							await fs.writeFile(path, content)
+							return true
+						})
+						return written === undefined
+							? "This turn has ended; the workspace no longer accepts its calls."
+							: undefined
 					}),
 				discard: (): Effect.Effect<void> =>
 					Effect.promise(async () => {
