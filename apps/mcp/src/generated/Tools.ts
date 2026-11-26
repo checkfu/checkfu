@@ -1940,7 +1940,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 	{
 		name: "environments_updateEnvironment",
 		title: "Update an environment",
-		description: "Update an environment",
+		description:
+			"Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts.",
 		method: "POST",
 		path: "/v1/environments/{environment_id}",
 		readOnly: false,

@@ -1838,7 +1838,11 @@ const environmentsUpdateCommand = CommandMake(
 		),
 	},
 	(flags) => invokeGeneratedOperation(environmentsUpdateCommandSpec, flags),
-).pipe(CommandWithDescription("Update an environment (accepts flags and/or JSON/YAML on stdin)"))
+).pipe(
+	CommandWithDescription(
+		"Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts. (accepts flags and/or JSON/YAML on stdin)",
+	),
+)
 
 const sessionsArchiveCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "sessions archive",

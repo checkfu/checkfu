@@ -1,6 +1,7 @@
 import type { AgentTool, McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import type { McpToolOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { isJsonValue } from "@earendil-works/chord/json"
+import { renderToolSample } from "@earendil-works/pi-codemode/declarations"
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable"
 import * as Schema from "effect/Schema"
 import * as Option from "effect/Option"
@@ -16,6 +17,8 @@ import { schemaFault } from "./PiSchemaFault.ts"
 export const MCP_EXTENSION_PREFIX = "checkfu.mcp."
 
 export const MAX_TOOL_LIST_BYTES = 256 * 1024
+
+export const MAX_TOOL_CATALOG_BYTES = 1024 * 1024
 
 export const mcpToolPrefix = (server: string): string => `mcp__${server}__`
 
@@ -56,6 +59,69 @@ export const cachedTools = (text: string): McpServerTools =>
 		onSome: (tools) => ({ status: "listed", tools }),
 		onNone: () => ({ status: "unavailable", reason: "its stored tool list could not be read" }),
 	})
+
+const OPEN_SCHEMA: Schema.JsonObject = { type: "object" }
+const UNCHECKED_INPUT =
+	"The input schema this tool's server published could not be used, so arguments are sent to it unchecked."
+const TEXT_OUTPUT: Schema.JsonObject = { type: "string" }
+
+const declared = (tool: McpToolDescriptor) => {
+	const checked = schemaFault(tool.inputSchema) === null
+	const outputSchema =
+		tool.outputSchema !== undefined && schemaFault(tool.outputSchema) === null
+			? tool.outputSchema
+			: undefined
+	return {
+		description: checked ? tool.description : `${tool.description} ${UNCHECKED_INPUT}`.trim(),
+		parameters: checked ? tool.inputSchema : OPEN_SCHEMA,
+		outputSchema,
+	}
+}
+
+const utf8 = new TextEncoder()
+
+const catalogBytes = (server: string, tools: ReadonlyArray<McpToolDescriptor>): number =>
+	tools.reduce((total, tool) => {
+		const { description, parameters, outputSchema } = declared(tool)
+		const name = `${mcpToolPrefix(server)}${tool.name}`
+		const sample = renderToolSample({
+			name,
+			description,
+			inputSchema: parameters,
+			outputSchema: outputSchema ?? TEXT_OUTPUT,
+		})
+		return (
+			total + utf8.encode(JSON.stringify({ name, jsName: name, description: sample })).byteLength
+		)
+	}, 0)
+
+export interface McpServerEntry {
+	readonly binding: McpServerBinding
+	readonly tools: McpServerTools
+}
+
+export const withinCatalog = (
+	servers: ReadonlyArray<McpServerEntry>,
+): ReadonlyArray<McpServerEntry> => {
+	let total = 0
+	return servers.map((server) => {
+		if (server.tools.status !== "listed") {
+			return server
+		}
+		const bytes = catalogBytes(server.binding.name, server.tools.tools)
+		if (total + bytes > MAX_TOOL_CATALOG_BYTES) {
+			return {
+				...server,
+				tools: {
+					status: "unavailable",
+					reason: `the agent's combined tool catalog is too large: this server's tools would take it past the ${MAX_TOOL_CATALOG_BYTES} bytes a script can start with, after the servers declared before it. Declare fewer or smaller MCP servers on the agent`,
+				},
+			}
+		}
+		total += bytes
+		return server
+	})
+}
 
 export interface McpRegistered {
 	readonly binding: McpServerBinding
@@ -115,10 +181,6 @@ export type McpRegistry = ReturnType<typeof mcpRegistry>
 
 const isJsonObject = Schema.is(Schema.JsonObject)
 
-const OPEN_INPUT: Schema.JsonObject = { type: "object" }
-const UNCHECKED =
-	"The input schema this tool's server published could not be used, so arguments are sent to it unchecked."
-
 export type McpDispatch = (
 	binding: McpServerBinding,
 	tool: McpToolDescriptor,
@@ -138,15 +200,11 @@ export const mcpExtension = (
 		if (owner.name !== binding.name) {
 			continue
 		}
-		const checked = schemaFault(tool.inputSchema) === null
-		const outputSchema =
-			tool.outputSchema !== undefined && schemaFault(tool.outputSchema) === null
-				? tool.outputSchema
-				: undefined
+		const { description, parameters, outputSchema } = declared(tool)
 		registrations.push({
 			name,
-			description: checked ? tool.description : `${tool.description} ${UNCHECKED}`.trim(),
-			parameters: checked ? tool.inputSchema : OPEN_INPUT,
+			description,
+			parameters,
 			...(outputSchema === undefined ? {} : { structuredOutputSchema: outputSchema }),
 			deferred: true,
 			outputLimits: MODEL_TEXT_LIMITS,

@@ -8,6 +8,7 @@ import {
 	MAX_OUTPUT_TOTAL_BYTES,
 	SESSION_OUTPUTS_PATH,
 } from "./SessionOutputs.ts"
+import * as Schema from "effect/Schema"
 
 export type WorkspaceTool = PiTool
 export type WorkspaceToolCall = Required<PiToolCall>
@@ -19,12 +20,46 @@ const REPLAY_SAFE: ReadonlySet<string> = new Set(["read", "ls", "find", "grep"])
 
 const MEBIBYTE = 1024 * 1024
 
-const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths. Files you leave in ${SESSION_OUTPUTS_PATH} are published as this session's artifact each time your turn ends, so put there what the user should keep. The directory holds at most ${MAX_OUTPUT_FILES} files, ${MAX_OUTPUT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_OUTPUT_TOTAL_BYTES / MEBIBYTE} MiB in total, and at most ${MAX_OUTPUT_ENTRIES} files and folders counted together; beyond that, nothing is published. An empty directory publishes nothing either, so the last version stays.`
+const WORKSPACE_PROMPT = `You have a durable workspace that lasts for the whole session. Its working directory is /workspace. Use the read, ls, find, grep, write, edit and delete tools with absolute paths, and the bash tool to run commands. Files you leave in ${SESSION_OUTPUTS_PATH} are published as this session's artifact each time your turn ends, so put there what the user should keep. The directory holds at most ${MAX_OUTPUT_FILES} files, ${MAX_OUTPUT_FILE_BYTES / MEBIBYTE} MiB each and ${MAX_OUTPUT_TOTAL_BYTES / MEBIBYTE} MiB in total, and at most ${MAX_OUTPUT_ENTRIES} files and folders counted together; beyond that, nothing is published. An empty directory publishes nothing either, so the last version stays.`
+
+export const BASH_SECONDS = 120
+export const MAX_BASH_SECONDS = 600
+
+export const BASH_TOOL: WorkspaceTool = {
+	name: "bash",
+	description: `Run a command with bash in the session's Linux machine, which starts the first time this is called. \`cwd\` is the directory to run in, /workspace when left out. The machine and the file tools share /workspace, and /workspace is all the machine keeps: after a while without use it is put to sleep, and when it wakes every process has stopped and whatever was installed or written outside /workspace is gone, so keep what sets it up in a script there. A command does not see /mnt, so copy what it needs into /workspace first. git, node, python3, ripgrep and curl are installed, and only HTTP and HTTPS leave the machine, to the hosts the session's environment allows: clone over https, not ssh. stdout and stderr come back together, and only the end of a long output is returned: send it to a file and read that when you need all of it. \`timeout\` is in seconds, ${BASH_SECONDS} when left out and at most ${MAX_BASH_SECONDS}. A command still running then is stopped, so start a server in the background with its output sent to a file. Once the machine has started, list a very large directory with find in a command: the find tool walks at most 100,000 files and directories.`,
+	parameters: {
+		type: "object",
+		properties: {
+			command: { type: "string" },
+			cwd: { type: "string" },
+			timeout: { type: "integer", minimum: 1, maximum: MAX_BASH_SECONDS },
+		},
+		required: ["command"],
+		additionalProperties: false,
+	},
+}
+
+export const decodeBashToolArguments = Schema.decodeUnknownOption(
+	Schema.Struct({
+		command: Schema.String.check(Schema.isMinLength(1)),
+		cwd: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1))),
+		timeout: Schema.optionalKey(
+			Schema.Int.check(
+				Schema.isGreaterThanOrEqualTo(1),
+				Schema.isLessThanOrEqualTo(MAX_BASH_SECONDS),
+			),
+		),
+	}),
+)
 
 export const MAX_INLINE_IMAGE_BYTES = 1024 * 1024
 
 const RESULT_BYTES = 50 * 1024
 const RESULT_LINES = 2000
+
+export const COMMAND_OUTPUT_BYTES = RESULT_BYTES - 2 * 1024
+export const COMMAND_OUTPUT_LINES = RESULT_LINES - 10
 
 export const READ_PAGE_BYTES = 48 * 1024
 const READ_RESULT_BYTES = READ_PAGE_BYTES * 6 + 4 * 1024
@@ -106,7 +141,7 @@ export const asLiteral = (call: WorkspaceToolCall): WorkspaceToolCall =>
 		: call
 
 const GREP_DESCRIPTION =
-	"Search workspace text for a string, matched as written. Results include paths and line numbers and can include surrounding lines."
+	"Search workspace text for a string, matched as written. Results include paths and line numbers and can include surrounding lines. For a regular expression, or a large tree once the machine has started, run rg with bash."
 const GREP_QUERY = "Text to search for, matched as written."
 
 const asDeclared = (tool: WorkspaceTool): WorkspaceTool => {
@@ -128,9 +163,12 @@ const asDeclared = (tool: WorkspaceTool): WorkspaceTool => {
 
 export const workspaceToolDeclarations = async (): Promise<ReadonlyArray<WorkspaceTool>> => {
 	const { createPiTools } = await import("@cloudflare/computer/tools/pi-ai")
-	return createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools.map(
-		asDeclared,
-	)
+	return [
+		...createPiTools({ ...WORKSPACE_TOOL_OPTIONS, workspace: DECLARATIONS_ONLY }).tools.map(
+			asDeclared,
+		),
+		BASH_TOOL,
+	]
 }
 
 const INTERRUPTED: ToolExecutionResult = {
