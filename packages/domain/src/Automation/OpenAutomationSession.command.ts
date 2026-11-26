@@ -1,4 +1,5 @@
 import * as Domain from "@alchemy.run/domain"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { AgentArchivedError } from "../Agent/AgentArchived.rejection.ts"
 import { AgentNotFound } from "../Agent/AgentNotFound.rejection.ts"
@@ -13,6 +14,7 @@ import {
 import { SessionAlreadyExists, SessionCreated } from "../Session/CreateSession.command.ts"
 import { SessionStatusRunning, UserMessage } from "../Session/SendUserMessage.command.ts"
 import { SessionId } from "../Session/Session.id.ts"
+import { SessionResources } from "../Session/SessionResource.ts"
 import { MessageText, PositiveInt, SessionTitle } from "../Session/SessionTypes.ts"
 
 export class OpenAutomationSession extends Domain.Command("OpenAutomationSession", {
@@ -24,6 +26,7 @@ export class OpenAutomationSession extends Domain.Command("OpenAutomationSession
 		title: Schema.NullOr(SessionTitle),
 		text: MessageText,
 		mcp_server_credentials: Schema.optionalKey(McpServerCredentialsText),
+		resources: SessionResources.pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 	},
 	events: [SessionCreated, UserMessage, SessionStatusRunning],
 	rejects: [

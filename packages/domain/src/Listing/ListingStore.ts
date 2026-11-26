@@ -14,6 +14,7 @@ export const ListingKind = Schema.Literals([
 	"vault",
 	"vault_credential",
 	"webhook",
+	"memory_store",
 ])
 export type ListingKind = typeof ListingKind.Type
 

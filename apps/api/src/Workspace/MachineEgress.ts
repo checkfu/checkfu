@@ -29,9 +29,9 @@ export const isAllowedHost = (allowed: ReadonlyArray<string> | null, host: strin
 export const createMachineEgress =
 	(network: MachineNetwork) =>
 	async (request: Request): Promise<Response> => {
-		const { hostname } = new URL(request.url)
-		if (!isAllowedHost(network.allowedHosts(), hostname)) {
-			return new Response(notAllowed(hostname), { status: 403 })
+		const { host } = new URL(request.url)
+		if (!isAllowedHost(network.allowedHosts(), host)) {
+			return new Response(notAllowed(host), { status: 403 })
 		}
 		return network.fetch(new Request(request, { redirect: "manual" }))
 	}

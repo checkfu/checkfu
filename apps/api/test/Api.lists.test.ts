@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { RuntimeContext } from "alchemy/RuntimeContext"
 import type * as HttpServerRequest from "effect/http/HttpServerRequest"
 import type * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Schedule from "effect/Schedule"
@@ -18,7 +19,7 @@ import {
 type ApiFetch = Effect.Effect<
 	HttpServerResponse.HttpServerResponse,
 	never,
-	HttpServerRequest.HttpServerRequest
+	HttpServerRequest.HttpServerRequest | RuntimeContext
 >
 
 interface Resource {

@@ -25,7 +25,7 @@ import { createPiModels } from "../src/Pi/PiModels.ts"
 import { DEFAULT_REFUSAL_TEXT, PROVIDER_FAILURE_MESSAGE } from "../src/Pi/PiRefusals.ts"
 import {
 	AUTH_HEADERS,
-	TEST_API_KEY,
+	checkfuWithHarness,
 	extractLastUserText,
 	makeAssistantReply,
 	makePiDurableTestLayer,
@@ -34,6 +34,7 @@ import {
 	sendAndSettle,
 	sendRequest,
 	TestRuntimeContext,
+	TEST_API_KEY,
 } from "./helpers/ApiHarness.ts"
 import { makeArtifactStoreMemory } from "../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../src/Content/ArtifactLinks.ts"
@@ -200,7 +201,11 @@ describe("Anthropic Messages refusals and stream errors", () => {
 				Layer.provide(PiDurableHarnessLive),
 			),
 		).pipe(Layer.provide(executorLayer))
-		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive).pipe(
+		const HarnessLive = PiDurableHarnessLive.pipe(
+			Layer.provide(executorLayer),
+			Layer.provide(CheckfuLive),
+		)
+		const layer = Layer.mergeAll(makeWebhooksTestSupport().layer, CheckfuLive, HarnessLive).pipe(
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(makeArtifactStoreMemory().layer),
 			Layer.provideMerge(ArtifactLinksTest),
@@ -1063,15 +1068,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			})
 			const normalizedLayer = Layer.mergeAll(
 				makeWebhooksTestSupport().layer,
-				Checkfu.layer(
-					CheckfuHandlersLive.pipe(
-						Layer.provide(ArtifactBytesKept),
-						Layer.provide(SessionOutputsUnpublished),
-						Layer.provide(ListingStore.memory),
-						Layer.provide(WebhookEventsNoop),
-						Layer.provide(PiDurableHarnessLive),
-					),
-				).pipe(Layer.provide(normalizedExecutor)),
+				checkfuWithHarness(normalizedExecutor).pipe(Layer.provide(WebhookEventsNoop)),
 			).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),
@@ -1283,15 +1280,7 @@ describe("Anthropic Messages refusals and stream errors", () => {
 			})
 			const unnormalizedLayer = Layer.mergeAll(
 				makeWebhooksTestSupport().layer,
-				Checkfu.layer(
-					CheckfuHandlersLive.pipe(
-						Layer.provide(ArtifactBytesKept),
-						Layer.provide(SessionOutputsUnpublished),
-						Layer.provide(ListingStore.memory),
-						Layer.provide(WebhookEventsNoop),
-						Layer.provide(PiDurableHarnessLive),
-					),
-				).pipe(Layer.provide(unnormalizedExecutor)),
+				checkfuWithHarness(unnormalizedExecutor).pipe(Layer.provide(WebhookEventsNoop)),
 			).pipe(
 				Layer.provide(Domain.InMemory),
 				Layer.provideMerge(makeArtifactStoreMemory().layer),

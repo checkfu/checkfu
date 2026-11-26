@@ -30,6 +30,7 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 					environment_id: environment.id,
 					title: cmd.title,
 					mcp_server_credentials: cmd.mcp_server_credentials,
+					resources: cmd.resources,
 				}),
 			),
 		]

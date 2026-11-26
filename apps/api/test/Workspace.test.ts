@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { RESERVED_TOOL_NAMES } from "@checkfu/sdk/Api"
 import { allowedHostsOf } from "../src/Pi/PiDurableHarness.ts"
+import { mcpHostAllowed } from "@checkfu/domain/Mcp/McpServers"
 import { createMachineEgress } from "../src/Workspace/MachineEgress.ts"
 import { makeTurnFence } from "../src/Workspace/WorkspaceFence.ts"
 import type { FencedTurn, TurnToken } from "../src/Workspace/WorkspaceFence.ts"
@@ -312,5 +313,34 @@ describe("session workspace", () => {
 		expect(await reach(limited(false), "https://registry.npmjs.org/effect")).toBe(403)
 		expect(await reach(limited(true), "https://example.org/")).toBe(403)
 		expect(allowedHostsOf({ type: "cloud", networking: { type: "unrestricted" } })).toBeNull()
+	})
+
+	it("reads an allowed host the way the MCP servers' check does, port included", async () => {
+		const reach = async (allowed: ReadonlyArray<string>, url: string) =>
+			(
+				await createMachineEgress({
+					allowedHosts: () => allowed,
+					fetch: () => Promise.resolve(new Response("ok")),
+				})(new Request(url))
+			).status
+		const ported = ["registry.example:8443"]
+		expect(await reach(ported, "https://registry.example:8443/pkg")).toBe(200)
+		expect(await reach(ported, "https://registry.example/pkg")).toBe(403)
+		expect(await reach(["registry.example"], "https://registry.example:8443/pkg")).toBe(403)
+		expect(await reach(["registry.example"], "https://REGISTRY.example/pkg")).toBe(200)
+		for (const [host, url] of [
+			["registry.example:8443", "https://registry.example:8443/pkg"],
+			["registry.example", "https://registry.example:8443/pkg"],
+		] as const) {
+			const networking = {
+				type: "limited" as const,
+				allowed_hosts: [host],
+				allow_mcp_servers: false,
+				allow_package_managers: false,
+			}
+			expect(await reach([host], url)).toBe(
+				mcpHostAllowed(networking, new URL(url).host) ? 200 : 403,
+			)
+		}
 	})
 })

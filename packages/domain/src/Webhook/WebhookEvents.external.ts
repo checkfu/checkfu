@@ -13,6 +13,7 @@ export const WebhookResourceType = Schema.Literals([
 	"artifact",
 	"vault",
 	"vault_credential",
+	"memory_store",
 	"webhook",
 ])
 export type WebhookResourceType = typeof WebhookResourceType.Type

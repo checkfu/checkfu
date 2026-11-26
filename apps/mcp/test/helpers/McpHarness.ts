@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import {
@@ -17,7 +18,6 @@ import { boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as McpClient from "effect/ai/McpClient"
 import * as McpProtocol from "effect/ai/McpProtocol"
-import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
@@ -30,13 +30,14 @@ import * as Layer from "effect/Layer"
 import { ApiBinding } from "../../src/GeneratedRuntime.ts"
 import { CREDENTIAL_CHECK_PATH, MCP_PATH, makeMcpWebHandler } from "../../src/Server.ts"
 
-const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+const TEST_RUNTIME = {
 	Type: "Test",
 	id: "test",
 	env: {},
 	get: () => Effect.undefined,
 	set: (id: string) => Effect.succeed(id),
-})
+}
+const TestRuntimeContext = Layer.succeed(RuntimeContext, TEST_RUNTIME)
 
 export const TEST_API_KEY = "ck_mcp_test_secret"
 export const MCP_ORIGIN = "http://mcp.test"
@@ -58,6 +59,7 @@ export const makeTestServer = Effect.gen(function* () {
 				}),
 			interrupt: () => Effect.void,
 			discardWorkspace: () => Effect.void,
+			storeRepositoryToken: () => Effect.void,
 		}),
 	)
 	const listingStore = ListingStore.memory
@@ -92,6 +94,7 @@ export const makeTestServer = Effect.gen(function* () {
 		Layer.mergeAll(makeArtifactStoreMemory().layer, ArtifactLinksTest).pipe(
 			Layer.provide(Domain.InMemory),
 		),
+		HarnessLive,
 	).pipe(
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -116,6 +119,7 @@ export const makeTestServer = Effect.gen(function* () {
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(request),
 				),
+				Effect.provideService(RuntimeContext, TEST_RUNTIME),
 				Effect.map((response) => HttpServerResponse.toWeb(response)),
 			),
 		)

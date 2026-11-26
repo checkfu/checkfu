@@ -246,7 +246,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const session = yield* createIdleSession(apiFetch)
 					yield* sendAndSettle(apiFetch, session.id, ["Hello."], 1)
 					expect(workspaceCalls).toEqual([`prepare ${session.id} 1`])
-					expect(preparedWorkspaces).toEqual([{ sessionId: session.id, allowedHosts: null }])
+					expect(preparedWorkspaces).toEqual([
+						{ sessionId: session.id, repositories: [], allowedHosts: null },
+					])
 					expect(modelCalls).toBe(1)
 
 					preparations.push({ ok: false, interrupted: true })
@@ -1136,6 +1138,25 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						Effect.provideService(SessionView, laggingSessionViews),
 					)
 					const session = yield* createIdleSession(apiFetch)
+					const created = <A>(path: string, body: Readonly<Record<string, string>>) =>
+						Effect.flatMap(
+							sendRequest(apiFetch, { method: "POST", path, headers: AUTH_HEADERS, body }),
+							(res) => Effect.promise(() => res.json() as Promise<A>),
+						)
+					const agent = yield* created<{ id: string }>("/v1/agents", {
+						name: "Keyed",
+						model: "gpt-4o-mini",
+					})
+					const environment = yield* created<{ id: string }>("/v1/environments", { name: "Keyed" })
+					const keyedCreate = sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/sessions",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "lagging-retry" },
+						body: { agent: agent.id, environment_id: environment.id },
+					})
+					const keyed = yield* Effect.flatMap(keyedCreate, (res) =>
+						Effect.promise(() => res.json() as Promise<{ id: string }>),
+					)
 					yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: `/v1/sessions/${session.id}/events`,
@@ -1163,6 +1184,14 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						})
 					}
 					expect(waitCalls).toBe(3)
+					const retried = yield* keyedCreate
+					expect(retried.status).toBe(202)
+					expect(yield* Effect.promise(() => retried.json())).toEqual({
+						id: keyed.id,
+						type: "session",
+						pending: true,
+					})
+					waitCalls = 3
 
 					const missingRes = yield* sendRequest(apiFetch, {
 						method: "GET",
@@ -2248,6 +2277,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							environment_id: "env_1",
 							title: null,
 							mcp_server_credentials: "[]",
+							resources: [],
 						}),
 					)
 					expect(badAgent._tag).toBe("Failure")
@@ -2261,6 +2291,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							environment_id: overLimit,
 							title: null,
 							mcp_server_credentials: "[]",
+							resources: [],
 						}),
 					)
 					expect(badEnv._tag).toBe("Failure")
@@ -2817,6 +2848,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						agent_version: 1,
 						environment_id: "env_1",
 						title: null,
+						resources: [],
 						turn: 1,
 						usage: { input_tokens: 10, output_tokens: 5 },
 						created_at: at,
@@ -3392,6 +3424,67 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					expect(next.next_page).toBeNull()
 					expect(sentUserMessages).toContain("keyed batch")
 					expect(sentUserMessages).toContain("explicit batch")
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
+	it("names the agent, the agent version or the environment that does not exist", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "unused", 1, 1),
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const created = (
+						path: string,
+						body: { readonly name: string; readonly model?: string },
+					) =>
+						sendRequest(apiFetch, { method: "POST", path, headers: AUTH_HEADERS, body }).pipe(
+							Effect.flatMap((res) => Effect.promise(() => res.json() as Promise<{ id: string }>)),
+						)
+					const agent = yield* created("/v1/agents", { name: "Agent", model: "gpt-4o-mini" })
+					const environment = yield* created("/v1/environments", { name: "Env" })
+					const refusal = (body: {
+						readonly agent:
+							| string
+							| { readonly type: "agent"; readonly id: string; readonly version: number }
+						readonly environment_id: string
+					}) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: AUTH_HEADERS,
+							body,
+						}).pipe(
+							Effect.flatMap((res) =>
+								Effect.promise(async () => {
+									const { error } = (await res.json()) as { error: { message: string } }
+									return [res.status, error.message]
+								}),
+							),
+						)
+					expect(yield* refusal({ agent: "agent_gone", environment_id: environment.id })).toEqual([
+						404,
+						"Agent agent_gone not found.",
+					])
+					expect(yield* refusal({ agent: agent.id, environment_id: "env_gone" })).toEqual([
+						404,
+						"Environment env_gone not found.",
+					])
+					expect(yield* refusal({ agent: "agent_gone", environment_id: "env_gone" })).toEqual([
+						404,
+						"Agent agent_gone not found.",
+					])
+					expect(
+						yield* refusal({
+							agent: { type: "agent", id: agent.id, version: 7 },
+							environment_id: environment.id,
+						}),
+					).toEqual([404, `Agent ${agent.id} has no version 7.`])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {

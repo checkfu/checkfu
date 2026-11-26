@@ -5,7 +5,8 @@ import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { HeldSecret, PutMode, PutOutcome } from "../Connection/SecretCustody.ts"
-import { TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
+import { SkillReading } from "../Skills/SkillReader.ts"
+import { RepositoryMount, TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
 
 const TURN_OPERATION_PREFIX = "turn:"
 
@@ -124,8 +125,17 @@ export const PiHarnessCalls = {
 		result: Schema.Array(Schema.NullOr(Schema.String)),
 	},
 	prepareWorkspace: {
-		args: Schema.Tuple([Schema.String, TurnToken, Schema.NullOr(Schema.Array(Schema.String))]),
+		args: Schema.Tuple([
+			Schema.String,
+			TurnToken,
+			Schema.Array(RepositoryMount),
+			Schema.NullOr(Schema.Array(Schema.String)),
+		]),
 		result: WorkspacePreparation,
+	},
+	storeRepositoryToken: {
+		args: Schema.Tuple([Schema.String, Schema.String, Schema.String, Schema.Boolean]),
+		result: Schema.Void,
 	},
 	interruptWorkspace: { args: Schema.Tuple([Schema.String, TurnToken]), result: Schema.Void },
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
@@ -136,4 +146,5 @@ export const PiHarnessCalls = {
 	secretUsable: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	eraseSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Void },
 	sealVault: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	readSkill: { args: Schema.Tuple([Schema.String]), result: SkillReading },
 } as const

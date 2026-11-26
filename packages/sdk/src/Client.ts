@@ -1,3 +1,4 @@
+import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import * as Context from "effect/Context"
 import * as SecureRandom from "effect/crypto/SecureRandom"
 import * as Duration from "effect/Duration"
@@ -111,6 +112,8 @@ export interface PendingResolved {
 	readonly vault: Vault
 	readonly vault_credential: VaultCredential
 	readonly webhook: WebhookCreated
+	readonly memory_store: MemoryStoreSnapshot
+	readonly memory: MemorySnapshot
 }
 
 export type PendingResolvedResource = PendingResolved[PendingResourceType]
@@ -163,6 +166,10 @@ const retrievePending = (
 				}
 				return { ...found, signing_secret: pending.signing_secret }
 			})
+		case "memory_store":
+			return client.memoryStores.retrieve(pending.id, options)
+		case "memory":
+			return client.memoryStores.memories.retrieve(pending.memory_store_id, pending.id, options)
 		default: {
 			const unknown: { readonly type: unknown } = pending
 			return Effect.fail(

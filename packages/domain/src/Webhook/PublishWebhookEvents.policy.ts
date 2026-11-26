@@ -29,6 +29,10 @@ import { EnvironmentCreated } from "../Environment/CreateEnvironment.command.ts"
 import { EnvironmentDeleted } from "../Environment/DeleteEnvironment.command.ts"
 import { Environment } from "../Environment/Environment.aggregate.ts"
 import { EnvironmentUpdated } from "../Environment/UpdateEnvironment.command.ts"
+import { MemoryStoreArchived } from "../Memory/ArchiveMemoryStore.command.ts"
+import { MemoryStoreCreated } from "../Memory/CreateMemoryStore.command.ts"
+import { MemoryStoreDeleted } from "../Memory/DeleteMemoryStore.command.ts"
+import { MemoryStore } from "../Memory/MemoryStore.aggregate.ts"
 import { SessionStatusTerminated } from "../Session/ArchiveSession.command.ts"
 import { SessionStatusIdle } from "../Session/CommitModelReply.command.ts"
 import { SessionStatusRunning } from "../Session/SendUserMessage.command.ts"
@@ -39,7 +43,7 @@ import type { WebhookResourceType } from "./WebhookEvents.external.ts"
 export class PublishWebhookEvents extends Domain.Policy(
 	"PublishWebhookEvents",
 	{
-		from: [Agent, Environment, Session, Automation, Artifact],
+		from: [Agent, Environment, Session, Automation, Artifact, MemoryStore],
 		on: [
 			AgentCreated,
 			AgentUpdated,
@@ -64,6 +68,9 @@ export class PublishWebhookEvents extends Domain.Policy(
 			ArtifactPublished,
 			ArtifactUnpublished,
 			ArtifactDeleted,
+			MemoryStoreCreated,
+			MemoryStoreArchived,
+			MemoryStoreDeleted,
 		],
 	},
 	{
@@ -130,6 +137,10 @@ const notificationOf = ({
 				resource_id: automationRunId(source.id, event.run),
 				automation_id: source.id,
 			}
+		case "memory_store.created":
+		case "memory_store.archived":
+		case "memory_store.deleted":
+			return { event_type: event._tag, resource_type: "memory_store", resource_id: source.id }
 		case "artifact.created":
 		case "artifact.version_added":
 		case "artifact.published":

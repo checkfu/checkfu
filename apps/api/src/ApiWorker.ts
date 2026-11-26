@@ -20,6 +20,7 @@ import {
 	ConnectionExecutor,
 	CredentialSecretsLive,
 } from "./Connection/CredentialCustody.ts"
+import { ApiWorker } from "./Api.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
@@ -27,7 +28,6 @@ import { ArtifactObjectsLive, ArtifactStoreR2 } from "./Artifacts/ArtifactObject
 import { ArtifactVersionResolver } from "./Artifacts/ResolveArtifactVersion.ts"
 import { PublicationResolver } from "./Artifacts/ResolvePublication.ts"
 import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
-import { ApiWorker } from "./Api.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { WebhookListingQueryLive, vaultListingQueriesFrom } from "./Http/Listing.ts"
@@ -42,6 +42,9 @@ import { apiWorkerWebhookEgressProps } from "./Webhooks/WebhookEgressConfig.ts"
 import { WebhookEventsLive } from "./Webhooks/WebhookEventsLive.ts"
 import { WebhookFanoutContinuationDo, WebhookFanoutLive } from "./Webhooks/WebhookFanout.do.ts"
 import { WebhookSigningMasterKeyLive } from "./Webhooks/WebhookSigning.ts"
+import { SessionArtifactAccess } from "./SessionArtifactAccess.ts"
+import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
+import { SkillReader } from "./Skills/SkillReader.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -61,10 +64,16 @@ const PiHarnessExecutorLive = Layer.effect(
 					Effect.asVoid,
 					Effect.withSpan("PiHarness.abortTurn"),
 				),
-			prepareWorkspace: (sessionId, token, allowedHosts) =>
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
 				harnessCall(
-					Effect.suspend(() => harness.prepareWorkspace(sessionId, token, allowedHosts)),
+					Effect.suspend(() =>
+						harness.prepareWorkspace(sessionId, token, repositories, allowedHosts),
+					),
 				).pipe(Effect.withSpan("PiHarness.prepareWorkspace")),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				harnessCall(
+					Effect.suspend(() => harness.storeRepositoryToken(sessionId, resourceId, token, replace)),
+				).pipe(Effect.withSpan("PiHarness.storeRepositoryToken")),
 			interruptWorkspace: (sessionId, token) =>
 				harnessCall(Effect.suspend(() => harness.interruptWorkspace(sessionId, token))).pipe(
 					Effect.withSpan("PiHarness.interruptWorkspace"),
@@ -210,6 +219,25 @@ const VaultsLive = Vaults.layer(
 	Layer.provide(PlacedDurableObjects),
 )
 
+const SkillReaderLive = Layer.effect(
+	SkillReader,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			read: (markdown: string) =>
+				harnessCall(Effect.suspend(() => harness.readSkill(markdown))).pipe(
+					Effect.withSpan("PiHarness.readSkill"),
+					Effect.orDie,
+				),
+		}
+	}),
+)
+
+const HarnessLive = PiDurableHarnessLive.pipe(
+	Layer.provide(PiHarnessExecutorLive),
+	Layer.provide(CheckfuLive),
+)
+
 const PiPreviewSourceLive = Layer.effect(
 	SessionPreviewSource,
 	Effect.map(
@@ -231,10 +259,15 @@ const ApiWorkerLive = Layer.mergeAll(
 	CustomToolFaultsLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
+	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
 	Mac.layerWebCrypto,
-).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
+).pipe(
+	Layer.provideMerge(SkillReaderLive),
+	Layer.provideMerge(Digest.layerWebCrypto),
+	Layer.provideMerge(SecureRandom.layerWebCrypto),
+)
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,
@@ -276,10 +309,25 @@ export default ApiWorker.make(
 			Effect.provide(services),
 			Effect.provideService(RuntimeContext, yield* Cloudflare.Worker),
 		)
+		const memory = yield* SessionMemoryAccess.pipe(Effect.provide(services))
+		const artifacts = yield* SessionArtifactAccess.pipe(Effect.provide(services))
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),
 			resolvePublication: yield* PublicationResolver.pipe(Effect.provide(services)),
+			memoryMounts: (sessionId) => Effect.orDie(memory.memoryMounts(sessionId)),
+			memoryList: (sessionId, name, after) =>
+				Effect.orDie(memory.memoryList(sessionId, name, after)),
+			memoryRead: (sessionId, name, path) => Effect.orDie(memory.memoryRead(sessionId, name, path)),
+			memoryWrite: (sessionId, name, path, content, exclusive) =>
+				Effect.orDie(memory.memoryWrite(sessionId, name, path, content, exclusive)),
+			memoryRemove: (sessionId, name, path, expected) =>
+				Effect.orDie(memory.memoryRemove(sessionId, name, path, expected)),
+			artifactMounts: (sessionId) => Effect.orDie(artifacts.artifactMounts(sessionId)),
+			artifactFiles: (sessionId, mountPath) =>
+				Effect.orDie(artifacts.artifactFiles(sessionId, mountPath)),
+			artifactRead: (sessionId, mountPath, path, offset, length) =>
+				Effect.orDie(artifacts.artifactRead(sessionId, mountPath, path, offset, length)),
 		})
 	}),
 )

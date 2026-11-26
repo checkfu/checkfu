@@ -7,6 +7,7 @@ import { placedStub, placement } from "../Placement.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { piHarnessAiBindingProps } from "./PiModels.ts"
 import { SandboxesCloudflare, sandboxEgress } from "../Sandbox/CloudflareSandboxes.do.ts"
+import { readSkill } from "../Skills/ReadSkill.ts"
 import { SessionWorkspace, SessionWorkspaceLive } from "../Workspace/SessionWorkspace.do.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
 import { customToolFaults } from "./PiToolSchema.ts"
@@ -45,10 +46,13 @@ export default PiHarnessWorker.make(
 			answerCall: (conversation, toolUseId, answer) =>
 				Effect.orDie(piSession(conversation).answerCall(toolUseId, answer)),
 			customToolFaults: (tools, taken) => Effect.sync(() => customToolFaults(tools, taken)),
-			prepareWorkspace: (sessionId, token, allowedHosts) =>
-				Effect.orDie(workspace(sessionId).prepare(token, allowedHosts)),
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				Effect.orDie(workspace(sessionId).prepare(token, repositories, allowedHosts)),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				Effect.orDie(workspace(sessionId).storeRepositoryToken(resourceId, token, replace)),
 			interruptWorkspace: (sessionId, token) => Effect.orDie(workspace(sessionId).interrupt(token)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard(sessionId)),
+			readSkill: (markdown) => Effect.promise(() => readSkill(markdown)),
 			fetch: yield* sandboxEgress((sessionId, request) =>
 				Effect.orDie(workspace(sessionId).fetch(request)),
 			),

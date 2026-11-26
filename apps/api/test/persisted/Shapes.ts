@@ -503,10 +503,12 @@ const SIGNED_LINKS: ReadonlyArray<PersistedShape> = [
 ]
 
 const API_CALLS: ReadonlyArray<PersistedShape> = Object.entries(ApiCalls).flatMap(
-	([method, { args, result, error }]): ReadonlyArray<PersistedShape> => [
-		{ id: `api-call:Api.${method}/args`, kind: "api-call", schema: args },
-		{ id: `api-call:Api.${method}/result`, kind: "api-call", schema: result },
-		{ id: `api-call:Api.${method}/error`, kind: "api-call", schema: error },
+	([method, call]): ReadonlyArray<PersistedShape> => [
+		{ id: `api-call:Api.${method}/args`, kind: "api-call", schema: call.args },
+		{ id: `api-call:Api.${method}/result`, kind: "api-call", schema: call.result },
+		...("error" in call
+			? [{ id: `api-call:Api.${method}/error`, kind: "api-call" as const, schema: call.error }]
+			: []),
 	],
 )
 

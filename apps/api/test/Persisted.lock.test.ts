@@ -84,7 +84,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 		() =>
 			Effect.sync(() => {
 				expect(registryProblems()).toEqual([])
-				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(11)
+				expect(persistedShapes.filter((shape) => shape.kind === "state").length).toBe(13)
 				expect(persistedShapes.map((shape) => shape.id)).toEqual(
 					expect.arrayContaining([
 						"saga-input:Checkfu.RunTurn",
@@ -114,6 +114,11 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shapes
 						"event:Vaults.Credential/vault_credential.created",
 						"command-reply:Vaults/CreateCredential",
 						"view:Vaults.CredentialView@v0",
+						"state:Checkfu.MemoryStore",
+						"state:Checkfu.Memory",
+						"event:Checkfu.Memory/memory.written",
+						"event:Checkfu.MemoryStore/memory_store.memory_added",
+						"command-reply:Checkfu/WriteMemory",
 						"pi-doc:checkfu.active-usage",
 						"pi-doc:checkfu.settled-usage",
 						"pi-doc:checkfu.session-system-context",
@@ -226,6 +231,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 							agent_id: "agent_1",
 							agent_version: 1,
 							environment_id: "env_1",
+							resources: [],
 							turn: 1,
 							input: ["hi"],
 							__cause: {
@@ -406,7 +412,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 			}),
 	)
 
-	it.effect("locks the arguments and the result of every harness Worker call", () =>
+	it.effect("locks the arguments and the result of every call between the Workers", () =>
 		Effect.gen(function* () {
 			expect(
 				persistedShapes
@@ -426,14 +432,18 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					"prepareWorkspace",
 					"putSecret",
 					"readOutputs",
+					"readSkill",
 					"recoverTurn",
 					"runTurn",
 					"sealVault",
 					"secretUsable",
-				].flatMap((method) => [
-					`harness-call:PiHarness.${method}/args`,
-					`harness-call:PiHarness.${method}/result`,
-				]),
+					"storeRepositoryToken",
+				]
+					.flatMap((method) => [
+						`harness-call:PiHarness.${method}/args`,
+						`harness-call:PiHarness.${method}/result`,
+					])
+					.toSorted(),
 			)
 			const id = "harness-call:PiHarness.abortTurn/args"
 			const sent = lockWith({ [id]: [["sess_1", "turn:1"]] })
@@ -492,7 +502,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 		}),
 	)
 
-	it.effect("locks viewing link claims and every call the content Worker makes to the API", () =>
+	it.effect("locks viewing link claims and every call another Worker makes to the API", () =>
 		Effect.gen(function* () {
 			const idsOf = (kind: PersistedShape["kind"]) =>
 				persistedShapes
@@ -500,14 +510,26 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					.map((shape) => shape.id)
 					.toSorted()
 			expect(idsOf("signed-link")).toEqual(["signed-link:ArtifactLink/claims"])
-			expect(idsOf("api-call")).toEqual([
-				"api-call:Api.resolveArtifactVersion/args",
-				"api-call:Api.resolveArtifactVersion/error",
-				"api-call:Api.resolveArtifactVersion/result",
-				"api-call:Api.resolvePublication/args",
-				"api-call:Api.resolvePublication/error",
-				"api-call:Api.resolvePublication/result",
-			])
+			expect(idsOf("api-call")).toEqual(
+				[
+					"api-call:Api.resolveArtifactVersion/args",
+					"api-call:Api.resolveArtifactVersion/error",
+					"api-call:Api.resolveArtifactVersion/result",
+					"api-call:Api.resolvePublication/args",
+					"api-call:Api.resolvePublication/error",
+					"api-call:Api.resolvePublication/result",
+					...[
+						"artifactFiles",
+						"artifactMounts",
+						"artifactRead",
+						"memoryList",
+						"memoryMounts",
+						"memoryRead",
+						"memoryRemove",
+						"memoryWrite",
+					].flatMap((method) => [`api-call:Api.${method}/args`, `api-call:Api.${method}/result`]),
+				].toSorted(),
+			)
 			const claims = "signed-link:ArtifactLink/claims"
 			const signed = lockWith({ [claims]: ["default.art_1.1.1800000000"] })
 			expect(yield* lockProblems(signed)).toEqual([])
@@ -605,6 +627,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 					agent_id: "agent_1",
 					agent_version: 1,
 					environment_id: "env_1",
+					resources: [],
 					turn: 2,
 					harness_generation: 0,
 					input: ["hi"],
@@ -612,6 +635,7 @@ it.layer(PersistedServicesLive, { excludeTestServices: true })("persisted shape 
 				})
 				expect(queued.turn).toBe(2)
 				expect(queued.last_reply_turn).toBeUndefined()
+				expect(queued.resources).toEqual([])
 			}),
 	)
 

@@ -47,6 +47,7 @@ const PlannedWorkspace = SessionWorkspace.make(
 			readOutputs: planOnly,
 			writeScriptOutput: planOnly,
 			prepare: planOnly,
+			storeRepositoryToken: planOnly,
 			discard: planOnly,
 		}),
 	),
@@ -205,6 +206,7 @@ describe("PiProviderRuntime", () => {
 								runTurn: () => Effect.die(new Error("plan only")),
 								abortTurn: () => Effect.succeed(false),
 								prepareWorkspace: () => Effect.succeed({ ok: true }),
+								storeRepositoryToken: () => Effect.void,
 								interruptWorkspace: () => Effect.void,
 								listOutputs: () => Effect.succeed({ ok: true, files: [] }),
 								readOutputs: () => Effect.succeed([]),
@@ -216,6 +218,7 @@ describe("PiProviderRuntime", () => {
 								pauseUsage: () => Effect.die(new Error("plan only")),
 								answerCall: () => Effect.succeed("gone" as const),
 								customToolFaults: () => Effect.succeed([]),
+								readSkill: () => Effect.die(new Error("plan only")),
 							})
 						}).pipe(Effect.provide(providerLayer)),
 					)

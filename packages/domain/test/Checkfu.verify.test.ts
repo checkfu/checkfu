@@ -54,6 +54,7 @@ import { SendUserMessage } from "../src/Session/SendUserMessage.command.ts"
 import { Session } from "../src/Session/Session.aggregate.ts"
 import { addToolUseId, removeToolUseId } from "../src/Session/SessionTypes.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
+import { SessionResourceId } from "../src/Session/SessionResource.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { TurnInput } from "../src/Session/TurnInput.view.ts"
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -63,6 +64,11 @@ import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
 import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
+import { Memory } from "../src/Memory/Memory.aggregate.ts"
+import { MemoryIndex } from "../src/Memory/MemoryIndex.view.ts"
+import { MemoryStore } from "../src/Memory/MemoryStore.aggregate.ts"
+import { MemoryStoreView } from "../src/Memory/MemoryStoreView.view.ts"
+import { MemoryView } from "../src/Memory/MemoryView.view.ts"
 import {
 	AdmitSession,
 	BoundedAgentId,
@@ -81,6 +87,14 @@ class CheckfuLifecycleApi extends Domain.Api("CheckfuLifecycleApi", {
 	],
 	views: ["AgentView", "AgentVersionByNumberView", "EnvironmentView", "SessionView"],
 }) {}
+
+const REPOSITORY = {
+	id: SessionResourceId.make("sesrsc_post_1"),
+	type: "github_repository" as const,
+	url: "https://github.com/acme/api",
+	mount_path: "/workspace/api",
+	checkout: { type: "branch" as const, name: "main" },
+}
 
 const STANDING = {
 	"Agent.StatusIsKnown": "proved",
@@ -194,6 +208,21 @@ const STANDING = {
 	"AutomationCapacity.SlotsChangeOneAtATime": "proved",
 	"CreateAgent.NewAgentKeepsItsDeclaredServers": "proved",
 	"CreateAgent.NewAgentKeepsItsDeclaredTools": "proved",
+	"MemoryStore.StatusIsKnown": "proved",
+	"MemoryStore.NamedExactlyWhenCreated": "proved",
+	"MemoryStore.HoldsNoMoreThanItsLimit": "proved",
+	"MemoryStore.EveryHeldMemoryChangedTheLayout": "proved",
+	"MemoryStore.CreatedStoreNeverReturnsToUninitialized": "proved",
+	"MemoryStore.ArchivedStoreNeverReactivates": "proved",
+	"MemoryStore.DeletedStoreStaysDeleted": "proved",
+	"MemoryStore.OnlyAnActiveStoreChangesWhatItHolds": "proved",
+	"MemoryStore.CountMovesByAtMostOne": "proved",
+	"MemoryStore.TheLayoutChangesExactlyWhenTheCountDoes": "proved",
+	"MemoryStore.UpdateKeepsWhatItDoesNotName": "proved",
+	"Memory.StatusIsKnown": "proved",
+	"Memory.PlacedExactlyWhenWritten": "proved",
+	"Memory.AMemoryNeverLeavesItsPlace": "proved",
+	"Memory.VersionGrowsByOneOrNotAtAll": "proved",
 	"CreateAgent.NewAgentStartsAtVersionOne": "proved",
 	"UpdateAgent.ChangeMintsNextVersionOrNoOps": "proved",
 	"UpdateAgent.UnchangedConfigMintsNothing": "proved",
@@ -217,6 +246,13 @@ const STANDING = {
 	"OpenAutomationSession.OpeningAnAutomationSessionLeavesAgentAndEnvironmentUnchanged": "proved",
 	"UpdateAutomation.AnUpdateNeedsTheCurrentRevisionOfALiveAutomation": "proved",
 	"UpdateAutomation.OnlyANewScheduleOnAnActiveAutomationRestartsIt": "proved",
+	"WriteMemory.OnlyAnActiveStoreIsWritten": "proved",
+	"WriteMemory.AWriteLeavesTheMemoryPresentWithItsContent": "proved",
+	"WriteMemory.ANewMemoryCountsOnceAndWithinTheLimit": "proved",
+	"WriteMemory.ANewPathCommitsOnlyAtTheLayoutItWasCheckedAgainst": "proved",
+	"WriteMemory.AnAbsentPreconditionNeverOverwrites": "proved",
+	"DeleteMemory.ADeleteRemovesOnePresentMemory": "proved",
+	"Checkfu.APresentMemoryIsInAStoreThatWasCreated": "proved",
 	"Checkfu.EverySessionReferencesExistingAgentVersion": "checked",
 	"Checkfu.EverySessionReferencesKnownEnvironment": "checked",
 	"Checkfu.HostedViewsMatchAggregates": "checked",
@@ -225,6 +261,10 @@ const STANDING = {
 	"Checkfu.ReservedSlotsEqualLiveAutomations": "checked",
 	"Checkfu.EveryArtifactVersionIsWithinItsArtifactsHead": "checked",
 	"Checkfu.EveryArtifactVersionIsRecorded": "checked",
+	"Checkfu.AStoreCountsItsPresentMemories": "checked",
+	"Checkfu.MemoryViewsMatchMemories": "checked",
+	"Checkfu.TheIndexListsEachStoresPresentMemories": "checked",
+	"Checkfu.MemoryStoreViewsMatchStores": "checked",
 	"Checkfu.ASessionIsAdmitted": "reached",
 	"Checkfu.AnAdmittedSessionCompletesATurn": "reached",
 	"Checkfu.EveryTurnSettles": "checked",
@@ -240,6 +280,7 @@ const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
 		discardWorkspace: () => Effect.void,
+		storeRepositoryToken: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
 				thinking: null,
@@ -297,6 +338,12 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"PublishArtifact",
 			"UnpublishArtifact",
 			"ClaimArtifactIdempotencyKey",
+			"CreateMemoryStore",
+			"UpdateMemoryStore",
+			"ArchiveMemoryStore",
+			"DeleteMemoryStore",
+			"WriteMemory",
+			"DeleteMemory",
 		])
 		expect(hostedCommands).not.toContain("CreateSession")
 		expect(hostedCommands).not.toContain("CreateAutomation")
@@ -310,6 +357,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"AutomationView",
 			"AutomationRunView",
 			"ArtifactVersionView",
+			"MemoryStoreView",
+			"MemoryView",
+			"MemoryIndex",
 		])
 		const report = await Effect.runPromise(
 			Verify.model(Checkfu, {
@@ -553,6 +603,8 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							Agent: yield* readAggregate(Agent),
 							Environment: yield* readAggregate(Environment),
 							Session: yield* readAggregate(Session),
+							MemoryStore: yield* readAggregate(MemoryStore),
+							Memory: yield* readAggregate(Memory),
 							AgentView: yield* readView(AgentView),
 							AgentVersionByNumberView: yield* readView(AgentVersionByNumberView),
 							EnvironmentView: yield* readView(EnvironmentView),
@@ -564,6 +616,9 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							AutomationRunView: yield* readView(AutomationRunView),
 							Artifact: yield* readAggregate(Artifact),
 							ArtifactVersionView: yield* readView(ArtifactVersionView),
+							MemoryStoreView: yield* readView(MemoryStoreView),
+							MemoryView: yield* readView(MemoryView),
+							MemoryIndex: yield* readView(MemoryIndex),
 						}
 					})
 
@@ -606,6 +661,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 							environment_id: BoundedEnvironmentId.make(envRef.id),
 							title: "Pinned v1",
 							mcp_server_credentials: "[]",
+							resources: [REPOSITORY],
 						}),
 					)
 					yield* recordStep("admitted-v1")
@@ -758,6 +814,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				AutomationViewRevisionMatchesAutomation: true,
 				EveryArtifactVersionIsRecorded: true,
 				ReservedSlotsEqualLiveAutomations: true,
+				AStoreCountsItsPresentMemories: true,
+				MemoryViewsMatchMemories: true,
+				TheIndexListsEachStoresPresentMemories: true,
+				MemoryStoreViewsMatchStores: true,
 			})
 		}
 
@@ -954,6 +1014,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
 			ReservedSlotsEqualLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -972,6 +1036,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
 			ReservedSlotsEqualLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 
 		const untampered = evaluateCheckfuInvariants(results.finalWorld)
@@ -1015,6 +1083,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
 			ReservedSlotsEqualLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -1031,6 +1103,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
 			ReservedSlotsEqualLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
 		expect(
 			evaluateCheckfuInvariants({
@@ -1052,6 +1128,17 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			AutomationViewRevisionMatchesAutomation: true,
 			EveryArtifactVersionIsRecorded: true,
 			ReservedSlotsEqualLiveAutomations: true,
+			AStoreCountsItsPresentMemories: true,
+			MemoryViewsMatchMemories: true,
+			TheIndexListsEachStoresPresentMemories: true,
+			MemoryStoreViewsMatchStores: true,
 		})
+
+		expect(
+			results.finalWorld.SessionView.find((row) => row.id === "sess_post_v1")?.state.resources,
+		).toEqual([REPOSITORY])
+		expect(
+			results.finalWorld.TurnInput.find((row) => row.id === "sess_post_v1")?.state.resources,
+		).toEqual([REPOSITORY])
 	})
 })

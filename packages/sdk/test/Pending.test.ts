@@ -48,6 +48,12 @@ const poll = {
 	requestOptions: { maxRetries: 0 },
 } as const
 
+const memoryReceipt = {
+	id: "res_1",
+	type: "memory",
+	memory_store_id: "store_1",
+	pending: true,
+} as const
 const credentialReceipt = Schema.decodeSync(PendingCredential)({
 	id: "res_1",
 	type: "vault_credential",
@@ -130,6 +136,18 @@ const helpers = {
 		reads: "/v1/webhooks",
 		effect: (client) => client.waitForPending(webhookReceipt, poll),
 		promise: (client) => client.waitForPending(webhookReceipt, poll),
+	},
+	memory_store: {
+		reads: "/v1/memory_stores/res_1",
+		effect: (client) =>
+			client.waitForPending({ id: "res_1", type: "memory_store", pending: true }, poll),
+		promise: (client) =>
+			client.waitForPending({ id: "res_1", type: "memory_store", pending: true }, poll),
+	},
+	memory: {
+		reads: "/v1/memory_stores/store_1/memories/res_1",
+		effect: (client) => client.waitForPending(memoryReceipt, poll),
+		promise: (client) => client.waitForPending(memoryReceipt, poll),
 	},
 } satisfies { readonly [K in PendingResourceType]: Helper }
 

@@ -1,6 +1,8 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { SessionArtifactCalls } from "./Workspace/SessionArtifacts.ts"
+import { SessionMemoryCalls } from "./Workspace/SessionMemory.ts"
 
 export class ArtifactVersionNotReady extends Schema.TaggedError<
 	ArtifactVersionNotReady,
@@ -24,14 +26,20 @@ export const ApiCalls = {
 		result: Schema.NullOr(ResolvedPublication),
 		error: ArtifactVersionNotReady,
 	},
+	...SessionMemoryCalls,
+	...SessionArtifactCalls,
 } as const
 
 type Calls = typeof ApiCalls
 
+type ErrorOf<Call> = Call extends { readonly error: { readonly Type: infer Failure } }
+	? Failure
+	: never
+
 export type ApiShape = {
 	readonly [Method in keyof Calls]: (
 		...args: Calls[Method]["args"]["Type"]
-	) => Effect.Effect<Calls[Method]["result"]["Type"], Calls[Method]["error"]["Type"]>
+	) => Effect.Effect<Calls[Method]["result"]["Type"], ErrorOf<Calls[Method]>>
 }
 
 export class ApiWorker extends Cloudflare.Worker<ApiWorker, ApiShape>()("ApiWorker") {}

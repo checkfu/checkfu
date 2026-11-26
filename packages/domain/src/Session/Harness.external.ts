@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import { SessionId } from "./Session.id.ts"
+import { RepositoryToken, SessionResourceId, SessionResources } from "./SessionResource.ts"
 import {
 	ErrorMessage,
 	ErrorType,
@@ -59,6 +60,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			agent_id: ResourceId,
 			agent_version: PositiveInt,
 			environment_id: ResourceId,
+			resources: SessionResources,
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
 			system_context: Schema.optionalKey(Schema.String),
@@ -80,6 +82,15 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 		args: {
 			session_id: SessionId,
 			turn: PositiveInt,
+		},
+		error: HarnessUnavailable,
+	},
+	storeRepositoryToken: {
+		args: {
+			session_id: SessionId,
+			resource_id: SessionResourceId,
+			authorization_token: RepositoryToken,
+			replace: Schema.Boolean,
 		},
 		error: HarnessUnavailable,
 	},
@@ -161,6 +172,7 @@ export const boundedHarness = <R = never>(
 				readonly agent_id: string
 				readonly agent_version: number
 				readonly environment_id: string
+				readonly resources: SessionResources
 				readonly turn: number
 				readonly input: ReadonlyArray<string>
 				readonly system_context?: string
@@ -173,6 +185,12 @@ export const boundedHarness = <R = never>(
 			readonly interrupt: (args: {
 				readonly session_id: SessionId
 				readonly turn: number
+			}) => Effect.Effect<void, HarnessUnavailable>
+			readonly storeRepositoryToken: (args: {
+				readonly session_id: SessionId
+				readonly resource_id: SessionResourceId
+				readonly authorization_token: RepositoryToken
+				readonly replace: boolean
 			}) => Effect.Effect<void, HarnessUnavailable>
 			readonly discardWorkspace: (args: { readonly session_id: SessionId }) => Effect.Effect<void>
 		},
@@ -201,6 +219,7 @@ export const boundedHarness = <R = never>(
 					Effect.flatMap(clampHarnessReply),
 				),
 			interrupt: adapter.interrupt,
+			storeRepositoryToken: adapter.storeRepositoryToken,
 			discardWorkspace: adapter.discardWorkspace,
 		})),
 	)

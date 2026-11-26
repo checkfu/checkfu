@@ -14,6 +14,7 @@ import { MessageText } from "../src/Session/SessionTypes.ts"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { EnvironmentId } from "../src/Environment/Environment.id.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { MemoryStoreId } from "../src/Memory/MemoryStore.id.ts"
 import { BoundedAgentId, BoundedEnvironmentId } from "../src/Session/AdmitSession.command.ts"
 import { Harness } from "../src/Session/Harness.external.ts"
 import { SessionId } from "../src/Session/Session.id.ts"
@@ -28,6 +29,7 @@ import type { WebhookEventPublication } from "../src/Webhook/WebhookEvents.exter
 const HarnessStubLayer = Harness.toLayer(
 	Effect.succeed({
 		interrupt: () => Effect.void,
+		storeRepositoryToken: () => Effect.void,
 		discardWorkspace: () => Effect.void,
 		runTurn: () =>
 			Effect.succeed({
@@ -88,6 +90,7 @@ describe("PublishWebhookEvents policy", () => {
 					environment_id: BoundedEnvironmentId.make(envId),
 					title: "Session 1",
 					mcp_server_credentials: "[]",
+					resources: [],
 				})
 				yield* domain.ReserveArtifact({ artifact_id: artifactId })
 				yield* domain.CreateArtifact({
@@ -123,6 +126,16 @@ describe("PublishWebhookEvents policy", () => {
 					}),
 				)
 
+				const memory_store_id = MemoryStoreId.make("memst_webhooks")
+				yield* domain.CreateMemoryStore({
+					memory_store_id,
+					name: "Reports",
+					description: "Stores report context.",
+				})
+				yield* domain.ArchiveMemoryStore({ memory_store_id })
+				yield* domain.ArchiveMemoryStore({ memory_store_id })
+				yield* domain.DeleteMemoryStore({ memory_store_id })
+
 				// Allow asynchronous in-memory policy delivery to settle.
 				for (let i = 0; i < 10; i++) {
 					yield* Effect.yieldNow
@@ -134,6 +147,16 @@ describe("PublishWebhookEvents policy", () => {
 				expect([...byType.keys()]).not.toContain("session.created")
 				expect(byType.has("artifact.created")).toBe(true)
 				expect(byType.has("artifact.published")).toBe(true)
+
+				expect(
+					published.flatMap(({ event_type, resource_id, resource_type }) =>
+						resource_type === "memory_store" ? [{ event_type, resource_id }] : [],
+					),
+				).toEqual([
+					{ event_type: "memory_store.created", resource_id: memory_store_id },
+					{ event_type: "memory_store.archived", resource_id: memory_store_id },
+					{ event_type: "memory_store.deleted", resource_id: memory_store_id },
+				])
 
 				const runEvents = published.filter((event) =>
 					event.event_type.startsWith("automation_run."),
