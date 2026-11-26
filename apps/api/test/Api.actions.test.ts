@@ -455,7 +455,7 @@ describe("tool calls that wait on an answer", () => {
 		)
 	}, 30_000)
 
-	it("runs a read-only tool, and one the agent allows, without asking", async () => {
+	it("asks before running a read-only tool and honors an explicit always_allow policy", async () => {
 		await world((call) =>
 			Effect.gen(function* () {
 				const id = yield* session(call, [
@@ -467,14 +467,16 @@ describe("tool calls that wait on an answer", () => {
 					},
 				])
 				yield* send(call, id, [message("search")])
-				const first = yield* until(call, id, ended, "search did not end")
-				expect(find(first, "agent.mcp_tool_use")).toMatchObject({
-					name: "search",
-					evaluated_permission: "allow",
-				})
+				const first = yield* until(call, id, waiting(1), "search did not pause")
+				const search = find(first, "agent.mcp_tool_use")
+				expect(search).toMatchObject({ name: "search", evaluated_permission: "ask" })
+				expect((yield* send(call, id, [confirm(search.tool_use_id, "allow")])).status).toBe(200)
+				yield* until(call, id, ended, "search did not end")
 				yield* send(call, id, [message("deploy")])
-				const all = yield* until(call, id, (e) => idles(e).length >= 2, "deploy did not end")
-				expect(waiting(1)(all)).toBe(false)
+				const all = yield* until(call, id, (e) => idles(e).length >= 3, "deploy did not end")
+				expect(
+					all.find((e) => e.type === "agent.mcp_tool_use" && e.name === "deploy"),
+				).toMatchObject({ evaluated_permission: "allow" })
 				expect(ran).toEqual(["prod"])
 			}),
 		)

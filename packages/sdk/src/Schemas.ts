@@ -144,7 +144,7 @@ export const McpToolset = Schema.Struct({
 	mcp_server_name: McpServerName,
 	default_config: Schema.optionalKey(PermissionConfig).annotate({
 		description:
-			"Applies to every tool of the server without its own config. Without either, a tool the server marks read-only runs and every other tool asks.",
+			"Applies to tools without their own configuration. MCP tools require confirmation by default.",
 	}),
 	configs: Schema.optionalKey(
 		Schema.Array(
