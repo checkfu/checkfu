@@ -20,7 +20,12 @@ const makeOwner = () => {
 	let beforeList: Effect.Effect<void> = Effect.void
 	let duringUpload: Effect.Effect<void> = Effect.void
 	const bucket: ArtifactBucketWriter<never> = {
-		verifyStream: () => Effect.succeed("stored" as const),
+		verifyStream: (body, size) =>
+			Effect.promise(async () =>
+				(await new Response(body).arrayBuffer()).byteLength === size
+					? ("stored" as const)
+					: ("mismatch" as const),
+			),
 		putStream: (key) =>
 			Effect.andThen(
 				Effect.suspend(() => duringUpload),
@@ -219,5 +224,35 @@ describe("artifact owner", () => {
 				yield* owner.release(ID, 1)
 				expect(objects.size).toBe(3)
 			}),
+	)
+
+	it.effect("writes a new digest once when two uploads of it race, and checks the second", () =>
+		Effect.gen(function* () {
+			const { owner, puts, setDuringUpload } = makeOwner()
+			const release = yield* Deferred.make<void>()
+			setDuringUpload(Deferred.await(release))
+			const key = artifactBlobKey(SCOPE, ID, "a".repeat(64))
+			const first = yield* Effect.forkChild(
+				owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1),
+			)
+			const second = yield* Effect.forkChild(
+				owner.putBlob(ID, "a".repeat(64), new Blob(["x"]).stream(), 1),
+			)
+			yield* Effect.yieldNow
+			yield* Deferred.succeed(release, undefined)
+			expect([yield* Fiber.join(first), yield* Fiber.join(second)]).toEqual(["stored", "stored"])
+			expect(puts.filter((put) => put === key)).toHaveLength(1)
+		}),
+	)
+
+	it.effect("refuses an upload declared empty whose body is not", () =>
+		Effect.gen(function* () {
+			const { owner, objects } = makeOwner()
+			expect(yield* owner.putBlob(ID, "e".repeat(64), new Blob(["not empty"]).stream(), 0)).toBe(
+				"mismatch",
+			)
+			expect(objects.size).toBe(0)
+			expect(yield* owner.putBlob(ID, "e".repeat(64), new Blob([]).stream(), 0)).toBe("stored")
+		}),
 	)
 })

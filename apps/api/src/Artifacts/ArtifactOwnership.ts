@@ -71,6 +71,24 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 	const uploads = Semaphore.makeUnsafe(UPLOAD_SLOTS)
 	const exclusive = <A, E, R2>(effect: Effect.Effect<A, E, R2>) =>
 		uploads.withPermits(UPLOAD_SLOTS)(lock.withPermit(effect))
+	const blobLocks = new Map<string, { readonly lock: Semaphore.Semaphore; holders: number }>()
+	const perBlob = <A, E, R2>(key: string, effect: Effect.Effect<A, E, R2>) =>
+		Effect.acquireUseRelease(
+			Effect.sync(() => {
+				const entry = blobLocks.get(key) ?? { lock: Semaphore.makeUnsafe(1), holders: 0 }
+				entry.holders += 1
+				blobLocks.set(key, entry)
+				return entry
+			}),
+			(entry) => entry.lock.withPermit(effect),
+			(entry) =>
+				Effect.sync(() => {
+					entry.holders -= 1
+					if (entry.holders === 0) {
+						blobLocks.delete(key)
+					}
+				}),
+		)
 
 	const putMissing = (key: string, body: Uint8Array | string, options: ArtifactPutOptions) =>
 		Effect.flatMap(bucket.has(key), (stored) =>
@@ -130,9 +148,22 @@ export const makeArtifactOwner = <R>(ports: ArtifactOwnerPorts<R>) => {
 					return yield* new ArtifactPurged({ artifact_id: artifactId })
 				}
 				const key = artifactBlobKey(scope, artifactId, sha256)
-				return yield* (yield* bucket.has(key))
-					? bucket.verifyStream(body, size, sha256)
-					: bucket.putStream(key, body, size, sha256)
+				return yield* perBlob(
+					key,
+					Effect.gen(function* () {
+						if (yield* bucket.has(key)) {
+							return yield* bucket.verifyStream(body, size, sha256)
+						}
+						if (size === 0) {
+							const empty = yield* bucket.verifyStream(body, 0, sha256)
+							if (empty === "mismatch") {
+								return empty
+							}
+							return yield* bucket.putStream(key, new ReadableStream(), 0, sha256)
+						}
+						return yield* bucket.putStream(key, body, size, sha256)
+					}),
+				)
 			}),
 		)
 

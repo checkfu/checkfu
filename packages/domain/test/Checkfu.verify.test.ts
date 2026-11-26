@@ -239,6 +239,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			"RunAutomation",
 			"ReserveArtifact",
 			"CreateArtifact",
+			"OpenArtifact",
 			"AddArtifactVersion",
 			"DeleteArtifact",
 			"PublishArtifact",
