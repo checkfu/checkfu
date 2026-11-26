@@ -165,7 +165,7 @@ export default defineConfig({
 			},
 		},
 		{
-			files: ["**/test/**/*.ts"],
+			files: ["**/test/**/*.{ts,tsx}"],
 			rules: {
 				"quality/no-chained-type-assertions": "off",
 				"typescript/no-unsafe-type-assertion": "off",
