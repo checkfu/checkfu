@@ -77,7 +77,7 @@
 						}
 					},
 					{
-						"include": ["**/packages/sdk/src/Api.ts"],
+						"include": ["**/packages/sdk/src/Api.ts", "**/packages/domain/src/**/*.external.ts"],
 						"options": {
 							"diagnosticSeverity": {
 								"leakingRequirements": "off"

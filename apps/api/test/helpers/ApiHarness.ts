@@ -27,6 +27,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
@@ -52,6 +53,14 @@ import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
+
+export const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+	Type: "Test",
+	id: "test",
+	env: {},
+	get: () => Effect.undefined,
+	set: (id: string) => Effect.succeed(id),
+})
 
 export const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
@@ -355,6 +364,7 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(Digest.layerWebCrypto),
 		Layer.provideMerge(SecureRandom.layerWebCrypto),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
+		Layer.provideMerge(TestRuntimeContext),
 	)
 
 	return {

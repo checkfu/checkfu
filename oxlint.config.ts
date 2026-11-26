@@ -226,7 +226,7 @@ export default defineConfig({
 			},
 		},
 		{
-			files: ["packages/sdk/src/Api.ts"],
+			files: ["packages/sdk/src/Api.ts", "packages/domain/src/**/*.external.ts"],
 			rules: {
 				"effecttsgo/leaking-requirements": "off",
 			},

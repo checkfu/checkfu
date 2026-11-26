@@ -27,6 +27,7 @@ import {
 import {
 	AUTH_HEADERS,
 	TEST_API_KEY,
+	TestRuntimeContext,
 	createIdleSession,
 	extractLastUserText,
 	makeAssistantReply,
@@ -227,6 +228,7 @@ describe("interrupted turns and turn recovery", () => {
 			),
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -378,6 +380,7 @@ describe("interrupted turns and turn recovery", () => {
 			),
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -564,6 +567,7 @@ describe("interrupted turns and turn recovery", () => {
 			),
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
@@ -664,6 +668,7 @@ describe("interrupted turns and turn recovery", () => {
 			Layer.provideMerge(Layer.succeed(HarnessTurnTimeout, "1 second")),
 			Layer.provide(Domain.InMemory),
 			Layer.provideMerge(Digest.layerWebCrypto),
+			Layer.provideMerge(TestRuntimeContext),
 			Layer.provideMerge(SecureRandom.layerWebCrypto),
 			Layer.provideMerge(
 				ConfigProvider.layer(
