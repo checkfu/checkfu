@@ -2145,7 +2145,15 @@ describe("CLI sessions:events and sessions connect", () => {
 						id: "sess_subproc",
 						type: "session",
 						status: "idle",
-						agent: { id: "agent_1", version: 1 },
+						agent: {
+							id: "agent_1",
+							type: "agent",
+							version: 1,
+							name: "Assistant",
+							model: { id: "gpt-6.2-sol" },
+							system: null,
+							description: null,
+						},
 						environment_id: "env_1",
 						title: null,
 						turn: 0,
@@ -2986,7 +2994,15 @@ describe("CLI sessions:events and sessions connect", () => {
 							status: "running",
 							turn: 1,
 							usage: { input_tokens: 0, output_tokens: 0 },
-							agent: { id: "agt_pty", version: 1 },
+							agent: {
+								id: "agt_pty",
+								type: "agent",
+								version: 1,
+								name: "Assistant",
+								model: { id: "gpt-6.2-sol" },
+								system: null,
+								description: null,
+							},
 							environment_id: "env_pty",
 							title: null,
 							created_at: "2026-11-22T00:00:00.000Z",
@@ -3016,7 +3032,11 @@ describe("CLI sessions:events and sessions connect", () => {
 					req.on("end", () => {
 						postedEventBodies.push(body)
 						res.writeHead(200, { "content-type": "application/json" })
-						res.end(JSON.stringify({ data: [{ type: "user.interrupt" }] }))
+						res.end(
+							JSON.stringify({
+								data: [{ type: "user.interrupt", id: "evt_interrupt", processed_at: null }],
+							}),
+						)
 					})
 					return
 				}
@@ -4399,7 +4419,15 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						status: "idle",
 						turn: 0,
 						usage: { input_tokens: 0, output_tokens: 0 },
-						agent: { id: "agt_env", version: 1 },
+						agent: {
+							id: "agt_env",
+							type: "agent",
+							version: 1,
+							name: "Assistant",
+							model: { id: "gpt-6.2-sol" },
+							system: null,
+							description: null,
+						},
 						environment_id: "env_1",
 						title: null,
 						created_at: "2026-11-22T00:00:00.000Z",
