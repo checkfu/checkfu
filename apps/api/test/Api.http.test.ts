@@ -138,7 +138,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						environment_id: string
 					}
 					expect(session.id).toMatch(/^sess_/)
-					expect(session.agent).toEqual({ id: agentV1.id, version: 2 })
+					expect(session.agent).toMatchObject({ type: "agent", id: agentV1.id, version: 2 })
 
 					const streamRes = yield* sendRequest(apiFetch, {
 						method: "GET",

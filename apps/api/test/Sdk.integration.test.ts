@@ -374,7 +374,7 @@ describe("@checkfu/sdk live API integration", () => {
 										environment_id: env.id,
 									}),
 								)
-								expect(session.agent).toEqual({ id: agent.id, version: 1 })
+								expect(session.agent).toMatchObject({ type: "agent", id: agent.id, version: 1 })
 								const listedSessions = async () => {
 									const ids: Array<string> = []
 									for await (const entry of client.sessions.list({ agent_id: agent.id })) {

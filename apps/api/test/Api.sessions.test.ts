@@ -2611,7 +2611,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const encoded = encodeEvent(mapped)
 					expect(encoded).toMatchObject({
 						id:
-							"event_id" in generated && generated.event_id !== undefined
+							generated !== undefined && "event_id" in generated && generated.event_id !== undefined
 								? generated.event_id
 								: `sevt_sess_generated_${seq}`,
 						seq,
@@ -2656,12 +2656,12 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							},
 						})
 
-					const created = yield* create(["first", "second"])
+					const created = yield* create(["first"])
 					expect(created.status).toBe(201)
 					const session = (yield* Effect.promise(() => created.json())) as { id: string }
 					expect(session).toMatchObject({ status: "running", turn: 1 })
 
-					const replay = yield* create(["first", "second"])
+					const replay = yield* create(["first"])
 					expect(replay.status).toBe(201)
 					expect(yield* Effect.promise(() => replay.json())).toEqual(session)
 					const conflict = yield* create(["different"])
@@ -2675,16 +2675,15 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const { data } = (yield* Effect.promise(() => listed.json())) as {
 						data: ReadonlyArray<{ type: string; content: ReadonlyArray<{ text: string }> }>
 					}
-					expect(data.slice(0, 3).map(({ type }) => type)).toEqual([
+					expect(data.slice(0, 2).map(({ type }) => type)).toEqual([
 						"user.message",
 						"session.status_running",
-						"user.message",
 					])
 					expect(
 						data
 							.filter(({ type }) => type === "user.message")
 							.map(({ content }) => content[0]?.text),
-					).toEqual(["first", "second"])
+					).toEqual(["first"])
 				}).pipe(Effect.scoped, Effect.provide(layer)),
 			)
 		} finally {
@@ -2808,7 +2807,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						created_at: string
 					}
 					expect(sess1.id).toMatch(/^sess_/)
-					expect(sess1.agent).toEqual({ id: agent.id, version: 1 })
+					expect(sess1.agent).toMatchObject({ type: "agent", id: agent.id, version: 1 })
 
 					const updateAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",

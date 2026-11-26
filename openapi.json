@@ -6415,16 +6415,65 @@
 											"type": "object",
 											"properties": {
 												"id": {
-													"type": "string"
+													"type": "string",
+													"minLength": 1
+												},
+												"type": {
+													"type": "string",
+													"enum": ["agent"]
 												},
 												"version": {
 													"type": "integer",
 													"minimum": 1,
 													"maximum": 9007199254740991
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1
+												},
+												"model": {
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["id"],
+													"additionalProperties": false
+												},
+												"system": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"description": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
 												}
 											},
-											"required": ["id", "version"],
-											"additionalProperties": false
+											"required": [
+												"id",
+												"type",
+												"version",
+												"name",
+												"model",
+												"system",
+												"description"
+											],
+											"additionalProperties": false,
+											"description": "The pinned agent configuration used by the session."
 										}
 									},
 									"required": [
@@ -6954,8 +7003,8 @@
 													"required": ["type", "content"],
 													"additionalProperties": false
 												},
-												"maxItems": 8,
-												"description": "User messages to send when the session is created, in order."
+												"maxItems": 1,
+												"description": "A text user message to send when the session is created."
 											},
 											"agent_version": {
 												"type": "integer",
@@ -7056,8 +7105,8 @@
 													"required": ["type", "content"],
 													"additionalProperties": false
 												},
-												"maxItems": 8,
-												"description": "User messages to send when the session is created, in order."
+												"maxItems": 1,
+												"description": "A text user message to send when the session is created."
 											},
 											"agent_version": {
 												"type": "integer",
@@ -7108,7 +7157,7 @@
 					"repeatArrayField": {
 						"field": "initial_events",
 						"flag": "initial-event",
-						"description": "Initial user message as JSON, YAML, or @file (repeatable, up to 8)"
+						"description": "Initial user message as JSON, YAML, or @file"
 					},
 					"examples": [
 						{
@@ -7263,16 +7312,65 @@
 														"type": "object",
 														"properties": {
 															"id": {
-																"type": "string"
+																"type": "string",
+																"minLength": 1
+															},
+															"type": {
+																"type": "string",
+																"enum": ["agent"]
 															},
 															"version": {
 																"type": "integer",
 																"minimum": 1,
 																"maximum": 9007199254740991
+															},
+															"name": {
+																"type": "string",
+																"minLength": 1
+															},
+															"model": {
+																"type": "object",
+																"properties": {
+																	"id": {
+																		"type": "string",
+																		"minLength": 1
+																	}
+																},
+																"required": ["id"],
+																"additionalProperties": false
+															},
+															"system": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"description": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
 															}
 														},
-														"required": ["id", "version"],
-														"additionalProperties": false
+														"required": [
+															"id",
+															"type",
+															"version",
+															"name",
+															"model",
+															"system",
+															"description"
+														],
+														"additionalProperties": false,
+														"description": "The pinned agent configuration used by the session."
 													}
 												},
 												"required": [
@@ -7752,16 +7850,65 @@
 											"type": "object",
 											"properties": {
 												"id": {
-													"type": "string"
+													"type": "string",
+													"minLength": 1
+												},
+												"type": {
+													"type": "string",
+													"enum": ["agent"]
 												},
 												"version": {
 													"type": "integer",
 													"minimum": 1,
 													"maximum": 9007199254740991
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1
+												},
+												"model": {
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["id"],
+													"additionalProperties": false
+												},
+												"system": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"description": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
 												}
 											},
-											"required": ["id", "version"],
-											"additionalProperties": false
+											"required": [
+												"id",
+												"type",
+												"version",
+												"name",
+												"model",
+												"system",
+												"description"
+											],
+											"additionalProperties": false,
+											"description": "The pinned agent configuration used by the session."
 										}
 									},
 									"required": [
@@ -8212,16 +8359,65 @@
 											"type": "object",
 											"properties": {
 												"id": {
-													"type": "string"
+													"type": "string",
+													"minLength": 1
+												},
+												"type": {
+													"type": "string",
+													"enum": ["agent"]
 												},
 												"version": {
 													"type": "integer",
 													"minimum": 1,
 													"maximum": 9007199254740991
+												},
+												"name": {
+													"type": "string",
+													"minLength": 1
+												},
+												"model": {
+													"type": "object",
+													"properties": {
+														"id": {
+															"type": "string",
+															"minLength": 1
+														}
+													},
+													"required": ["id"],
+													"additionalProperties": false
+												},
+												"system": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"description": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
 												}
 											},
-											"required": ["id", "version"],
-											"additionalProperties": false
+											"required": [
+												"id",
+												"type",
+												"version",
+												"name",
+												"model",
+												"system",
+												"description"
+											],
+											"additionalProperties": false,
+											"description": "The pinned agent configuration used by the session."
 										}
 									},
 									"required": [

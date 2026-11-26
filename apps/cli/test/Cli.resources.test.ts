@@ -501,7 +501,7 @@ describe("CLI help, errors, and resource commands", () => {
 						status: string
 					}
 					expect(session.id).toMatch(/^sess_/)
-					expect(session.agent).toEqual({ id: agentId, version: 1 })
+					expect(session.agent).toMatchObject({ type: "agent", id: agentId, version: 1 })
 					expect(session.environment_id).toBe(envId)
 					expect(session.title).toBe("CLI Session")
 					expect(session.status).toBe("idle")

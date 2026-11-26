@@ -1916,8 +1916,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										required: ["type", "content"],
 										additionalProperties: false,
 									},
-									maxItems: 8,
-									description: "User messages to send when the session is created, in order.",
+									maxItems: 1,
+									description: "A text user message to send when the session is created.",
 								},
 								agent_version: {
 									type: "integer",
@@ -2019,8 +2019,8 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 										required: ["type", "content"],
 										additionalProperties: false,
 									},
-									maxItems: 8,
-									description: "User messages to send when the session is created, in order.",
+									maxItems: 1,
+									description: "A text user message to send when the session is created.",
 								},
 								agent_version: {
 									type: "integer",

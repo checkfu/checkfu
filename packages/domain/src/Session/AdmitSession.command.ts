@@ -36,7 +36,7 @@ export class AdmitSession extends Domain.Command("AdmitSession", {
 		agent_version: Schema.NullOr(PositiveInt),
 		environment_id: BoundedEnvironmentId,
 		title: Schema.NullOr(SessionTitle),
-		initial_messages: Schema.optionalKey(Schema.Array(MessageText).check(Schema.isMaxLength(8))),
+		initial_message: Schema.optionalKey(MessageText),
 	},
 	events: [SessionCreated, UserMessage, SessionStatusRunning],
 	rejects: [

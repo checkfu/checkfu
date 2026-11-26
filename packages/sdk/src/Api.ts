@@ -437,8 +437,8 @@ const AutomationAgentReference = AgentReference.annotate({
 const CreateSessionCommonFields = {
 	initial_events: Schema.optionalKey(
 		Schema.Array(Schema.Struct({ type: Schema.Literal("user.message"), content: TextBlocks }))
-			.check(Schema.isMaxLength(8))
-			.annotate({ description: "User messages to send when the session is created, in order." }),
+			.check(Schema.isMaxLength(1))
+			.annotate({ description: "A text user message to send when the session is created." }),
 	),
 	agent_version: Schema.optionalKey(
 		PositiveInt.annotate({ description: "Optional pinned agent version" }),
@@ -573,7 +573,17 @@ export type EnvironmentDeleted = typeof EnvironmentDeleted.Type
 
 export const SessionResource = Schema.Struct({
 	...Struct.omit(SessionSnapshot.fields, ["agent_id", "agent_version"]),
-	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
+	agent: Schema.Struct({
+		...Struct.pick(AgentSnapshot.fields, [
+			"id",
+			"type",
+			"version",
+			"name",
+			"model",
+			"system",
+			"description",
+		]),
+	}).annotate({ description: "The pinned agent configuration used by the session." }),
 })
 export type Session = typeof SessionResource.Type
 
@@ -1332,7 +1342,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					repeatArrayField: {
 						field: "initial_events",
 						flag: "initial-event",
-						description: "Initial user message as JSON, YAML, or @file (repeatable, up to 8)",
+						description: "Initial user message as JSON, YAML, or @file",
 					},
 					examples: [
 						{

@@ -2,6 +2,7 @@ import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
+import type { AgentVersionSnapshot } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
@@ -125,10 +126,28 @@ const eventBatchFingerprint = (
 		),
 	)
 
-const serializeSession = ({ agent_id, agent_version, ...snapshot }: SessionSnapshot) => ({
-	...snapshot,
-	agent: { id: agent_id, version: agent_version },
+const pinnedAgent = ({
+	agent_id,
+	type,
+	version,
+	name,
+	model,
+	system,
+	description,
+}: AgentVersionSnapshot) => ({
+	id: agent_id,
+	type,
+	version,
+	name,
+	model,
+	system,
+	description,
 })
+
+const serializeSession = (
+	{ agent_id: _agentId, agent_version: _agentVersion, ...snapshot }: SessionSnapshot,
+	agent: AgentVersionSnapshot,
+) => ({ ...snapshot, agent: pinnedAgent(agent) })
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
 
@@ -276,11 +295,14 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const waitForPinnedAgentVersion = (agentId: string, version: number, timeout: Duration.Input) =>
 			Effect.gen(function* () {
 				const lookupKey = agentVersionLookupKey(agentId, version)
-				if (Option.isSome(yield* agentVersionsByNumber.get(lookupKey))) {
-					return true
+				const found = yield* agentVersionsByNumber.get(lookupKey)
+				if (Option.isSome(found) && found.value !== null) {
+					return found.value
 				}
-				const found = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
-				return found !== null
+				const pinned = yield* agentVersionsByNumber.waitFor(lookupKey, { version }, { timeout })
+				return pinned === null
+					? yield* reject(503, `Agent ${agentId} version ${version} projection is not ready.`)
+					: pinned
 			})
 
 		const existing = (id: SessionId) =>
@@ -305,7 +327,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return projected
 			})
 
-		const pinnedVersionReady = (agentId: string, version: number) =>
+		const resolvePinnedAgent = (agentId: string, version: number) =>
 			Effect.gen(function* () {
 				const timeout = Duration.min(
 					Duration.fromInputUnsafe(yield* SessionReadWaitTimeout),
@@ -314,13 +336,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				return yield* waitForPinnedAgentVersion(agentId, version, timeout)
 			})
 
-		const retrieve = (id: SessionId, ready: typeof pinnedVersionReady = pinnedVersionReady) =>
+		const retrieve = (id: SessionId, resolve: typeof resolvePinnedAgent = resolvePinnedAgent) =>
 			Effect.gen(function* () {
 				const snapshot = yield* existing(id)
-				if (!(yield* ready(snapshot.agent_id, snapshot.agent_version))) {
-					return yield* reject(503, `Session ${id} pinned agent version projection is not ready.`)
-				}
-				return serializeSession(snapshot)
+				const agent = yield* resolve(snapshot.agent_id, snapshot.agent_version)
+				return serializeSession(snapshot, agent)
 			})
 
 		return handlers
@@ -362,17 +382,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const environmentId = decodedEnvironmentId.value
 					const agentVersion = explicitVersion ?? null
 					const title = payload.title ?? null
-					const initialMessages = yield* Effect.forEach(payload.initial_events ?? [], (event, i) =>
-						Schema.decodeEffect(MessageText)(event.content.map(({ text }) => text).join("\n")).pipe(
-							Effect.catch(() =>
-								reject(
-									400,
-									`initial_events[${i}] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
-								),
-							),
-						),
-					)
-					const hasInitialMessages = initialMessages.length > 0
+					const first = payload.initial_events?.[0]
+					const initialMessage =
+						first === undefined
+							? undefined
+							: yield* Schema.decodeEffect(MessageText)(
+									first.content.map(({ text }) => text).join("\n"),
+								).pipe(
+									Effect.catch(() =>
+										reject(
+											400,
+											`initial_events[0] combined text must be between 1 and ${MAX_MESSAGE_TEXT_LENGTH} characters.`,
+										),
+									),
+								)
 					let id: SessionId
 					let sendOptions: { readonly commandId: string } | undefined
 					if (idempotencyKey !== undefined) {
@@ -385,7 +408,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
-								...(hasInitialMessages ? { initial_messages: initialMessages } : {}),
+								...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
 							}),
 						}
 					} else {
@@ -399,7 +422,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 								agent_version: agentVersion,
 								environment_id: environmentId,
 								title,
-								...(hasInitialMessages ? { initial_messages: initialMessages } : {}),
+								...(initialMessage === undefined ? {} : { initial_message: initialMessage }),
 							}),
 							sendOptions,
 						)
@@ -415,9 +438,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(pinnedReady)) {
 						return pinnedReady
 					}
-					if (!pinnedReady) {
-						return { id, type: "session" as const, pending: true as const }
-					}
 					const sessionCommit = commitForStream(receipt.commits, `Session/${id}`)
 					const result = yield* sessionViews
 						.get(Session.ref(id), sessionCommit === undefined ? {} : { atLeast: sessionCommit })
@@ -429,11 +449,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					return {
 						id,
 						type: "session" as const,
-						status: hasInitialMessages ? ("running" as const) : ("idle" as const),
-						agent: { id: agentId, version: pinnedVersion },
+						status: initialMessage !== undefined ? ("running" as const) : ("idle" as const),
+						agent: pinnedAgent(pinnedReady),
 						environment_id: environmentId,
 						title,
-						turn: hasInitialMessages ? 1 : 0,
+						turn: initialMessage !== undefined ? 1 : 0,
 						usage: {
 							input_tokens: 0,
 							output_tokens: 0,
@@ -449,7 +469,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const pinned = yield* Cache.make({
 						capacity: LIST_PAGE_MAX,
 						lookup: (key: string) =>
-							pinnedVersionReady(
+							resolvePinnedAgent(
 								key.slice(key.indexOf(":") + 1),
 								Number(key.slice(0, key.indexOf(":"))),
 							),
@@ -472,7 +492,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					if (isPending(result)) {
 						return result
 					}
-					return serializeSession(yield* present(result, 404, `Session ${id} not found.`))
+					const snapshot = yield* present(result, 404, `Session ${id} not found.`)
+					const agent = yield* resolvePinnedAgent(snapshot.agent_id, snapshot.agent_version).pipe(
+						orPending(id, "session"),
+					)
+					return isPending(agent) ? agent : serializeSession(snapshot, agent)
 				}).pipe(handled),
 			)
 			.handle("getOutputs", ({ params }) =>

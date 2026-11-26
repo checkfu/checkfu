@@ -31,17 +31,13 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 				title: cmd.title,
 			}),
 		)
-		const [first, ...queued] = cmd.initial_messages ?? []
-		if (first === undefined) {
+		if (cmd.initial_message === undefined) {
 			return [created]
 		}
 		return [
 			created,
-			session.record(new UserMessage({ content: [{ type: "text", text: first }] })),
+			session.record(new UserMessage({ content: [{ type: "text", text: cmd.initial_message }] })),
 			session.record(new SessionStatusRunning({ turn: 1 })),
-			...queued.map((text) =>
-				session.record(new UserMessage({ content: [{ type: "text", text }] })),
-			),
 		]
 	},
 	transitions: {
@@ -49,11 +45,11 @@ export class AdmitSessionDecision extends Domain.Decision(AdmitSession, {
 			before.agent.status === "active" &&
 			before.environment.status === "active" &&
 			before.session._tag === "Uninitialized" &&
-			((command.initial_messages ?? []).length === 0
+			(command.initial_message === undefined
 				? after.session._tag === "Idle" && after.session.turn === 0
 				: after.session._tag === "Running" &&
 					after.session.turn === 1 &&
-					after.session.pending_user_messages === (command.initial_messages ?? []).length - 1),
+					after.session.pending_user_messages === 0),
 		PinnedVersionWithinAgentHead: ({ before, command, events }) => {
 			const pinned = command.agent_version ?? before.agent.version
 			return (

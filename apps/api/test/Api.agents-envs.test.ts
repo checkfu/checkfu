@@ -391,7 +391,7 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 						id: string
 						agent: { id: string; version: number }
 					}
-					expect(pinnedSession.agent).toEqual({ id: agentV1.id, version: 1 })
+					expect(pinnedSession.agent).toMatchObject({ type: "agent", id: agentV1.id, version: 1 })
 
 					const reply = yield* provider.runTurn({
 						session_id: SessionId.make("sess_pinned_version"),
