@@ -686,6 +686,9 @@ describe("machine egress", () => {
 			1,
 			"ok",
 		])
+		expect((await reach(["GitHub.com"], "https://github.com:8443/acme/api")).slice(0, 2)).toEqual([
+			403, 0,
+		])
 		const [status, sent, message] = await reach([], "https://github.com/acme/api/info/refs")
 		expect([status, sent]).toEqual([403, 0])
 		expect(message).toContain("allowed_hosts")
