@@ -27,10 +27,10 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
-import type { WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
@@ -60,9 +60,15 @@ import {
 } from "../../src/Pi/PiDurableHarness.ts"
 import { makeSessionOutputs } from "../../src/Workspace/SessionOutputs.ts"
 import { makeSessionOutputsPublisher } from "../../src/Artifacts/SessionOutputsLive.ts"
-import { SessionOutputs } from "@checkfu/domain/Session/SessionOutputs.external"
+import {
+	SessionOutputs,
+	SessionOutputsUnpublished,
+} from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
+import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { repositoryTokenGate } from "../../src/Workspace/Repositories.ts"
+import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
@@ -70,13 +76,15 @@ import { VaultsTestLive } from "./VaultsHarness.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
-export const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+export const TEST_RUNTIME = {
 	Type: "Test",
 	id: "test",
 	env: {},
 	get: () => Effect.undefined,
 	set: (id: string) => Effect.succeed(id),
-})
+}
+
+export const TestRuntimeContext = Layer.succeed(RuntimeContext, TEST_RUNTIME)
 
 export const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
@@ -208,6 +216,26 @@ export interface TestMcpTool {
 	readonly parameters?: JsonObject
 	readonly run: (args: unknown) => string | Promise<string>
 }
+
+export const checkfuWithHarness = <E, R>(
+	executor: Layer.Layer<PiTurnExecutor, E, R>,
+	harness = PiDurableHarnessLive,
+) => {
+	const hosted = Checkfu.layer(
+		CheckfuHandlersLive.pipe(
+			Layer.provide(ArtifactBytesKept),
+			Layer.provide(SessionOutputsUnpublished),
+			Layer.provide(ListingStore.memory),
+			Layer.provide(harness),
+		),
+	).pipe(Layer.provide(executor))
+	return Layer.mergeAll(
+		hosted,
+		PiDurableHarnessLive.pipe(Layer.provide(executor), Layer.provide(hosted)),
+	)
+}
+
+const repositoryKey = (sessionId: string, resourceId: string) => `${sessionId}/${resourceId}`
 
 export const makePiDurableTestLayer = (
 	handler: (
@@ -470,11 +498,16 @@ export const makePiDurableTestLayer = (
 	)
 	const preparedWorkspaces: Array<{
 		readonly sessionId: string
+		readonly repositories: ReadonlyArray<RepositoryMount>
 		readonly allowedHosts: ReadonlyArray<string> | null
 	}> = []
 	const workspaceCalls: Array<string> = []
 	const refusedWorkspaces = new Set<string>()
+	const repositoryTokens = new Map<string, string>()
+	const tokens = Effect.runSync(repositoryTokenGate((key) => repositoryTokens.has(key)))
 	const preparations: Array<WorkspacePreparation> = []
+	const beforeTokenStored: Array<() => Promise<Response>> = []
+	const tokenDeliveries: Array<string> = []
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -518,19 +551,49 @@ export const makePiDurableTestLayer = (
 				),
 		},
 		{
-			prepareWorkspace: (sessionId, token, allowedHosts) =>
-				Effect.sync((): WorkspacePreparation => {
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				Effect.gen(function* (): Effect.fn.Return<WorkspacePreparation> {
 					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
 					if (refusedWorkspaces.has(sessionId)) {
 						return { ok: false, interrupted: true }
 					}
-					preparedWorkspaces.push({ sessionId, allowedHosts })
+					for (const repository of repositories) {
+						if (
+							repository.requires_token &&
+							!(yield* tokens.awaitToken(repositoryKey(sessionId, repository.id)))
+						) {
+							return {
+								ok: false,
+								resource_id: repository.id,
+								message: "Repository token was not stored.",
+							}
+						}
+					}
+					preparedWorkspaces.push({ sessionId, repositories, allowedHosts })
 					return preparations.shift() ?? { ok: true }
 				}),
 			interruptWorkspace: (sessionId, token) =>
 				Effect.sync(() => {
 					workspaceCalls.push(`interrupt ${sessionId} ${token.turn}`)
 				}),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				Effect.suspend(() => {
+					tokenDeliveries.push(token)
+					return unreachable.has(sessionId) || unreachable.has("*")
+						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+						: Effect.void
+				}).pipe(
+					Effect.andThen(
+						Effect.gen(function* () {
+							yield* Effect.promise(async () => beforeTokenStored.shift()?.())
+							const key = repositoryKey(sessionId, resourceId)
+							if (replace || !repositoryTokens.has(key)) {
+								repositoryTokens.set(key, token)
+								yield* tokens.stored(key)
+							}
+						}),
+					),
+				),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -659,7 +722,10 @@ export const makePiDurableTestLayer = (
 		preparedWorkspaces,
 		workspaceCalls,
 		refusedWorkspaces,
+		repositoryTokens,
 		preparations,
+		beforeTokenStored,
+		tokenDeliveries,
 	}
 }
 
@@ -672,7 +738,7 @@ export const sendRequest = (
 	fetchEffect: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	input: {
 		readonly method: string
@@ -699,6 +765,7 @@ export const sendRequest = (
 				HttpServerRequest.HttpServerRequest,
 				HttpServerRequest.fromWeb(webRequest),
 			),
+			Effect.provideService(RuntimeContext, TEST_RUNTIME),
 		)
 		return HttpServerResponse.toWeb(response)
 	})
@@ -707,7 +774,7 @@ export const makeApiTestClient = (
 	fetchEffect: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 ) =>
 	makeCheckfuClientWith({
@@ -719,7 +786,7 @@ export const makeApiTestHttpClient = (
 	fetchEffect: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 ) =>
 	HttpClient.make((request, url) =>
@@ -740,6 +807,7 @@ export const makeApiTestHttpClient = (
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(webRequest),
 				),
+				Effect.provideService(RuntimeContext, TEST_RUNTIME),
 			)
 			return HttpClientResponse.fromWeb(request, HttpServerResponse.toWeb(response))
 		}),
@@ -832,7 +900,7 @@ export const createIdleSession = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	system?: string,
 ) =>
@@ -874,7 +942,7 @@ export const waitForSession = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	sessionId: string,
 	predicate: (session: { readonly status: string; readonly turn: number }) => boolean,
@@ -909,7 +977,7 @@ export const sendAndSettle = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	sessionId: string,
 	texts: ReadonlyArray<string>,

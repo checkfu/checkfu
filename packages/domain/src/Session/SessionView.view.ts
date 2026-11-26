@@ -70,6 +70,7 @@ export class SessionView extends Domain.View("SessionView", {
 						agent_version: e.agent_version,
 						environment_id: e.environment_id,
 						title: e.title,
+						resources: e.resources,
 						turn: 0,
 						usage: {
 							input_tokens: 0,

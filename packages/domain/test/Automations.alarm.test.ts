@@ -73,6 +73,7 @@ describe("Automation alarms", () => {
 			Effect.succeed({
 				interrupt: () => Effect.void,
 				discardWorkspace: () => Effect.void,
+				storeRepositoryToken: () => Effect.void,
 				runTurn: () =>
 					Effect.succeed({
 						thinking: null,

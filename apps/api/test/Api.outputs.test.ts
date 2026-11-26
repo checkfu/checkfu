@@ -1007,6 +1007,7 @@ describe("A session's outputs", () => {
 							agent_id: session.agent.id,
 							agent_version: session.agent.version,
 							environment_id: session.environment_id,
+							resources: [],
 							turn: 1,
 							input: ["Build the page."],
 						}),

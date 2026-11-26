@@ -9,7 +9,14 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import { Sandboxes, machineIdle } from "../Sandbox/Sandboxes.ts"
-import { createMachineEgress } from "./MachineEgress.ts"
+import { createMachineEgress, isAllowedHost } from "./MachineEgress.ts"
+import {
+	GITHUB_HOST,
+	cloneCommand,
+	githubBaseUrl,
+	repositoryTokenGate,
+	withRepositoryCredentials,
+} from "./Repositories.ts"
 import { makeSandboxMount } from "./SandboxMount.ts"
 import { makeSessionOutputs } from "./SessionOutputs.ts"
 import type { OutputBytes, OutputsListing } from "./SessionOutputs.ts"
@@ -18,7 +25,7 @@ import type { FencedTurn, TurnToken } from "./WorkspaceFence.ts"
 import { makeSavedDisk } from "./SavedDisk.ts"
 import type { SavedDisk } from "./SavedDisk.ts"
 import { makeWorkspaceMachine } from "./WorkspaceMachine.ts"
-import type { WorkspacePreparation } from "./WorkspaceShapes.ts"
+import type { RepositoryMount, WorkspacePreparation } from "./WorkspaceShapes.ts"
 import { purgeTables } from "./WorkspaceStorage.ts"
 import {
 	BASH_SECONDS,
@@ -39,6 +46,12 @@ const isScriptOutputPath = (path: string): boolean =>
 	path.startsWith(`${SCRIPT_OUTPUT_DIRECTORY}/`) && !path.split("/").includes("..")
 const ALLOWED_HOSTS = "allowed-hosts"
 const SLEEP = "sleep"
+const CLONE_SECONDS = 600
+const tokenKey = (resourceId: string) => `token:${resourceId}`
+const REPOSITORIES = "repositories"
+
+const notAllowed = (host: string) =>
+	`The session's environment does not let the workspace reach ${host}: add it to its networking's allowed_hosts.`
 
 const PREPARED: WorkspacePreparation = { ok: true }
 const INTERRUPTED: WorkspacePreparation = { ok: false, interrupted: true }
@@ -97,8 +110,14 @@ export interface SessionWorkspaceShape {
 	) => Effect.Effect<string | undefined>
 	readonly prepare: (
 		token: TurnToken,
+		repositories: ReadonlyArray<RepositoryMount>,
 		allowedHosts: ReadonlyArray<string> | null,
 	) => Effect.Effect<WorkspacePreparation>
+	readonly storeRepositoryToken: (
+		resourceId: string,
+		token: string,
+		replace: boolean,
+	) => Effect.Effect<void>
 	readonly discard: (sessionId: string) => Effect.Effect<void>
 }
 
@@ -113,11 +132,17 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 			state: Cloudflare.DurableObjectState,
 			sandboxes: Sandboxes,
 			idleAfter: Effect.orDie(machineIdle),
+			baseUrl: githubBaseUrl,
 		}),
-		({ state, sandboxes, idleAfter }) =>
+		({ state, sandboxes, idleAfter, baseUrl }) =>
 			Effect.gen(function* () {
 				const { storage } = state.raw
-				const fork = Effect.runForkWith(yield* Effect.context<never>())
+				const tokens = yield* repositoryTokenGate(
+					(id) => storage.kv.get(tokenKey(id)) !== undefined,
+				)
+				const context = yield* Effect.context<never>()
+				const fork = Effect.runForkWith(context)
+				const runPromise = Effect.runPromiseWith(context)
 				const sessionId = state.raw.id.name ?? ""
 				const allowedHosts = (): ReadonlyArray<string> | null => {
 					const allowed = storage.kv.get<ReadonlyArray<string> | null>(ALLOWED_HOSTS)
@@ -202,9 +227,16 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						fork(stayAwake)
 					},
 				})
+				const mounted = (): ReadonlyArray<RepositoryMount> =>
+					storage.kv.get<ReadonlyArray<RepositoryMount>>(REPOSITORIES) ?? []
 				const egress = createMachineEgress({
 					allowedHosts,
-					fetch: (request) => fetch(request),
+					fetch: withRepositoryCredentials({
+						repositories: mounted,
+						token: (resourceId) => storage.kv.get<string>(tokenKey(resourceId)),
+						baseUrl,
+						fetch: (request) => fetch(request),
+					}),
 				})
 				const fence = makeTurnFence({
 					get: () => storage.kv.get<FencedTurn>(NEWEST_TURN),
@@ -218,6 +250,55 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						await fs.mkdir(WORKING_DIRECTORY, { recursive: true })
 					})
 				}
+
+				const prepare = async (
+					repositories: ReadonlyArray<RepositoryMount>,
+					signal: AbortSignal,
+				): Promise<WorkspacePreparation> => {
+					storage.kv.put(REPOSITORIES, repositories)
+					for (const repository of repositories) {
+						if (signal.aborted) {
+							return INTERRUPTED
+						}
+						if (repository.requires_token && isAllowedHost(allowedHosts(), GITHUB_HOST)) {
+							const ready = await runPromise(tokens.awaitToken(repository.id), {
+								signal,
+							}).catch((error: unknown) => {
+								if (signal.aborted) {
+									return false
+								}
+								throw error
+							})
+							if (!ready) {
+								return signal.aborted
+									? INTERRUPTED
+									: {
+											ok: false,
+											resource_id: repository.id,
+											message: "Repository token was not stored.",
+										}
+							}
+						}
+						await initialize((await workspace()).fs)
+						const cloned = await machine
+							.command(cloneCommand(repository), { cwd: "/", seconds: CLONE_SECONDS }, signal)
+							.catch((error: unknown) => failed(messageOf(error)))
+						if (signal.aborted) {
+							return INTERRUPTED
+						}
+						if (cloned.isError) {
+							return {
+								ok: false,
+								resource_id: repository.id,
+								message: isAllowedHost(allowedHosts(), GITHUB_HOST)
+									? cloned.content.map((part) => (part.type === "text" ? part.text : "")).join("")
+									: notAllowed(GITHUB_HOST),
+							}
+						}
+					}
+					return PREPARED
+				}
+				let preparing: Promise<unknown> = Promise.resolve()
 
 				const runBash = async (
 					input: unknown,
@@ -388,17 +469,33 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 						}),
 					prepare: (
 						token: TurnToken,
-						allowedHosts: ReadonlyArray<string> | null,
+						repositories: ReadonlyArray<RepositoryMount>,
+						hosts: ReadonlyArray<string> | null,
 					): Effect.Effect<WorkspacePreparation> =>
 						Effect.promise(async () => {
 							if (storage.kv.get(DISCARDED) === true || !(await fence.enter(token))) {
 								return INTERRUPTED
 							}
-							const prepared = await fence.run(token, async () => {
-								storage.kv.put(ALLOWED_HOSTS, allowedHosts)
-								return PREPARED
-							})
-							return prepared ?? INTERRUPTED
+							const next = fence.run(token, (signal) =>
+								preparing.then(() => {
+									storage.kv.put(ALLOWED_HOSTS, hosts)
+									return prepare(repositories, signal)
+								}),
+							)
+							preparing = next.catch(() => undefined)
+							return (await next) ?? INTERRUPTED
+						}),
+					storeRepositoryToken: (
+						resourceId: string,
+						token: string,
+						replace: boolean,
+					): Effect.Effect<void> =>
+						Effect.gen(function* () {
+							const stored = storage.kv.get<string>(tokenKey(resourceId)) !== undefined
+							if (storage.kv.get(DISCARDED) !== true && (replace || !stored)) {
+								storage.kv.put(tokenKey(resourceId), token)
+								yield* tokens.stored(resourceId)
+							}
 						}),
 					discard: (discarded: string) =>
 						Effect.gen(function* () {

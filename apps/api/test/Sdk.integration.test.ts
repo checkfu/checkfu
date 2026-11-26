@@ -9,6 +9,7 @@ import {
 	isPendingResource,
 } from "@checkfu/sdk"
 import type { JsonSessionEvent, SessionEvent } from "@checkfu/sdk"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
@@ -16,7 +17,12 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Stream from "effect/Stream"
 import { AgentVersionWaitTimeout, makeApiHandler } from "../src/Http/Router.ts"
-import { TEST_API_KEY, makeAssistantReply, makePiDurableTestLayer } from "./helpers/ApiHarness.ts"
+import {
+	TEST_API_KEY,
+	TEST_RUNTIME,
+	makeAssistantReply,
+	makePiDurableTestLayer,
+} from "./helpers/ApiHarness.ts"
 
 const makeFetchBridge =
 	(
@@ -24,7 +30,7 @@ const makeFetchBridge =
 		apiFetch: Effect.Effect<
 			HttpServerResponse.HttpServerResponse,
 			never,
-			HttpServerRequest.HttpServerRequest
+			HttpServerRequest.HttpServerRequest | RuntimeContext
 		>,
 	): typeof globalThis.fetch =>
 	async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -45,6 +51,7 @@ const makeFetchBridge =
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(request),
 				),
+				Effect.provideService(RuntimeContext, TEST_RUNTIME),
 			),
 		)
 		return HttpServerResponse.toWeb(serverResponse)

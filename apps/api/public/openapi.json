@@ -8372,6 +8372,92 @@
 											],
 											"additionalProperties": false,
 											"description": "The pinned agent configuration used by the session."
+										},
+										"resources": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"type": {
+														"type": "string",
+														"enum": ["github_repository"]
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+													},
+													"mount_path": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+														"allOf": [
+															{
+																"pattern": "^\\/workspace\\/\\S+$"
+															}
+														]
+													},
+													"checkout": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["branch"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 255
+																	}
+																},
+																"required": ["type", "name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["commit"]
+																	},
+																	"sha": {
+																		"type": "string",
+																		"pattern": "^[0-9a-f]{40}$"
+																	}
+																},
+																"required": ["type", "sha"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"created_at": {
+														"type": "string"
+													},
+													"updated_at": {
+														"type": "string"
+													}
+												},
+												"required": [
+													"id",
+													"type",
+													"url",
+													"mount_path",
+													"checkout",
+													"created_at",
+													"updated_at"
+												],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -8386,7 +8472,8 @@
 										"created_at",
 										"updated_at",
 										"archived_at",
-										"agent"
+										"agent",
+										"resources"
 									],
 									"additionalProperties": false
 								}
@@ -8972,6 +9059,89 @@
 										},
 										"maxItems": 20,
 										"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
+									},
+									"resources": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["github_repository"]
+												},
+												"url": {
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+												},
+												"authorization_token": {
+													"type": "string",
+													"format": "password",
+													"allOf": [
+														{
+															"minLength": 1,
+															"x-forge-sensitive": true
+														}
+													],
+													"maxLength": 4096,
+													"description": "GitHub token used to clone and push. Never returned."
+												},
+												"checkout": {
+													"anyOf": [
+														{
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["branch"]
+																},
+																"name": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 255
+																}
+															},
+															"required": ["type", "name"],
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["commit"]
+																},
+																"sha": {
+																	"type": "string",
+																	"pattern": "^[0-9a-f]{40}$"
+																}
+															},
+															"required": ["type", "sha"],
+															"additionalProperties": false
+														},
+														{
+															"type": "null"
+														}
+													],
+													"description": "Branch or commit to check out. Defaults to the default branch."
+												},
+												"mount_path": {
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+													"allOf": [
+														{
+															"pattern": "^\\/workspace\\/\\S+$",
+															"description": "Where the repository is cloned. Defaults to /workspace/<repository>."
+														}
+													]
+												}
+											},
+											"required": ["type", "url"],
+											"additionalProperties": false
+										},
+										"maxItems": 8,
+										"description": "Repositories to mount in the session's workspace"
 									}
 								},
 								"required": ["agent", "environment_id"],
@@ -9358,6 +9528,92 @@
 														],
 														"additionalProperties": false,
 														"description": "The pinned agent configuration used by the session."
+													},
+													"resources": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"id": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 256
+																},
+																"type": {
+																	"type": "string",
+																	"enum": ["github_repository"]
+																},
+																"url": {
+																	"type": "string",
+																	"maxLength": 1024,
+																	"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+																},
+																"mount_path": {
+																	"type": "string",
+																	"maxLength": 1024,
+																	"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+																	"allOf": [
+																		{
+																			"pattern": "^\\/workspace\\/\\S+$"
+																		}
+																	]
+																},
+																"checkout": {
+																	"anyOf": [
+																		{
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["branch"]
+																				},
+																				"name": {
+																					"type": "string",
+																					"minLength": 1,
+																					"maxLength": 255
+																				}
+																			},
+																			"required": ["type", "name"],
+																			"additionalProperties": false
+																		},
+																		{
+																			"type": "object",
+																			"properties": {
+																				"type": {
+																					"type": "string",
+																					"enum": ["commit"]
+																				},
+																				"sha": {
+																					"type": "string",
+																					"pattern": "^[0-9a-f]{40}$"
+																				}
+																			},
+																			"required": ["type", "sha"],
+																			"additionalProperties": false
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"created_at": {
+																	"type": "string"
+																},
+																"updated_at": {
+																	"type": "string"
+																}
+															},
+															"required": [
+																"id",
+																"type",
+																"url",
+																"mount_path",
+																"checkout",
+																"created_at",
+																"updated_at"
+															],
+															"additionalProperties": false
+														}
 													}
 												},
 												"required": [
@@ -9372,7 +9628,8 @@
 													"created_at",
 													"updated_at",
 													"archived_at",
-													"agent"
+													"agent",
+													"resources"
 												],
 												"additionalProperties": false
 											}
@@ -10062,6 +10319,92 @@
 											],
 											"additionalProperties": false,
 											"description": "The pinned agent configuration used by the session."
+										},
+										"resources": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"type": {
+														"type": "string",
+														"enum": ["github_repository"]
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+													},
+													"mount_path": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+														"allOf": [
+															{
+																"pattern": "^\\/workspace\\/\\S+$"
+															}
+														]
+													},
+													"checkout": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["branch"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 255
+																	}
+																},
+																"required": ["type", "name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["commit"]
+																	},
+																	"sha": {
+																		"type": "string",
+																		"pattern": "^[0-9a-f]{40}$"
+																	}
+																},
+																"required": ["type", "sha"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"created_at": {
+														"type": "string"
+													},
+													"updated_at": {
+														"type": "string"
+													}
+												},
+												"required": [
+													"id",
+													"type",
+													"url",
+													"mount_path",
+													"checkout",
+													"created_at",
+													"updated_at"
+												],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -10076,7 +10419,8 @@
 										"created_at",
 										"updated_at",
 										"archived_at",
-										"agent"
+										"agent",
+										"resources"
 									],
 									"additionalProperties": false
 								}
@@ -10741,6 +11085,92 @@
 											],
 											"additionalProperties": false,
 											"description": "The pinned agent configuration used by the session."
+										},
+										"resources": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"type": {
+														"type": "string",
+														"enum": ["github_repository"]
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+													},
+													"mount_path": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+														"allOf": [
+															{
+																"pattern": "^\\/workspace\\/\\S+$"
+															}
+														]
+													},
+													"checkout": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["branch"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 255
+																	}
+																},
+																"required": ["type", "name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["commit"]
+																	},
+																	"sha": {
+																		"type": "string",
+																		"pattern": "^[0-9a-f]{40}$"
+																	}
+																},
+																"required": ["type", "sha"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"created_at": {
+														"type": "string"
+													},
+													"updated_at": {
+														"type": "string"
+													}
+												},
+												"required": [
+													"id",
+													"type",
+													"url",
+													"mount_path",
+													"checkout",
+													"created_at",
+													"updated_at"
+												],
+												"additionalProperties": false
+											}
 										}
 									},
 									"required": [
@@ -10755,7 +11185,8 @@
 										"created_at",
 										"updated_at",
 										"archived_at",
-										"agent"
+										"agent",
+										"resources"
 									],
 									"additionalProperties": false
 								}
@@ -13352,6 +13783,1557 @@
 				"x-checkfu-cli": {
 					"groupDescription": "Retrieve what a session published from its outputs directory"
 				}
+			}
+		},
+		"/v1/sessions/{session_id}/resources": {
+			"get": {
+				"tags": ["sessions"],
+				"operationId": "sessions.listResources",
+				"parameters": [
+					{
+						"name": "session_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256,
+							"description": "Session ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"data": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 256
+													},
+													"type": {
+														"type": "string",
+														"enum": ["github_repository"]
+													},
+													"url": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+													},
+													"mount_path": {
+														"type": "string",
+														"maxLength": 1024,
+														"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+														"allOf": [
+															{
+																"pattern": "^\\/workspace\\/\\S+$"
+															}
+														]
+													},
+													"checkout": {
+														"anyOf": [
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["branch"]
+																	},
+																	"name": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 255
+																	}
+																},
+																"required": ["type", "name"],
+																"additionalProperties": false
+															},
+															{
+																"type": "object",
+																"properties": {
+																	"type": {
+																		"type": "string",
+																		"enum": ["commit"]
+																	},
+																	"sha": {
+																		"type": "string",
+																		"pattern": "^[0-9a-f]{40}$"
+																	}
+																},
+																"required": ["type", "sha"],
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"created_at": {
+														"type": "string"
+													},
+													"updated_at": {
+														"type": "string"
+													}
+												},
+												"required": [
+													"id",
+													"type",
+													"url",
+													"mount_path",
+													"checkout",
+													"created_at",
+													"updated_at"
+												],
+												"additionalProperties": false
+											}
+										}
+									},
+									"required": ["data"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "List what is mounted in a session's workspace",
+				"summary": "List session resources",
+				"x-forge-group-name": "sessions.resources",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": {
+					"group": "sessions",
+					"endpoint": "listResources"
+				},
+				"x-checkfu-mcp": {
+					"name": "sessions_listResources"
+				},
+				"x-checkfu-cli": {
+					"groupDescription": "List session resources and rotate their credentials"
+				}
+			}
+		},
+		"/v1/sessions/{session_id}/resources/{resource_id}": {
+			"get": {
+				"tags": ["sessions"],
+				"operationId": "sessions.getResource",
+				"parameters": [
+					{
+						"name": "session_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256,
+							"description": "Session ID"
+						},
+						"required": true
+					},
+					{
+						"name": "resource_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256,
+							"description": "Session resource ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"type": {
+											"type": "string",
+											"enum": ["github_repository"]
+										},
+										"url": {
+											"type": "string",
+											"maxLength": 1024,
+											"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+										},
+										"mount_path": {
+											"type": "string",
+											"maxLength": 1024,
+											"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+											"allOf": [
+												{
+													"pattern": "^\\/workspace\\/\\S+$"
+												}
+											]
+										},
+										"checkout": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["branch"]
+														},
+														"name": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 255
+														}
+													},
+													"required": ["type", "name"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["commit"]
+														},
+														"sha": {
+															"type": "string",
+															"pattern": "^[0-9a-f]{40}$"
+														}
+													},
+													"required": ["type", "sha"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"url",
+										"mount_path",
+										"checkout",
+										"created_at",
+										"updated_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Retrieve one resource mounted in a session's workspace",
+				"summary": "Retrieve a session resource",
+				"x-forge-group-name": "sessions.resources",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": {
+					"group": "sessions",
+					"endpoint": "getResource"
+				},
+				"x-checkfu-mcp": {
+					"name": "sessions_getResource"
+				}
+			},
+			"post": {
+				"tags": ["sessions"],
+				"operationId": "sessions.updateResource",
+				"parameters": [
+					{
+						"name": "session_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256,
+							"description": "Session ID"
+						},
+						"required": true
+					},
+					{
+						"name": "resource_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 256,
+							"description": "Session resource ID"
+						},
+						"required": true
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"id": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 256
+										},
+										"type": {
+											"type": "string",
+											"enum": ["github_repository"]
+										},
+										"url": {
+											"type": "string",
+											"maxLength": 1024,
+											"pattern": "^https:\\/\\/github\\.com\\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\\/[A-Za-z0-9._-]+$"
+										},
+										"mount_path": {
+											"type": "string",
+											"maxLength": 1024,
+											"pattern": "^(?:\\/(?:[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.[^/\\\\.\\u0000-\\u001f\\u007f-\\u009f][^/\\\\\\u0000-\\u001f\\u007f-\\u009f]*|\\.\\.[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+))+$",
+											"allOf": [
+												{
+													"pattern": "^\\/workspace\\/\\S+$"
+												}
+											]
+										},
+										"checkout": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["branch"]
+														},
+														"name": {
+															"type": "string",
+															"minLength": 1,
+															"maxLength": 255
+														}
+													},
+													"required": ["type", "name"],
+													"additionalProperties": false
+												},
+												{
+													"type": "object",
+													"properties": {
+														"type": {
+															"type": "string",
+															"enum": ["commit"]
+														},
+														"sha": {
+															"type": "string",
+															"pattern": "^[0-9a-f]{40}$"
+														}
+													},
+													"required": ["type", "sha"],
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"created_at": {
+											"type": "string"
+										},
+										"updated_at": {
+											"type": "string"
+										}
+									},
+									"required": [
+										"id",
+										"type",
+										"url",
+										"mount_path",
+										"checkout",
+										"created_at",
+										"updated_at"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["payload_too_large"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"415": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["unsupported_media_type"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "Replace the GitHub token a mounted repository clones and pushes with",
+				"summary": "Rotate a repository's token",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"authorization_token": {
+										"type": "string",
+										"format": "password",
+										"allOf": [
+											{
+												"minLength": 1,
+												"x-forge-sensitive": true
+											}
+										],
+										"maxLength": 4096,
+										"description": "New GitHub token for the repository. Never returned."
+									}
+								},
+								"required": ["authorization_token"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": true
+				},
+				"x-forge-group-name": "sessions.resources",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": {
+					"group": "sessions",
+					"endpoint": "updateResource"
+				},
+				"x-checkfu-mcp": false
 			}
 		},
 		"/v1/automations": {

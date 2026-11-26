@@ -246,7 +246,9 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 					const session = yield* createIdleSession(apiFetch)
 					yield* sendAndSettle(apiFetch, session.id, ["Hello."], 1)
 					expect(workspaceCalls).toEqual([`prepare ${session.id} 1`])
-					expect(preparedWorkspaces).toEqual([{ sessionId: session.id, allowedHosts: null }])
+					expect(preparedWorkspaces).toEqual([
+						{ sessionId: session.id, repositories: [], allowedHosts: null },
+					])
 					expect(modelCalls).toBe(1)
 
 					preparations.push({ ok: false, interrupted: true })
@@ -2248,6 +2250,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							environment_id: "env_1",
 							title: null,
 							mcp_server_credentials: "[]",
+							resources: [],
 						}),
 					)
 					expect(badAgent._tag).toBe("Failure")
@@ -2261,6 +2264,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 							environment_id: overLimit,
 							title: null,
 							mcp_server_credentials: "[]",
+							resources: [],
 						}),
 					)
 					expect(badEnv._tag).toBe("Failure")
@@ -2817,6 +2821,7 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 						agent_version: 1,
 						environment_id: "env_1",
 						title: null,
+						resources: [],
 						turn: 1,
 						usage: { input_tokens: 10, output_tokens: 5 },
 						created_at: at,

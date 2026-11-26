@@ -19,6 +19,7 @@
 			"@earendil-works/pi-codemode": "1.6.0",
 			"@earendil-works/pi-durable": "1.6.0",
 			"@earendil-works/pi-schema": "1.6.0",
+			"@platformatic/vfs": "0.4.1",
 			"@effect/platform-bun": "4.1.5",
 			"@effect/platform-node": "4.1.5",
 			"@effect/vitest": "4.1.5",

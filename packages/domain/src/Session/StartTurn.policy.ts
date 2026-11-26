@@ -63,6 +63,7 @@ export const StartTurnLive = StartTurn.toLayer(
 				agent_id: state.agent_id,
 				agent_version: state.agent_version,
 				environment_id: state.environment_id,
+				resources: state.resources,
 				turn: state.turn,
 				input: state.input,
 				...(state.system_context === undefined ? {} : { system_context: state.system_context }),
