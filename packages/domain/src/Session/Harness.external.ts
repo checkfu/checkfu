@@ -40,6 +40,11 @@ export const TurnInterrupted = Schema.TaggedStruct("TurnInterrupted", {
 })
 export type TurnInterrupted = typeof TurnInterrupted.Type
 
+export const TurnPaused = Schema.TaggedStruct("TurnPaused", {
+	model_usage: ModelUsage,
+})
+export type TurnPaused = typeof TurnPaused.Type
+
 export const HARNESS_UNAVAILABLE = "harness_unavailable"
 export const HARNESS_UNAVAILABLE_MESSAGE = "The agent runtime could not be reached."
 export const TURN_TIMEOUT = "model_request_timeout"
@@ -57,6 +62,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			turn: PositiveInt,
 			input: Schema.Array(MessageText),
 			last_reply_turn: Schema.optionalKey(NonNegativeInt),
+			segment: Schema.optionalKey(PositiveInt),
 		},
 		success: {
 			thinking: Schema.NullOr(ThinkingText),
@@ -66,7 +72,7 @@ export class Harness extends Domain.ExternalSystem("Harness", {
 			output_tokens: NonNegativeInt,
 			stop_reason: ModelStopReason,
 		},
-		error: [TurnFailed, TurnInterrupted, HarnessUnavailable],
+		error: [TurnFailed, TurnInterrupted, TurnPaused, HarnessUnavailable],
 	},
 	interrupt: {
 		args: {
@@ -155,7 +161,11 @@ export const boundedHarness = <R = never>(
 				readonly turn: number
 				readonly input: ReadonlyArray<string>
 				readonly last_reply_turn?: number
-			}) => Effect.Effect<HarnessReply, TurnFailed | TurnInterrupted | HarnessUnavailable>
+				readonly segment?: number
+			}) => Effect.Effect<
+				HarnessReply,
+				TurnFailed | TurnInterrupted | TurnPaused | HarnessUnavailable
+			>
 			readonly interrupt: (args: {
 				readonly session_id: SessionId
 				readonly turn: number

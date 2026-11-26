@@ -1,10 +1,25 @@
-import { McpServerCredentials, McpServerName, McpServerUrl, McpServers } from "@checkfu/sdk/Schemas"
-import type { EnvironmentNetworking, McpServer, McpServerCredential } from "@checkfu/sdk/Schemas"
+import {
+	AgentTools,
+	McpServerCredentials,
+	McpServerName,
+	McpServerUrl,
+	McpServers,
+} from "@checkfu/sdk/Schemas"
+import type {
+	AgentTool,
+	EnvironmentNetworking,
+	McpServer,
+	McpServerCredential,
+} from "@checkfu/sdk/Schemas"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 export {
+	AgentTool,
+	AgentTools,
+	CustomTool,
+	McpToolset,
 	MAX_MCP_SERVERS,
 	McpServer,
 	McpServerCredential,
@@ -14,14 +29,18 @@ export {
 
 export const MAX_MCP_SERVERS_TEXT_LENGTH = 65_536
 export const MAX_MCP_SERVER_CREDENTIALS_TEXT_LENGTH = 16_384
+export const MAX_AGENT_TOOLS_TEXT_LENGTH = 200_000
 
 export const McpServersText = Schema.String.check(Schema.isMaxLength(MAX_MCP_SERVERS_TEXT_LENGTH))
 export const McpServerCredentialsText = Schema.String.check(
 	Schema.isMaxLength(MAX_MCP_SERVER_CREDENTIALS_TEXT_LENGTH),
 )
 
+export const AgentToolsText = Schema.String.check(Schema.isMaxLength(MAX_AGENT_TOOLS_TEXT_LENGTH))
+
 export const NO_MCP_SERVERS = "[]"
 export const NO_MCP_SERVER_CREDENTIALS = "[]"
+export const NO_AGENT_TOOLS = "[]"
 
 export const McpServerBinding = Schema.Struct({
 	name: McpServerName,
@@ -39,11 +58,14 @@ const checkedText = <A>(list: Schema.Codec<A, string>, text: Schema.Schema<strin
 
 const serversJson = Schema.fromJsonString(McpServers)
 const credentialsJson = Schema.fromJsonString(McpServerCredentials)
+const toolsJson = Schema.fromJsonString(AgentTools)
+const readTools = Schema.decodeOption(toolsJson)
 const readServers = Schema.decodeOption(serversJson)
 const readCredentials = Schema.decodeOption(credentialsJson)
 
 export const encodeMcpServers = checkedText(serversJson, McpServersText)
 export const encodeMcpServerCredentials = checkedText(credentialsJson, McpServerCredentialsText)
+export const encodeAgentTools = checkedText(toolsJson, AgentToolsText)
 
 export const decodeMcpServers = (text: string | undefined): ReadonlyArray<McpServer> =>
 	text === undefined ? [] : Option.getOrElse(readServers(text), () => [])
@@ -52,6 +74,9 @@ export const decodeMcpServerCredentials = (
 	text: string | undefined,
 ): ReadonlyArray<McpServerCredential> =>
 	text === undefined ? [] : Option.getOrElse(readCredentials(text), () => [])
+
+export const decodeAgentTools = (text: string | undefined): ReadonlyArray<AgentTool> =>
+	text === undefined ? [] : Option.getOrElse(readTools(text), () => [])
 
 export const mcpHostAllowed = (
 	networking: EnvironmentNetworking | null | undefined,

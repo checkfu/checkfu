@@ -92,6 +92,14 @@ const agentsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "tools",
+			flagName: "tools",
+			wireName: "tools",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
+		{
 			propName: "idempotencyKey",
 			flagName: "idempotency-key",
 			wireName: "idempotency-key",
@@ -127,6 +135,13 @@ const agentsCreateCommand = CommandMake(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription(
 				"MCP servers whose tools the agent may use. Each tool is offered as mcp__<server>__<tool>. (JSON, YAML, or @file)",
+			),
+			FlagOptional,
+		),
+		tools: FlagString("tools").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Permission policies for MCP servers' tools (mcp_toolset) and custom tools the caller's application runs (custom). (JSON, YAML, or @file)",
 			),
 			FlagOptional,
 		),
@@ -311,6 +326,14 @@ const agentsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			kind: "structured",
 			required: false,
 		},
+		{
+			propName: "tools",
+			flagName: "tools",
+			wireName: "tools",
+			location: "body",
+			kind: "structured",
+			required: false,
+		},
 	],
 }
 
@@ -344,6 +367,13 @@ const agentsUpdateCommand = CommandMake(
 		mcpServers: FlagString("mcp-servers").pipe(
 			FlagWithMetavar("JSON|YAML|@FILE"),
 			FlagWithDescription("Replacement list of the agent's MCP servers (JSON, YAML, or @file)"),
+			FlagOptional,
+		),
+		tools: FlagString("tools").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription(
+				"Replacement list of the agent's tool declarations (JSON, YAML, or @file)",
+			),
 			FlagOptional,
 		),
 	},

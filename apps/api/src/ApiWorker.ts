@@ -31,6 +31,7 @@ import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
 import { vaultListingQueriesFrom } from "./Http/Listing.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { apiWorkerCustomProvidersProps } from "./Pi/PiCatalog.ts"
+import { CustomToolFaults } from "./Http/ToolSchemas.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
 import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
@@ -60,6 +61,14 @@ const PiHarnessExecutorLive = Layer.effect(
 			readOutputs: (sessionId, turn, paths) =>
 				harnessCall(Effect.suspend(() => harness.readOutputs(sessionId, turn, paths))).pipe(
 					Effect.withSpan("PiHarness.readOutputs"),
+				),
+			pauseUsage: (conversation, operationId, pause) =>
+				harnessCall(
+					Effect.suspend(() => harness.pauseUsage(conversation, operationId, pause)),
+				).pipe(Effect.withSpan("PiHarness.pauseUsage")),
+			answerCall: (conversation, toolUseId, answer) =>
+				harnessCall(Effect.suspend(() => harness.answerCall(conversation, toolUseId, answer))).pipe(
+					Effect.withSpan("PiHarness.answerCall"),
 				),
 			discardWorkspace: (sessionId) =>
 				harnessCall(Effect.suspend(() => harness.discardWorkspace(sessionId))).pipe(
@@ -108,6 +117,18 @@ const ConnectionExecutorLive = Layer.effect(
 	}),
 )
 
+const CustomToolFaultsLive = Layer.effect(
+	CustomToolFaults,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return (tools, taken) =>
+			harnessCall(Effect.suspend(() => harness.customToolFaults(tools, taken))).pipe(
+				Effect.mapError(() => ({ _tag: "CustomToolsUncheckable" as const })),
+				Effect.withSpan("PiHarness.customToolFaults"),
+			)
+	}),
+)
+
 const ListingLive = D1ListingStore.pipe(Layer.provide(Cloudflare.D1.QueryDatabaseBinding))
 
 const CheckfuLive = Checkfu.layer(
@@ -136,6 +157,7 @@ const ApiWorkerLive = Layer.mergeAll(
 	vaultListingQueriesFrom(VaultsLive),
 	CheckfuLive,
 	ArtifactStoreLive,
+	CustomToolFaultsLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
 	ArtifactLinksLive.pipe(Layer.provide(Mac.layerWebCrypto)),
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),

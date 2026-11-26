@@ -22,11 +22,17 @@ import { AgentUpdated, UpdateAgent } from "@checkfu/domain/Agent/UpdateAgent.com
 import { UpdateAgentDecision } from "@checkfu/domain/Agent/UpdateAgent.decision"
 import { Agents } from "@checkfu/domain/Agents.model"
 import {
+	MAX_AGENT_TOOLS_TEXT_LENGTH,
+	MAX_MCP_SERVERS_TEXT_LENGTH,
+} from "@checkfu/domain/Mcp/McpServers"
+import {
 	MAX_AGENT_DESCRIPTION_LENGTH,
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
 import {
+	MAX_CUSTOM_TOOLS,
+	MAX_CUSTOM_TOOL_DESCRIPTION_LENGTH,
 	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_NAME_LENGTH,
 	MAX_MCP_SERVER_URL_LENGTH,
@@ -2565,6 +2571,68 @@ describe("Agent and environment field length limits", () => {
 		}
 	})
 
+	it("accepts a full-size agent sent with every character escaped, its tool declarations included", async () => {
+		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
+			makeAssistantReply(model, null, "ok", 1, 1),
+		)
+		const escaped = (text: string) =>
+			Array.from(
+				{ length: text.length },
+				(_, index) => `\\u${text.charCodeAt(index).toString(16).padStart(4, "0")}`,
+			).join("")
+		const tools: Array<{
+			readonly type: "custom"
+			readonly name: string
+			readonly description: string
+		}> = []
+		const next = (index: number) => ({
+			type: "custom" as const,
+			name: `c${index}`,
+			description: "a".repeat(MAX_CUSTOM_TOOL_DESCRIPTION_LENGTH),
+		})
+		const withSchema = (list: ReadonlyArray<unknown>) =>
+			JSON.stringify(
+				list.map((tool) => ({ ...(tool as object), input_schema: { type: "object" } })),
+			)
+		while (
+			tools.length < MAX_CUSTOM_TOOLS &&
+			withSchema([...tools, next(tools.length)]).length < MAX_AGENT_TOOLS_TEXT_LENGTH - 1024
+		) {
+			tools.push(next(tools.length))
+		}
+		const rawTools = tools
+			.map(
+				(tool) =>
+					`{"type":"custom","name":"${tool.name}","description":"${escaped(tool.description)}","input_schema":{"type":"object"}}`,
+			)
+			.join(",")
+		const rawBody = `{"name":"${escaped("😀".repeat(MAX_AGENT_NAME_LENGTH))}","model":"gpt-4o-mini","description":"${escaped(
+			"😀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+		)}","system":"${escaped("😀".repeat(MAX_AGENT_SYSTEM_LENGTH))}","tools":[${rawTools}]}`
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					expect(withSchema(tools).length).toBeGreaterThan(MAX_AGENT_TOOLS_TEXT_LENGTH - 8192)
+					expect(new TextEncoder().encode(rawBody).length).toBeLessThanOrEqual(MAX_AGENT_BODY_BYTES)
+					const created = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/agents",
+						headers: AUTH_HEADERS,
+						rawBody,
+					})
+					expect(created.status).toBe(201)
+					const body = (yield* Effect.promise(() => created.json())) as {
+						readonly tools: ReadonlyArray<unknown>
+					}
+					expect(body.tools).toHaveLength(tools.length)
+				}).pipe(Effect.scoped, Effect.provide(layer)),
+			)
+		} finally {
+			await closeAll()
+		}
+	})
+
 	it("accepts a full-size non-ASCII agent payload past 160 KiB and advertises every limit in OpenAPI", async () => {
 		const { layer, closeAll } = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "ok", 1, 1),
@@ -2864,6 +2932,8 @@ describe("Agent and environment field length limits", () => {
 								model: { id: maxLengthModelId("😀") },
 								system: "😀".repeat(MAX_AGENT_SYSTEM_LENGTH),
 								description: "😀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+								mcp_servers: "漢".repeat(MAX_MCP_SERVERS_TEXT_LENGTH),
+								tools: "漢".repeat(MAX_AGENT_TOOLS_TEXT_LENGTH),
 							}),
 						)
 						expect(
@@ -2891,6 +2961,8 @@ describe("Agent and environment field length limits", () => {
 									model: { id: maxLengthModelId("🚀") },
 									system: "🚀".repeat(MAX_AGENT_SYSTEM_LENGTH),
 									description: "🚀".repeat(MAX_AGENT_DESCRIPTION_LENGTH),
+									mcp_servers: "語".repeat(MAX_MCP_SERVERS_TEXT_LENGTH),
+									tools: "語".repeat(MAX_AGENT_TOOLS_TEXT_LENGTH),
 								},
 							}),
 						)
@@ -2975,7 +3047,7 @@ describe("Agent and environment field length limits", () => {
 			(write) => write.className === "AgentAggregate" && write.key === "intent",
 		)
 		expect(primaryIntents.length).toBeGreaterThanOrEqual(4)
-		expect(Math.max(...primaryIntents.map((write) => write.bytes))).toBeGreaterThan(750_000)
+		expect(Math.max(...primaryIntents.map((write) => write.bytes))).toBeGreaterThan(1_800_000)
 		expect(writes.some((write) => write.key.startsWith("decided:"))).toBe(true)
 		expect(writes.some((write) => write.key.startsWith("receipt:"))).toBe(true)
 		expect(writes.some((write) => write.key.startsWith("event:"))).toBe(true)

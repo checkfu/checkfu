@@ -29,8 +29,12 @@ import {
 	AgentMcpToolUse,
 	AgentToolResult,
 	AgentToolUse,
+	AgentCustomToolUse,
 } from "@checkfu/domain/Session/RecordToolCall.command"
 import { UserInterrupt } from "@checkfu/domain/Session/SendUserInterrupt.command"
+import { UserToolConfirmation } from "@checkfu/domain/Session/ConfirmTool.command"
+import { UserCustomToolResult } from "@checkfu/domain/Session/ReturnCustomToolResult.command"
+import { encodeToolUseIds } from "@checkfu/domain/Session/SessionTypes"
 import { SessionStatusRunning, UserMessage } from "@checkfu/domain/Session/SendUserMessage.command"
 import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionId } from "@checkfu/domain/Session/Session.id"
@@ -2433,7 +2437,11 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				event: new SessionStatusIdle({
+					stop_reason: { type: "end_turn" },
+					turn: 1,
+					event_ids: "[]",
+				}),
 				expectedJson: {
 					id: "evt_12",
 					seq: 12,
@@ -2498,10 +2506,73 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 				},
 			},
 			{
-				event: new SessionStatusTerminated({ running_turn: null }),
+				event: new AgentCustomToolUse({
+					tool_use_id: "tu_20",
+					name: "lookup_order",
+					input: { order: 42 },
+				}),
 				expectedJson: {
 					id: "evt_16",
 					seq: 16,
+					type: "agent.custom_tool_use",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "tu_20",
+					name: "lookup_order",
+					input: { order: 42 },
+				},
+			},
+			{
+				event: new SessionStatusIdle({
+					stop_reason: { type: "requires_action" },
+					event_ids: encodeToolUseIds(["tu_20", "tu_21"]),
+					turn: 1,
+				}),
+				expectedJson: {
+					id: "evt_17",
+					seq: 17,
+					type: "session.status_idle",
+					created_at: "2026-01-01T00:00:00.000Z",
+					stop_reason: { type: "requires_action", event_ids: ["tu_20", "tu_21"] },
+					turn: 1,
+				},
+			},
+			{
+				event: new UserToolConfirmation({
+					tool_use_id: "tu_21",
+					result: "deny",
+					deny_message: "No",
+				}),
+				expectedJson: {
+					id: "evt_18",
+					seq: 18,
+					type: "user.tool_confirmation",
+					created_at: "2026-01-01T00:00:00.000Z",
+					tool_use_id: "tu_21",
+					result: "deny",
+					deny_message: "No",
+				},
+			},
+			{
+				event: new UserCustomToolResult({
+					custom_tool_use_id: "tu_20",
+					content: [{ type: "text", text: "shipped" }],
+					is_error: true,
+				}),
+				expectedJson: {
+					id: "evt_19",
+					seq: 19,
+					type: "user.custom_tool_result",
+					created_at: "2026-01-01T00:00:00.000Z",
+					custom_tool_use_id: "tu_20",
+					content: [{ type: "text", text: "shipped" }],
+					is_error: true,
+				},
+			},
+			{
+				event: new SessionStatusTerminated({ running_turn: null, event_ids: "[]" }),
+				expectedJson: {
+					id: "evt_20",
+					seq: 20,
 					type: "session.status_terminated",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},
@@ -2509,8 +2580,8 @@ describe("Session event batching, interrupts, and SSE streaming", () => {
 			{
 				event: new SessionArchived(),
 				expectedJson: {
-					id: "evt_17",
-					seq: 17,
+					id: "evt_21",
+					seq: 21,
 					type: "session.archived",
 					created_at: "2026-01-01T00:00:00.000Z",
 				},

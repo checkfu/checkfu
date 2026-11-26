@@ -6,16 +6,20 @@ import { AbandonTurn } from "./AbandonTurn.command.ts"
 import { SessionStatusTerminated } from "./ArchiveSession.command.ts"
 import { SessionStatusIdle } from "./CommitModelReply.command.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, TURN_TIMEOUT, TURN_TIMEOUT_MESSAGE } from "./Harness.external.ts"
-import { RunTurn, turnKey } from "./RunTurn.saga.ts"
+import { TurnContinued } from "./PauseTurn.command.ts"
+import { RunTurn, segmentKey } from "./RunTurn.saga.ts"
 import { SessionStatusRunning } from "./SendUserMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { TurnInput } from "./TurnInput.view.ts"
 
 export const ENSURED_TURN_DEADLINE = "ensured-turn-deadline"
 
+const ensuredDeadline = (segment: number) =>
+	segment === 1 ? ENSURED_TURN_DEADLINE : `${ENSURED_TURN_DEADLINE}:${segment}`
+
 export class EnsureTurnStarted extends Domain.Policy("EnsureTurnStarted", {
 	from: Session,
-	on: [SessionStatusRunning, SessionStatusIdle, SessionStatusTerminated],
+	on: [SessionStatusRunning, TurnContinued, SessionStatusIdle, SessionStatusTerminated],
 }) {}
 
 export const ensureTurnStarted = Effect.gen(function* () {
@@ -27,17 +31,6 @@ export const ensureTurnStarted = Effect.gen(function* () {
 		event,
 		envelope,
 	}: Policy.TriggerOf<typeof EnsureTurnStarted>) {
-		if (event._tag !== "session.status_running") {
-			yield* sessions
-				.unschedule(source.id, ENSURED_TURN_DEADLINE)
-				.pipe(
-					Effect.catchTag(
-						["AlreadyExecuted", "AlreadyCancelled", "NotScheduled"],
-						() => Effect.void,
-					),
-				)
-			return
-		}
 		const state = Option.getOrNull(
 			yield* Effect.orDie(
 				inputs.get(source, {
@@ -45,19 +38,43 @@ export const ensureTurnStarted = Effect.gen(function* () {
 				}),
 			),
 		)
+		const segment = state?.segment ?? 1
+		const unschedule = (id: string) =>
+			sessions
+				.unschedule(source.id, id)
+				.pipe(
+					Effect.catchTag(
+						["AlreadyExecuted", "AlreadyCancelled", "NotScheduled"],
+						() => Effect.void,
+					),
+				)
+		if (event._tag === "session.status_idle" && event.stop_reason.type === "requires_action") {
+			return
+		}
+		if (event._tag !== "session.status_running" && event._tag !== "turn.continued") {
+			yield* unschedule(ensuredDeadline(segment))
+			return
+		}
 		if (state === null || state.turn !== event.turn || state.input.length === 0) {
+			return
+		}
+		if (event._tag === "session.status_running" ? segment > 1 : event.segment !== segment) {
 			return
 		}
 		yield* sessions.schedule(
 			new AbandonTurn({
 				session_id: source.id,
 				turn: state.turn,
+				segment,
 				error_type: TURN_TIMEOUT,
 				message: TURN_TIMEOUT_MESSAGE,
 			}),
-			{ after: DEFAULT_TURN_TIMEOUT_MS, commandId: ENSURED_TURN_DEADLINE },
+			{ after: DEFAULT_TURN_TIMEOUT_MS, commandId: ensuredDeadline(segment) },
 		)
-		yield* runs.start(turnKey(source.id, state.turn), {
+		if (segment > 1) {
+			yield* unschedule(ensuredDeadline(segment - 1))
+		}
+		yield* runs.start(segmentKey(source.id, state.turn, segment), {
 			session_id: source.id,
 			agent_id: state.agent_id,
 			agent_version: state.agent_version,
@@ -65,6 +82,7 @@ export const ensureTurnStarted = Effect.gen(function* () {
 			turn: state.turn,
 			input: state.input,
 			...(state.last_reply_turn === undefined ? {} : { last_reply_turn: state.last_reply_turn }),
+			...(segment === 1 ? {} : { segment }),
 		})
 	})
 })

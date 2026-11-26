@@ -40,16 +40,28 @@ import {
 	PublishSessionOutputs,
 	PublishSessionOutputsLive,
 } from "./Session/PublishSessionOutputs.policy.ts"
+import { ConfirmToolDecision } from "./Session/ConfirmTool.decision.ts"
+import { RequestToolActionDecision } from "./Session/RequestToolAction.decision.ts"
+import { ReturnCustomToolResultDecision } from "./Session/ReturnCustomToolResult.decision.ts"
 import { RunTurn, RunTurnLive } from "./Session/RunTurn.saga.ts"
 import { Session } from "./Session/Session.aggregate.ts"
 import { SessionView } from "./Session/SessionView.view.ts"
 import { EnsureTurnStarted, EnsureTurnStartedLive } from "./Session/EnsureTurnStarted.policy.ts"
 import { EnsureTurnStopped, EnsureTurnStoppedLive } from "./Session/EnsureTurnStopped.policy.ts"
 import { StartTurn, StartTurnLive } from "./Session/StartTurn.policy.ts"
+import { ToolConfirmation } from "./Session/ToolConfirmation.aggregate.ts"
 import { TurnInput } from "./Session/TurnInput.view.ts"
 
 export class Checkfu extends Domain.Model("Checkfu", {
-	aggregates: [Agent, Environment, Session, Automation, AutomationCapacity, Artifact],
+	aggregates: [
+		Agent,
+		Environment,
+		Session,
+		ToolConfirmation,
+		Automation,
+		AutomationCapacity,
+		Artifact,
+	],
 	decisions: [
 		CreateAgentDecision,
 		UpdateAgentDecision,
@@ -57,6 +69,9 @@ export class Checkfu extends Domain.Model("Checkfu", {
 		AdmitAutomationDecision,
 		OpenAutomationSessionDecision,
 		UpdateAutomationDecision,
+		RequestToolActionDecision,
+		ConfirmToolDecision,
+		ReturnCustomToolResultDecision,
 	],
 	views: [
 		AgentView,
@@ -236,7 +251,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 					if (s.state._tag === "Running") {
 						return [
 							...identity,
-							view.state.status === "running",
+							view.state.status === (s.state.paused ? "idle" : "running"),
 							view.state.turn === s.state.turn,
 							!view.state.archived_at,
 							input.state.turn === s.state.turn,
@@ -244,9 +259,13 @@ export class Checkfu extends Domain.Model("Checkfu", {
 							input.state.unsent.length === s.state.pending_user_messages,
 						].every((ok) => ok)
 					}
-					const startedTurns = s.events.filter(
-						(event) => event._tag === "session.status_running",
-					).length
+					const startedTurns = s.events.reduce(
+						(highest, event) =>
+							event._tag === "session.status_running" && event.turn > highest
+								? event.turn
+								: highest,
+						0,
+					)
 					return [
 						...identity,
 						view.state.status === "terminated",
@@ -355,7 +374,7 @@ export class Checkfu extends Domain.Model("Checkfu", {
 			m.Session.some((s) => s.state._tag === "Idle" && s.state.turn >= 1),
 	},
 	eventually: {
-		EveryTurnSettles: (m) => m.Session.every((s) => s.state._tag !== "Running"),
+		EveryTurnSettles: (m) => m.Session.every((s) => s.state._tag !== "Running" || s.state.paused),
 	},
 }) {}
 
@@ -372,6 +391,8 @@ export class CheckfuDomainApi extends Domain.Api("CheckfuDomainApi", {
 		"AdmitSession",
 		"SendUserMessage",
 		"SendUserInterrupt",
+		"ConfirmTool",
+		"ReturnCustomToolResult",
 		"ArchiveSession",
 		"ClaimIdempotencyKey",
 		"AdmitAutomation",

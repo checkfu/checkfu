@@ -7,6 +7,7 @@ import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./PiHarness.ts"
 import { piHarnessAiBindingProps } from "./PiModels.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { PiSession, PiSessionLive } from "./PiSession.do.ts"
+import { customToolFaults } from "./PiToolSchema.ts"
 
 export const PI_HARNESS_WORKER_PROPS = {
 	main: import.meta.url,
@@ -36,6 +37,11 @@ export default PiHarnessWorker.make(
 			listOutputs: (sessionId, turn) => Effect.orDie(workspace(sessionId).listOutputs(turn)),
 			readOutputs: (sessionId, turn, paths) =>
 				Effect.orDie(workspace(sessionId).readOutputs(turn, paths)),
+			pauseUsage: (conversation, operationId, pause) =>
+				Effect.orDie(piSession(conversation).pauseUsage(operationId, pause)),
+			answerCall: (conversation, toolUseId, answer) =>
+				Effect.orDie(piSession(conversation).answerCall(toolUseId, answer)),
+			customToolFaults: (tools, taken) => Effect.sync(() => customToolFaults(tools, taken)),
 			discardWorkspace: (sessionId) => Effect.orDie(workspace(sessionId).discard()),
 			putSecret: (vaultId, credentialId, secret, target, mode) =>
 				Effect.orDie(connection(vaultId).putSecret(credentialId, secret, target, mode)),

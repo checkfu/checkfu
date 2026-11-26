@@ -1,5 +1,5 @@
 import { MAX_MCP_SERVERS, mcpHostAllowed } from "@checkfu/domain/Mcp/McpServers"
-import type { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
+import type { AgentTool, McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
 import type { Extension } from "@earendil-works/pi-durable"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -138,6 +138,7 @@ export const makeSessionMcp = (options: {
 	readonly kv: SessionKv
 	readonly vaults: SessionVaults
 	readonly admittedTurn: () => number
+	readonly agentTools: () => ReadonlyArray<AgentTool>
 	readonly fetch?: typeof fetch
 }) => {
 	const { kv } = options
@@ -243,7 +244,7 @@ export const makeSessionMcp = (options: {
 			},
 		}))
 
-	let registry: McpRegistry = mcpRegistry(servers())
+	let registry: McpRegistry = mcpRegistry(servers(), options.agentTools())
 
 	const dispatch: McpDispatch = async (binding, tool, args, signal) => {
 		const turn = options.admittedTurn()
@@ -270,7 +271,7 @@ export const makeSessionMcp = (options: {
 	return {
 		extensions: (): ReadonlyArray<Extension> => {
 			const kept = servers()
-			registry = mcpRegistry(kept)
+			registry = mcpRegistry(kept, options.agentTools())
 			return kept.map(({ binding, tools }) => mcpExtension(binding, tools, registry, dispatch))
 		},
 		toolOf: (name: string) => registry.toolOf(name),

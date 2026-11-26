@@ -1,11 +1,13 @@
-import type { McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
-import type { McpToolOf } from "@checkfu/domain/Session/RecordToolEvents"
+import type { AgentTool, McpServerBinding } from "@checkfu/domain/Mcp/McpServers"
+import type { McpToolOf } from "@checkfu/domain/Session/ToolEventBounds"
 import { isJsonValue } from "@earendil-works/chord/json"
 import type { Extension, ToolRegistration } from "@earendil-works/pi-durable"
 import * as Schema from "effect/Schema"
 import * as Option from "effect/Option"
 import { McpToolDescriptors } from "./PiMcpTypes.ts"
 import type { McpCallOutcome, McpListOutcome, McpToolDescriptor } from "./PiMcpTypes.ts"
+import { mcpPermission } from "./PiActions.ts"
+import type { Permission } from "./PiActions.ts"
 import { assignToolNames } from "./PiToolNames.ts"
 import type { ToolNames } from "./PiToolNames.ts"
 import { MODEL_TEXT_LIMITS, boundModelOutput } from "./PiToolText.ts"
@@ -59,10 +61,12 @@ export interface McpRegistered {
 	readonly binding: McpServerBinding
 	readonly tool: McpToolDescriptor
 	readonly names: ToolNames
+	readonly permission: Permission
 }
 
 export const mcpRegistry = (
 	servers: ReadonlyArray<{ readonly binding: McpServerBinding; readonly tools: McpServerTools }>,
+	agentTools: ReadonlyArray<AgentTool> = [],
 ) => {
 	const offered = servers.flatMap(({ binding, tools }) =>
 		tools.status === "listed"
@@ -78,19 +82,31 @@ export const mcpRegistry = (
 		}
 	}
 	const byName = new Map<string, McpRegistered>()
-	for (const names of assignToolNames(
-		offered.map(({ prefix, tool }) => ({ prefix, name: tool.name })),
-	)) {
+	for (const names of assignToolNames([
+		...offered.map(({ prefix, tool }) => ({ prefix, name: tool.name })),
+		...agentTools.flatMap((tool) =>
+			tool.type === "custom" ? [{ prefix: "", name: tool.name, kept: true }] : [],
+		),
+	])) {
 		const entry = offeredAs.get(names.prefix)?.get(names.name)
 		if (entry !== undefined) {
-			byName.set(names.model, { binding: entry.binding, tool: entry.tool, names })
+			byName.set(names.model, {
+				binding: entry.binding,
+				tool: entry.tool,
+				names,
+				permission: mcpPermission(agentTools, entry.binding.name, entry.tool),
+			})
 		}
 	}
 	const toolOf: McpToolOf = (name) => {
 		const registered = byName.get(name)
 		return registered === undefined
 			? undefined
-			: { server: registered.binding.name, tool: registered.names.public }
+			: {
+					server: registered.binding.name,
+					tool: registered.names.public,
+					permission: registered.permission,
+				}
 	}
 	return { byName, toolOf }
 }

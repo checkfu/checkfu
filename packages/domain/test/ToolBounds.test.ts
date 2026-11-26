@@ -4,8 +4,11 @@ import {
 	boundToolEvents,
 	toolCallCommandId,
 	toolCallsOf,
+	toolRecordsOf,
+	toolResultCommandId,
 	toolUseId,
 	toolUseOf,
+	turnCalls,
 } from "../src/Session/RecordToolEvents.ts"
 import type { TranscriptToolResult, TranscriptToolUse } from "../src/Session/RecordToolEvents.ts"
 import {
@@ -14,6 +17,10 @@ import {
 	MAX_TOOL_INPUT_JSON_LENGTH,
 	MAX_TOOL_RESULT_TEXT_LENGTH,
 	MAX_TURN_TOOL_TEXT_LENGTH,
+	NO_TOOL_USE_IDS,
+	addToolUseId,
+	decodeToolUseIds,
+	removeToolUseId,
 } from "../src/Session/SessionTypes.ts"
 import type { ToolEvent } from "../src/Session/SessionTypes.ts"
 import { truncateText } from "../src/Session/TextBounds.ts"
@@ -185,24 +192,30 @@ describe("Bounding a turn's tool events", () => {
 		])
 	})
 
-	it("drops the result of a call past the count limit that reuses a kept call's id", () => {
+	it("gives a place to the call a result names, never to a call that got none", () => {
 		const steps: Array<Step> = []
 		for (let index = 0; index < MAX_TOOL_CALLS_PER_TURN - 1; index++) {
 			steps.push({ use: use(`call-${index}`) }, { result: result(`call-${index}`, index + 1, "r") })
 		}
 		steps.push(
-			{ use: use("dup", "kept") },
-			{ use: use("dup", "past-limit") },
-			{ result: result("dup", 1000, "not for the kept call") },
+			{ use: use("dup", "unanswered") },
+			{ use: use("dup", "ambiguous") },
+			{ result: result("dup", 1000, "for one of the two") },
+			{ use: use("late", "answered") },
+			{ result: result("late", 1001, "for the call that ran") },
+			{ use: use("later", "past-limit") },
+			{ result: result("later", 1002, "left out") },
 		)
 		const bounds = bound(steps)
-		const names = bounds.events().filter((event) => event.type === "tool_use")
-		expect(names).toHaveLength(MAX_TOOL_CALLS_PER_TURN - 1)
-		expect(names.some((event) => event.name === "kept" || event.name === "past-limit")).toBe(false)
-		expect(bounds.complete()).toBe(false)
-		bounds.round()
-		bounds.use(use("last"))
-		bounds.result(result("last", 2000, "r"))
+		const events = bounds.events()
+		const names = events.filter((event) => event.type === "tool_use")
+		expect(names).toHaveLength(MAX_TOOL_CALLS_PER_TURN)
+		expect(names.at(-1)).toMatchObject({ name: "answered", tool_use_id: toolUseId(1, 1001) })
+		expect(
+			names.some((event) => ["unanswered", "ambiguous", "past-limit"].includes(event.name)),
+		).toBe(false)
+		expect(events.some((event) => event.tool_use_id === toolUseId(1, 1000))).toBe(false)
+		expect(events.some((event) => event.tool_use_id === toolUseId(1, 1002))).toBe(false)
 		expect(bounds.complete()).toBe(true)
 		expect(bounds.events().filter((event) => event.type === "tool_use")).toHaveLength(
 			MAX_TOOL_CALLS_PER_TURN,
@@ -233,6 +246,113 @@ describe("Bounding a turn's tool events", () => {
 				is_error: false,
 			},
 		])
+	})
+
+	it("publishes the result of a call whose use is on the log, however many calls came first", () => {
+		const calls = turnCalls()
+		const waited = [5000, 5001]
+		waited.forEach((task) => expect(calls.admit(task)).toBe(true))
+		const bounds = boundToolEvents(1, undefined, calls)
+		for (let index = 0; index < MAX_TOOL_CALLS_PER_TURN + 10; index++) {
+			bounds.use(use(`call-${index}`))
+			bounds.result(result(`call-${index}`, index + 1, "r"))
+		}
+		expect(bounds.complete()).toBe(false)
+		for (const task of waited) {
+			bounds.use(use(`waited-${task}`, "deploy"))
+			bounds.result({ ...result(`waited-${task}`, task, "deployed"), use_published: true })
+		}
+		const events = bounds.events()
+		for (const task of waited) {
+			const own = events.filter((event) => event.tool_use_id === toolUseId(1, task))
+			expect(own).toEqual([
+				{
+					type: "tool_result",
+					tool_use_id: toolUseId(1, task),
+					content: [{ type: "text", text: "deployed" }],
+					is_error: false,
+				},
+			])
+		}
+		expect(events.filter((event) => event.type === "tool_use")).toHaveLength(
+			MAX_TOOL_CALLS_PER_TURN - waited.length,
+		)
+		expect(bounds.complete()).toBe(true)
+	})
+
+	it("publishes a result whose use is marked published even when no place is recorded for it", () => {
+		const calls = turnCalls()
+		for (let task = 1; task <= MAX_TOOL_CALLS_PER_TURN; task++) {
+			calls.admit(task)
+		}
+		const bounds = boundToolEvents(1, undefined, calls)
+		bounds.use(use("waited", "deploy"))
+		bounds.result({ ...result("waited", 900, "deployed"), use_published: true })
+		expect(bounds.events().map((event) => `${event.type}:${event.tool_use_id}`)).toEqual([
+			`tool_result:${toolUseId(1, 900)}`,
+		])
+	})
+
+	it("records a waited call's result alone, and every other call whole, each under one id", () => {
+		const bounds = boundToolEvents(1)
+		bounds.use(use("plain"))
+		bounds.result(result("plain", 3, "x"))
+		bounds.use(use("waited", "deploy"))
+		bounds.result({ ...result("waited", 5, "deployed"), use_published: true })
+		const events = bounds.events()
+		const records = toolRecordsOf(events)
+
+		expect(
+			records.map((record) =>
+				record.type === "call"
+					? toolCallCommandId(record.call.tool_use_id)
+					: toolResultCommandId(record.result.tool_use_id),
+			),
+		).toEqual(["tool:call:tu_1_3", "tool:result:tu_1_5"])
+		expect(records[1]).toMatchObject({
+			type: "result",
+			result: { tool_use_id: "tu_1_5", content: [{ type: "text", text: "deployed" }] },
+		})
+		expect(toolCallsOf(events).map((call) => call.tool_use_id)).toEqual(["tu_1_3"])
+		expect(toolRecordsOf(events)).toEqual(records)
+	})
+
+	it("records nothing for a use that has no result yet", () => {
+		const [used] = boundToolEvents(1).events()
+		expect(used).toBeUndefined()
+		expect(
+			toolRecordsOf([{ type: "tool_use", tool_use_id: "tu_1_1", name: "read", input: {} }]),
+		).toEqual([])
+	})
+
+	it("keeps a published call's result when the turn's text is spent, cut to nothing and marked", () => {
+		const calls = turnCalls()
+		calls.admit(900)
+		const bounds = boundToolEvents(1, undefined, calls)
+		for (let index = 0; index < MAX_TOOL_CALLS_PER_TURN - 1; index++) {
+			bounds.use(use(`c-${index}`))
+			bounds.result(result(`c-${index}`, index + 1, "z".repeat(MAX_TOOL_RESULT_TEXT_LENGTH)))
+		}
+		bounds.use(use("waited", "deploy"))
+		bounds.result({ ...result("waited", 900, "deployed"), use_published: true })
+		expect(bounds.events().at(-1)).toEqual({
+			type: "tool_result",
+			tool_use_id: toolUseId(1, 900),
+			content: [],
+			is_error: false,
+			truncated: true,
+		})
+		expect(textOf(bounds.events())).toBeLessThanOrEqual(MAX_TURN_TOOL_TEXT_LENGTH)
+	})
+
+	it("gives a call one answer for good, and a turn no more places than its limit", () => {
+		const calls = turnCalls()
+		const answers = Array.from({ length: MAX_TOOL_CALLS_PER_TURN + 20 }, (_, task) =>
+			calls.admit(task),
+		)
+		expect(answers.filter(Boolean)).toHaveLength(MAX_TOOL_CALLS_PER_TURN)
+		expect(Array.from({ length: answers.length }, (_, task) => calls.admit(task))).toEqual(answers)
+		expect(calls.admitted()).toHaveLength(MAX_TOOL_CALLS_PER_TURN)
 	})
 
 	it("cuts and marks oversized inputs and results, keeps a mark the transcript carried, and stays within the turn's text", () => {
@@ -297,4 +417,14 @@ describe("Cutting text", () => {
 			expect(reply.text).toBe("y".repeat(MAX_MESSAGE_TEXT_LENGTH - 1))
 		}),
 	)
+})
+
+describe("The calls a turn waits on", () => {
+	it("keeps each call once, in the order asked, until it is answered", () => {
+		const asked = ["tu_b", "tu_a", "tu_b"].reduce(addToolUseId, NO_TOOL_USE_IDS)
+		expect(decodeToolUseIds(asked)).toEqual(["tu_b", "tu_a"])
+		expect(decodeToolUseIds(removeToolUseId(asked, "tu_b"))).toEqual(["tu_a"])
+		expect(decodeToolUseIds(removeToolUseId(asked, "tu_c"))).toEqual(["tu_b", "tu_a"])
+		expect(removeToolUseId(removeToolUseId(asked, "tu_a"), "tu_b")).toBe(NO_TOOL_USE_IDS)
+	})
 })

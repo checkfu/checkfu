@@ -54,7 +54,7 @@ interface SessionEventItem {
 	readonly name?: string
 	readonly input?: Schema.JsonObject
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
-	readonly stop_reason?: { readonly type: string }
+	readonly stop_reason?: { readonly type: string; readonly event_ids?: ReadonlyArray<string> }
 }
 
 const LOCAL_R2_ACCESS_KEY = "alchemy-local-r2"
@@ -1998,6 +1998,11 @@ describe("PiSession real Durable Object under workerd", () => {
 					{ type: "url", name: "secure", url: secure.url },
 					{ type: "url", name: "open", url: open.url },
 				],
+				tools: ["secure", "open"].map((mcp_server_name) => ({
+					type: "mcp_toolset",
+					mcp_server_name,
+					default_config: { permission_policy: { type: "always_allow" } },
+				})),
 			})
 			const vaults = await Promise.all(
 				[0, 1].map(() =>
@@ -2126,6 +2131,13 @@ describe("PiSession real Durable Object under workerd", () => {
 				name: "Revoked MCP Agent",
 				model: "gpt-4o-mini",
 				mcp_servers: [{ type: "url", name: "secure", url: secure.url }],
+				tools: [
+					{
+						type: "mcp_toolset",
+						mcp_server_name: "secure",
+						default_config: { permission_policy: { type: "always_allow" } },
+					},
+				],
 			})
 			const script =
 				'try { return await tools.mcp__secure__echo({ text: "hi" }) } catch (e) { return String(e) }'
@@ -2206,6 +2218,11 @@ describe("PiSession real Durable Object under workerd", () => {
 					{ type: "url", name: "raw", url: raw.url },
 					{ type: "url", name: "huge", url: huge.url },
 				],
+				tools: ["raw", "huge"].map((mcp_server_name) => ({
+					type: "mcp_toolset",
+					mcp_server_name,
+					default_config: { permission_policy: { type: "always_allow" } },
+				})),
 			})
 			const session = await createResource<SessionResource>("/v1/sessions", {
 				agent: agent.id,
@@ -2300,4 +2317,107 @@ describe("PiSession real Durable Object under workerd", () => {
 			await huge.close()
 		}
 	}, 180_000)
+
+	it("pauses a turn on a call that asks and on a custom tool, and goes on once each is answered", async () => {
+		const open = await startFakeMcpServer(null, { modern: true })
+		try {
+			const agent = await createResource<{ readonly id: string }>("/v1/agents", {
+				name: "Asking Agent",
+				model: "gpt-4o-mini",
+				mcp_servers: [{ type: "url", name: "open", url: open.url }],
+				tools: [
+					{
+						type: "custom",
+						name: "lookup_order",
+						description: "Looks an order up",
+						input_schema: {
+							type: "object",
+							properties: { order: { type: "integer" } },
+							required: ["order"],
+						},
+					},
+				],
+			})
+			fakeOpenAI.setHandler((req) => {
+				switch (req.toolOutputs.length) {
+					case 0:
+						return { kind: "tool_call", name: "tool_search", arguments: { query: "echo" } }
+					case 1:
+						return { kind: "tool_call", name: "mcp__open__echo", arguments: { text: "approved" } }
+					case 2:
+						return { kind: "tool_call", name: "lookup_order", arguments: { order: "42" } }
+					default:
+						return { kind: "reply", text: "Done." }
+				}
+			})
+			const session = await createResource<SessionResource>("/v1/sessions", {
+				agent: agent.id,
+				environment_id: environmentId,
+			})
+			const send = (event: unknown) =>
+				apiJson(`/v1/sessions/${session.id}/events`, { method: "POST", body: { events: [event] } })
+			expect(
+				(await send({ type: "user.message", content: [{ type: "text", text: "Go." }] })).status,
+			).toBe(200)
+			const waitingOn = async (count: number) => {
+				for (let attempt = 0; attempt < 600; attempt++) {
+					const events = await listAllEvents(session.id)
+					const pauses = events.filter(
+						(e) => e.type === "session.status_idle" && e.stop_reason?.type === "requires_action",
+					)
+					if (pauses.length >= count) {
+						return { events, ids: pauses.at(-1)?.stop_reason?.event_ids ?? [] }
+					}
+					await sleep(100)
+				}
+				throw new Error(`the turn did not pause ${count} times`)
+			}
+			const first = await waitingOn(1)
+			const asked = first.events.find((e) => e.type === "agent.mcp_tool_use")
+			expect(asked).toMatchObject({
+				name: "echo",
+				evaluated_permission: "ask",
+				input: { text: "approved" },
+			})
+			expect(first.ids).toEqual([asked?.tool_use_id])
+			expect(open.calls).toEqual([])
+			expect(
+				(
+					await send({
+						type: "user.tool_confirmation",
+						tool_use_id: asked?.tool_use_id,
+						result: "allow",
+					})
+				).status,
+			).toBe(200)
+			const second = await waitingOn(2)
+			const custom = second.events.find((e) => e.type === "agent.custom_tool_use")
+			expect(custom).toMatchObject({ name: "lookup_order", input: { order: 42 } })
+			expect(open.calls.map((call) => call.arguments)).toEqual([{ text: "approved" }])
+			expect(
+				(
+					await send({
+						type: "user.custom_tool_result",
+						custom_tool_use_id: custom?.tool_use_id,
+						content: [{ type: "text", text: "shipped" }],
+					})
+				).status,
+			).toBe(200)
+			let events = await listAllEvents(session.id)
+			for (
+				let attempt = 0;
+				attempt < 600 && !events.some((e) => e.type === "agent.message");
+				attempt++
+			) {
+				await sleep(100)
+				events = await listAllEvents(session.id)
+			}
+			const last = events.filter((e) => e.type === "session.status_idle").at(-1)
+			expect(last?.stop_reason?.type).toBe("end_turn")
+			expect(events.find((e) => e.type === "agent.message")?.content?.[0]?.text).toBe("Done.")
+			expect(events.filter((e) => e.type === "agent.mcp_tool_use")).toHaveLength(1)
+		} finally {
+			await open.close()
+		}
+	}, 120_000)
 })
