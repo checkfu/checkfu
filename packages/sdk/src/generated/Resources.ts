@@ -37,6 +37,7 @@ import type {
 	AnyRequestOptions,
 	EffectSdkRuntime,
 	EndpointBody,
+	EndpointJsonBody,
 	EndpointJsonSuccess,
 	EndpointParams,
 	EndpointQuery,
@@ -58,229 +59,305 @@ export interface CheckfuOperations {
 		EndpointParams<"agents", "archive">,
 		EndpointQuery<"agents", "archive">,
 		EndpointBody<"agents", "archive">,
-		EndpointSuccess<"agents", "archive">
+		EndpointSuccess<"agents", "archive">,
+		EndpointJsonSuccess<"agents", "archive">,
+		EndpointJsonBody<"agents", "archive">
 	>
 	readonly "agents.create": OperationShape<
 		EndpointParams<"agents", "create">,
 		EndpointQuery<"agents", "create">,
 		EndpointBody<"agents", "create">,
-		EndpointSuccess<"agents", "create">
+		EndpointSuccess<"agents", "create">,
+		EndpointJsonSuccess<"agents", "create">,
+		EndpointJsonBody<"agents", "create">
 	>
 	readonly "agents.list": OperationShape<
 		EndpointParams<"agents", "list">,
 		RelaxOptionalProps<EndpointQuery<"agents", "list">>,
 		EndpointBody<"agents", "list">,
-		EndpointSuccess<"agents", "list">
+		EndpointSuccess<"agents", "list">,
+		EndpointJsonSuccess<"agents", "list">,
+		EndpointJsonBody<"agents", "list">
 	>
 	readonly "agents.retrieve": OperationShape<
 		EndpointParams<"agents", "get">,
 		RelaxOptionalProps<EndpointQuery<"agents", "get">>,
 		EndpointBody<"agents", "get">,
-		EndpointSuccess<"agents", "get">
+		EndpointSuccess<"agents", "get">,
+		EndpointJsonSuccess<"agents", "get">,
+		EndpointJsonBody<"agents", "get">
 	>
 	readonly "agents.update": OperationShape<
 		EndpointParams<"agents", "update">,
 		EndpointQuery<"agents", "update">,
 		EndpointBody<"agents", "update">,
-		EndpointSuccess<"agents", "update">
+		EndpointSuccess<"agents", "update">,
+		EndpointJsonSuccess<"agents", "update">,
+		EndpointJsonBody<"agents", "update">
 	>
 	readonly "agents.versions.list": OperationShape<
 		EndpointParams<"agents", "listVersions">,
 		RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
 		EndpointBody<"agents", "listVersions">,
-		EndpointSuccess<"agents", "listVersions">
+		EndpointSuccess<"agents", "listVersions">,
+		EndpointJsonSuccess<"agents", "listVersions">,
+		EndpointJsonBody<"agents", "listVersions">
 	>
 	readonly "artifacts.create": OperationShape<
 		EndpointParams<"artifacts", "create">,
 		EndpointQuery<"artifacts", "create">,
 		EndpointBody<"artifacts", "create">,
-		EndpointSuccess<"artifacts", "create">
+		EndpointSuccess<"artifacts", "create">,
+		EndpointJsonSuccess<"artifacts", "create">,
+		EndpointJsonBody<"artifacts", "create">
 	>
 	readonly "artifacts.delete": OperationShape<
 		EndpointParams<"artifacts", "delete">,
 		EndpointQuery<"artifacts", "delete">,
 		EndpointBody<"artifacts", "delete">,
-		EndpointSuccess<"artifacts", "delete">
+		EndpointSuccess<"artifacts", "delete">,
+		EndpointJsonSuccess<"artifacts", "delete">,
+		EndpointJsonBody<"artifacts", "delete">
 	>
 	readonly "artifacts.list": OperationShape<
 		EndpointParams<"artifacts", "list">,
 		RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
 		EndpointBody<"artifacts", "list">,
-		EndpointSuccess<"artifacts", "list">
+		EndpointSuccess<"artifacts", "list">,
+		EndpointJsonSuccess<"artifacts", "list">,
+		EndpointJsonBody<"artifacts", "list">
 	>
 	readonly "artifacts.publish": OperationShape<
 		EndpointParams<"artifacts", "publish">,
 		EndpointQuery<"artifacts", "publish">,
 		EndpointBody<"artifacts", "publish">,
-		EndpointSuccess<"artifacts", "publish">
+		EndpointSuccess<"artifacts", "publish">,
+		EndpointJsonSuccess<"artifacts", "publish">,
+		EndpointJsonBody<"artifacts", "publish">
 	>
 	readonly "artifacts.retrieve": OperationShape<
 		EndpointParams<"artifacts", "get">,
 		EndpointQuery<"artifacts", "get">,
 		EndpointBody<"artifacts", "get">,
-		EndpointSuccess<"artifacts", "get">
+		EndpointSuccess<"artifacts", "get">,
+		EndpointJsonSuccess<"artifacts", "get">,
+		EndpointJsonBody<"artifacts", "get">
 	>
 	readonly "artifacts.unpublish": OperationShape<
 		EndpointParams<"artifacts", "unpublish">,
 		EndpointQuery<"artifacts", "unpublish">,
 		EndpointBody<"artifacts", "unpublish">,
-		EndpointSuccess<"artifacts", "unpublish">
+		EndpointSuccess<"artifacts", "unpublish">,
+		EndpointJsonSuccess<"artifacts", "unpublish">,
+		EndpointJsonBody<"artifacts", "unpublish">
 	>
 	readonly "artifacts.versions.create": OperationShape<
 		EndpointParams<"artifacts", "createVersion">,
 		EndpointQuery<"artifacts", "createVersion">,
 		EndpointBody<"artifacts", "createVersion">,
-		EndpointSuccess<"artifacts", "createVersion">
+		EndpointSuccess<"artifacts", "createVersion">,
+		EndpointJsonSuccess<"artifacts", "createVersion">,
+		EndpointJsonBody<"artifacts", "createVersion">
 	>
 	readonly "artifacts.versions.file": OperationShape<
 		EndpointParams<"artifacts", "getFile">,
 		RelaxOptionalProps<EndpointQuery<"artifacts", "getFile">>,
 		EndpointBody<"artifacts", "getFile">,
-		EndpointSuccess<"artifacts", "getFile">
+		EndpointSuccess<"artifacts", "getFile">,
+		EndpointJsonSuccess<"artifacts", "getFile">,
+		EndpointJsonBody<"artifacts", "getFile">
 	>
 	readonly "artifacts.versions.link": OperationShape<
 		EndpointParams<"artifacts", "createLink">,
 		EndpointQuery<"artifacts", "createLink">,
 		EndpointBody<"artifacts", "createLink">,
-		EndpointSuccess<"artifacts", "createLink">
+		EndpointSuccess<"artifacts", "createLink">,
+		EndpointJsonSuccess<"artifacts", "createLink">,
+		EndpointJsonBody<"artifacts", "createLink">
 	>
 	readonly "artifacts.versions.retrieve": OperationShape<
 		EndpointParams<"artifacts", "getVersion">,
 		EndpointQuery<"artifacts", "getVersion">,
 		EndpointBody<"artifacts", "getVersion">,
-		EndpointSuccess<"artifacts", "getVersion">
+		EndpointSuccess<"artifacts", "getVersion">,
+		EndpointJsonSuccess<"artifacts", "getVersion">,
+		EndpointJsonBody<"artifacts", "getVersion">
 	>
 	readonly "automations.archive": OperationShape<
 		EndpointParams<"automations", "archive">,
 		EndpointQuery<"automations", "archive">,
 		EndpointBody<"automations", "archive">,
-		EndpointSuccess<"automations", "archive">
+		EndpointSuccess<"automations", "archive">,
+		EndpointJsonSuccess<"automations", "archive">,
+		EndpointJsonBody<"automations", "archive">
 	>
 	readonly "automations.create": OperationShape<
 		EndpointParams<"automations", "create">,
 		EndpointQuery<"automations", "create">,
 		EndpointBody<"automations", "create">,
-		EndpointSuccess<"automations", "create">
+		EndpointSuccess<"automations", "create">,
+		EndpointJsonSuccess<"automations", "create">,
+		EndpointJsonBody<"automations", "create">
 	>
 	readonly "automations.list": OperationShape<
 		EndpointParams<"automations", "list">,
 		RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		EndpointBody<"automations", "list">,
-		EndpointSuccess<"automations", "list">
+		EndpointSuccess<"automations", "list">,
+		EndpointJsonSuccess<"automations", "list">,
+		EndpointJsonBody<"automations", "list">
 	>
 	readonly "automations.pause": OperationShape<
 		EndpointParams<"automations", "pause">,
 		EndpointQuery<"automations", "pause">,
 		EndpointBody<"automations", "pause">,
-		EndpointSuccess<"automations", "pause">
+		EndpointSuccess<"automations", "pause">,
+		EndpointJsonSuccess<"automations", "pause">,
+		EndpointJsonBody<"automations", "pause">
 	>
 	readonly "automations.retrieve": OperationShape<
 		EndpointParams<"automations", "get">,
 		EndpointQuery<"automations", "get">,
 		EndpointBody<"automations", "get">,
-		EndpointSuccess<"automations", "get">
+		EndpointSuccess<"automations", "get">,
+		EndpointJsonSuccess<"automations", "get">,
+		EndpointJsonBody<"automations", "get">
 	>
 	readonly "automations.run": OperationShape<
 		EndpointParams<"automations", "run">,
 		EndpointQuery<"automations", "run">,
 		EndpointBody<"automations", "run">,
-		EndpointSuccess<"automations", "run">
+		EndpointSuccess<"automations", "run">,
+		EndpointJsonSuccess<"automations", "run">,
+		EndpointJsonBody<"automations", "run">
 	>
 	readonly "automations.unpause": OperationShape<
 		EndpointParams<"automations", "unpause">,
 		EndpointQuery<"automations", "unpause">,
 		EndpointBody<"automations", "unpause">,
-		EndpointSuccess<"automations", "unpause">
+		EndpointSuccess<"automations", "unpause">,
+		EndpointJsonSuccess<"automations", "unpause">,
+		EndpointJsonBody<"automations", "unpause">
 	>
 	readonly "automations.update": OperationShape<
 		EndpointParams<"automations", "update">,
 		EndpointQuery<"automations", "update">,
 		EndpointBody<"automations", "update">,
-		EndpointSuccess<"automations", "update">
+		EndpointSuccess<"automations", "update">,
+		EndpointJsonSuccess<"automations", "update">,
+		EndpointJsonBody<"automations", "update">
 	>
 	readonly "automations.runs.list": OperationShape<
 		EndpointParams<"automations", "listRuns">,
 		RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		EndpointBody<"automations", "listRuns">,
-		EndpointSuccess<"automations", "listRuns">
+		EndpointSuccess<"automations", "listRuns">,
+		EndpointJsonSuccess<"automations", "listRuns">,
+		EndpointJsonBody<"automations", "listRuns">
 	>
 	readonly "automations.runs.retrieve": OperationShape<
 		EndpointParams<"automations", "getRun">,
 		EndpointQuery<"automations", "getRun">,
 		EndpointBody<"automations", "getRun">,
-		EndpointSuccess<"automations", "getRun">
+		EndpointSuccess<"automations", "getRun">,
+		EndpointJsonSuccess<"automations", "getRun">,
+		EndpointJsonBody<"automations", "getRun">
 	>
 	readonly "environments.archive": OperationShape<
 		EndpointParams<"environments", "archive">,
 		EndpointQuery<"environments", "archive">,
 		EndpointBody<"environments", "archive">,
-		EndpointSuccess<"environments", "archive">
+		EndpointSuccess<"environments", "archive">,
+		EndpointJsonSuccess<"environments", "archive">,
+		EndpointJsonBody<"environments", "archive">
 	>
 	readonly "environments.create": OperationShape<
 		EndpointParams<"environments", "create">,
 		EndpointQuery<"environments", "create">,
 		EndpointBody<"environments", "create">,
-		EndpointSuccess<"environments", "create">
+		EndpointSuccess<"environments", "create">,
+		EndpointJsonSuccess<"environments", "create">,
+		EndpointJsonBody<"environments", "create">
 	>
 	readonly "environments.delete": OperationShape<
 		EndpointParams<"environments", "delete">,
 		EndpointQuery<"environments", "delete">,
 		EndpointBody<"environments", "delete">,
-		EndpointSuccess<"environments", "delete">
+		EndpointSuccess<"environments", "delete">,
+		EndpointJsonSuccess<"environments", "delete">,
+		EndpointJsonBody<"environments", "delete">
 	>
 	readonly "environments.list": OperationShape<
 		EndpointParams<"environments", "list">,
 		RelaxOptionalProps<EndpointQuery<"environments", "list">>,
 		EndpointBody<"environments", "list">,
-		EndpointSuccess<"environments", "list">
+		EndpointSuccess<"environments", "list">,
+		EndpointJsonSuccess<"environments", "list">,
+		EndpointJsonBody<"environments", "list">
 	>
 	readonly "environments.retrieve": OperationShape<
 		EndpointParams<"environments", "get">,
 		EndpointQuery<"environments", "get">,
 		EndpointBody<"environments", "get">,
-		EndpointSuccess<"environments", "get">
+		EndpointSuccess<"environments", "get">,
+		EndpointJsonSuccess<"environments", "get">,
+		EndpointJsonBody<"environments", "get">
 	>
 	readonly "environments.update": OperationShape<
 		EndpointParams<"environments", "update">,
 		EndpointQuery<"environments", "update">,
 		EndpointBody<"environments", "update">,
-		EndpointSuccess<"environments", "update">
+		EndpointSuccess<"environments", "update">,
+		EndpointJsonSuccess<"environments", "update">,
+		EndpointJsonBody<"environments", "update">
 	>
 	readonly "sessions.archive": OperationShape<
 		EndpointParams<"sessions", "archive">,
 		EndpointQuery<"sessions", "archive">,
 		EndpointBody<"sessions", "archive">,
-		EndpointSuccess<"sessions", "archive">
+		EndpointSuccess<"sessions", "archive">,
+		EndpointJsonSuccess<"sessions", "archive">,
+		EndpointJsonBody<"sessions", "archive">
 	>
 	readonly "sessions.create": OperationShape<
 		EndpointParams<"sessions", "create">,
 		EndpointQuery<"sessions", "create">,
 		EndpointBody<"sessions", "create">,
-		EndpointSuccess<"sessions", "create">
+		EndpointSuccess<"sessions", "create">,
+		EndpointJsonSuccess<"sessions", "create">,
+		EndpointJsonBody<"sessions", "create">
 	>
 	readonly "sessions.list": OperationShape<
 		EndpointParams<"sessions", "list">,
 		RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
 		EndpointBody<"sessions", "list">,
-		EndpointSuccess<"sessions", "list">
+		EndpointSuccess<"sessions", "list">,
+		EndpointJsonSuccess<"sessions", "list">,
+		EndpointJsonBody<"sessions", "list">
 	>
 	readonly "sessions.retrieve": OperationShape<
 		EndpointParams<"sessions", "get">,
 		EndpointQuery<"sessions", "get">,
 		EndpointBody<"sessions", "get">,
-		EndpointSuccess<"sessions", "get">
+		EndpointSuccess<"sessions", "get">,
+		EndpointJsonSuccess<"sessions", "get">,
+		EndpointJsonBody<"sessions", "get">
 	>
 	readonly "sessions.events.list": OperationShape<
 		EndpointParams<"sessions", "listEvents">,
 		RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		EndpointBody<"sessions", "listEvents">,
-		EndpointSuccess<"sessions", "listEvents">
+		EndpointSuccess<"sessions", "listEvents">,
+		EndpointJsonSuccess<"sessions", "listEvents">,
+		EndpointJsonBody<"sessions", "listEvents">
 	>
 	readonly "sessions.events.send": OperationShape<
 		EndpointParams<"sessions", "sendEvents">,
 		EndpointQuery<"sessions", "sendEvents">,
 		EndpointBody<"sessions", "sendEvents">,
-		EndpointSuccess<"sessions", "sendEvents">
+		EndpointSuccess<"sessions", "sendEvents">,
+		EndpointJsonSuccess<"sessions", "sendEvents">,
+		EndpointJsonBody<"sessions", "sendEvents">
 	>
 	readonly "sessions.events.stream": OperationShape<
 		EndpointParams<"sessions", "streamEvents">,
@@ -294,97 +371,129 @@ export interface CheckfuOperations {
 		EndpointParams<"sessions", "getOutputs">,
 		EndpointQuery<"sessions", "getOutputs">,
 		EndpointBody<"sessions", "getOutputs">,
-		EndpointSuccess<"sessions", "getOutputs">
+		EndpointSuccess<"sessions", "getOutputs">,
+		EndpointJsonSuccess<"sessions", "getOutputs">,
+		EndpointJsonBody<"sessions", "getOutputs">
 	>
 	readonly "sessions.resources.list": OperationShape<
 		EndpointParams<"sessions", "listResources">,
 		EndpointQuery<"sessions", "listResources">,
 		EndpointBody<"sessions", "listResources">,
-		EndpointSuccess<"sessions", "listResources">
+		EndpointSuccess<"sessions", "listResources">,
+		EndpointJsonSuccess<"sessions", "listResources">,
+		EndpointJsonBody<"sessions", "listResources">
 	>
 	readonly "sessions.resources.retrieve": OperationShape<
 		EndpointParams<"sessions", "getResource">,
 		EndpointQuery<"sessions", "getResource">,
 		EndpointBody<"sessions", "getResource">,
-		EndpointSuccess<"sessions", "getResource">
+		EndpointSuccess<"sessions", "getResource">,
+		EndpointJsonSuccess<"sessions", "getResource">,
+		EndpointJsonBody<"sessions", "getResource">
 	>
 	readonly "sessions.resources.update": OperationShape<
 		EndpointParams<"sessions", "updateResource">,
 		EndpointQuery<"sessions", "updateResource">,
 		EndpointBody<"sessions", "updateResource">,
-		EndpointSuccess<"sessions", "updateResource">
+		EndpointSuccess<"sessions", "updateResource">,
+		EndpointJsonSuccess<"sessions", "updateResource">,
+		EndpointJsonBody<"sessions", "updateResource">
 	>
 	readonly "vaults.archive": OperationShape<
 		EndpointParams<"vaults", "archive">,
 		EndpointQuery<"vaults", "archive">,
 		EndpointBody<"vaults", "archive">,
-		EndpointSuccess<"vaults", "archive">
+		EndpointSuccess<"vaults", "archive">,
+		EndpointJsonSuccess<"vaults", "archive">,
+		EndpointJsonBody<"vaults", "archive">
 	>
 	readonly "vaults.create": OperationShape<
 		EndpointParams<"vaults", "create">,
 		EndpointQuery<"vaults", "create">,
 		EndpointBody<"vaults", "create">,
-		EndpointSuccess<"vaults", "create">
+		EndpointSuccess<"vaults", "create">,
+		EndpointJsonSuccess<"vaults", "create">,
+		EndpointJsonBody<"vaults", "create">
 	>
 	readonly "vaults.delete": OperationShape<
 		EndpointParams<"vaults", "delete">,
 		EndpointQuery<"vaults", "delete">,
 		EndpointBody<"vaults", "delete">,
-		EndpointSuccess<"vaults", "delete">
+		EndpointSuccess<"vaults", "delete">,
+		EndpointJsonSuccess<"vaults", "delete">,
+		EndpointJsonBody<"vaults", "delete">
 	>
 	readonly "vaults.list": OperationShape<
 		EndpointParams<"vaults", "list">,
 		RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
 		EndpointBody<"vaults", "list">,
-		EndpointSuccess<"vaults", "list">
+		EndpointSuccess<"vaults", "list">,
+		EndpointJsonSuccess<"vaults", "list">,
+		EndpointJsonBody<"vaults", "list">
 	>
 	readonly "vaults.retrieve": OperationShape<
 		EndpointParams<"vaults", "get">,
 		EndpointQuery<"vaults", "get">,
 		EndpointBody<"vaults", "get">,
-		EndpointSuccess<"vaults", "get">
+		EndpointSuccess<"vaults", "get">,
+		EndpointJsonSuccess<"vaults", "get">,
+		EndpointJsonBody<"vaults", "get">
 	>
 	readonly "vaults.update": OperationShape<
 		EndpointParams<"vaults", "update">,
 		EndpointQuery<"vaults", "update">,
 		EndpointBody<"vaults", "update">,
-		EndpointSuccess<"vaults", "update">
+		EndpointSuccess<"vaults", "update">,
+		EndpointJsonSuccess<"vaults", "update">,
+		EndpointJsonBody<"vaults", "update">
 	>
 	readonly "vaults.credentials.archive": OperationShape<
 		EndpointParams<"vaults", "archiveCredential">,
 		EndpointQuery<"vaults", "archiveCredential">,
 		EndpointBody<"vaults", "archiveCredential">,
-		EndpointSuccess<"vaults", "archiveCredential">
+		EndpointSuccess<"vaults", "archiveCredential">,
+		EndpointJsonSuccess<"vaults", "archiveCredential">,
+		EndpointJsonBody<"vaults", "archiveCredential">
 	>
 	readonly "vaults.credentials.create": OperationShape<
 		EndpointParams<"vaults", "createCredential">,
 		EndpointQuery<"vaults", "createCredential">,
 		EndpointBody<"vaults", "createCredential">,
-		EndpointSuccess<"vaults", "createCredential">
+		EndpointSuccess<"vaults", "createCredential">,
+		EndpointJsonSuccess<"vaults", "createCredential">,
+		EndpointJsonBody<"vaults", "createCredential">
 	>
 	readonly "vaults.credentials.delete": OperationShape<
 		EndpointParams<"vaults", "deleteCredential">,
 		EndpointQuery<"vaults", "deleteCredential">,
 		EndpointBody<"vaults", "deleteCredential">,
-		EndpointSuccess<"vaults", "deleteCredential">
+		EndpointSuccess<"vaults", "deleteCredential">,
+		EndpointJsonSuccess<"vaults", "deleteCredential">,
+		EndpointJsonBody<"vaults", "deleteCredential">
 	>
 	readonly "vaults.credentials.list": OperationShape<
 		EndpointParams<"vaults", "listCredentials">,
 		RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
 		EndpointBody<"vaults", "listCredentials">,
-		EndpointSuccess<"vaults", "listCredentials">
+		EndpointSuccess<"vaults", "listCredentials">,
+		EndpointJsonSuccess<"vaults", "listCredentials">,
+		EndpointJsonBody<"vaults", "listCredentials">
 	>
 	readonly "vaults.credentials.retrieve": OperationShape<
 		EndpointParams<"vaults", "getCredential">,
 		EndpointQuery<"vaults", "getCredential">,
 		EndpointBody<"vaults", "getCredential">,
-		EndpointSuccess<"vaults", "getCredential">
+		EndpointSuccess<"vaults", "getCredential">,
+		EndpointJsonSuccess<"vaults", "getCredential">,
+		EndpointJsonBody<"vaults", "getCredential">
 	>
 	readonly "vaults.credentials.update": OperationShape<
 		EndpointParams<"vaults", "updateCredential">,
 		EndpointQuery<"vaults", "updateCredential">,
 		EndpointBody<"vaults", "updateCredential">,
-		EndpointSuccess<"vaults", "updateCredential">
+		EndpointSuccess<"vaults", "updateCredential">,
+		EndpointJsonSuccess<"vaults", "updateCredential">,
+		EndpointJsonBody<"vaults", "updateCredential">
 	>
 }
 
@@ -2521,7 +2630,7 @@ export class EffectVaultsCredentialsResource {
 		this.#runtime = runtime
 	}
 
-	/** Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased. */
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
@@ -2614,7 +2723,7 @@ export class EffectVaultsCredentialsResource {
 		)
 	}
 
-	/** Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
@@ -2641,16 +2750,19 @@ export class EffectVaultsCredentialsResource {
 					credential_id: credentialId,
 				}),
 				(pathParams) =>
-					executeWithRetries(
-						this.#runtime,
-						"checkfu.vaults.credentials.delete",
-						"idempotent",
-						options,
-						() =>
-							this.#runtime.raw.vaults.deleteCredential({
-								params: pathParams,
-								responseMode: "decoded-and-response",
-							}),
+					withPendingReadiness(
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.vaults.credentials.delete",
+							"idempotent",
+							options,
+							() =>
+								this.#runtime.raw.vaults.deleteCredential({
+									params: pathParams,
+									responseMode: "decoded-and-response",
+								}),
+						),
+						{ kind: "requires-until", operation: "vaults.credentials.delete" },
 					),
 			),
 			options,
@@ -2856,7 +2968,7 @@ export class EffectVaultsResource {
 		this.credentials = new EffectVaultsCredentialsResource(runtime)
 	}
 
-	/** Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
 		options: WithResponseRequestOptions,
@@ -2928,7 +3040,7 @@ export class EffectVaultsResource {
 		)
 	}
 
-	/** Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
 		options: WithResponseRequestOptions,
@@ -2946,11 +3058,14 @@ export class EffectVaultsResource {
 	> {
 		return unwrapResponse(
 			EffectFlatMap(decodeEndpointParams("vaults", "delete", { vault_id: vaultId }), (pathParams) =>
-				executeWithRetries(this.#runtime, "checkfu.vaults.delete", "idempotent", options, () =>
-					this.#runtime.raw.vaults.delete({
-						params: pathParams,
-						responseMode: "decoded-and-response",
-					}),
+				withPendingReadiness(
+					executeWithRetries(this.#runtime, "checkfu.vaults.delete", "idempotent", options, () =>
+						this.#runtime.raw.vaults.delete({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
+					{ kind: "requires-until", operation: "vaults.delete" },
 				),
 			),
 			options,
@@ -3894,7 +4009,7 @@ export class VaultsCredentialsResource {
 		this.#runtime = runtime
 	}
 
-	/** Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased. */
 	archive(
 		vaultId: PathParam<"vaults", "archiveCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "archiveCredential", "credential_id">,
@@ -3922,7 +4037,7 @@ export class VaultsCredentialsResource {
 		)
 	}
 
-	/** Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "deleteCredential", "vault_id">,
 		credentialId: PathParam<"vaults", "deleteCredential", "credential_id">,
@@ -4000,7 +4115,7 @@ export class VaultsResource {
 		this.credentials = new VaultsCredentialsResource(runtime)
 	}
 
-	/** Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again. */
+	/** Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0. */
 	archive(
 		vaultId: PathParam<"vaults", "archive", "vault_id">,
 		options?: PromiseRequestOptions,
@@ -4023,7 +4138,7 @@ export class VaultsResource {
 		)
 	}
 
-	/** Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again. */
+	/** Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state. */
 	delete(
 		vaultId: PathParam<"vaults", "delete", "vault_id">,
 		options?: PromiseRequestOptions,
