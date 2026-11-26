@@ -6,6 +6,7 @@ import {
 	AgentVersionByNumberView,
 	agentVersionLookupKey,
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
+import type { AgentSnapshot } from "@checkfu/domain/Agent/AgentView.view"
 import { AgentView } from "@checkfu/domain/Agent/AgentView.view"
 import { ArchiveAgent } from "@checkfu/domain/Agent/ArchiveAgent.command"
 import { CreateAgent } from "@checkfu/domain/Agent/CreateAgent.command"
@@ -65,6 +66,9 @@ const unsupportedModel = (model: AgentModel) =>
 	model.id.length > MAX_MODEL_ID_LENGTH
 		? reject(400, `Model id must be at most ${MAX_MODEL_ID_LENGTH} characters.`)
 		: reject(400, `Unsupported model "${model.id}".`)
+
+const versionPage = (id: AgentId, version: number): string =>
+	`page_${encodeURIComponent(id)}:${version}`
 
 const declaredMcpServers = (servers: ReadonlyArray<McpServer>) =>
 	Effect.gen(function* () {
@@ -155,6 +159,46 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 				}
 				return projected
 			})
+		const readVersion = (head: AgentSnapshot, version: number) =>
+			Effect.gen(function* () {
+				const id = head.id
+				const key = agentVersionLookupKey(id, version)
+				const existing = Option.getOrNull(yield* agentVersionsByNumber.get(key))
+				const snapshot =
+					existing ??
+					(yield* agentVersionsByNumber.waitFor(
+						key,
+						{ version },
+						{
+							timeout: yield* AgentVersionWaitTimeout,
+						},
+					))
+				if (snapshot === null) {
+					return yield* reject(503, `Agent ${id} version ${version} projection is not ready.`)
+				}
+				return {
+					...head,
+					version,
+					name: snapshot.name,
+					model: snapshot.model,
+					system: snapshot.system,
+					description: snapshot.description,
+					mcp_servers: snapshot.mcp_servers,
+					tools: snapshot.tools,
+					updated_at: snapshot.created_at,
+				}
+			})
+
+		const retrieveVersion = (id: AgentId, version: number) =>
+			Effect.gen(function* () {
+				const head = yield* retrieve(id)
+				const committed = yield* agents.get(id)
+				if (version > committed.version) {
+					return yield* reject(404, `Agent ${id} version ${version} not found.`)
+				}
+				return yield* readVersion(head, version)
+			})
+
 		const supported = (model: AgentModel) =>
 			model.id.length <= MAX_MODEL_ID_LENGTH && isSupportedModel(model.id)
 				? Effect.void
@@ -286,7 +330,40 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 			.handle("list", ({ query }) =>
 				list("agent", query, (id) => retrieve(AgentId.make(id))).pipe(handled),
 			)
-			.handle("get", ({ params }) => retrieve(params.agent_id).pipe(handled))
+			.handle("get", ({ params, query }) =>
+				(query.version === undefined
+					? retrieve(params.agent_id)
+					: retrieveVersion(params.agent_id, query.version)
+				).pipe(handled),
+			)
+			.handle("listVersions", ({ params, query }) =>
+				Effect.gen(function* () {
+					const id = params.agent_id
+					const head = yield* retrieve(id)
+					const committed = yield* agents.get(id)
+					const start =
+						query.page === undefined
+							? committed.version
+							: Number(query.page.slice(query.page.lastIndexOf(":") + 1))
+					if (
+						query.page !== undefined &&
+						(!Number.isSafeInteger(start) ||
+							start < 1 ||
+							start > committed.version ||
+							versionPage(id, start) !== query.page)
+					) {
+						return yield* reject(400, "Invalid agent version page.")
+					}
+					const size = Math.min(start, query.limit ?? 50)
+					const data = yield* Effect.forEach(
+						Array.from({ length: size }, (_, index) => start - index),
+						(version) => readVersion(head, version),
+						{ concurrency: 8 },
+					)
+					const next = start - size
+					return { data, next_page: next > 0 ? versionPage(id, next) : null }
+				}).pipe(handled),
+			)
 			.handle("update", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const id = params.agent_id
@@ -311,7 +388,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						if (head.status !== "active") {
 							return yield* new AgentArchivedError({ agent_id: id })
 						}
-						if (head.version !== version) {
+						if (version !== undefined && head.version !== version) {
 							return yield* new AgentVersionConflict({
 								agent_id: id,
 								expected_version: version,
@@ -332,10 +409,11 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						...(declared === undefined ? {} : { mcp_servers: declared.text }),
 						...(tools === undefined ? {} : { tools: tools.text }),
 					}
+					const expectedVersion = version ?? head?.version
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,
-							expected_version: version,
+							...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
 							next_version_id: AgentVersionId.make(yield* randomId(random, "aver")),
 							changes: model === undefined ? fields : { ...fields, model },
 						}),

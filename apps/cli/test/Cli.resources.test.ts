@@ -482,7 +482,7 @@ describe("CLI help, errors, and resource commands", () => {
 							"sessions",
 							"create",
 							"--agent",
-							`{"id":"${agentId}","version":1}`,
+							`{"type":"agent","id":"${agentId}","version":1}`,
 							"--environment-id",
 							envId,
 							"--title",
@@ -598,7 +598,7 @@ describe("CLI help, errors, and resource commands", () => {
 						"sessions",
 						"create",
 						"--agent",
-						`"id": ${agent.id}`,
+						`"type": agent\n"id": ${agent.id}`,
 						"--environment-id",
 						envId,
 					])
@@ -609,7 +609,7 @@ describe("CLI help, errors, and resource commands", () => {
 
 					const quotedAgentFileSession = yield* cli.run(
 						["sessions", "create", "--agent", "@agent.yaml", "--environment-id", envId],
-						{ files: { "agent.yaml": `"id": ${agent.id}\n` } },
+						{ files: { "agent.yaml": `"type": agent\n"id": ${agent.id}\n` } },
 					)
 					expect(quotedAgentFileSession.exitCode).toBe(0)
 					expect(

@@ -1055,7 +1055,7 @@
 						}
 					}
 				},
-				"description": "Create an agent",
+				"description": "Create a reusable agent configuration with a model and an optional system prompt.",
 				"summary": "Create an agent",
 				"requestBody": {
 					"content": {
@@ -1927,6 +1927,16 @@
 							"description": "Agent ID"
 						},
 						"required": true
+					},
+					{
+						"name": "version",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9]\\d{0,14}$",
+							"description": "Agent version. Omit to retrieve the latest version."
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -2493,6 +2503,14 @@
 				},
 				"x-checkfu-mcp": {
 					"name": "agents_getAgent"
+				},
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"version": {
+							"min": 1,
+							"metavar": "N"
+						}
+					}
 				}
 			},
 			"post": {
@@ -3185,7 +3203,7 @@
 						}
 					}
 				},
-				"description": "Update an agent (creates a new agent version)",
+				"description": "Update an agent's configuration. Changes create a new version for future sessions.",
 				"summary": "Update an agent",
 				"requestBody": {
 					"content": {
@@ -3197,7 +3215,7 @@
 										"type": "integer",
 										"minimum": 1,
 										"maximum": 9007199254740991,
-										"description": "Current agent version for optimistic concurrency"
+										"description": "Apply the update only if the agent is still at this version"
 									},
 									"name": {
 										"type": "string",
@@ -3371,7 +3389,6 @@
 										"description": "Replacement list of the agent's tool declarations"
 									}
 								},
-								"required": ["version"],
 								"additionalProperties": false
 							}
 						}
@@ -3390,6 +3407,642 @@
 				"x-checkfu-cli": {
 					"fileFields": ["system", "description"],
 					"textOrObjectFields": ["model"]
+				}
+			}
+		},
+		"/v1/agents/{agent_id}/versions": {
+			"get": {
+				"tags": ["agents"],
+				"operationId": "agents.listVersions",
+				"parameters": [
+					{
+						"name": "agent_id",
+						"in": "path",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"description": "Agent ID"
+						},
+						"required": true
+					},
+					{
+						"name": "page",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 512,
+							"description": "Opaque cursor returned by the previous page."
+						},
+						"required": false
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^(?:[1-9]\\d?|100)$",
+							"description": "Maximum number of results to return (1-100, default 50)"
+						},
+						"required": false
+					}
+				],
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"apiKey": []
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"data": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"properties": {
+													"id": {
+														"type": "string",
+														"minLength": 1
+													},
+													"type": {
+														"type": "string",
+														"enum": ["agent"]
+													},
+													"version": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
+													},
+													"name": {
+														"type": "string",
+														"minLength": 1
+													},
+													"model": {
+														"type": "object",
+														"properties": {
+															"id": {
+																"type": "string",
+																"minLength": 1
+															}
+														},
+														"required": ["id"],
+														"additionalProperties": false
+													},
+													"system": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"description": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"mcp_servers": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"properties": {
+																"type": {
+																	"type": "string",
+																	"enum": ["url"]
+																},
+																"name": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 32,
+																	"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																},
+																"url": {
+																	"type": "string",
+																	"minLength": 1,
+																	"maxLength": 2048
+																}
+															},
+															"required": ["type", "name", "url"],
+															"additionalProperties": false
+														},
+														"maxItems": 20
+													},
+													"tools": {
+														"type": "array",
+														"items": {
+															"anyOf": [
+																{
+																	"type": "object",
+																	"properties": {
+																		"type": {
+																			"type": "string",
+																			"enum": ["mcp_toolset"]
+																		},
+																		"mcp_server_name": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 32,
+																			"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+																		},
+																		"default_config": {
+																			"type": "object",
+																			"properties": {
+																				"permission_policy": {
+																					"type": "object",
+																					"properties": {
+																						"type": {
+																							"type": "string",
+																							"enum": ["always_allow", "always_ask"]
+																						}
+																					},
+																					"required": ["type"],
+																					"additionalProperties": false
+																				}
+																			},
+																			"additionalProperties": false,
+																			"description": "Applies to tools without their own configuration. MCP tools require confirmation by default."
+																		},
+																		"configs": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"properties": {
+																					"name": {
+																						"type": "string",
+																						"minLength": 1,
+																						"maxLength": 128
+																					},
+																					"permission_policy": {
+																						"type": "object",
+																						"properties": {
+																							"type": {
+																								"type": "string",
+																								"enum": ["always_allow", "always_ask"]
+																							}
+																						},
+																						"required": ["type"],
+																						"additionalProperties": false
+																					}
+																				},
+																				"required": ["name"],
+																				"additionalProperties": false
+																			},
+																			"maxItems": 128
+																		}
+																	},
+																	"required": ["type", "mcp_server_name"],
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"type": {
+																			"type": "string",
+																			"enum": ["custom"]
+																		},
+																		"name": {
+																			"type": "string",
+																			"pattern": "^[A-Za-z0-9_-]{1,64}$"
+																		},
+																		"description": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 4096
+																		},
+																		"input_schema": {
+																			"type": "object"
+																		}
+																	},
+																	"required": ["type", "name", "description", "input_schema"],
+																	"additionalProperties": false
+																}
+															]
+														},
+														"maxItems": 84
+													},
+													"created_at": {
+														"type": "string"
+													},
+													"updated_at": {
+														"type": "string"
+													},
+													"archived_at": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"required": [
+													"id",
+													"type",
+													"version",
+													"name",
+													"model",
+													"system",
+													"description",
+													"created_at",
+													"updated_at",
+													"archived_at"
+												],
+												"additionalProperties": false
+											}
+										},
+										"next_page": {
+											"anyOf": [
+												{
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 512,
+													"description": "Opaque cursor returned by the previous page."
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"required": ["data", "next_page"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["invalid_request_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["authentication_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["not_found_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["conflict_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"429": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["rate_limit_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["internal_error"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["error"]
+										},
+										"error": {
+											"type": "object",
+											"properties": {
+												"type": {
+													"type": "string",
+													"enum": ["service_unavailable"]
+												},
+												"message": {
+													"type": "string"
+												},
+												"code": {
+													"type": "string"
+												}
+											},
+											"required": ["type", "message"],
+											"additionalProperties": false
+										},
+										"request_id": {
+											"type": "string",
+											"minLength": 1
+										},
+										"accepted": {
+											"type": "array"
+										},
+										"failed_index": {
+											"type": "number"
+										},
+										"unconfirmed_index": {
+											"type": "number"
+										}
+									},
+									"required": ["type", "error", "request_id"],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				},
+				"description": "List the published versions of an agent, newest first.",
+				"summary": "List agent versions",
+				"x-forge-group-name": "agents.versions",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": {
+					"group": "agents",
+					"endpoint": "listVersions"
+				},
+				"x-checkfu-mcp": {
+					"name": "agents_listVersions"
+				},
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"limit": {
+							"min": 1,
+							"max": 100,
+							"metavar": "N"
+						}
+					}
 				}
 			}
 		},
@@ -4609,7 +5262,7 @@
 						}
 					}
 				},
-				"description": "Create an environment",
+				"description": "Create an environment that configures the cloud sandbox where sessions run.",
 				"summary": "Create an environment",
 				"requestBody": {
 					"content": {
@@ -8023,204 +8676,97 @@
 						}
 					}
 				},
-				"description": "Create a session",
+				"description": "Create an agent instance in an environment. Send a user.message event to start work.",
 				"summary": "Create a session",
 				"requestBody": {
 					"content": {
 						"application/json": {
 							"schema": {
-								"anyOf": [
-									{
-										"type": "object",
-										"properties": {
-											"agent": {
-												"anyOf": [
-													{
+								"type": "object",
+								"properties": {
+									"agent": {
+										"anyOf": [
+											{
+												"type": "string",
+												"minLength": 1,
+												"maxLength": 256
+											},
+											{
+												"type": "object",
+												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["agent"]
+													},
+													"id": {
 														"type": "string",
 														"minLength": 1,
 														"maxLength": 256
 													},
-													{
-														"type": "object",
-														"properties": {
-															"id": {
-																"type": "string",
-																"minLength": 1,
-																"maxLength": 256
-															},
-															"version": {
-																"type": "integer",
-																"minimum": 1,
-																"maximum": 9007199254740991
-															}
-														},
-														"required": ["id"],
-														"additionalProperties": false
+													"version": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
 													}
-												],
-												"description": "Agent ID string or agent reference object ({id, version})"
-											},
-											"agent_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Agent ID (alternative to agent)"
-											},
-											"agent_version": {
-												"type": "integer",
-												"minimum": 1,
-												"maximum": 9007199254740991,
-												"description": "Optional pinned agent version"
-											},
-											"environment_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Environment ID for the session"
-											},
-											"title": {
-												"anyOf": [
-													{
-														"type": "string",
-														"maxLength": 1024
-													},
-													{
-														"type": "null"
-													}
-												],
-												"description": "Optional session title"
-											},
-											"vault_ids": {
-												"type": "array",
-												"items": {
-													"type": "string",
-													"minLength": 1
 												},
-												"maxItems": 20,
-												"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
-											},
-											"mcp_server_credentials": {
-												"type": "array",
-												"items": {
-													"type": "object",
-													"properties": {
-														"mcp_server_name": {
-															"type": "string",
-															"minLength": 1,
-															"maxLength": 32,
-															"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
-														},
-														"credential_id": {
-															"type": "string",
-															"minLength": 1
-														}
-													},
-													"required": ["mcp_server_name", "credential_id"],
-													"additionalProperties": false
-												},
-												"maxItems": 20,
-												"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
+												"required": ["type", "id"],
+												"additionalProperties": false
 											}
-										},
-										"required": ["agent", "environment_id"],
-										"additionalProperties": false
+										],
+										"description": "Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
-									{
-										"type": "object",
-										"properties": {
-											"agent": {
-												"anyOf": [
-													{
-														"type": "string",
-														"minLength": 1,
-														"maxLength": 256
-													},
-													{
-														"type": "object",
-														"properties": {
-															"id": {
-																"type": "string",
-																"minLength": 1,
-																"maxLength": 256
-															},
-															"version": {
-																"type": "integer",
-																"minimum": 1,
-																"maximum": 9007199254740991
-															}
-														},
-														"required": ["id"],
-														"additionalProperties": false
-													}
-												],
-												"description": "Agent ID string or agent reference object ({id, version})"
-											},
-											"agent_id": {
+									"environment_id": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 256,
+										"description": "Environment ID for the session"
+									},
+									"title": {
+										"anyOf": [
+											{
 												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Agent ID (alternative to agent)"
+												"maxLength": 1024
 											},
-											"agent_version": {
-												"type": "integer",
-												"minimum": 1,
-												"maximum": 9007199254740991,
-												"description": "Optional pinned agent version"
-											},
-											"environment_id": {
-												"type": "string",
-												"minLength": 1,
-												"maxLength": 256,
-												"description": "Environment ID for the session"
-											},
-											"title": {
-												"anyOf": [
-													{
-														"type": "string",
-														"maxLength": 1024
-													},
-													{
-														"type": "null"
-													}
-												],
-												"description": "Optional session title"
-											},
-											"vault_ids": {
-												"type": "array",
-												"items": {
+											{
+												"type": "null"
+											}
+										],
+										"description": "Optional session title"
+									},
+									"vault_ids": {
+										"type": "array",
+										"items": {
+											"type": "string",
+											"minLength": 1
+										},
+										"maxItems": 20,
+										"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
+									},
+									"mcp_server_credentials": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"mcp_server_name": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 32,
+													"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
+												},
+												"credential_id": {
 													"type": "string",
 													"minLength": 1
-												},
-												"maxItems": 20,
-												"description": "Vaults whose credentials the session may use. A server with exactly one matching credential across them is bound to it."
+												}
 											},
-											"mcp_server_credentials": {
-												"type": "array",
-												"items": {
-													"type": "object",
-													"properties": {
-														"mcp_server_name": {
-															"type": "string",
-															"minLength": 1,
-															"maxLength": 32,
-															"pattern": "^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$"
-														},
-														"credential_id": {
-															"type": "string",
-															"minLength": 1
-														}
-													},
-													"required": ["mcp_server_name", "credential_id"],
-													"additionalProperties": false
-												},
-												"maxItems": 20,
-												"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
-											}
+											"required": ["mcp_server_name", "credential_id"],
+											"additionalProperties": false
 										},
-										"required": ["agent_id", "environment_id"],
-										"additionalProperties": false
+										"maxItems": 20,
+										"description": "Explicit credentials for named servers. An explicit binding wins over vault matching."
 									}
-								]
+								},
+								"required": ["agent", "environment_id"],
+								"additionalProperties": false
 							}
 						}
 					},
@@ -8241,7 +8787,7 @@
 					"examples": [
 						{
 							"command": "checkfu sessions create --agent agent_123 --environment-id env_456",
-							"description": "Create a session with flags"
+							"description": "Create a session using the latest agent version"
 						}
 					]
 				}
@@ -10360,7 +10906,7 @@
 						}
 					}
 				},
-				"description": "Send user events to a session",
+				"description": "Send events to a session to start or resume work, queue a follow-up, or interrupt the current turn.",
 				"summary": "Send session events",
 				"requestBody": {
 					"content": {
@@ -10505,7 +11051,8 @@
 											]
 										},
 										"minItems": 1,
-										"maxItems": 8
+										"maxItems": 8,
+										"description": "Events to send to the session. Send user.message to give the agent work or user.interrupt to stop the current turn."
 									}
 								},
 								"required": ["events"],
@@ -10968,7 +11515,7 @@
 						}
 					}
 				},
-				"description": "List historical events for a session",
+				"description": "List persisted events for a session. Use the returned cursor to continue through its history.",
 				"summary": "List session events",
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "list",
@@ -11460,7 +12007,7 @@
 						}
 					}
 				},
-				"description": "Stream live session events over Server-Sent Events",
+				"description": "Follow a session's event stream over server-sent events (SSE). Pass after to resume from a sequence number.",
 				"summary": "Stream session events",
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "stream",
@@ -12667,7 +13214,7 @@
 						}
 					}
 				},
-				"description": "Create an automation that opens a new session with its message every time its schedule fires",
+				"description": "Create an automation that runs an agent on a cron schedule. Each run starts a new session in the configured environment and sends the initial events.",
 				"summary": "Create an automation",
 				"requestBody": {
 					"content": {
@@ -12703,6 +13250,10 @@
 											{
 												"type": "object",
 												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["agent"]
+													},
 													"id": {
 														"type": "string",
 														"minLength": 1,
@@ -12714,11 +13265,11 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": ["id"],
+												"required": ["type", "id"],
 												"additionalProperties": false
 											}
 										],
-										"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+										"description": "Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
 									"environment_id": {
 										"type": "string",
@@ -12760,7 +13311,7 @@
 										},
 										"minItems": 1,
 										"maxItems": 1,
-										"description": "The one user message each run's session starts with"
+										"description": "Initial events sent when each run creates a session. Supply one text user.message event."
 									},
 									"schedule": {
 										"type": "object",
@@ -12807,7 +13358,7 @@
 					"repeatArrayField": {
 						"field": "initial_events",
 						"flag": "initial-event",
-						"description": "The user message each run starts with, as JSON, YAML, or @file"
+						"description": "The initial user.message event sent to each session, as JSON, YAML, or @file"
 					},
 					"examples": [
 						{
@@ -14730,6 +15281,10 @@
 											{
 												"type": "object",
 												"properties": {
+													"type": {
+														"type": "string",
+														"enum": ["agent"]
+													},
 													"id": {
 														"type": "string",
 														"minLength": 1,
@@ -14741,11 +15296,11 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": ["id"],
+												"required": ["type", "id"],
 												"additionalProperties": false
 											}
 										],
-										"description": "Agent ID string, which follows the agent's latest version, or an agent reference object ({id, version}) that pins one"
+										"description": "Agent to run in each session. Pass an ID to use the latest version on each run, or pass an object with type \"agent\", id, and version to pin a specific version."
 									},
 									"environment_id": {
 										"type": "string",
@@ -14787,7 +15342,7 @@
 										},
 										"minItems": 1,
 										"maxItems": 1,
-										"description": "The one user message later runs' sessions start with"
+										"description": "Initial events for future runs. Supply one text user.message event."
 									},
 									"schedule": {
 										"type": "object",
@@ -15414,7 +15969,7 @@
 						}
 					}
 				},
-				"description": "Stop an automation's schedule until it is unpaused; it can still be run on request",
+				"description": "Pause scheduled runs. You can still run the automation manually, and sessions from earlier runs continue.",
 				"summary": "Pause an automation",
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "pause",
@@ -17016,7 +17571,7 @@
 						}
 					}
 				},
-				"description": "Queue a run now, whether or not the automation is paused, without moving its schedule. The response carries the run's number; the run appears in the run list once its session starts or fails to",
+				"description": "Trigger an automation run outside its schedule, including while paused. The response gives the queued run number. The run appears in history once session creation succeeds or fails.",
 				"summary": "Run an automation now",
 				"x-forge-group-name": "automations",
 				"x-forge-method-name": "run",
@@ -17627,7 +18182,7 @@
 						"schema": {
 							"type": "string",
 							"pattern": "^[1-9]\\d{0,14}$",
-							"description": "Run number: a whole number from 1, written in decimal"
+							"description": "Run number as a positive integer"
 						},
 						"required": true
 					}
@@ -30175,7 +30730,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "content"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "A user message in the session conversation, with text content blocks."
 					},
 					{
 						"type": "object",
@@ -30197,7 +30753,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "An interrupt that stops the agent's current turn."
 					},
 					{
 						"type": "object",
@@ -30306,7 +30863,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "The agent is processing a turn."
 					},
 					{
 						"type": "object",
@@ -30332,7 +30890,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "model_request_start_id"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "A model request started."
 					},
 					{
 						"type": "object",
@@ -30373,7 +30932,7 @@
 						},
 						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
 						"additionalProperties": false,
-						"description": "Records a call the model made. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+						"description": "The agent called a tool. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
 					{
 						"type": "object",
@@ -30429,7 +30988,7 @@
 						},
 						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
 						"additionalProperties": false,
-						"description": "Records what a call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+						"description": "The result of a tool call, including why the call was rejected when applicable. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
 					},
 					{
 						"type": "object",
@@ -30605,7 +31164,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "thinking"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "The agent's thinking text when the model returns it."
 					},
 					{
 						"type": "object",
@@ -30649,7 +31209,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "content"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "The agent's response, with text content blocks."
 					},
 					{
 						"type": "object",
@@ -30710,7 +31271,8 @@
 							"model_usage",
 							"is_error"
 						],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "A model request finished. Includes token usage in model_usage."
 					},
 					{
 						"type": "object",
@@ -30783,7 +31345,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "stop_reason"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "The agent stopped processing a turn. See stop_reason for why it stopped."
 					},
 					{
 						"type": "object",
@@ -30829,7 +31392,8 @@
 							}
 						},
 						"required": ["id", "seq", "type", "created_at", "error"],
-						"additionalProperties": false
+						"additionalProperties": false,
+						"description": "An error occurred while processing a turn. Includes the error and its retry status."
 					},
 					{
 						"type": "object",
@@ -31020,19 +31584,19 @@
 		},
 		{
 			"name": "agents",
-			"description": "Manage agents"
+			"description": "Create and manage versioned agent configurations"
 		},
 		{
 			"name": "environments",
-			"description": "Manage environments"
+			"description": "Create and manage environments where agents run"
 		},
 		{
 			"name": "sessions",
-			"description": "Manage sessions"
+			"description": "Run agents in sessions and follow their events"
 		},
 		{
 			"name": "automations",
-			"description": "Manage automations"
+			"description": "Run agents on a schedule and inspect their runs"
 		},
 		{
 			"name": "artifacts",
