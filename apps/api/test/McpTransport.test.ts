@@ -1,5 +1,6 @@
 import type { EnvironmentNetworking } from "@checkfu/domain/Environment/EnvironmentTypes"
 import { afterEach, describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import fc from "fast-check"
 import { REDACTED, scrubValue, secretForms } from "../src/Connection/Scrub.ts"
@@ -7,9 +8,16 @@ import { makeSecretCustody } from "../src/Connection/SecretCustody.ts"
 import { makeVaultConnection, makeVaultMcp } from "../src/Connection/VaultMcp.ts"
 import type { VaultMcp } from "../src/Connection/VaultMcp.ts"
 import { MAX_TOOL_LIST_BYTES } from "../src/Pi/PiMcp.ts"
+import { connectMcp, describeMcpFailure } from "../src/Pi/PiMcpClient.ts"
 import { makeSessionMcp, vaultsOver } from "../src/Pi/PiMcpSession.ts"
 import type { SessionMcp, SessionVaults } from "../src/Pi/PiMcpSession.ts"
-import { MAX_MCP_RESPONSE_BYTES, McpCallOutcome, McpListOutcome } from "../src/Pi/PiMcpTypes.ts"
+import {
+	MAX_MCP_RESPONSE_BYTES,
+	McpCall,
+	McpCallOutcome,
+	McpListOutcome,
+	mcpCallScope,
+} from "../src/Pi/PiMcpTypes.ts"
 import type { McpToolDescriptor } from "../src/Pi/PiMcpTypes.ts"
 import { startFakeMcpServer } from "./workerd/FakeMcpServer.ts"
 import { makeCustodyDatabase } from "./helpers/CustodyDatabase.ts"
@@ -460,6 +468,28 @@ describe("A session's MCP servers", () => {
 		expect(server.sessions()).toBe(2)
 		expect(server.calls.every((c) => c.token === TOKEN)).toBe(true)
 	})
+
+	it.effect("passes a rate limit through instead of trying the legacy protocol", () =>
+		Effect.gen(function* () {
+			const sent: Array<string> = []
+			const fetchFn = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+				sent.push(typeof init?.body === "string" ? init.body : "")
+				return new Response("slow down", { status: 429, headers: { "retry-after": "30" } })
+			}) as typeof fetch
+			const error = yield* Effect.flip(
+				connectMcp("https://docs.mcp.example/mcp", () => ({ token: null }), fetchFn).pipe(
+					Effect.scoped,
+					Effect.provideService(McpCall, mcpCallScope(1, MAX_MCP_RESPONSE_BYTES)),
+				),
+			)
+			expect(sent.length).toBeGreaterThan(0)
+			expect(sent.some((body) => body.includes('"initialize"'))).toBe(false)
+			expect(error.reason).toMatchObject({ _tag: "HttpError", status: 429 })
+			expect(describeMcpFailure(error)).toBe(
+				"The MCP server is limiting requests (429). Try again after 30.",
+			)
+		}),
+	)
 
 	it("speaks to a server that offers only the modern protocol, and to one that offers only the legacy one", async () => {
 		for (const modern of [true, false]) {
