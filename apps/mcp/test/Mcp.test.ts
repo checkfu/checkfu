@@ -459,7 +459,7 @@ describe("Checkfu MCP server", () => {
 					automations_createAutomation: {
 						body: {
 							name: "Morning report",
-							agent: { id: "agent_1", version: 1 },
+							agent: { type: "agent", id: "agent_1", version: 1 },
 							environment_id: "env_1",
 							initial_events: [
 								{ type: "user.message", content: [{ type: "text", text: "Report." }] },
