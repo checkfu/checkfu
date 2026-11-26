@@ -83,6 +83,12 @@ export interface CheckfuOperations {
 		EndpointBody<"agents", "update">,
 		EndpointSuccess<"agents", "update">
 	>
+	readonly "agents.versions.list": OperationShape<
+		EndpointParams<"agents", "listVersions">,
+		RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		EndpointBody<"agents", "listVersions">,
+		EndpointSuccess<"agents", "listVersions">
+	>
 	readonly "artifacts.create": OperationShape<
 		EndpointParams<"artifacts", "create">,
 		EndpointQuery<"artifacts", "create">,
@@ -364,11 +370,115 @@ export interface CheckfuOperations {
 export type CheckfuOperationId = keyof CheckfuOperations
 export type Op<K extends CheckfuOperationId> = CheckfuOperations[K]
 
-export class EffectAgentsResource {
+export class EffectAgentsVersionsResource {
 	readonly #runtime: EffectSdkRuntime
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.#runtime = runtime
+	}
+
+	/** List the published versions of an agent, newest first. */
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions)
+			| undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError>
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError>
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError>
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"agents", "listVersions">
+		| WithResponse<EndpointSuccess<"agents", "listVersions">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("agents", "listVersions", { agent_id: agentId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.agents.versions.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.agents.listVersions({
+								params: pathParams,
+								query: {
+									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List the published versions of an agent, newest first. */
+	listPages(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(cursor) =>
+				this.list(
+					agentId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { page: cursor }),
+					},
+					options,
+				),
+			params?.["page"],
+			"asc",
+		)
+	}
+
+	/** Auto-paginate items for List the published versions of an agent, newest first. */
+	listStream(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(cursor) =>
+				this.list(
+					agentId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { page: cursor }),
+					},
+					options,
+				),
+			params?.["page"],
+			"asc",
+		)
+	}
+}
+
+export class EffectAgentsResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly versions: EffectAgentsVersionsResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.versions = new EffectAgentsVersionsResource(runtime)
 	}
 
 	/** Archive an agent */
@@ -2397,23 +2507,31 @@ export class EffectVaultsCredentialsResource {
 	/** List a vault's credentials in creation order, oldest first by default. Archived credentials are left out unless include_archived is true. */
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> | undefined,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
+		params: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError>
+	list(
+		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"vaults", "listCredentials">, CheckfuSdkError>
 	list(
 		vaultId: PathParam<"vaults", "listCredentials", "vault_id">,
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"vaults", "listCredentials">
 		| WithResponse<EndpointSuccess<"vaults", "listCredentials">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("vaults", "listCredentials", { vault_id: vaultId }),
@@ -2690,20 +2808,24 @@ export class EffectVaultsResource {
 
 	/** List vaults in creation order, oldest first by default. Archived vaults are left out unless include_archived is true. */
 	list(
-		params: RelaxOptionalProps<EndpointQuery<"vaults", "list">> | undefined,
+		params: (RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions) | undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"vaults", "list">>, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
+		params: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"vaults", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"vaults", "list">, CheckfuSdkError>
 	list(
-		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
+		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"vaults", "list"> | WithResponse<EndpointSuccess<"vaults", "list">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			executeWithRetries(this.#runtime, "checkfu.vaults.list", "idempotent", options, () =>
 				this.#runtime.raw.vaults.list({
@@ -2849,11 +2971,47 @@ export class EffectResources {
 	}
 }
 
-export class AgentsResource {
+export class AgentsVersionsResource {
 	readonly #runtime: PromiseSdkRuntime
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.#runtime = runtime
+	}
+
+	/** List the published versions of an agent, newest first. */
+	list(
+		agentId: PathParam<"agents", "listVersions", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "listVersions">>, string>,
+		ItemOf<EndpointJsonSuccess<"agents", "listVersions">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.["page"],
+			"asc",
+			options,
+			(effectRuntime, cursor, effectOpts) =>
+				new EffectAgentsVersionsResource(effectRuntime).list(
+					agentId,
+					{
+						...params,
+						...(cursor === undefined ? {} : { page: cursor }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+}
+
+export class AgentsResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly versions: AgentsVersionsResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.versions = new AgentsVersionsResource(runtime)
 	}
 
 	/** Archive an agent */

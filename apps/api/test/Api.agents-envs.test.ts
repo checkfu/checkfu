@@ -358,6 +358,27 @@ describe("Agent and environment lifecycle, versioning, and projection consistenc
 					})
 					expect(missingVersion.status).toBe(404)
 
+					const versions = (page?: string) =>
+						sendRequest(apiFetch, {
+							method: "GET",
+							path: `/v1/agents/${agentV1.id}/versions?limit=1${page === undefined ? "" : `&page=${encodeURIComponent(page)}`}`,
+							headers: AUTH_HEADERS,
+						})
+					const headPage = yield* versions()
+					expect(headPage.status).toBe(200)
+					const latest = (yield* Effect.promise(() => headPage.json())) as {
+						data: ReadonlyArray<{ version: number }>
+						next_page: string
+					}
+					expect(latest.data.map(({ version }) => version)).toEqual([2])
+					const earlierPage = yield* versions(latest.next_page)
+					expect(earlierPage.status).toBe(200)
+					expect(yield* Effect.promise(() => earlierPage.json())).toMatchObject({
+						data: [{ version: 1, system: "V1 prompt" }],
+						next_page: null,
+					})
+					expect((yield* versions("wrong-page")).status).toBe(400)
+
 					const envRes = yield* sendRequest(apiFetch, {
 						method: "POST",
 						path: "/v1/environments",

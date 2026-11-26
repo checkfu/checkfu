@@ -1032,6 +1032,16 @@ const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, c
 		next_cursor: Schema.NullOr(cursor),
 	})
 
+const AgentVersionPage = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(512),
+).annotate({ description: "Opaque cursor returned by the previous page." })
+
+export const ListAgentVersionsResponse = Schema.Struct({
+	data: Schema.Array(AgentResource),
+	next_page: Schema.NullOr(AgentVersionPage),
+})
+
 export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
@@ -1270,6 +1280,26 @@ const Agents = HttpApiGroup.make("agents")
 				"x-checkfu-endpoint": { group: "agents", endpoint: "get" },
 				"x-checkfu-mcp": { name: "agents_getAgent" },
 				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("listVersions", "/v1/agents/:agent_id/versions", {
+			params: agentParams,
+			query: {
+				page: Schema.optionalKey(AgentVersionPage),
+				limit: Schema.optionalKey(ListLimitFromString),
+			},
+			success: ListAgentVersionsResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List agent versions")
+			.annotate(OpenApi.Description, "List the published versions of an agent, newest first.")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "agents.versions",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "agents", endpoint: "listVersions" },
+				"x-checkfu-mcp": { name: "agents_listVersions" },
+				"x-checkfu-cli": { intQueryParams: { limit: { min: 1, max: 100, metavar: "N" } } },
 			}),
 	)
 	.add(

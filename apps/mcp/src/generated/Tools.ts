@@ -207,6 +207,54 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 		},
 	},
 	{
+		name: "agents_listVersions",
+		title: "List agent versions",
+		description: "List the published versions of an agent, newest first.",
+		method: "GET",
+		path: "/v1/agents/{agent_id}/versions",
+		readOnly: true,
+		idempotent: true,
+		destructive: false,
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: {
+					type: "object",
+					properties: {
+						agent_id: {
+							type: "string",
+							minLength: 1,
+							description: "Agent ID",
+							pattern: "^(?:[^/\\\\.][^/\\\\]*|\\.[^/\\\\.][^/\\\\]*|\\.\\.[^/\\\\]+)$",
+						},
+					},
+					required: ["agent_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						page: {
+							type: "string",
+							minLength: 1,
+							maxLength: 512,
+							description: "Opaque cursor returned by the previous page.",
+						},
+						limit: {
+							type: "string",
+							pattern: "^(?:[1-9]\\d?|100)$",
+							description: "Maximum number of results to return (1-100, default 50)",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+	},
+	{
 		name: "agents_updateAgent",
 		title: "Update an agent",
 		description:

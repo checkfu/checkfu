@@ -730,6 +730,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/agents",
 						"/v1/agents/{agent_id}",
 						"/v1/agents/{agent_id}/archive",
+						"/v1/agents/{agent_id}/versions",
 						"/v1/artifacts",
 						"/v1/artifacts/{artifact_id}",
 						"/v1/artifacts/{artifact_id}/blobs/{sha256}",

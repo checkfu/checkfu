@@ -342,6 +342,58 @@ const agentsUpdateCommand = CommandMake(
 	),
 )
 
+const agentsVersionsListCommandSpec: GeneratedOperationDescriptor = {
+	cliLabel: "agents:versions list",
+	apiGroup: "agents",
+	apiEndpoint: "listVersions",
+	hasBody: false,
+	flags: [
+		{
+			propName: "agentId",
+			flagName: "agent-id",
+			wireName: "agent_id",
+			location: "path",
+			kind: "string",
+			required: true,
+		},
+		{
+			propName: "page",
+			flagName: "page",
+			wireName: "page",
+			location: "query",
+			kind: "string",
+			required: false,
+		},
+		{
+			propName: "limit",
+			flagName: "limit",
+			wireName: "limit",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+			max: 100,
+		},
+	],
+}
+
+const agentsVersionsListCommand = CommandMake(
+	"list",
+	{
+		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
+		page: FlagString("page").pipe(
+			FlagWithDescription("Opaque cursor returned by the previous page."),
+			FlagOptional,
+		),
+		limit: FlagInt("limit").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Maximum number of results to return (1-100, default 50)"),
+			FlagOptional,
+		),
+	},
+	(flags) => invokeGeneratedOperation(agentsVersionsListCommandSpec, flags),
+).pipe(CommandWithDescription("List the published versions of an agent, newest first."))
+
 const artifactsCreateCommandSpec: GeneratedOperationDescriptor = {
 	cliLabel: "artifacts create",
 	apiGroup: "artifacts",
@@ -2826,6 +2878,7 @@ const vaultsCredentialsUpdateCommand = CommandMake(
 
 export const buildGeneratedResourceCommands = <
 	const AgentsExtras extends ReadonlyArray<Command.Any> = readonly [],
+	const AgentsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const ArtifactsVersionsExtras extends ReadonlyArray<Command.Any> = readonly [],
 	const AutomationsExtras extends ReadonlyArray<Command.Any> = readonly [],
@@ -2838,6 +2891,7 @@ export const buildGeneratedResourceCommands = <
 	const VaultsCredentialsExtras extends ReadonlyArray<Command.Any> = readonly [],
 >(extras?: {
 	readonly agents?: AgentsExtras
+	readonly "agents:versions"?: AgentsVersionsExtras
 	readonly artifacts?: ArtifactsExtras
 	readonly "artifacts:versions"?: ArtifactsVersionsExtras
 	readonly automations?: AutomationsExtras
@@ -2859,6 +2913,13 @@ export const buildGeneratedResourceCommands = <
 				agentsRetrieveCommand,
 				agentsUpdateCommand,
 				...(extras?.["agents"] ?? ([] as const)),
+			]),
+		),
+		CommandMake("agents:versions").pipe(
+			CommandWithDescription("Manage agents:versions"),
+			CommandWithSubcommands([
+				agentsVersionsListCommand,
+				...(extras?.["agents:versions"] ?? ([] as const)),
 			]),
 		),
 		CommandMake("artifacts").pipe(
