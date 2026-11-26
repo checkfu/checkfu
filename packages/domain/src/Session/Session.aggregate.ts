@@ -64,12 +64,11 @@ import { StaleTurn } from "./StaleTurn.rejection.ts"
 import { UnknownModelRequest } from "./UnknownModelRequest.rejection.ts"
 import { snapshotVersion, versionedSnapshot } from "@checkfu/snapshots/VersionedSnapshot"
 
-export const SESSION_STATE_SCHEMA_VERSION = 3 as const
+export const SESSION_STATE_SCHEMA_VERSION = 2 as const
 
 const Uninitialized = Schema.TaggedStruct("Uninitialized", {})
-const IdleV2 = Schema.TaggedStruct("Idle", { turn: NonNegativeInt })
 const Idle = Schema.TaggedStruct("Idle", {
-	...IdleV2.fields,
+	turn: NonNegativeInt,
 	initial_messages_remaining: Schema.optionalKey(NonNegativeInt),
 })
 const Terminated = Schema.TaggedStruct("Terminated", { archived: Schema.Boolean })
@@ -97,13 +96,8 @@ export const SessionStateSnapshot = versionedSnapshot({
 	schema: SessionState,
 	previous: [
 		snapshotVersion({
-			version: 2,
-			schema: Schema.Union([Uninitialized, IdleV2, Running, Terminated]),
-			migrate: (state) => state,
-		}),
-		snapshotVersion({
 			version: 1,
-			schema: Schema.Union([Uninitialized, IdleV2, RunningV1, Terminated]),
+			schema: Schema.Union([Uninitialized, Idle, RunningV1, Terminated]),
 			migrate: (state) =>
 				state._tag === "Running"
 					? {
