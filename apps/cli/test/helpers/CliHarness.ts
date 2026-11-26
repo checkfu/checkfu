@@ -118,6 +118,7 @@ export interface CliRunOptions {
 	readonly stdoutIsTerminal?: boolean
 	readonly stderrIsTerminal?: boolean
 	readonly files?: Record<string, string | Stream.Stream<Uint8Array, PlatformError.PlatformError>>
+	readonly fileSystem?: Layer.Layer<FileSystem.FileSystem>
 	readonly onChmod?: (filePath: string, mode: number) => void
 	readonly onRead?: (filePath: string) => void
 	readonly readyWithin?: Duration.Input
@@ -440,7 +441,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 							}
 
 				const cliLayer = Layer.mergeAll(
-					fileSystemLayer,
+					options?.fileSystem ?? fileSystemLayer,
 					Path.layer,
 					Stdio.layerTest({
 						args: Effect.succeed(args),

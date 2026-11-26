@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { parse } from "@cloudflare/forge"
+import { generateApplySchemas } from "./ApplySchemas.ts"
 import { generateCliFiles } from "./CliTransformer.ts"
 import { generateMcpFiles } from "./McpTransformer.ts"
 import { exportDeterministicOpenApiJson } from "./OpenApiExport.ts"
@@ -31,6 +32,7 @@ export const generateAllArtifacts = (): ReadonlyArray<EmittedArtifact> => {
 			relativePath: "apps/api/public/openapi.json",
 			content: openApiJson,
 		},
+		...generateApplySchemas(),
 		...cliFiles.map((file) => ({
 			relativePath: `apps/cli/src/generated/${file.path}`,
 			content: file.content,

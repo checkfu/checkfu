@@ -815,6 +815,12 @@ export const CreateAutomationBody = Schema.Struct({
 export type CreateAutomationBody = typeof CreateAutomationBody.Type
 
 export const UpdateAutomationBody = Schema.Struct({
+	revision: Schema.optionalKey(
+		PositiveInt.annotate({
+			description:
+				"Current automation revision. If supplied, the update fails when the revision has changed.",
+		}),
+	),
 	name: Schema.optionalKey(AutomationName.annotate({ description: "New automation name" })),
 	description: Schema.optionalKey(
 		Schema.NullOr(AutomationDescription).annotate({
@@ -1052,7 +1058,6 @@ export const AutomationResource = Schema.Struct({
 		"text",
 		"runs",
 		"activation",
-		"revision",
 		"upcoming",
 	]),
 	agent: Schema.Struct({ id: Schema.String, version: PositiveInt }),
@@ -1716,6 +1721,13 @@ const AgentVersionFromString = positiveIntegerFromString(
 	"Agent version. Omit to retrieve the latest version.",
 )
 
+const ArchiveVersionFromString = positiveIntegerFromString(
+	"Expected version. The archive is refused if the resource changed or a live automation uses it.",
+)
+const ArchiveRevisionFromString = positiveIntegerFromString(
+	"Expected revision. The archive is refused if the automation changed.",
+)
+
 const resourceListQuery = {
 	page: Schema.optionalKey(ResourceListCursor),
 	limit: Schema.optionalKey(ListLimitFromString),
@@ -1931,6 +1943,7 @@ const Agents = HttpApiGroup.make("agents")
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/agents/:agent_id/archive", {
 			params: agentParams,
+			query: { version: Schema.optionalKey(ArchiveVersionFromString) },
 			success: [AgentResource, PendingAgent],
 			error: HandlerErrors,
 		})
@@ -1942,6 +1955,7 @@ const Agents = HttpApiGroup.make("agents")
 				"x-checkfu-endpoint": { group: "agents", endpoint: "archive" },
 				"x-checkfu-mcp": { name: "agents_archiveAgent" },
 				"x-checkfu-idempotent": true,
+				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
 			}),
 	)
 	.annotate(OpenApi.Description, "Create and manage versioned agent configurations")
@@ -2051,6 +2065,7 @@ const Environments = HttpApiGroup.make("environments")
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/environments/:environment_id/archive", {
 			params: environmentParams,
+			query: { version: Schema.optionalKey(ArchiveVersionFromString) },
 			success: [EnvironmentSnapshot, PendingEnvironment],
 			error: HandlerErrors,
 		})
@@ -2062,6 +2077,7 @@ const Environments = HttpApiGroup.make("environments")
 				"x-checkfu-endpoint": { group: "environments", endpoint: "archive" },
 				"x-checkfu-mcp": { name: "environments_archiveEnvironment" },
 				"x-checkfu-idempotent": true,
+				"x-checkfu-cli": { intQueryParams: { version: { min: 1, metavar: "N" } } },
 			}),
 	)
 	.annotate(OpenApi.Description, "Create and manage environments where agents run")
@@ -2495,6 +2511,7 @@ const Automations = HttpApiGroup.make("automations")
 	.add(
 		HttpApiEndpoint.post("archive", "/v1/automations/:automation_id/archive", {
 			params: automationParams,
+			query: { revision: Schema.optionalKey(ArchiveRevisionFromString) },
 			success: [AutomationResource, PendingAutomation],
 			error: HandlerErrors,
 		})
@@ -2506,6 +2523,7 @@ const Automations = HttpApiGroup.make("automations")
 				"x-checkfu-endpoint": { group: "automations", endpoint: "archive" },
 				"x-checkfu-mcp": { name: "automations_archiveAutomation" },
 				"x-checkfu-idempotent": true,
+				"x-checkfu-cli": { intQueryParams: { revision: { min: 1, metavar: "N" } } },
 			}),
 	)
 	.add(

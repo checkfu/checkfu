@@ -1,0 +1,22 @@
+{
+	"name": "@checkfu/authoring",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./document": "./src/Document.ts",
+		"./lockfile": "./src/Lockfile.ts",
+		"./project": "./src/Project.ts",
+		"./schemas": "./src/Schemas.ts"
+	},
+	"scripts": {
+		"typecheck": "effect-tsgo tsc --noEmit"
+	},
+	"dependencies": {
+		"@checkfu/sdk": "workspace:*",
+		"effect": "catalog:",
+		"yaml": "catalog:"
+	}
+}

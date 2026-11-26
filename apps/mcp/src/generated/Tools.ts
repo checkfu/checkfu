@@ -30,6 +30,19 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					required: ["agent_id"],
 					additionalProperties: false,
 				},
+				query: {
+					type: "object",
+					properties: {
+						version: {
+							type: "string",
+							pattern: "^[1-9]\\d{0,14}$",
+							description:
+								"Expected version. The archive is refused if the resource changed or a live automation uses it.",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
 			},
 			required: ["path"],
 			additionalProperties: false,
@@ -1184,6 +1197,18 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 					required: ["automation_id"],
 					additionalProperties: false,
 				},
+				query: {
+					type: "object",
+					properties: {
+						revision: {
+							type: "string",
+							pattern: "^[1-9]\\d{0,14}$",
+							description: "Expected revision. The archive is refused if the automation changed.",
+						},
+					},
+					required: [],
+					additionalProperties: false,
+				},
 			},
 			required: ["path"],
 			additionalProperties: false,
@@ -1638,6 +1663,13 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 				body: {
 					type: "object",
 					properties: {
+						revision: {
+							type: "integer",
+							minimum: 1,
+							maximum: 9007199254740991,
+							description:
+								"Current automation revision. If supplied, the update fails when the revision has changed.",
+						},
 						name: {
 							type: "string",
 							minLength: 1,
@@ -1784,6 +1816,19 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 						},
 					},
 					required: ["environment_id"],
+					additionalProperties: false,
+				},
+				query: {
+					type: "object",
+					properties: {
+						version: {
+							type: "string",
+							pattern: "^[1-9]\\d{0,14}$",
+							description:
+								"Expected version. The archive is refused if the resource changed or a live automation uses it.",
+						},
+					},
+					required: [],
 					additionalProperties: false,
 				},
 			},

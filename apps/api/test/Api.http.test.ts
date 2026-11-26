@@ -1,3 +1,4 @@
+import { AutomationInventoryChanged } from "@checkfu/domain/Automation/GuardedArchives"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
 import { AgentVersionId } from "@checkfu/domain/Agent/AgentVersion.id"
@@ -981,6 +982,13 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 			expect(envelope.request_id).toBe(requestId)
 		}
 		expect(() => RequestId.make("")).toThrow(/Schema validation failed/)
+		expect(toApiError(new AutomationInventoryChanged(), requestId)).toEqual(
+			apiError(
+				503,
+				"The automation inventory changed. Retry after the list catches up.",
+				requestId,
+			),
+		)
 		expect(
 			toApiError(
 				{ type: "error", error: { type: "conflict_error", message: "Conflict." } },

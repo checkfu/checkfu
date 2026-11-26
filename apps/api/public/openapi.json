@@ -4066,6 +4066,16 @@
 							"description": "Agent ID"
 						},
 						"required": true
+					},
+					{
+						"name": "version",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9]\\d{0,14}$",
+							"description": "Expected version. The archive is refused if the resource changed or a live automation uses it."
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -4660,7 +4670,15 @@
 				"x-checkfu-mcp": {
 					"name": "agents_archiveAgent"
 				},
-				"x-checkfu-idempotent": true
+				"x-checkfu-idempotent": true,
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"version": {
+							"min": 1,
+							"metavar": "N"
+						}
+					}
+				}
 			}
 		},
 		"/v1/environments": {
@@ -7554,6 +7572,16 @@
 							"description": "Environment ID"
 						},
 						"required": true
+					},
+					{
+						"name": "version",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9]\\d{0,14}$",
+							"description": "Expected version. The archive is refused if the resource changed or a live automation uses it."
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -8060,7 +8088,15 @@
 				"x-checkfu-mcp": {
 					"name": "environments_archiveEnvironment"
 				},
-				"x-checkfu-idempotent": true
+				"x-checkfu-idempotent": true,
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"version": {
+							"min": 1,
+							"metavar": "N"
+						}
+					}
+				}
 			}
 		},
 		"/v1/sessions": {
@@ -16905,6 +16941,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -17002,6 +17043,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -17770,6 +17812,11 @@
 															}
 														]
 													},
+													"revision": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 9007199254740991
+													},
 													"last_run_at": {
 														"anyOf": [
 															{
@@ -17867,6 +17914,7 @@
 													"schedule",
 													"status",
 													"pause_reason",
+													"revision",
 													"last_run_at",
 													"created_at",
 													"updated_at",
@@ -18354,6 +18402,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -18451,6 +18504,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -18911,6 +18965,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -19008,6 +19067,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -19488,6 +19548,12 @@
 							"schema": {
 								"type": "object",
 								"properties": {
+									"revision": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 9007199254740991,
+										"description": "Current automation revision. If supplied, the update fails when the revision has changed."
+									},
 									"name": {
 										"type": "string",
 										"minLength": 1,
@@ -19724,6 +19790,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -19821,6 +19892,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -20308,6 +20380,11 @@
 												}
 											]
 										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
+										},
 										"last_run_at": {
 											"anyOf": [
 												{
@@ -20405,6 +20482,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -20809,6 +20887,16 @@
 							"description": "Automation ID"
 						},
 						"required": true
+					},
+					{
+						"name": "revision",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9]\\d{0,14}$",
+							"description": "Expected revision. The archive is refused if the automation changed."
+						},
+						"required": false
 					}
 				],
 				"security": [
@@ -20891,6 +20979,11 @@
 													"type": "null"
 												}
 											]
+										},
+										"revision": {
+											"type": "integer",
+											"minimum": 1,
+											"maximum": 9007199254740991
 										},
 										"last_run_at": {
 											"anyOf": [
@@ -20989,6 +21082,7 @@
 										"schedule",
 										"status",
 										"pause_reason",
+										"revision",
 										"last_run_at",
 										"created_at",
 										"updated_at",
@@ -21376,7 +21470,15 @@
 				"x-checkfu-mcp": {
 					"name": "automations_archiveAutomation"
 				},
-				"x-checkfu-idempotent": true
+				"x-checkfu-idempotent": true,
+				"x-checkfu-cli": {
+					"intQueryParams": {
+						"revision": {
+							"min": 1,
+							"metavar": "N"
+						}
+					}
+				}
 			}
 		},
 		"/v1/automations/{automation_id}/run": {

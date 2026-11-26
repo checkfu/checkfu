@@ -146,6 +146,7 @@ const sampleAutomation = (overrides?: {
 	schedule: { type: "cron" as const, expression: "0 9 * * *", timezone: "UTC" },
 	status: "active" as const,
 	pause_reason: null,
+	revision: 1,
 	run_count: 0,
 	last_run_at: null,
 	upcoming_runs_at: [],
@@ -1634,13 +1635,13 @@ describe("@checkfu/sdk", () => {
 
 		it("exports complete Forge-generated SDK_OPERATION_BINDINGS and Op type helpers", () => {
 			const ungenerated = new Set(["health", "auth"])
-			const rawBytes = new Set(["artifacts.getFileContent", "artifacts.uploadBlob"])
+			const internalEndpoints = new Set(["artifacts.getFileContent", "artifacts.uploadBlob"])
 			const expectedEndpoints = Object.entries(CheckfuApi.groups)
 				.filter(([group]) => !ungenerated.has(group))
 				.flatMap(([group, apiGroup]) =>
 					Object.keys(apiGroup.endpoints).map((endpoint) => `${group}.${endpoint}`),
 				)
-				.filter((endpoint) => !rawBytes.has(endpoint))
+				.filter((endpoint) => !internalEndpoints.has(endpoint))
 				.sort()
 			const boundEndpoints = SDK_OPERATION_BINDINGS.map(
 				(binding) => `${binding.apiGroup}.${binding.apiEndpoint}`,

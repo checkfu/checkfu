@@ -57,7 +57,7 @@ import type {
 export interface CheckfuOperations {
 	readonly "agents.archive": OperationShape<
 		EndpointParams<"agents", "archive">,
-		EndpointQuery<"agents", "archive">,
+		RelaxOptionalProps<EndpointQuery<"agents", "archive">>,
 		EndpointBody<"agents", "archive">,
 		EndpointSuccess<"agents", "archive">,
 		EndpointJsonSuccess<"agents", "archive">,
@@ -193,7 +193,7 @@ export interface CheckfuOperations {
 	>
 	readonly "automations.archive": OperationShape<
 		EndpointParams<"automations", "archive">,
-		EndpointQuery<"automations", "archive">,
+		RelaxOptionalProps<EndpointQuery<"automations", "archive">>,
 		EndpointBody<"automations", "archive">,
 		EndpointSuccess<"automations", "archive">,
 		EndpointJsonSuccess<"automations", "archive">,
@@ -273,7 +273,7 @@ export interface CheckfuOperations {
 	>
 	readonly "environments.archive": OperationShape<
 		EndpointParams<"environments", "archive">,
-		EndpointQuery<"environments", "archive">,
+		RelaxOptionalProps<EndpointQuery<"environments", "archive">>,
 		EndpointBody<"environments", "archive">,
 		EndpointSuccess<"environments", "archive">,
 		EndpointJsonSuccess<"environments", "archive">,
@@ -804,19 +804,29 @@ export class EffectAgentsResource {
 	/** Archive an agent */
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"agents", "archive">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"agents", "archive">>, CheckfuSdkError>
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
+		params: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"agents", "archive">>, CheckfuSdkError>
+	archive(
+		agentId: PathParam<"agents", "archive", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"agents", "archive">, CheckfuSdkError>
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		EndpointSuccess<"agents", "archive"> | WithResponse<EndpointSuccess<"agents", "archive">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("agents", "archive", { agent_id: agentId }),
@@ -825,6 +835,7 @@ export class EffectAgentsResource {
 						executeWithRetries(this.#runtime, "checkfu.agents.archive", "idempotent", options, () =>
 							this.#runtime.raw.agents.archive({
 								params: pathParams,
+								query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
 								responseMode: "decoded-and-response",
 							}),
 						),
@@ -1677,20 +1688,31 @@ export class EffectAutomationsResource {
 	/** Archive an automation so it never runs again */
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"automations", "archive">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"automations", "archive">>, CheckfuSdkError>
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
+		params: RelaxOptionalProps<EndpointQuery<"automations", "archive">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "archive">>, CheckfuSdkError>
+	archive(
+		automationId: PathParam<"automations", "archive", "automation_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"automations", "archive">, CheckfuSdkError>
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"automations", "archive">
 		| WithResponse<EndpointSuccess<"automations", "archive">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("automations", "archive", { automation_id: automationId }),
@@ -1704,6 +1726,8 @@ export class EffectAutomationsResource {
 							() =>
 								this.#runtime.raw.automations.archive({
 									params: pathParams,
+									query:
+										params?.["revision"] === undefined ? {} : { revision: params?.["revision"] },
 									responseMode: "decoded-and-response",
 								}),
 						),
@@ -2036,20 +2060,31 @@ export class EffectEnvironmentsResource {
 	/** Archive an environment */
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"environments", "archive">> & AnyRequestOptions)
+			| undefined,
 		options: WithResponseRequestOptions,
 	): Effect<WithResponse<EndpointSuccess<"environments", "archive">>, CheckfuSdkError>
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
+		params: RelaxOptionalProps<EndpointQuery<"environments", "archive">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"environments", "archive">>, CheckfuSdkError>
+	archive(
+		environmentId: PathParam<"environments", "archive", "environment_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & RequestOptions,
 		options?: RequestOptions,
 	): Effect<EndpointSuccess<"environments", "archive">, CheckfuSdkError>
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & AnyRequestOptions,
 		options?: AnyRequestOptions,
 	): Effect<
 		| EndpointSuccess<"environments", "archive">
 		| WithResponse<EndpointSuccess<"environments", "archive">>,
 		CheckfuSdkError
 	> {
+		options ??= params
 		return unwrapResponse(
 			EffectFlatMap(
 				decodeEndpointParams("environments", "archive", { environment_id: environmentId }),
@@ -2063,6 +2098,7 @@ export class EffectEnvironmentsResource {
 							() =>
 								this.#runtime.raw.environments.archive({
 									params: pathParams,
+									query: params?.["version"] === undefined ? {} : { version: params?.["version"] },
 									responseMode: "decoded-and-response",
 								}),
 						),
@@ -4615,10 +4651,11 @@ export class AgentsResource {
 	/** Archive an agent */
 	archive(
 		agentId: PathParam<"agents", "archive", "agent_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"agents", "archive">> & PromiseRequestOptions,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"agents", "archive">> {
-		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
-			new EffectAgentsResource(effectRuntime).archive(agentId, {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectAgentsResource(effectRuntime).archive(agentId, params, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -4932,10 +4969,11 @@ export class AutomationsResource {
 	/** Archive an automation so it never runs again */
 	archive(
 		automationId: PathParam<"automations", "archive", "automation_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"automations", "archive">> & PromiseRequestOptions,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"automations", "archive">> {
-		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
-			new EffectAutomationsResource(effectRuntime).archive(automationId, {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectAutomationsResource(effectRuntime).archive(automationId, params, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -5056,10 +5094,11 @@ export class EnvironmentsResource {
 	/** Archive an environment */
 	archive(
 		environmentId: PathParam<"environments", "archive", "environment_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"environments", "archive">> & PromiseRequestOptions,
 		options?: PromiseRequestOptions,
 	): APIPromise<EndpointJsonSuccess<"environments", "archive">> {
-		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
-			new EffectEnvironmentsResource(effectRuntime).archive(environmentId, {
+		return executeUnaryPromise(this.#runtime, options ?? params, (effectRuntime, effectOpts) =>
+			new EffectEnvironmentsResource(effectRuntime).archive(environmentId, params, {
 				...effectOpts,
 				withResponse: true,
 			}),

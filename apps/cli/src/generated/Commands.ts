@@ -36,6 +36,15 @@ const agentsArchiveCommandSpec: GeneratedOperationDescriptor = {
 			kind: "string",
 			required: true,
 		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+		},
 	],
 }
 
@@ -43,6 +52,13 @@ const agentsArchiveCommand = CommandMake(
 	"archive",
 	{
 		agentId: FlagString("agent-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Agent ID")),
+		version: FlagInt("current-version").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription(
+				"Expected version. The archive is refused if the resource changed or a live automation uses it.",
+			),
+			FlagOptional,
+		),
 	},
 	(flags) => invokeGeneratedOperation(agentsArchiveCommandSpec, flags),
 ).pipe(CommandWithDescription("Archive an agent"))
@@ -1016,6 +1032,15 @@ const automationsArchiveCommandSpec: GeneratedOperationDescriptor = {
 			kind: "string",
 			required: true,
 		},
+		{
+			propName: "revision",
+			flagName: "revision",
+			wireName: "revision",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+		},
 	],
 }
 
@@ -1025,6 +1050,11 @@ const automationsArchiveCommand = CommandMake(
 		automationId: FlagString("automation-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
+		),
+		revision: FlagInt("revision").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription("Expected revision. The archive is refused if the automation changed."),
+			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(automationsArchiveCommandSpec, flags),
@@ -1379,6 +1409,14 @@ const automationsUpdateCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
+			propName: "revision",
+			flagName: "revision",
+			wireName: "revision",
+			location: "body",
+			kind: "int",
+			required: false,
+		},
+		{
 			propName: "name",
 			flagName: "name",
 			wireName: "name",
@@ -1437,6 +1475,13 @@ const automationsUpdateCommand = CommandMake(
 		automationId: FlagString("automation-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
+		),
+		revision: FlagInt("revision").pipe(
+			FlagWithMetavar("INT"),
+			FlagWithDescription(
+				"Current automation revision. If supplied, the update fails when the revision has changed.",
+			),
+			FlagOptional,
 		),
 		name: FlagString("name").pipe(FlagWithDescription("New automation name"), FlagOptional),
 		description: FlagString("description").pipe(
@@ -1606,6 +1651,15 @@ const environmentsArchiveCommandSpec: GeneratedOperationDescriptor = {
 			kind: "string",
 			required: true,
 		},
+		{
+			propName: "version",
+			flagName: "current-version",
+			wireName: "version",
+			location: "query",
+			kind: "int",
+			required: false,
+			min: 1,
+		},
 	],
 }
 
@@ -1615,6 +1669,13 @@ const environmentsArchiveCommand = CommandMake(
 		environmentId: FlagString("environment-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Environment ID"),
+		),
+		version: FlagInt("current-version").pipe(
+			FlagWithMetavar("N"),
+			FlagWithDescription(
+				"Expected version. The archive is refused if the resource changed or a live automation uses it.",
+			),
+			FlagOptional,
 		),
 	},
 	(flags) => invokeGeneratedOperation(environmentsArchiveCommandSpec, flags),

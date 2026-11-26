@@ -225,6 +225,11 @@ export const EnvironmentConfig = Schema.Struct({
 })
 export type EnvironmentConfig = typeof EnvironmentConfig.Type
 
+export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
+	type: "cloud",
+	networking: { type: "unrestricted" },
+}
+
 export const EnvironmentSnapshot = Schema.Struct({
 	id: EnvironmentId,
 	type: Schema.Literal("environment"),
