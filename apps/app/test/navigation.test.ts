@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ApiError } from "../src/api.ts"
-import { present } from "../src/queries.ts"
+import { lookup, present } from "../src/queries.ts"
 import { returnTo } from "../src/return-to.ts"
 import { selection } from "../src/selection.ts"
 import { sessionTitle } from "../src/session-title.ts"
@@ -53,6 +53,28 @@ describe("detail pages", () => {
 				error: new ApiError(404, "not_found_error", "Environment not found."),
 			}),
 		).toThrow("Environment not found.")
+	})
+
+	it("read one resource as pending, active, gone or failed, a failed recheck failing despite cached data", () => {
+		const vault = { archived_at: null as string | null }
+		const active = (found: typeof vault) => found.archived_at === null
+		expect(lookup({ data: undefined, error: null }, active)).toEqual({ state: "pending" })
+		expect(lookup({ data: vault, error: null }, active)).toEqual({ state: "active", found: vault })
+		expect(lookup({ data: { archived_at: "2026-11-24" }, error: null }, active)).toEqual({
+			state: "gone",
+		})
+		expect(lookup({ data: vault, error: new ApiError(404, null, "gone") }, active)).toEqual({
+			state: "gone",
+		})
+		expect(lookup({ data: undefined, error: new ApiError(404, null, "gone") }, active)).toEqual({
+			state: "gone",
+		})
+		expect(lookup({ data: undefined, error: new ApiError(503, null, "busy") }, active)).toEqual({
+			state: "failed",
+		})
+		expect(lookup({ data: vault, error: new ApiError(503, null, "busy") }, active)).toEqual({
+			state: "failed",
+		})
 	})
 })
 

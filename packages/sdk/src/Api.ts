@@ -34,7 +34,6 @@ import {
 	AutomationSchedule,
 	CronExpression,
 	AutomationSnapshot,
-	CredentialCustody,
 	CredentialDisplayName,
 	CredentialId,
 	CredentialSecret,
@@ -88,6 +87,7 @@ import {
 	MAX_CUSTOM_TOOL_INPUT_SCHEMA_LENGTH,
 } from "./Schemas.ts"
 import type { AgentTool, SessionEventType } from "./Schemas.ts"
+import { MAX_SESSION_VAULTS } from "./Limits.ts"
 
 export const REQUEST_ID_HEADER = "request-id"
 
@@ -574,7 +574,6 @@ export const CreateArtifactVersionBody = Schema.Struct({
 	}),
 })
 export type CreateArtifactVersionBody = typeof CreateArtifactVersionBody.Type
-const MAX_SESSION_VAULTS = 20
 
 const AgentReference = Schema.Union([
 	ResourceId,
@@ -822,18 +821,30 @@ export type Vault = typeof VaultResource.Type
 export const CredentialResource = CredentialSnapshot.annotate({ identifier: "VaultCredential" })
 export type VaultCredential = typeof CredentialResource.Type
 
-export const VaultDeleted = Schema.Struct({
-	id: Schema.String,
-	type: Schema.Literal("vault_deleted"),
-	custody: VaultCustody,
-})
+const vaultDeleted = <const Secrets extends "erased" | "erasing">(secrets: Secrets) =>
+	Schema.Struct({
+		id: Schema.String,
+		type: Schema.Literal("vault_deleted"),
+		secrets: Schema.Literal(secrets).annotate({
+			description:
+				"erased once the vault's storage confirmed every secret gone; erasing while that finishes in the background",
+		}),
+		custody: VaultCustody,
+	})
+export const VaultDeletedErased = vaultDeleted("erased")
+export const VaultDeletedErasing = vaultDeleted("erasing").pipe(HttpApiSchema.status(202))
+export const VaultDeleted = Schema.Union([VaultDeletedErased, VaultDeletedErasing])
 export type VaultDeleted = typeof VaultDeleted.Type
 
-export const CredentialDeleted = Schema.Struct({
-	id: Schema.String,
-	type: Schema.Literal("vault_credential_deleted"),
-	custody: CredentialCustody,
-})
+const credentialDeleted = <const Custody extends "erased" | "erasing">(custody: Custody) =>
+	Schema.Struct({
+		id: Schema.String,
+		type: Schema.Literal("vault_credential_deleted"),
+		custody: Schema.Literal(custody),
+	})
+export const CredentialDeletedErased = credentialDeleted("erased")
+export const CredentialDeletedErasing = credentialDeleted("erasing").pipe(HttpApiSchema.status(202))
+export const CredentialDeleted = Schema.Union([CredentialDeletedErased, CredentialDeletedErasing])
 export type CredentialDeleted = typeof CredentialDeleted.Type
 
 export const SessionResource = Schema.Struct({
@@ -2480,13 +2491,13 @@ const Vaults = HttpApiGroup.make("vaults")
 	.add(
 		HttpApiEndpoint.delete("delete", "/v1/vaults/:vault_id", {
 			params: vaultParams,
-			success: VaultDeleted,
+			success: [VaultDeletedErased, VaultDeletedErasing],
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Delete a vault")
 			.annotate(
 				OpenApi.Description,
-				"Delete a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet, and sending the delete again returns the current count. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"Delete a vault and its credentials. A 200 (secrets: erased) means the vault's storage confirmed every secret gone. A 202 (secrets: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. custody.erasing counts the credentials whose records have not caught up yet. Sending the delete again returns the current state.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults",
@@ -2504,7 +2515,7 @@ const Vaults = HttpApiGroup.make("vaults")
 			.annotate(OpenApi.Summary, "Archive a vault")
 			.annotate(
 				OpenApi.Description,
-				"Archive a vault and its credentials. Every secret in the vault is erased before this answers; custody.erasing counts the credentials whose records have not caught up yet. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"Archive a vault and its credentials. A 200 means the vault's storage confirmed every secret gone; custody.erasing counts the credentials whose records have not caught up yet. A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once every custody count is 0.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults",
@@ -2584,13 +2595,13 @@ const Vaults = HttpApiGroup.make("vaults")
 	.add(
 		HttpApiEndpoint.delete("deleteCredential", "/v1/vaults/:vault_id/credentials/:credential_id", {
 			params: credentialParams,
-			success: CredentialDeleted,
+			success: [CredentialDeletedErased, CredentialDeletedErasing],
 			error: HandlerErrors,
 		})
 			.annotate(OpenApi.Summary, "Delete a credential")
 			.annotate(
 				OpenApi.Description,
-				"Delete a credential. Its secret is erased before this answers, and sending the delete again returns the current state. A 503 means the delete is recorded but the erasure is not confirmed: send it again.",
+				"Delete a credential. A 200 (custody: erased) means storage confirmed its secret gone. A 202 (custody: erasing) means the delete is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. Sending the delete again returns the current state.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults.credentials",
@@ -2612,7 +2623,7 @@ const Vaults = HttpApiGroup.make("vaults")
 			.annotate(OpenApi.Summary, "Archive a credential")
 			.annotate(
 				OpenApi.Description,
-				"Archive a credential. Its secret is erased before this answers. A 503 means the archive is recorded but the erasure is not confirmed: send it again.",
+				"Archive a credential. A 200 means storage confirmed its secret gone (custody: erased). A 202 receipt means the archive is recorded but that confirmation is still to come; nothing needs to be sent again: erasure finishes in the background, and until it does a session already holding the credential may still use its secret. The receipt settles with waitForPending once custody is erased.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "vaults.credentials",

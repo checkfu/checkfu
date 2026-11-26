@@ -1,12 +1,11 @@
 import { CheckfuFetchError, createFetchClient, operationUrl } from "@checkfu/sdk/fetch"
-import type { FetchResult } from "@checkfu/sdk/fetch"
+import type { FetchInput, FetchResult, JsonOperationId } from "@checkfu/sdk/fetch"
 import type {
 	ERROR_CODES,
 	CreateAgentBody,
 	CreateArtifactLinkBody,
 	CreateAutomationBody,
 	CreateEnvironmentBody,
-	CreateSessionBody,
 	PublishArtifactBody,
 	SendSessionEventsBody,
 	UpdateAgentBody,
@@ -91,6 +90,9 @@ const isArchived = (value: unknown): boolean =>
 	"archived_at" in value &&
 	value.archived_at !== null
 
+const isStored = (credential: FetchResult<"vaults.credentials.retrieve">): boolean =>
+	credential.custody !== "storing"
+
 export const newIdempotencyKey = (): string => crypto.randomUUID()
 
 const newestFirst = (page: string | undefined) => ({
@@ -120,6 +122,73 @@ const retrieveSession = (session_id: string, signal?: AbortSignal): Promise<Json
 		...(signal === undefined ? {} : { signal }),
 	})
 const withSignal = (signal: AbortSignal | undefined) => (signal === undefined ? {} : { signal })
+
+type BodyOf<Op extends JsonOperationId> =
+	FetchInput<Op> extends { readonly body: infer Body } ? Body : never
+
+const retrieveVault = (vault_id: string, signal?: AbortSignal) =>
+	request("vaults.retrieve", { path: { vault_id }, ...withSignal(signal) })
+const retrieveCredential = (vault_id: string, credential_id: string, signal?: AbortSignal) =>
+	request("vaults.credentials.retrieve", {
+		path: { vault_id, credential_id },
+		...withSignal(signal),
+	})
+const credentialOf = (vault_id: string) => (credential_id: string) =>
+	retrieveCredential(vault_id, credential_id)
+
+const vaults = {
+	list: (token?: string, signal?: AbortSignal, includeArchived = false) =>
+		request("vaults.list", {
+			query: { ...newestFirst(token), ...(includeArchived ? { include_archived: true } : {}) },
+			...withSignal(signal),
+		}),
+	retrieve: retrieveVault,
+	create: async (body: BodyOf<"vaults.create">, idempotencyKey: string) =>
+		settled(retrieveVault, await request("vaults.create", { body, idempotencyKey })),
+	archive: async (vault_id: string) =>
+		settled(retrieveVault, await request("vaults.archive", { path: { vault_id } }), isArchived),
+	delete: (vault_id: string) => request("vaults.delete", { path: { vault_id } }),
+	credentials: {
+		list: (vault_id: string, includeArchived: boolean, token?: string, signal?: AbortSignal) =>
+			request("vaults.credentials.list", {
+				path: { vault_id },
+				query: { ...newestFirst(token), ...(includeArchived ? { include_archived: true } : {}) },
+				...withSignal(signal),
+			}),
+		retrieve: retrieveCredential,
+		create: async (
+			vault_id: string,
+			body: BodyOf<"vaults.credentials.create">,
+			idempotencyKey: string,
+		) =>
+			settled(
+				credentialOf(vault_id),
+				await request("vaults.credentials.create", { path: { vault_id }, body, idempotencyKey }),
+				isStored,
+			),
+		update: async (
+			vault_id: string,
+			credential_id: string,
+			body: BodyOf<"vaults.credentials.update">,
+			since: { readonly updated_at: string },
+		) =>
+			settled(
+				credentialOf(vault_id),
+				await request("vaults.credentials.update", { path: { vault_id, credential_id }, body }),
+				(credential) =>
+					Date.parse(credential.updated_at) > Date.parse(since.updated_at) &&
+					!(typeof body === "object" && body !== null && "auth" in body && !isStored(credential)),
+			),
+		archive: async (vault_id: string, credential_id: string) =>
+			settled(
+				credentialOf(vault_id),
+				await request("vaults.credentials.archive", { path: { vault_id, credential_id } }),
+				isArchived,
+			),
+		delete: (vault_id: string, credential_id: string) =>
+			request("vaults.credentials.delete", { path: { vault_id, credential_id } }),
+	},
+}
 
 export const checkfu = {
 	agents: {
@@ -198,11 +267,12 @@ export const checkfu = {
 				...withSignal(signal),
 			}),
 	},
+	vaults,
 	sessions: {
 		list: (page?: string, signal?: AbortSignal) =>
 			request("sessions.list", { query: newestFirst(page), ...withSignal(signal) }),
 		retrieve: retrieveSession,
-		create: async (body: CreateSessionBody, idempotencyKey: string) =>
+		create: async (body: BodyOf<"sessions.create">, idempotencyKey: string) =>
 			settled(retrieveSession, await request("sessions.create", { body, idempotencyKey })),
 		archive: async (session_id: string) =>
 			settled(
