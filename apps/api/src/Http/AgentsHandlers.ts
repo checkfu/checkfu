@@ -388,7 +388,7 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						if (head.status !== "active") {
 							return yield* new AgentArchivedError({ agent_id: id })
 						}
-						if (head.version !== version) {
+						if (version !== undefined && head.version !== version) {
 							return yield* new AgentVersionConflict({
 								agent_id: id,
 								expected_version: version,
@@ -409,10 +409,11 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 						...(declared === undefined ? {} : { mcp_servers: declared.text }),
 						...(tools === undefined ? {} : { tools: tools.text }),
 					}
+					const expectedVersion = version ?? head?.version
 					const receipt = yield* updateAgent.send(
 						new UpdateAgent({
 							agent_id: id,
-							...(version === undefined ? {} : { expected_version: version }),
+							...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
 							next_version_id: AgentVersionId.make(yield* randomId(random, "aver")),
 							changes: model === undefined ? fields : { ...fields, model },
 						}),
