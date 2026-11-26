@@ -265,6 +265,59 @@ describe("vault pages", () => {
 		page.unmount()
 	})
 
+	it("keeps an unsure create for one URL from explaining another URL's conflict", async () => {
+		let attempts = 0
+		const taken = "The vault already holds an active credential for this MCP server URL."
+		stubApi((request) => {
+			if (request.method !== "POST") {
+				return { body: pageOf([credential]) }
+			}
+			attempts += 1
+			return attempts === 1
+				? { status: 503, body: { error: { type: "service_unavailable", message: "unavailable" } } }
+				: { status: 409, body: { error: { type: "invalid_request_error", message: taken } } }
+		})
+		const page = await mount(<VaultView vault={vault} />, withCredentials([credential]))
+		const form = [...page.container.querySelectorAll("form")].find((candidate) =>
+			candidate.textContent?.includes("Add a credential"),
+		)
+		const url = form?.querySelector<HTMLInputElement>('input[type="url"]') ?? null
+		await type(url, "https://mcp.linear.app/mcp")
+		await type(form?.querySelector<HTMLInputElement>('input[type="password"]') ?? null, TOKEN)
+		await submit(form)
+		await type(url, "https://mcp.example.com/mcp")
+		await submit(form)
+		expect(attempts).toBe(2)
+		expect(page.container.textContent).toContain(taken)
+		expect(page.container.textContent).not.toContain("may already have created this credential")
+		page.unmount()
+	})
+
+	it("freezes the replacement token while it is being saved", async () => {
+		let release = (): void => undefined
+		const json = (body: unknown) =>
+			new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
+		vi.stubGlobal("fetch", async (_path: string, init: RequestInit = {}) => {
+			if ((init.method ?? "GET") !== "POST") {
+				return json(pageOf([credential]))
+			}
+			await new Promise<void>((resolve) => {
+				release = resolve
+			})
+			return json(credential)
+		})
+		const page = await mount(<VaultView vault={vault} />, withCredentials([credential]))
+		await click(button(page.container, "Replace token"))
+		const field = page.container.querySelector<HTMLInputElement>('td input[type="password"]')
+		await type(field, TOKEN)
+		await submit(field?.closest("form"))
+		expect(field?.closest("fieldset")?.disabled).toBe(true)
+		release()
+		await settle()
+		expect(page.container.querySelector('td input[type="password"]')).toBeNull()
+		page.unmount()
+	})
+
 	it("closes a token being replaced once its credential is archived", async () => {
 		stubApi(() => ({ body: pageOf([credential]) }))
 		const queryClient = withCredentials([credential])

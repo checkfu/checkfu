@@ -10,6 +10,7 @@ import {
 	SessionBindings,
 	SessionCredentialFields,
 } from "../src/pages/session-bindings.tsx"
+import type { VaultList } from "../src/pages/session-bindings.tsx"
 import { credentialsQuery } from "../src/queries.ts"
 import { reconcile } from "../src/selection.ts"
 import { newQueryClient } from "./dom.tsx"
@@ -72,11 +73,21 @@ const AMBIGUOUS =
 const NETWORK =
 	'MCP server "linear" (mcp.linear.app) is not allowed by the environment\'s network rules.'
 
-const render = (message: string | undefined) => {
+const render = (
+	message: string | undefined,
+	list: Partial<VaultList> = {},
+	held: {
+		readonly a: ReadonlyArray<JsonVaultCredential>
+		readonly b: ReadonlyArray<JsonVaultCredential>
+	} = {
+		a: [work, linear],
+		b: [personal],
+	},
+) => {
 	const queryClient = newQueryClient()
 	const page = { has_more: false, next_cursor: null }
-	queryClient.setQueryData(credentialsQuery("vlt_a").queryKey, { ...page, data: [work, linear] })
-	queryClient.setQueryData(credentialsQuery("vlt_b").queryKey, { ...page, data: [personal] })
+	queryClient.setQueryData(credentialsQuery("vlt_a").queryKey, { ...page, data: held.a })
+	queryClient.setQueryData(credentialsQuery("vlt_b").queryKey, { ...page, data: held.b })
 	return renderToStaticMarkup(
 		<QueryClientProvider client={queryClient}>
 			<SessionCredentialFields
@@ -86,7 +97,9 @@ const render = (message: string | undefined) => {
 					more: null,
 					loading: false,
 					error: undefined,
+					moreError: undefined,
 					retry: () => undefined,
+					...list,
 				}}
 				vaultIds={["vlt_a", "vlt_b"]}
 				onVaults={() => undefined}
@@ -150,6 +163,36 @@ describe("session credential bindings", () => {
 		expect(github).toContain("Credential vcrd_work")
 		expect(github).toContain("Credential vcrd_personal")
 		expect(github).not.toContain("Credential vcrd_linear")
+	})
+
+	it("names each credential's vault and id, so two with the same name can be told apart", () => {
+		const html = render(
+			undefined,
+			{},
+			{
+				a: [{ ...work, display_name: "Work" }, linear],
+				b: [{ ...personal, display_name: "Work" }],
+			},
+		)
+		const github = html.slice(
+			html.indexOf("Credential for github"),
+			html.indexOf("Credential for linear"),
+		)
+		expect(github).toContain("Work · Vault vlt_a · ")
+		expect(github).toContain("Work · Vault vlt_b · ")
+		const labels = [...github.matchAll(/<option value="vcrd_[a-z]+">([^<]+)<\/option>/gu)].map(
+			(match) => match[1],
+		)
+		expect(new Set(labels).size).toBe(labels.length)
+	})
+
+	it("keeps the loaded vaults and offers Retry when the next page fails", () => {
+		const html = render(undefined, { more: () => undefined, moreError: "Service unavailable" })
+		expect(html).toContain("Vault vlt_a")
+		expect(html).toContain("More vaults could not be loaded: Service unavailable")
+		expect(html).not.toContain("Load more vaults")
+		expect(html).toContain("Retry")
+		expect(render(undefined, { more: () => undefined })).toContain("Load more vaults")
 	})
 
 	it("puts the ambiguity refusal next to the server it names", () => {

@@ -122,6 +122,9 @@ export function SessionsPage(): React.JSX.Element {
 	)
 }
 
+const NO_VAULTS: ReadonlyArray<string> = []
+const NO_CREDENTIALS: ExplicitCredentials = {}
+
 export function NewSessionPage(): React.JSX.Element {
 	const navigate = useNavigate()
 	const agentOptions = choicesOf(useSuspenseInfiniteQuery(agentChoices))
@@ -140,18 +143,25 @@ export function NewSessionPage(): React.JSX.Element {
 	const [explicit, setExplicit] = useState<ExplicitCredentials>({})
 	const shown = agents.find((option) => option.id === agentId)
 	const servers = shown?.mcp_servers ?? []
-	const vaultQuery = useInfiniteQuery({ ...vaultChoices, enabled: servers.length > 0 })
+	const usesVaults = servers.length > 0
+	const vaultQuery = useInfiniteQuery({ ...vaultChoices, enabled: usesVaults })
 	const vaultList = {
-		items: vaultQuery.data?.pages.flatMap((page) => page.data) ?? [],
-		more: vaultQuery.hasNextPage ? () => void vaultQuery.fetchNextPage() : null,
-		loading: servers.length > 0 && vaultQuery.isPending,
+		items: usesVaults ? (vaultQuery.data?.pages.flatMap((page) => page.data) ?? []) : [],
+		more: usesVaults && vaultQuery.hasNextPage ? () => void vaultQuery.fetchNextPage() : null,
+		loading: usesVaults && vaultQuery.isPending,
 		error:
-			vaultQuery.error === null || vaultQuery.data !== undefined
+			!usesVaults || vaultQuery.error === null || vaultQuery.data !== undefined
 				? undefined
 				: errorMessage(vaultQuery.error),
+		moreError:
+			usesVaults && vaultQuery.isFetchNextPageError && vaultQuery.error !== null
+				? errorMessage(vaultQuery.error)
+				: undefined,
 		retry: () => void vaultQuery.refetch(),
 	}
-	const choices = useSessionChoices(servers, vaultList.items, vaultIds, explicit)
+	const chosenVaults = usesVaults ? vaultIds : NO_VAULTS
+	const chosenCredentials = usesVaults ? explicit : NO_CREDENTIALS
+	const choices = useSessionChoices(servers, vaultList.items, chosenVaults, chosenCredentials)
 	const blocked = hasGoneSelection(choices.gone)
 	const unchecked = hasFailedLookup(choices.failed)
 	const canStart = ready && !blocked && !unchecked && !choices.checking
@@ -165,7 +175,7 @@ export function NewSessionPage(): React.JSX.Element {
 				agent: shown === undefined ? agentId : { id: shown.id, version: shown.version },
 				environment_id: environmentId,
 				title: title.trim() === "" ? null : title.trim(),
-				...bindingsOf(servers, vaultIds, explicit, choices.credentials),
+				...bindingsOf(servers, chosenVaults, chosenCredentials, choices.credentials),
 			}
 			const session = await checkfu.sessions.create(body, startKey.keyFor(body))
 			startKey.settle()
@@ -230,9 +240,9 @@ export function NewSessionPage(): React.JSX.Element {
 						<SessionCredentialFields
 							agent={agents.find((option) => option.id === agentId)}
 							vaultList={vaultList}
-							vaultIds={vaultIds}
+							vaultIds={chosenVaults}
 							onVaults={setVaultIds}
-							explicit={explicit}
+							explicit={chosenCredentials}
 							onExplicit={setExplicit}
 							error={startError}
 						/>

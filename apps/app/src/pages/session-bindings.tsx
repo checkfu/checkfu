@@ -212,11 +212,27 @@ function ServerError({ message }: { readonly message: string }): React.JSX.Eleme
 	)
 }
 
+const credentialLabel = (
+	credential: {
+		readonly id: string
+		readonly vault_id: string
+		readonly display_name: string | null
+	},
+	vaults: ReadonlyArray<JsonVault>,
+): string =>
+	[
+		credential.display_name ?? "Credential",
+		vaults.find((vault) => vault.id === credential.vault_id)?.display_name ??
+			shortId(credential.vault_id),
+		shortId(credential.id),
+	].join(" · ")
+
 export interface VaultList {
 	readonly items: ReadonlyArray<JsonVault>
 	readonly more: (() => void) | null
 	readonly loading: boolean
 	readonly error: string | undefined
+	readonly moreError: string | undefined
 	readonly retry: () => void
 }
 
@@ -330,10 +346,19 @@ export function SessionCredentialFields({
 						</label>
 					))
 				)}
-				{moreVaults === null ? null : (
+				{moreVaults === null ? null : vaultList.moreError === undefined ? (
 					<Button variant="ghost" size="sm" onClick={moreVaults}>
 						Load more vaults
 					</Button>
+				) : (
+					<div className="flex items-center gap-2 text-control">
+						<span className="text-destructive">
+							More vaults could not be loaded: {vaultList.moreError}
+						</span>
+						<Button variant="ghost" size="sm" onClick={moreVaults}>
+							Retry
+						</Button>
+					</div>
 				)}
 			</fieldset>
 			{servers.map((server) => {
@@ -370,7 +395,7 @@ export function SessionCredentialFields({
 								) : null}
 								{choices.map((credential) => (
 									<option key={credential.id} value={credential.id}>
-										{credential.display_name ?? shortId(credential.id)}
+										{credentialLabel(credential, vaultList.items)}
 									</option>
 								))}
 							</Select>

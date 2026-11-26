@@ -54,6 +54,7 @@ const server = () => {
 			["vlt_personal", [credential("vcrd_personal", "vlt_personal")]],
 		]),
 		agent,
+		others: [] as ReadonlyArray<JsonAgent>,
 		failing: new Set<string>(),
 		failingLists: new Set<string>(),
 		vaultsDown: false,
@@ -104,7 +105,7 @@ const server = () => {
 		if (path.startsWith("/v1/environments")) {
 			return { body: page([{ id: "env_1", type: "environment", name: "Default" }]) }
 		}
-		return { body: page([state.agent]) }
+		return { body: page([state.agent, ...state.others]) }
 	})
 	return { state, started: () => sent.filter((request) => request.method === "POST") }
 }
@@ -177,6 +178,34 @@ describe("starting a session", () => {
 				title: null,
 				vault_ids: ["vlt_work"],
 			},
+		])
+		mounted.unmount()
+	})
+})
+
+describe("switching to an agent with no MCP servers", () => {
+	it("drops the vaults chosen for the earlier agent, and a failed lookup no longer blocks it", async () => {
+		const api = server()
+		api.state.others = [{ ...agent, id: "agent_plain", name: "Plain", mcp_servers: [] }]
+		api.state.failingLists.add("vlt_work")
+		const mounted = await open()
+		await check(mounted.container, "Vault vlt_work")
+		await settle()
+		expect(button(mounted.container, START).disabled).toBe(true)
+
+		const agentSelect = [...mounted.container.querySelectorAll("select")].find((select) =>
+			[...select.options].some((option) => option.textContent?.includes("Plain") === true),
+		)
+		if (agentSelect === undefined) {
+			throw new Error("No agent field.")
+		}
+		await choose(agentSelect, "agent_plain")
+		expect(mounted.container.textContent).not.toContain("Vaults")
+		expect(mounted.container.textContent).not.toContain("could not be loaded")
+		expect(button(mounted.container, START).disabled).toBe(false)
+		await submit(mounted.container.querySelector("form"))
+		expect(api.started().map((request) => request.body)).toEqual([
+			{ agent: { id: "agent_plain", version: 1 }, environment_id: "env_1", title: null },
 		])
 		mounted.unmount()
 	})

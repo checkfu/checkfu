@@ -280,6 +280,14 @@ const isUrlTaken = (error: unknown): error is ApiError =>
 
 const isAmbiguous = (error: unknown): boolean => !(error instanceof ApiError) || error.status >= 500
 
+const canonicalUrl = (url: string): string => {
+	try {
+		return new URL(url).href
+	} catch {
+		return url
+	}
+}
+
 function SecretInput({
 	ref,
 	onInput,
@@ -309,7 +317,7 @@ function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX
 	const [url, setUrl] = useState("")
 	const { ref: tokenRef, ...secret } = useSecretField()
 	const createKey = useSubmissionKey()
-	const unsure = useRef(false)
+	const unsure = useRef(new Set<string>())
 	const create = useAction(
 		async () => {
 			const token = secret.read()
@@ -317,6 +325,7 @@ function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX
 				mcp_server_url: url.trim(),
 				display_name: name.trim() === "" ? null : name.trim(),
 			}
+			const pair = `${vaultId} ${canonicalUrl(described.mcp_server_url)}`
 			const credential = await checkfu.vaults.credentials
 				.create(
 					vaultId,
@@ -327,14 +336,16 @@ function NewCredentialForm({ vaultId }: { readonly vaultId: string }): React.JSX
 					createKey.keyFor({ vaultId, ...described, token: secret.edits }),
 				)
 				.catch((error: unknown) => {
-					const earlierUnsure = unsure.current
-					unsure.current = earlierUnsure || isAmbiguous(error)
+					const earlierUnsure = unsure.current.has(pair)
+					if (isAmbiguous(error)) {
+						unsure.current.add(pair)
+					}
 					throw isUrlTaken(error) && earlierUnsure
 						? new Error(`${error.message} ${MAYBE_CREATED}`)
 						: error
 				})
 			createKey.settle()
-			unsure.current = false
+			unsure.current.delete(pair)
 			return credential
 		},
 		{
@@ -449,10 +460,12 @@ function CredentialActions({
 						rotate.run()
 					}}
 				>
-					<SecretInput label="New token" ref={tokenRef} onInput={secret.onInput} />
-					<Button type="submit" size="sm" disabled={busy || !secret.filled}>
-						Save new token
-					</Button>
+					<fieldset disabled={rotate.pending} className="min-w-0 space-y-2">
+						<SecretInput label="New token" ref={tokenRef} onInput={secret.onInput} />
+						<Button type="submit" size="sm" disabled={busy || !secret.filled}>
+							Save new token
+						</Button>
+					</fieldset>
 				</form>
 			) : null}
 			{error === undefined ? null : <Callout tone="error">{error}</Callout>}
