@@ -18,13 +18,11 @@ import {
 	DEFAULT_ENVIRONMENT_CONFIG,
 	IDEMPOTENCY_KEY_REUSED,
 	bestEffortAfterCommit,
-	createCommandId,
+	createIdentity,
 	handled,
-	idempotentId,
 	isPending,
 	orPending,
 	present,
-	randomId,
 	reject,
 } from "./HttpHelpers.ts"
 
@@ -71,22 +69,14 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					const idempotencyKey = headers["idempotency-key"]
 					const description = payload.description ?? null
 					const config = payload.config ?? DEFAULT_ENVIRONMENT_CONFIG
-					let id: EnvironmentId
-					let sendOptions: { readonly commandId: string } | undefined
-					if (idempotencyKey !== undefined) {
-						id = EnvironmentId.make(
-							yield* idempotentId(digest, "env", ["create", "environment", "id", idempotencyKey]),
-						)
-						sendOptions = {
-							commandId: yield* createCommandId(digest, "environment", idempotencyKey, {
-								name: payload.name,
-								description,
-								config,
-							}),
-						}
-					} else {
-						id = EnvironmentId.make(yield* randomId(random, "env"))
-					}
+					const identity = yield* createIdentity(digest, random, {
+						resource: "environment",
+						prefix: "env",
+						key: idempotencyKey,
+						body: { name: payload.name, description, config },
+					})
+					const id = EnvironmentId.make(identity.id)
+					const sendOptions = identity.options
 					const receipt = yield* environments
 						.send(
 							new CreateEnvironment({

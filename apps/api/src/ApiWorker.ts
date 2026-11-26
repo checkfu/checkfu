@@ -1,6 +1,9 @@
 import { fileURLToPath } from "node:url"
 import * as Cloudflare from "@alchemy.run/cloudflare"
+import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Alchemy from "alchemy"
+import { RuntimeContext } from "alchemy/RuntimeContext"
+import * as Cause from "effect/Cause"
 import * as Digest from "effect/crypto/Digest"
 import * as Mac from "effect/crypto/Mac"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -10,6 +13,11 @@ import * as Option from "effect/Option"
 import * as Scope from "effect/Scope"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { COMPATIBILITY_DATE, TRACE_SAMPLING_RATE } from "./Compatibility.ts"
+import {
+	ConnectionCallFailed,
+	ConnectionExecutor,
+	CredentialSecretsLive,
+} from "./Connection/CredentialCustody.ts"
 import { customDomains } from "./CustomDomain.ts"
 import { SessionOutputsLive } from "./Artifacts/SessionOutputsLive.ts"
 import { ArtifactBytesLive } from "./Artifacts/ArtifactBytesLive.ts"
@@ -20,6 +28,7 @@ import { ArtifactLinksLive } from "./Content/ArtifactLinks.ts"
 import { ApiWorker } from "./Api.ts"
 import { D1ListingStore } from "./D1ListingStore.ts"
 import { ViewEventsOverObjectSockets } from "./Http/ObjectSocketEvents.ts"
+import { vaultListingQueriesFrom } from "./Http/Listing.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "./Http/Router.ts"
 import { apiWorkerCustomProvidersProps } from "./Pi/PiCatalog.ts"
 import { PiDurableHarnessLive, PiTurnExecutor, harnessCall } from "./Pi/PiDurableHarness.ts"
@@ -65,13 +74,48 @@ const ArtifactStoreLive = ArtifactStoreR2.pipe(
 	Layer.provide([Cloudflare.R2.ReadBucketBinding, Cloudflare.R2.ReadWriteBucketBinding]),
 )
 
+const connectionCall = <A, E, R>(
+	call: Effect.Effect<A, E, R>,
+): Effect.Effect<A, ConnectionCallFailed, R> =>
+	Effect.catchCause(call, (cause): Effect.Effect<never, ConnectionCallFailed> =>
+		Cause.hasInterruptsOnly(cause)
+			? Effect.interrupt
+			: Effect.fail(new ConnectionCallFailed({ cause })),
+	)
+
+const ConnectionExecutorLive = Layer.effect(
+	ConnectionExecutor,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			put: (vaultId, credentialId, secret, target, mode) =>
+				connectionCall(
+					Effect.suspend(() => harness.putSecret(vaultId, credentialId, secret, target, mode)),
+				).pipe(Effect.withSpan("Connection.put")),
+			erase: (vaultId, credentialId) =>
+				connectionCall(Effect.suspend(() => harness.eraseSecret(vaultId, credentialId))).pipe(
+					Effect.withSpan("Connection.erase"),
+				),
+			seal: (vaultId) =>
+				connectionCall(Effect.suspend(() => harness.sealVault(vaultId))).pipe(
+					Effect.withSpan("Connection.seal"),
+				),
+			usable: (vaultId, credentialId) =>
+				connectionCall(Effect.suspend(() => harness.secretUsable(vaultId, credentialId))).pipe(
+					Effect.withSpan("Connection.usable"),
+				),
+		}
+	}),
+)
+
+const ListingLive = D1ListingStore.pipe(Layer.provide(Cloudflare.D1.QueryDatabaseBinding))
+
 const CheckfuLive = Checkfu.layer(
 	CheckfuHandlersLive.pipe(
 		Layer.provide(PiDurableHarnessLive),
 		Layer.provide(SessionOutputsLive),
 		Layer.provide(ArtifactBytesLive),
-		Layer.provide(D1ListingStore),
-		Layer.provide(Cloudflare.D1.QueryDatabaseBinding),
+		Layer.provide(ListingLive),
 	),
 ).pipe(
 	Layer.provide(PiHarnessExecutorLive),
@@ -79,7 +123,17 @@ const CheckfuLive = Checkfu.layer(
 	Layer.provide(ArtifactStoreLive),
 )
 
+const VaultsLive = Vaults.layer(VaultsHandlersLive.pipe(Layer.provide(ListingLive)), {
+	legacyData: false,
+}).pipe(
+	Layer.provideMerge(CredentialSecretsLive),
+	Layer.provide(ConnectionExecutorLive),
+	Layer.provide(PlacedDurableObjects),
+)
+
 const ApiWorkerLive = Layer.mergeAll(
+	VaultsLive,
+	vaultListingQueriesFrom(VaultsLive),
 	CheckfuLive,
 	ArtifactStoreLive,
 	Layer.succeed(ViewEventsOverObjectSockets, true),
@@ -111,7 +165,11 @@ export default ApiWorker.make(
 			return yield* Effect.die(new Error("ApiWorker requires an owning instance Scope."))
 		}
 		const services = yield* Layer.buildWithScope(ApiWorkerLive, scope)
-		const handler = yield* makeApiHandler.pipe(Scope.provide(scope), Effect.provide(services))
+		const handler = yield* makeApiHandler.pipe(
+			Scope.provide(scope),
+			Effect.provide(services),
+			Effect.provideService(RuntimeContext, yield* Cloudflare.Worker),
+		)
 		return ApiWorker.of({
 			...handler,
 			resolveArtifactVersion: yield* ArtifactVersionResolver.pipe(Effect.provide(services)),

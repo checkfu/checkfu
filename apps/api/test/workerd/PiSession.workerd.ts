@@ -1357,6 +1357,113 @@ describe("PiSession real Durable Object under workerd", () => {
 			[{ type: "text", text: "Still here." }],
 		])
 	}, 90_000)
+	it("keeps a credential's secret in its vault's connection object until the credential ends", async () => {
+		const token = "tok_workerd_SECRET_do_not_leak"
+		const replacement = "tok_workerd_ROTATED_do_not_leak"
+		const vault = await createResource<{ readonly id: string }>("/v1/vaults", {
+			display_name: "workerd",
+		})
+		const credential = await createResource<{ readonly id: string }>(
+			`/v1/vaults/${vault.id}/credentials`,
+			{
+				auth: {
+					type: "static_bearer",
+					token,
+					mcp_server_url: "https://mcp.example.com/mcp",
+				},
+			},
+		)
+		const path = `/v1/vaults/${vault.id}/credentials/${credential.id}`
+		const rotate = () =>
+			apiJson<{ readonly error?: { readonly message: string } }>(path, {
+				method: "POST",
+				body: { auth: { type: "static_bearer", token: replacement } },
+			})
+
+		expect((await rotate()).status).toBe(200)
+
+		const prefix = "https://mcp.example.com/"
+		const longest = `${prefix}${"a".repeat(2048 - prefix.length)}`
+		const long = await apiJson<{ readonly id: string }>(`/v1/vaults/${vault.id}/credentials`, {
+			method: "POST",
+			body: { auth: { type: "static_bearer", token, mcp_server_url: longest } },
+		})
+		expect(long.status).toBe(201)
+		const repeated = await apiJson(`/v1/vaults/${vault.id}/credentials`, {
+			method: "POST",
+			body: { auth: { type: "static_bearer", token, mcp_server_url: longest } },
+		})
+		expect(repeated.status).toBe(409)
+
+		const listed = async () =>
+			(
+				await apiJson<{ readonly data: ReadonlyArray<{ readonly id: string }> }>(
+					`/v1/vaults/${vault.id}/credentials?order=desc`,
+					{ method: "GET" },
+				)
+			).body.data.map(({ id }) => id)
+		const listDeadline = Date.now() + 10_000
+		while ((await listed()).length < 2 && Date.now() < listDeadline) {
+			await sleep(100)
+		}
+		expect(await listed()).toEqual([long.body.id, credential.id])
+
+		const archived = await apiJson<{
+			readonly archived_at: string | null
+			readonly custody: string
+		}>(`${path}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+		expect(archived.body.archived_at).not.toBeNull()
+		expect(archived.body.custody).toBe("erased")
+		const afterArchive = await rotate()
+		expect(afterArchive.status).toBe(409)
+		expect(afterArchive.body.error?.message).toContain("is archived")
+
+		const deleted = await apiJson<{ readonly type: string }>(path, { method: "DELETE" })
+		expect(deleted).toEqual({
+			status: 200,
+			body: { id: credential.id, type: "vault_credential_deleted", custody: "erased" },
+		})
+
+		const ended = await apiJson<{
+			readonly custody: { readonly held: number; readonly erasing: number }
+		}>(`/v1/vaults/${vault.id}/archive`, { method: "POST" })
+		expect(ended.status).toBe(200)
+		expect(ended.body.custody.held).toBe(0)
+		const owed = async () =>
+			(
+				await apiJson<{ readonly custody: { readonly erasing: number } }>(
+					`/v1/vaults/${vault.id}`,
+					{ method: "GET" },
+				)
+			).body.custody.erasing
+		const vaultDeadline = Date.now() + 10_000
+		while ((await owed()) !== 0 && Date.now() < vaultDeadline) {
+			await sleep(100)
+		}
+		expect(await owed()).toBe(0)
+		const longAfter = await apiJson<{ readonly custody: string }>(
+			`/v1/vaults/${vault.id}/credentials/${long.body.id}`,
+			{ method: "GET" },
+		)
+		expect(longAfter.body.custody).toBe("erased")
+		expect((await apiFetch(path)).status).toBe(404)
+		expect((await rotate()).status).toBe(404)
+
+		const logDeadline = Date.now() + 10_000
+		while (
+			!stripAnsi(workerLogs.join("")).includes("Vault secrets erased") &&
+			Date.now() < logDeadline
+		) {
+			await sleep(100)
+		}
+		const logged = stripAnsi(workerLogs.join(""))
+		expect(logged).toContain("Credential secret erased")
+		expect(logged).toContain("Vault secrets erased")
+		expect(logged).toContain(credential.id)
+		expect(logged).not.toContain(token)
+		expect(logged).not.toContain(replacement)
+	}, 30_000)
 
 	it("interrupts a running turn and answers the message queued behind it", async () => {
 		const holdPrompt = "hold-for-interrupt"
