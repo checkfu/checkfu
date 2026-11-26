@@ -5,6 +5,7 @@ import {
 } from "@checkfu/domain/Agent/AgentTypes"
 import type { AgentModel } from "@checkfu/domain/Agent/AgentTypes"
 import type { EnvironmentConfig } from "@checkfu/domain/Environment/EnvironmentTypes"
+import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
@@ -37,6 +38,7 @@ import {
 	Authentication,
 	ERROR_CODES,
 	EventBatchBodyLimit,
+	MemoryBodyLimit,
 	RequestId,
 	RequestValidation,
 	apiError,
@@ -62,6 +64,7 @@ export const MAX_AGENT_BODY_BYTES =
 	(MAX_MCP_SERVERS_TEXT_LENGTH + MAX_AGENT_TOOLS_TEXT_LENGTH) * ESCAPED_UNIT_BYTES +
 	16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
+export const MAX_MEMORY_BODY_BYTES = MAX_MEMORY_CONTENT_BYTES * 6 + 16 * 1024
 
 export const DEFAULT_ENVIRONMENT_CONFIG: EnvironmentConfig = {
 	type: "cloud",
@@ -189,6 +192,18 @@ export const orPending =
 			),
 		)
 
+export const orPendingWithin =
+	<const T extends PendingResourceType, const P extends Readonly<Record<string, string>>>(
+		id: string,
+		type: T,
+		parent: P,
+	) =>
+	<A, E, R>(read: Effect.Effect<A, E, R>) =>
+		read.pipe(
+			orPending(id, type),
+			Effect.map((result) => (isPending(result) ? { ...result, ...parent } : result)),
+		)
+
 export const bestEffortAfterCommit = <A, E, R>(
 	read: Effect.Effect<A, E, R>,
 ): Effect.Effect<void, E, R> =>
@@ -265,6 +280,21 @@ export const idempotentCommandId = (
 ): Effect.Effect<string> => Effect.map(sha256Json(digest, scope), (hash) => `${prefix}:${hash}`)
 
 export const IDEMPOTENCY_KEY_REUSED = "Idempotency-Key was already used for a different request."
+
+export const measureContent = (digest: Digest.Digest["Service"], content: string) => {
+	const bytes = utf8Encoder.encode(content)
+	return Effect.map(digest.digestHex(Digest.sha256, bytes), (content_sha256) => ({
+		content_sha256,
+		content_size_bytes: bytes.length,
+	}))
+}
+
+export const memoryIdOf = (
+	digest: Digest.Digest["Service"],
+	memoryStoreId: string,
+	path: string,
+): Effect.Effect<string> =>
+	Effect.map(sha256Json(digest, [memoryStoreId, path]), (hash) => `mem_${hash.slice(0, 32)}`)
 
 export const createCommandId = (
 	digest: Digest.Digest["Service"],
@@ -395,6 +425,14 @@ export const AgentBodyLimitLive = Layer.succeed(AgentBodyLimit, (httpEffect) =>
 		httpEffect,
 		HttpIncomingMessage.MaxBodySize,
 		ByteSize.bytes(MAX_AGENT_BODY_BYTES),
+	),
+)
+
+export const MemoryBodyLimitLive = Layer.succeed(MemoryBodyLimit, (httpEffect) =>
+	Effect.provideService(
+		httpEffect,
+		HttpIncomingMessage.MaxBodySize,
+		ByteSize.bytes(MAX_MEMORY_BODY_BYTES),
 	),
 )
 

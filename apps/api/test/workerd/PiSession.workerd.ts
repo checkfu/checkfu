@@ -706,6 +706,36 @@ describe("PiSession real Durable Object under workerd", () => {
 		return res.body.data.map((agent) => agent.id)
 	}
 
+	it("lists a memory with the hash of the update just acknowledged, and reads it back at once", async () => {
+		const store = await createResource<{ id: string }>("/v1/memory_stores", { name: "Notes" })
+		const memories = `/v1/memory_stores/${store.id}/memories`
+		const created = await createResource<{ id: string }>(memories, {
+			path: "/a.md",
+			content: "0",
+		})
+		for (let round = 1; round <= 12; round += 1) {
+			const res = await apiFetch(`${memories}/${created.id}`, {
+				method: "POST",
+				body: { content: `Round ${round}.` },
+			})
+			expect(res.status).toBe(200)
+			const updated = (await res.json()) as { content_sha256: string; version: number }
+			const [listed, read] = await Promise.all([
+				apiFetch(memories).then(
+					(list) => list.json() as Promise<{ data: ReadonlyArray<{ content_sha256: string }> }>,
+				),
+				apiFetch(`${memories}/${created.id}`).then(
+					(one) => one.json() as Promise<{ version: number }>,
+				),
+			])
+			expect([round, listed.data.map((entry) => entry.content_sha256)]).toEqual([
+				round,
+				[updated.content_sha256],
+			])
+			expect(read.version).toBeGreaterThanOrEqual(updated.version)
+		}
+	}, 60_000)
+
 	it("answers successive list requests in one isolate", async () => {
 		const deadline = Date.now() + 20_000
 		while (!(await listedAgentIds()).includes(agentId) && Date.now() < deadline) {

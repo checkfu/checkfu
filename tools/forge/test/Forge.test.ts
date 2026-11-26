@@ -174,6 +174,72 @@ describe("Cloudflare Forge pipeline", () => {
 				path: "/v1/environments/{environment_id}",
 			},
 			{
+				group: "memory-stores",
+				name: "archive",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}/archive",
+			},
+			{
+				group: "memory-stores",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/memory_stores",
+			},
+			{
+				group: "memory-stores",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/memory_stores/{memory_store_id}",
+			},
+			{
+				group: "memory-stores",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/memory_stores",
+			},
+			{
+				group: "memory-stores",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/memory_stores/{memory_store_id}",
+			},
+			{
+				group: "memory-stores",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "create",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}/memories",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "delete",
+				httpMethod: "DELETE",
+				path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/memory_stores/{memory_store_id}/memories",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "retrieve",
+				httpMethod: "GET",
+				path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+			},
+			{
+				group: "memory-stores:memories",
+				name: "update",
+				httpMethod: "POST",
+				path: "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+			},
+			{
 				group: "sessions",
 				name: "archive",
 				httpMethod: "POST",
@@ -542,6 +608,12 @@ describe("Cloudflare Forge pipeline", () => {
 		const sdkResources = sdkFiles.find((f) => f.path === "Resources.ts")?.content ?? ""
 		const sdkBindings = sdkFiles.find((f) => f.path === "OperationBindings.ts")?.content ?? ""
 
+		const safety = (group: string, endpoint: string) =>
+			catalog.operations.find((op) => op.apiGroup === group && op.apiEndpoint === endpoint)
+				?.retrySafety
+		expect(safety("memory_stores", "deleteMemory")).toBe("pre-commit-only")
+		expect(safety("memory_stores", "delete")).toBe("idempotent")
+
 		expect(sortUnique(catalog.operations.map((op) => `${op.apiGroup}.${op.apiEndpoint}`))).toEqual(
 			expectedEndpoints,
 		)
@@ -639,7 +711,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(55)
+		expect(inspectedMethods.length).toBe(66)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {

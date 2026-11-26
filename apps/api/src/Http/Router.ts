@@ -30,12 +30,14 @@ import {
 	ArtifactBodyLimitLive,
 	AuthenticationLive,
 	EventBatchBodyLimitLive,
+	MemoryBodyLimitLive,
 	MAX_REQUEST_BODY_BYTES,
 	RequestValidationLive,
 	errorResponse,
 	randomId,
 	requestPath,
 } from "./HttpHelpers.ts"
+import { MemoryStoresLive } from "./MemoryStoresHandlers.ts"
 import { SessionsLive } from "./SessionsHandlers.ts"
 import { VaultsLive } from "./VaultsHandlers.ts"
 
@@ -92,6 +94,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		AutomationsLive,
 		ArtifactsLive,
 		VaultsLive,
+		MemoryStoresLive,
 	]),
 	Layer.provide([
 		AuthenticationLive.pipe(Layer.provide(Mac.layerWebCrypto)),
@@ -100,6 +103,7 @@ const ApiLive = Layer.mergeAll(HttpApiBuilder.layer(CheckfuApi)).pipe(
 		ArtifactBlobLimitLive,
 		ArtifactBodyLimitLive,
 		EventBatchBodyLimitLive,
+		MemoryBodyLimitLive,
 	]),
 	Layer.provide(HttpPlatform.layer),
 	Layer.provide([Etag.layerWeak, FileSystem.layerNoop({}), Path.layer]),

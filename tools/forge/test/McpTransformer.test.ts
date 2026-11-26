@@ -104,6 +104,8 @@ describe("MCP tool projection", () => {
 			"automations_createAutomation",
 			"environments_archiveEnvironment",
 			"environments_deleteEnvironment",
+			"memoryStores_archiveMemoryStore",
+			"memoryStores_deleteMemoryStore",
 			"sessions_archiveSession",
 			"vaults_archiveCredential",
 			"vaults_archiveVault",
@@ -121,6 +123,8 @@ describe("MCP tool projection", () => {
 			"artifacts_createArtifactVersion",
 			"automations_createAutomation",
 			"environments_createEnvironment",
+			"memoryStores_createMemory",
+			"memoryStores_createMemoryStore",
 			"sessions_createSession",
 			"vaults_createVault",
 		])
@@ -433,6 +437,13 @@ describe("MCP tool projection", () => {
 	})
 
 	it("leaves a secret out of a tool's arguments, wherever in the body it is, and refuses a required one", () => {
+		const withSearchOperation = (operation: Operation) =>
+			JSON.stringify({
+				openapi: "3.1.0",
+				info: { title: "Checkfu", version: "1.0.0" },
+				paths: { "/v1/agents/search": { post: operation } },
+				components: { schemas: {} },
+			})
 		const secret = { type: "string", format: "password" }
 		const body = (schema: Json) => ({
 			...searchAgents,
@@ -440,9 +451,7 @@ describe("MCP tool projection", () => {
 			requestBody: { required: true, content: { "application/json": { schema } } },
 		})
 		const tool = project(
-			withOperation(
-				"/v1/agents/search",
-				"post",
+			withSearchOperation(
 				body({
 					type: "object",
 					properties: {
@@ -481,15 +490,13 @@ describe("MCP tool projection", () => {
 		expect(JSON.stringify(tool?.inputSchema)).not.toContain("token")
 		expect(() =>
 			project(
-				withOperation(
-					"/v1/agents/search",
-					"post",
+				withSearchOperation(
 					body({ type: "object", properties: { token: secret }, required: ["token"] }),
 				),
 			),
 		).toThrow(/POST \/v1\/agents\/search: MCP tools cannot take the secret "token"/)
 		const withSecretComponent = (schema: Json) => {
-			const spec = JSON.parse(withOperation("/v1/agents/search", "post", body(schema))) as {
+			const spec = JSON.parse(withSearchOperation(body(schema))) as {
 				components: { schemas: Record<string, Json> }
 			}
 			spec.components.schemas["Token"] = { $ref: "#/components/schemas/TokenText" }
@@ -517,9 +524,7 @@ describe("MCP tool projection", () => {
 		).toThrow(/MCP tools cannot take the secret "token"/)
 		const withObjectComponent = (credentials: Json) => {
 			const spec = JSON.parse(
-				withOperation(
-					"/v1/agents/search",
-					"post",
+				withSearchOperation(
 					body({
 						type: "object",
 						properties: {
@@ -555,9 +560,7 @@ describe("MCP tool projection", () => {
 		).toThrow(/MCP tools cannot take the secret "secret_token"/)
 		const nullable = { anyOf: [secret, { type: "null" }] }
 		const composed = project(
-			withOperation(
-				"/v1/agents/search",
-				"post",
+			withSearchOperation(
 				body({
 					type: "object",
 					properties: { name: { type: "string" }, maybe_token: nullable },
@@ -569,9 +572,7 @@ describe("MCP tool projection", () => {
 		expect(JSON.stringify(composed?.inputSchema)).not.toContain("maybe_token")
 		expect(() =>
 			project(
-				withOperation(
-					"/v1/agents/search",
-					"post",
+				withSearchOperation(
 					body({
 						type: "object",
 						properties: { maybe_token: nullable },
@@ -582,9 +583,7 @@ describe("MCP tool projection", () => {
 		).toThrow(/MCP tools cannot take the secret "maybe_token"/)
 		const listed = { type: "array", items: secret }
 		const collected = project(
-			withOperation(
-				"/v1/agents/search",
-				"post",
+			withSearchOperation(
 				body({
 					type: "object",
 					properties: {
@@ -601,18 +600,14 @@ describe("MCP tool projection", () => {
 		expect(JSON.stringify(collected?.inputSchema)).not.toContain("by_host")
 		expect(() =>
 			project(
-				withOperation(
-					"/v1/agents/search",
-					"post",
+				withSearchOperation(
 					body({ type: "object", properties: { tokens: listed }, required: ["tokens"] }),
 				),
 			),
 		).toThrow(/MCP tools cannot take the secret "tokens"/)
 		expect(() =>
 			project(
-				withOperation(
-					"/v1/agents/search",
-					"post",
+				withSearchOperation(
 					body({
 						type: "object",
 						properties: { name: { type: "string" }, token: secret },
@@ -623,9 +618,7 @@ describe("MCP tool projection", () => {
 		).toThrow(/cannot leave out the secret "token" from an object that accepts other keys/)
 		expect(() =>
 			project(
-				withOperation(
-					"/v1/agents/search",
-					"post",
+				withSearchOperation(
 					body({ type: "object", properties: { name: { type: "string" }, token: secret } }),
 				),
 			),

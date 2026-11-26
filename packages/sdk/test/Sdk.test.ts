@@ -2775,6 +2775,114 @@ describe("@checkfu/sdk", () => {
 			}),
 		)
 
+		it.live("waits for a pending memory store and a pending memory in both clients", () =>
+			Effect.gen(function* () {
+				let storePolls = 0
+				let memoryPolls = 0
+				const store = {
+					id: "memstore_1",
+					type: "memory_store",
+					name: "Notes",
+					description: "",
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+					archived_at: null,
+				}
+				const memory = {
+					id: "mem_1",
+					type: "memory",
+					memory_store_id: "memstore_1",
+					path: "/a.md",
+					content: "A.",
+					content_sha256: "a".repeat(64),
+					content_size_bytes: 2,
+					version: 1,
+					created_at: ISO_NOW,
+					updated_at: ISO_NOW,
+				}
+				const memoryFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+					const req = toWebRequest(input, init)
+					const url = new URL(req.url)
+					if (req.method === "POST" && url.pathname === "/v1/memory_stores") {
+						return jsonResponse({ id: "memstore_1", type: "memory_store", pending: true }, 202)
+					}
+					if (req.method === "GET" && url.pathname === "/v1/memory_stores/memstore_1") {
+						storePolls += 1
+						return storePolls < 3
+							? jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+							: jsonResponse(store)
+					}
+					if (req.method === "POST" && url.pathname === "/v1/memory_stores/memstore_1/memories") {
+						return jsonResponse(
+							{ id: "mem_1", type: "memory", memory_store_id: "memstore_1", pending: true },
+							202,
+						)
+					}
+					if (
+						req.method === "GET" &&
+						url.pathname === "/v1/memory_stores/memstore_1/memories/mem_1"
+					) {
+						memoryPolls += 1
+						return memoryPolls < 3
+							? jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+							: jsonResponse(memory)
+					}
+					return jsonResponse(apiErrorBody("not_found_error", "not found"), 404)
+				}) as typeof globalThis.fetch
+				const pollOpts = {
+					initialDelay: "1 millis" as const,
+					maxDelay: "2 millis" as const,
+					timeout: "2 seconds" as const,
+				}
+
+				yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					const created = yield* client.waitForPending(
+						yield* client.memoryStores.create({ name: "Notes" }, { idempotencyKey: "store" }),
+						pollOpts,
+					)
+					expect(created.id).toBe("memstore_1")
+					const written = yield* client.waitForPending(
+						yield* client.memoryStores.memories.create("memstore_1", {
+							path: "/a.md",
+							content: "A.",
+						}),
+						pollOpts,
+					)
+					expect(written).toMatchObject({ id: "mem_1", content: "A." })
+				}).pipe(Effect.provide(makeEffectLayer(memoryFetch, { maxRetries: 0 })))
+
+				storePolls = 0
+				memoryPolls = 0
+				yield* Effect.promise(async () => {
+					const promiseClient = new Checkfu({
+						apiKey: "ck_test_key",
+						baseUrl: "http://localhost:1337",
+						maxRetries: 0,
+						fetch: memoryFetch,
+					})
+					try {
+						const created = await promiseClient.waitForPending(
+							await promiseClient.memoryStores.create({ name: "Notes" }, { idempotencyKey: "p" }),
+							pollOpts,
+						)
+						expect(created.created_at).toBe(ISO_NOW)
+						const written = await promiseClient.waitForPending(
+							await promiseClient.memoryStores.memories.create("memstore_1", {
+								path: "/a.md",
+								content: "A.",
+							}),
+							pollOpts,
+						)
+						expect(written.content).toBe("A.")
+						expect(memoryPolls).toBe(3)
+					} finally {
+						await promiseClient.close()
+					}
+				})
+			}),
+		)
+
 		it.live(
 			"distinguishes ready archive and update mutations from stale existing projections in waitForPending",
 			() =>

@@ -34,6 +34,7 @@ import {
 	AutomationSchedule,
 	CronExpression,
 	AutomationSnapshot,
+	ContentSha256,
 	CredentialDisplayName,
 	CredentialId,
 	CredentialSecret,
@@ -67,6 +68,15 @@ import {
 	ToolConfirmationResult,
 	GitHubRepositoryResource,
 	MAX_SESSION_REPOSITORIES,
+	MemoryContent,
+	MemoryId,
+	MemoryIndexEntry,
+	MemoryPath,
+	MemorySnapshot,
+	MemoryStoreDescription,
+	MemoryStoreId,
+	MemoryStoreName,
+	MemoryStoreSnapshot,
 	NonEmptyString,
 	PositiveInt,
 	PublicationAddress,
@@ -468,6 +478,10 @@ const AgentToolsInput = Schema.Array(Schema.Union([McpToolsetInput, CustomToolIn
 	Schema.isMaxLength(MAX_MCP_SERVERS + MAX_CUSTOM_TOOLS),
 )
 
+export class MemoryBodyLimit extends HttpApiMiddleware.Service<MemoryBodyLimit>()(
+	"@checkfu/api/MemoryBodyLimit",
+) {}
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -592,6 +606,45 @@ const AgentReference = Schema.Union([
 		version: Schema.optionalKey(PositiveInt),
 	}),
 ])
+
+export const CreateMemoryStoreBody = Schema.Struct({
+	name: MemoryStoreName.annotate({ description: "Name shown to the agent" }),
+	description: Schema.optionalKey(
+		MemoryStoreDescription.annotate({
+			description: "What the store holds. Shown to the agent.",
+		}),
+	),
+})
+
+export const UpdateMemoryStoreBody = Schema.Struct({
+	name: Schema.optionalKey(MemoryStoreName.annotate({ description: "New name" })),
+	description: Schema.optionalKey(
+		MemoryStoreDescription.annotate({ description: "New description" }),
+	),
+})
+
+export const CreateMemoryBody = Schema.Struct({
+	path: MemoryPath.annotate({ description: "Path inside the store, such as /notes/todo.md" }),
+	content: MemoryContent.annotate({ description: "Text of the memory, up to 100 kB" }),
+})
+
+export const UpdateMemoryBody = Schema.Struct({
+	content: MemoryContent.annotate({ description: "New text of the memory" }),
+	precondition: Schema.optionalKey(
+		Schema.Struct({
+			type: Schema.Literal("content_sha256"),
+			content_sha256: ContentSha256,
+		}).annotate({
+			description: "Apply only if the stored content still has this SHA-256",
+		}),
+	),
+})
+
+export const MemoryListItem = Schema.Struct({
+	...MemoryIndexEntry.fields,
+	type: Schema.Literal("memory"),
+	memory_store_id: MemoryStoreId,
+})
 
 export const GitHubRepositoryParams = Schema.Struct({
 	type: Schema.Literal("github_repository"),
@@ -1079,6 +1132,8 @@ export type PendingResourceType =
 	| "artifact_version"
 	| "vault"
 	| "vault_credential"
+	| "memory_store"
+	| "memory"
 
 const pendingResource = <const T extends PendingResourceType>(type: T) =>
 	Schema.Struct({
@@ -1120,6 +1175,17 @@ export const PendingCredential = Schema.Struct({
 }).pipe(HttpApiSchema.status(202))
 export type PendingCredential = typeof PendingCredential.Type
 
+export const PendingMemoryStore = pendingResource("memory_store")
+export type PendingMemoryStore = typeof PendingMemoryStore.Type
+
+export const PendingMemory = Schema.Struct({
+	id: Schema.String,
+	type: Schema.Literal("memory"),
+	memory_store_id: Schema.String,
+	pending: Schema.Literal(true),
+}).pipe(HttpApiSchema.status(202))
+export type PendingMemory = typeof PendingMemory.Type
+
 export const PendingResource = Schema.Union([
 	PendingAgent,
 	PendingEnvironment,
@@ -1129,6 +1195,8 @@ export const PendingResource = Schema.Union([
 	PendingArtifactVersion,
 	PendingVault,
 	PendingCredential,
+	PendingMemoryStore,
+	PendingMemory,
 ])
 
 export type PendingResource = typeof PendingResource.Type
@@ -1378,6 +1446,7 @@ export const ListAgentsResponse = listResponse(AgentResource)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
 export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot)
+export const ListMemoryStoresResponse = listResponse(MemoryStoreSnapshot)
 export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
 export const ListSessionsResponse = listResponse(SessionResource)
@@ -1486,6 +1555,13 @@ const automationParams = {
 }
 const artifactParams = { artifact_id: ArtifactId.annotate({ description: "Artifact ID" }) }
 const artifactVersionParams = { ...artifactParams, version: ArtifactVersionFromString }
+const memoryStoreParams = {
+	memory_store_id: MemoryStoreId.annotate({ description: "Memory store ID" }),
+}
+const memoryParams = {
+	...memoryStoreParams,
+	memory_id: MemoryId.annotate({ description: "Memory ID" }),
+}
 const vaultParams = { vault_id: VaultId.annotate({ description: "Vault ID" }) }
 const credentialParams = {
 	...vaultParams,
@@ -2801,6 +2877,241 @@ const Vaults = HttpApiGroup.make("vaults")
 	.annotate(OpenApi.Description, "Manage vaults and the credentials they hold")
 	.middleware(Authentication)
 
+const MemoryStores = HttpApiGroup.make("memory_stores")
+	.add(
+		HttpApiEndpoint.post("create", "/v1/memory_stores", {
+			headers: IdempotencyHeaders,
+			payload: CreateMemoryStoreBody,
+			success: [MemoryStoreSnapshot.pipe(HttpApiSchema.status(201)), PendingMemoryStore],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a memory store")
+			.annotate(OpenApi.Description, "Create a store of memories that sessions can share")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "create" },
+				"x-checkfu-mcp": { name: "memoryStores_createMemoryStore", destructive: false },
+				"x-checkfu-cli": {
+					fileFields: ["description"],
+					examples: [
+						{
+							command:
+								'checkfu memory-stores create --name "User Preferences" --description "Per-user preferences"',
+							description: "Create a memory store",
+						},
+					],
+				},
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("list", "/v1/memory_stores", {
+			query: {
+				page: Schema.optionalKey(
+					ResourceListCursor.annotate({
+						description: "Opaque page token from the previous response's next_page.",
+					}),
+				),
+				limit: resourceListQuery.limit,
+				order: resourceListQuery.order,
+				include_archived: resourceListQuery.include_archived,
+			},
+			success: ListMemoryStoresResponse,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List memory stores")
+			.annotate(
+				OpenApi.Description,
+				"List memory stores in creation order, oldest first by default. Archived stores are left out unless include_archived is true; deleted ones never appear.",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "list" },
+				"x-checkfu-mcp": { name: "memoryStores_listMemoryStores" },
+				"x-checkfu-cli": resourceListCli,
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("get", "/v1/memory_stores/:memory_store_id", {
+			params: memoryStoreParams,
+			success: MemoryStoreSnapshot,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a memory store")
+			.annotate(OpenApi.Description, "Retrieve a memory store by ID")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "get" },
+				"x-checkfu-mcp": { name: "memoryStores_getMemoryStore" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("update", "/v1/memory_stores/:memory_store_id", {
+			params: memoryStoreParams,
+			payload: UpdateMemoryStoreBody,
+			success: [MemoryStoreSnapshot, PendingMemoryStore],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a memory store")
+			.annotate(OpenApi.Description, "Rename a memory store or change its description")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "update" },
+				"x-checkfu-mcp": { name: "memoryStores_updateMemoryStore" },
+				"x-checkfu-cli": { fileFields: ["description"] },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("archive", "/v1/memory_stores/:memory_store_id/archive", {
+			params: memoryStoreParams,
+			success: [MemoryStoreSnapshot, PendingMemoryStore],
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Archive a memory store")
+			.annotate(
+				OpenApi.Description,
+				"Make a memory store read-only and stop new sessions from attaching it",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "archive",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "archive" },
+				"x-checkfu-idempotent": true,
+				"x-checkfu-mcp": { name: "memoryStores_archiveMemoryStore" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.delete("delete", "/v1/memory_stores/:memory_store_id", {
+			params: memoryStoreParams,
+			success: Schema.Struct({ id: Schema.String, type: Schema.Literal("memory_store_deleted") }),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Delete a memory store")
+			.annotate(OpenApi.Description, "Delete a memory store and make its memories unreachable")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "delete" },
+				"x-checkfu-mcp": { name: "memoryStores_deleteMemoryStore" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("createMemory", "/v1/memory_stores/:memory_store_id/memories", {
+			params: memoryStoreParams,
+			payload: CreateMemoryBody,
+			success: [MemorySnapshot.pipe(HttpApiSchema.status(201)), PendingMemory],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Create a memory")
+			.annotate(OpenApi.Description, "Create a memory at a path that holds none")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores.memories",
+				"x-forge-method-name": "create",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "createMemory" },
+				"x-checkfu-mcp": { name: "memoryStores_createMemory", destructive: false },
+				"x-checkfu-cli": {
+					groupDescription: "Read and edit the memories in a store",
+					fileFields: ["content"],
+				},
+			})
+			.middleware(MemoryBodyLimit),
+	)
+	.add(
+		HttpApiEndpoint.get("listMemories", "/v1/memory_stores/:memory_store_id/memories", {
+			params: memoryStoreParams,
+			query: {
+				path_prefix: Schema.optionalKey(
+					Schema.String.check(Schema.isStartingWith("/"), Schema.isEndingWith("/")).annotate({
+						description: "List only memories under this directory. Must start and end with /",
+					}),
+				),
+				depth: Schema.optionalKey(
+					Schema.Literals(["0", "1"]).annotate({
+						description: "1 lists only the directory's own memories; 0 lists the whole subtree",
+					}),
+				),
+			},
+			success: Schema.Struct({ data: Schema.Array(MemoryListItem) }),
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "List memories")
+			.annotate(OpenApi.Description, "List the memories in a store, without their content")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores.memories",
+				"x-forge-method-name": "list",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "listMemories" },
+				"x-checkfu-mcp": { name: "memoryStores_listMemories" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.get("getMemory", "/v1/memory_stores/:memory_store_id/memories/:memory_id", {
+			params: memoryParams,
+			success: MemorySnapshot,
+			error: HandlerErrors,
+		})
+			.annotate(OpenApi.Summary, "Retrieve a memory")
+			.annotate(OpenApi.Description, "Retrieve a memory with its content")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores.memories",
+				"x-forge-method-name": "retrieve",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "getMemory" },
+				"x-checkfu-mcp": { name: "memoryStores_getMemory" },
+			}),
+	)
+	.add(
+		HttpApiEndpoint.post("updateMemory", "/v1/memory_stores/:memory_store_id/memories/:memory_id", {
+			params: memoryParams,
+			payload: UpdateMemoryBody,
+			success: [MemorySnapshot, PendingMemory],
+			error: BodyErrors,
+		})
+			.annotate(OpenApi.Summary, "Update a memory")
+			.annotate(
+				OpenApi.Description,
+				"Replace a memory's content, optionally only if it is unchanged since it was read",
+			)
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores.memories",
+				"x-forge-method-name": "update",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "updateMemory" },
+				"x-checkfu-mcp": { name: "memoryStores_updateMemory" },
+				"x-checkfu-cli": { fileFields: ["content"] },
+			})
+			.middleware(MemoryBodyLimit),
+	)
+	.add(
+		HttpApiEndpoint.delete(
+			"deleteMemory",
+			"/v1/memory_stores/:memory_store_id/memories/:memory_id",
+			{
+				params: memoryParams,
+				query: {
+					expected_content_sha256: Schema.optionalKey(
+						ContentSha256.annotate({
+							description: "Delete only if the stored content still has this SHA-256",
+						}),
+					),
+				},
+				success: Schema.Struct({ id: Schema.String, type: Schema.Literal("memory_deleted") }),
+				error: HandlerErrors,
+			},
+		)
+			.annotate(OpenApi.Summary, "Delete a memory")
+			.annotate(OpenApi.Description, "Delete a memory from its store")
+			.annotate(OpenApi.Override, {
+				"x-forge-group-name": "memoryStores.memories",
+				"x-forge-method-name": "delete",
+				"x-checkfu-endpoint": { group: "memory_stores", endpoint: "deleteMemory" },
+				"x-checkfu-mcp": { name: "memoryStores_deleteMemory" },
+				"x-checkfu-idempotent": false,
+			}),
+	)
+	.annotate(OpenApi.Description, "Manage memory stores")
+	.middleware(Authentication)
+
 export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Health)
 	.add(Auth)
@@ -2810,11 +3121,12 @@ export const CheckfuApi = HttpApi.make("checkfu")
 	.add(Automations)
 	.add(Artifacts)
 	.add(Vaults)
+	.add(MemoryStores)
 	.annotate(OpenApi.Title, "Checkfu API")
 	.annotate(OpenApi.Version, "0.0.1")
 	.annotate(
 		OpenApi.Description,
-		"Managed agents API for managing agents, environments, sessions, automations, artifacts, and vaults.",
+		"Managed agents API for managing agents, environments, sessions, automations, artifacts, vaults, and memory stores.",
 	)
 	.annotate(HttpApi.PayloadParseOptions, { onExcessProperty: "error" })
 	.middleware(RequestValidation)
