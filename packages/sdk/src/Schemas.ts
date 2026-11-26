@@ -578,6 +578,50 @@ export const ArtifactMount = Schema.Struct({
 })
 export type ArtifactMount = typeof ArtifactMount.Type
 
+export const MAX_SESSION_SKILLS = 16
+export const MAX_SKILL_NAME_LENGTH = 64
+export const MAX_SKILL_DESCRIPTION_LENGTH = 1024
+export const MAX_SKILL_FILE_BYTES = 256 * 1024
+export const SKILL_MOUNT_ROOT = "/mnt/skills"
+
+const withinCharacters = (max: number) => (text: string) => Array.from(text).length <= max
+const SKILL_NAME_PARTS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u
+const isSkillName = (name: string) =>
+	name.length > 0 &&
+	withinCharacters(MAX_SKILL_NAME_LENGTH)(name) &&
+	name === name.toLowerCase() &&
+	SKILL_NAME_PARTS.test(name)
+
+export const SkillName = Schema.String.check(
+	Schema.makeFilter(isSkillName, {
+		expected: `at most ${MAX_SKILL_NAME_LENGTH} lower-case letters and digits, with single hyphens between them`,
+	}),
+)
+
+export const SkillDescription = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.makeFilter(withinCharacters(MAX_SKILL_DESCRIPTION_LENGTH), {
+		expected: `at most ${MAX_SKILL_DESCRIPTION_LENGTH} characters`,
+	}),
+)
+
+export const SkillMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/skills\/[^/]+$/u, {
+		expected: `a directory directly inside ${SKILL_MOUNT_ROOT}`,
+	}),
+)
+
+export const skillMountPath = (name: string): string => `${SKILL_MOUNT_ROOT}/${name}`
+
+export const SkillMount = Schema.Struct({
+	...ArtifactMount.fields,
+	type: Schema.Literal("skill"),
+	name: SkillName,
+	description: SkillDescription,
+	mount_path: SkillMountPath,
+})
+export type SkillMount = typeof SkillMount.Type
+
 const GitHubRepositoryMount = GitHubRepositoryResource.mapFields((fields) => ({
 	...fields,
 	requires_token: Schema.optionalKey(Schema.Literal(true)),
@@ -586,6 +630,7 @@ export const SessionMount = Schema.Union([
 	GitHubRepositoryMount,
 	MemoryStoreResource,
 	ArtifactMount,
+	SkillMount,
 ])
 export type SessionMount = typeof SessionMount.Type
 
@@ -601,6 +646,9 @@ export const memoryStoresOf = (
 
 export const artifactsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<ArtifactMount> =>
 	resources.filter((resource) => resource.type === "artifact")
+
+export const skillsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<SkillMount> =>
+	resources.filter((resource) => resource.type === "skill")
 
 export const mountsOverlap = (a: string, b: string): boolean =>
 	a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
@@ -623,7 +671,8 @@ const mountEachRepositoryOnce = (resources: ReadonlyArray<SessionMount>): boolea
 const areWithinLimits = (resources: ReadonlyArray<SessionMount>): boolean =>
 	repositoriesOf(resources).length <= MAX_SESSION_REPOSITORIES &&
 	memoryStoresOf(resources).length <= MAX_SESSION_MEMORY_STORES &&
-	artifactsOf(resources).length <= MAX_SESSION_ARTIFACTS
+	artifactsOf(resources).length <= MAX_SESSION_ARTIFACTS &&
+	skillsOf(resources).length <= MAX_SESSION_SKILLS
 
 const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
 	const stores = memoryStoresOf(resources).map((resource) => resource.memory_store_id)
@@ -631,12 +680,12 @@ const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean =>
 }
 
 export const MAX_SESSION_RESOURCES =
-	MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES + MAX_SESSION_ARTIFACTS
+	MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES + MAX_SESSION_ARTIFACTS + MAX_SESSION_SKILLS
 
 export const SessionMounts = Schema.Array(SessionMount).check(
 	Schema.isMaxLength(MAX_SESSION_RESOURCES),
 	Schema.makeFilter(areWithinLimits, {
-		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories, ${MAX_SESSION_MEMORY_STORES} memory stores and ${MAX_SESSION_ARTIFACTS} artifacts`,
+		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories, ${MAX_SESSION_MEMORY_STORES} memory stores, ${MAX_SESSION_ARTIFACTS} artifacts and ${MAX_SESSION_SKILLS} skills`,
 	}),
 	Schema.makeFilter(attachEachStoreOnce, { expected: "each memory store attached once" }),
 	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),

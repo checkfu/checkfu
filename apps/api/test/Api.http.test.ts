@@ -26,7 +26,12 @@ import * as References from "effect/References"
 import * as Scope from "effect/Scope"
 import * as Tracer from "effect/Tracer"
 import { REQUEST_ID_HEADER, RequestId, apiError, statusOf } from "../src/Http/Api.ts"
-import { MAX_AGENT_BODY_BYTES, handled, toApiError } from "../src/Http/HttpHelpers.ts"
+import {
+	MAX_AGENT_BODY_BYTES,
+	MAX_SESSION_BODY_BYTES,
+	handled,
+	toApiError,
+} from "../src/Http/HttpHelpers.ts"
 import { HealthTracerDisabledWhen, makeApiHandler } from "../src/Http/Router.ts"
 import { AgentVersionLookupTimeout } from "../src/Pi/PiDurableHarness.ts"
 import {
@@ -570,6 +575,25 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						},
 					})
 					expect(hugeAgentRes.status).toBe(413)
+
+					const escaped = String.raw`\u00e9`.repeat(4096)
+					const resources = Array.from(
+						{ length: 8 },
+						(_, index) =>
+							`{"type":"memory_store","memory_store_id":"memstore_${index}","instructions":"${escaped}"}`,
+					)
+					const escapedSession = `{"agent":"agent_1","environment_id":"env_1","resources":[${resources}]}`
+					expect(escapedSession.length).toBeGreaterThan(192 * 1024)
+					const sessionOf = (body: string) =>
+						sendRequest(apiFetch, {
+							method: "POST",
+							path: "/v1/sessions",
+							headers: AUTH_HEADERS,
+							rawBody: body,
+						})
+					expect((yield* sessionOf(escapedSession)).status).toBe(404)
+					const hugeSession = `{"agent":"agent_1","environment_id":"env_1","title":"${"x".repeat(MAX_SESSION_BODY_BYTES)}"}`
+					expect((yield* sessionOf(hugeSession)).status).toBe(413)
 
 					const okAgentRes = yield* sendRequest(apiFetch, {
 						method: "POST",

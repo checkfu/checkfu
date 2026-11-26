@@ -1,4 +1,13 @@
 export {
+	skillsOf,
+	skillMountPath,
+	SkillName,
+	SkillMountPath,
+	SkillMount,
+	SKILL_MOUNT_ROOT,
+	MAX_SKILL_NAME_LENGTH,
+	MAX_SKILL_DESCRIPTION_LENGTH,
+	MAX_SESSION_SKILLS,
 	artifactsOf,
 	artifactMountPath,
 	MAX_SESSION_RESOURCES,

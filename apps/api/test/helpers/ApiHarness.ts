@@ -80,6 +80,8 @@ import type {
 } from "../../src/Workspace/SessionMemory.ts"
 import { repositoryTokenGate } from "../../src/Workspace/Repositories.ts"
 import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
+import { readSkill } from "../../src/Skills/ReadSkill.ts"
+import { SkillReader } from "../../src/Skills/SkillReader.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
@@ -787,6 +789,9 @@ export const makePiDurableTestLayer = (
 		ArtifactLinksTest,
 	).pipe(
 		Layer.provideMerge(artifactStore.layer),
+		Layer.provideMerge(
+			Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
+		),
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,

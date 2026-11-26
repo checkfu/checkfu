@@ -18,7 +18,7 @@ import {
 	withRepositoryCredentials,
 } from "./Repositories.ts"
 import { ApiWorker } from "../Api.ts"
-import { ARTIFACT_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
+import { ARTIFACT_MOUNT_ROOT, SKILL_MOUNT_ROOT } from "@checkfu/domain/Session/SessionResource"
 import { makeArtifactMount } from "./ArtifactMount.ts"
 import { makeMemoryMount } from "./MemoryMount.ts"
 import { makeSandboxMount } from "./SandboxMount.ts"
@@ -180,6 +180,7 @@ export const SessionWorkspaceLive = SessionWorkspace.make(
 				}
 				const mounts = (walkLimit: number) => ({
 					[MEMORY_ROOT]: makeMemoryMount(memory),
+					[SKILL_MOUNT_ROOT]: makeArtifactMount(SKILL_MOUNT_ROOT, artifacts, walkLimit),
 					[ARTIFACT_MOUNT_ROOT]: makeArtifactMount(ARTIFACT_MOUNT_ROOT, artifacts, walkLimit),
 				})
 				const allowedHosts = (): ReadonlyArray<string> | null => {

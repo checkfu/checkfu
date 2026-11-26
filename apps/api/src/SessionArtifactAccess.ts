@@ -1,4 +1,4 @@
-import { artifactsOf } from "@checkfu/domain/Session/SessionResource"
+import { artifactsOf, skillsOf } from "@checkfu/domain/Session/SessionResource"
 import type { ArtifactMount } from "@checkfu/domain/Session/SessionResource"
 import * as Effect from "effect/Effect"
 import { PinnedArtifact } from "./Artifacts/PinnedArtifact.ts"
@@ -15,7 +15,9 @@ export const SessionArtifactAccess = Effect.gen(function* () {
 		Effect.map(
 			resourcesOf(sessionId),
 			(resources) =>
-				new Map<string, Pinned>(artifactsOf(resources).map((pin) => [pin.mount_path, pin])),
+				new Map<string, Pinned>(
+					[...artifactsOf(resources), ...skillsOf(resources)].map((pin) => [pin.mount_path, pin]),
+				),
 		)
 
 	const filesOf = (pin: Pinned) =>

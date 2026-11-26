@@ -26,6 +26,7 @@ import {
 	ArtifactVersionFilesInput,
 	ArtifactId,
 	ArtifactMount,
+	SkillMount,
 	ArtifactName,
 	ArtifactPath,
 	AutomationId,
@@ -486,6 +487,10 @@ export class MemoryBodyLimit extends HttpApiMiddleware.Service<MemoryBodyLimit>(
 	"@checkfu/api/MemoryBodyLimit",
 ) {}
 
+export class SessionBodyLimit extends HttpApiMiddleware.Service<SessionBodyLimit>()(
+	"@checkfu/api/SessionBodyLimit",
+) {}
+
 const ModelInput = Schema.Union([NonEmptyString, AgentModel])
 
 export const CreateAgentBody = Schema.Struct({
@@ -695,10 +700,22 @@ export const ArtifactMountParams = Schema.Struct({
 	),
 })
 
+export const SkillMountParams = Schema.Struct({
+	type: Schema.Literal("skill"),
+	artifact_id: ResourceId.annotate({
+		description:
+			"Artifact that holds the skill: a SKILL.md at its root, and the files it refers to",
+	}),
+	version: Schema.optionalKey(
+		PositiveInt.annotate({ description: "Version to use (default: the current version)" }),
+	),
+})
+
 const CreateSessionResource = Schema.Union([
 	GitHubRepositoryParams,
 	MemoryStoreParams,
 	ArtifactMountParams,
+	SkillMountParams,
 ])
 export type CreateSessionResource = typeof CreateSessionResource.Type
 
@@ -748,7 +765,8 @@ export const CreateSessionBody = Schema.Struct({
 	),
 	resources: Schema.optionalKey(
 		CreateSessionResources.annotate({
-			description: "Repositories, memory stores and artifacts to mount in the session's workspace",
+			description:
+				"Repositories, memory stores, artifacts and skills to mount in the session's workspace",
 		}),
 	),
 })
@@ -988,6 +1006,7 @@ export const SessionResourceItem = Schema.Union([
 	Schema.Struct({ ...GitHubRepositoryResource.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...MemoryStoreResource.fields, ...resourceTimestamps }),
 	Schema.Struct({ ...ArtifactMount.fields, ...resourceTimestamps }),
+	Schema.Struct({ ...SkillMount.fields, ...resourceTimestamps }),
 ])
 export type SessionResourceItem = typeof SessionResourceItem.Type
 
@@ -1938,7 +1957,7 @@ const Sessions = HttpApiGroup.make("sessions")
 					],
 				},
 			})
-			.middleware(EventBatchBodyLimit),
+			.middleware(SessionBodyLimit),
 	)
 	.add(
 		HttpApiEndpoint.get("list", "/v1/sessions", {

@@ -38,6 +38,7 @@ import { PiHarnessWorker, TURN_CODE_UPDATE_STRATEGY } from "./Pi/PiHarness.ts"
 import { PlacedDurableObjects } from "./PlacedDurableObjects.ts"
 import { SessionArtifactAccess } from "./SessionArtifactAccess.ts"
 import { SessionMemoryAccess } from "./SessionMemoryAccess.ts"
+import { SkillReader } from "./Skills/SkillReader.ts"
 
 const PiHarnessExecutorLive = Layer.effect(
 	PiTurnExecutor,
@@ -169,6 +170,20 @@ const VaultsLive = Vaults.layer(VaultsHandlersLive.pipe(Layer.provide(ListingLiv
 	Layer.provide(PlacedDurableObjects),
 )
 
+const SkillReaderLive = Layer.effect(
+	SkillReader,
+	Effect.gen(function* () {
+		const harness = yield* Cloudflare.Workers.bindWorker(PiHarnessWorker)
+		return {
+			read: (markdown: string) =>
+				harnessCall(Effect.suspend(() => harness.readSkill(markdown))).pipe(
+					Effect.withSpan("PiHarness.readSkill"),
+					Effect.orDie,
+				),
+		}
+	}),
+)
+
 const HarnessLive = PiDurableHarnessLive.pipe(
 	Layer.provide(PiHarnessExecutorLive),
 	Layer.provide(CheckfuLive),
@@ -194,7 +209,11 @@ const ApiWorkerLive = Layer.mergeAll(
 	HarnessLive,
 	Cloudflare.Telemetry({ headSamplingRate: TRACE_SAMPLING_RATE }),
 	Alchemy.Telemetry.layer(HealthTracerDisabledWhen),
-).pipe(Layer.provideMerge(Digest.layerWebCrypto), Layer.provideMerge(SecureRandom.layerWebCrypto))
+).pipe(
+	Layer.provideMerge(SkillReaderLive),
+	Layer.provideMerge(Digest.layerWebCrypto),
+	Layer.provideMerge(SecureRandom.layerWebCrypto),
+)
 
 export const API_WORKER_PROPS = {
 	main: import.meta.url,

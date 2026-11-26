@@ -5,6 +5,7 @@ import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { HeldSecret, PutMode, PutOutcome } from "../Connection/SecretCustody.ts"
+import { SkillReading } from "../Skills/SkillReader.ts"
 import { RepositoryMount, TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
 
 const TURN_OPERATION_PREFIX = "turn:"
@@ -145,4 +146,5 @@ export const PiHarnessCalls = {
 	secretUsable: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Boolean },
 	eraseSecret: { args: Schema.Tuple([Schema.String, Schema.String]), result: Schema.Void },
 	sealVault: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
+	readSkill: { args: Schema.Tuple([Schema.String]), result: SkillReading },
 } as const
