@@ -11885,6 +11885,39 @@
 						"required": false
 					},
 					{
+						"name": "types",
+						"in": "query",
+						"schema": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"enum": [
+									"system.message",
+									"user.message",
+									"user.interrupt",
+									"user.tool_confirmation",
+									"user.custom_tool_result",
+									"session.status_running",
+									"span.model_request_start",
+									"agent.tool_use",
+									"agent.tool_result",
+									"agent.mcp_tool_use",
+									"agent.mcp_tool_result",
+									"agent.custom_tool_use",
+									"agent.thinking",
+									"agent.message",
+									"span.model_request_end",
+									"session.status_idle",
+									"session.error",
+									"session.status_terminated",
+									"session.archived"
+								]
+							},
+							"description": "Return events with one of these types."
+						},
+						"required": false
+					},
+					{
 						"name": "order",
 						"in": "query",
 						"schema": {
@@ -12272,7 +12305,7 @@
 						}
 					}
 				},
-				"description": "List persisted events for a session. Use the returned cursor to continue through its history.",
+				"description": "List persisted events for a session. Use next_page to continue through its history.",
 				"summary": "List session events",
 				"x-forge-group-name": "sessions.events",
 				"x-forge-method-name": "list",
@@ -12284,6 +12317,10 @@
 					"name": "sessions_listEvents"
 				},
 				"x-checkfu-cli": {
+					"repeatArrayField": {
+						"field": "types",
+						"flag": "type"
+					},
 					"intQueryParams": {
 						"limit": {
 							"min": 1,

@@ -1871,6 +1871,13 @@ const Sessions = HttpApiGroup.make("sessions")
 			query: {
 				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
+				types: Schema.optionalKey(
+					Schema.Array(
+						Schema.Literals(SessionEvent.members.map((event) => event.fields.type.literal)),
+					).annotate({
+						description: "Return events with one of these types.",
+					}),
+				),
 				order: Schema.optionalKey(
 					Schema.Literals(["asc", "desc"]).annotate({ description: "Sort order: asc or desc" }),
 				),
@@ -1881,7 +1888,7 @@ const Sessions = HttpApiGroup.make("sessions")
 			.annotate(OpenApi.Summary, "List session events")
 			.annotate(
 				OpenApi.Description,
-				"List persisted events for a session. Use the returned cursor to continue through its history.",
+				"List persisted events for a session. Use next_page to continue through its history.",
 			)
 			.annotate(OpenApi.Override, {
 				"x-forge-group-name": "sessions.events",
@@ -1889,6 +1896,7 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-endpoint": { group: "sessions", endpoint: "listEvents" },
 				"x-checkfu-mcp": { name: "sessions_listEvents" },
 				"x-checkfu-cli": {
+					repeatArrayField: { field: "types", flag: "type" },
 					intQueryParams: {
 						limit: { min: 1, max: 100, metavar: "N" },
 					},

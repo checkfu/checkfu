@@ -11,6 +11,7 @@ import {
 	Int as FlagInt,
 	Literals as FlagLiterals,
 	String as FlagString,
+	atLeast as FlagAtLeast,
 	between as FlagBetween,
 	optional as FlagOptional,
 	withDescription as FlagWithDescription,
@@ -2167,6 +2168,15 @@ const sessionsEventsListCommandSpec: GeneratedOperationDescriptor = {
 			max: 100,
 		},
 		{
+			propName: "types",
+			flagName: "type",
+			wireName: "types",
+			location: "query",
+			kind: "repeat-query",
+			required: false,
+			min: 0,
+		},
+		{
 			propName: "order",
 			flagName: "order",
 			wireName: "order",
@@ -2193,6 +2203,10 @@ const sessionsEventsListCommand = CommandMake(
 			FlagWithDescription("Maximum number of events to return (1-100)"),
 			FlagOptional,
 		),
+		types: FlagString("type").pipe(
+			FlagWithDescription("Return events with one of these types."),
+			FlagAtLeast(0),
+		),
 		order: FlagLiterals("order", ["asc", "desc"]).pipe(
 			FlagWithDescription("Sort order: asc or desc"),
 			FlagOptional,
@@ -2201,7 +2215,7 @@ const sessionsEventsListCommand = CommandMake(
 	(flags) => invokeGeneratedOperation(sessionsEventsListCommandSpec, flags),
 ).pipe(
 	CommandWithDescription(
-		"List persisted events for a session. Use the returned cursor to continue through its history.",
+		"List persisted events for a session. Use next_page to continue through its history.",
 	),
 )
 

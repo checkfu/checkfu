@@ -717,7 +717,7 @@ export const SDK_OPERATION_BINDINGS = [
 		httpMethod: "GET",
 		path: "/v1/sessions/{session_id}/events",
 		pathParams: ["session_id"],
-		queryParams: ["page", "limit", "order"],
+		queryParams: ["page", "limit", "types", "order"],
 		requiredQueryParams: [],
 		kind: "paginated",
 		retrySafety: "idempotent",

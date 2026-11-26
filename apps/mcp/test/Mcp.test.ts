@@ -334,6 +334,14 @@ describe("Checkfu MCP server", () => {
 				Effect.retry(Schedule.max([Schedule.spaced("20 millis"), Schedule.recurs(200)])),
 			)
 			expect(events["next_page"]).toBeNull()
+			const filtered = yield* callOk(client, "sessions_listEvents", {
+				path,
+				query: { types: ["user.message", "agent.message"] },
+			})
+			expect(filtered["data"]).toEqual([
+				expect.objectContaining({ type: "user.message" }),
+				expect.objectContaining({ type: "agent.message" }),
+			])
 		}).pipe(Effect.scoped),
 	)
 

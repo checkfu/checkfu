@@ -2052,7 +2052,7 @@ export class EffectSessionsEventsResource {
 		this.#runtime = runtime
 	}
 
-	/** List persisted events for a session. Use the returned cursor to continue through its history. */
+	/** List persisted events for a session. Use next_page to continue through its history. */
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params:
@@ -2095,6 +2095,7 @@ export class EffectSessionsEventsResource {
 								query: {
 									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+									...(params?.["types"] === undefined ? {} : { types: params["types"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
 								},
 								responseMode: "decoded-and-response",
@@ -2105,7 +2106,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Auto-paginate pages for List persisted events for a session. Use the returned cursor to continue through its history. */
+	/** Auto-paginate pages for List persisted events for a session. Use next_page to continue through its history. */
 	listPages(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -2125,7 +2126,7 @@ export class EffectSessionsEventsResource {
 		)
 	}
 
-	/** Auto-paginate items for List persisted events for a session. Use the returned cursor to continue through its history. */
+	/** Auto-paginate items for List persisted events for a session. Use next_page to continue through its history. */
 	listStream(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
@@ -3632,7 +3633,7 @@ export class SessionsEventsResource {
 		this.#runtime = runtime
 	}
 
-	/** List persisted events for a session. Use the returned cursor to continue through its history. */
+	/** List persisted events for a session. Use next_page to continue through its history. */
 	list(
 		sessionId: PathParam<"sessions", "listEvents", "session_id">,
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,

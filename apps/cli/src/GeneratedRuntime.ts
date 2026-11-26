@@ -45,6 +45,7 @@ export interface GeneratedFlagDescriptor {
 		| "text-or-object"
 		| "structured"
 		| "repeat-structured"
+		| "repeat-query"
 	readonly required: boolean
 	readonly min?: number
 	readonly max?: number
@@ -136,7 +137,7 @@ type RawFlagsRecord = Readonly<Record<string, RawFlagValue>>
 
 interface RequestParts {
 	readonly params: Record<string, string>
-	readonly query: Record<string, string>
+	readonly query: Record<string, string | ReadonlyArray<string>>
 	readonly headers: Record<string, string>
 	readonly body: StructuredRecord | undefined
 }
@@ -152,7 +153,7 @@ const collectRequestParts = (
 ): Effect.Effect<RequestParts, CliFailure, FileSystem.FileSystem | Stdio.Stdio> =>
 	Effect.gen(function* () {
 		const params: Record<string, string> = {}
-		const query: Record<string, string> = {}
+		const query: RequestParts["query"] = {}
 		const headers: Record<string, string> = {}
 		let body: StructuredRecord | undefined
 
@@ -237,7 +238,11 @@ const collectRequestParts = (
 				continue
 			}
 			if (fl.location === "query") {
-				query[fl.wireName] = String(value)
+				if (fl.kind !== "repeat-query") {
+					query[fl.wireName] = String(value)
+				} else if (Array.isArray(value) && value.length > 0) {
+					query[fl.wireName] = value
+				}
 				continue
 			}
 			if (fl.location === "header") {
@@ -391,7 +396,7 @@ export const invokeGeneratedStream = (
 				? yield* decodeWithTop(endpoint.params, parts.params, `${spec.cliLabel} params`)
 				: undefined
 		const rawDeltas = parts.query["event_deltas[]"]
-		const deltaTypes = rawDeltas === undefined ? undefined : rawDeltas.split(",")
+		const deltaTypes = typeof rawDeltas === "string" ? rawDeltas.split(",") : rawDeltas
 		const decodedQuery =
 			endpoint.query !== undefined
 				? yield* decodeWithTop(
