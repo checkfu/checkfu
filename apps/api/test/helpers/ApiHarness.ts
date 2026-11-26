@@ -9,10 +9,11 @@ import {
 import type { ProviderSpec } from "@checkfu/pi-providers/catalog"
 import { buildPiProvider, withDynamicModelLookup } from "@checkfu/pi-providers/runtime"
 import type { TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import type { Api, AssistantMessage, Model, TranscriptContext } from "@earendil-works/pi-ai"
 import { createModels } from "@earendil-works/pi-ai/models"
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
-import type { JsonObject } from "@earendil-works/pi-durable"
+import type { JsonObject, Registry } from "@earendil-works/pi-durable"
 import { expect } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
@@ -183,6 +184,10 @@ export const makePiDurableTestLayer = (
 		ANTHROPIC_API_KEY: "sk-anthropic-test",
 	},
 	platform = Domain.InMemory,
+	registry?: () => Registry,
+	options: {
+		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
+	} = {},
 ) => {
 	interface SessionObject {
 		readonly backend: InMemoryPiDurableBackend
@@ -204,7 +209,7 @@ export const makePiDurableTestLayer = (
 		const backend = await createInMemoryPiDurableBackend(
 			makeScriptedPiModels(handler, customProviders),
 			undefined,
-			undefined,
+			registry?.(),
 			(provider) =>
 				checkCatalogProviderCredentials(provider, { env: envOverrides }, customProviders).ok,
 			{
@@ -292,10 +297,21 @@ export const makePiDurableTestLayer = (
 	)
 
 	const artifactStore = makeArtifactStoreMemory()
+	const wrapSessions = options.harnessSessions ?? ((sessions) => sessions)
+	const HarnessLive = PiDurableHarnessLive.pipe(
+		Layer.provide(
+			Layer.effect(
+				Session,
+				Effect.gen(function* () {
+					return wrapSessions(yield* Session)
+				}),
+			),
+		),
+	)
 	const CheckfuLive = Checkfu.layer(
 		CheckfuHandlersLive.pipe(
 			Layer.provide(ListingStore.memory),
-			Layer.provide(PiDurableHarnessLive),
+			Layer.provide(HarnessLive),
 			Layer.provide(ArtifactBytesLive.pipe(Layer.provide(artifactStore.layer))),
 		),
 	).pipe(Layer.provide(executorLayer))

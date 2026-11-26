@@ -4,6 +4,10 @@ import {
 } from "@checkfu/domain/Agent/AgentVersionByNumberView.view"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import { recordToolEvents } from "@checkfu/domain/Session/RecordToolEvents"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -16,6 +20,7 @@ import {
 	resolveCatalogModel,
 	supportedProvidersDescription,
 } from "./PiCatalog.ts"
+import { turnOperationId } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -64,6 +69,8 @@ export const HarnessLimits = Context.Reference<{
 
 export const conversationName = (sessionId: string): string => sessionId
 
+const RECORD_RETRY_CAP = "10 seconds"
+
 const withRetry = <A>(call: Effect.Effect<A, HarnessCallFailed>) =>
 	Effect.gen(function* () {
 		const { attempts, baseDelay } = yield* HarnessLimits
@@ -71,6 +78,29 @@ const withRetry = <A>(call: Effect.Effect<A, HarnessCallFailed>) =>
 			times: attempts - 1,
 			schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
 		})
+	})
+
+export const recordSettledToolEvents = (
+	args: { readonly session_id: SessionId; readonly turn: number },
+	events: ReadonlyArray<ToolEvent>,
+) =>
+	Effect.gen(function* () {
+		const { baseDelay } = yield* HarnessLimits
+		yield* recordToolEvents({ ...args, events }).pipe(
+			Effect.catchDefect((defect) =>
+				Effect.andThen(
+					Effect.logWarning("Tool events not recorded yet", args.session_id, defect),
+					Effect.fail({ _tag: "NotRecorded" as const }),
+				),
+			),
+			Effect.retry({
+				schedule: Schedule.min([
+					Schedule.exponential(baseDelay),
+					Schedule.spaced(RECORD_RETRY_CAP),
+				]).pipe(Schedule.jittered),
+			}),
+			Effect.orDie,
+		)
 	})
 
 export class PiTurnExecutor extends Context.Service<PiTurnExecutor, PiTurnExecutorService>()(
@@ -95,8 +125,6 @@ const settleTimeout = Effect.gen(function* () {
 	)
 })
 
-const turnOperationId = (turn: number) => `turn:${turn}`
-
 const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<string> =>
 	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
 		turnOperationId(lastReplyTurn + 1 + i),
@@ -107,6 +135,18 @@ export const PiDurableHarnessLive = boundedHarness(
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const executor = yield* PiTurnExecutor
 		const customProviders = yield* configuredApiCustomProviders
+		const sessions = yield* Session
+
+		const settled = (
+			args: { readonly session_id: SessionId; readonly turn: number },
+			outcome: PiTurnOutcome,
+		) =>
+			Effect.andThen(
+				recordSettledToolEvents(args, outcome.tool_events ?? []).pipe(
+					Effect.provideService(Session, sessions),
+				),
+				outcome.ok ? Effect.succeed(outcome.reply) : Effect.fail(outcome.error),
+			)
 
 		return {
 			runTurn: (args) => {
@@ -121,10 +161,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
 					if (recovered !== null) {
-						if (!recovered.ok) {
-							return yield* Effect.fail(recovered.error)
-						}
-						return recovered.reply
+						return yield* settled(args, recovered)
 					}
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
@@ -194,10 +231,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
 
-					if (!outcome.ok) {
-						return yield* Effect.fail(outcome.error)
-					}
-					return outcome.reply
+					return yield* settled(args, outcome)
 				})
 				return Effect.flatMap(settleTimeout, (duration) =>
 					Effect.timeoutOrElse(settle, {

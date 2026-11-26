@@ -10,6 +10,8 @@ import type { Api, AssistantMessage } from "@earendil-works/pi-ai"
 import { GenerationTask, createRegistry, defineExtension, hook } from "@earendil-works/pi-durable"
 
 import type { PiTurnOutcome } from "./PiTurn.ts"
+import { resultBoundsExtension } from "./PiResultBounds.ts"
+import { rejectionProvenanceExtension } from "./PiRejection.ts"
 
 export { DEFAULT_REFUSAL_TEXT, isRefusalAssistantMessage }
 
@@ -49,6 +51,15 @@ export const normalizeRefusalAssistantMessage = (message: AssistantMessage): Ass
 
 export const createCheckfuRegistry = () => {
 	const registry = createRegistry()
+	registry.install(
+		resultBoundsExtension(() =>
+			registry
+				.snapshot()
+				.tools()
+				.map(({ tool }) => tool),
+		),
+	)
+	registry.install(rejectionProvenanceExtension)
 	registry.install(
 		defineExtension({
 			name: "checkfu-refusal-normalization",

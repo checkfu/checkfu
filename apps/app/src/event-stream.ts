@@ -24,6 +24,8 @@ const EVENT_TYPES: Record<SessionEventType, true> = {
 	"span.model_request_start": true,
 	"agent.thinking": true,
 	"agent.message": true,
+	"agent.tool_use": true,
+	"agent.tool_result": true,
 	"span.model_request_end": true,
 	"session.status_idle": true,
 	"session.error": true,

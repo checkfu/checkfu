@@ -64,6 +64,12 @@ const entryOf = (event: JsonSessionEvent): React.JSX.Element | null => {
 			)
 		case "session.status_terminated":
 			return <p className="text-control text-muted-foreground">Session terminated.</p>
+		case "agent.tool_use":
+			return <p className="font-mono text-control text-muted-foreground">Called {event.name}</p>
+		case "agent.tool_result":
+			return event.is_error ? (
+				<p className="font-mono text-control text-destructive">Tool call failed.</p>
+			) : null
 		default:
 			return null
 	}

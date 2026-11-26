@@ -21165,6 +21165,102 @@
 							},
 							"type": {
 								"type": "string",
+								"enum": ["agent.tool_use"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"name": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"input": {
+								"type": "object"
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "tool_use_id", "name", "input"],
+						"additionalProperties": false,
+						"description": "Records a call the model made. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
+								"enum": ["agent.tool_result"]
+							},
+							"created_at": {
+								"type": "string"
+							},
+							"tool_use_id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 256
+							},
+							"content": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string",
+											"enum": ["text"]
+										},
+										"text": {
+											"type": "string"
+										}
+									},
+									"required": ["type", "text"],
+									"additionalProperties": false
+								}
+							},
+							"is_error": {
+								"type": "boolean"
+							},
+							"truncated": {
+								"type": "boolean",
+								"enum": [true]
+							},
+							"rejected": {
+								"type": "string",
+								"enum": ["unavailable", "invalid_arguments", "blocked"]
+							}
+						},
+						"required": ["id", "seq", "type", "created_at", "tool_use_id", "content", "is_error"],
+						"additionalProperties": false,
+						"description": "Records what a call the model made returned, or, with rejected, why it did not run. A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+					},
+					{
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 9007199254740991
+							},
+							"type": {
+								"type": "string",
 								"enum": ["agent.thinking"]
 							},
 							"created_at": {
