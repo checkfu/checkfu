@@ -1629,6 +1629,14 @@ describe("PiSession real Durable Object under workerd", () => {
 				saved.some((event) => event.type === "event_start" || event.type === "event_delta"),
 			).toBe(false)
 			expect(saved.find((event) => event.type === "agent.message")?.id).toBe(eventId)
+			const filtered: Array<string> = []
+			for await (const event of client.sessions.events.list(session.id, {
+				types: ["user.message", "agent.message"],
+				limit: 1,
+			})) {
+				filtered.push(event.type)
+			}
+			expect(filtered).toEqual(["user.message", "agent.message"])
 		} finally {
 			await client.close()
 		}
