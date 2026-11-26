@@ -13,7 +13,8 @@ const ContentJson = Schema.fromJsonString(SessionEventFields["system.message"].c
 const readContent = Schema.decodeUnknownOption(ContentJson)
 
 export const encodeSystemMessage = Schema.encodeSync(ContentJson)
-export const decodeSystemMessage = Schema.decodeSync(ContentJson)
+const decodeContent = Schema.decodeSync(ContentJson)
+export const decodeSystemMessage = (content: string) => decodeContent(content)
 
 const SystemMessageJson = Schema.String.check(
 	Schema.isMinLength(2),
