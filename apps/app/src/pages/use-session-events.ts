@@ -1,4 +1,5 @@
-import type { JsonSession, JsonSessionEvent, JsonSessionEventPreview } from "@checkfu/sdk/client"
+import { accumulateSessionEvent } from "@checkfu/sdk/client"
+import type { JsonSession, JsonSessionEvent, SessionMessagePreview } from "@checkfu/sdk/client"
 import type { SessionEventType } from "@checkfu/sdk/Schemas"
 import { useMountEffect } from "@checkfu/ui/use-mount-effect"
 import { useQuery, useQueryClient, useSuspenseInfiniteQuery } from "@tanstack/react-query"
@@ -41,7 +42,7 @@ export function useSessionEvents({
 	const live = liveQuery(session.id)
 	const history = useSuspenseInfiniteQuery(transcript)
 	const tail = useQuery(live).data ?? NO_EVENTS
-	const [preview, setPreview] = useState<{ readonly id: string; readonly text: string }>()
+	const [preview, setPreview] = useState<SessionMessagePreview>()
 	const [connection, setConnection] = useState<Connection>("live")
 	const [batch] = useState(
 		() =>
@@ -77,10 +78,11 @@ export function useSessionEvents({
 			}
 		}
 		const receive = (event: JsonSessionEvent) => {
+			batch.add([event])
 			if (event.type === "agent.message" || event.type === "span.model_request_end") {
+				batch.flush()
 				setPreview(undefined)
 			}
-			batch.add([event])
 			if (CHANGES_SNAPSHOT.has(event.type)) {
 				resync()
 			}
@@ -88,23 +90,8 @@ export function useSessionEvents({
 		const stop = isFinal(events)
 			? () => undefined
 			: follow({
-					open: (after) =>
-						new EventSource(
-							checkfu.sessions.streamUrl(session.id, after) + "&event_deltas%5B%5D=agent.message",
-						),
-					preview: (event: JsonSessionEventPreview) => {
-						if (event.type === "event_start") {
-							if (event.event.type === "agent.message") {
-								setPreview({ id: event.event.id, text: "" })
-							}
-						} else {
-							setPreview((current) =>
-								current?.id === event.event_id
-									? { ...current, text: current.text + event.delta.content.text }
-									: current,
-							)
-						}
-					},
+					open: (after) => new EventSource(checkfu.sessions.streamUrl(session.id, after)),
+					preview: (event) => setPreview((current) => accumulateSessionEvent(current, event)),
 					cursor: () =>
 						Math.max(
 							newestSeqOf(queryClient.getQueryData(transcript.queryKey)),

@@ -1087,8 +1087,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						).pipe(Stream.tap((entry) => Effect.sync(() => (cursor = entry.envelope.seq))))
 					const deltaTypes = query["event_deltas[]"] ?? []
 					let caughtUp = false
+					const offsets = new Map<string, number>()
+					const finished = new Set<string>()
 					const previews = Stream.suspend(() => {
-						const offsets = new Map<string, number>()
 						return watchPreviews(id).pipe(
 							Stream.catchCause(() => Stream.empty),
 							Stream.filter(({ event, offset }) => {
@@ -1096,7 +1097,11 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 									return false
 								}
 								if (event.type === "event_start") {
-									if (!deltaTypes.includes(event.event.type)) {
+									if (
+										finished.has(event.event.id) ||
+										offsets.has(event.event.id) ||
+										!deltaTypes.includes(event.event.type)
+									) {
 										return false
 									}
 									if (offsets.size >= 32) {
@@ -1150,6 +1155,16 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						Stream.filter((entry) => entry.envelope.seq > from),
 						Stream.mapEffect(publishedEvent),
 						Stream.map((payload) => {
+							if (
+								deltaTypes.length > 0 &&
+								(payload.type === "agent.message" || payload.type === "agent.thinking")
+							) {
+								offsets.delete(payload.id)
+								if (finished.size >= 32) {
+									finished.delete(finished.values().next().value ?? "")
+								}
+								finished.add(payload.id)
+							}
 							return Sse.encoder.write({
 								_tag: "Event",
 								id: String(payload.seq),

@@ -173,7 +173,15 @@ const generateResourcesFile = (
 				if (op.kind === "sse") {
 					if (op.sse?.cursorParam !== undefined) {
 						out(
-							"{ readonly ",
+							"Omit<",
+							EndpointQuery,
+							"<",
+							g,
+							", ",
+							e,
+							">, ",
+							JSON.stringify(op.sse.cursorParam),
+							"> & { readonly ",
 							JSON.stringify(op.sse.cursorParam),
 							"?: ",
 							op.sse.cursorType,

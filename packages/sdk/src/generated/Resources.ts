@@ -284,7 +284,9 @@ export interface CheckfuOperations {
 	>
 	readonly "sessions.events.stream": OperationShape<
 		EndpointParams<"sessions", "streamEvents">,
-		{ readonly after?: number | undefined },
+		Omit<EndpointQuery<"sessions", "streamEvents">, "after"> & {
+			readonly after?: number | undefined
+		},
 		never,
 		EndpointSseEvent<"sessions", "streamEvents">
 	>
