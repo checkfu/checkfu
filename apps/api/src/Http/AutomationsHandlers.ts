@@ -415,10 +415,7 @@ export const AutomationsLive = HttpApiBuilder.group(CheckfuApi, "automations", (
 					)
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) => archive(params.automation_id))
-			.handle("archiveIfCurrent", ({ params, payload }) =>
-				archive(params.automation_id, payload.revision),
-			)
+			.handle("archive", ({ params, query }) => archive(params.automation_id, query.revision))
 			.handle("run", ({ params }) =>
 				Effect.gen(function* () {
 					const id = params.automation_id

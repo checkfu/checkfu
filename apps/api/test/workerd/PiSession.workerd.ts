@@ -19,6 +19,8 @@ import {
 	measureBundle,
 } from "./BundleBudget.ts"
 import { removeStage } from "./StageCleanup.ts"
+import { startFakeGitHubServer } from "./FakeGitHubServer.ts"
+import type { FakeGitHubServer } from "./FakeGitHubServer.ts"
 import { startFakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import type { FakeOpenAIAction, FakeOpenAIResponsesServer } from "./FakeOpenAIResponsesServer.ts"
 import { startFakeMcpServer } from "./FakeMcpServer.ts"
@@ -35,6 +37,7 @@ const TEST_CLOUDFLARE_AI_KEY = "cf-ai-workerd-fake-key"
 const TEST_CUSTOM_PROVIDER_ID = "custom-local"
 const TEST_CUSTOM_API_KEY = "sk-custom-workerd-fake-key"
 const TEST_CUSTOM_HEADER_SECRET = "hdr-custom-workerd-secret"
+const TEST_GITHUB_TOKEN = "ghp_workerd_fake_token"
 const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
 }
@@ -210,8 +213,11 @@ const boundEnv = (stage: string, worker: (typeof WORKERS)[number]): object => {
 const boundNames = (stage: string, worker: (typeof WORKERS)[number]): ReadonlyArray<string> =>
 	Object.keys(boundEnv(stage, worker))
 
-const startAlchemyDev = async (openAIBaseUrl: string) => {
-	const stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`
+const startAlchemyDev = async (
+	openAIBaseUrl: string,
+	gitHubBaseUrl: string,
+	stage = `wd-${process.pid.toString(36)}-${Date.now().toString(36).slice(-4)}`,
+) => {
 	const envDir = mkdtempSync(join(tmpdir(), `checkfu-${stage}-`))
 	const envFile = join(envDir, "test.env")
 	const customProvidersJson = JSON.stringify({
@@ -241,6 +247,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				"CHECKFU_PUBLISH_DOMAIN=pages.example",
 				"CHECKFU_API_DOMAIN=none",
 				"CHECKFU_MCP_DOMAIN=none",
+				`CHECKFU_GITHUB_BASE_URL=${gitHubBaseUrl}`,
 				"CHECKFU_MACHINE_IDLE=10 seconds",
 				"",
 			].join("\n"),
@@ -270,6 +277,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.CHECKFU_PUBLISH_DOMAIN
 	delete childEnv.CHECKFU_API_DOMAIN
 	delete childEnv.CHECKFU_MCP_DOMAIN
+	delete childEnv.CHECKFU_GITHUB_BASE_URL
 	delete childEnv.CHECKFU_MACHINE_IDLE
 	delete childEnv.CHECKFU_LOCAL_DEV
 	delete childEnv.ALCHEMY_STAGE
@@ -367,10 +375,13 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		}
 	}, 180_000)
 
-	const stop = async () => {
+	const halt = async () => {
 		clearTimeout(startupTimer)
 		await stopProcessByPid(child)
 		rmSync(envDir, { recursive: true, force: true })
+	}
+	const stop = async () => {
+		await halt()
 		removeStage(join(REPO_ROOT, ".alchemy"), "Checkfu", stage)
 	}
 
@@ -397,7 +408,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				})
 				void res.body?.cancel().catch(() => undefined)
 				if (res.status === 200) {
-					return { baseUrl, logs, stage, stop }
+					return { baseUrl, logs, stage, stop, halt }
 				}
 			} catch {
 				const sleepMs = Math.min(100, healthDeadline - Date.now())
@@ -440,9 +451,11 @@ const userMessage = (text: string) => ({
 
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
+	let fakeGitHub: FakeGitHubServer
 	let baseUrl: string
 	let stage: string
 	let stopWorker: (() => Promise<void>) | undefined
+	let haltWorker: (() => Promise<void>) | undefined
 	let workerLogs: ReadonlyArray<string> = []
 	let workerStage: string
 	let agentId: string
@@ -561,6 +574,31 @@ describe("PiSession real Durable Object under workerd", () => {
 		return res.body.data
 	}
 
+	const storedMemories = async (storeId: string): Promise<Record<string, string>> => {
+		const listed = await apiJson<{
+			readonly data: ReadonlyArray<{ readonly id: string; readonly path: string }>
+		}>(`/v1/memory_stores/${storeId}/memories`)
+		const contents: Record<string, string> = {}
+		for (const entry of listed.body.data) {
+			const memory = await apiJson<{ readonly content: string }>(
+				`/v1/memory_stores/${storeId}/memories/${entry.id}`,
+			)
+			contents[entry.path] = memory.body.content
+		}
+		return contents
+	}
+
+	const replyAfterTurn = async (sessionId: string, text: string, number: number) => {
+		const sent = await apiJson(`/v1/sessions/${sessionId}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(sessionId, (s) => s.status === "idle" && s.turn === number, 240_000)
+		const replies = (await listAllEvents(sessionId)).filter((e) => e.type === "agent.message")
+		return replies.at(-1)?.content?.[0]?.text ?? ""
+	}
+
 	beforeAll(async () => {
 		fakeOpenAI = await startFakeOpenAIResponsesServer((req) => ({
 			kind: "reply",
@@ -569,10 +607,16 @@ describe("PiSession real Durable Object under workerd", () => {
 			outputTokens: 9,
 		}))
 
-		const worker = await startAlchemyDev(fakeOpenAI.baseUrl)
+		fakeGitHub = await startFakeGitHubServer([
+			{ name: "acme/api", files: { "README.md": "# Acme API\n" }, token: TEST_GITHUB_TOKEN },
+			{ name: "acme/secret", files: { "KEYS.md": "do not read\n" }, token: "ghp_another_token" },
+		])
+
+		const worker = await startAlchemyDev(fakeOpenAI.baseUrl, fakeGitHub.baseUrl)
 		baseUrl = worker.baseUrl
 		stage = worker.stage
 		stopWorker = worker.stop
+		haltWorker = worker.halt
 		workerLogs = worker.logs
 		workerStage = worker.stage
 
@@ -596,6 +640,7 @@ describe("PiSession real Durable Object under workerd", () => {
 	afterAll(async () => {
 		await stopWorker?.()
 		await fakeOpenAI?.close()
+		await fakeGitHub?.close()
 	}, 30_000)
 
 	const bytesOf = async (artifactId: string, version: number, path: string) => {
@@ -608,17 +653,6 @@ describe("PiSession real Durable Object under workerd", () => {
 			encoding: file.body.encoding,
 			bytes: Buffer.from(file.body.content, file.body.encoding),
 		}
-	}
-
-	const replyAfterTurn = async (sessionId: string, text: string, number: number) => {
-		const sent = await apiJson(`/v1/sessions/${sessionId}/events`, {
-			method: "POST",
-			body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
-		})
-		expect(sent.status).toBe(200)
-		await waitForSession(sessionId, (s) => s.status === "idle" && s.turn === number, 60_000)
-		const replies = (await listAllEvents(sessionId)).filter((e) => e.type === "agent.message")
-		return replies.at(-1)?.content?.[0]?.text ?? ""
 	}
 
 	it("serializes a conditional archive with a competing automation repoint", async () => {
@@ -658,7 +692,7 @@ describe("PiSession real Durable Object under workerd", () => {
 		)
 
 		const [archive, repoint] = await Promise.all([
-			apiJson(`${environmentPath}/archive-if-current`, { method: "POST", body: { version: 1 } }),
+			apiJson(`${environmentPath}/archive?version=1`, { method: "POST" }),
 			apiJson(automationPath, { method: "POST", body: { environment_id: target.id } }),
 		])
 		const archived = archive.status === 200 || archive.status === 202
@@ -676,9 +710,8 @@ describe("PiSession real Durable Object under workerd", () => {
 			readonly environment_id: string
 			readonly revision: number
 		}>(automationPath, (row) => row.environment_id === (archived ? environmentId : target.id))
-		const cleanup = await apiJson(`${automationPath}/archive-if-current`, {
+		const cleanup = await apiJson(`${automationPath}/archive?revision=${automation.revision}`, {
 			method: "POST",
-			body: { revision: automation.revision },
 		})
 		expect([200, 202], JSON.stringify(cleanup.body)).toContain(cleanup.status)
 	}, 30_000)
@@ -755,6 +788,36 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(res.status).toBe(200)
 		return res.body.data.map((agent) => agent.id)
 	}
+
+	it("lists a memory with the hash of the update just acknowledged, and reads it back at once", async () => {
+		const store = await createResource<{ id: string }>("/v1/memory_stores", { name: "Notes" })
+		const memories = `/v1/memory_stores/${store.id}/memories`
+		const created = await createResource<{ id: string }>(memories, {
+			path: "/a.md",
+			content: "0",
+		})
+		for (let round = 1; round <= 12; round += 1) {
+			const res = await apiFetch(`${memories}/${created.id}`, {
+				method: "POST",
+				body: { content: `Round ${round}.` },
+			})
+			expect(res.status).toBe(200)
+			const updated = (await res.json()) as { content_sha256: string; version: number }
+			const [listed, read] = await Promise.all([
+				apiFetch(memories).then(
+					(list) => list.json() as Promise<{ data: ReadonlyArray<{ content_sha256: string }> }>,
+				),
+				apiFetch(`${memories}/${created.id}`).then(
+					(one) => one.json() as Promise<{ version: number }>,
+				),
+			])
+			expect([round, listed.data.map((entry) => entry.content_sha256)]).toEqual([
+				round,
+				[updated.content_sha256],
+			])
+			expect(read.version).toBeGreaterThanOrEqual(updated.version)
+		}
+	}, 60_000)
 
 	it("answers successive list requests in one isolate", async () => {
 		const deadline = Date.now() + 20_000
@@ -1195,6 +1258,562 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
 	}, 60_000)
+	it("clones a private repository in the machine with its token kept outside it, lets the agent commit and push, and lends the token to no other repository", async () => {
+		const repo = "/workspace/api"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Read the readme.": [
+					{ kind: "tool_call", name: "read", arguments: { path: `${repo}/README.md` } },
+				],
+				"Add a changelog and push it.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${repo}/CHANGELOG.md`, content: "## 1.0.1\n" },
+					},
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								'git add CHANGELOG.md && git commit -qm "Add changelog" && git push -q origin main && echo pushed',
+							cwd: repo,
+						},
+					},
+				],
+				"Look for the token.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: "env; cat .git/config; git config --list", cwd: repo },
+					},
+				],
+				"Clone the secret repository.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								"git clone -q https://github.com/acme/secret /workspace/secret 2>&1 | tail -1",
+							cwd: "/workspace",
+						},
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.at(-1) ?? ""}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		const session = await createResource<
+			SessionResource & {
+				readonly resources: ReadonlyArray<{ readonly id: string; readonly mount_path: string }>
+			}
+		>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			initial_events: [
+				{ type: "user.message", content: [{ type: "text", text: "Read the readme." }] },
+			],
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		expect(session.resources.map((resource) => resource.mount_path)).toEqual([repo])
+		expect(JSON.stringify(session)).not.toContain(TEST_GITHUB_TOKEN)
+
+		const turn = (text: string, number: number) => replyAfterTurn(session.id, text, number)
+
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		const firstReply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(firstReply?.content?.[0]?.text).toContain("# Acme API")
+		const basic = `Basic ${Buffer.from(`x-access-token:${TEST_GITHUB_TOKEN}`).toString("base64")}`
+		expect(fakeGitHub.requests.length).toBeGreaterThan(0)
+		expect(fakeGitHub.requests.map((request) => request.authorization)).toEqual(
+			fakeGitHub.requests.map(() => basic),
+		)
+		expect(fakeGitHub.requests.map((request) => request.status)).toEqual(
+			fakeGitHub.requests.map(() => 200),
+		)
+
+		expect(await turn("Add a changelog and push it.", 2)).toBe("Done: pushed")
+		expect(
+			fakeGitHub.git("acme/api", "log", "--format=%s|%an|%ae", "main").trim().split("\n"),
+		).toEqual(["Add changelog|Checkfu|agent@checkfu.com", "Initial commit|Owner|owner@example.com"])
+		expect(fakeGitHub.git("acme/api", "show", "main:CHANGELOG.md")).toBe("## 1.0.1\n")
+
+		const looked = await turn("Look for the token.", 3)
+		expect(looked).toContain("remote.origin.url=https://github.com/acme/api")
+		expect(looked).not.toContain(TEST_GITHUB_TOKEN)
+		expect(looked).not.toContain(basic)
+
+		const refusal = await turn("Clone the secret repository.", 4)
+		expect(refusal).toContain("Done: ")
+		expect(refusal).not.toBe("Done: ")
+		const secret = fakeGitHub.requests.filter((request) => request.path.startsWith("/acme/secret"))
+		expect(secret.map((request) => request.authorization)).toEqual(secret.map(() => null))
+		expect(fakeGitHub.git("acme/secret", "log", "--format=%s", "main").trim()).toBe(
+			"Initial commit",
+		)
+
+		const requests = fakeOpenAI.requests.slice(startCount)
+		expect(requests[0]?.toolNames).toContain("bash")
+		expect(
+			requests[0]?.messages.some((message) =>
+				message.text.includes(`- ${repo}: https://github.com/acme/api (default branch)`),
+			),
+		).toBe(true)
+		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(TEST_GITHUB_TOKEN)
+		expect(JSON.stringify(requests.map((request) => request.body))).not.toContain(basic)
+	}, 600_000)
+
+	it("checks out a commit behind the branch tip without fetching the history before it", async () => {
+		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
+		const tip = fakeGitHub.git("acme/api", "rev-parse", "main").trim()
+		const pinned = fakeGitHub.git("acme/api", "commit-tree", tree, "-p", tip, "-m", "Pinned").trim()
+		const later = fakeGitHub
+			.git("acme/api", "commit-tree", tree, "-p", pinned, "-m", "Later")
+			.trim()
+		fakeGitHub.git("acme/api", "update-ref", "refs/heads/main", later)
+		const repo = "/workspace/pinned"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: 'git log --format="%H %s"', cwd: repo },
+					}
+				: { kind: "reply", text: `Log: ${req.toolOutputs[0] ?? ""}` },
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					mount_path: repo,
+					authorization_token: TEST_GITHUB_TOKEN,
+					checkout: { type: "commit", sha: pinned },
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [{ type: "user.message", content: [{ type: "text", text: "Show the log." }] }],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe(`Log: ${pinned} Pinned`)
+	}, 300_000)
+
+	it("tells the session why a repository was not reached, when its host is not allowed", async () => {
+		fakeOpenAI.setHandler(() => ({ kind: "reply", text: "unused" }))
+		const fenced = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Workerd Fenced Env",
+			config: {
+				type: "cloud",
+				networking: {
+					type: "limited",
+					allowed_hosts: ["example.com"],
+					allow_mcp_servers: false,
+					allow_package_managers: false,
+				},
+			},
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: fenced.id,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					authorization_token: TEST_GITHUB_TOKEN,
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: "Look." }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 120_000)
+		const failure = (await listAllEvents(session.id)).find((e) => e.type === "session.error")
+		expect(JSON.stringify(failure)).toContain("allowed_hosts")
+	}, 180_000)
+	it("mounts memory stores as files, saves a session's changes, and shares them with the next session", async () => {
+		const createStore = async (name: string, memories: Readonly<Record<string, string>>) => {
+			const store = await createResource<{ readonly id: string }>("/v1/memory_stores", { name })
+			for (const [path, content] of Object.entries(memories)) {
+				const created = await apiJson(`/v1/memory_stores/${store.id}/memories`, {
+					method: "POST",
+					body: { path, content },
+				})
+				expect(created.status).toBe(201)
+			}
+			return store
+		}
+		const notes = await createStore("Team Notes", { "/facts.md": "The launch code is KIWI-9." })
+		const handbook = await createStore("Handbook", { "/rules.md": "Be kind." })
+		const resources = [
+			{ type: "memory_store", memory_store_id: notes.id },
+			{ type: "memory_store", memory_store_id: handbook.id, access: "read_only" },
+		]
+
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"What is the launch code?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/team-notes/facts.md" },
+					},
+				],
+				"Remember the customer's preference.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: {
+							path: "/mnt/memory/team-notes/customers/acme.md",
+							content: "Prefers email.",
+						},
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/memory/handbook/rules.md", content: "Be cruel." },
+					},
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/memory/./handbook//rules.md", content: "Be cruel." },
+					},
+					{ kind: "tool_call", name: "delete", arguments: { path: "/mnt/memory" } },
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/handbook/rules.md" },
+					},
+				],
+				"What does Acme prefer?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/memory/team-notes/customers/acme.md" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		const first = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources,
+		})
+		expect(await replyAfterTurn(first.id, "What is the launch code?", 1)).toContain("KIWI-9")
+		const refused = await replyAfterTurn(first.id, "Remember the customer's preference.", 2)
+		expect(refused.split("The memory store handbook is read-only.").length - 1).toBe(2)
+		expect(refused).toContain("mount root can't be removed or renamed: /mnt/memory")
+		expect(refused.endsWith("Be kind.")).toBe(true)
+		expect(await storedMemories(notes.id)).toEqual({
+			"/customers/acme.md": "Prefers email.",
+			"/facts.md": "The launch code is KIWI-9.",
+		})
+		expect(await storedMemories(handbook.id)).toEqual({ "/rules.md": "Be kind." })
+
+		const second = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources,
+		})
+		expect(await replyAfterTurn(second.id, "What does Acme prefer?", 1)).toContain("Prefers email.")
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain("- /mnt/memory/team-notes (read and write): Team Notes.")
+		expect(systemText).toContain("- /mnt/memory/handbook (read-only): Handbook.")
+	}, 180_000)
+
+	it("follows a memory path that turns from a directory into a file between turns", async () => {
+		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
+			name: "Shapes",
+		})
+		const memories = `/v1/memory_stores/${store.id}/memories`
+		const todo = await apiJson<{ readonly id: string }>(memories, {
+			method: "POST",
+			body: { path: "/notes/todo.md", content: "A file in a directory." },
+		})
+		expect(todo.status).toBe(201)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "memory_store", memory_store_id: store.id }],
+		})
+		const reads = new Map([
+			["Read the todo.", "/mnt/memory/shapes/notes/todo.md"],
+			["Read the notes.", "/mnt/memory/shapes/notes"],
+		])
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: reads.get(req.lastUserText) ?? "/missing" },
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` },
+		)
+		expect(await replyAfterTurn(session.id, "Read the todo.", 1)).toContain(
+			"A file in a directory.",
+		)
+
+		expect((await apiJson(`${memories}/${todo.body.id}`, { method: "DELETE" })).status).toBe(200)
+		const notes = await apiJson(memories, {
+			method: "POST",
+			body: { path: "/notes", content: "Now the directory is a file." },
+		})
+		expect(notes.status).toBe(201)
+		expect(await replyAfterTurn(session.id, "Read the notes.", 2)).toContain(
+			"Now the directory is a file.",
+		)
+		expect(await storedMemories(store.id)).toEqual({ "/notes": "Now the directory is a file." })
+	}, 120_000)
+
+	it("reaches memory stores in a turn Pi resumes after the Workers restart mid-turn", async () => {
+		const store = await createResource<{ readonly id: string }>("/v1/memory_stores", {
+			name: "Journal",
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "memory_store", memory_store_id: store.id }],
+		})
+		const prompt = "Keep a journal across the restart."
+		let restarted = false
+		const steps: ReadonlyArray<FakeOpenAIAction> = [
+			{
+				kind: "tool_call",
+				name: "write",
+				arguments: { path: "/mnt/memory/journal/before.md", content: "Written before." },
+			},
+			{
+				kind: "tool_call",
+				name: "write",
+				arguments: { path: "/mnt/memory/journal/after.md", content: "Written after." },
+			},
+			{ kind: "tool_call", name: "read", arguments: { path: "/mnt/memory/journal/before.md" } },
+		]
+		fakeOpenAI.setHandler((req) => {
+			if (req.lastUserText !== prompt) {
+				return { kind: "reply", text: "unexpected" }
+			}
+			if (req.toolOutputs.length === 1 && !restarted) {
+				return { kind: "hold" }
+			}
+			return (
+				steps[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				}
+			)
+		})
+
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [{ type: "user.message", content: [{ type: "text", text: prompt }] }] },
+		})
+		expect(sent.status).toBe(200)
+		await fakeOpenAI.waitForRequest(
+			(req) => req.lastUserText === prompt && req.toolOutputs.length === 1,
+			30_000,
+		)
+
+		await haltWorker?.()
+		restarted = true
+		const worker = await startAlchemyDev(fakeOpenAI.baseUrl, fakeGitHub.baseUrl, stage)
+		baseUrl = worker.baseUrl
+		stopWorker = worker.stop
+		haltWorker = worker.halt
+		workerLogs = worker.logs
+
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 120_000)
+		const reply = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message").at(-1)
+			?.content?.[0]?.text
+		expect(reply).toContain("Written before.")
+		expect(await storedMemories(store.id)).toEqual({
+			"/after.md": "Written after.",
+			"/before.md": "Written before.",
+		})
+	}, 240_000)
+
+	it("mounts an artifact version as read-only files the model can read and cannot change", async () => {
+		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
+			name: "Q3 Data",
+			files: [
+				{ path: "sales.csv", content: "region,total\nEMEA,4217\n" },
+				{ path: "img/pixel.bin", content: "AAEC/w==", encoding: "base64" },
+			],
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "artifact", artifact_id: artifact.id }],
+		})
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"What did EMEA sell?": [
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+					},
+				],
+				"Fix the total.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: "/mnt/artifacts/q3-data/sales.csv", content: "EMEA,0" },
+					},
+					{
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/artifacts/q3-data/sales.csv" },
+					},
+				],
+				"What else is there?": [
+					{
+						kind: "tool_call",
+						name: "find",
+						arguments: { pattern: "**/*.bin", path: "/mnt/artifacts/q3-data" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.join(" | ")}`,
+				},
+		)
+		const startCount = fakeOpenAI.requests.length
+
+		expect(await replyAfterTurn(session.id, "What did EMEA sell?", 1)).toContain("EMEA,4217")
+		const refused = await replyAfterTurn(session.id, "Fix the total.", 2)
+		expect(refused).toContain("read-only mount at /mnt/artifacts: cannot modify")
+		expect(refused).toContain("EMEA,4217")
+		expect(await replyAfterTurn(session.id, "What else is there?", 3)).toContain("img/pixel.bin")
+
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain("- /mnt/artifacts/q3-data: Q3 Data (version 1)")
+	}, 180_000)
+
+	it("mounts a skill the model is told about and reads with its file tools", async () => {
+		const skillText =
+			"---\nname: release-notes\ndescription: Write release notes. Use when asked to summarise a release.\n---\nAlways open with the word ZANZIBAR.\n"
+		const artifact = await createResource<{ readonly id: string }>("/v1/artifacts", {
+			name: "Release skill",
+			files: [
+				{ path: "SKILL.md", content: skillText },
+				{ path: "templates/notes.md", content: "## What changed\n" },
+			],
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [{ type: "skill", artifact_id: artifact.id }],
+		})
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "read",
+						arguments: { path: "/mnt/skills/release-notes/SKILL.md" },
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.join(" | ")}` },
+		)
+		const startCount = fakeOpenAI.requests.length
+		expect(await replyAfterTurn(session.id, "Summarise the release.", 1)).toContain(
+			"Always open with the word ZANZIBAR.",
+		)
+		const systemText = fakeOpenAI.requests[startCount]?.messages
+			.filter((message) => message.role === "system" || message.role === "developer")
+			.map((message) => message.text)
+			.join("\n")
+		expect(systemText).toContain(
+			"- /mnt/skills/release-notes/SKILL.md: release-notes. Write release notes. Use when asked to summarise a release.",
+		)
+	}, 180_000)
+
+	it("checks out the branch it was asked for when a tag has the same name", async () => {
+		const tree = fakeGitHub.git("acme/api", "rev-parse", "main^{tree}").trim()
+		const tip = fakeGitHub.git("acme/api", "rev-parse", "main").trim()
+		const onBranch = fakeGitHub
+			.git("acme/api", "commit-tree", tree, "-p", tip, "-m", "On the branch")
+			.trim()
+		const onTag = fakeGitHub
+			.git("acme/api", "commit-tree", tree, "-p", tip, "-m", "On the tag")
+			.trim()
+		fakeGitHub.git("acme/api", "update-ref", "refs/heads/release", onBranch)
+		fakeGitHub.git("acme/api", "update-ref", "refs/tags/release", onTag)
+		const repo = "/workspace/release"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: 'git log -1 --format="%H %s"', cwd: repo },
+					}
+				: { kind: "reply", text: `Log: ${req.toolOutputs[0] ?? ""}` },
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environmentId,
+			resources: [
+				{
+					type: "github_repository",
+					url: "https://github.com/acme/api",
+					mount_path: repo,
+					authorization_token: TEST_GITHUB_TOKEN,
+					checkout: { type: "branch", name: "release" },
+				},
+			],
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: {
+				events: [{ type: "user.message", content: [{ type: "text", text: "Show the tip." }] }],
+			},
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe(`Log: ${onBranch} On the branch`)
+	}, 300_000)
 
 	it("publishes the first output a turn on the machine writes, after a turn that left none", async () => {
 		const outputs = "/mnt/session/outputs"

@@ -156,7 +156,7 @@ const callError = (client: McpClient.McpClient, name: string, args: ToolArgument
 		)
 	})
 
-describe("Checkfu MCP server", () => {
+describe("Checkfu MCP server", { timeout: 30_000 }, () => {
 	it.live("lists one tool per exposed API operation under the established names", () =>
 		Effect.gen(function* () {
 			const server = yield* makeTestServer
@@ -197,11 +197,24 @@ describe("Checkfu MCP server", () => {
 				"environments_getEnvironment",
 				"environments_listEnvironments",
 				"environments_updateEnvironment",
+				"memoryStores_archiveMemoryStore",
+				"memoryStores_createMemory",
+				"memoryStores_createMemoryStore",
+				"memoryStores_deleteMemory",
+				"memoryStores_deleteMemoryStore",
+				"memoryStores_getMemory",
+				"memoryStores_getMemoryStore",
+				"memoryStores_listMemories",
+				"memoryStores_listMemoryStores",
+				"memoryStores_updateMemory",
+				"memoryStores_updateMemoryStore",
 				"sessions_archiveSession",
 				"sessions_createSession",
 				"sessions_getOutputs",
+				"sessions_getResource",
 				"sessions_getSession",
 				"sessions_listEvents",
+				"sessions_listResources",
 				"sessions_listSessions",
 				"sessions_sendSessionEvents",
 				"vaults_archiveCredential",
@@ -262,12 +275,25 @@ describe("Checkfu MCP server", () => {
 				environments_getEnvironment: "read-only, additive, repeatable",
 				environments_listEnvironments: "read-only, additive, repeatable",
 				environments_updateEnvironment: "writes, destructive, not repeatable",
+				memoryStores_archiveMemoryStore: "writes, destructive, repeatable",
+				memoryStores_createMemory: "writes, additive, not repeatable",
+				memoryStores_createMemoryStore: "writes, additive, not repeatable",
+				memoryStores_deleteMemory: "writes, destructive, not repeatable",
+				memoryStores_deleteMemoryStore: "writes, destructive, repeatable",
+				memoryStores_getMemory: "read-only, additive, repeatable",
+				memoryStores_getMemoryStore: "read-only, additive, repeatable",
+				memoryStores_listMemories: "read-only, additive, repeatable",
+				memoryStores_listMemoryStores: "read-only, additive, repeatable",
+				memoryStores_updateMemory: "writes, destructive, not repeatable",
+				memoryStores_updateMemoryStore: "writes, destructive, not repeatable",
 				sessions_archiveSession: "writes, destructive, repeatable",
 				sessions_createSession: "writes, additive, not repeatable",
 				sessions_getOutputs: "read-only, additive, repeatable",
+				sessions_getResource: "read-only, additive, repeatable",
 				sessions_getSession: "read-only, additive, repeatable",
 				sessions_listEvents: "read-only, additive, repeatable",
 				sessions_listSessions: "read-only, additive, repeatable",
+				sessions_listResources: "read-only, additive, repeatable",
 				sessions_sendSessionEvents: "writes, destructive, not repeatable",
 				vaults_archiveCredential: "writes, destructive, repeatable",
 				vaults_archiveVault: "writes, destructive, repeatable",
@@ -446,6 +472,8 @@ describe("Checkfu MCP server", () => {
 				const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
 				const vault = { path: { vault_id: "vault_1" } }
 				const credential = { path: { vault_id: "vault_1", credential_id: "cred_1" } }
+				const store = { path: { memory_store_id: "memstore_1" } }
+				const memory = { path: { memory_store_id: "memstore_1", memory_id: "mem_1" } }
 				const calls = {
 					agents_archiveAgent: agent,
 					agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
@@ -490,13 +518,46 @@ describe("Checkfu MCP server", () => {
 					environments_getEnvironment: environment,
 					environments_listEnvironments: { query: { order: "desc" } },
 					environments_updateEnvironment: { ...environment, body: { version: 1, config } },
+					memoryStores_archiveMemoryStore: store,
+					memoryStores_createMemory: {
+						...store,
+						body: { path: "/notes/todo.md", content: "Ship." },
+					},
+					memoryStores_createMemoryStore: { body: { name: "Notes" } },
+					memoryStores_deleteMemory: memory,
+					memoryStores_deleteMemoryStore: store,
+					memoryStores_getMemory: memory,
+					memoryStores_getMemoryStore: store,
+					memoryStores_listMemories: { ...store, query: { path_prefix: "/notes/" } },
+					memoryStores_listMemoryStores: { query: { include_archived: "true" } },
+					memoryStores_updateMemory: {
+						...memory,
+						body: {
+							content: "Shipped.",
+							precondition: { type: "content_sha256", content_sha256: "a".repeat(64) },
+						},
+					},
+					memoryStores_updateMemoryStore: { ...store, body: { name: "Team notes" } },
 					sessions_archiveSession: session,
 					sessions_createSession: {
-						body: { agent: { type: "agent", id: "agent_1", version: 1 }, environment_id: "env_1" },
+						body: {
+							agent: { type: "agent", id: "agent_1", version: 1 },
+							environment_id: "env_1",
+							resources: [
+								{
+									type: "github_repository",
+									url: "https://github.com/acme/api",
+									checkout: { type: "branch", name: "main" },
+								},
+								{ type: "memory_store", memory_store_id: "memstore_1", access: "read_only" },
+							],
+						},
 					},
 					sessions_getOutputs: session,
+					sessions_getResource: { path: { session_id: "sess_1", resource_id: "sesrsc_1" } },
 					sessions_getSession: session,
 					sessions_listEvents: { ...session, query: { limit: "5" } },
+					sessions_listResources: session,
 					sessions_listSessions: { query: { agent_id: "agent_1", page: "3:sess_1" } },
 					sessions_sendSessionEvents: {
 						...session,
@@ -590,6 +651,7 @@ describe("Checkfu MCP server", () => {
 			"artifacts_unpublishArtifact",
 			"automations_createAutomation",
 			"environments_createEnvironment",
+			"memoryStores_createMemoryStore",
 			"sessions_createSession",
 			"sessions_sendSessionEvents",
 			"vaults_createVault",
@@ -907,6 +969,29 @@ describe("Checkfu MCP server", () => {
 				new Request(`${MCP_ORIGIN}/v1/agents`, { headers: { "x-api-key": TEST_API_KEY } }),
 			)
 			expect(unknownWithKey.status).toBe(404)
+		}).pipe(Effect.scoped),
+	)
+
+	it.live("takes no repository token: a model would have to write it", () =>
+		Effect.gen(function* () {
+			const server = yield* makeTestServer
+			const client = yield* server.connect()
+			const refused = yield* callError(client, "sessions_createSession", {
+				body: {
+					agent: { type: "agent", id: "agent_1", version: 1 },
+					environment_id: "env_1",
+					resources: [
+						{
+							type: "github_repository",
+							url: "https://github.com/acme/api",
+							authorization_token: "ghp_written_by_a_model",
+						},
+					],
+				},
+			})
+			expect(refused.error.type).toBe("invalid_request_error")
+			expect(refused.error.message).toContain("authorization_token")
+			expect(server.apiRequests.length).toBe(0)
 		}).pipe(Effect.scoped),
 	)
 

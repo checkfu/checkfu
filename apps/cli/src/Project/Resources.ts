@@ -325,23 +325,23 @@ export const archiveResource = (
 	switch (current.type) {
 		case "agent":
 			return api.agents
-				.archiveIfCurrent({
+				.archive({
 					params: { agent_id: current.id },
-					payload: { version: current.version },
+					query: { version: current.version },
 				})
 				.pipe(Effect.mapError(formatClientError))
 		case "environment":
 			return api.environments
-				.archiveIfCurrent({
+				.archive({
 					params: { environment_id: current.id },
-					payload: { version: current.version },
+					query: { version: current.version },
 				})
 				.pipe(Effect.mapError(formatClientError))
 		case "automation":
 			return api.automations
-				.archiveIfCurrent({
+				.archive({
 					params: { automation_id: current.id },
-					payload: { revision: current.revision },
+					query: { revision: current.revision },
 				})
 				.pipe(Effect.mapError(formatClientError))
 	}

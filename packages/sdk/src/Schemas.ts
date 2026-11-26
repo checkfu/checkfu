@@ -421,6 +421,286 @@ export const SessionEventFields = {
 
 export type SessionEventType = keyof typeof SessionEventFields
 
+export const MAX_SESSION_REPOSITORIES = 8
+export const MAX_MOUNT_PATH_LENGTH = 1024
+export const MAX_BRANCH_NAME_LENGTH = 255
+export const REPOSITORY_MOUNT_ROOT = "/workspace"
+
+export const SessionResourceId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+).pipe(Schema.brand("SessionResourceId"))
+export type SessionResourceId = typeof SessionResourceId.Type
+
+const SEGMENT_CHAR = String.raw`[^/\\\u0000-\u001f\u007f-\u009f]`
+const SEGMENT_START = String.raw`[^/\\.\u0000-\u001f\u007f-\u009f]`
+const NAMED_SEGMENT = String.raw`(?:${SEGMENT_START}${SEGMENT_CHAR}*|\.${SEGMENT_START}${SEGMENT_CHAR}*|\.\.${SEGMENT_CHAR}+)`
+
+export const ABSOLUTE_PATH = new RegExp(`^(?:/${NAMED_SEGMENT})+$`, "u")
+
+export const MountPath = Schema.String.check(
+	Schema.isMaxLength(MAX_MOUNT_PATH_LENGTH),
+	Schema.isPattern(ABSOLUTE_PATH),
+)
+
+export const RepositoryMountPath = MountPath.check(
+	Schema.isPattern(/^\/workspace\/\S+$/u, {
+		expected: `a path inside ${REPOSITORY_MOUNT_ROOT}, without spaces or line breaks`,
+	}),
+)
+
+const REPOSITORY_URL =
+	/^https:\/\/github\.com\/[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/u
+
+const isRepositoryName = (url: string): boolean => {
+	const name = url.slice(url.lastIndexOf("/") + 1)
+	return name !== "." && name !== ".." && !name.endsWith(".git")
+}
+
+export const RepositoryUrl = Schema.String.check(
+	Schema.isMaxLength(MAX_MOUNT_PATH_LENGTH),
+	Schema.isPattern(REPOSITORY_URL, {
+		expected: "a repository URL of the form https://github.com/<owner>/<repository>",
+	}),
+	Schema.makeFilter(isRepositoryName, {
+		expected: "a repository name without a trailing .git",
+	}),
+)
+
+export const MAX_REPOSITORY_TOKEN_LENGTH = 4096
+
+export const RepositoryTokenText = Schema.String.annotate({ format: "password" }).check(
+	Schema.isMinLength(1, { toJsonSchema: () => ({ minLength: 1, "x-forge-sensitive": true }) }),
+	Schema.isMaxLength(MAX_REPOSITORY_TOKEN_LENGTH),
+)
+export const RepositoryToken = Schema.Redacted(RepositoryTokenText)
+export type RepositoryToken = typeof RepositoryToken.Type
+
+const isBranchName = (name: string): boolean =>
+	Array.from({ length: name.length }, (_, index) => name.charCodeAt(index)).every(
+		(code) => code > 0x20 && code !== 0x7f && !"~^:?*[\\".includes(String.fromCharCode(code)),
+	) &&
+	!/\s/u.test(name) &&
+	!name.includes("..") &&
+	!name.includes("@{") &&
+	name !== "@" &&
+	name !== "HEAD" &&
+	!name.startsWith("-") &&
+	!name.endsWith(".") &&
+	name.split("/").every((part) => part !== "" && !part.startsWith(".") && !part.endsWith(".lock"))
+
+export const RepositoryCheckout = Schema.Union([
+	Schema.Struct({
+		type: Schema.Literal("branch"),
+		name: Schema.String.check(
+			Schema.isMinLength(1),
+			Schema.isMaxLength(MAX_BRANCH_NAME_LENGTH),
+			Schema.makeFilter(isBranchName, { expected: "a git branch name" }),
+		),
+	}),
+	Schema.Struct({
+		type: Schema.Literal("commit"),
+		sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/u)),
+	}),
+])
+export type RepositoryCheckout = typeof RepositoryCheckout.Type
+
+export const GitHubRepositoryResource = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("github_repository"),
+	url: RepositoryUrl,
+	mount_path: RepositoryMountPath,
+	checkout: Schema.NullOr(RepositoryCheckout),
+})
+export type GitHubRepositoryResource = typeof GitHubRepositoryResource.Type
+
+export const MAX_SESSION_MEMORY_STORES = 8
+export const MAX_MEMORY_INSTRUCTIONS_LENGTH = 4096
+export const MEMORY_MOUNT_ROOT = "/mnt/memory"
+
+export const MemoryAccess = Schema.Literals(["read_write", "read_only"])
+export type MemoryAccess = typeof MemoryAccess.Type
+
+export const MemoryInstructions = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_INSTRUCTIONS_LENGTH),
+)
+
+export const MemoryMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/memory\/[^/]+$/u, {
+		expected: `a directory directly inside ${MEMORY_MOUNT_ROOT}`,
+	}),
+)
+
+const mountSegment = (name: string, fallback: string): string => {
+	const slug = name
+		.toLowerCase()
+		.replaceAll(/[^\p{L}\p{N}]+/gu, "-")
+		.replaceAll(/^-+|-+$/gu, "")
+	return slug.length === 0 ? fallback : slug
+}
+
+export const memoryMountPath = (name: string, memoryStoreId: string): string =>
+	`${MEMORY_MOUNT_ROOT}/${mountSegment(name, memoryStoreId)}`
+
+export const MemoryStoreResource = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("memory_store"),
+	memory_store_id: Schema.String.check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+	),
+	access: MemoryAccess,
+	instructions: Schema.NullOr(MemoryInstructions),
+	name: Schema.String,
+	description: Schema.String,
+	mount_path: MemoryMountPath,
+})
+export type MemoryStoreResource = typeof MemoryStoreResource.Type
+
+export const MAX_SESSION_ARTIFACTS = 8
+export const ARTIFACT_MOUNT_ROOT = "/mnt/artifacts"
+
+export const ArtifactMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/artifacts\/[^/]+$/u, {
+		expected: `a directory directly inside ${ARTIFACT_MOUNT_ROOT}`,
+	}),
+)
+
+export const artifactMountPath = (name: string, artifactId: string): string =>
+	`${ARTIFACT_MOUNT_ROOT}/${mountSegment(name, artifactId)}`
+
+export const ArtifactMount = Schema.Struct({
+	id: SessionResourceId,
+	type: Schema.Literal("artifact"),
+	artifact_id: Schema.String.check(
+		Schema.isMinLength(1),
+		Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+	),
+	version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+	manifest: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+	name: Schema.String,
+	mount_path: ArtifactMountPath,
+})
+export type ArtifactMount = typeof ArtifactMount.Type
+
+export const MAX_SESSION_SKILLS = 16
+export const MAX_SKILL_NAME_LENGTH = 64
+export const MAX_SKILL_DESCRIPTION_LENGTH = 1024
+export const MAX_SKILL_FILE_BYTES = 256 * 1024
+export const SKILL_MOUNT_ROOT = "/mnt/skills"
+
+const withinCharacters = (max: number) => (text: string) => Array.from(text).length <= max
+const SKILL_NAME_PARTS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u
+const isSkillName = (name: string) =>
+	name.length > 0 &&
+	withinCharacters(MAX_SKILL_NAME_LENGTH)(name) &&
+	name === name.toLowerCase() &&
+	SKILL_NAME_PARTS.test(name)
+
+export const SkillName = Schema.String.check(
+	Schema.makeFilter(isSkillName, {
+		expected: `at most ${MAX_SKILL_NAME_LENGTH} lower-case letters and digits, with single hyphens between them`,
+	}),
+)
+
+export const SkillDescription = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.makeFilter(withinCharacters(MAX_SKILL_DESCRIPTION_LENGTH), {
+		expected: `at most ${MAX_SKILL_DESCRIPTION_LENGTH} characters`,
+	}),
+)
+
+export const SkillMountPath = MountPath.check(
+	Schema.isPattern(/^\/mnt\/skills\/[^/]+$/u, {
+		expected: `a directory directly inside ${SKILL_MOUNT_ROOT}`,
+	}),
+)
+
+export const skillMountPath = (name: string): string => `${SKILL_MOUNT_ROOT}/${name}`
+
+export const SkillMount = Schema.Struct({
+	...ArtifactMount.fields,
+	type: Schema.Literal("skill"),
+	name: SkillName,
+	description: SkillDescription,
+	mount_path: SkillMountPath,
+})
+export type SkillMount = typeof SkillMount.Type
+
+const GitHubRepositoryMount = GitHubRepositoryResource.mapFields((fields) => ({
+	...fields,
+	requires_token: Schema.optionalKey(Schema.Literal(true)),
+}))
+export const SessionMount = Schema.Union([
+	GitHubRepositoryMount,
+	MemoryStoreResource,
+	ArtifactMount,
+	SkillMount,
+])
+export type SessionMount = typeof SessionMount.Type
+
+export const repositoriesOf = (
+	resources: ReadonlyArray<SessionMount>,
+): ReadonlyArray<typeof GitHubRepositoryMount.Type> =>
+	resources.filter((resource) => resource.type === "github_repository")
+
+export const memoryStoresOf = (
+	resources: ReadonlyArray<SessionMount>,
+): ReadonlyArray<MemoryStoreResource> =>
+	resources.filter((resource) => resource.type === "memory_store")
+
+export const artifactsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<ArtifactMount> =>
+	resources.filter((resource) => resource.type === "artifact")
+
+export const skillsOf = (resources: ReadonlyArray<SessionMount>): ReadonlyArray<SkillMount> =>
+	resources.filter((resource) => resource.type === "skill")
+
+export const mountsOverlap = (a: string, b: string): boolean =>
+	a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+
+const haveDisjointMounts = (resources: ReadonlyArray<SessionMount>): boolean =>
+	resources.every((resource, index) =>
+		resources
+			.slice(index + 1)
+			.every((other) => !mountsOverlap(resource.mount_path, other.mount_path)),
+	)
+
+const haveDistinctIds = (resources: ReadonlyArray<SessionMount>): boolean =>
+	new Set(resources.map((resource) => resource.id)).size === resources.length
+
+const mountEachRepositoryOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
+	const urls = repositoriesOf(resources).map((resource) => resource.url.toLowerCase())
+	return new Set(urls).size === urls.length
+}
+
+const areWithinLimits = (resources: ReadonlyArray<SessionMount>): boolean =>
+	repositoriesOf(resources).length <= MAX_SESSION_REPOSITORIES &&
+	memoryStoresOf(resources).length <= MAX_SESSION_MEMORY_STORES &&
+	artifactsOf(resources).length <= MAX_SESSION_ARTIFACTS &&
+	skillsOf(resources).length <= MAX_SESSION_SKILLS
+
+const attachEachStoreOnce = (resources: ReadonlyArray<SessionMount>): boolean => {
+	const stores = memoryStoresOf(resources).map((resource) => resource.memory_store_id)
+	return new Set(stores).size === stores.length
+}
+
+export const MAX_SESSION_RESOURCES =
+	MAX_SESSION_REPOSITORIES + MAX_SESSION_MEMORY_STORES + MAX_SESSION_ARTIFACTS + MAX_SESSION_SKILLS
+
+export const SessionMounts = Schema.Array(SessionMount).check(
+	Schema.isMaxLength(MAX_SESSION_RESOURCES),
+	Schema.makeFilter(areWithinLimits, {
+		expected: `at most ${MAX_SESSION_REPOSITORIES} repositories, ${MAX_SESSION_MEMORY_STORES} memory stores, ${MAX_SESSION_ARTIFACTS} artifacts and ${MAX_SESSION_SKILLS} skills`,
+	}),
+	Schema.makeFilter(attachEachStoreOnce, { expected: "each memory store attached once" }),
+	Schema.makeFilter(haveDistinctIds, { expected: "resources with distinct ids" }),
+	Schema.makeFilter(mountEachRepositoryOnce, { expected: "each repository mounted once" }),
+	Schema.makeFilter(haveDisjointMounts, {
+		expected: "mount paths that are neither equal nor inside one another",
+	}),
+)
+export type SessionMounts = typeof SessionMounts.Type
+
 export const SessionSnapshot = Schema.Struct({
 	id: SessionId,
 	type: Schema.Literal("session"),
@@ -429,6 +709,7 @@ export const SessionSnapshot = Schema.Struct({
 	agent_version: PositiveInt,
 	environment_id: Schema.String,
 	title: Schema.NullOr(Schema.String),
+	resources: SessionMounts,
 	turn: NonNegativeInt,
 	usage: ModelUsage,
 	mcp_server_credentials: McpServerCredentials,
@@ -706,3 +987,99 @@ export const CredentialSnapshot = Schema.Struct({
 	archived_at: Schema.NullOr(Schema.DateTimeUtc),
 })
 export type CredentialSnapshot = typeof CredentialSnapshot.Type
+
+export const MemoryStoreId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+).pipe(Schema.brand("MemoryStoreId"))
+export type MemoryStoreId = typeof MemoryStoreId.Type
+
+export const MemoryId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_IDENTIFIER_LENGTH),
+).pipe(Schema.brand("MemoryId"))
+export type MemoryId = typeof MemoryId.Type
+
+export const MAX_MEMORIES_PER_STORE = 1000
+export const MAX_MEMORY_CONTENT_BYTES = 100_000
+export const MAX_MEMORY_PATH_LENGTH = 256
+export const MAX_MEMORY_STORE_NAME_LENGTH = 256
+export const MAX_MEMORY_STORE_DESCRIPTION_LENGTH = 1024
+
+export const MemoryStoreName = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxCodePoints(MAX_MEMORY_STORE_NAME_LENGTH),
+)
+export const MemoryStoreDescription = Schema.String.check(
+	Schema.isMaxCodePoints(MAX_MEMORY_STORE_DESCRIPTION_LENGTH),
+)
+
+export const MemoryPath = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_PATH_LENGTH),
+	Schema.isPattern(ABSOLUTE_PATH, { expected: "an absolute path such as /notes/todo.md" }),
+)
+export type MemoryPath = typeof MemoryPath.Type
+
+export const RecordedMemoryPath = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_MEMORY_PATH_LENGTH),
+)
+export const RecordedSha256 = Schema.String.check(Schema.isMinLength(64), Schema.isMaxLength(64))
+
+const isWellFormedText = Schema.makeFilter((text: string) => text.isWellFormed(), {
+	expected: "well-formed Unicode text (no unpaired surrogates)",
+})
+
+export const MemoryContent = Schema.String.check(
+	Schema.isMaxLength(MAX_MEMORY_CONTENT_BYTES),
+	isWellFormedText,
+)
+
+export const ContentSha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
+
+export const MemorySize = NonNegativeInt.check(Schema.isLessThanOrEqualTo(MAX_MEMORY_CONTENT_BYTES))
+
+export const MemoryOperation = Schema.Literals(["created", "modified"])
+
+export const WritePrecondition = Schema.Union([
+	Schema.Struct({ type: Schema.Literal("none") }),
+	Schema.Struct({ type: Schema.Literal("absent") }),
+	Schema.Struct({ type: Schema.Literal("present") }),
+	Schema.Struct({ type: Schema.Literal("content_sha256"), content_sha256: RecordedSha256 }),
+])
+export type WritePrecondition = typeof WritePrecondition.Type
+
+export const MemoryStoreSnapshot = Schema.Struct({
+	id: MemoryStoreId,
+	type: Schema.Literal("memory_store"),
+	name: MemoryStoreName,
+	description: MemoryStoreDescription,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+	archived_at: Schema.NullOr(Schema.DateTimeUtc),
+})
+export type MemoryStoreSnapshot = typeof MemoryStoreSnapshot.Type
+
+export const MemorySnapshot = Schema.Struct({
+	id: MemoryId,
+	type: Schema.Literal("memory"),
+	memory_store_id: MemoryStoreId,
+	path: RecordedMemoryPath,
+	content: MemoryContent,
+	content_sha256: RecordedSha256,
+	content_size_bytes: MemorySize,
+	version: PositiveInt,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type MemorySnapshot = typeof MemorySnapshot.Type
+
+export const MemoryIndexEntry = Schema.Struct({
+	id: MemoryId,
+	path: RecordedMemoryPath,
+	content_sha256: RecordedSha256,
+	content_size_bytes: MemorySize,
+	created_at: Schema.DateTimeUtc,
+	updated_at: Schema.DateTimeUtc,
+})
+export type MemoryIndexEntry = typeof MemoryIndexEntry.Type

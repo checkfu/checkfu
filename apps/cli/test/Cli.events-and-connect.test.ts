@@ -2313,6 +2313,7 @@ describe("CLI sessions:events and sessions connect", () => {
 						id: "sess_subproc",
 						type: "session",
 						mcp_server_credentials: [],
+						resources: [],
 						status: "idle",
 						agent: {
 							id: "agent_1",
@@ -3164,6 +3165,7 @@ describe("CLI sessions:events and sessions connect", () => {
 							id: "sess_pty",
 							type: "session",
 							mcp_server_credentials: [],
+							resources: [],
 							status: "running",
 							turn: 1,
 							usage: { input_tokens: 0, output_tokens: 0 },
@@ -4590,6 +4592,7 @@ print(json.dumps({"rc": p.returncode, "timedOut": timed_out, "output": out.decod
 						id: "sess_env",
 						type: "session",
 						mcp_server_credentials: [],
+						resources: [],
 						status: "idle",
 						turn: 0,
 						usage: { input_tokens: 0, output_tokens: 0 },

@@ -44,14 +44,15 @@ import { makeLister } from "./Listing.ts"
 import { CustomToolFaults } from "./ToolSchemas.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	commitForStream,
 	createIdentity,
 	handled,
 	idempotentId,
 	isPending,
 	orPending,
-	present,
 	randomId,
+	readExisting,
 	reject,
 } from "./HttpHelpers.ts"
 
@@ -149,27 +150,19 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		const automationViews = yield* AutomationView
 		const guardedArchive = yield* ArchiveAgentIfCurrentDecision
 
-		const retrieve = (id: AgentId) =>
-			Effect.gen(function* () {
-				const ref = Agent.ref(id)
-				const found = Option.getOrNull(yield* agentViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const committed = yield* agents.get(id)
-				if (committed.status === "") {
-					return yield* reject(404, `Agent ${id} not found.`)
-				}
-				const projected = yield* agentViews.waitFor(
-					ref,
-					{ version: { gte: 1 } },
-					{ timeout: yield* AgentVersionWaitTimeout },
-				)
-				if (projected === null) {
-					return yield* reject(503, `Agent ${id} projection is not ready.`)
-				}
-				return projected
+		const retrieve = (id: AgentId) => {
+			const ref = Agent.ref(id)
+			return readExisting({
+				current: agentViews.get(ref),
+				missing: Effect.flatMap(agents.get(id), (committed) =>
+					committed.status === "" ? reject(404, `Agent ${id} not found.`) : Effect.void,
+				),
+				projected: Effect.flatMap(AgentVersionWaitTimeout, (timeout) =>
+					agentViews.waitFor(ref, { version: { gte: 1 } }, { timeout }),
+				),
 			})
+		}
+
 		const readVersion = (head: AgentSnapshot, version: number) =>
 			Effect.gen(function* () {
 				const id = head.id
@@ -292,16 +285,9 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 		})
 
 		const archive = (id: AgentId, version?: number) =>
-			Effect.gen(function* () {
-				const commit = yield* archiveCommit(id, version)
-				const result = yield* agentViews
-					.get(Agent.ref(id), commit === undefined ? {} : { atLeast: commit })
-					.pipe(orPending(id, "agent"))
-				if (isPending(result)) {
-					return result
-				}
-				return yield* present(result, 404, `Agent ${id} not found.`)
-			}).pipe(handled)
+			archiveAndRead(id, "agent", "Agent", archiveCommit(id, version), (commit) =>
+				agentViews.get(Agent.ref(id), commit === undefined ? {} : { atLeast: commit }),
+			).pipe(handled)
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -474,9 +460,6 @@ export const AgentsLive = HttpApiBuilder.group(CheckfuApi, "agents", (handlers) 
 					)
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) => archive(params.agent_id))
-			.handle("archiveIfCurrent", ({ params, payload }) =>
-				archive(params.agent_id, payload.version),
-			)
+			.handle("archive", ({ params, query }) => archive(params.agent_id, query.version))
 	}),
 )

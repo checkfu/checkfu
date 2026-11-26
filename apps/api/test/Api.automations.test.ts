@@ -8,6 +8,7 @@ import {
 } from "@checkfu/domain/Automation/GuardedArchives"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
 import * as InMemory from "@alchemy.run/domain/InMemory"
+import type { RuntimeContext } from "alchemy/RuntimeContext"
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
@@ -36,7 +37,7 @@ import {
 type ApiFetch = Effect.Effect<
 	HttpServerResponse.HttpServerResponse,
 	never,
-	HttpServerRequest.HttpServerRequest
+	HttpServerRequest.HttpServerRequest | RuntimeContext
 >
 
 interface AutomationBody {
@@ -247,9 +248,7 @@ describe("Automations API", () => {
 				expect(paused.body.status).toBe("paused")
 
 				for (const path of [`/v1/agents/${agent}`, `/v1/environments/${environment}`]) {
-					const refused = yield* call<ErrorBody>(apiFetch, "POST", `${path}/archive-if-current`, {
-						version: 1,
-					})
+					const refused = yield* call<ErrorBody>(apiFetch, "POST", `${path}/archive?version=1`)
 					expect(refused.status).toBe(409)
 					expect(refused.body.error.message).toContain(`Automation ${id} still references`)
 					const live = yield* call<{ archived_at: string | null }>(apiFetch, "GET", path)

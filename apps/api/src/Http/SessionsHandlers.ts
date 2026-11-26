@@ -1,5 +1,4 @@
 import type { SessionEventType, TextBlock } from "@checkfu/sdk/Schemas"
-import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import type * as Domain from "@alchemy.run/domain"
 import * as Model from "@alchemy.run/domain/Model"
 import { AgentId } from "@checkfu/domain/Agent/Agent.id"
@@ -11,6 +10,8 @@ import {
 import { OpenAutomationSession } from "@checkfu/domain/Automation/OpenAutomationSession.command"
 import { OpenAutomationSessionDecision } from "@checkfu/domain/Automation/OpenAutomationSession.decision"
 import { EnvironmentId } from "@checkfu/domain/Environment/Environment.id"
+import { MemoryStore } from "@checkfu/domain/Memory/MemoryStore.aggregate"
+import { MemoryStoreId } from "@checkfu/domain/Memory/MemoryStore.id"
 import { ArchiveSession } from "@checkfu/domain/Session/ArchiveSession.command"
 import { encodeInitialMessages } from "@checkfu/domain/Session/InitialMessages"
 import { recordInitialMessages } from "@checkfu/domain/Session/RecordInitialMessages.policy"
@@ -39,11 +40,19 @@ import {
 	decodeToolUseIds,
 } from "@checkfu/domain/Session/SessionTypes"
 import {
+	SessionResources,
+	artifactMountPath,
+	memoryMountPath,
+	skillMountPath,
+} from "@checkfu/domain/Session/SessionResource"
+import type { RepositoryToken, SessionResourceId } from "@checkfu/domain/Session/SessionResource"
+import {
 	SessionTurnCompletion,
 	sessionTurnKey,
 } from "@checkfu/domain/Session/SessionTurnCompletion.view"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { SessionSnapshot } from "@checkfu/domain/Session/SessionView.view"
+import { MAX_SKILL_FILE_BYTES } from "@checkfu/sdk/Schemas"
 import * as Context from "effect/Context"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -55,14 +64,19 @@ import * as Sse from "effect/encoding/Sse"
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Struct from "effect/Struct"
 import { admissionRefusal } from "@checkfu/domain/Session/AdmissionRefusal"
+import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
+import { ArtifactId } from "@checkfu/domain/Artifact/Artifact.id"
 import {
 	AdmitSession,
 	AdmitSessionWithMessages,
 } from "@checkfu/domain/Session/AdmitSession.command"
 import { AdmitSessionWithMessagesDecision } from "@checkfu/domain/Session/AdmitSessionWithMessages.decision"
+import { Harness } from "@checkfu/domain/Session/Harness.external"
 import { AdmitSessionDecision } from "@checkfu/domain/Session/AdmitSession.decision"
 import { LIST_PAGE_MAX } from "@checkfu/domain/Listing/ListResources.query"
 import { Agent } from "@checkfu/domain/Agent/Agent.aggregate"
@@ -89,22 +103,33 @@ import {
 import { Vault } from "@checkfu/domain/Vault/Vault.aggregate"
 import { VaultId } from "@checkfu/domain/Vault/Vault.id"
 import * as Result from "effect/Result"
+import { ArtifactManifestAt } from "../Artifacts/ResolveArtifactVersion.ts"
+import { PinnedArtifact } from "../Artifacts/PinnedArtifact.ts"
+import { SkillReader } from "../Skills/SkillReader.ts"
 import { AgentVersionWaitTimeout } from "./AgentsHandlers.ts"
 import { artifactReads } from "./ArtifactsHandlers.ts"
 import { outputsArtifactId } from "../OutputsIdentity.ts"
 import { CheckfuApi, CursorFromString, SessionEvent, statusOf } from "./Api.ts"
-import type { ClientEventId, SendSessionEventReceipt } from "./Api.ts"
+import type {
+	ClientEventId,
+	CreateSessionResource,
+	SendSessionEventReceipt,
+	SessionResourceItem,
+} from "./Api.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	commitForStream,
 	createIdentity,
 	currentRequestId,
 	handled,
 	idempotentCommandId,
+	idempotentId,
 	isPending,
 	orPending,
 	present,
 	randomId,
+	readExisting,
 	reject,
 	settled,
 	sha256Json,
@@ -210,6 +235,18 @@ const eventBatchFingerprint = (
 		})),
 	)
 
+const serializeResources = (
+	resources: SessionResources,
+	created_at: DateTime.Utc,
+): ReadonlyArray<SessionResourceItem> =>
+	resources.map((resource) => ({
+		...(resource.type === "github_repository"
+			? Struct.omit(resource, ["requires_token"])
+			: resource),
+		created_at,
+		updated_at: created_at,
+	}))
+
 const pinnedAgent = ({
 	agent_id,
 	type,
@@ -235,7 +272,26 @@ const pinnedAgent = ({
 const serializeSession = (
 	{ agent_id: _agentId, agent_version: _agentVersion, ...snapshot }: SessionSnapshot,
 	agent: AgentVersionSnapshot,
-) => ({ ...snapshot, agent: pinnedAgent(agent) })
+) => ({
+	...snapshot,
+	agent: pinnedAgent(agent),
+	resources: serializeResources(snapshot.resources, snapshot.created_at),
+})
+
+const SKILL_FILE = "SKILL.md"
+
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true })
+const utf8Of = (bytes: Uint8Array): Option.Option<string> => {
+	try {
+		return Option.some(strictUtf8.decode(bytes))
+	} catch {
+		return Option.none()
+	}
+}
+
+const decodeResources = Schema.decodeUnknownEffect(SessionResources)
+
+const repositoryName = (url: string): string => url.slice(url.lastIndexOf("/") + 1)
 
 export type DomainSessionEvent = Domain.View.EventOf<typeof SessionView>
 
@@ -372,6 +428,32 @@ export const serializeSessionEvent = (
 	}
 }
 
+const askedResource = (resource: CreateSessionResource) => {
+	switch (resource.type) {
+		case "github_repository":
+			return {
+				type: resource.type,
+				url: resource.url,
+				mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+				checkout: resource.checkout ?? null,
+				...(resource.authorization_token === undefined ? {} : { requires_token: true as const }),
+			}
+		case "memory_store":
+			return {
+				type: resource.type,
+				memory_store_id: resource.memory_store_id,
+				access: resource.access ?? "read_write",
+				instructions: resource.instructions ?? null,
+			}
+		default:
+			return {
+				type: resource.type,
+				artifact_id: resource.artifact_id,
+				version: resource.version ?? null,
+			}
+	}
+}
+
 export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handlers) =>
 	Effect.gen(function* () {
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
@@ -383,6 +465,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 		const sendSystem = yield* SendSystemMessageDecision
 		const sessions = yield* Session
 		const sessionViews = yield* SessionView
+		const memoryStores = yield* MemoryStore
+		const artifacts = yield* Artifact
+		const manifestAt = yield* ArtifactManifestAt
+		const pinnedArtifact = yield* PinnedArtifact
+		const skills = yield* SkillReader
+		const harness = yield* Harness
 		const completions = yield* SessionTurnCompletion
 		const publishedEvent = (entry: SessionEventEntry) => {
 			const event = entry.event
@@ -408,7 +496,6 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			return yield* Effect.die(new Error("SessionView is not pushed over object sockets."))
 		}
 		const { readArtifact } = yield* artifactReads
-		const artifacts = yield* Artifact
 
 		const agents = yield* Agent
 		const environments = yield* Environment
@@ -524,27 +611,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					: pinned
 			})
 
-		const existing = (id: SessionId) =>
-			Effect.gen(function* () {
-				const ref = Session.ref(id)
-				const found = Option.getOrNull(yield* sessionViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const committed = yield* sessions.get(id)
-				if (committed._tag === "Uninitialized") {
-					return yield* reject(404, `Session ${id} not found.`)
-				}
-				const projected = yield* sessionViews.waitFor(
-					ref,
-					{ id },
-					{ timeout: yield* SessionReadWaitTimeout },
-				)
-				if (projected === null) {
-					return yield* reject(503, `Session ${id} projection is not ready.`)
-				}
-				return projected
+		const existing = (id: SessionId) => {
+			const ref = Session.ref(id)
+			return readExisting({
+				current: sessionViews.get(ref),
+				missing: Effect.flatMap(sessions.get(id), (committed) =>
+					committed._tag === "Uninitialized"
+						? reject(404, `Session ${id} not found.`)
+						: Effect.void,
+				),
+				projected: Effect.flatMap(SessionReadWaitTimeout, (timeout) =>
+					sessionViews.waitFor(ref, { id }, { timeout }),
+				),
 			})
+		}
 
 		const resolvePinnedAgent = (agentId: string, version: number) =>
 			Effect.gen(function* () {
@@ -560,6 +640,160 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 				const snapshot = yield* existing(id)
 				const agent = yield* resolve(snapshot.agent_id, snapshot.agent_version)
 				return serializeSession(snapshot, agent)
+			})
+
+		const storeToken = (
+			sessionId: SessionId,
+			resourceId: SessionResourceId,
+			authorization_token: RepositoryToken,
+			replace: boolean,
+		) =>
+			harness
+				.storeRepositoryToken({
+					session_id: sessionId,
+					resource_id: resourceId,
+					authorization_token,
+					replace,
+				})
+				.pipe(
+					Effect.catchTag("HarnessUnavailable", () =>
+						reject(
+							503,
+							`The token for resource ${resourceId} of session ${sessionId} could not be stored. Send it again with POST /v1/sessions/${sessionId}/resources/${resourceId}.`,
+						),
+					),
+				)
+
+		const artifactVersion = Effect.fn(function* (wanted: {
+			readonly artifact_id: ArtifactId
+			readonly version?: number
+		}) {
+			const artifact = yield* artifacts.get(wanted.artifact_id)
+			if (artifact.status !== "active") {
+				return yield* reject(404, `Artifact ${wanted.artifact_id} not found.`)
+			}
+			const version = wanted.version ?? artifact.version
+			if (version === 0) {
+				return yield* reject(
+					400,
+					`Artifact ${wanted.artifact_id} has no published version yet; publish one before mounting it.`,
+				)
+			}
+			if (version > artifact.version) {
+				return yield* reject(404, `Artifact ${wanted.artifact_id} has no version ${version}.`)
+			}
+			const manifest = yield* manifestAt(wanted.artifact_id, artifact, version).pipe(
+				Effect.catchTag("ArtifactVersionNotReady", () =>
+					reject(503, "Timed out waiting for view consistency."),
+				),
+			)
+			if (manifest === null) {
+				return yield* reject(404, `Artifact ${wanted.artifact_id} not found.`)
+			}
+			return {
+				artifact_id: wanted.artifact_id,
+				version,
+				manifest,
+				name: artifact.name,
+				mount_path: artifactMountPath(artifact.name, wanted.artifact_id),
+			}
+		})
+
+		const skillOf = Effect.fn(
+			function* (pinned: { readonly artifact_id: ArtifactId; readonly manifest: string }) {
+				const invalid = (reason: string) =>
+					reject(400, `Artifact ${pinned.artifact_id} is not a skill: ${reason}.`)
+				const gone = reject(404, `Artifact ${pinned.artifact_id} not found.`)
+				const manifest = yield* pinnedArtifact.manifest(pinned.artifact_id, pinned.manifest)
+				if (manifest === null) {
+					return yield* gone
+				}
+				const file = manifest.files.find(({ path }) => path === SKILL_FILE)
+				if (file === undefined) {
+					return yield* invalid(`it has no ${SKILL_FILE} at its root`)
+				}
+				if (file.size > MAX_SKILL_FILE_BYTES) {
+					return yield* invalid(
+						`its ${SKILL_FILE} is ${file.size} bytes; the limit is ${MAX_SKILL_FILE_BYTES}`,
+					)
+				}
+				const bytes = yield* pinnedArtifact.blob(pinned.artifact_id, file.sha256)
+				if (bytes === null) {
+					return yield* gone
+				}
+				const markdown = Option.getOrUndefined(utf8Of(bytes))
+				if (markdown === undefined) {
+					return yield* invalid(`its ${SKILL_FILE} is not UTF-8 text`)
+				}
+				const read = yield* skills.read(markdown)
+				if (!read.ok) {
+					return yield* invalid(read.message)
+				}
+				return { name: read.name, description: read.description }
+			},
+			Effect.catchTag("ArtifactBytesMissing", () => reject(500, "Failed to load artifact files.")),
+		)
+
+		const requestedResource = Effect.fn(function* (resource: CreateSessionResource) {
+			if (resource.type === "github_repository") {
+				return {
+					type: resource.type,
+					url: resource.url,
+					mount_path: resource.mount_path ?? `/workspace/${repositoryName(resource.url)}`,
+					checkout: resource.checkout ?? null,
+					...(resource.authorization_token === undefined ? {} : { requires_token: true as const }),
+				}
+			}
+			if (resource.type === "artifact") {
+				return {
+					type: resource.type,
+					...(yield* artifactVersion({
+						...resource,
+						artifact_id: ArtifactId.make(resource.artifact_id),
+					})),
+				}
+			}
+			if (resource.type === "skill") {
+				const pinned = yield* artifactVersion({
+					...resource,
+					artifact_id: ArtifactId.make(resource.artifact_id),
+				})
+				const { name, description } = yield* skillOf(pinned)
+				return {
+					...pinned,
+					type: resource.type,
+					name,
+					description,
+					mount_path: skillMountPath(name),
+				}
+			}
+			const storeId = MemoryStoreId.make(resource.memory_store_id)
+			const store = yield* memoryStores.get(storeId)
+			if (store.status === "" || store.status === "deleted") {
+				return yield* reject(404, `Memory store ${storeId} not found.`)
+			}
+			if (store.status !== "active") {
+				return yield* reject(409, `Memory store ${storeId} is archived.`)
+			}
+			return {
+				type: resource.type,
+				memory_store_id: storeId,
+				access: resource.access ?? "read_write",
+				instructions: resource.instructions ?? null,
+				name: store.name,
+				description: store.description,
+				mount_path: memoryMountPath(store.name, storeId),
+			}
+		})
+
+		const existingResource = (sessionId: SessionId, resourceId: SessionResourceId) =>
+			Effect.gen(function* () {
+				const session = yield* existing(sessionId)
+				const resource = session.resources.find(({ id }) => id === resourceId)
+				if (resource === undefined) {
+					return yield* reject(404, `Resource ${resourceId} not found in session ${sessionId}.`)
+				}
+				return { session, resource }
 			})
 
 		return handlers
@@ -578,6 +812,12 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					}
 					const agentId = decodedAgentId.value
 					const environmentId = decodedEnvironmentId.value
+					const missing = {
+						AgentNotFound: () => reject(404, `Agent ${agentId} not found.`),
+						AgentVersionNotFound: ({ version }: { readonly version: number }) =>
+							reject(404, `Agent ${agentId} has no version ${version}.`),
+						EnvironmentNotFound: () => reject(404, `Environment ${environmentId} not found.`),
+					}
 					const agentVersion = typeof agent === "string" ? null : (agent.version ?? null)
 					const title = payload.title ?? null
 					const messages = yield* Effect.forEach(
@@ -597,6 +837,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						messages.length <= 1
 							? undefined
 							: { count: messages.length, messages: encodeInitialMessages(messages) }
+					const asked = (payload.resources ?? []).map(askedResource)
 					const identity = yield* createIdentity(digest, random, {
 						resource: "session",
 						prefix: "sess",
@@ -609,6 +850,7 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							initial_events: messages,
 							vault_ids: payload.vault_ids,
 							mcp_server_credentials: payload.mcp_server_credentials,
+							...(asked.length === 0 ? {} : { resources: asked }),
 						},
 					})
 					const id = SessionId.make(identity.id)
@@ -616,7 +858,37 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 					const given =
 						sendOptions !== undefined && (yield* sessions.get(id))._tag !== "Uninitialized"
 							? { agent_version: agentVersion, text: NO_MCP_SERVER_CREDENTIALS }
-							: yield* credentialsFor(agentId, agentVersion, environmentId, payload)
+							: yield* credentialsFor(agentId, agentVersion, environmentId, payload).pipe(
+									Effect.catchTags(missing),
+								)
+					const prior =
+						idempotencyKey === undefined || (yield* sessions.get(id))._tag === "Uninitialized"
+							? undefined
+							: yield* existing(id).pipe(orPending(id, "session"))
+					if (prior !== undefined && isPending(prior)) {
+						return prior
+					}
+					const admitted = prior?.resources
+					const resources =
+						admitted ??
+						(yield* decodeResources(
+							yield* Effect.forEach(
+								yield* Effect.forEach(payload.resources ?? [], requestedResource),
+								(resource, index) =>
+									Effect.map(
+										idempotencyKey === undefined
+											? randomId(random, "sesrsc")
+											: idempotentId(digest, "sesrsc", [
+													"create",
+													"session",
+													"resource",
+													idempotencyKey,
+													index,
+												]),
+										(resourceId) => ({ id: resourceId, ...resource }),
+									),
+							),
+						).pipe(Effect.catchTag("SchemaError", (error) => reject(400, error.message))))
 					const admission = {
 						session_id: id,
 						agent_id: agentId,
@@ -624,7 +896,9 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 						mcp_server_credentials: given.text,
 						environment_id: environmentId,
 						title,
+						resources,
 					}
+					const refused = { SessionAlreadyExists: rejectReusedSessionKey, ...missing }
 					const receipt =
 						initialPlan !== undefined
 							? yield* admitWithMessages
@@ -632,17 +906,41 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 										new AdmitSessionWithMessages({ ...admission, initial_messages: initialPlan }),
 										sendOptions,
 									)
-									.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+									.pipe(Effect.catchTags(refused))
 							: initialMessage === undefined
 								? yield* admitSession
 										.send(new AdmitSession(admission), sendOptions)
-										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+										.pipe(Effect.catchTags(refused))
 								: yield* startSession
 										.send(
 											new OpenAutomationSession({ ...admission, text: initialMessage }),
 											sendOptions,
 										)
-										.pipe(Effect.catchTag("SessionAlreadyExists", rejectReusedSessionKey))
+										.pipe(Effect.catchTags(refused))
+					const unstored = yield* Effect.forEach(payload.resources ?? [], (resource, index) => {
+						const stored = resources[index]
+						return resource.type !== "github_repository" ||
+							resource.authorization_token === undefined ||
+							stored === undefined
+							? Effect.succeed([])
+							: harness
+									.storeRepositoryToken({
+										session_id: id,
+										resource_id: stored.id,
+										authorization_token: Redacted.make(resource.authorization_token),
+										replace: false,
+									})
+									.pipe(
+										Effect.as([]),
+										Effect.catchTag("HarnessUnavailable", () => Effect.succeed([stored.id])),
+									)
+					})
+					if (unstored.flat().length > 0) {
+						return yield* reject(
+							503,
+							`The tokens for resources ${unstored.flat().join(", ")} of session ${id} could not be stored. Send each again with POST /v1/sessions/${id}/resources/{resource_id}.`,
+						)
+					}
 					const created = receipt.events.find((event) => event._tag === "session.created")
 					if (created?._tag !== "session.created") {
 						return yield* reject(500, "Failed to load created session.")
@@ -701,19 +999,20 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 			.handle("get", ({ params }) => retrieve(params.session_id).pipe(handled))
 			.handle("archive", ({ params }) =>
 				Effect.gen(function* () {
-					const id = params.session_id
-					const receipt = yield* sessions.send(new ArchiveSession({ session_id: id }))
-					const result = yield* sessionViews
-						.get(Session.ref(id), { atLeast: receipt })
-						.pipe(orPending(id, "session"))
+					const result = yield* archiveAndRead(
+						params.session_id,
+						"session",
+						"Session",
+						sessions.send(new ArchiveSession({ session_id: params.session_id })),
+						(receipt) => sessionViews.get(Session.ref(params.session_id), { atLeast: receipt }),
+					)
 					if (isPending(result)) {
 						return result
 					}
-					const snapshot = yield* present(result, 404, `Session ${id} not found.`)
-					const agent = yield* resolvePinnedAgent(snapshot.agent_id, snapshot.agent_version).pipe(
-						orPending(id, "session"),
+					const agent = yield* resolvePinnedAgent(result.agent_id, result.agent_version).pipe(
+						orPending(params.session_id, "session"),
 					)
-					return isPending(agent) ? agent : serializeSession(snapshot, agent)
+					return isPending(agent) ? agent : serializeSession(result, agent)
 				}).pipe(handled),
 			)
 			.handle("getOutputs", ({ params }) =>
@@ -730,6 +1029,47 @@ export const SessionsLive = HttpApiBuilder.group(CheckfuApi, "sessions", (handle
 							? `Session ${sessionId} not found.`
 							: `Session ${sessionId} has published no outputs.`,
 					)
+				}).pipe(handled),
+			)
+			.handle("listResources", ({ params }) =>
+				Effect.gen(function* () {
+					const session = yield* existing(params.session_id)
+					return { data: serializeResources(session.resources, session.created_at) }
+				}).pipe(handled),
+			)
+			.handle("getResource", ({ params }) =>
+				Effect.gen(function* () {
+					const { session, resource } = yield* existingResource(
+						params.session_id,
+						params.resource_id,
+					)
+					const [item] = serializeResources([resource], session.created_at)
+					return yield* present(Option.fromNullishOr(item), 404, "Resource not found.")
+				}).pipe(handled),
+			)
+			.handle("updateResource", ({ params, payload }) =>
+				Effect.gen(function* () {
+					const { session, resource } = yield* existingResource(
+						params.session_id,
+						params.resource_id,
+					)
+					if (resource.type !== "github_repository") {
+						return yield* reject(400, `Resource ${resource.id} is not a repository.`)
+					}
+					if (session.status === "terminated") {
+						return yield* reject(409, `Session ${session.id} is terminated.`)
+					}
+					yield* storeToken(
+						session.id,
+						resource.id,
+						Redacted.make(payload.authorization_token),
+						true,
+					)
+					if ((yield* sessions.get(session.id))._tag === "Terminated") {
+						return yield* reject(409, `Session ${session.id} is terminated.`)
+					}
+					const [item] = serializeResources([resource], session.created_at)
+					return yield* present(Option.fromNullishOr(item), 404, "Resource not found.")
 				}).pipe(handled),
 			)
 			.handle("sendEvents", ({ params, headers, payload }) =>

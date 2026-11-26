@@ -3,6 +3,16 @@ import {
 	MAX_AGENT_NAME_LENGTH,
 	MAX_AGENT_SYSTEM_LENGTH,
 } from "@checkfu/domain/Agent/AgentTypes"
+import { MAX_MEMORY_CONTENT_BYTES } from "@checkfu/domain/Memory/MemoryTypes"
+import {
+	MAX_MEMORY_INSTRUCTIONS_LENGTH,
+	MAX_MOUNT_PATH_LENGTH,
+	MAX_REPOSITORY_TOKEN_LENGTH,
+	MAX_SESSION_ARTIFACTS,
+	MAX_SESSION_MEMORY_STORES,
+	MAX_SESSION_REPOSITORIES,
+	MAX_SESSION_SKILLS,
+} from "@checkfu/domain/Session/SessionResource"
 import { MAX_MESSAGE_TEXT_LENGTH } from "@checkfu/domain/Session/SessionTypes"
 import {
 	MAX_AGENT_TOOLS_TEXT_LENGTH,
@@ -24,6 +34,8 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as References from "effect/References"
+import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import { optionalSecret } from "../Secrets.ts"
 import { MAX_ARTIFACT_BODY_BYTES, MAX_ARTIFACT_FILE_BYTES } from "../Artifacts/ArtifactFiles.ts"
 import {
@@ -33,6 +45,8 @@ import {
 	Authentication,
 	ERROR_CODES,
 	EventBatchBodyLimit,
+	MemoryBodyLimit,
+	SessionBodyLimit,
 	RequestId,
 	RequestValidation,
 	apiError,
@@ -58,6 +72,14 @@ export const MAX_AGENT_BODY_BYTES =
 	(MAX_MCP_SERVERS_TEXT_LENGTH + MAX_AGENT_TOOLS_TEXT_LENGTH) * ESCAPED_UNIT_BYTES +
 	16 * 1024
 export const MAX_EVENTS_BODY_BYTES = 8 * MAX_MESSAGE_TEXT_LENGTH * 6 + 16 * 1024
+export const MAX_MEMORY_BODY_BYTES = MAX_MEMORY_CONTENT_BYTES * 6 + 16 * 1024
+export const MAX_SESSION_BODY_BYTES =
+	(MAX_SESSION_REPOSITORIES * (2 * MAX_MOUNT_PATH_LENGTH + MAX_REPOSITORY_TOKEN_LENGTH) +
+		MAX_SESSION_MEMORY_STORES * (MAX_MOUNT_PATH_LENGTH + MAX_MEMORY_INSTRUCTIONS_LENGTH) +
+		(MAX_SESSION_ARTIFACTS + MAX_SESSION_SKILLS) * MAX_MOUNT_PATH_LENGTH +
+		MAX_MESSAGE_TEXT_LENGTH) *
+		6 +
+	16 * 1024
 
 const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined => {
 	switch (status) {
@@ -74,37 +96,15 @@ const errorStatusOfRejection = (status: number): HandlerErrorStatus | undefined 
 	}
 }
 
-interface RejectionAnnotationInfo {
-	readonly httpApiStatus?: number
-	readonly description?: string
-}
-
-const rejectionAnnotationInfo = (err: unknown): RejectionAnnotationInfo | undefined => {
-	if (typeof err !== "object" || err === null) {
+const rejectionAnnotationInfo = (err: unknown) => {
+	const rejection = Predicate.isObject(err) && "constructor" in err ? err.constructor : undefined
+	if (!Schema.isSchema(rejection)) {
 		return undefined
 	}
-	const ctor: unknown = "constructor" in err ? err.constructor : undefined
-	if ((typeof ctor !== "function" && typeof ctor !== "object") || ctor === null) {
-		return undefined
-	}
-	if (!("annotations" in ctor)) {
-		return undefined
-	}
-	const annotations = ctor.annotations
-	if (typeof annotations !== "object" || annotations === null) {
-		return undefined
-	}
-	const httpApiStatus =
-		"httpApiStatus" in annotations && typeof annotations.httpApiStatus === "number"
-			? annotations.httpApiStatus
-			: undefined
-	const description =
-		"description" in annotations && typeof annotations.description === "string"
-			? annotations.description
-			: undefined
+	const httpApiStatus = SchemaAST.resolveAt<unknown>("httpApiStatus")(rejection.ast)
 	return {
-		...(httpApiStatus === undefined ? {} : { httpApiStatus }),
-		...(description === undefined ? {} : { description }),
+		httpApiStatus: typeof httpApiStatus === "number" ? httpApiStatus : undefined,
+		description: SchemaAST.resolveDescription(rejection.ast),
 	}
 }
 
@@ -204,6 +204,18 @@ export const orPending =
 					Predicate.isTagged(err, "ConsistencyTimeout") || Predicate.isTagged(err, "WaitTimeout"),
 				() => Effect.succeed({ id, type, pending: true as const }),
 			),
+		)
+
+export const orPendingWithin =
+	<const T extends PendingResourceType, const P extends Readonly<Record<string, string>>>(
+		id: string,
+		type: T,
+		parent: P,
+	) =>
+	<A, E, R>(read: Effect.Effect<A, E, R>) =>
+		read.pipe(
+			orPending(id, type),
+			Effect.map((result) => (isPending(result) ? { ...result, ...parent } : result)),
 		)
 
 export const bestEffortAfterCommit = <A, E, R>(
@@ -334,6 +346,40 @@ export const createIdentity = (
 		}
 	})
 
+export const readExisting = <S, E1, R1, E2, R2, E3, R3>(options: {
+	readonly current: Effect.Effect<Option.Option<S | null>, E1, R1>
+	readonly missing: Effect.Effect<void, E2, R2>
+	readonly projected: Effect.Effect<S | null, E3, R3>
+	readonly missingFirst?: boolean
+}) =>
+	Effect.gen(function* () {
+		if (options.missingFirst === true) {
+			yield* options.missing
+		}
+		const found = Option.getOrNull(yield* options.current)
+		if (found !== null) {
+			return found
+		}
+		yield* options.missing
+		const projected = yield* options.projected.pipe(Effect.tapError(() => options.missing))
+		return projected ?? (yield* Effect.die(new Error("A view wait matched no row.")))
+	})
+
+export const archiveAndRead = <const T extends PendingResourceType, Receipt, S, E1, R1, E2, R2>(
+	id: string,
+	type: T,
+	label: string,
+	archive: Effect.Effect<Receipt, E1, R1>,
+	read: (receipt: Receipt) => Effect.Effect<Option.Option<S | null>, E2, R2>,
+) =>
+	Effect.gen(function* () {
+		const result = yield* read(yield* archive).pipe(orPending(id, type))
+		if (isPending(result)) {
+			return result
+		}
+		return yield* present(result, 404, `${label} ${id} not found.`)
+	})
+
 const prepareConfiguredCredential = (mac: Mac.Mac["Service"], secret: Redacted.Redacted<string>) =>
 	Effect.gen(function* () {
 		const key = yield* mac.generateKey(Mac.hmacSha256)
@@ -375,6 +421,22 @@ export const AgentBodyLimitLive = Layer.succeed(AgentBodyLimit, (httpEffect) =>
 		httpEffect,
 		HttpIncomingMessage.MaxBodySize,
 		ByteSize.bytes(MAX_AGENT_BODY_BYTES),
+	),
+)
+
+export const MemoryBodyLimitLive = Layer.succeed(MemoryBodyLimit, (httpEffect) =>
+	Effect.provideService(
+		httpEffect,
+		HttpIncomingMessage.MaxBodySize,
+		ByteSize.bytes(MAX_MEMORY_BODY_BYTES),
+	),
+)
+
+export const SessionBodyLimitLive = Layer.succeed(SessionBodyLimit, (httpEffect) =>
+	Effect.provideService(
+		httpEffect,
+		HttpIncomingMessage.MaxBodySize,
+		ByteSize.bytes(MAX_SESSION_BODY_BYTES),
 	),
 )
 

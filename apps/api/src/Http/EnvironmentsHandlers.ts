@@ -22,13 +22,14 @@ import { CheckfuApi } from "./Api.ts"
 import { makeLister } from "./Listing.ts"
 import {
 	IDEMPOTENCY_KEY_REUSED,
+	archiveAndRead,
 	bestEffortAfterCommit,
 	commitForStream,
 	createIdentity,
 	handled,
 	isPending,
 	orPending,
-	present,
+	readExisting,
 	reject,
 } from "./HttpHelpers.ts"
 
@@ -47,29 +48,21 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		const automationViews = yield* AutomationView
 		const guardedArchive = yield* ArchiveEnvironmentIfCurrentDecision
 
-		const retrieve = (id: EnvironmentId) =>
-			Effect.gen(function* () {
-				const checkExists = Effect.gen(function* () {
-					const committed = yield* environments.get(id)
-					if (committed.status === "" || committed.status === "deleted") {
-						return yield* reject(404, `Environment ${id} not found.`)
-					}
-				})
-				yield* checkExists
-				const ref = Environment.ref(id)
-				const found = Option.getOrNull(yield* environmentViews.get(ref))
-				if (found !== null) {
-					return found
-				}
-				const projected = yield* environmentViews
-					.waitFor(ref, { version: { gte: 1 } }, { timeout: yield* EnvironmentReadWaitTimeout })
-					.pipe(Effect.tapErrorTag("WaitTimeout", () => checkExists))
-				if (projected === null) {
-					yield* checkExists
-					return yield* reject(503, `Environment ${id} projection is not ready.`)
-				}
-				return projected
+		const retrieve = (id: EnvironmentId) => {
+			const ref = Environment.ref(id)
+			return readExisting({
+				missingFirst: true,
+				current: environmentViews.get(ref),
+				missing: Effect.flatMap(environments.get(id), (committed) =>
+					committed.status === "" || committed.status === "deleted"
+						? reject(404, `Environment ${id} not found.`)
+						: Effect.void,
+				),
+				projected: Effect.flatMap(EnvironmentReadWaitTimeout, (timeout) =>
+					environmentViews.waitFor(ref, { version: { gte: 1 } }, { timeout }),
+				),
 			})
+		}
 
 		const archiveCommit = Effect.fnUntraced(function* (id: EnvironmentId, version?: number) {
 			if (version === undefined) {
@@ -89,16 +82,9 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 		})
 
 		const archive = (id: EnvironmentId, version?: number) =>
-			Effect.gen(function* () {
-				const commit = yield* archiveCommit(id, version)
-				const result = yield* environmentViews
-					.get(Environment.ref(id), commit === undefined ? {} : { atLeast: commit })
-					.pipe(orPending(id, "environment"))
-				if (isPending(result)) {
-					return result
-				}
-				return yield* present(result, 404, `Environment ${id} not found.`)
-			}).pipe(handled)
+			archiveAndRead(id, "environment", "Environment", archiveCommit(id, version), (commit) =>
+				environmentViews.get(Environment.ref(id), commit === undefined ? {} : { atLeast: commit }),
+			).pipe(handled)
 
 		return handlers
 			.handle("create", ({ payload, headers }) =>
@@ -228,9 +214,6 @@ export const EnvironmentsLive = HttpApiBuilder.group(CheckfuApi, "environments",
 					return { id, type: "environment_deleted" as const }
 				}).pipe(handled),
 			)
-			.handle("archive", ({ params }) => archive(params.environment_id))
-			.handle("archiveIfCurrent", ({ params, payload }) =>
-				archive(params.environment_id, payload.version),
-			)
+			.handle("archive", ({ params, query }) => archive(params.environment_id, query.version))
 	}),
 )

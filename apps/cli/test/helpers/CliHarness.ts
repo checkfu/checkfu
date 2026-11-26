@@ -1,6 +1,7 @@
 import * as Domain from "@alchemy.run/domain"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { SessionOutputsUnpublished } from "@checkfu/domain/Session/SessionOutputs.external"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import { makeArtifactStoreMemory } from "@checkfu/api/Artifacts/ArtifactStoreMemory"
 import { ArtifactLinksTest } from "@checkfu/api/Content/ArtifactLinks"
 import {
@@ -29,7 +30,6 @@ import * as ByteSize from "effect/ByteSize"
 import { toolConfirmationId } from "@checkfu/domain/Session/ToolConfirmation.id"
 import { Vaults, VaultsHandlersLive } from "@checkfu/domain/Vaults.model"
 import * as Clock from "effect/Clock"
-import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Digest from "effect/crypto/Digest"
 import * as SecureRandom from "effect/crypto/SecureRandom"
@@ -53,13 +53,14 @@ import { Checkout } from "../../src/Commands/Deploy.ts"
 import { SigintCoordinator, makeSigintController } from "../../src/Signals.ts"
 import type { SigintController } from "../../src/Signals.ts"
 
-const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+const TEST_RUNTIME = {
 	Type: "Test",
 	id: "test",
 	env: {},
 	get: () => Effect.undefined,
 	set: (id: string) => Effect.succeed(id),
-})
+}
+const TestRuntimeContext = Layer.succeed(RuntimeContext, TEST_RUNTIME)
 
 export const TEST_API_KEY = "ck_cli_test_secret"
 
@@ -204,6 +205,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						}),
 					interrupt: effective.interrupt,
 					discardWorkspace: () => Effect.void,
+					storeRepositoryToken: () => Effect.void,
 				}
 			}),
 		)
@@ -231,7 +233,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 		const ServerLayer = Layer.mergeAll(
 			VaultsLive,
 			vaultListingQueriesFrom(VaultsLive),
-			CheckfuLive,
+			HarnessLive.pipe(Layer.provideMerge(CheckfuLive)),
 			makeArtifactStoreMemory().layer,
 			ArtifactLinksTest,
 		).pipe(
@@ -255,6 +257,7 @@ export const makeTestServer = (handler?: ModelHandler) =>
 						HttpServerRequest.HttpServerRequest,
 						HttpServerRequest.fromWeb(request),
 					),
+					Effect.provideService(RuntimeContext, TEST_RUNTIME),
 					Effect.map((response) => HttpServerResponse.toWeb(response)),
 				),
 			)

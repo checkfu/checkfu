@@ -1,3 +1,4 @@
+import type { MemorySnapshot, MemoryStoreSnapshot } from "./Schemas.ts"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
@@ -93,6 +94,8 @@ export type JsonAutomation = IsoDateTimes<Automation>
 export type JsonArtifact = IsoDateTimes<Artifact>
 export type JsonArtifactSummary = IsoDateTimes<ArtifactSummary>
 export type JsonArtifactVersion = IsoDateTimes<ArtifactVersion>
+export type JsonMemoryStore = IsoDateTimes<MemoryStoreSnapshot>
+export type JsonMemory = IsoDateTimes<MemorySnapshot>
 export type JsonVault = IsoDateTimes<Vault>
 export type JsonVaultCredential = IsoDateTimes<VaultCredential>
 export type JsonSessionEvent = IsoDateTimes<SessionEvent>

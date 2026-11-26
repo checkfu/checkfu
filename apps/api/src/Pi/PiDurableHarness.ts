@@ -25,9 +25,21 @@ import type { SessionId } from "@checkfu/domain/Session/Session.id"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import type { EnvironmentConfig } from "@checkfu/sdk/Schemas"
 import * as Cause from "effect/Cause"
+import {
+	artifactsOf,
+	memoryStoresOf,
+	repositoriesOf,
+	skillsOf,
+} from "@checkfu/domain/Session/SessionResource"
+import type {
+	ArtifactMount,
+	MemoryStoreResource,
+	SkillMount,
+} from "@checkfu/domain/Session/SessionResource"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
 import * as Layer from "effect/Layer"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
@@ -40,7 +52,11 @@ import { turnOperationId } from "./PiTurn.ts"
 import type { PiActionAnswer, PiParkedCall, PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import type { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { PACKAGE_REGISTRY_HOSTS } from "../Workspace/MachineEgress.ts"
-import type { TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
+import type {
+	RepositoryMount,
+	TurnToken,
+	WorkspacePreparation,
+} from "../Workspace/WorkspaceShapes.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
 	HarnessCallFailed,
@@ -85,8 +101,15 @@ export interface WorkspaceExecutorService {
 	readonly prepareWorkspace: (
 		sessionId: string,
 		token: TurnToken,
+		repositories: ReadonlyArray<RepositoryMount>,
 		allowedHosts: ReadonlyArray<string> | null,
 	) => Effect.Effect<WorkspacePreparation, HarnessCallFailed>
+	readonly storeRepositoryToken: (
+		sessionId: string,
+		resourceId: string,
+		token: string,
+		replace: boolean,
+	) => Effect.Effect<void, HarnessCallFailed>
 	readonly interruptWorkspace: (
 		sessionId: string,
 		token: TurnToken,
@@ -191,6 +214,77 @@ const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<st
 	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
 		turnOperationId(lastReplyTurn + 1 + i),
 	)
+
+const checkoutLabel = ({ checkout }: RepositoryMount): string =>
+	checkout === null
+		? "default branch"
+		: checkout.type === "branch"
+			? `branch ${checkout.name}`
+			: `commit ${checkout.sha}`
+
+const describeStore = (store: MemoryStoreResource): string =>
+	[
+		`- ${store.mount_path} (${store.access === "read_only" ? "read-only" : "read and write"}): ${store.name}.`,
+		store.description,
+		store.instructions ?? "",
+	]
+		.filter((part) => part.length > 0)
+		.join(" ")
+
+export const describeMounts = (
+	system: string | null,
+	repositories: ReadonlyArray<RepositoryMount>,
+	stores: ReadonlyArray<MemoryStoreResource> = [],
+	artifacts: ReadonlyArray<ArtifactMount> = [],
+	skills: ReadonlyArray<SkillMount> = [],
+): string | null => {
+	const sections = [
+		...(system === null || system.length === 0 ? [] : [system]),
+		...(repositories.length === 0
+			? []
+			: [
+					[
+						"Repositories mounted in your workspace:",
+						...repositories.map(
+							(repository) =>
+								`- ${repository.mount_path}: ${repository.url} (${checkoutLabel(repository)})`,
+						),
+					].join("\n"),
+				]),
+		...(stores.length === 0
+			? []
+			: [
+					[
+						"Memory stores mounted in your workspace. Each is a directory of files that outlasts this session; what you write there is saved as you write it:",
+						...stores.map(describeStore),
+					].join("\n"),
+				]),
+		...(artifacts.length === 0
+			? []
+			: [
+					[
+						"Files mounted in your workspace, read-only:",
+						...artifacts.map(
+							(artifact) =>
+								`- ${artifact.mount_path}: ${artifact.name} (version ${artifact.version})`,
+						),
+					].join("\n"),
+				]),
+		...(skills.length === 0
+			? []
+			: [
+					[
+						"Skills in your workspace. Each is a directory of instructions for one kind of task. When a task matches a skill's description, read its SKILL.md before you start:",
+						...skills.map(
+							(skill) => `- ${skill.mount_path}/SKILL.md: ${skill.name}. ${skill.description}`,
+						),
+					].join("\n"),
+				]),
+	]
+	return repositories.length + stores.length + artifacts.length + skills.length === 0
+		? system
+		: sections.join("\n\n")
+}
 
 export const allowedHostsOf = (config: EnvironmentConfig | null): ReadonlyArray<string> | null =>
 	config === null
@@ -381,10 +475,14 @@ export const PiDurableHarnessLive = boundedHarness(
 					}
 
 					const token = { turn: args.turn }
+					const repositories = repositoriesOf(args.resources)
+					const stores = memoryStoresOf(args.resources)
+					const artifacts = artifactsOf(args.resources)
 					const prepared = yield* withRetry(
 						executor.prepareWorkspace(
 							args.session_id,
 							token,
+							repositories,
 							allowedHostsOf(
 								(yield* environments.get(EnvironmentId.make(args.environment_id))).config,
 							),
@@ -395,9 +493,20 @@ export const PiDurableHarnessLive = boundedHarness(
 						),
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
-					if (!prepared.ok) {
+					if (!prepared.ok && "interrupted" in prepared) {
 						return yield* Effect.fail<TurnInterrupted>({ _tag: "TurnInterrupted" })
 					}
+					if (!prepared.ok) {
+						const failed = repositories.find(({ id }) => id === prepared.resource_id)
+						return yield* Effect.fail<TurnFailed>({
+							_tag: "TurnFailed",
+							error_type: "repository_unavailable",
+							message: `Could not clone ${failed?.url ?? prepared.resource_id}: ${prepared.message}`,
+							terminal: false,
+						})
+					}
+					const skills = skillsOf(args.resources)
+					const system = describeMounts(version.system, repositories, stores, artifacts, skills)
 
 					const mcp =
 						version.mcp_servers.length === 0 ||
@@ -437,7 +546,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						turn: args.turn,
 						provider: resolved.provider,
 						modelId: resolved.modelId,
-						system: version.system,
+						system,
 						...(args.system_context === undefined ? {} : { systemContext: args.system_context }),
 						text: userText,
 						...(mcp === undefined ? {} : { mcp }),
@@ -498,6 +607,20 @@ export const PiDurableHarnessLive = boundedHarness(
 					),
 					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 				),
+			storeRepositoryToken: (args) => {
+				const store = executor.storeRepositoryToken(
+					args.session_id,
+					args.resource_id,
+					Redacted.value(args.authorization_token),
+					args.replace,
+				)
+				return (args.replace ? store : withRetry(store)).pipe(
+					Effect.tapError((error) =>
+						Effect.logError("Repository token not stored", args.session_id, error.cause),
+					),
+					Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
+				)
+			},
 			discardWorkspace: (args) =>
 				withRetry(executor.discardWorkspace(args.session_id)).pipe(
 					Effect.tap(() => Effect.logInfo("Workspace discarded", args.session_id)),
@@ -512,6 +635,7 @@ export const PiDurableHarnessLive = boundedHarness(
 
 const NO_WORKSPACES: WorkspaceExecutorService = {
 	prepareWorkspace: () => Effect.succeed({ ok: true }),
+	storeRepositoryToken: () => Effect.void,
 	interruptWorkspace: () => Effect.void,
 	listOutputs: () => Effect.succeed({ ok: true, files: [] }),
 	readOutputs: () => Effect.succeed([]),

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { describe, expect, it } from "vitest"
 import * as Deferred from "effect/Deferred"
+import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Effect from "effect/Effect"
 import * as Base64 from "effect/encoding/Base64"
 import * as Exit from "effect/Exit"
@@ -34,6 +35,7 @@ import { makeApiHandler } from "../src/Http/Router.ts"
 import { DEFAULT_STORAGE_SCOPE } from "../src/Placement.ts"
 import {
 	AUTH_HEADERS,
+	TEST_RUNTIME,
 	makeAssistantReply,
 	makePiDurableTestLayer,
 	sendRequest,
@@ -337,6 +339,7 @@ const withApi = <A>(
 									}),
 								),
 							),
+							Effect.provideService(RuntimeContext, TEST_RUNTIME),
 						),
 						HttpServerResponse.toWeb,
 					),
@@ -353,6 +356,7 @@ const withApi = <A>(
 									}),
 								),
 							),
+							Effect.provideService(RuntimeContext, TEST_RUNTIME),
 						),
 						HttpServerResponse.toWeb,
 					),

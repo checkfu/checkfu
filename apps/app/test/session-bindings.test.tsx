@@ -228,6 +228,7 @@ describe("session credential bindings", () => {
 			environment_id: "env_1",
 			title: null,
 			turn: 0,
+			resources: [],
 			usage: { input_tokens: 0, output_tokens: 0 },
 			mcp_server_credentials: [{ mcp_server_name: "github", credential_id: "vcrd_work" }],
 			created_at: AT,

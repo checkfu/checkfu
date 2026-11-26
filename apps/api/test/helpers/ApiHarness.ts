@@ -27,10 +27,10 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Layer from "effect/Layer"
-import type { WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
 import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
+import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { ListingStore } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
 import { checkCatalogProviderCredentials } from "../../src/Pi/PiCatalog.ts"
@@ -60,9 +60,28 @@ import {
 } from "../../src/Pi/PiDurableHarness.ts"
 import { makeSessionOutputs } from "../../src/Workspace/SessionOutputs.ts"
 import { makeSessionOutputsPublisher } from "../../src/Artifacts/SessionOutputsLive.ts"
-import { SessionOutputs } from "@checkfu/domain/Session/SessionOutputs.external"
+import {
+	SessionOutputs,
+	SessionOutputsUnpublished,
+} from "@checkfu/domain/Session/SessionOutputs.external"
 import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory.ts"
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
+import type { PiTurnExecutor } from "../../src/Pi/PiDurableHarness.ts"
+import { SessionArtifactAccess } from "../../src/SessionArtifactAccess.ts"
+import { SessionMemoryAccess } from "../../src/SessionMemoryAccess.ts"
+import { makeArtifactMount } from "../../src/Workspace/ArtifactMount.ts"
+import { makeMemoryMount } from "../../src/Workspace/MemoryMount.ts"
+import { makeSessionMemory } from "../../src/Workspace/SessionMemory.ts"
+import type {
+	PendingReceiptStore,
+	PendingReceipts,
+	SessionMemory,
+	SessionMemoryCalls,
+} from "../../src/Workspace/SessionMemory.ts"
+import { repositoryTokenGate } from "../../src/Workspace/Repositories.ts"
+import type { RepositoryMount, WorkspacePreparation } from "../../src/Workspace/WorkspaceShapes.ts"
+import { readSkill } from "../../src/Skills/ReadSkill.ts"
+import { SkillReader } from "../../src/Skills/SkillReader.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
@@ -70,13 +89,15 @@ import { VaultsTestLive } from "./VaultsHarness.ts"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
-export const TestRuntimeContext = Layer.succeed(RuntimeContext, {
+export const TEST_RUNTIME = {
 	Type: "Test",
 	id: "test",
 	env: {},
 	get: () => Effect.undefined,
 	set: (id: string) => Effect.succeed(id),
-})
+}
+
+export const TestRuntimeContext = Layer.succeed(RuntimeContext, TEST_RUNTIME)
 
 export const AUTH_HEADERS = {
 	authorization: `Bearer ${TEST_API_KEY}`,
@@ -208,6 +229,27 @@ export interface TestMcpTool {
 	readonly parameters?: JsonObject
 	readonly run: (args: unknown) => string | Promise<string>
 }
+
+export const checkfuWithHarness = <E, R>(
+	executor: Layer.Layer<PiTurnExecutor, E, R>,
+	harness = PiDurableHarnessLive,
+) => {
+	const hosted = Checkfu.layer(
+		CheckfuHandlersLive.pipe(
+			Layer.provide(ArtifactBytesKept),
+			Layer.provide(SessionOutputsUnpublished),
+			Layer.provide(ListingStore.memory),
+			Layer.provide(harness),
+		),
+	).pipe(Layer.provide(executor))
+	return Layer.mergeAll(
+		hosted,
+		PiDurableHarnessLive.pipe(Layer.provide(executor), Layer.provide(hosted)),
+	)
+}
+
+const memoryRel = (path: string) => path.slice("/mnt/memory/".length)
+const repositoryKey = (sessionId: string, resourceId: string) => `${sessionId}/${resourceId}`
 
 export const makePiDurableTestLayer = (
 	handler: (
@@ -470,11 +512,122 @@ export const makePiDurableTestLayer = (
 	)
 	const preparedWorkspaces: Array<{
 		readonly sessionId: string
+		readonly repositories: ReadonlyArray<RepositoryMount>
 		readonly allowedHosts: ReadonlyArray<string> | null
 	}> = []
 	const workspaceCalls: Array<string> = []
 	const refusedWorkspaces = new Set<string>()
+	const repositoryTokens = new Map<string, string>()
+	const tokens = Effect.runSync(repositoryTokenGate((key) => repositoryTokens.has(key)))
 	const preparations: Array<WorkspacePreparation> = []
+	const beforeTokenStored: Array<() => Promise<Response>> = []
+	const tokenDeliveries: Array<string> = []
+	let memoryCalls:
+		| {
+				readonly access: Effect.Success<typeof SessionMemoryAccess>
+				readonly artifacts: Effect.Success<typeof SessionArtifactAccess>
+				readonly run: <A>(effect: Effect.Effect<A>) => Promise<A>
+		  }
+		| undefined
+	const memoryCallsLive = Layer.effectDiscard(
+		Effect.gen(function* () {
+			const access = yield* SessionMemoryAccess
+			const artifacts = yield* SessionArtifactAccess
+			const services = yield* Effect.context<never>()
+			memoryCalls = {
+				access,
+				artifacts,
+				run: (effect) => Effect.runPromiseWith(services)(effect),
+			}
+		}),
+	)
+	const built = () => {
+		if (memoryCalls === undefined) {
+			throw new Error("The test layer is not built yet.")
+		}
+		return memoryCalls
+	}
+	const run = <A, E>(
+		effect: (access: Effect.Success<typeof SessionMemoryAccess>) => Effect.Effect<A, E>,
+	) => built().run(Effect.orDie(effect(built().access)))
+	const artifactFiles = (sessionId: string, root = "/mnt/artifacts") => {
+		const mount = makeArtifactMount(
+			root,
+			{
+				mounts: () => built().run(Effect.orDie(built().artifacts.artifactMounts(sessionId))),
+				files: (mountPath) =>
+					built().run(Effect.orDie(built().artifacts.artifactFiles(sessionId, mountPath))),
+				read: (mountPath, path, offset, length) =>
+					built().run(
+						Effect.orDie(
+							built().artifacts.artifactRead(sessionId, mountPath, path, offset, length),
+						),
+					),
+			},
+			100_000,
+		)
+		return {
+			list: async () =>
+				((await mount.readdir("", { recursive: true })) ?? [])
+					.filter((entry) => entry.type === "file")
+					.map((entry) => `${root}/${entry.name}`)
+					.toSorted(),
+			read: async (path: string, range?: { readonly offset: number; readonly length: number }) => {
+				const read = await mount.readFile(
+					path.slice(root.length + 1),
+					range === undefined ? undefined : { range },
+				)
+				return read === null ? null : await new Response(read.body).text()
+			},
+		}
+	}
+	const heldReceipts = new Map<string, PendingReceipts>()
+	const receiptsOf = (sessionId: string): PendingReceiptStore => ({
+		get: () => heldReceipts.get(sessionId),
+		put: (pending) => {
+			heldReceipts.set(sessionId, pending)
+		},
+	})
+	const sessionMemoryCalls = (sessionId: string): SessionMemoryCalls => ({
+		mounts: () => run((access) => access.memoryMounts(sessionId)),
+		list: (name, after) => run((access) => access.memoryList(sessionId, name, after)),
+		read: (name, path) => run((access) => access.memoryRead(sessionId, name, path)),
+		write: (name, path, content, exclusive) =>
+			run((access) => access.memoryWrite(sessionId, name, path, content, exclusive)),
+		remove: (name, path, expected) =>
+			run((access) => access.memoryRemove(sessionId, name, path, expected)),
+	})
+	const sessionMemoryOf = (sessionId: string): SessionMemory =>
+		makeSessionMemory(sessionMemoryCalls(sessionId), receiptsOf(sessionId))
+	const memoryMounts = new Map<string, ReturnType<typeof makeMemoryMount>>()
+	const memoryFiles = (sessionId: string) => {
+		let mount = memoryMounts.get(sessionId)
+		if (mount === undefined) {
+			mount = makeMemoryMount(sessionMemoryOf(sessionId))
+			memoryMounts.set(sessionId, mount)
+		}
+		const served = mount
+		return {
+			write: async (path: string, content: string) => {
+				await served.writeFile?.(memoryRel(path), new Blob([content]).stream(), {})
+			},
+			remove: async (path: string, recursive = false) => {
+				await served.rm?.(memoryRel(path), { recursive })
+			},
+			rename: async (from: string, to: string) => {
+				await served.rename?.(memoryRel(from), memoryRel(to), {})
+			},
+			read: async (path: string) => {
+				const read = await served.readFile(memoryRel(path))
+				return read === null ? null : await new Response(read.body).text()
+			},
+			list: async () =>
+				((await served.readdir("", { recursive: true })) ?? [])
+					.filter((entry) => entry.type === "file")
+					.map((entry) => `/mnt/memory/${entry.name}`)
+					.toSorted(),
+		}
+	}
 	const executorLayer = makePiTurnExecutorLayer(
 		{
 			recoverTurn: (conversation, operationId) =>
@@ -518,19 +671,49 @@ export const makePiDurableTestLayer = (
 				),
 		},
 		{
-			prepareWorkspace: (sessionId, token, allowedHosts) =>
-				Effect.sync((): WorkspacePreparation => {
+			prepareWorkspace: (sessionId, token, repositories, allowedHosts) =>
+				Effect.gen(function* (): Effect.fn.Return<WorkspacePreparation> {
 					workspaceCalls.push(`prepare ${sessionId} ${token.turn}`)
 					if (refusedWorkspaces.has(sessionId)) {
 						return { ok: false, interrupted: true }
 					}
-					preparedWorkspaces.push({ sessionId, allowedHosts })
+					for (const repository of repositories) {
+						if (
+							repository.requires_token &&
+							!(yield* tokens.awaitToken(repositoryKey(sessionId, repository.id)))
+						) {
+							return {
+								ok: false,
+								resource_id: repository.id,
+								message: "Repository token was not stored.",
+							}
+						}
+					}
+					preparedWorkspaces.push({ sessionId, repositories, allowedHosts })
 					return preparations.shift() ?? { ok: true }
 				}),
 			interruptWorkspace: (sessionId, token) =>
 				Effect.sync(() => {
 					workspaceCalls.push(`interrupt ${sessionId} ${token.turn}`)
 				}),
+			storeRepositoryToken: (sessionId, resourceId, token, replace) =>
+				Effect.suspend(() => {
+					tokenDeliveries.push(token)
+					return unreachable.has(sessionId) || unreachable.has("*")
+						? Effect.fail(new HarnessCallFailed({ cause: "unreachable in test" }))
+						: Effect.void
+				}).pipe(
+					Effect.andThen(
+						Effect.gen(function* () {
+							yield* Effect.promise(async () => beforeTokenStored.shift()?.())
+							const key = repositoryKey(sessionId, resourceId)
+							if (replace || !repositoryTokens.has(key)) {
+								repositoryTokens.set(key, token)
+								yield* tokens.stored(key)
+							}
+						}),
+					),
+				),
 			discardWorkspace: (sessionId) =>
 				Effect.sync(() => {
 					discardedWorkspaces.push(sessionId)
@@ -599,13 +782,16 @@ export const makePiDurableTestLayer = (
 	const CustomToolFaultsLive = Layer.succeed(CustomToolFaults, (tools, taken) =>
 		Effect.succeed(customToolFaults(tools, taken)),
 	)
-	const layer = Layer.mergeAll(
+	const base = Layer.mergeAll(
 		CheckfuLive,
 		PiProviderLive,
 		CustomToolFaultsLive,
 		ArtifactLinksTest,
 	).pipe(
 		Layer.provideMerge(artifactStore.layer),
+		Layer.provideMerge(
+			Layer.succeed(SkillReader, { read: (markdown) => Effect.promise(() => readSkill(markdown)) }),
+		),
 		Layer.provideMerge(
 			Layer.succeed(HarnessLimits, {
 				attempts: 2,
@@ -622,6 +808,7 @@ export const makePiDurableTestLayer = (
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(envOverrides))),
 		Layer.provideMerge(TestRuntimeContext),
 	)
+	const layer = memoryCallsLive.pipe(Layer.provideMerge(base))
 
 	const restartPi = async (sessionId: string) => {
 		const serving = await objects.get(sessionId)
@@ -659,7 +846,13 @@ export const makePiDurableTestLayer = (
 		preparedWorkspaces,
 		workspaceCalls,
 		refusedWorkspaces,
+		repositoryTokens,
 		preparations,
+		beforeTokenStored,
+		tokenDeliveries,
+		memoryFiles,
+		sessionMemoryCalls,
+		artifactFiles,
 	}
 }
 
@@ -672,7 +865,7 @@ export const sendRequest = (
 	fetchEffect: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	input: {
 		readonly method: string
@@ -699,6 +892,7 @@ export const sendRequest = (
 				HttpServerRequest.HttpServerRequest,
 				HttpServerRequest.fromWeb(webRequest),
 			),
+			Effect.provideService(RuntimeContext, TEST_RUNTIME),
 		)
 		return HttpServerResponse.toWeb(response)
 	})
@@ -707,7 +901,7 @@ export const makeApiTestClient = (
 	fetchEffect: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 ) =>
 	makeCheckfuClientWith({
@@ -719,7 +913,7 @@ export const makeApiTestHttpClient = (
 	fetchEffect: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 ) =>
 	HttpClient.make((request, url) =>
@@ -740,6 +934,7 @@ export const makeApiTestHttpClient = (
 					HttpServerRequest.HttpServerRequest,
 					HttpServerRequest.fromWeb(webRequest),
 				),
+				Effect.provideService(RuntimeContext, TEST_RUNTIME),
 			)
 			return HttpClientResponse.fromWeb(request, HttpServerResponse.toWeb(response))
 		}),
@@ -832,7 +1027,7 @@ export const createIdleSession = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	system?: string,
 ) =>
@@ -874,7 +1069,7 @@ export const waitForSession = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	sessionId: string,
 	predicate: (session: { readonly status: string; readonly turn: number }) => boolean,
@@ -909,7 +1104,7 @@ export const sendAndSettle = (
 	apiFetch: Effect.Effect<
 		HttpServerResponse.HttpServerResponse,
 		never,
-		HttpServerRequest.HttpServerRequest
+		HttpServerRequest.HttpServerRequest | RuntimeContext
 	>,
 	sessionId: string,
 	texts: ReadonlyArray<string>,

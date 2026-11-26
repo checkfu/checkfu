@@ -1,4 +1,4 @@
-import type { Field, Forge, Group, Method } from "@cloudflare/forge"
+import type { Field, Forge, Group, Method, Type } from "@cloudflare/forge"
 import { file, module } from "@cloudflare/forge/ts"
 import {
 	cleanGeneratedHeader,
@@ -141,6 +141,28 @@ const readCliExtension = (method: Method): CliExtension => {
 		...(typeof raw["maxInputBytes"] === "number" && Number.isSafeInteger(raw["maxInputBytes"])
 			? { maxInputBytes: raw["maxInputBytes"] }
 			: {}),
+	}
+}
+
+const carriesSecret = (type: Type, seen: ReadonlySet<string> = new Set()): boolean => {
+	switch (type.kind) {
+		case "array":
+			return carriesSecret(type.elem, seen)
+		case "object":
+			return (
+				type.fields.some((field) => field.sensitive || carriesSecret(field.type, seen)) ||
+				(type.extra !== undefined && carriesSecret(type.extra, seen))
+			)
+		case "union":
+		case "intersection":
+			return type.members.some((member) => carriesSecret(member, seen))
+		case "model":
+			return (
+				!seen.has(type.model.schemaName) &&
+				carriesSecret(type.model.type, new Set([...seen, type.model.schemaName]))
+			)
+		default:
+			return false
 	}
 }
 
@@ -337,6 +359,9 @@ const collectMethodFlags = (method: Method, cliExt: CliExtension): ReadonlyArray
 	}
 
 	for (const field of bodyFields) {
+		if (field.sensitive || carriesSecret(field.type)) {
+			continue
+		}
 		const repeat = cliExt.repeatArrayField
 		if (repeat !== undefined && repeat.field === field.wireName) {
 			const repeatMax = repeat.max ?? extractArrayMaxItems(field.type)

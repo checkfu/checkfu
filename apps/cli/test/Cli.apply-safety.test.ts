@@ -246,6 +246,7 @@ it("sends an automation patch with a revision and preserves a concurrent schedul
 							sent = await request.clone().json()
 							const headers = new Headers(request.headers)
 							headers.delete("content-length")
+							headers.set("content-type", "application/json")
 							const result = await next(
 								new Request(request.url, {
 									method: "POST",
@@ -359,7 +360,7 @@ it("releases capacity from an approved archive and retries creation with the sam
 				])
 				expect(writes).toEqual([
 					"/v1/automations",
-					`/v1/automations/${oldId}/archive-if-current`,
+					`/v1/automations/${oldId}/archive`,
 					"/v1/automations",
 					"/v1/automations",
 				])
@@ -430,12 +431,17 @@ it.each([
 					yield* fs.remove(file(source))
 					const result = yield* apply([source], ["--yes", "--prune", "--force"], {
 						interceptFetch: async (next, request) => {
-							if (new URL(request.url).pathname !== `${endpoint}/archive-if-current`) {
+							if (new URL(request.url).pathname !== `${endpoint}/archive`) {
 								return next(request)
 							}
-							expect(await request.clone().json()).toEqual(guard)
+							expect(Object.fromEntries(new URL(request.url).searchParams)).toEqual(
+								Object.fromEntries(
+									Object.entries(guard).map(([key, value]) => [key, String(value)]),
+								),
+							)
 							const headers = new Headers(request.headers)
 							headers.delete("content-length")
+							headers.set("content-type", "application/json")
 							const edited = await next(
 								new Request(new URL(endpoint, request.url), {
 									method: "POST",
@@ -729,7 +735,7 @@ it("blocks pruning a dependency used by an automation outside the project", () =
 						}
 						const response = await next(request)
 						if (request.method === "POST") {
-							expect(request.url).toContain("/archive-if-current")
+							expect(request.url).toContain("/archive")
 							expect(response.status).toBe(409)
 						}
 						return response

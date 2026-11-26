@@ -15,6 +15,7 @@ import {
 } from "./RunTurnActivities.ts"
 import { Session } from "./Session.aggregate.ts"
 import { SessionId } from "./Session.id.ts"
+import { SessionResources } from "./SessionResource.ts"
 import { MessageText, NonNegativeInt, PositiveInt, ResourceId } from "./SessionTypes.ts"
 
 export { TurnOutcome, RUN_TURN_ACTIVITIES, StepOutcome }
@@ -40,6 +41,7 @@ export class RunTurn extends Domain.Saga("RunTurn", {
 		agent_id: ResourceId,
 		agent_version: PositiveInt,
 		environment_id: ResourceId,
+		resources: SessionResources,
 		turn: PositiveInt,
 		input: Schema.Array(MessageText),
 		system_context: Schema.optionalKey(Schema.String),
@@ -98,6 +100,7 @@ export const RunTurnLive = RunTurn.toLayer(
 						agent_id: payload.agent_id,
 						agent_version: payload.agent_version,
 						environment_id: payload.environment_id,
+						resources: payload.resources,
 						turn: payload.turn,
 						input: payload.input,
 						...(payload.system_context === undefined
