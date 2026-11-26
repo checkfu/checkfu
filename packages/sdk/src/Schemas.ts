@@ -290,14 +290,14 @@ export const RequiresActionStopReason = Schema.Struct({
 	type: Schema.Literal("requires_action"),
 	event_ids: Schema.Array(Schema.String).annotate({
 		description:
-			"The tool calls waiting for an answer, by tool_use_id. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use.",
+			"The IDs of the tool call events waiting for an answer. Send a user.tool_confirmation for each agent.mcp_tool_use and a user.custom_tool_result for each agent.custom_tool_use.",
 	}),
 })
 export type RequiresActionStopReason = typeof RequiresActionStopReason.Type
 
 export const CancelledEventIds = Schema.Array(Schema.String).annotate({
 	description:
-		"The tool calls that still waited for an answer when the turn ended, by tool_use_id. The end of the turn cancelled them: they can no longer be answered.",
+		"The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered.",
 })
 
 export const MAX_DENY_MESSAGE_LENGTH = 4096
@@ -396,9 +396,7 @@ export const SessionEventFields = {
 		name: ResourceId,
 		input: Schema.JsonObject,
 	},
-	"agent.thinking": {
-		thinking: Schema.String,
-	},
+	"agent.thinking": {},
 	"agent.message": {
 		content: TextBlocks,
 		truncated: Schema.optionalKey(Schema.Literal(true)),

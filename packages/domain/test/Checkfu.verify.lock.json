@@ -537,6 +537,10 @@
 			"Session.AStopNamesTheUnansweredCalls": {
 				"kind": "transition",
 				"source": "({ before, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\t(event._tag !== \"session.status_idle\" && event._tag !== \"session.status_terminated\") ||\n\t\t\t\t\tevent.event_ids === (before._tag === \"Running\" ? before.awaiting_ids : NO_TOOL_USE_IDS),\n\t\t\t)"
+			},
+			"OpenAutomationSession.FirstTurnAdmissionKeepsGivenCredentials": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" &&\n\t\t\t\t\tevent.mcp_server_credentials === command.mcp_server_credentials,\n\t\t\t)"
 			}
 		}
 	}

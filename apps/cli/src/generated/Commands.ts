@@ -1943,6 +1943,16 @@ const sessionsCreateCommandSpec: GeneratedOperationDescriptor = {
 			required: false,
 		},
 		{
+			propName: "initialEvents",
+			flagName: "initial-event",
+			wireName: "initial_events",
+			location: "body",
+			kind: "repeat-structured",
+			required: false,
+			min: 0,
+			max: 1,
+		},
+		{
 			propName: "environmentId",
 			flagName: "environment-id",
 			wireName: "environment_id",
@@ -1994,6 +2004,11 @@ const sessionsCreateCommand = CommandMake(
 				'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version. (accepts value, JSON/YAML object, or @file)',
 			),
 			FlagOptional,
+		),
+		initialEvents: FlagString("initial-event").pipe(
+			FlagWithMetavar("JSON|YAML|@FILE"),
+			FlagWithDescription("Initial user message as JSON, YAML, or @file"),
+			FlagBetween(0, 1),
 		),
 		environmentId: FlagString("environment-id").pipe(
 			FlagWithMetavar("ID"),

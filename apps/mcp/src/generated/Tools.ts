@@ -2181,6 +2181,40 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 							description:
 								'Agent to run in the session. Pass an ID to pin the latest version, or pass an object with type "agent", id, and version to pin a specific version.',
 						},
+						initial_events: {
+							type: "array",
+							items: {
+								type: "object",
+								properties: {
+									type: {
+										type: "string",
+										enum: ["user.message"],
+									},
+									content: {
+										type: "array",
+										items: {
+											type: "object",
+											properties: {
+												type: {
+													type: "string",
+													enum: ["text"],
+												},
+												text: {
+													type: "string",
+												},
+											},
+											required: ["type", "text"],
+											additionalProperties: false,
+										},
+										minItems: 1,
+									},
+								},
+								required: ["type", "content"],
+								additionalProperties: false,
+							},
+							maxItems: 1,
+							description: "A text user message to send when the session is created.",
+						},
 						environment_id: {
 							type: "string",
 							minLength: 1,
@@ -2522,7 +2556,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											tool_use_id: {
 												type: "string",
 												minLength: 1,
-												maxLength: 256,
+												maxLength: 523,
 												description: "The agent.mcp_tool_use event that waits for this answer",
 											},
 											result: {
@@ -2554,7 +2588,7 @@ export const GENERATED_TOOLS: ReadonlyArray<GeneratedToolDescriptor> = [
 											custom_tool_use_id: {
 												type: "string",
 												minLength: 1,
-												maxLength: 256,
+												maxLength: 523,
 												description: "The agent.custom_tool_use event this result answers",
 											},
 											content: {
