@@ -367,7 +367,7 @@ describe("@checkfu/sdk live API integration", () => {
 
 								const session = await client.waitForPending(
 									await client.sessions.create({
-										agent: { id: agent.id, version: agent.version },
+										agent: { type: "agent", id: agent.id, version: agent.version },
 										environment_id: env.id,
 									}),
 								)

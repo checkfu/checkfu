@@ -41,6 +41,12 @@ describe("Cloudflare Forge pipeline", () => {
 			{ group: "agents", name: "list", httpMethod: "GET", path: "/v1/agents" },
 			{ group: "agents", name: "retrieve", httpMethod: "GET", path: "/v1/agents/{agent_id}" },
 			{ group: "agents", name: "update", httpMethod: "POST", path: "/v1/agents/{agent_id}" },
+			{
+				group: "agents:versions",
+				name: "list",
+				httpMethod: "GET",
+				path: "/v1/agents/{agent_id}/versions",
+			},
 			{ group: "artifacts", name: "create", httpMethod: "POST", path: "/v1/artifacts" },
 			{
 				group: "artifacts",
@@ -351,7 +357,9 @@ describe("Cloudflare Forge pipeline", () => {
 			paths: Record<string, Record<string, Record<string, Json>>>
 		}
 		const agentsPost = spec.paths["/v1/agents"]?.["post"]
-		expect(agentsPost?.["description"]).toBe("Create an agent")
+		expect(agentsPost?.["description"]).toBe(
+			"Create a reusable agent configuration with a model and an optional system prompt.",
+		)
 		const agentProps = (
 			(agentsPost?.["requestBody"] as Record<string, Record<string, Record<string, Json>>>)?.[
 				"content"
@@ -677,7 +685,7 @@ describe("Cloudflare Forge pipeline", () => {
 			group: ReadonlyArray<string>
 			name: string
 		}>
-		expect(inspectedMethods.length).toBe(64)
+		expect(inspectedMethods.length).toBe(65)
 
 		const scratch = mkdtempSync(join(tmpdir(), "checkfu-forge-sdk-"))
 		try {
