@@ -1315,31 +1315,19 @@ const SessionPreviewTypes = Schema.Array(SessionPreviewType)
 	.check(Schema.isMaxLength(100))
 	.annotate({ description: "Event types to preview on this connection." })
 
-const NextPage = Schema.optionalKey(Schema.NullOr(Schema.String))
-
-export const ListSessionEventsResponse = Schema.Struct({
-	data: Schema.Array(SessionEvent),
-	has_more: Schema.Boolean,
-	next_cursor: Schema.NullOr(Schema.Finite),
-	next_page: NextPage,
-})
-export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
-
-export const ListAutomationRunsResponse = Schema.Struct({
-	data: Schema.Array(AutomationRunResource),
-	has_more: Schema.Boolean,
-	next_cursor: Schema.NullOr(Schema.Finite),
-	next_page: NextPage,
-})
-export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
-
-const listResponse = <A extends Schema.Top, C extends Schema.Top>(resource: A, cursor: C) =>
+const listResponse = <A extends Schema.Top>(resource: A) =>
 	Schema.Struct({
 		data: Schema.Array(resource),
-		has_more: Schema.Boolean,
-		next_cursor: Schema.NullOr(cursor),
-		next_page: NextPage,
+		next_page: Schema.NullOr(Schema.String).annotate({
+			description: "Token for the next page, or null when there are no more results.",
+		}),
 	})
+
+export const ListSessionEventsResponse = listResponse(SessionEvent)
+export type ListSessionEventsResponse = typeof ListSessionEventsResponse.Type
+
+export const ListAutomationRunsResponse = listResponse(AutomationRunResource)
+export type ListAutomationRunsResponse = typeof ListAutomationRunsResponse.Type
 
 const AgentVersionPage = Schema.String.check(
 	Schema.isMinLength(1),
@@ -1351,25 +1339,25 @@ export const ListAgentVersionsResponse = Schema.Struct({
 	next_page: Schema.NullOr(AgentVersionPage),
 })
 
-export const ListAgentsResponse = listResponse(AgentResource, ResourceListCursor)
+export const ListAgentsResponse = listResponse(AgentResource)
 export type ListAgentsResponse = typeof ListAgentsResponse.Type
 
-export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot, ResourceListCursor)
+export const ListEnvironmentsResponse = listResponse(EnvironmentSnapshot)
 export type ListEnvironmentsResponse = typeof ListEnvironmentsResponse.Type
 
-export const ListSessionsResponse = listResponse(SessionResource, ResourceListCursor)
+export const ListSessionsResponse = listResponse(SessionResource)
 export type ListSessionsResponse = typeof ListSessionsResponse.Type
 
-export const ListArtifactsResponse = listResponse(ArtifactSummaryResource, ResourceListCursor)
+export const ListArtifactsResponse = listResponse(ArtifactSummaryResource)
 export type ListArtifactsResponse = typeof ListArtifactsResponse.Type
 
-export const ListVaultsResponse = listResponse(VaultResource, ResourceListCursor)
+export const ListVaultsResponse = listResponse(VaultResource)
 export type ListVaultsResponse = typeof ListVaultsResponse.Type
 
-export const ListCredentialsResponse = listResponse(CredentialResource, ResourceListCursor)
+export const ListCredentialsResponse = listResponse(CredentialResource)
 export type ListCredentialsResponse = typeof ListCredentialsResponse.Type
 
-export const ListAutomationsResponse = listResponse(AutomationResource, ResourceListCursor)
+export const ListAutomationsResponse = listResponse(AutomationResource)
 export type ListAutomationsResponse = typeof ListAutomationsResponse.Type
 
 export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).pipe(
@@ -1381,21 +1369,6 @@ export const CursorFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$
 		},
 	),
 )
-
-const EventListAfterFromString = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u))
-	.annotate({
-		description:
-			"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-	})
-	.pipe(
-		Schema.decodeTo(
-			Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 999_999_999_999_999 })),
-			{
-				decode: SchemaGetter.transform(Number),
-				encode: SchemaGetter.transform(String),
-			},
-		),
-	)
 
 const EventListPage = Schema.String.check(Schema.isPattern(/^\d{1,15}$/u)).annotate({
 	description: "Opaque pagination cursor from the previous response's next_page.",
@@ -1448,7 +1421,6 @@ const AgentVersionFromString = positiveIntegerFromString(
 )
 
 const resourceListQuery = {
-	after: Schema.optionalKey(ResourceListCursor),
 	page: Schema.optionalKey(ResourceListCursor),
 	limit: Schema.optionalKey(ListLimitFromString),
 	order: Schema.optionalKey(
@@ -1911,7 +1883,6 @@ const Sessions = HttpApiGroup.make("sessions")
 		HttpApiEndpoint.get("listEvents", "/v1/sessions/:session_id/events", {
 			params: sessionParams,
 			query: {
-				after: Schema.optionalKey(EventListAfterFromString),
 				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
 				types: Schema.optionalKey(
@@ -1941,7 +1912,6 @@ const Sessions = HttpApiGroup.make("sessions")
 				"x-checkfu-cli": {
 					repeatArrayField: { field: "types", flag: "type" },
 					intQueryParams: {
-						after: { min: 0, metavar: "SEQ" },
 						limit: { min: 1, max: 100, metavar: "N" },
 					},
 				},
@@ -2189,7 +2159,6 @@ const Automations = HttpApiGroup.make("automations")
 		HttpApiEndpoint.get("listRuns", "/v1/automations/:automation_id/runs", {
 			params: automationParams,
 			query: {
-				after: Schema.optionalKey(EventListAfterFromString),
 				page: Schema.optionalKey(EventListPage),
 				limit: Schema.optionalKey(EventListLimitFromString),
 				order: Schema.optionalKey(
@@ -2211,7 +2180,6 @@ const Automations = HttpApiGroup.make("automations")
 				"x-checkfu-mcp": { name: "automations_listRuns" },
 				"x-checkfu-cli": {
 					intQueryParams: {
-						after: { min: 0, metavar: "SEQ" },
 						limit: { min: 1, max: 100, metavar: "N" },
 					},
 				},

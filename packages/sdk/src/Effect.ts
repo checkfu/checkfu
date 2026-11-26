@@ -38,7 +38,7 @@ export type {
 
 export type {
 	BodyOf,
-	CursorPageEnvelope,
+	PageEnvelope,
 	EndpointBody,
 	EndpointJsonSuccess,
 	EndpointParams,

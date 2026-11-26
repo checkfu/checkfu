@@ -41,8 +41,7 @@ export const ResourceId = Schema.String.check(
 export const ResourceListCursor = Schema.String.check(
 	Schema.isPattern(/^\d{1,15}:[^/\\]+$/u),
 ).annotate({
-	description:
-		"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
+	description: "Opaque page token from the previous response's next_page.",
 })
 
 export const AgentId = Schema.String.check(Schema.isMinLength(1), SinglePathSegmentCheck).pipe(

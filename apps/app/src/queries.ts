@@ -4,10 +4,10 @@ import type { JsonSessionEvent } from "@checkfu/sdk/client"
 import { ApiError, checkfu } from "./api.ts"
 import type { EventPage } from "./api.ts"
 
-export const agentsPage = (after?: string) =>
+export const agentsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["agents", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.agents.list(after, signal),
+		queryKey: ["agents", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.agents.list(token, signal),
 	})
 
 export const agentQuery = (id: string) =>
@@ -20,13 +20,13 @@ export const agentChoices = infiniteQueryOptions({
 	queryKey: ["agents", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.agents.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_page ?? page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
 })
 
-export const environmentsPage = (after?: string) =>
+export const environmentsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["environments", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.environments.list(after, signal),
+		queryKey: ["environments", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.environments.list(token, signal),
 	})
 
 export const environmentQuery = (id: string) =>
@@ -39,13 +39,13 @@ export const environmentChoices = infiniteQueryOptions({
 	queryKey: ["environments", "choices"],
 	queryFn: ({ pageParam, signal }) => checkfu.environments.list(pageParam, signal),
 	initialPageParam: undefined as string | undefined,
-	getNextPageParam: (page) => page.next_page ?? page.next_cursor ?? undefined,
+	getNextPageParam: (page) => page.next_page ?? undefined,
 })
 
-export const automationsPage = (after?: string) =>
+export const automationsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["automations", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.automations.list(after, signal),
+		queryKey: ["automations", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.automations.list(token, signal),
 	})
 
 export const automationQuery = (id: string) =>
@@ -59,14 +59,13 @@ export const automationRunsQuery = (id: string) =>
 		queryKey: ["automations", "runs", id],
 		queryFn: ({ pageParam, signal }) => checkfu.automations.runs(id, pageParam, signal),
 		initialPageParam: undefined as string | undefined,
-		getNextPageParam: (page) =>
-			page.next_page ?? (page.next_cursor === null ? undefined : String(page.next_cursor)),
+		getNextPageParam: (page) => page.next_page ?? undefined,
 	})
 
-export const sessionsPage = (after?: string) =>
+export const sessionsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["sessions", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.sessions.list(after, signal),
+		queryKey: ["sessions", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.sessions.list(token, signal),
 	})
 
 export const sessionQuery = (id: string) =>
@@ -75,10 +74,10 @@ export const sessionQuery = (id: string) =>
 		queryFn: ({ signal }) => checkfu.sessions.retrieve(id, signal),
 	})
 
-export const artifactsPage = (after?: string) =>
+export const artifactsPage = (token?: string) =>
 	queryOptions({
-		queryKey: ["artifacts", "page", after ?? null],
-		queryFn: ({ signal }) => checkfu.artifacts.list(after, signal),
+		queryKey: ["artifacts", "page", token ?? null],
+		queryFn: ({ signal }) => checkfu.artifacts.list(token, signal),
 	})
 
 export const artifactQuery = (id: string) =>
@@ -106,8 +105,7 @@ export const transcriptQuery = (id: string) =>
 		queryKey: ["transcripts", id],
 		queryFn: ({ pageParam, signal }) => checkfu.sessions.events(id, pageParam, signal),
 		initialPageParam: undefined as string | undefined,
-		getNextPageParam: (page) =>
-			page.next_page ?? (page.next_cursor === null ? undefined : String(page.next_cursor)),
+		getNextPageParam: (page) => page.next_page ?? undefined,
 		staleTime: Number.POSITIVE_INFINITY,
 	})
 

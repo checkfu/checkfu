@@ -439,17 +439,16 @@ export class EffectAgentsVersionsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"agents", "listVersions">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					agentId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { page: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["page"],
-			"asc",
+			params?.page,
 		)
 	}
 
@@ -460,17 +459,16 @@ export class EffectAgentsVersionsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"agents", "listVersions">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					agentId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { page: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["page"],
-			"asc",
+			params?.page,
 		)
 	}
 }
@@ -580,7 +578,6 @@ export class EffectAgentsResource {
 			executeWithRetries(this.#runtime, "checkfu.agents.list", "idempotent", options, () =>
 				this.#runtime.raw.agents.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -601,16 +598,15 @@ export class EffectAgentsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"agents", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -620,16 +616,15 @@ export class EffectAgentsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"agents", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -998,7 +993,6 @@ export class EffectArtifactsResource {
 			executeWithRetries(this.#runtime, "checkfu.artifacts.list", "idempotent", options, () =>
 				this.#runtime.raw.artifacts.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -1016,16 +1010,15 @@ export class EffectArtifactsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"artifacts", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1035,16 +1028,15 @@ export class EffectArtifactsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"artifacts", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1216,7 +1208,6 @@ export class EffectAutomationsRunsResource {
 							this.#runtime.raw.automations.listRuns({
 								params: pathParams,
 								query: {
-									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -1236,17 +1227,16 @@ export class EffectAutomationsRunsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"automations", "listRuns">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					automationId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1257,17 +1247,16 @@ export class EffectAutomationsRunsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"automations", "listRuns">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					automationId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1426,7 +1415,6 @@ export class EffectAutomationsResource {
 			executeWithRetries(this.#runtime, "checkfu.automations.list", "idempotent", options, () =>
 				this.#runtime.raw.automations.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -1448,16 +1436,15 @@ export class EffectAutomationsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"automations", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1467,16 +1454,15 @@ export class EffectAutomationsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"automations", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1825,7 +1811,6 @@ export class EffectEnvironmentsResource {
 			executeWithRetries(this.#runtime, "checkfu.environments.list", "idempotent", options, () =>
 				this.#runtime.raw.environments.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -1846,16 +1831,15 @@ export class EffectEnvironmentsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"environments", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -1865,16 +1849,15 @@ export class EffectEnvironmentsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"environments", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2007,7 +1990,6 @@ export class EffectSessionsEventsResource {
 							this.#runtime.raw.sessions.listEvents({
 								params: pathParams,
 								query: {
-									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["types"] === undefined ? {} : { types: params["types"] }),
@@ -2028,17 +2010,16 @@ export class EffectSessionsEventsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"sessions", "listEvents">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					sessionId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2049,17 +2030,16 @@ export class EffectSessionsEventsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"sessions", "listEvents">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					sessionId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2291,7 +2271,6 @@ export class EffectSessionsResource {
 			executeWithRetries(this.#runtime, "checkfu.sessions.list", "idempotent", options, () =>
 				this.#runtime.raw.sessions.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -2313,16 +2292,15 @@ export class EffectSessionsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"sessions", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2332,16 +2310,15 @@ export class EffectSessionsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"sessions", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2566,7 +2543,6 @@ export class EffectVaultsCredentialsResource {
 							this.#runtime.raw.vaults.listCredentials({
 								params: pathParams,
 								query: {
-									...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 									...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -2589,17 +2565,16 @@ export class EffectVaultsCredentialsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"vaults", "listCredentials">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					vaultId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2610,17 +2585,16 @@ export class EffectVaultsCredentialsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"vaults", "listCredentials">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					vaultId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2852,7 +2826,6 @@ export class EffectVaultsResource {
 			executeWithRetries(this.#runtime, "checkfu.vaults.list", "idempotent", options, () =>
 				this.#runtime.raw.vaults.list({
 					query: {
-						...(params?.["after"] === undefined ? {} : { after: params["after"] }),
 						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
 						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
 						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
@@ -2873,16 +2846,15 @@ export class EffectVaultsResource {
 		options?: RequestOptions,
 	): Stream<EndpointSuccess<"vaults", "list">, CheckfuSdkError> {
 		return executePaginatedPagesEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -2892,16 +2864,15 @@ export class EffectVaultsResource {
 		options?: RequestOptions,
 	): Stream<ItemOf<EndpointSuccess<"vaults", "list">>, CheckfuSdkError> {
 		return executePaginatedStreamEffect(
-			(cursor) =>
+			(page) =>
 				this.list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					options,
 				),
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 		)
 	}
 
@@ -3007,20 +2978,19 @@ export class AgentsVersionsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "listVersions">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "listVersions">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "listVersions">>>,
 		ItemOf<EndpointJsonSuccess<"agents", "listVersions">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["page"],
-			"asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectAgentsVersionsResource(effectRuntime).list(
 					agentId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { page: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3065,19 +3035,18 @@ export class AgentsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"agents", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "list">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"agents", "list">>>,
 		ItemOf<EndpointJsonSuccess<"agents", "list">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectAgentsResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3219,19 +3188,18 @@ export class ArtifactsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"artifacts", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"artifacts", "list">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"artifacts", "list">>>,
 		ItemOf<EndpointJsonSuccess<"artifacts", "list">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectArtifactsResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3292,20 +3260,19 @@ export class AutomationsRunsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "listRuns">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "listRuns">>, number>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "listRuns">>>,
 		ItemOf<EndpointJsonSuccess<"automations", "listRuns">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectAutomationsRunsResource(effectRuntime).list(
 					automationId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3368,19 +3335,18 @@ export class AutomationsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"automations", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "list">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"automations", "list">>>,
 		ItemOf<EndpointJsonSuccess<"automations", "list">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectAutomationsResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3505,19 +3471,18 @@ export class EnvironmentsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"environments", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"environments", "list">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"environments", "list">>>,
 		ItemOf<EndpointJsonSuccess<"environments", "list">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectEnvironmentsResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3565,20 +3530,19 @@ export class SessionsEventsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "listEvents">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "listEvents">>, number>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "listEvents">>>,
 		ItemOf<EndpointJsonSuccess<"sessions", "listEvents">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectSessionsEventsResource(effectRuntime).list(
 					sessionId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3684,19 +3648,18 @@ export class SessionsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"sessions", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "list">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"sessions", "list">>>,
 		ItemOf<EndpointJsonSuccess<"sessions", "list">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectSessionsResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3772,20 +3735,19 @@ export class VaultsCredentialsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "listCredentials">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"vaults", "listCredentials">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"vaults", "listCredentials">>>,
 		ItemOf<EndpointJsonSuccess<"vaults", "listCredentials">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectVaultsCredentialsResource(effectRuntime).list(
 					vaultId,
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),
@@ -3872,19 +3834,18 @@ export class VaultsResource {
 		params?: RelaxOptionalProps<EndpointQuery<"vaults", "list">>,
 		options?: PromiseRequestOptions,
 	): PagePromise<
-		CursorPage<ItemOf<EndpointJsonSuccess<"vaults", "list">>, string>,
+		CursorPage<ItemOf<EndpointJsonSuccess<"vaults", "list">>>,
 		ItemOf<EndpointJsonSuccess<"vaults", "list">>
 	> {
 		return executePaginatedPromise(
 			this.#runtime,
-			params?.["after"],
-			params?.order ?? "asc",
+			params?.page,
 			options,
-			(effectRuntime, cursor, effectOpts) =>
+			(effectRuntime, page, effectOpts) =>
 				new EffectVaultsResource(effectRuntime).list(
 					{
 						...params,
-						...(cursor === undefined ? {} : { after: cursor }),
+						...(page === undefined ? {} : { page }),
 					},
 					{ ...effectOpts, withResponse: true },
 				),

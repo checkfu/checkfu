@@ -153,21 +153,10 @@ export type ItemOf<R> = R extends { readonly data: ReadonlyArray<infer T> }
 		? T
 		: never
 
-export interface CursorPageEnvelope<Item, Cursor extends string | number = number> {
+export interface PageEnvelope<Item> {
 	readonly data: ReadonlyArray<Item>
-	readonly has_more: boolean
-	readonly next_cursor: Cursor | null
-	readonly next_page?: string | null
+	readonly next_page: string | null
 }
-
-export type PageEnvelope<Item, Cursor extends string | number> =
-	| CursorPageEnvelope<Item, Cursor>
-	| { readonly data: ReadonlyArray<Item>; readonly next_page: Cursor | null }
-
-export const nextPageOf = <Item, Cursor extends string | number>(
-	page: PageEnvelope<Item, Cursor>,
-): Cursor | null =>
-	"has_more" in page ? (page.has_more ? page.next_cursor : null) : page.next_page
 
 export interface RequestOptions {
 	readonly headers?: HeaderMap | undefined
@@ -495,54 +484,31 @@ export function unwrapResponse<A>(
 	return options?.withResponse === true ? effect : Effect.map(effect, (res) => res.data)
 }
 
-export const executePaginatedPagesEffect = <
-	Item,
-	Cursor extends string | number = number,
-	Page extends PageEnvelope<Item, Cursor> = PageEnvelope<Item, Cursor>,
->(
-	fetchPage: (after: Cursor | undefined) => Effect.Effect<Page, CheckfuSdkError>,
-	initialAfter: Cursor | undefined,
-	order: "asc" | "desc",
+export const executePaginatedPagesEffect = <Page extends PageEnvelope<unknown>>(
+	fetchPage: (page: string | undefined) => Effect.Effect<Page, CheckfuSdkError>,
+	initialPage: string | undefined,
 ): Stream.Stream<Page, CheckfuSdkError> =>
 	Stream.suspend(() => {
-		interface PageCursor {
-			readonly after: Cursor | undefined
-			readonly done: boolean
-		}
-		const seenCursors = new Set<Cursor>()
-		if (initialAfter !== undefined) {
-			seenCursors.add(initialAfter)
-		}
-		const initialCursor: PageCursor = { after: initialAfter, done: false }
-		return Stream.unfold(
-			initialCursor,
-			(
-				cursor: PageCursor,
-			): Effect.Effect<readonly [Page, PageCursor] | undefined, CheckfuSdkError> => {
-				if (cursor.done) {
+		const seen = new Set<string>(initialPage === undefined ? [] : [initialPage])
+		return Stream.unfold<string | null | undefined, Page, CheckfuSdkError, never>(
+			initialPage,
+			(token) => {
+				if (token === null) {
 					return Effect.undefined
 				}
-				return fetchPage(cursor.after).pipe(
-					Effect.flatMap((page): Effect.Effect<readonly [Page, PageCursor], CheckfuSdkError> => {
-						const nextAfter = nextPageOf(page)
-						if (nextAfter === null) {
-							const next: PageCursor = { after: undefined, done: true }
-							return Effect.succeed([page, next] as const)
-						}
-						const repeated = seenCursors.has(nextAfter)
-						const regressed =
-							typeof cursor.after === "number" &&
-							typeof nextAfter === "number" &&
-							(order === "asc" ? nextAfter <= cursor.after : nextAfter >= cursor.after)
-						if (repeated || regressed) {
+				return fetchPage(token).pipe(
+					Effect.flatMap((page) => {
+						const next = page.next_page
+						if (next !== null && seen.has(next)) {
 							return Effect.fail(
 								new PaginationCursorCycleError({
-									message: `Pagination cursor did not advance (${String(cursor.after)} -> ${String(nextAfter)}).`,
+									message: `Pagination cursor did not advance (${token} -> ${next}).`,
 								}),
 							)
 						}
-						seenCursors.add(nextAfter)
-						const next: PageCursor = { after: nextAfter, done: false }
+						if (next !== null) {
+							seen.add(next)
+						}
 						return Effect.succeed([page, next] as const)
 					}),
 				)
@@ -550,16 +516,11 @@ export const executePaginatedPagesEffect = <
 		)
 	})
 
-export const executePaginatedStreamEffect = <
-	Item,
-	Cursor extends string | number = number,
-	Page extends PageEnvelope<Item, Cursor> = PageEnvelope<Item, Cursor>,
->(
-	fetchPage: (after: Cursor | undefined) => Effect.Effect<Page, CheckfuSdkError>,
-	initialAfter: Cursor | undefined,
-	order: "asc" | "desc",
+export const executePaginatedStreamEffect = <Item>(
+	fetchPage: (page: string | undefined) => Effect.Effect<PageEnvelope<Item>, CheckfuSdkError>,
+	initialPage: string | undefined,
 ): Stream.Stream<Item, CheckfuSdkError> =>
-	executePaginatedPagesEffect(fetchPage, initialAfter, order).pipe(
+	executePaginatedPagesEffect(fetchPage, initialPage).pipe(
 		Stream.flatMap((page) => Stream.fromIterable(page.data)),
 	)
 

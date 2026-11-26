@@ -176,14 +176,6 @@ const agentsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -223,16 +215,8 @@ const agentsListCommandSpec: GeneratedOperationDescriptor = {
 const agentsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -572,14 +556,6 @@ const artifactsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -611,16 +587,8 @@ const artifactsListCommandSpec: GeneratedOperationDescriptor = {
 const artifactsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -1164,14 +1132,6 @@ const automationsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -1219,16 +1179,8 @@ const automationsListCommandSpec: GeneratedOperationDescriptor = {
 const automationsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -1509,15 +1461,6 @@ const automationsRunsListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "int",
-			required: false,
-			min: 0,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -1552,13 +1495,6 @@ const automationsRunsListCommand = CommandMake(
 		automationId: FlagString("automation-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Automation ID"),
-		),
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
-			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-			),
-			FlagOptional,
 		),
 		page: FlagString("page").pipe(
 			FlagWithDescription("Opaque pagination cursor from the previous response's next_page."),
@@ -1766,14 +1702,6 @@ const environmentsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -1813,16 +1741,8 @@ const environmentsListCommandSpec: GeneratedOperationDescriptor = {
 const environmentsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -2132,14 +2052,6 @@ const sessionsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -2187,16 +2099,8 @@ const sessionsListCommandSpec: GeneratedOperationDescriptor = {
 const sessionsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -2268,15 +2172,6 @@ const sessionsEventsListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "int",
-			required: false,
-			min: 0,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -2320,13 +2215,6 @@ const sessionsEventsListCommand = CommandMake(
 		sessionId: FlagString("session-id").pipe(
 			FlagWithMetavar("ID"),
 			FlagWithDescription("Session ID"),
-		),
-		after: FlagInt("after").pipe(
-			FlagWithMetavar("SEQ"),
-			FlagWithDescription(
-				"Exclusive sequence pagination cursor in the selected order (> after for asc, < after for desc)",
-			),
-			FlagOptional,
 		),
 		page: FlagString("page").pipe(
 			FlagWithDescription("Opaque pagination cursor from the previous response's next_page."),
@@ -2636,14 +2524,6 @@ const vaultsListCommandSpec: GeneratedOperationDescriptor = {
 	hasBody: false,
 	flags: [
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -2683,16 +2563,8 @@ const vaultsListCommandSpec: GeneratedOperationDescriptor = {
 const vaultsListCommand = CommandMake(
 	"list",
 	{
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagInt("limit").pipe(
@@ -2944,14 +2816,6 @@ const vaultsCredentialsListCommandSpec: GeneratedOperationDescriptor = {
 			required: true,
 		},
 		{
-			propName: "after",
-			flagName: "after",
-			wireName: "after",
-			location: "query",
-			kind: "string",
-			required: false,
-		},
-		{
 			propName: "page",
 			flagName: "page",
 			wireName: "page",
@@ -2990,16 +2854,8 @@ const vaultsCredentialsListCommand = CommandMake(
 	"list",
 	{
 		vaultId: FlagString("vault-id").pipe(FlagWithMetavar("ID"), FlagWithDescription("Vault ID")),
-		after: FlagString("after").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
-			FlagOptional,
-		),
 		page: FlagString("page").pipe(
-			FlagWithDescription(
-				"Opaque cursor from a previous page's next_cursor; the page continues after it in the selected order",
-			),
+			FlagWithDescription("Opaque page token from the previous response's next_page."),
 			FlagOptional,
 		),
 		limit: FlagString("limit").pipe(

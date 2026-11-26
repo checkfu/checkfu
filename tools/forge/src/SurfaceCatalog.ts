@@ -22,12 +22,6 @@ export interface SurfaceParam {
 	readonly type: Type
 }
 
-export interface SurfacePaginationSpec {
-	readonly cursorParam: string
-	readonly cursorType: "number" | "string"
-	readonly hasOrderParam: boolean
-}
-
 export interface SurfaceSseSpec {
 	readonly cursorParam: string | undefined
 	readonly cursorType: "number" | "string"
@@ -56,7 +50,6 @@ export interface SurfaceOperation {
 	readonly supportsPending: boolean
 	readonly kind: SurfaceOperationKind
 	readonly retrySafety: SurfaceRetrySafety
-	readonly pagination: SurfacePaginationSpec | undefined
 	readonly sse: SurfaceSseSpec | undefined
 	readonly group: Group
 	readonly method: Method
@@ -300,47 +293,23 @@ const hasIntQueryHint = (method: Method, wireName: string): boolean => {
 	return isJsonRecord(intQueryParams) && intQueryParams[wireName] !== undefined
 }
 
-const detectPagination = (
-	method: Method,
-	queryParams: ReadonlyArray<SurfaceParam>,
-): SurfacePaginationSpec | undefined => {
-	if (method.httpMethod.toUpperCase() !== "GET" || isSseMethod(method)) {
-		return undefined
-	}
-	const cursorField = queryParams.find((q) => q.wireName === "after" || q.wireName === "page")
-	if (cursorField === undefined) {
-		return undefined
-	}
-	const okResponse = method.responses.find((r) => r.status === "200") ?? method.responses[0]
-	if (okResponse?.json === undefined) {
-		return undefined
-	}
-	const responseFields = new Map<string, Field>()
-	collectFieldsFromType(okResponse.json.type, responseFields)
-	const dataField = responseFields.get("data")
-	const hasMoreField = responseFields.get("has_more")
-	const nextCursorField = responseFields.get(
-		cursorField.wireName === "page" ? "next_page" : "next_cursor",
-	)
-	if (dataField === undefined || nextCursorField === undefined) {
-		return undefined
-	}
-	const unwrappedData = unwrapNullableType(dataField.type)
-	if (unwrappedData.kind !== "array") {
-		return undefined
-	}
+const isPaginated = (method: Method, queryParams: ReadonlyArray<SurfaceParam>): boolean => {
 	if (
-		cursorField.wireName === "after" &&
-		(hasMoreField === undefined || !isBooleanScalar(hasMoreField.type))
+		method.httpMethod.toUpperCase() !== "GET" ||
+		!queryParams.some((param) => param.wireName === "page")
 	) {
-		return undefined
+		return false
 	}
-	const cursorType = isNumberScalar(nextCursorField.type) ? "number" : "string"
-	return {
-		cursorParam: cursorField.wireName,
-		cursorType,
-		hasOrderParam: queryParams.some((q) => q.wireName === "order"),
+	const okResponse = method.responses.find((response) => response.status === "200")
+	if (okResponse?.json === undefined) {
+		return false
 	}
+	const fields = new Map<string, Field>()
+	collectFieldsFromType(okResponse.json.type, fields)
+	const data = fields.get("data")
+	return (
+		data !== undefined && unwrapNullableType(data.type).kind === "array" && fields.has("next_page")
+	)
 }
 
 const detectSse = (
@@ -424,9 +393,8 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 	const supportsPending = method.responses.some((r) => r.status === "202")
 
 	const sse = detectSse(method, queryParams, endpointRef)
-	const pagination = detectPagination(method, queryParams)
 	const kind: SurfaceOperationKind =
-		sse !== undefined ? "sse" : pagination !== undefined ? "paginated" : "unary"
+		sse !== undefined ? "sse" : isPaginated(method, queryParams) ? "paginated" : "unary"
 
 	const explicitIdempotent = method.extension("x-checkfu-idempotent") === true
 	const retrySafety: SurfaceRetrySafety = explicitIdempotent
@@ -460,7 +428,6 @@ const buildOperation = (group: Group, method: Method): SurfaceOperation => {
 		supportsPending,
 		kind,
 		retrySafety,
-		pagination,
 		sse,
 		group,
 		method,

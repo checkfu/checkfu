@@ -148,8 +148,7 @@ const run = async <A>(
 
 interface ListBody {
 	readonly data: ReadonlyArray<AutomationBody>
-	readonly has_more: boolean
-	readonly next_cursor: string | null
+	readonly next_page: string | null
 }
 
 const listed = (apiFetch: ApiFetch, query: string, count: number) =>
@@ -162,7 +161,7 @@ const listed = (apiFetch: ApiFetch, query: string, count: number) =>
 	)
 
 const settledRuns = (apiFetch: ApiFetch, automationId: string, count: number) =>
-	call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
+	call<{ data: ReadonlyArray<RunBody>; next_page: string | null }>(
 		apiFetch,
 		"GET",
 		`/v1/automations/${automationId}/runs`,
@@ -415,14 +414,11 @@ describe("Automations API", () => {
 				expect(newestFirst.body.data.map((entry) => entry.run)).toEqual([2, 1])
 				const oldestFirst = yield* call<{
 					data: ReadonlyArray<RunBody>
-					has_more: boolean
-					next_cursor: number | null
 					next_page: string | null
 				}>(apiFetch, "GET", `/v1/automations/${id}/runs?order=asc&limit=1`)
 				expect(oldestFirst.body.data.map((entry) => entry.run)).toEqual([1])
-				expect(oldestFirst.body.has_more).toBe(true)
-				expect(oldestFirst.body.next_page).toBe(String(oldestFirst.body.next_cursor))
-				const rest = yield* call<{ data: ReadonlyArray<RunBody>; has_more: boolean }>(
+				expect(oldestFirst.body.next_page).not.toBeNull()
+				const rest = yield* call<{ data: ReadonlyArray<RunBody>; next_page: string | null }>(
 					apiFetch,
 					"GET",
 					`/v1/automations/${id}/runs?order=asc&limit=1&page=${oldestFirst.body.next_page}`,
@@ -608,7 +604,7 @@ describe("Automations API", () => {
 				const empty = yield* call<ListBody>(apiFetch, "GET", "/v1/automations")
 				expect(empty).toEqual({
 					status: 200,
-					body: { data: [], has_more: false, next_cursor: null, next_page: null },
+					body: { data: [], next_page: null },
 				})
 				const ids: Array<string> = []
 				for (const [name, agent] of [
@@ -628,25 +624,24 @@ describe("Automations API", () => {
 				const all = yield* listed(apiFetch, "", 3)
 				const order = all.body.data.map((automation) => automation.id)
 				expect(order.toSorted()).toEqual(ids.toSorted())
-				expect(all.body).toMatchObject({ has_more: false, next_cursor: null })
+				expect(all.body).toMatchObject({ next_page: null })
 				const fetched = yield* call<AutomationBody>(apiFetch, "GET", `/v1/automations/${ids[0]}`)
 				expect(all.body.data.find((automation) => automation.id === ids[0])).toEqual(fetched.body)
 
 				const pages = (query: string) =>
 					Effect.gen(function* () {
 						const seen: Array<string> = []
-						let after: string | null = null
+						let token: string | null = null
 						do {
-							const cursor: string = after === null ? "" : `&after=${after}`
+							const cursor: string = token === null ? "" : `&page=${encodeURIComponent(token)}`
 							const page = yield* call<ListBody>(
 								apiFetch,
 								"GET",
 								`/v1/automations?limit=1${query}${cursor}`,
 							)
 							seen.push(...page.body.data.map((automation) => automation.id))
-							after = page.body.next_cursor
-							expect(page.body.has_more).toBe(after !== null)
-						} while (after !== null)
+							token = page.body.next_page
+						} while (token !== null)
 						return seen
 					})
 				expect(yield* pages("")).toEqual(order)
@@ -756,7 +751,7 @@ describe("Automations API", () => {
 				)
 				expect([
 					unavailable.status,
-					unavailable.body.next_cursor,
+					unavailable.body.next_page,
 					unavailable.body.data,
 					waits,
 				]).toEqual([503, undefined, undefined, 2])
@@ -778,7 +773,7 @@ describe("Automations API", () => {
 	it("refuses list paging values it cannot use", () =>
 		run((apiFetch) =>
 			Effect.gen(function* () {
-				for (const query of ["limit=0", "limit=101", "after=-1", "order=newest"]) {
+				for (const query of ["limit=0", "limit=101", "page=-1", "order=newest"]) {
 					const refused = yield* call<ErrorBody>(apiFetch, "GET", `/v1/automations?${query}`)
 					expect([query, refused.status]).toEqual([query, 400])
 				}

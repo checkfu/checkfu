@@ -35,7 +35,7 @@ const detail = getRouteApi("/_app/sessions/$sessionId")
 
 export function SessionsPage(): React.JSX.Element {
 	const search = list.useSearch()
-	const page = useSuspenseQuery(sessionsPage(search.after)).data
+	const page = useSuspenseQuery(sessionsPage(search.page)).data
 	return (
 		<>
 			<PageHeader
@@ -101,7 +101,7 @@ export function SessionsPage(): React.JSX.Element {
 					},
 				]}
 			/>
-			<Pager next={page.next_page ?? page.next_cursor} paged={search.after !== undefined} />
+			<Pager next={page.next_page} paged={search.page !== undefined} />
 		</>
 	)
 }
