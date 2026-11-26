@@ -1,4 +1,4 @@
-import * as Effect from "effect/Effect"
+import type * as Effect from "effect/Effect"
 import * as HttpApi from "effect/http-api/HttpApi"
 import * as HttpApiClient from "effect/http-api/HttpApiClient"
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint"
@@ -55,12 +55,9 @@ import {
 	MIN_LINK_TTL_SECONDS,
 	MAX_MCP_SERVERS,
 	MAX_MCP_SERVER_URL_LENGTH,
-	McpServerCredentials,
 	McpServer,
 	McpServerName,
 	McpServerUrl,
-	McpServers,
-	AgentTools,
 	DenyMessage,
 	MAX_CUSTOM_TOOL_RESULT_LENGTH,
 	MAX_IDENTIFIER_LENGTH,
@@ -753,11 +750,9 @@ export const SendSessionEventsBody = Schema.Struct({
 })
 export type SendSessionEventsBody = typeof SendSessionEventsBody.Type
 
-export const AgentResource = Schema.Struct({
-	...Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
-	mcp_servers: McpServers.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-	tools: AgentTools.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
-})
+export const AgentResource = Schema.Struct(
+	Struct.omit(AgentSnapshot.fields, ["current_version_id"]),
+)
 export type Agent = typeof AgentResource.Type
 
 export type Environment = EnvironmentSnapshot
@@ -856,9 +851,6 @@ export const SessionResource = Schema.Struct({
 			"tools",
 		]),
 	}).annotate({ description: "The pinned agent configuration used by the session." }),
-	mcp_server_credentials: McpServerCredentials.pipe(
-		Schema.withDecodingDefaultKey(Effect.succeed([])),
-	),
 })
 export type Session = typeof SessionResource.Type
 
@@ -1162,10 +1154,10 @@ export const AgentCustomToolUseSessionEvent = wireSessionEvent("agent.custom_too
 	...SessionEventFields["agent.custom_tool_use"],
 	tool_use_id: ToolUseEventId,
 })
-export const SessionStatusRunningEvent = wireSessionEvent("session.status_running", {
-	...SessionEventFields["session.status_running"],
-	turn: Schema.optionalKey(PositiveInt),
-}).annotate({ description: "The agent is processing a turn." })
+export const SessionStatusRunningEvent = wireSessionEvent(
+	"session.status_running",
+	SessionEventFields["session.status_running"],
+).annotate({ description: "The agent is processing a turn." })
 export const SpanModelRequestStartEvent = wireSessionEvent(
 	"span.model_request_start",
 	SessionEventFields["span.model_request_start"],
@@ -1207,7 +1199,6 @@ export const SpanModelRequestEndEvent = wireSessionEvent(
 export const SessionStatusIdleEvent = wireSessionEvent("session.status_idle", {
 	...SessionEventFields["session.status_idle"],
 	stop_reason: Schema.Union([StopReason, RequiresActionStopReason]),
-	turn: Schema.optionalKey(PositiveInt),
 	cancelled_event_ids: Schema.optionalKey(CancelledEventIds),
 }).annotate({
 	description: "The agent stopped processing a turn. See stop_reason for why it stopped.",
