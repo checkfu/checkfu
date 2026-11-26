@@ -93,7 +93,7 @@ const changeOf = ({
 	}
 }
 
-export const LISTING_VERSION = 3
+export const LISTING_VERSION = 2
 
 export const ListingLive = Listing.toLayer(
 	Effect.gen(function* () {
