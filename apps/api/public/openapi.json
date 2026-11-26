@@ -21178,7 +21178,8 @@
 							"name": {
 								"type": "string",
 								"minLength": 1,
-								"maxLength": 256
+								"maxLength": 256,
+								"description": "The tool the model called. A code mode script is one call named codemode: its code is the input and its output the result; the calls the script makes are not published separately."
 							},
 							"input": {
 								"type": "object"

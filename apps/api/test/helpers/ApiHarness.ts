@@ -51,6 +51,7 @@ import { makeArtifactStoreMemory } from "../../src/Artifacts/ArtifactStoreMemory
 import { ArtifactLinksTest } from "../../src/Content/ArtifactLinks.ts"
 import { createInMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
 import type { InMemoryPiDurableBackend } from "./InMemoryPiBackend.ts"
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env"
 
 export const TEST_API_KEY = "ck_test_secret_token"
 
@@ -196,6 +197,7 @@ export const makePiDurableTestLayer = (
 	registry?: () => Registry,
 	options: {
 		readonly harnessSessions?: (sessions: Session["Service"]) => Session["Service"]
+		readonly env?: ExecutionEnv
 	} = {},
 ) => {
 	interface SessionObject {
@@ -223,6 +225,7 @@ export const makePiDurableTestLayer = (
 				checkCatalogProviderCredentials(provider, { env: envOverrides }, customProviders).ok,
 			{
 				...(storage === undefined ? {} : { storage }),
+				...(options.env === undefined ? {} : { env: options.env }),
 				reset: Effect.andThen(
 					Effect.promise(async () => {
 						const serving = await objects.get(sessionId)

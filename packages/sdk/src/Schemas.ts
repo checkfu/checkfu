@@ -219,7 +219,10 @@ export const SessionEventFields = {
 	},
 	"agent.tool_use": {
 		tool_use_id: ResourceId,
-		name: ResourceId,
+		name: ResourceId.annotate({
+			description:
+				"The tool the model called. A code mode script is one call named codemode: its code is the input and its output the result; the calls the script makes are not published separately.",
+		}),
 		input: Schema.JsonObject,
 		truncated: Schema.optionalKey(Schema.Literal(true)),
 	},
