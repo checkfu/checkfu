@@ -588,6 +588,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -1525,6 +1527,8 @@
 													"model",
 													"system",
 													"description",
+													"mcp_servers",
+													"tools",
 													"created_at",
 													"updated_at",
 													"archived_at"
@@ -2143,6 +2147,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -2732,6 +2738,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -3656,6 +3664,8 @@
 													"model",
 													"system",
 													"description",
+													"mcp_servers",
+													"tools",
 													"created_at",
 													"updated_at",
 													"archived_at"
@@ -4266,6 +4276,8 @@
 										"model",
 										"system",
 										"description",
+										"mcp_servers",
+										"tools",
 										"created_at",
 										"updated_at",
 										"archived_at"
@@ -8354,7 +8366,9 @@
 												"name",
 												"model",
 												"system",
-												"description"
+												"description",
+												"mcp_servers",
+												"tools"
 											],
 											"additionalProperties": false,
 											"description": "The pinned agent configuration used by the session."
@@ -8368,6 +8382,7 @@
 										"title",
 										"turn",
 										"usage",
+										"mcp_server_credentials",
 										"created_at",
 										"updated_at",
 										"archived_at",
@@ -9337,7 +9352,9 @@
 															"name",
 															"model",
 															"system",
-															"description"
+															"description",
+															"mcp_servers",
+															"tools"
 														],
 														"additionalProperties": false,
 														"description": "The pinned agent configuration used by the session."
@@ -9351,6 +9368,7 @@
 													"title",
 													"turn",
 													"usage",
+													"mcp_server_credentials",
 													"created_at",
 													"updated_at",
 													"archived_at",
@@ -10038,7 +10056,9 @@
 												"name",
 												"model",
 												"system",
-												"description"
+												"description",
+												"mcp_servers",
+												"tools"
 											],
 											"additionalProperties": false,
 											"description": "The pinned agent configuration used by the session."
@@ -10052,6 +10072,7 @@
 										"title",
 										"turn",
 										"usage",
+										"mcp_server_credentials",
 										"created_at",
 										"updated_at",
 										"archived_at",
@@ -10714,7 +10735,9 @@
 												"name",
 												"model",
 												"system",
-												"description"
+												"description",
+												"mcp_servers",
+												"tools"
 											],
 											"additionalProperties": false,
 											"description": "The pinned agent configuration used by the session."
@@ -10728,6 +10751,7 @@
 										"title",
 										"turn",
 										"usage",
+										"mcp_server_credentials",
 										"created_at",
 										"updated_at",
 										"archived_at",
@@ -31815,7 +31839,7 @@
 								"maximum": 9007199254740991
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "processed_at"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "turn"],
 						"additionalProperties": false,
 						"description": "The agent is processing a turn."
 					},
@@ -32439,7 +32463,7 @@
 								"description": "The IDs of the tool calls still waiting for an answer when the turn ended. The end of the turn cancelled them: they can no longer be answered."
 							}
 						},
-						"required": ["id", "seq", "type", "created_at", "processed_at", "stop_reason"],
+						"required": ["id", "seq", "type", "created_at", "processed_at", "stop_reason", "turn"],
 						"additionalProperties": false,
 						"description": "The agent stopped processing a turn. See stop_reason for why it stopped."
 					},
