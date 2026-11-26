@@ -61,7 +61,7 @@ import {
 	resolveStreamEndedError,
 	shouldInterruptOnCtrlC,
 } from "./SessionsConnectState.ts"
-import type { ConnectState, ConnectStopReason } from "./SessionsConnectState.ts"
+import type { ConnectState } from "./SessionsConnectState.ts"
 
 const MAX_SESSION_STATUS_LOOKUP_RETRIES = 2
 const SESSION_STATUS_LOOKUP_RETRY_BASE_MS = 100
@@ -359,11 +359,6 @@ const renderConnectEvent = (
 			yield* renderOutput(event, { streaming: true })
 		}
 
-		let formattedError: string | undefined
-		let errorRetryStatus: string | undefined
-		let stopReason: ConnectStopReason | undefined
-		let eventTurn: number | undefined
-
 		switch (event.type) {
 			case "user.message": {
 				const text = event.content.map((block) => block.text).join("\n")
@@ -417,20 +412,13 @@ const renderConnectEvent = (
 				break
 			}
 			case "session.error": {
-				formattedError = `${event.error.type}: ${event.error.message}`
-				errorRetryStatus = event.error.retry_status.type
 				if (!rawStructuredMode) {
-					yield* writeStderrLine(`[error] ${formattedError}`)
+					yield* writeStderrLine(`[error] ${event.error.type}: ${event.error.message}`)
 				}
 				break
 			}
-			case "session.status_running": {
-				eventTurn = event.turn
-				break
-			}
 			case "session.status_idle": {
-				eventTurn = event.turn
-				stopReason = event.stop_reason.type
+				const stopReason = event.stop_reason.type
 				if (!rawStructuredMode && stopReason !== "end_turn") {
 					yield* writeStderrLine(`[status: idle (${stopReason})]`)
 				}
@@ -450,16 +438,7 @@ const renderConnectEvent = (
 		}
 
 		const transition = yield* Ref.modify(stateRef, (state) => {
-			const res = applySessionEvent(state, {
-				seq: eventSeq,
-				type: eventType,
-				...(eventTurn !== undefined ? { turn: eventTurn } : {}),
-				...(stopReason !== undefined ? { stopReason } : {}),
-				source: event,
-				...(formattedError !== undefined
-					? { error: { message: formattedError, retryStatus: errorRetryStatus } }
-					: {}),
-			})
+			const res = applySessionEvent(state, event)
 			return [res, res.state] as const
 		})
 		if (transition.duplicate) {
@@ -671,58 +650,6 @@ const dispatchUserLine = (
 
 type SessionSnapshotResponse = Effect.Success<ReturnType<typeof fetchSessionStatusWithRetry>>
 
-const resolveCursorBaselineFromPrefix = (
-	client: CheckfuClient,
-	sessionId: SessionId,
-	after: number,
-	retain: SessionFoldRetention,
-): Effect.Effect<{ readonly calls: SessionFold }, CliFailure> =>
-	Effect.gen(function* () {
-		let pageCursor = 0
-		let lastSeenSeq = 0
-		let calls = emptySessionFold(retain)
-		while (true) {
-			const page = yield* client.api.sessions
-				.listEvents({
-					params: { session_id: sessionId },
-					query: {
-						...(pageCursor > 0 ? { after: pageCursor } : {}),
-						limit: 100,
-						order: "asc",
-					},
-				})
-				.pipe(Effect.mapError(formatClientError))
-			let reachedCursor = false
-			calls = foldSessionEvents(
-				calls,
-				page.data.filter((entry) => entry.seq <= after),
-			)
-			for (const entry of page.data) {
-				lastSeenSeq = Math.max(lastSeenSeq, entry.seq)
-				if (entry.seq > after) {
-					reachedCursor = true
-					break
-				}
-			}
-			if (
-				reachedCursor ||
-				!page.has_more ||
-				page.next_cursor === null ||
-				page.next_cursor <= pageCursor ||
-				page.next_cursor >= after
-			) {
-				break
-			}
-			pageCursor = page.next_cursor
-		}
-		if (after > lastSeenSeq) {
-			return yield* usageError(
-				`--after cursor ${after} is beyond the latest session event sequence (${lastSeenSeq}).`,
-			)
-		}
-		return { calls }
-	})
-
 const resolveCursorBaseline = (
 	client: CheckfuClient,
 	sessionId: SessionId,
@@ -753,7 +680,6 @@ const resolveCursorBaseline = (
 			calls: foldSessionEvents(emptySessionFold(retain), walked.toReversed()),
 			latestSession: initialSession,
 		})
-		let sawMissingTurn = false
 		while (true) {
 			const page = yield* client.api.sessions
 				.listEvents({
@@ -771,10 +697,6 @@ const resolveCursorBaseline = (
 					continue
 				}
 				if (entry.type === "session.status_running" || entry.type === "session.status_idle") {
-					if (entry.turn === undefined) {
-						sawMissingTurn = true
-						break
-					}
 					const paused =
 						entry.type === "session.status_idle" && entry.stop_reason.type === "requires_action"
 					const settled = entry.type === "session.status_idle" && !paused
@@ -790,19 +712,10 @@ const resolveCursorBaseline = (
 				}
 				walked.push(entry)
 			}
-			if (sawMissingTurn) {
-				break
-			}
 			if (!page.has_more || page.next_cursor === null || page.next_cursor >= cursor) {
 				return baseline()
 			}
 			cursor = page.next_cursor
-		}
-
-		const prefix = yield* resolveCursorBaselineFromPrefix(client, sessionId, after, retain)
-		return {
-			...prefix,
-			latestSession: initialSession,
 		}
 	})
 }

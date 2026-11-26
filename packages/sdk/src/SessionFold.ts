@@ -292,12 +292,12 @@ export const foldSessionEvents = (
 				leavePause()
 				turn = {
 					status: "running",
-					turn: event.turn ?? (turn.status === "settled" ? turn.turn + 1 : turn.turn),
+					turn: event.turn,
 				}
 				settledBefore(turn.turn)
 				break
 			case "session.status_idle": {
-				const number = event.turn ?? turn.turn
+				const number = event.turn
 				if (event.stop_reason.type === "requires_action") {
 					leavePause()
 					const named = event.stop_reason.event_ids.filter((id) => !closed.has(id))

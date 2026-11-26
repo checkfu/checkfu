@@ -11,7 +11,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AgentResource, ListAgentsResponse, SessionResource } from "../src/Api.ts"
+import { AgentResource, SessionResource, SessionStatusRunningEvent } from "../src/Api.ts"
 import { INTERNAL_EFFECT_RUNTIME } from "../src/Client.ts"
 import {
 	executePaginatedPromise,
@@ -267,43 +267,35 @@ const makeEffectLayer = (
 		fetch: fetchImpl,
 	})
 
-describe("Responses from a server that predates a field", () => {
-	it("reads an agent without mcp_servers and a session without mcp_server_credentials as having none", () => {
-		const { mcp_servers: _servers, ...agent } = sampleAgent()
-		const { mcp_server_credentials: _credentials, ...session } = sampleSession()
+describe("Resource responses", () => {
+	it("requires the server and tool arrays and the session's credential bindings", () => {
+		const { mcp_servers: _servers, ...withoutServers } = sampleAgent()
+		const { tools: _tools, ...withoutTools } = sampleAgent()
+		const { mcp_server_credentials: _credentials, ...withoutCredentials } = sampleSession()
 		const readAgent = Schema.decodeUnknownSync(Schema.toCodecJson(AgentResource))
 		const readSession = Schema.decodeUnknownSync(Schema.toCodecJson(SessionResource))
-		expect(readAgent(agent).mcp_servers).toEqual([])
-		expect(readSession(session).mcp_server_credentials).toEqual([])
+		expect(() => readAgent(withoutServers)).toThrow(/mcp_servers/u)
+		expect(() => readAgent(withoutTools)).toThrow(/tools/u)
+		expect(() => readSession(withoutCredentials)).toThrow(/mcp_server_credentials/u)
 		const bound = [
 			{ mcp_server_name: "docs", credential_id: "cred_1" },
 			{ mcp_server_name: "files", credential_id: "cred_2", vault_id: "vlt_1" },
 		]
 		expect(
-			readSession({ ...session, mcp_server_credentials: bound }).mcp_server_credentials,
+			readSession({ ...sampleSession(), mcp_server_credentials: bound }).mcp_server_credentials,
 		).toEqual(bound)
 	})
-
-	it("reads an agent as the server sent it before agents declared servers or tools, retrieved or listed", () => {
-		const body = JSON.stringify({
-			id: "agent_1",
-			type: "agent",
-			version: 1,
-			name: "Assistant",
-			model: { id: "gpt-6.2-sol" },
-			system: "Be concise.",
-			description: null,
+	it("requires a turn number on a running status event", () => {
+		const read = Schema.decodeUnknownSync(Schema.toCodecJson(SessionStatusRunningEvent))
+		const event = {
+			id: "evt_1",
+			seq: 1,
+			type: "session.status_running",
 			created_at: ISO_NOW,
-			updated_at: ISO_NOW,
-			archived_at: null,
-		})
-		const retrieved = Schema.decodeUnknownSync(Schema.toCodecJson(AgentResource))(JSON.parse(body))
-		expect(retrieved.tools).toEqual([])
-		expect(retrieved.mcp_servers).toEqual([])
-		const listed = Schema.decodeUnknownSync(Schema.toCodecJson(ListAgentsResponse))(
-			JSON.parse(`{"data":[${body}],"has_more":false,"next_cursor":null}`),
-		)
-		expect(listed.data.map((agent) => [agent.tools, agent.mcp_servers])).toEqual([[[], []]])
+			processed_at: ISO_NOW,
+		}
+		expect(() => read(event)).toThrow(/turn/u)
+		expect(read({ ...event, turn: 1 }).turn).toBe(1)
 	})
 })
 
@@ -2253,76 +2245,32 @@ describe("@checkfu/sdk", () => {
 			}
 		})
 
-		it.live(
-			"decodes legacy v1 status events without turn and delivers complete SSE frames before an oversized trailing frame",
-			() =>
-				Effect.gen(function* () {
-					const legacyRunning = {
-						id: "evt_1",
-						seq: 1,
-						type: "session.status_running",
-						created_at: ISO_NOW,
-					}
-					const legacyIdle = {
-						id: "evt_2",
-						seq: 2,
-						type: "session.status_idle",
-						created_at: ISO_NOW,
-						stop_reason: { type: "end_turn" },
-					}
-					const legacyArchived = sampleArchivedEvent(3)
-					const legacyFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-						const req = toWebRequest(input, init)
-						const url = new URL(req.url)
-						if (url.pathname.endsWith("/events/stream")) {
-							return new Response(
-								`${sseFrame(legacyRunning)}${sseFrame(legacyIdle)}${sseFrame(legacyArchived)}`,
-								{ status: 200, headers: { "content-type": "text/event-stream" } },
-							)
-						}
-						return jsonResponse({
-							data: [legacyRunning, legacyIdle, legacyArchived],
-							has_more: false,
-							next_cursor: null,
-						})
-					}
+		it.live("delivers complete SSE frames before an oversized trailing frame", () =>
+			Effect.gen(function* () {
+				const oversizedChunk = `${sseFrame(sampleUserMessageEvent(1))}id: 2\nevent: user.message\ndata: ${"x".repeat(10 * 1024 * 1024 + 64)}`
+				const oversizedFetch = async () =>
+					new Response(oversizedChunk, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					})
 
-					yield* Effect.gen(function* () {
-						const client = yield* CheckfuClient
-						const listed = yield* client.sessions.events.list("sess_legacy")
-						expect(listed.data.map((e) => e.type)).toEqual([
-							"session.status_running",
-							"session.status_idle",
-							"session.archived",
-						])
-						const streamed = yield* Stream.runCollect(client.sessions.events.stream("sess_legacy"))
-						expect(Array.from(streamed).map((e) => e.seq)).toEqual([1, 2, 3])
-					}).pipe(Effect.provide(makeEffectLayer(legacyFetch)))
-
-					const oversizedChunk = `${sseFrame(sampleUserMessageEvent(1))}id: 2\nevent: user.message\ndata: ${"x".repeat(10 * 1024 * 1024 + 64)}`
-					const oversizedFetch = async () =>
-						new Response(oversizedChunk, {
-							status: 200,
-							headers: { "content-type": "text/event-stream" },
-						})
-
-					const deliveredBeforeError: Array<number> = []
-					const oversizedErr = yield* Effect.gen(function* () {
-						const client = yield* CheckfuClient
-						return yield* Effect.flip(
-							client.sessions.events.stream("sess_oversized").pipe(
-								Stream.runForEach((ev) =>
-									Effect.sync(() => {
-										deliveredBeforeError.push(ev.seq)
-									}),
-								),
+				const deliveredBeforeError: Array<number> = []
+				const oversizedErr = yield* Effect.gen(function* () {
+					const client = yield* CheckfuClient
+					return yield* Effect.flip(
+						client.sessions.events.stream("sess_oversized").pipe(
+							Stream.runForEach((ev) =>
+								Effect.sync(() => {
+									deliveredBeforeError.push(ev.seq)
+								}),
 							),
-						)
-					}).pipe(Effect.provide(makeEffectLayer(oversizedFetch)))
-					expect(deliveredBeforeError).toEqual([1])
-					expect(oversizedErr._tag).toBe("APIConnectionError")
-					expect(oversizedErr.message).toContain("Event stream decode failed")
-				}),
+						),
+					)
+				}).pipe(Effect.provide(makeEffectLayer(oversizedFetch)))
+				expect(deliveredBeforeError).toEqual([1])
+				expect(oversizedErr._tag).toBe("APIConnectionError")
+				expect(oversizedErr.message).toContain("Event stream decode failed")
+			}),
 		)
 
 		it.live(
