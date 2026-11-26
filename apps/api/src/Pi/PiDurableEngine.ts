@@ -36,6 +36,7 @@ export interface PiDurableBackend {
 	readonly missingCredentialsMessage?: (provider: string) => string | Promise<string>
 	readonly checkCredentials?: (
 		provider: string,
+		signal?: AbortSignal,
 	) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
 	readonly isCancelled: (operationId: string) => boolean
 	readonly enterWorkspace: (turn: number) => Promise<boolean>
@@ -253,6 +254,28 @@ export const AbortGrace = Context.Reference<Duration.Input>("@checkfu/api/AbortG
 	defaultValue: () => "10 seconds",
 })
 
+const admissionAborts = new WeakMap<PiDurableBackend, Map<string, Set<AbortController>>>()
+
+const abortControllersOf = (backend: PiDurableBackend) => {
+	const existing = admissionAborts.get(backend)
+	if (existing !== undefined) {
+		return existing
+	}
+	const created = new Map<string, Set<AbortController>>()
+	admissionAborts.set(backend, created)
+	return created
+}
+
+const notifyAdmissionAbort = (backend: PiDurableBackend, operationId: string): void => {
+	const active = admissionAborts.get(backend)?.get(operationId)
+	if (active === undefined) {
+		return
+	}
+	for (const controller of active) {
+		controller.abort()
+	}
+}
+
 export const abortPiDurableTurn = (
 	backend: PiDurableBackend,
 	operationId: string,
@@ -261,7 +284,10 @@ export const abortPiDurableTurn = (
 		const grace = yield* AbortGrace
 		const watched = yield* Effect.forkDetach(
 			Effect.gen(function* () {
-				const aborting = yield* Effect.forkDetach(backend.abort(operationId))
+				const aborting = yield* Effect.forkDetach(backend.abort(operationId), {
+					startImmediately: true,
+				})
+				notifyAdmissionAbort(backend, operationId)
 				return yield* Fiber.join(aborting).pipe(
 					Effect.timeoutOrElse({ duration: grace, orElse: () => backend.reset }),
 				)
@@ -351,30 +377,81 @@ const admitPiTurnUnderWay = (
 				if (precheck === "cancelled") {
 					return false
 				}
-				const credentialOutcome = yield* Effect.promise(async (): Promise<AdmitPiTurnResult> => {
-					if (backend.checkCredentials !== undefined) {
-						const check = await backend.checkCredentials(request.provider)
-						return check.ok ? true : { _tag: "missing_key", message: check.message }
-					}
-					if (await backend.hasApiKey(request.provider)) {
-						return true
-					}
-					return {
-						_tag: "missing_key",
-						message:
-							backend.missingCredentialsMessage === undefined
-								? undefined
-								: await backend.missingCredentialsMessage(request.provider),
-					}
-				})
-				if (typeof credentialOutcome === "object") {
+				const credentialOutcome = yield* Effect.acquireUseRelease(
+					Effect.sync(() => {
+						const controller = new AbortController()
+						const byOp = abortControllersOf(backend)
+						const active = byOp.get(operationId) ?? new Set()
+						active.add(controller)
+						byOp.set(operationId, active)
+						if (backend.isCancelled(operationId)) {
+							controller.abort()
+						}
+						return controller
+					}),
+					(controller) =>
+						Effect.promise(async (): Promise<AdmitPiTurnResult | "aborted"> => {
+							if (controller.signal.aborted) {
+								return "aborted"
+							}
+							const runCheck = async (): Promise<AdmitPiTurnResult> => {
+								if (backend.checkCredentials !== undefined) {
+									const check = await backend.checkCredentials(request.provider, controller.signal)
+									return check.ok ? true : { _tag: "missing_key", message: check.message }
+								}
+								if (await backend.hasApiKey(request.provider)) {
+									return true
+								}
+								return {
+									_tag: "missing_key",
+									message:
+										backend.missingCredentialsMessage === undefined
+											? undefined
+											: await backend.missingCredentialsMessage(request.provider),
+								}
+							}
+							return new Promise<AdmitPiTurnResult | "aborted">((resolve, reject) => {
+								const onAbort = () => {
+									resolve("aborted")
+								}
+								controller.signal.addEventListener("abort", onAbort, { once: true })
+								runCheck().then(
+									(outcome) => {
+										controller.signal.removeEventListener("abort", onAbort)
+										resolve(outcome)
+									},
+									(error: unknown) => {
+										controller.signal.removeEventListener("abort", onAbort)
+										if (controller.signal.aborted) {
+											resolve("aborted")
+										} else {
+											reject(error)
+										}
+									},
+								)
+							})
+						}),
+					(controller) =>
+						Effect.sync(() => {
+							const byOp = admissionAborts.get(backend)
+							const active = byOp?.get(operationId)
+							active?.delete(controller)
+							if (active?.size === 0) {
+								byOp?.delete(operationId)
+							}
+						}),
+				)
+				if (credentialOutcome === "aborted" || typeof credentialOutcome === "object") {
 					const raced = yield* backend.withLock(
 						Effect.promise(async (): Promise<"submitted" | "cancelled" | "missing"> => {
 							const pi = await backend.pi()
 							if ((await submissionOf(pi, operationId)) !== undefined) {
 								return "submitted"
 							}
-							return backend.isCancelled(operationId) ? "cancelled" : "missing"
+							if (credentialOutcome === "aborted" || backend.isCancelled(operationId)) {
+								return "cancelled"
+							}
+							return "missing"
 						}),
 					)
 					if (raced === "submitted") {
@@ -383,7 +460,7 @@ const admitPiTurnUnderWay = (
 					if (raced === "cancelled") {
 						return false
 					}
-					return credentialOutcome
+					return credentialOutcome === "aborted" ? false : credentialOutcome
 				}
 				credentialsVerified = true
 			}

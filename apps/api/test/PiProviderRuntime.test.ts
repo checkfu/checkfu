@@ -14,7 +14,12 @@ import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import { AbortGrace, abortPiDurableTurn, runPiDurableTurn } from "../src/Pi/PiDurableEngine.ts"
+import {
+	AbortGrace,
+	abortPiDurableTurn,
+	recoverPiDurableTurn,
+	runPiDurableTurn,
+} from "../src/Pi/PiDurableEngine.ts"
 import { PiHarnessWorker } from "../src/Pi/PiHarness.ts"
 import {
 	EnvPiProviderRuntimeLive,
@@ -841,6 +846,294 @@ describe("PiProviderRuntime", () => {
 				} finally {
 					releaseFullRefresh()
 				}
+			}),
+	)
+
+	it.live(
+		"revalidates gateway models by their original lookup ID instead of stripped wire ID",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* Effect.acquireRelease(
+					Effect.promise(() => startCaptureResponsesServer()),
+					(running) => Effect.promise(() => running.close()),
+				)
+				const runtime = dynamicPiProviderRuntime(() =>
+					Effect.succeed({
+						env: {
+							CLOUDFLARE_ACCOUNT_ID: "acct_test",
+							CLOUDFLARE_GATEWAY_ID: "gw_test",
+							CLOUDFLARE_AI_API_KEY: "cf-aig-test-token",
+						},
+						baseUrlOverrides: { "cloudflare-ai-gateway": server.baseUrl },
+					}),
+				)
+				const providers = yield* runtime.forSession({ sessionId: "sess_gateway_lookup" })
+				const models = providers.createModels()
+
+				const gatewayModel = models.getModel("cloudflare-ai-gateway", "openai/future-model")
+				expect(gatewayModel).toBeDefined()
+				if (gatewayModel === undefined || !hasApi(gatewayModel, "openai-responses")) {
+					return
+				}
+				expect(gatewayModel.id).toBe("future-model")
+
+				const auth = yield* Effect.promise(() => models.getAuth(gatewayModel))
+				expect(auth?.auth.headers?.["cf-aig-authorization"]).toBe("Bearer cf-aig-test-token")
+
+				const simpleReply = yield* Effect.promise(() =>
+					models.completeSimple(gatewayModel, {
+						messages: [{ role: "user", content: "gateway hi", timestamp: 1_700_000_000_000 }],
+					}),
+				)
+				expect(simpleReply.stopReason).toBe("stop")
+
+				const typedReply = yield* Effect.promise(() =>
+					models.complete(gatewayModel, {
+						messages: [{ role: "user", content: "gateway typed", timestamp: 1_700_000_000_001 }],
+					}),
+				)
+				expect(typedReply.stopReason).toBe("stop")
+
+				models.deleteProvider("cloudflare-ai-gateway")
+				expect(yield* Effect.promise(() => models.getAuth(gatewayModel))).toBeUndefined()
+				const afterDelete = yield* Effect.promise(() =>
+					models.completeSimple(gatewayModel, {
+						messages: [{ role: "user", content: "blocked", timestamp: 1_700_000_000_002 }],
+					}),
+				)
+				expect(afterDelete.stopReason).toBe("error")
+			}),
+	)
+
+	it.live(
+		"unblocks both runPiDurableTurn and recoverPiDurableTurn when abort interrupts a stalled credential check",
+		() =>
+			Effect.gen(function* () {
+				const cancelled = new Set<string>()
+				let resetCount = 0
+				let observedSignal: AbortSignal | undefined
+				let markEntered!: () => void
+				const entered = new Promise<void>((resolve) => {
+					markEntered = resolve
+				})
+
+				const backend = makePiHarnessBackend(
+					{
+						pi: async () => ({
+							commit: async () => undefined,
+						}),
+						abort: async () => undefined,
+					} as unknown as Parameters<typeof makePiHarnessBackend>[0],
+					{
+						isCancelled: (operationId: string) => cancelled.has(operationId),
+						markCancelled: (operationId: string) => {
+							cancelled.add(operationId)
+						},
+					} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+					{},
+					() => {
+						resetCount += 1
+					},
+					() => Promise.resolve(true),
+					{
+						checkCredentials: (_provider, signal) => {
+							observedSignal = signal
+							markEntered()
+							// Deliberately never resolves (simulating a hung external credential check).
+							return new Promise(() => {
+								// intentionally unsettled
+							})
+						},
+					},
+				)
+
+				const turnFiber = yield* Effect.forkChild(
+					runPiDurableTurn(backend, makeTurnRequest(1, "openai")),
+					{ startImmediately: true },
+				)
+				yield* Effect.promise(() => entered)
+
+				const recoverFiber = yield* Effect.forkChild(recoverPiDurableTurn(backend, "turn:1"), {
+					startImmediately: true,
+				})
+
+				const aborted = yield* abortPiDurableTurn(backend, "turn:1").pipe(
+					Effect.provideService(AbortGrace, "50 millis"),
+				)
+				expect(aborted).toBe(true)
+				expect(resetCount).toBe(0)
+				expect(observedSignal?.aborted).toBe(true)
+
+				const [turnOutcome, recoverOutcome] = yield* Effect.all([
+					Fiber.join(turnFiber),
+					Fiber.join(recoverFiber),
+				])
+				expect(turnOutcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+				expect(recoverOutcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+			}),
+	)
+
+	it.live("returns an aborted refresh result when signal fires during config resolution", () =>
+		Effect.gen(function* () {
+			let hangRefresh = false
+			const runtime = dynamicPiProviderRuntime(({ provider }) => {
+				if (hangRefresh && provider === undefined) {
+					return Effect.never
+				}
+				return Effect.succeed({ env: { OPENAI_API_KEY: "sk-refresh" } })
+			})
+
+			const providers = yield* runtime.forSession({ sessionId: "sess_refresh_abort" })
+			const models = providers.createModels()
+
+			hangRefresh = true
+			const runAbortedRefresh = async () => {
+				const controller = new AbortController()
+				const pending = models.refresh({ signal: controller.signal })
+				await new Promise<void>((resolve) => {
+					setTimeout(() => {
+						resolve()
+					}, 10)
+				})
+				controller.abort()
+				return pending
+			}
+			const result = yield* Effect.promise(() => runAbortedRefresh())
+			expect(result.aborted).toBe(true)
+			expect(result.errors.size).toBe(0)
+		}),
+	)
+
+	it.live(
+		"preserves refresh ordering across registry rebuilds for a refreshable provider installed via setProvider",
+		() =>
+			Effect.gen(function* () {
+				const runtime = dynamicPiProviderRuntime(() =>
+					Effect.succeed({ env: { OPENAI_API_KEY: "sk-fresh-every-call" } }),
+				)
+				const providers = yield* runtime.forSession({ sessionId: "sess_refresh_order" })
+				const models = providers.createModels()
+
+				let callCount = 0
+				let markFirstStarted!: () => void
+				const firstStarted = new Promise<void>((resolve) => {
+					markFirstStarted = resolve
+				})
+				let releaseFirst!: () => void
+				const firstGate = new Promise<void>((resolve) => {
+					releaseFirst = resolve
+				})
+
+				const makeRefreshModel = (id: string) => ({
+					id,
+					name: id,
+					api: "openai-responses" as const,
+					provider: "refreshable",
+					baseUrl: "https://refreshable.example/v1",
+					reasoning: false,
+					input: ["text" as const],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128_000,
+					maxTokens: 16_384,
+				})
+
+				const refreshable = createProvider({
+					id: "refreshable",
+					name: "Refreshable",
+					models: [],
+					api: {
+						stream: () => {
+							throw new Error("unused")
+						},
+						streamSimple: () => {
+							throw new Error("unused")
+						},
+					},
+					auth: {
+						apiKey: {
+							name: "Refreshable Key",
+							resolve: async () => ({ auth: { apiKey: "sk-ref" }, source: "static" }),
+						},
+					},
+					fetchModels: async () => {
+						callCount += 1
+						if (callCount === 1) {
+							markFirstStarted()
+							await firstGate
+							return [makeRefreshModel("stale-v1")]
+						}
+						return [makeRefreshModel("fresh-v2")]
+					},
+				})
+
+				models.setProvider(refreshable)
+
+				try {
+					const firstRefresh = models.refresh({ providers: ["refreshable"] })
+					yield* Effect.promise(() => firstStarted)
+
+					const secondResult = yield* Effect.promise(() =>
+						models.refresh({ providers: ["refreshable"] }),
+					)
+					expect(secondResult.aborted).toBe(false)
+					expect(models.getModels("refreshable").map((m) => m.id)).toEqual(["fresh-v2"])
+
+					releaseFirst()
+					const firstResult = yield* Effect.promise(() => firstRefresh)
+					expect(firstResult.aborted).toBe(false)
+					expect(models.getModels("refreshable").map((m) => m.id)).toEqual(["fresh-v2"])
+				} finally {
+					releaseFirst()
+				}
+			}),
+	)
+
+	it.live(
+		"does not retain snapshots for unknown provider IDs and tombstones removed providers",
+		() =>
+			Effect.gen(function* () {
+				let includeAcme = true
+				const acmeSpec: ProviderSpec = {
+					id: "acme",
+					name: "Acme",
+					source: "custom",
+					defaultFormat: "openai-responses",
+					formats: ["openai-responses"],
+					baseUrl: "https://acme.example/v1",
+					auth: { kind: "bearer", env: "ACME_API_KEY", label: "Acme API Key" },
+					allowUnlistedModels: false,
+					models: { "model-a": {} },
+				}
+
+				const runtime = dynamicPiProviderRuntime(() =>
+					Effect.succeed({
+						env: includeAcme ? { ACME_API_KEY: "sk-acme" } : {},
+						customProviders: includeAcme ? [acmeSpec] : [],
+					}),
+				)
+				const providers = yield* runtime.forSession({ sessionId: "sess_unknown_bound" })
+				const models = providers.createModels()
+				expect(models.getModel("acme", "model-a")?.id).toBe("model-a")
+
+				// Probe many unknown provider IDs.
+				for (let i = 0; i < 100; i += 1) {
+					const check = yield* Effect.promise(() =>
+						Promise.resolve(providers.checkCredentials(`unknown-provider-${i}`)),
+					)
+					expect(check.ok).toBe(false)
+				}
+				expect(yield* Effect.promise(() => models.getAuth("unknown-provider-0"))).toBeUndefined()
+				expect(models.getProvider("unknown-provider-0")).toBeUndefined()
+
+				// Remove previously configured acme -> tombstoned on active & reopened registries.
+				includeAcme = false
+				const acmeCheck = yield* Effect.promise(() =>
+					Promise.resolve(providers.checkCredentials("acme")),
+				)
+				expect(acmeCheck.ok).toBe(false)
+				expect(models.getProvider("acme")).toBeUndefined()
+				expect(models.getModel("acme", "model-a")).toBeUndefined()
+				expect(providers.createModels().getProvider("acme")).toBeUndefined()
 			}),
 	)
 

@@ -16,7 +16,7 @@ import {
 } from "@earendil-works/pi-ai"
 import type { AnyModel, Api, Model, ModelType, ModelTypeMap, Provider } from "@earendil-works/pi-ai"
 import { hasApi } from "@earendil-works/pi-ai/models"
-import type { MutableModels } from "@earendil-works/pi-ai/models"
+import type { ModelsRefreshResult, MutableModels } from "@earendil-works/pi-ai/models"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -43,6 +43,7 @@ export interface PiSessionProviders {
 	readonly releaseModels?: (models: MutableModels) => void
 	readonly checkCredentials: (
 		provider: string,
+		signal?: AbortSignal,
 	) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
 }
 
@@ -71,6 +72,20 @@ const EMPTY_AUTH_CONTEXT = {
 	fileExists: () => Promise.resolve(false),
 } as const
 
+const MODEL_LOOKUP_IDS = new WeakMap<AnyModel, string>()
+
+const rememberLookupId = <T extends AnyModel | undefined>(model: T, lookupId: string): T => {
+	if (model !== undefined) {
+		MODEL_LOOKUP_IDS.set(model, lookupId)
+	}
+	return model
+}
+
+const lookupIdOf = (model: AnyModel): string => MODEL_LOOKUP_IDS.get(model) ?? model.id
+
+const hasConfiguredProvider = (config: ProviderRuntimeConfig, providerId: string): boolean =>
+	allProviders(config.customProviders).some((spec) => spec.id === providerId)
+
 const unavailableModelMessage = (provider: string, id: string): string =>
 	`Model "${provider}/${id}" is not available in the current provider configuration.`
 
@@ -83,11 +98,12 @@ const errorMessageOf = (error: unknown): string =>
 		: String(error)
 
 const requireCurrentChatModel = (models: MutableModels, model: Model<Api>): Model<Api> => {
-	const resolved = models.getModel(model.provider, model.id)
+	const lookupId = lookupIdOf(model)
+	const resolved = models.getModel(model.provider, lookupId)
 	if (resolved === undefined) {
-		throw new ModelsError("model_validation", unavailableModelMessage(model.provider, model.id))
+		throw new ModelsError("model_validation", unavailableModelMessage(model.provider, lookupId))
 	}
-	return resolved
+	return rememberLookupId(resolved, lookupId)
 }
 
 const requireCurrentTypedChatModel = <TApi extends Api>(
@@ -98,7 +114,7 @@ const requireCurrentTypedChatModel = <TApi extends Api>(
 	if (!hasApi(resolved, model.api)) {
 		throw new ModelsError(
 			"model_validation",
-			`Model "${model.provider}/${model.id}" uses API "${resolved.api}", not "${model.api}".`,
+			`Model "${model.provider}/${lookupIdOf(model)}" uses API "${resolved.api}", not "${model.api}".`,
 		)
 	}
 	return resolved
@@ -116,6 +132,27 @@ interface DynamicModelsController {
 		provider: string | undefined,
 		seq: number,
 	) => void
+	readonly syncTombstone: (provider: string, seq: number) => void
+}
+
+interface ActiveRefreshPhase {
+	readonly providers: ReadonlySet<string> | undefined
+	readonly controller: AbortController
+}
+
+const refreshScopesOverlap = (
+	left: ReadonlySet<string> | undefined,
+	right: ReadonlySet<string> | undefined,
+): boolean => {
+	if (left === undefined || right === undefined) {
+		return true
+	}
+	for (const id of left) {
+		if (right.has(id)) {
+			return true
+		}
+	}
+	return false
 }
 
 const createDynamicProviderModels = (
@@ -129,6 +166,16 @@ const createDynamicProviderModels = (
 ): DynamicModelsController => {
 	const credentials = new InMemoryCredentialStore()
 	const modelsStore = new InMemoryModelsStore()
+	const emptyRegistry = createModels({
+		credentials,
+		modelsStore,
+		authContext: EMPTY_AUTH_CONTEXT,
+	})
+	const refreshHost = createModels({
+		credentials,
+		modelsStore,
+		authContext: EMPTY_AUTH_CONTEXT,
+	})
 
 	const buildRegistry = (config: ProviderRuntimeConfig): MutableModels => {
 		const base = createModels({
@@ -147,10 +194,20 @@ const createDynamicProviderModels = (
 	let lastFullConfig: ProviderRuntimeConfig | undefined = initialConfig
 	const providerRegistries = new Map<string, MutableModels>()
 	const providerSeqs = new Map<string, number>()
+	const tombstonedProviders = new Map<string, number>()
 
 	let cleared = false
 	const overrides = new Map<string, Provider<Api>>()
 	const deletions = new Set<string>()
+	const activeRefreshPhases = new Set<ActiveRefreshPhase>()
+
+	const abortRefreshPhases = (targets?: ReadonlySet<string>): void => {
+		for (const phase of activeRefreshPhases) {
+			if (refreshScopesOverlap(phase.providers, targets)) {
+				phase.controller.abort()
+			}
+		}
+	}
 
 	const applyMutations = (target: MutableModels): MutableModels => {
 		if (cleared) {
@@ -166,8 +223,14 @@ const createDynamicProviderModels = (
 	}
 
 	const registryForProvider = (providerId: string): MutableModels => {
-		if (deletions.has(providerId) || overrides.has(providerId)) {
+		if (deletions.has(providerId)) {
+			return emptyRegistry
+		}
+		if (overrides.has(providerId)) {
 			return fullRegistry
+		}
+		if (tombstonedProviders.has(providerId)) {
+			return emptyRegistry
 		}
 		return providerRegistries.get(providerId) ?? fullRegistry
 	}
@@ -192,6 +255,24 @@ const createDynamicProviderModels = (
 		return live
 	}
 
+	const applyTombstone = (provider: string, seq: number): void => {
+		const watermark = Math.max(
+			fullSeq,
+			providerSeqs.get(provider) ?? 0,
+			tombstonedProviders.get(provider) ?? 0,
+		)
+		if (seq <= watermark) {
+			return
+		}
+		providerRegistries.delete(provider)
+		providerSeqs.delete(provider)
+		if (fullRegistry.getProvider(provider) !== undefined) {
+			tombstonedProviders.set(provider, seq)
+		} else {
+			tombstonedProviders.delete(provider)
+		}
+	}
+
 	const applySnapshot = (
 		config: ProviderRuntimeConfig,
 		provider: string | undefined,
@@ -211,13 +292,36 @@ const createDynamicProviderModels = (
 					providerRegistries.delete(providerId)
 				}
 			}
+			for (const [providerId, tombstoneSeq] of tombstonedProviders) {
+				if (tombstoneSeq <= seq) {
+					tombstonedProviders.delete(providerId)
+				}
+			}
 			return fresh
 		}
 
-		const watermark = Math.max(fullSeq, providerSeqs.get(provider) ?? 0)
+		if (deletions.has(provider)) {
+			return emptyRegistry
+		}
+		if (overrides.has(provider)) {
+			return fullRegistry
+		}
+
+		const watermark = Math.max(
+			fullSeq,
+			providerSeqs.get(provider) ?? 0,
+			tombstonedProviders.get(provider) ?? 0,
+		)
 		if (seq <= watermark) {
 			return registryForProvider(provider)
 		}
+
+		if (!hasConfiguredProvider(config, provider)) {
+			applyTombstone(provider, seq)
+			return emptyRegistry
+		}
+
+		tombstonedProviders.delete(provider)
 		const fresh = applyMutations(buildRegistry(config))
 		providerRegistries.set(provider, fresh)
 		providerSeqs.set(provider, seq)
@@ -242,6 +346,30 @@ const createDynamicProviderModels = (
 			liveProviderIds().map((id) => read(registryForProvider(id), id)),
 		)
 		return chunks.flat()
+	}
+
+	const syncRefreshHost = (selected: ReadonlySet<string> | undefined): void => {
+		const targets = new Set<string>()
+		if (selected !== undefined) {
+			for (const id of selected) {
+				targets.add(id)
+			}
+		} else {
+			for (const id of liveProviderIds()) {
+				targets.add(id)
+			}
+			for (const existing of refreshHost.getProviders()) {
+				targets.add(existing.id)
+			}
+		}
+		for (const id of targets) {
+			const next = registryForProvider(id).getProvider(id)
+			if (next === undefined) {
+				refreshHost.deleteProvider(id)
+			} else {
+				refreshHost.setProvider(next)
+			}
+		}
 	}
 
 	function getModelsOfType<TType extends ModelType>(
@@ -270,7 +398,10 @@ const createDynamicProviderModels = (
 		providerId: string,
 		id: string,
 	): ModelTypeMap[ModelType] | undefined {
-		return registryForProvider(providerId).getModelOfType(type, providerId, id)
+		return rememberLookupId(
+			registryForProvider(providerId).getModelOfType(type, providerId, id),
+			id,
+		)
 	}
 
 	function getAvailableOfType<TType extends ModelType>(
@@ -305,11 +436,12 @@ const createDynamicProviderModels = (
 		if (typeof target === "string") {
 			return resolvedModels.getAuth(target, overridesParam)
 		}
-		const resolved = resolvedModels.getModelOfType(getModelType(target), target.provider, target.id)
+		const lookupId = lookupIdOf(target)
+		const resolved = resolvedModels.getModelOfType(getModelType(target), target.provider, lookupId)
 		if (resolved === undefined) {
 			return undefined
 		}
-		return resolvedModels.getAuth(resolved, overridesParam)
+		return resolvedModels.getAuth(rememberLookupId(resolved, lookupId), overridesParam)
 	}
 
 	const stream: MutableModels["stream"] = (model, context, options) =>
@@ -368,9 +500,46 @@ const createDynamicProviderModels = (
 						registryForProvider(providerId).getAllModels(providerId),
 					),
 		getModelsOfType,
-		getModel: (providerId, id) => registryForProvider(providerId).getModel(providerId, id),
+		getModel: (providerId, id) =>
+			rememberLookupId(registryForProvider(providerId).getModel(providerId, id), id),
 		getModelOfType,
-		refresh: async (options) => (await resolveModels(undefined, options?.signal)).refresh(options),
+		refresh: async (options): Promise<ModelsRefreshResult> => {
+			if (options?.signal?.aborted) {
+				return { aborted: true, errors: new Map() }
+			}
+			const selected = options?.providers === undefined ? undefined : new Set(options.providers)
+			abortRefreshPhases(selected)
+			const phase: ActiveRefreshPhase = {
+				providers: selected,
+				controller: new AbortController(),
+			}
+			activeRefreshPhases.add(phase)
+			const combinedSignal =
+				options?.signal === undefined
+					? phase.controller.signal
+					: AbortSignal.any([options.signal, phase.controller.signal])
+			try {
+				await resolveModels(undefined, combinedSignal)
+			} catch (error) {
+				if (options?.signal?.aborted) {
+					return { aborted: true, errors: new Map() }
+				}
+				if (phase.controller.signal.aborted) {
+					return { aborted: false, errors: new Map() }
+				}
+				throw error
+			} finally {
+				activeRefreshPhases.delete(phase)
+			}
+			if (options?.signal?.aborted) {
+				return { aborted: true, errors: new Map() }
+			}
+			if (phase.controller.signal.aborted) {
+				return { aborted: false, errors: new Map() }
+			}
+			syncRefreshHost(selected)
+			return refreshHost.refresh(options)
+		},
 		checkAuth: async (providerId, options) =>
 			(await resolveModels(providerId, options?.signal)).checkAuth(providerId, options),
 		getAvailable: (providerId, options) =>
@@ -406,7 +575,8 @@ const createDynamicProviderModels = (
 		generateImages: async (model, context, options) => {
 			try {
 				const resolvedModels = await resolveModels(model.provider, options?.signal)
-				const target = resolvedModels.getModelOfType("image", model.provider, model.id)
+				const lookupId = lookupIdOf(model)
+				const target = resolvedModels.getModelOfType("image", model.provider, lookupId)
 				if (target === undefined) {
 					return {
 						api: model.api,
@@ -414,11 +584,15 @@ const createDynamicProviderModels = (
 						model: model.id,
 						output: [],
 						stopReason: options?.signal?.aborted ? "aborted" : "error",
-						errorMessage: unavailableModelMessage(model.provider, model.id),
+						errorMessage: unavailableModelMessage(model.provider, lookupId),
 						timestamp: Date.now(),
 					}
 				}
-				return await resolvedModels.generateImages(target, context, options)
+				return await resolvedModels.generateImages(
+					rememberLookupId(target, lookupId),
+					context,
+					options,
+				)
 			} catch (error) {
 				return {
 					api: model.api,
@@ -434,7 +608,8 @@ const createDynamicProviderModels = (
 		classify: async (model, context, options) => {
 			try {
 				const resolvedModels = await resolveModels(model.provider, options?.signal)
-				const target = resolvedModels.getModelOfType("classifier", model.provider, model.id)
+				const lookupId = lookupIdOf(model)
+				const target = resolvedModels.getModelOfType("classifier", model.provider, lookupId)
 				if (target === undefined) {
 					return {
 						api: model.api,
@@ -442,11 +617,11 @@ const createDynamicProviderModels = (
 						model: model.id,
 						answers: {},
 						stopReason: options?.signal?.aborted ? "aborted" : "error",
-						errorMessage: unavailableModelMessage(model.provider, model.id),
+						errorMessage: unavailableModelMessage(model.provider, lookupId),
 						timestamp: Date.now(),
 					}
 				}
-				return await resolvedModels.classify(target, context, options)
+				return await resolvedModels.classify(rememberLookupId(target, lookupId), context, options)
 			} catch (error) {
 				return {
 					api: model.api,
@@ -460,29 +635,38 @@ const createDynamicProviderModels = (
 			}
 		},
 		setProvider: (provider) => {
+			abortRefreshPhases(new Set([provider.id]))
 			deletions.delete(provider.id)
+			tombstonedProviders.delete(provider.id)
 			overrides.set(provider.id, provider)
 			providerRegistries.delete(provider.id)
 			providerSeqs.delete(provider.id)
 			lastFullConfig = undefined
 			fullRegistry.setProvider(provider)
+			refreshHost.setProvider(provider)
 		},
 		deleteProvider: (id) => {
+			abortRefreshPhases(new Set([id]))
 			overrides.delete(id)
+			tombstonedProviders.delete(id)
 			deletions.add(id)
 			providerRegistries.delete(id)
 			providerSeqs.delete(id)
 			lastFullConfig = undefined
 			fullRegistry.deleteProvider(id)
+			refreshHost.deleteProvider(id)
 		},
 		clearProviders: () => {
+			abortRefreshPhases(undefined)
 			cleared = true
 			overrides.clear()
 			deletions.clear()
+			tombstonedProviders.clear()
 			providerRegistries.clear()
 			providerSeqs.clear()
 			lastFullConfig = undefined
 			fullRegistry.clearProviders()
+			refreshHost.clearProviders()
 		},
 	}
 
@@ -491,9 +675,18 @@ const createDynamicProviderModels = (
 		syncConfig: (config, provider, seq) => {
 			applySnapshot(config, provider, seq)
 		},
+		syncTombstone: (provider, seq) => {
+			applyTombstone(provider, seq)
+		},
 	}
 
 	return controller
+}
+
+interface InFlightProviderOrdering {
+	count: number
+	winnerSeq: number
+	winnerSnapshot?: ResolvedSnapshot
 }
 
 export const dynamicPiProviderRuntime = (
@@ -505,10 +698,12 @@ export const dynamicPiProviderRuntime = (
 			let latestFullSeq = 0
 			let latestFullConfig = initialConfig
 			const syncedByProvider = new Map<string, ResolvedSnapshot>()
+			const tombstonedByProvider = new Map<string, number>()
+			const inFlightByProvider = new Map<string, InFlightProviderOrdering>()
 			const instances = new Set<WeakRef<DynamicModelsController>>()
 			const refsByModels = new WeakMap<MutableModels, WeakRef<DynamicModelsController>>()
 
-			const notifyInstances = (
+			const notifyConfig = (
 				config: ProviderRuntimeConfig,
 				provider: string | undefined,
 				seq: number,
@@ -526,17 +721,34 @@ export const dynamicPiProviderRuntime = (
 				}
 			}
 
+			const notifyTombstone = (
+				provider: string,
+				seq: number,
+				caller?: DynamicModelsController,
+			): void => {
+				for (const ref of instances) {
+					const instance = ref.deref()
+					if (instance === undefined) {
+						instances.delete(ref)
+						continue
+					}
+					if (instance !== caller) {
+						instance.syncTombstone(provider, seq)
+					}
+				}
+			}
+
 			const resolveAndSync = async (
 				provider: string | undefined,
 				signal: AbortSignal | undefined,
 				caller?: DynamicModelsController,
 			): Promise<ResolvedSnapshot> => {
 				const seq = ++nextSeq
-				const config = await Effect.runPromise(
-					resolve(provider === undefined ? { sessionId } : { sessionId, provider }),
-					signal === undefined ? undefined : { signal },
-				)
 				if (provider === undefined) {
+					const config = await Effect.runPromise(
+						resolve({ sessionId }),
+						signal === undefined ? undefined : { signal },
+					)
 					if (seq > latestFullSeq) {
 						latestFullSeq = seq
 						latestFullConfig = config
@@ -545,22 +757,68 @@ export const dynamicPiProviderRuntime = (
 								syncedByProvider.delete(providerId)
 							}
 						}
-						notifyInstances(config, undefined, seq, caller)
+						for (const [providerId, tombstoneSeq] of tombstonedByProvider) {
+							if (tombstoneSeq <= seq) {
+								tombstonedByProvider.delete(providerId)
+							}
+						}
+						notifyConfig(config, undefined, seq, caller)
 						return { config, seq }
 					}
 					return { config: latestFullConfig, seq: latestFullSeq }
 				}
 
-				const existing = syncedByProvider.get(provider)
-				const watermark = Math.max(latestFullSeq, existing?.seq ?? 0)
-				if (seq > watermark) {
-					syncedByProvider.set(provider, { config, seq })
-					notifyInstances(config, provider, seq, caller)
-					return { config, seq }
+				const inFlight = inFlightByProvider.get(provider) ?? { count: 0, winnerSeq: 0 }
+				inFlight.count += 1
+				inFlightByProvider.set(provider, inFlight)
+				try {
+					const config = await Effect.runPromise(
+						resolve({ sessionId, provider }),
+						signal === undefined ? undefined : { signal },
+					)
+					const existing = syncedByProvider.get(provider)
+					const existingTombstone = tombstonedByProvider.get(provider) ?? 0
+					const watermark = Math.max(
+						latestFullSeq,
+						existing?.seq ?? 0,
+						existingTombstone,
+						inFlight.winnerSeq,
+					)
+					if (seq > watermark) {
+						const snapshot: ResolvedSnapshot = { config, seq }
+						inFlight.winnerSeq = seq
+						inFlight.winnerSnapshot = snapshot
+						if (hasConfiguredProvider(config, provider)) {
+							tombstonedByProvider.delete(provider)
+							syncedByProvider.set(provider, snapshot)
+							notifyConfig(config, provider, seq, caller)
+						} else {
+							const hadSnapshot = syncedByProvider.delete(provider)
+							const inFull = hasConfiguredProvider(latestFullConfig, provider)
+							if (inFull) {
+								tombstonedByProvider.set(provider, seq)
+							} else {
+								tombstonedByProvider.delete(provider)
+							}
+							if (hadSnapshot || inFull) {
+								notifyTombstone(provider, seq, caller)
+							}
+						}
+						return snapshot
+					}
+					if (existing !== undefined && existing.seq >= latestFullSeq) {
+						return existing
+					}
+					if (inFlight.winnerSnapshot !== undefined && inFlight.winnerSeq >= latestFullSeq) {
+						return inFlight.winnerSnapshot
+					}
+					return { config: latestFullConfig, seq: latestFullSeq }
+				} finally {
+					inFlight.count -= 1
+					if (inFlight.count === 0) {
+						inFlightByProvider.delete(provider)
+					}
 				}
-				return existing !== undefined && existing.seq >= latestFullSeq
-					? existing
-					: { config: latestFullConfig, seq: latestFullSeq }
 			}
 
 			return {
@@ -572,6 +830,9 @@ export const dynamicPiProviderRuntime = (
 					)
 					for (const [provider, entry] of syncedByProvider) {
 						controller.syncConfig(entry.config, provider, entry.seq)
+					}
+					for (const [provider, tombstoneSeq] of tombstonedByProvider) {
+						controller.syncTombstone(provider, tombstoneSeq)
 					}
 					const ref = new WeakRef(controller)
 					instances.add(ref)
@@ -585,8 +846,8 @@ export const dynamicPiProviderRuntime = (
 						refsByModels.delete(models)
 					}
 				},
-				checkCredentials: async (provider) => {
-					const snapshot = await resolveAndSync(provider, undefined)
+				checkCredentials: async (provider, signal) => {
+					const snapshot = await resolveAndSync(provider, signal)
 					return checkCatalogProviderCredentials(
 						provider,
 						snapshot.config,

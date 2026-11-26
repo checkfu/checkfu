@@ -65,6 +65,7 @@ export const makePiHarnessBackend = (
 		readonly customProviders?: ReadonlyArray<ProviderSpec>
 		readonly checkCredentials?: (
 			provider: string,
+			signal?: AbortSignal,
 		) => ProviderCredentialCheck | Promise<ProviderCredentialCheck>
 	},
 ): PiDurableBackend => {
