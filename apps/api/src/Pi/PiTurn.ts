@@ -5,6 +5,7 @@ import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { HeldSecret, PutMode, PutOutcome } from "../Connection/SecretCustody.ts"
+import { TurnToken, WorkspacePreparation } from "../Workspace/WorkspaceShapes.ts"
 
 const TURN_OPERATION_PREFIX = "turn:"
 
@@ -121,6 +122,11 @@ export const PiHarnessCalls = {
 		]),
 		result: Schema.Array(Schema.NullOr(Schema.String)),
 	},
+	prepareWorkspace: {
+		args: Schema.Tuple([Schema.String, TurnToken, Schema.NullOr(Schema.Array(Schema.String))]),
+		result: WorkspacePreparation,
+	},
+	interruptWorkspace: { args: Schema.Tuple([Schema.String, TurnToken]), result: Schema.Void },
 	discardWorkspace: { args: Schema.Tuple([Schema.String]), result: Schema.Void },
 	putSecret: {
 		args: Schema.Tuple([Schema.String, Schema.String, HeldSecret, Schema.String, PutMode]),

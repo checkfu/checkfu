@@ -1,5 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
+import { SessionWorkspace } from "../src/Workspace/SessionWorkspace.do.ts"
 import { join } from "node:path"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type { ProviderCredentialCheck } from "@checkfu/pi-providers/catalog"
@@ -30,6 +31,25 @@ const makeTurnRequest = (turn: number, provider = "openai"): PiTurnRequest => ({
 	system: null,
 	text: "hello",
 })
+
+const planOnly = () => Effect.die(new Error("plan only"))
+
+const PlannedWorkspace = SessionWorkspace.make(
+	Effect.succeed(
+		Effect.succeed({
+			fetch: planOnly(),
+			enter: planOnly,
+			interrupt: planOnly,
+			runTool: planOnly,
+			stopCall: planOnly,
+			listOutputs: planOnly,
+			readOutputs: planOnly,
+			writeScriptOutput: planOnly,
+			prepare: planOnly,
+			discard: planOnly,
+		}),
+	),
+)
 
 describe("PiProviderRuntime", () => {
 	it.effect("resolves static provider credentials and models without reading environment", () =>
@@ -166,13 +186,14 @@ describe("PiProviderRuntime", () => {
 				)
 
 				const planWith = (stage: string, injectRuntime: boolean) => {
-					const providerLayer = injectRuntime
+					const sessionLayer = injectRuntime
 						? PiSessionLive.pipe(
 								Layer.provide(
 									Layer.succeed(PiProviderRuntime, staticPiProviderRuntime({ env: {} })),
 								),
 							)
 						: PiSessionLive
+					const providerLayer = Layer.provideMerge(sessionLayer, PlannedWorkspace)
 					const worker = PiHarnessWorker.make(
 						{ main: import.meta.url },
 						Effect.gen(function* () {
@@ -181,6 +202,8 @@ describe("PiProviderRuntime", () => {
 								recoverTurn: () => Effect.succeed(null),
 								runTurn: () => Effect.die(new Error("plan only")),
 								abortTurn: () => Effect.succeed(false),
+								prepareWorkspace: () => Effect.succeed({ ok: true }),
+								interruptWorkspace: () => Effect.void,
 								listOutputs: () => Effect.succeed({ ok: true, files: [] }),
 								readOutputs: () => Effect.succeed([]),
 								discardWorkspace: () => Effect.void,
