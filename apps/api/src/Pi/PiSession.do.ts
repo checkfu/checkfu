@@ -1,5 +1,9 @@
 import * as Cloudflare from "@alchemy.run/cloudflare"
-import type { CloudflareAiBindingLike, ProviderSpec } from "@checkfu/pi-providers/catalog"
+import type {
+	CloudflareAiBindingLike,
+	ProviderCredentialCheck,
+	ProviderSpec,
+} from "@checkfu/pi-providers/catalog"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
@@ -9,21 +13,28 @@ import * as Semaphore from "effect/Semaphore"
 import { placedStub, placement } from "../Placement.ts"
 import { SessionWorkspace } from "../Workspace/SessionWorkspace.do.ts"
 import { workspaceExtension, workspaceToolDeclarations } from "../Workspace/WorkspaceTools.ts"
-import { checkCatalogProviderCredentials, configuredCustomProviders } from "./PiCatalog.ts"
+import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { PI_HARNESS_SETTINGS } from "./PiContextBudget.ts"
 import { abortPiDurableTurn, recoverPiDurableTurn, runPiDurableTurn } from "./PiDurableEngine.ts"
 import type { PiDurableBackend } from "./PiDurableEngine.ts"
-import {
-	createPiModels,
-	extractAiBinding,
-	loadProviderApiKeys,
-	providerBaseUrls,
-	toProviderRuntimeConfig,
-} from "./PiModels.ts"
+import { toProviderRuntimeConfig } from "./PiModels.ts"
 import type { ProviderApiKeysInput } from "./PiModels.ts"
+import { PiProviderRuntime, loadEnvPiProviderRuntime } from "./PiProviderRuntime.ts"
 import { createCheckfuRegistry } from "./PiRefusals.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 import { SqliteTurnFence } from "./TurnFence.ts"
+
+export {
+	EnvPiProviderRuntimeLive,
+	PiProviderRuntime,
+	loadEnvPiProviderRuntime,
+	staticPiProviderRuntime,
+} from "./PiProviderRuntime.ts"
+export type {
+	PiProviderRuntimeService,
+	PiProviderSessionContext,
+	PiSessionProviders,
+} from "./PiProviderRuntime.ts"
 
 type RawDurableObjectState = Cloudflare.DurableObjectState["Service"]["raw"]
 
@@ -45,6 +56,7 @@ export const makePiHarnessBackend = (
 	options?: {
 		readonly aiBinding?: CloudflareAiBindingLike | null
 		readonly customProviders?: ReadonlyArray<ProviderSpec>
+		readonly checkCredentials?: (provider: string) => ProviderCredentialCheck
 	},
 ): PiDurableBackend => {
 	const lock = Semaphore.makeUnsafe(1)
@@ -52,13 +64,16 @@ export const makePiHarnessBackend = (
 		lock.withPermit(Effect.uninterruptible(effect))
 	const runtimeConfig = toProviderRuntimeConfig(apiKeys, undefined, options)
 	const customProviders = options?.customProviders
+	const checkCredentials = (provider: string): ProviderCredentialCheck =>
+		options?.checkCredentials !== undefined
+			? options.checkCredentials(provider)
+			: checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
 
 	return {
 		withLock,
-		hasApiKey: (provider) =>
-			checkCatalogProviderCredentials(provider, runtimeConfig, customProviders).ok,
+		hasApiKey: (provider) => checkCredentials(provider).ok,
 		missingCredentialsMessage: (provider) => {
-			const check = checkCatalogProviderCredentials(provider, runtimeConfig, customProviders)
+			const check = checkCredentials(provider)
 			return check.ok ? `Missing credentials for provider "${provider}".` : check.message
 		},
 		reset: Effect.andThen(Effect.sync(reset), Effect.never),
@@ -111,89 +126,90 @@ export class PiSession extends Cloudflare.DurableObject<PiSession, PiSessionShap
 
 const piSessionInit = Effect.gen(function* () {
 	const state = yield* Cloudflare.DurableObjectState
-	const workerEnv = yield* Effect.serviceOption(Cloudflare.Workers.WorkerEnvironment)
-	const customProviders = yield* configuredCustomProviders
-	const apiKeys = yield* loadProviderApiKeys(customProviders)
-	const baseUrls = yield* providerBaseUrls
+	const injectedRuntime = yield* Effect.serviceOption(PiProviderRuntime)
+	const providerRuntime = Option.isSome(injectedRuntime)
+		? injectedRuntime.value
+		: yield* loadEnvPiProviderRuntime
 	const workspaces = yield* SessionWorkspace
 	const where = yield* Effect.orDie(placement)
-	return { state, workerEnv, customProviders, apiKeys, baseUrls, workspaces, where }
+	return { state, providerRuntime, workspaces, where }
 })
 
 export const PiSessionLive = PiSession.make(
-	Effect.map(
-		piSessionInit,
-		({ state, workerEnv, customProviders, apiKeys, baseUrls, workspaces, where }) =>
-			Effect.promise(async () => {
-				const aiBinding = extractAiBinding(Option.getOrUndefined(workerEnv))
-				// Load workerd-only modules after Alchemy has evaluated the stack.
-				const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = await Promise.all([
-					import("agents/lifecycle"),
-					import("agents/harness/pi"),
-				])
+	Effect.map(piSessionInit, ({ state, providerRuntime, workspaces, where }) =>
+		Effect.gen(function* () {
+			const rawCtx = state.raw
+			const sessionId = rawCtx.id.name
+			if (sessionId === undefined) {
+				return yield* Effect.die(new Error("PiSession must be addressed by its session id."))
+			}
+			const sessionProviders = yield* providerRuntime.forSession({ sessionId })
+			const runPromise = Effect.runPromiseWith(yield* Effect.context<never>())
 
-				const rawCtx = state.raw
-				const sessionId = rawCtx.id.name
-				if (sessionId === undefined) {
-					throw new Error("PiSession must be addressed by its session id.")
-				}
-				const workspaceStub = placedStub(workspaces, where)
-				const workspace = () => workspaceStub(sessionId)
-				const workspaceTools = await workspaceToolDeclarations()
-				const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
+			// Load workerd-only modules after Alchemy has evaluated the stack.
+			const [{ Lifecycle: LifecycleClass }, { PiHarness: PiHarnessClass }] = yield* Effect.promise(
+				() => Promise.all([import("agents/lifecycle"), import("agents/harness/pi")]),
+			)
 
-				// PiHarness calls this factory again when it reopens after a storage error.
-				const harness = new PiHarnessClass({
-					harness: ({ storage, context, onWake }) => {
-						const models = createPiModels(apiKeys, baseUrls, { aiBinding, customProviders })
-						const registry = createCheckfuRegistry()
-						registry.install(
-							workspaceExtension(workspaceTools, (call, signal) =>
-								Effect.runPromise(
-									workspace().runTool(call, { turn: admittedTurn() }),
-									signal === undefined ? undefined : { signal },
-								),
+			const workspaceStub = placedStub(workspaces, where)
+			const workspace = () => workspaceStub(sessionId)
+			const workspaceTools = yield* Effect.promise(() => workspaceToolDeclarations())
+			const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
+
+			// PiHarness calls this factory again when it reopens after a storage error.
+			const harness = new PiHarnessClass({
+				harness: ({ storage, context, onWake }) => {
+					const models = sessionProviders.createModels()
+					const registry = createCheckfuRegistry()
+					registry.install(
+						workspaceExtension(workspaceTools, (call, signal) =>
+							runPromise(
+								workspace().runTool(call, { turn: admittedTurn() }),
+								signal === undefined ? undefined : { signal },
 							),
-						)
-						return Harness.open(
-							storage,
-							{
-								models,
-								registry,
-								onWake,
-								settings: PI_HARNESS_SETTINGS,
-							},
-							context,
-						)
-					},
-				})
-				const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
-				const fence = new SqliteTurnFence({
-					exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
-				})
-				const backend = makePiHarnessBackend(
-					harness,
-					fence,
-					apiKeys,
-					() => {
-						rawCtx.abort("A turn did not stop when aborted")
-					},
-					async (turn) => {
-						const entered = await Effect.runPromise(workspace().enter({ turn }))
-						if (entered) {
-							rawCtx.storage.kv.put(ADMITTED_TURN, turn)
-						}
-						return entered
-					},
-					{ aiBinding, customProviders },
-				)
+						),
+					)
+					return Harness.open(
+						storage,
+						{
+							models,
+							registry,
+							onWake,
+							settings: PI_HARNESS_SETTINGS,
+						},
+						context,
+					)
+				},
+			})
+			const lifecycle = new LifecycleClass(new PiSessionHost(rawCtx)).use(harness)
+			const fence = new SqliteTurnFence({
+				exec: (query, ...bindings) => rawCtx.storage.sql.exec(query, ...bindings),
+			})
+			const backend = makePiHarnessBackend(
+				harness,
+				fence,
+				{},
+				() => {
+					rawCtx.abort("A turn did not stop when aborted")
+				},
+				async (turn) => {
+					const entered = await runPromise(workspace().enter({ turn }))
+					if (entered) {
+						rawCtx.storage.kv.put(ADMITTED_TURN, turn)
+					}
+					return entered
+				},
+				{
+					checkCredentials: (provider) => sessionProviders.checkCredentials(provider),
+				},
+			)
 
-				return {
-					alarm: () => Effect.promise(() => lifecycle.alarm()),
-					recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
-					runTurn: (request) => runPiDurableTurn(backend, request),
-					abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
-				}
-			}),
+			return {
+				alarm: () => Effect.promise(() => lifecycle.alarm()),
+				recoverTurn: (operationId) => recoverPiDurableTurn(backend, operationId),
+				runTurn: (request) => runPiDurableTurn(backend, request),
+				abortTurn: (operationId) => abortPiDurableTurn(backend, operationId),
+			}
+		}),
 	),
 )

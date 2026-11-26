@@ -1,4 +1,5 @@
-import type { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
+import { boundToolEvents } from "@checkfu/domain/Session/ToolEventBounds"
+import type { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import {
@@ -17,6 +18,7 @@ import type {
 	EntryId,
 	EntryRecord,
 	Harness,
+	TaskId,
 } from "@earendil-works/pi-durable"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -25,8 +27,10 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { checkCatalogProviderCredentials } from "./PiCatalog.ts"
 import { mapAssistantMessageToOutcome, mapUnansweredToError } from "./PiRefusals.ts"
+import { rejectionIn } from "./PiRejection.ts"
 import { beginTurnUsage, settleTurnUsage } from "./PiTurnUsage.ts"
 
+import { turnOfOperation } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export interface PiDurableBackend {
@@ -76,21 +80,26 @@ const readAssistantMessage = async (
 
 const TURN_ENTRY_PAGE_SIZE = 8
 
-interface TurnEntries {
-	readonly ids: ReadonlyArray<EntryId>
-	readonly compaction: EntryRecord | undefined
-}
+const handedOff = (entry: EntryRecord, runTasks: ReadonlySet<TaskId>): boolean =>
+	ResetEntry.is(entry) &&
+	(entry.model?.length ?? 0) > 0 &&
+	entry.byTaskId !== undefined &&
+	runTasks.has(entry.byTaskId)
 
-const readTurnEntries = async (
+async function* turnEntries(
 	conversation: Conversation,
 	userEntryId: EntryId,
-): Promise<TurnEntries> => {
-	const ids: Array<EntryId> = [userEntryId]
-	let compaction: EntryRecord | undefined
+	upTo?: EntryId,
+): AsyncGenerator<EntryRecord> {
+	const runTasks = new Set<TaskId>()
 	let cursor: Cursor | undefined
 	do {
 		const page = await conversation.entries(
-			{ minEntryId: userEntryId, order: "ascending" },
+			{
+				minEntryId: userEntryId,
+				...(upTo === undefined ? {} : { maxEntryId: upTo }),
+				order: "ascending",
+			},
 			TURN_ENTRY_PAGE_SIZE,
 			cursor,
 			BACKGROUND_CONTEXT,
@@ -99,18 +108,106 @@ const readTurnEntries = async (
 			if (entry.id <= userEntryId) {
 				continue
 			}
-			if (UserEntry.is(entry) || ResetEntry.is(entry)) {
-				return { ids, compaction }
+			if (UserEntry.is(entry) || (ResetEntry.is(entry) && !handedOff(entry, runTasks))) {
+				return
 			}
-			if (CompactionEntry.is(entry)) {
-				compaction = entry
-			} else if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
-				ids.push(entry.id)
+			if (AssistantEntry.is(entry) && entry.byTaskId !== undefined) {
+				runTasks.add(entry.byTaskId)
 			}
+			yield entry
 		}
 		cursor = page.next
 	} while (cursor !== undefined)
+}
+
+interface TurnEntries {
+	readonly ids: ReadonlyArray<EntryId>
+	readonly compaction: EntryRecord | undefined
+}
+
+export const readTurnEntries = async (
+	conversation: Conversation,
+	userEntryId: EntryId,
+): Promise<TurnEntries> => {
+	const ids: Array<EntryId> = [userEntryId]
+	let compaction: EntryRecord | undefined
+	for await (const entry of turnEntries(conversation, userEntryId)) {
+		if (CompactionEntry.is(entry)) {
+			compaction = entry
+		} else if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
+			ids.push(entry.id)
+		}
+	}
 	return { ids, compaction }
+}
+
+const cutBeforeStored = (entry: EntryRecord): boolean =>
+	ToolResultEntry.is(entry) &&
+	entry.data.diagnostics.some((diagnostic) => diagnostic.code === "truncated")
+
+export const readTurnToolEvents = async (
+	pi: Harness,
+	operationId: string,
+	turn: number,
+): Promise<Array<ToolEvent>> => {
+	const record = await submissionOf(pi, operationId)
+	if (record?.type !== "input" || record.entry === undefined) {
+		return []
+	}
+	const conversation = await pi.conversation(ROOT_CONVERSATION_ID, BACKGROUND_CONTEXT)
+	if (conversation === undefined) {
+		return []
+	}
+	const head = (await conversation.entries({}, 1, undefined, BACKGROUND_CONTEXT)).items[0]?.id
+	if (head === undefined) {
+		return []
+	}
+	const bounds = boundToolEvents(turn)
+	const askedBy = new Map<string, TaskId | undefined>()
+	const visit = (entry: EntryRecord) => {
+		for (const message of entry.model ?? []) {
+			if (message.role === "assistant") {
+				if (message.stopReason !== "toolUse") {
+					continue
+				}
+				bounds.round()
+				for (const block of message.content) {
+					if (block.type === "toolCall") {
+						askedBy.set(block.id, entry.byTaskId)
+						bounds.use({ id: block.id, name: block.name, input: block.arguments })
+					}
+				}
+			} else if (
+				message.role === "toolResult" &&
+				entry.byTaskId !== undefined &&
+				entry.byTaskId !== askedBy.get(message.toolCallId)
+			) {
+				const rejected = rejectionIn(message.details)
+				bounds.result({
+					id: message.toolCallId,
+					task_id: entry.byTaskId,
+					content: message.content.map((block) => ({
+						type: "text",
+						text: block.type === "text" ? block.text : `[${block.mimeType} image]`,
+					})),
+					is_error: message.isError,
+					...(cutBeforeStored(entry) || message.content.some((block) => block.type !== "text")
+						? { truncated: true as const }
+						: {}),
+					...(rejected === undefined ? {} : { rejected }),
+				})
+			}
+		}
+	}
+	for await (const entry of turnEntries(conversation, record.entry, head)) {
+		if (AssistantEntry.is(entry) || ToolResultEntry.is(entry)) {
+			visit(entry)
+			if (bounds.complete()) {
+				break
+			}
+		}
+	}
+	return bounds.events()
 }
 
 export const RestoredHistoryLimit = Context.Reference<number>("@checkfu/api/RestoredHistoryLimit", {
@@ -384,50 +481,68 @@ const resolveSettledPiTurn = (
 	Effect.uninterruptible(
 		Effect.gen(function* () {
 			const pi = yield* Effect.promise(() => backend.pi())
-			const restoredLimit = yield* RestoredHistoryLimit
-			if (settled.status === "unanswered") {
-				if (settled.reason === "aborted") {
-					yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
-					const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
-					return { ok: false, error: { _tag: "TurnInterrupted", model_usage: usage } }
-				}
-				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
-				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
-				yield* Effect.logWarning("pi turn unanswered").pipe(
-					Effect.annotateLogs({
-						operationId,
-						provider: providerForLog,
-						reason: settled.reason ?? "unknown",
-					}),
-				)
-				return {
-					ok: false,
-					error: { ...mapUnansweredToError(settled.reason), model_usage: usage },
-				}
-			}
-
-			const assistantMessage = yield* Effect.promise(() => readAssistantMessage(pi, operationId))
-			if (assistantMessage === null) {
-				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
-				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
-				return {
-					ok: false,
-					error: {
-						_tag: "TurnFailed",
-						error_type: "empty_model_reply",
-						message: "Pi durable completed without an assistant entry.",
-						model_usage: usage,
-						terminal: false,
-					},
-				}
-			}
-			if (!mapAssistantMessageToOutcome(assistantMessage, ZERO_MODEL_USAGE).ok) {
-				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
-			}
-			const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
-			return mapAssistantMessageToOutcome(assistantMessage, usage)
+			const turn = turnOfOperation(operationId)
+			const tool_events =
+				turn === undefined
+					? []
+					: yield* Effect.promise(() => readTurnToolEvents(pi, operationId, turn))
+			const outcome = yield* settledOutcome(pi, operationId, settled, providerForLog)
+			return tool_events.length === 0 ? outcome : { ...outcome, tool_events }
 		}),
 	)
+
+const settledOutcome = (
+	pi: Harness,
+	operationId: string,
+	settled:
+		| { readonly status: "done" }
+		| { readonly status: "unanswered"; readonly reason?: string },
+	providerForLog: string,
+): Effect.Effect<PiTurnOutcome> =>
+	Effect.gen(function* () {
+		const restoredLimit = yield* RestoredHistoryLimit
+		if (settled.status === "unanswered") {
+			if (settled.reason === "aborted") {
+				yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
+				const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
+				return { ok: false, error: { _tag: "TurnInterrupted", model_usage: usage } }
+			}
+			yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
+			const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
+			yield* Effect.logWarning("pi turn unanswered").pipe(
+				Effect.annotateLogs({
+					operationId,
+					provider: providerForLog,
+					reason: settled.reason ?? "unknown",
+				}),
+			)
+			return {
+				ok: false,
+				error: { ...mapUnansweredToError(settled.reason), model_usage: usage },
+			}
+		}
+
+		const assistantMessage = yield* Effect.promise(() => readAssistantMessage(pi, operationId))
+		if (assistantMessage === null) {
+			yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
+			const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
+			return {
+				ok: false,
+				error: {
+					_tag: "TurnFailed",
+					error_type: "empty_model_reply",
+					message: "Pi durable completed without an assistant entry.",
+					model_usage: usage,
+					terminal: false,
+				},
+			}
+		}
+		if (!mapAssistantMessageToOutcome(assistantMessage, ZERO_MODEL_USAGE).ok) {
+			yield* Effect.promise(() => omitTurnEntries(pi, operationId, restoredLimit))
+		}
+		const usage = yield* Effect.promise(() => settleTurnUsage(pi, operationId))
+		return mapAssistantMessageToOutcome(assistantMessage, usage)
+	})
 
 export const recoverPiDurableTurn = Effect.fn("PiDurableEngine.recoverTurn")(function* (
 	backend: PiDurableBackend,

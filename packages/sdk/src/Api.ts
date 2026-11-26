@@ -804,6 +804,18 @@ export const SpanModelRequestStartEvent = wireSessionEvent(
 	"span.model_request_start",
 	SessionEventFields["span.model_request_start"],
 )
+const TOOL_CALL_RECORD =
+	"A turn's calls come before its end event, whether the turn replied, failed or was interrupted."
+export const AgentToolUseSessionEvent = wireSessionEvent(
+	"agent.tool_use",
+	SessionEventFields["agent.tool_use"],
+).annotate({ description: `Records a call the model made. ${TOOL_CALL_RECORD}` })
+export const AgentToolResultSessionEvent = wireSessionEvent(
+	"agent.tool_result",
+	SessionEventFields["agent.tool_result"],
+).annotate({
+	description: `Records what a call the model made returned, or, with rejected, why it did not run. ${TOOL_CALL_RECORD}`,
+})
 export const AgentThinkingSessionEvent = wireSessionEvent(
 	"agent.thinking",
 	SessionEventFields["agent.thinking"],
@@ -838,6 +850,8 @@ export const SessionEvent = Schema.Union([
 	UserInterruptSessionEvent,
 	SessionStatusRunningEvent,
 	SpanModelRequestStartEvent,
+	AgentToolUseSessionEvent,
+	AgentToolResultSessionEvent,
 	AgentThinkingSessionEvent,
 	AgentMessageSessionEvent,
 	SpanModelRequestEndEvent,

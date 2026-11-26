@@ -1,7 +1,19 @@
 import { ModelStopReason, TurnInterrupted } from "@checkfu/domain/Session/Harness.external"
-import { ModelUsage } from "@checkfu/domain/Session/SessionTypes"
+import { ModelUsage, ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Schema from "effect/Schema"
 import { OutputBytes, OutputsListing } from "../Workspace/SessionOutputs.ts"
+
+const TURN_OPERATION_PREFIX = "turn:"
+
+export const turnOperationId = (turn: number): string => `${TURN_OPERATION_PREFIX}${turn}`
+
+export const turnOfOperation = (operationId: string): number | undefined => {
+	const text = operationId.startsWith(TURN_OPERATION_PREFIX)
+		? operationId.slice(TURN_OPERATION_PREFIX.length)
+		: ""
+	const turn = Number(text)
+	return Number.isSafeInteger(turn) && turn >= 0 && String(turn) === text ? turn : undefined
+}
 
 export const PiTurnRequest = Schema.Struct({
 	operationId: Schema.String,
@@ -30,10 +42,15 @@ export const PiTurnFailed = Schema.TaggedStruct("TurnFailed", {
 })
 
 export const PiTurnOutcome = Schema.Union([
-	Schema.Struct({ ok: Schema.Literal(true), reply: PiTurnReply }),
+	Schema.Struct({
+		ok: Schema.Literal(true),
+		reply: PiTurnReply,
+		tool_events: Schema.optionalKey(Schema.Array(ToolEvent)),
+	}),
 	Schema.Struct({
 		ok: Schema.Literal(false),
 		error: Schema.Union([PiTurnFailed, TurnInterrupted]),
+		tool_events: Schema.optionalKey(Schema.Array(ToolEvent)),
 	}),
 ])
 export type PiTurnOutcome = typeof PiTurnOutcome.Type

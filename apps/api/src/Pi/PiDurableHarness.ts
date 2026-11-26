@@ -6,7 +6,6 @@ import { AddArtifactVersion } from "@checkfu/domain/Artifact/AddArtifactVersion.
 import { Artifact } from "@checkfu/domain/Artifact/Artifact.aggregate"
 import { CreateArtifact } from "@checkfu/domain/Artifact/CreateArtifact.command"
 import { ReserveArtifact } from "@checkfu/domain/Artifact/ReserveArtifact.command"
-import { Session } from "@checkfu/domain/Session/Session.aggregate"
 import { SessionView } from "@checkfu/domain/Session/SessionView.view"
 import * as Digest from "effect/crypto/Digest"
 import * as Option from "effect/Option"
@@ -18,6 +17,10 @@ import { outputsArtifactId, outputsArtifactName } from "../OutputsIdentity.ts"
 import type { OutputBytes, OutputFile, OutputsListing } from "../Workspace/SessionOutputs.ts"
 import { DEFAULT_TURN_TIMEOUT_MS, boundedHarness } from "@checkfu/domain/Session/Harness.external"
 import type { HarnessUnavailable, TurnFailed } from "@checkfu/domain/Session/Harness.external"
+import { recordToolEvents } from "@checkfu/domain/Session/RecordToolEvents"
+import { Session } from "@checkfu/domain/Session/Session.aggregate"
+import type { SessionId } from "@checkfu/domain/Session/Session.id"
+import type { ToolEvent } from "@checkfu/domain/Session/SessionTypes"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -31,6 +34,7 @@ import {
 	resolveCatalogModel,
 	supportedProvidersDescription,
 } from "./PiCatalog.ts"
+import { turnOperationId } from "./PiTurn.ts"
 import type { PiTurnOutcome, PiTurnRequest } from "./PiTurn.ts"
 
 export class HarnessCallFailed extends Schema.TaggedError<
@@ -84,6 +88,8 @@ export const HarnessLimits = Context.Reference<{
 
 export const conversationName = (sessionId: string): string => sessionId
 
+const RECORD_RETRY_CAP = "10 seconds"
+
 const withRetry = <A, E, R>(call: Effect.Effect<A, E, R>) =>
 	Effect.gen(function* () {
 		const { attempts, baseDelay } = yield* HarnessLimits
@@ -91,6 +97,29 @@ const withRetry = <A, E, R>(call: Effect.Effect<A, E, R>) =>
 			times: attempts - 1,
 			schedule: Schedule.exponential(baseDelay).pipe(Schedule.jittered),
 		})
+	})
+
+export const recordSettledToolEvents = (
+	args: { readonly session_id: SessionId; readonly turn: number },
+	events: ReadonlyArray<ToolEvent>,
+) =>
+	Effect.gen(function* () {
+		const { baseDelay } = yield* HarnessLimits
+		yield* recordToolEvents({ ...args, events }).pipe(
+			Effect.catchDefect((defect) =>
+				Effect.andThen(
+					Effect.logWarning("Tool events not recorded yet", args.session_id, defect),
+					Effect.fail({ _tag: "NotRecorded" as const }),
+				),
+			),
+			Effect.retry({
+				schedule: Schedule.min([
+					Schedule.exponential(baseDelay),
+					Schedule.spaced(RECORD_RETRY_CAP),
+				]).pipe(Schedule.jittered),
+			}),
+			Effect.orDie,
+		)
 	})
 
 export class PiTurnExecutor extends Context.Service<PiTurnExecutor, PiTurnExecutorService>()(
@@ -130,8 +159,6 @@ class OutputChanged extends Schema.TaggedError<OutputChanged, { readonly brand: 
 const notPublished = (sessionId: string, reason: string) =>
 	Effect.logWarning("Outputs not published", reason).pipe(Effect.annotateLogs({ sessionId }))
 
-const turnOperationId = (turn: number) => `turn:${turn}`
-
 const unpublishedTurns = (lastReplyTurn: number, turn: number): ReadonlyArray<string> =>
 	Array.from({ length: Math.max(0, turn - lastReplyTurn - 1) }, (_, i) =>
 		turnOperationId(lastReplyTurn + 1 + i),
@@ -142,6 +169,18 @@ export const PiDurableHarnessLive = boundedHarness(
 		const agentVersionsByNumber = yield* AgentVersionByNumberView
 		const executor = yield* PiTurnExecutor
 		const customProviders = yield* configuredApiCustomProviders
+		const sessions = yield* Session
+
+		const recorded = (
+			args: { readonly session_id: SessionId; readonly turn: number },
+			outcome: PiTurnOutcome,
+		) =>
+			Effect.as(
+				recordSettledToolEvents(args, outcome.tool_events ?? []).pipe(
+					Effect.provideService(Session, sessions),
+				),
+				outcome,
+			)
 
 		const artifacts = yield* Artifact
 		const artifactStore = yield* ArtifactStore
@@ -300,7 +339,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
 					if (recovered !== null) {
-						return recovered
+						return yield* recorded(args, recovered)
 					}
 
 					const lookupTimeout = yield* AgentVersionLookupTimeout
@@ -370,7 +409,7 @@ export const PiDurableHarnessLive = boundedHarness(
 						Effect.mapError((): HarnessUnavailable => ({ _tag: "HarnessUnavailable" })),
 					)
 
-					return outcome
+					return yield* recorded(args, outcome)
 				})
 				return Effect.gen(function* () {
 					const duration = yield* settleTimeout

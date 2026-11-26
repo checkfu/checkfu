@@ -23,6 +23,7 @@ import {
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "./RecordModelRequestStart.command.ts"
+import { AgentToolResult, AgentToolUse, RecordToolCall } from "./RecordToolCall.command.ts"
 import { SendUserInterrupt, UserInterrupt } from "./SendUserInterrupt.command.ts"
 import {
 	PendingMessageQueueFull,
@@ -149,6 +150,7 @@ export class Session extends Domain.Aggregate("Session", {
 		SendUserMessage,
 		SendUserInterrupt,
 		RecordModelRequestStart,
+		RecordToolCall,
 		CommitModelReply,
 		FailModelRequest,
 		InterruptModelRequest,
@@ -326,6 +328,35 @@ export class Session extends Domain.Aggregate("Session", {
 			return [new SpanModelRequestStart({ model_request_start_id: cmd.model_request_start_id })]
 		},
 
+		RecordToolCall: (state, cmd, ctx) => {
+			const running = requireRunningTurn(state, ctx.id, cmd.turn)
+			if (running._tag !== "Running") {
+				return running
+			}
+			if (running.open_model_request_id !== cmd.model_request_start_id) {
+				return new UnknownModelRequest({
+					session_id: ctx.id,
+					model_request_start_id: cmd.model_request_start_id,
+				})
+			}
+			const { call } = cmd
+			return [
+				new AgentToolUse({
+					tool_use_id: call.tool_use_id,
+					name: call.name,
+					input: call.input,
+					...(call.input_truncated === true ? { truncated: true as const } : {}),
+				}),
+				new AgentToolResult({
+					tool_use_id: call.tool_use_id,
+					content: call.content,
+					is_error: call.is_error,
+					...(call.result_truncated === true ? { truncated: true as const } : {}),
+					...(call.rejected === undefined ? {} : { rejected: call.rejected }),
+				}),
+			]
+		},
+
 		CommitModelReply: (state, cmd, ctx) => {
 			const running = requireRunningTurn(state, ctx.id, cmd.turn)
 			if (running._tag !== "Running") {
@@ -478,6 +509,8 @@ export class Session extends Domain.Aggregate("Session", {
 						model_requests_started: state.model_requests_started + 1,
 					}
 				: state,
+		"agent.tool_use": (state) => state,
+		"agent.tool_result": (state) => state,
 		"agent.thinking": (state) => state,
 		"agent.message": (state) => state,
 		"span.model_request_end": (state, e) =>

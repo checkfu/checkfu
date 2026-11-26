@@ -4,6 +4,7 @@ import type { ChildProcess } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import type * as Schema from "effect/Schema"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
 	API_WORKER_BUDGET,
@@ -45,6 +46,9 @@ interface SessionEventItem {
 	readonly type: string
 	readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>
 	readonly is_error?: boolean
+	readonly tool_use_id?: string
+	readonly name?: string
+	readonly input?: Schema.JsonObject
 	readonly model_usage?: { readonly input_tokens: number; readonly output_tokens: number }
 	readonly stop_reason?: { readonly type: string }
 }
@@ -874,16 +878,30 @@ describe("PiSession real Durable Object under workerd", () => {
 			"user.message",
 			"session.status_running",
 			"span.model_request_start",
+			"agent.tool_use",
+			"agent.tool_result",
 			"agent.message",
 			"span.model_request_end",
 			"session.status_idle",
 			"user.message",
 			"session.status_running",
 			"span.model_request_start",
+			"agent.tool_use",
+			"agent.tool_result",
 			"agent.message",
 			"span.model_request_end",
 			"session.status_idle",
 		])
+		const [wrote, read] = events.filter((e) => e.type === "agent.tool_use")
+		expect(wrote).toMatchObject({
+			name: "write",
+			input: { path: "/workspace/notes/launch.txt", content: "PAPAYA-7" },
+		})
+		expect(read).toMatchObject({ name: "read", input: { path: "/workspace/notes/launch.txt" } })
+		const [wroteResult, readResult] = events.filter((e) => e.type === "agent.tool_result")
+		expect(wroteResult).toMatchObject({ tool_use_id: wrote?.tool_use_id, is_error: false })
+		expect(readResult).toMatchObject({ tool_use_id: read?.tool_use_id, is_error: false })
+		expect(readResult?.content?.map((block) => block.text).join("")).toContain("PAPAYA-7")
 		const replies = events.filter((e) => e.type === "agent.message").map((e) => e.content)
 		expect(replies[0]).toEqual([{ type: "text", text: "Saved." }])
 		expect(replies[1]?.[0]?.text).toContain("PAPAYA-7")

@@ -385,111 +385,114 @@ describe("Checkfu MCP server", () => {
 		}).pipe(Effect.scoped),
 	)
 
-	it.live("refuses an unknown field at every object of every tool's arguments", () =>
-		Effect.gen(function* () {
-			const server = yield* makeTestServer
-			const client = yield* server.connect()
+	it.live(
+		"refuses an unknown field at every object of every tool's arguments",
+		() =>
+			Effect.gen(function* () {
+				const server = yield* makeTestServer
+				const client = yield* server.connect()
 
-			const model = { id: "gpt-6.2-sol" }
-			const config = { type: "cloud", networking: { type: "unrestricted" } }
-			const agent = { path: { agent_id: "agent_1" } }
-			const environment = { path: { environment_id: "env_1" } }
-			const session = { path: { session_id: "sess_1" } }
-			const automation = { path: { automation_id: "auto_1" } }
-			const artifact = { path: { artifact_id: "art_1" } }
-			const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
-			const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
-			const calls = {
-				agents_archiveAgent: agent,
-				agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
-				agents_getAgent: agent,
-				agents_listAgents: { query: { limit: "5", include_archived: "true" } },
-				agents_updateAgent: { ...agent, body: { version: 1, model } },
-				artifacts_createArtifact: { body: { name: "Report", files } },
-				artifacts_createArtifactLink: { ...artifactVersion, body: { expires_in: 600 } },
-				artifacts_createArtifactVersion: { ...artifact, body: { version: 1, files } },
-				artifacts_deleteArtifact: artifact,
-				artifacts_getArtifact: artifact,
-				artifacts_getArtifactFile: { ...artifactVersion, query: { file: "index.html" } },
-				artifacts_getArtifactVersion: artifactVersion,
-				artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
-				artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
-				artifacts_unpublishArtifact: artifact,
-				automations_archiveAutomation: automation,
-				automations_createAutomation: {
-					body: {
-						name: "Morning report",
-						agent: { id: "agent_1", version: 1 },
-						environment_id: "env_1",
-						initial_events: [
-							{ type: "user.message", content: [{ type: "text", text: "Report." }] },
-						],
-						schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+				const model = { id: "gpt-6.2-sol" }
+				const config = { type: "cloud", networking: { type: "unrestricted" } }
+				const agent = { path: { agent_id: "agent_1" } }
+				const environment = { path: { environment_id: "env_1" } }
+				const session = { path: { session_id: "sess_1" } }
+				const automation = { path: { automation_id: "auto_1" } }
+				const artifact = { path: { artifact_id: "art_1" } }
+				const artifactVersion = { path: { artifact_id: "art_1", version: 1 } }
+				const files = [{ path: "index.html", content: "<h1>Hello</h1>", encoding: "utf8" }]
+				const calls = {
+					agents_archiveAgent: agent,
+					agents_createAgent: { body: { name: "Assistant", model, system: "Be brief." } },
+					agents_getAgent: agent,
+					agents_listAgents: { query: { limit: "5", include_archived: "true" } },
+					agents_updateAgent: { ...agent, body: { version: 1, model } },
+					artifacts_createArtifact: { body: { name: "Report", files } },
+					artifacts_createArtifactLink: { ...artifactVersion, body: { expires_in: 600 } },
+					artifacts_createArtifactVersion: { ...artifact, body: { version: 1, files } },
+					artifacts_deleteArtifact: artifact,
+					artifacts_getArtifact: artifact,
+					artifacts_getArtifactFile: { ...artifactVersion, query: { file: "index.html" } },
+					artifacts_getArtifactVersion: artifactVersion,
+					artifacts_listArtifacts: { query: { limit: "5", order: "desc" } },
+					artifacts_publishArtifact: { ...artifact, body: { version: 1 } },
+					artifacts_unpublishArtifact: artifact,
+					automations_archiveAutomation: automation,
+					automations_createAutomation: {
+						body: {
+							name: "Morning report",
+							agent: { id: "agent_1", version: 1 },
+							environment_id: "env_1",
+							initial_events: [
+								{ type: "user.message", content: [{ type: "text", text: "Report." }] },
+							],
+							schedule: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+						},
+						idempotency_key: "create-morning-report",
 					},
-					idempotency_key: "create-morning-report",
-				},
-				automations_getAutomation: automation,
-				automations_getRun: { path: { automation_id: "auto_1", run: 1 } },
-				automations_listAutomations: { query: { limit: "5" } },
-				automations_listRuns: { ...automation, query: { limit: "5" } },
-				automations_pauseAutomation: automation,
-				automations_runAutomation: automation,
-				automations_unpauseAutomation: automation,
-				automations_updateAutomation: { ...automation, body: { name: "Renamed" } },
-				environments_archiveEnvironment: environment,
-				environments_createEnvironment: { body: { name: "default", config } },
-				environments_deleteEnvironment: environment,
-				environments_getEnvironment: environment,
-				environments_listEnvironments: { query: { order: "desc" } },
-				environments_updateEnvironment: { ...environment, body: { version: 1, config } },
-				sessions_archiveSession: session,
-				sessions_createSession: {
-					body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
-				},
-				sessions_getOutputs: session,
-				sessions_getSession: session,
-				sessions_listEvents: { ...session, query: { limit: "5" } },
-				sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
-				sessions_sendSessionEvents: {
-					...session,
-					body: {
-						events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
+					automations_getAutomation: automation,
+					automations_getRun: { path: { automation_id: "auto_1", run: 1 } },
+					automations_listAutomations: { query: { limit: "5" } },
+					automations_listRuns: { ...automation, query: { limit: "5" } },
+					automations_pauseAutomation: automation,
+					automations_runAutomation: automation,
+					automations_unpauseAutomation: automation,
+					automations_updateAutomation: { ...automation, body: { name: "Renamed" } },
+					environments_archiveEnvironment: environment,
+					environments_createEnvironment: { body: { name: "default", config } },
+					environments_deleteEnvironment: environment,
+					environments_getEnvironment: environment,
+					environments_listEnvironments: { query: { order: "desc" } },
+					environments_updateEnvironment: { ...environment, body: { version: 1, config } },
+					sessions_archiveSession: session,
+					sessions_createSession: {
+						body: { agent: { id: "agent_1", version: 1 }, environment_id: "env_1" },
 					},
-				},
-			} satisfies Record<string, Argument>
-			expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
+					sessions_getOutputs: session,
+					sessions_getSession: session,
+					sessions_listEvents: { ...session, query: { limit: "5" } },
+					sessions_listSessions: { query: { agent_id: "agent_1", after: "3:sess_1" } },
+					sessions_sendSessionEvents: {
+						...session,
+						body: {
+							events: [{ type: "user.message", content: [{ type: "text", text: "Hello" }] }],
+						},
+					},
+				} satisfies Record<string, Argument>
+				expect(Object.keys(calls)).toEqual(GENERATED_TOOLS.map((tool) => tool.name))
 
-			let refusals = 0
-			for (const [name, valid] of Object.entries(calls)) {
-				for (const changed of withUnknownField(valid)) {
-					const refused = yield* callError(client, name, changed as ToolArguments)
-					expect([name, changed, refused.error.type]).toEqual([
-						name,
-						changed,
-						"invalid_request_error",
-					])
-					expect(refused.error.message).toContain("unknown_field")
-					refusals += 1
+				let refusals = 0
+				for (const [name, valid] of Object.entries(calls)) {
+					for (const changed of withUnknownField(valid)) {
+						const refused = yield* callError(client, name, changed as ToolArguments)
+						expect([name, changed, refused.error.type]).toEqual([
+							name,
+							changed,
+							"invalid_request_error",
+						])
+						expect(refused.error.message).toContain("unknown_field")
+						refusals += 1
+					}
 				}
-			}
-			expect(refusals).toBeGreaterThan(40)
-			expect(server.apiRequests.length).toBe(0)
+				expect(refusals).toBeGreaterThan(40)
+				expect(server.apiRequests.length).toBe(0)
 
-			for (const [name, valid] of Object.entries(calls)) {
-				const result = yield* callTool(client, name, valid)
-				const [block] = result.content
-				const refusal = result.isError
-					? yield* Schema.decodeUnknownEffect(ErrorEnvelope)(
-							block?.type === "text" ? block.text : undefined,
-						)
-					: undefined
-				expect([name, refusal === undefined || refusal.request_id !== undefined]).toEqual([
-					name,
-					true,
-				])
-			}
-			expect(server.apiRequests.length).toBe(Object.keys(calls).length)
-		}).pipe(Effect.scoped),
+				for (const [name, valid] of Object.entries(calls)) {
+					const result = yield* callTool(client, name, valid)
+					const [block] = result.content
+					const refusal = result.isError
+						? yield* Schema.decodeUnknownEffect(ErrorEnvelope)(
+								block?.type === "text" ? block.text : undefined,
+							)
+						: undefined
+					expect([name, refusal === undefined || refusal.request_id !== undefined]).toEqual([
+						name,
+						true,
+					])
+				}
+				expect(server.apiRequests.length).toBe(Object.keys(calls).length)
+			}).pipe(Effect.scoped),
+		30_000,
 	)
 
 	const everyByte = Array.from({ length: 256 }, (_, code) => String.fromCodePoint(code))

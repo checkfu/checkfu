@@ -167,6 +167,23 @@ export const serializeSessionEvent = (entry: SessionEventEntry): SessionEvent =>
 				...sessionEventEnvelope(entry, "span.model_request_start"),
 				model_request_start_id: event.model_request_start_id,
 			}
+		case "agent.tool_use":
+			return {
+				...sessionEventEnvelope(entry, "agent.tool_use"),
+				tool_use_id: event.tool_use_id,
+				name: event.name,
+				input: event.input,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+			}
+		case "agent.tool_result":
+			return {
+				...sessionEventEnvelope(entry, "agent.tool_result"),
+				tool_use_id: event.tool_use_id,
+				content: event.content.map((block) => ({ type: block.type, text: block.text })),
+				is_error: event.is_error,
+				...(event.truncated === true ? { truncated: true as const } : {}),
+				...(event.rejected === undefined ? {} : { rejected: event.rejected }),
+			}
 		case "agent.thinking":
 			return {
 				...sessionEventEnvelope(entry, "agent.thinking"),

@@ -49,6 +49,12 @@ import {
 	RecordModelRequestStart,
 	SpanModelRequestStart,
 } from "../src/Session/RecordModelRequestStart.command.ts"
+import {
+	AgentToolResult,
+	AgentToolUse,
+	RecordToolCall,
+} from "../src/Session/RecordToolCall.command.ts"
+import { boundToolEvents, recordToolEvents, toolUseId } from "../src/Session/RecordToolEvents.ts"
 import { RunTurn, RunTurnLive, turnKey } from "../src/Session/RunTurn.saga.ts"
 import { SendUserInterrupt, UserInterrupt } from "../src/Session/SendUserInterrupt.command.ts"
 import {
@@ -72,6 +78,8 @@ import {
 	MAX_MESSAGE_TEXT_LENGTH,
 	MAX_THINKING_TEXT_LENGTH,
 } from "../src/Session/SessionTypes.ts"
+import type { SessionId } from "../src/Session/Session.id.ts"
+import type { ToolCall } from "../src/Session/SessionTypes.ts"
 import { SessionView } from "../src/Session/SessionView.view.ts"
 import { StaleTurn } from "../src/Session/StaleTurn.rejection.ts"
 import { StopModelRequest, StopModelRequestLive } from "../src/Session/StopModelRequest.policy.ts"
@@ -3561,6 +3569,296 @@ describe("Sessions", () => {
 		expect(turnInputRowBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
 		expect(successCheckpointBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
 		expect(failureCheckpointBytes).toBeLessThan(MAX_CHECKPOINT_BYTES)
+	})
+
+	it.effect(
+		"records a call's use and result together, and only while the turn's model request is open",
+		() => {
+			const session = Session.ref("sess_tools_1")
+			const call: ToolCall = {
+				tool_use_id: toolUseId(1, 1),
+				name: "read",
+				input: { path: "/workspace/a.md" },
+				content: [{ type: "text", text: "# A" }],
+				is_error: false,
+				result_truncated: true,
+			}
+			const record = (model_request_start_id: string) =>
+				new RecordToolCall({ session_id: session.id, turn: 1, model_request_start_id, call })
+			return story(
+				Story.given(
+					session,
+					createdEvent,
+					new UserMessage({ content: [{ type: "text", text: "Hi" }] }),
+					new SessionStatusRunning({ turn: 1 }),
+				),
+				Story.when(record("req_1")),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_1" }),
+				),
+				Story.when(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+					}),
+				),
+				Story.then(session, new SpanModelRequestStart({ model_request_start_id: "req_1" })),
+				Story.when(record("req_1")),
+				Story.then(
+					session,
+					new AgentToolUse({
+						tool_use_id: toolUseId(1, 1),
+						name: "read",
+						input: { path: "/workspace/a.md" },
+					}),
+					new AgentToolResult({
+						tool_use_id: toolUseId(1, 1),
+						content: [{ type: "text", text: "# A" }],
+						is_error: false,
+						truncated: true,
+					}),
+				),
+				Story.when(record("req_other")),
+				Story.rejected(
+					new UnknownModelRequest({ session_id: session.id, model_request_start_id: "req_other" }),
+				),
+				Story.when(
+					new CommitModelReply({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: "req_1",
+						thinking: null,
+						text: "Done",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						stop_reason: { type: "end_turn" },
+					}),
+				),
+				Story.then(
+					session,
+					new AgentMessage({ content: [{ type: "text", text: "Done" }] }),
+					new SpanModelRequestEnd({
+						model_request_start_id: "req_1",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						is_error: false,
+					}),
+					new SessionStatusIdle({ stop_reason: { type: "end_turn" }, turn: 1 }),
+				),
+				Story.when(record("req_1")),
+				Story.rejected(new SessionNotRunning({ session_id: session.id, status: "idle" })),
+			)
+		},
+	)
+
+	it("publishes a turn's tool events once each, ahead of its reply, and nothing after the turn has ended", async () => {
+		const memory = InMemory.make({ manual: true })
+		const handlers = Layer.mergeAll(
+			StartTurnNoopLayer,
+			RunTurn.toLayer(Effect.succeed(() => Effect.succeed({ status: "completed" as const }))),
+		)
+		const session = Session.ref("sess_tools_2")
+		const bounds = boundToolEvents(1)
+		bounds.use({ id: "call_1", name: "read", input: { path: "/a" } })
+		bounds.result({
+			id: "call_1",
+			task_id: 4,
+			content: [{ type: "text", text: "A" }],
+			is_error: false,
+		})
+		bounds.use({ id: "call_1", name: "read", input: { path: "/b" } })
+		bounds.result({
+			id: "call_1",
+			task_id: 6,
+			content: [{ type: "text", text: "B" }],
+			is_error: false,
+		})
+		const events = bounds.events()
+		const logged = await Effect.runPromise(
+			Effect.gen(function* () {
+				const sessions = yield* Session
+				const views = yield* SessionView
+				yield* sessions.send(
+					new CreateSession({
+						session_id: session.id,
+						agent_id: "agent_001",
+						agent_version: 1,
+						environment_id: "env_001",
+						title: null,
+					}),
+				)
+				yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Go" }))
+				const requestId = `${turnKey(session.id, 1)}:req:1`
+				yield* sessions.send(
+					new RecordModelRequestStart({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: requestId,
+					}),
+				)
+				yield* recordToolEvents({ session_id: session.id, turn: 1, events: events.slice(0, 2) })
+				yield* recordToolEvents({ session_id: session.id, turn: 1, events })
+				yield* sessions.send(
+					new CommitModelReply({
+						session_id: session.id,
+						turn: 1,
+						request_seq: 1,
+						model_request_start_id: requestId,
+						thinking: null,
+						text: "Done",
+						model_usage: { input_tokens: 1, output_tokens: 1 },
+						stop_reason: { type: "end_turn" },
+					}),
+				)
+				yield* recordToolEvents({
+					session_id: session.id,
+					turn: 1,
+					events: [
+						{ type: "tool_use", tool_use_id: toolUseId(1, 99), name: "late", input: {} },
+						{ type: "tool_result", tool_use_id: toolUseId(1, 99), content: [], is_error: false },
+					],
+				})
+				yield* memory.control.drain
+				const page = yield* views.list(session)
+				return page.entries.map(({ event }) =>
+					"tool_use_id" in event ? `${event._tag}:${event.tool_use_id}` : event._tag,
+				)
+			}).pipe(
+				Effect.provide(
+					Sessions.layer(handlers).pipe(
+						Layer.provide(Layer.mergeAll(memory.layer, HarnessNoopLayer)),
+					),
+				),
+			),
+		)
+		expect(logged).toEqual([
+			"user.message",
+			"session.status_running",
+			"span.model_request_start",
+			"agent.tool_use:tu_1_4",
+			"agent.tool_result:tu_1_4",
+			"agent.tool_use:tu_1_6",
+			"agent.tool_result:tu_1_6",
+			"agent.message",
+			"span.model_request_end",
+			"session.status_idle",
+		])
+	})
+
+	it("keeps every recorded call whole when the request closes at any point of a settlement", async () => {
+		const bounds = boundToolEvents(1)
+		for (const task of [1, 2, 3]) {
+			bounds.use({ id: `call_${task}`, name: "read", input: { path: `/${task}` } })
+			bounds.result({
+				id: `call_${task}`,
+				task_id: task,
+				content: [{ type: "text", text: `${task}` }],
+				is_error: false,
+			})
+		}
+		const events = bounds.events()
+		const closings = {
+			archive: (session_id: SessionId) => new ArchiveSession({ session_id }),
+			deadline: (session_id: SessionId) =>
+				new AbandonTurn({
+					session_id,
+					turn: 1,
+					error_type: "model_request_timeout",
+					message: "Model request timed out.",
+				}),
+		}
+		const settle = (closing: keyof typeof closings, recorded: number) => {
+			const memory = InMemory.make({ manual: true })
+			const handlers = Layer.mergeAll(
+				StartTurnNoopLayer,
+				RunTurn.toLayer(Effect.succeed(() => Effect.succeed({ status: "completed" as const }))),
+			)
+			const session = Session.ref(`sess_tools_close_${closing}_${recorded}`)
+			return Effect.runPromise(
+				Effect.gen(function* () {
+					const sessions = yield* Session
+					const views = yield* SessionView
+					yield* sessions.send(
+						new CreateSession({
+							session_id: session.id,
+							agent_id: "agent_001",
+							agent_version: 1,
+							environment_id: "env_001",
+							title: null,
+						}),
+					)
+					yield* sessions.send(new SendUserMessage({ session_id: session.id, text: "Go" }))
+					const requestId = `${turnKey(session.id, 1)}:req:1`
+					yield* sessions.send(
+						new RecordModelRequestStart({
+							session_id: session.id,
+							turn: 1,
+							request_seq: 1,
+							model_request_start_id: requestId,
+						}),
+					)
+					yield* recordToolEvents({
+						session_id: session.id,
+						turn: 1,
+						events: events.slice(0, 2 * recorded),
+					})
+					yield* sessions.send(closings[closing](session.id))
+					yield* recordToolEvents({ session_id: session.id, turn: 1, events })
+					const reply = yield* Effect.exit(
+						sessions.send(
+							new CommitModelReply({
+								session_id: session.id,
+								turn: 1,
+								request_seq: 1,
+								model_request_start_id: requestId,
+								thinking: null,
+								text: "Done",
+								model_usage: { input_tokens: 1, output_tokens: 1 },
+								stop_reason: { type: "end_turn" },
+							}),
+						),
+					)
+					yield* memory.control.drain
+					const page = yield* views.list(session)
+					return {
+						replied: reply._tag === "Success",
+						log: page.entries.map(({ event }) =>
+							"tool_use_id" in event ? `${event._tag}:${event.tool_use_id}` : event._tag,
+						),
+					}
+				}).pipe(
+					Effect.provide(
+						Sessions.layer(handlers).pipe(
+							Layer.provide(Layer.mergeAll(memory.layer, HarnessNoopLayer)),
+						),
+					),
+				),
+			)
+		}
+		for (const closing of ["archive", "deadline"] as const) {
+			for (const recorded of [0, 1, 2, 3]) {
+				const { replied, log } = await settle(closing, recorded)
+				const uses = log.filter((entry) => entry.startsWith("agent.tool_use:"))
+				expect(replied).toBe(false)
+				expect(log).not.toContain("agent.message")
+				expect(uses).toEqual(
+					[1, 2, 3].slice(0, recorded).map((task) => `agent.tool_use:${toolUseId(1, task)}`),
+				)
+				for (const [index, entry] of log.entries()) {
+					if (entry.startsWith("agent.tool_use:")) {
+						expect(log[index + 1]).toBe(entry.replace("agent.tool_use:", "agent.tool_result:"))
+					}
+					if (entry.startsWith("agent.tool_result:")) {
+						expect(log[index - 1]).toBe(entry.replace("agent.tool_result:", "agent.tool_use:"))
+					}
+				}
+				const closed = log.indexOf("span.model_request_end")
+				expect(closed).toBeGreaterThan(-1)
+				expect(log.slice(closed).some((entry) => entry.startsWith("agent.tool_"))).toBe(false)
+			}
+		}
 	})
 
 	it("reports a reply cut to the message limit as budget_reached, never as a clean end_turn", async () => {
