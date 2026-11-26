@@ -28,11 +28,15 @@ import { Session } from "./Session.aggregate.ts"
 export { SessionSnapshot }
 
 export class SessionView extends Domain.View("SessionView", {
-	version: 5,
+	version: 6,
 	from: [Session],
 	key: Session,
 	state: Schema.NullOr(SessionSnapshot),
 	initial: null,
+	emit: {
+		"user.message": (event, { before }) =>
+			before === null ? event : new UserMessage({ content: event.content, turn: before.turn + 1 }),
+	},
 	events: [
 		SystemMessage,
 		UserMessage,

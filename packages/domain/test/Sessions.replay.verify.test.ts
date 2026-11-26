@@ -50,7 +50,13 @@ describe("Sessions Z3 formal verification, replayed", () => {
 					STANDING,
 				)
 				expect(report.undone).toEqual([])
-				expect(report.explored.aside).toEqual([])
+				expect(report.explored.aside).toEqual([
+					{
+						kind: "view",
+						name: "SessionTurnCompletion",
+						reason: "no rule reads it and no policy reacts to it",
+					},
+				])
 				expect(report.explored.truncated).toBe(false)
 				expect(report.explored.complete).toBe(2)
 				expect(report.unrun).toBe(0)

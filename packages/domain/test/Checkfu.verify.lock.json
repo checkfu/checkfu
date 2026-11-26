@@ -54,6 +54,10 @@
 				"kind": "invariant",
 				"source": "(s) => s._tag !== \"Idle\" || s.turn >= 0"
 			},
+			"Session.SystemContextIsBounded": {
+				"kind": "invariant",
+				"source": "(s) =>\n\t\t\t(s._tag !== \"Idle\" && s._tag !== \"Running\") ||\n\t\t\ts.system_context_length === undefined ||\n\t\t\ts.system_context_length <= MAX_AGENT_SYSTEM_LENGTH"
+			},
 			"Session.ModelRequestsStartedNonNegative": {
 				"kind": "invariant",
 				"source": "(s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
@@ -542,9 +546,37 @@
 				"kind": "transition",
 				"source": "({ command, events }) =>\n\t\t\tevents.some(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent._tag === \"session.created\" &&\n\t\t\t\t\tevent.mcp_server_credentials === command.mcp_server_credentials,\n\t\t\t)"
 			},
-			"Session.SystemContextIsBounded": {
+			"Session.InitialMessagesAreBoundedAndOnlyBeforeTheFirstTurn": {
 				"kind": "invariant",
-				"source": "(s) =>\n\t\t\t(s._tag !== \"Idle\" && s._tag !== \"Running\") ||\n\t\t\ts.system_context_length === undefined ||\n\t\t\ts.system_context_length <= MAX_AGENT_SYSTEM_LENGTH,\n\t\tModelRequestsStartedNonNegative: (s) => s._tag !== \"Running\" || s.model_requests_started >= 0"
+				"source": "(s) =>\n\t\t\ts._tag !== \"Idle\" ||\n\t\t\ts.initial_messages_remaining === undefined ||\n\t\t\t(s.turn === 0 &&\n\t\t\t\ts.initial_messages_remaining >= 0 &&\n\t\t\t\ts.initial_messages_remaining <= MAX_SESSION_INITIAL_EVENTS)"
+			},
+			"Session.OnlyTheNextInitialMessageCanAdvanceAdmission": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\tevents.length === 0 ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === command.remaining)"
+			},
+			"Session.OnlyTheLastInitialMessageStartsTheTurn": {
+				"kind": "transition",
+				"source": "({ before, command, events }) =>\n\t\t\tcommand._tag !== \"RecordInitialMessage\" ||\n\t\t\t!events.some((e) => e._tag === \"session.status_running\") ||\n\t\t\t(before._tag === \"Idle\" && before.initial_messages_remaining === 1)"
+			},
+			"AdmitSessionWithMessages.OnlyActiveAgentAndEnvironmentAdmitSession": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\tbefore.agent.status === \"active\" &&\n\t\t\tbefore.environment.status === \"active\" &&\n\t\t\tbefore.session._tag === \"Uninitialized\" &&\n\t\t\tafter.session._tag === \"Idle\" &&\n\t\t\tafter.session.turn === 0"
+			},
+			"AdmitSessionWithMessages.PinnedVersionWithinAgentHead": {
+				"kind": "transition",
+				"source": "({ before, command, events }) => {\n\t\t\tconst pinned = command.agent_version ?? before.agent.version\n\t\t\treturn (\n\t\t\t\tbefore.agent.version >= 1 &&\n\t\t\t\tpinned >= 1 &&\n\t\t\t\tpinned <= before.agent.version &&\n\t\t\t\tevents.length === 1 &&\n\t\t\t\tevents.every(\n\t\t\t\t\t(event) =>\n\t\t\t\t\t\tevent.agent_id === command.agent_id &&\n\t\t\t\t\t\tevent.agent_version === pinned &&\n\t\t\t\t\t\tevent.environment_id === command.environment_id,\n\t\t\t\t)\n\t\t\t)\n\t\t}"
+			},
+			"AdmitSessionWithMessages.AdmissionLeavesAgentAndEnvironmentUnchanged": {
+				"kind": "transition",
+				"source": "({ before, after }) =>\n\t\t\t[\n\t\t\t\tafter.agent.status === before.agent.status,\n\t\t\t\tafter.agent.version === before.agent.version,\n\t\t\t\tafter.agent.current_version_id === before.agent.current_version_id,\n\t\t\t\tafter.agent.name === before.agent.name,\n\t\t\t\tafter.agent.model_id === before.agent.model_id,\n\t\t\t\tafter.agent.has_system === before.agent.has_system,\n\t\t\t\tafter.agent.system === before.agent.system,\n\t\t\t\tafter.agent.has_description === before.agent.has_description,\n\t\t\t\tafter.agent.description === before.agent.description,\n\t\t\t\tafter.environment.status === before.environment.status,\n\t\t\t\tafter.environment.version === before.environment.version,\n\t\t\t\tafter.environment.name === before.environment.name,\n\t\t\t].every((ok) => ok)"
+			},
+			"AdmitSessionWithMessages.AdmissionKeepsTheCredentialsItWasGiven": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tevents.every((event) => event.mcp_server_credentials === command.mcp_server_credentials)"
+			},
+			"AdmitSessionWithMessages.AdmissionKeepsTheInitialPlan": {
+				"kind": "transition",
+				"source": "({ command, events }) =>\n\t\t\tevents.every(\n\t\t\t\t(event) =>\n\t\t\t\t\tevent.initial_messages !== undefined &&\n\t\t\t\t\tevent.initial_messages.count === command.initial_messages.count &&\n\t\t\t\t\tevent.initial_messages.messages === command.initial_messages.messages,\n\t\t\t)"
 			}
 		}
 	}

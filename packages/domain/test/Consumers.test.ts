@@ -19,6 +19,8 @@ const SOURCES = [
 	{ name: "SessionView", version: 3, from: ["Session"] },
 	{ name: "SessionView", version: 4, from: ["Session"] },
 	{ name: "SessionView", version: 5, from: ["Session"] },
+	{ name: "SessionView", version: 6, from: ["Session"] },
+	{ name: "SessionTurnCompletion", version: 1, from: ["Session"] },
 	{ name: "TurnInput", version: 3, from: ["Session"] },
 	{ name: "TurnInput", version: 4, from: ["Session"] },
 	{ name: "TurnInput", version: 5, from: ["Session"] },

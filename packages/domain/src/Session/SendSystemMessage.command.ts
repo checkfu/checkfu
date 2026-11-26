@@ -1,5 +1,6 @@
 import * as Domain from "@alchemy.run/domain"
 import * as Schema from "effect/Schema"
+import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
 import { SessionId } from "./Session.id.ts"
 import { SessionNotFound } from "./SessionNotFound.rejection.ts"
@@ -20,5 +21,11 @@ export class SystemContextFull extends Domain.Rejection(
 export class SendSystemMessage extends Domain.Command("SendSystemMessage", {
 	input: { session_id: SessionId, text: MessageText },
 	events: [SystemMessage],
-	rejects: [SessionNotFound, SessionTerminated, SessionAwaitingAction, SystemContextFull],
+	rejects: [
+		SessionNotFound,
+		SessionTerminated,
+		SessionAwaitingAction,
+		InitialMessagesPending,
+		SystemContextFull,
+	],
 }) {}
