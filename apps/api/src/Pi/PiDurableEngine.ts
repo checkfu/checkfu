@@ -302,6 +302,9 @@ const notifyAdmissionSubmitted = (
 ): Effect.Effect<void> =>
 	wakePendingChecks(backend, (entry) => entry.operationId === operationId || entry.turn < turn)
 
+const notifyTurnFenceAdvanced = (backend: PiDurableBackend, turn: number): Effect.Effect<void> =>
+	wakePendingChecks(backend, (entry) => entry.turn < turn)
+
 export const abortPiDurableTurn = (
 	backend: PiDurableBackend,
 	operationId: string,
@@ -499,6 +502,7 @@ const admitPiTurnUnderWay = (
 
 			const admitted: AdmitLockOutcome = yield* backend.withLock(
 				Effect.gen(function* () {
+					let turnFenceAdvanced = false
 					const outcome = yield* Effect.promise(async (): Promise<AdmitLockOutcome> => {
 						const pi = await backend.pi()
 						if ((await submissionOf(pi, operationId)) !== undefined) {
@@ -532,6 +536,7 @@ const admitPiTurnUnderWay = (
 								finalizedPrevious = turnState.operationId
 								continue
 							}
+							turnFenceAdvanced = true
 							break
 						}
 						if (!(await backend.enterWorkspace(request.turn))) {
@@ -546,7 +551,13 @@ const admitPiTurnUnderWay = (
 						}
 						await backend.submit(request.text, operationId)
 						return true
-					})
+					}).pipe(
+						Effect.ensuring(
+							Effect.suspend(() =>
+								turnFenceAdvanced ? notifyTurnFenceAdvanced(backend, request.turn) : Effect.void,
+							),
+						),
+					)
 					if (outcome === true) {
 						yield* notifyAdmissionSubmitted(backend, operationId, request.turn)
 					}

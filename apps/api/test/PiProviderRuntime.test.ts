@@ -391,6 +391,65 @@ describe("PiProviderRuntime", () => {
 	)
 
 	it.live(
+		"wakes an older stalled credential check when a newer turn advances the turn fence without submitting",
+		() =>
+			Effect.gen(function* () {
+				const rawBackend = yield* Effect.promise(() =>
+					createInMemoryPiDurableBackend(
+						makeScriptedPiModels(async (model) => makeAssistantReply(model, null, "unused", 1, 1)),
+					),
+				)
+				let checkCall = 0
+				let stalledSignal: AbortSignal | undefined
+				let markStalledEntered!: () => void
+				const stalledEntered = new Promise<void>((resolve) => {
+					markStalledEntered = resolve
+				})
+
+				const backend: PiDurableBackend = {
+					...rawBackend,
+					checkCredentials: (_provider, signal) => {
+						checkCall += 1
+						if (checkCall === 1) {
+							stalledSignal = signal
+							markStalledEntered()
+							return new Promise(() => {
+								// intentionally unsettled
+							})
+						}
+						return { ok: true }
+					},
+					enterWorkspace: async () => false,
+				}
+
+				try {
+					const stalledTurn1 = yield* Effect.forkChild(
+						runPiDurableTurn(backend, makeTurnRequest(1, "openai")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => stalledEntered)
+
+					const recovery1 = yield* Effect.forkChild(recoverPiDurableTurn(backend, "turn:1"), {
+						startImmediately: true,
+					})
+
+					const turn2Outcome = yield* runPiDurableTurn(backend, makeTurnRequest(2, "openai"))
+					expect(turn2Outcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+
+					const [turn1Outcome, recovered1Outcome] = yield* Effect.all([
+						Fiber.join(stalledTurn1),
+						Fiber.join(recovery1),
+					])
+					expect(stalledSignal?.aborted).toBe(true)
+					expect(turn1Outcome).toEqual({ ok: false, error: { _tag: "TurnInterrupted" } })
+					expect(recovered1Outcome).toBeNull()
+				} finally {
+					yield* Effect.promise(() => rawBackend.close())
+				}
+			}),
+	)
+
+	it.live(
 		"rejects a stale turn before reconfiguring the root agent when a newer turn submits during credential checks",
 		() =>
 			Effect.gen(function* () {
