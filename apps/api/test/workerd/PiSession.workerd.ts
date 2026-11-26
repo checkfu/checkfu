@@ -238,6 +238,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 				"CHECKFU_PUBLISH_DOMAIN=pages.example",
 				"CHECKFU_API_DOMAIN=none",
 				"CHECKFU_MCP_DOMAIN=none",
+				"CHECKFU_MACHINE_IDLE=10 seconds",
 				"",
 			].join("\n"),
 			{ flag: "wx", mode: 0o600 },
@@ -266,6 +267,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 	delete childEnv.CHECKFU_PUBLISH_DOMAIN
 	delete childEnv.CHECKFU_API_DOMAIN
 	delete childEnv.CHECKFU_MCP_DOMAIN
+	delete childEnv.CHECKFU_MACHINE_IDLE
 	delete childEnv.CHECKFU_LOCAL_DEV
 	delete childEnv.ALCHEMY_STAGE
 	delete childEnv.ALCHEMY_PROFILE
@@ -286,6 +288,8 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 
 	const logs: Array<string> = []
 	let readyUrl: string | null = null
+	let apiUrl: string | null = null
+	let harnessReady = false
 	let resolveReady!: (url: string) => void
 	let rejectReady!: (err: Error) => void
 	const ready = new Promise<string>((res, rej) => {
@@ -300,7 +304,11 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		const clean = stripAnsi(line)
 		const match = clean.match(/\[ApiWorker\] ready at (http:\/\/[^\s]+)/)
 		if (match?.[1] !== undefined) {
-			readyUrl = match[1].replace(/\/+$/, "")
+			apiUrl = match[1].replace(/\/+$/, "")
+		}
+		harnessReady ||= clean.includes("[PiHarnessWorker] ready at ")
+		if (apiUrl !== null && harnessReady && readyUrl === null) {
+			readyUrl = apiUrl
 			resolveReady(readyUrl)
 		}
 	}
@@ -354,7 +362,7 @@ const startAlchemyDev = async (openAIBaseUrl: string) => {
 		if (readyUrl === null) {
 			rejectReady(new Error(`Timed out waiting for alchemy dev\n${logs.join("")}`))
 		}
-	}, 45_000)
+	}, 180_000)
 
 	const stop = async () => {
 		clearTimeout(startupTimer)
@@ -421,6 +429,11 @@ const runsScript = (code: string) => (req: { readonly toolOutputs: ReadonlyArray
 	req.toolOutputs.length === 0
 		? ({ kind: "tool_call", name: "codemode", arguments: { code } } as const)
 		: ({ kind: "reply", text: "Done." } as const)
+
+const userMessage = (text: string) => ({
+	type: "user.message",
+	content: [{ type: "text", text }],
+})
 
 describe("PiSession real Durable Object under workerd", () => {
 	let fakeOpenAI: FakeOpenAIResponsesServer
@@ -575,7 +588,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			name: "Workerd Test Env",
 		})
 		environmentId = createdEnv.id
-	}, 90_000)
+	}, 240_000)
 
 	afterAll(async () => {
 		await stopWorker?.()
@@ -944,6 +957,7 @@ describe("PiSession real Durable Object under workerd", () => {
 			"write",
 			"edit",
 			"delete",
+			"bash",
 			"codemode",
 		])
 		expect(requests[3]?.toolOutputs.join("")).toContain("PAPAYA-7")
@@ -1104,6 +1118,54 @@ describe("PiSession real Durable Object under workerd", () => {
 		const reply = (await listAllEvents(session.id)).find((e) => e.type === "agent.message")
 		expect(reply?.content?.[0]?.text).toBe('Listing: {"path":"/workspace","count":0,"entries":[]}')
 	}, 60_000)
+
+	it("publishes the first output a turn on the machine writes, after a turn that left none", async () => {
+		const outputs = "/mnt/session/outputs"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Write it on the machine.": [
+					{ kind: "tool_call", name: "bash", arguments: { command: "echo up" } },
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${outputs}/report.md`, content: "# Late\n" },
+					},
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? { kind: "reply", text: "Done." },
+		)
+		const session = await createSession()
+		const turn = async (text: string, number: number) => {
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [userMessage(text)] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 240_000)
+		}
+		const published = () =>
+			apiJson<{
+				readonly version: number
+				readonly files: ReadonlyArray<{ readonly path: string }>
+			}>(`/v1/sessions/${session.id}/outputs`)
+		await turn("Say hello.", 1)
+		await sleep(1000)
+		expect((await published()).status).toBe(404)
+		await turn("Write it on the machine.", 2)
+		const deadline = Date.now() + 30_000
+		let current = await published()
+		while (current.status !== 200 && Date.now() < deadline) {
+			await sleep(100)
+			current = await published()
+		}
+		expect(current.status).toBe(200)
+		expect(current.body.files.map(({ path }) => path)).toEqual(["report.md"])
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 300_000)
 
 	it("publishes what the model leaves in the outputs directory as the session's artifact, byte for byte", async () => {
 		const outputs = "/mnt/session/outputs"
@@ -1682,6 +1744,260 @@ describe("PiSession real Durable Object under workerd", () => {
 		const caughtUp = await openStream(ending.at(-1)?.id)
 		expect(caughtUp.res.status).toBe(204)
 	}, 60_000)
+
+	it("starts a machine at the first command and moves the working directory into it, where only it survives a sleep", async () => {
+		const dir = "/workspace/shell"
+		const steps = new Map<string, ReadonlyArray<FakeOpenAIAction>>(
+			Object.entries({
+				"Note it.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${dir}/notes.txt`, content: "from the file tool\n" },
+					},
+				],
+				"Run it.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								"cat notes.txt && echo built > out.txt && git --version >/dev/null && node --version",
+							cwd: dir,
+						},
+					},
+				],
+				"Read what it built.": [
+					{ kind: "tool_call", name: "read", arguments: { path: `${dir}/out.txt` } },
+				],
+				"Find the text files.": [
+					{ kind: "tool_call", name: "find", arguments: { path: dir, pattern: "*.txt" } },
+				],
+				"Search for it.": [
+					{ kind: "tool_call", name: "grep", arguments: { path: dir, query: "built" } },
+				],
+				"Write a changelog and see it.": [
+					{
+						kind: "tool_call",
+						name: "write",
+						arguments: { path: `${dir}/CHANGELOG.md`, content: "## 2.0.0\n" },
+					},
+					{ kind: "tool_call", name: "bash", arguments: { command: `cat ${dir}/CHANGELOG.md` } },
+				],
+				"Leave a mark outside.": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: { command: "touch /tmp/outside ~/.outside && echo left" },
+					},
+				],
+				"Is it still there?": [
+					{
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command: "cat out.txt CHANGELOG.md; ls /tmp/outside ~/.outside 2>/dev/null | wc -l",
+							cwd: dir,
+						},
+					},
+				],
+				"Fail.": [
+					{ kind: "tool_call", name: "bash", arguments: { command: "echo no >&2; exit 3" } },
+				],
+				"Take too long.": [
+					{ kind: "tool_call", name: "bash", arguments: { command: "sleep 30", timeout: 1 } },
+				],
+			}),
+		)
+		fakeOpenAI.setHandler(
+			(req) =>
+				steps.get(req.lastUserText)?.[req.toolOutputs.length] ?? {
+					kind: "reply",
+					text: `Done: ${req.toolOutputs.at(-1) ?? ""}`,
+				},
+		)
+		const session = await createSession()
+		let number = 0
+		const turn = async (text: string) => {
+			number += 1
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [userMessage(text)] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 240_000)
+			const replies = (await listAllEvents(session.id)).filter((e) => e.type === "agent.message")
+			return replies.at(-1)?.content?.[0]?.text ?? ""
+		}
+
+		expect(await turn("Note it.")).toContain("Done: ")
+		expect(await turn("Run it.")).toContain("from the file tool\nv")
+		expect(await turn("Read what it built.")).toContain("built")
+		const found = await turn("Find the text files.")
+		expect(found).toContain(`${dir}/notes.txt`)
+		expect(found).toContain(`${dir}/out.txt`)
+		expect(await turn("Search for it.")).toContain(
+			`"path":"${dir}/out.txt","line":1,"text":"built"`,
+		)
+		expect(await turn("Write a changelog and see it.")).toBe("Done: ## 2.0.0")
+		expect(await turn("Fail.")).toBe("Done: no\n[Exit code 3.]")
+		expect(await turn("Take too long.")).toBe("Done: [Stopped after 1 seconds.]")
+
+		expect(await turn("Leave a mark outside.")).toBe("Done: left")
+		const logged = (line: string) =>
+			stripAnsi(workerLogs.join(""))
+				.split("\n")
+				.some((entry) => entry.includes(line) && entry.includes(session.id))
+		const within = async (ms: number, line: string) => {
+			const deadline = Date.now() + ms
+			while (!logged(line) && Date.now() < deadline) {
+				await sleep(250)
+			}
+			return logged(line)
+		}
+		expect(await within(120_000, "Machine asleep")).toBe(true)
+		expect(await turn("Is it still there?")).toBe("Done: built\n## 2.0.0\n0")
+
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+		expect(await within(60_000, "Machine removed")).toBe(true)
+	}, 900_000)
+
+	it("holds a machine to the hosts its environment allows", async () => {
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length === 0
+				? {
+						kind: "tool_call",
+						name: "bash",
+						arguments: {
+							command:
+								"curl -fsS -m 5 -o /dev/null https://example.org 2>/dev/null && echo reached || echo refused",
+						},
+					}
+				: { kind: "reply", text: `Done: ${req.toolOutputs.at(-1) ?? ""}` },
+		)
+		const limited = await createResource<{ readonly id: string }>("/v1/environments", {
+			name: "Workerd Limited Env",
+			config: {
+				type: "cloud",
+				networking: {
+					type: "limited",
+					allowed_hosts: ["github.com"],
+					allow_mcp_servers: false,
+					allow_package_managers: false,
+				},
+			},
+		})
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: limited.id,
+		})
+		const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+			method: "POST",
+			body: { events: [userMessage("Reach out.")] },
+		})
+		expect(sent.status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		const reply = (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe("Done: refused")
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 300_000)
+
+	it("holds the machine already running to a network its environment tightens, from the next request", async () => {
+		fakeOpenAI.setHandler((req) => {
+			const command = { "Start it.": "echo alive > /tmp/alive && echo up" }[req.lastUserText]
+			const reach =
+				"cat /tmp/alive; curl -fsS -m 5 -o /dev/null https://example.org 2>/dev/null && echo reached || echo refused"
+			return req.toolOutputs.length > 0
+				? { kind: "reply", text: `Done: ${req.toolOutputs.at(-1) ?? ""}` }
+				: command !== undefined
+					? { kind: "tool_call", name: "bash", arguments: { command } }
+					: req.lastUserText === "Reach out."
+						? { kind: "tool_call", name: "bash", arguments: { command: reach } }
+						: { kind: "reply", text: "Nothing to run." }
+		})
+		const environment = await createResource<{ readonly id: string; readonly version: number }>(
+			"/v1/environments",
+			{ name: "Workerd Tightened Env" },
+		)
+		const session = await createResource<SessionResource>("/v1/sessions", {
+			agent: agentId,
+			environment_id: environment.id,
+		})
+		let number = 0
+		const turn = async (text: string) => {
+			number += 1
+			const sent = await apiJson(`/v1/sessions/${session.id}/events`, {
+				method: "POST",
+				body: { events: [{ type: "user.message", content: [{ type: "text", text }] }] },
+			})
+			expect(sent.status).toBe(200)
+			await waitForSession(session.id, (s) => s.status === "idle" && s.turn === number, 240_000)
+			return (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+				?.content?.[0]?.text
+		}
+		expect(await turn("Start it.")).toBe("Done: up")
+		const tightened = await apiJson(`/v1/environments/${environment.id}`, {
+			method: "POST",
+			body: {
+				version: environment.version,
+				config: {
+					type: "cloud",
+					networking: {
+						type: "limited",
+						allowed_hosts: [],
+						allow_mcp_servers: false,
+						allow_package_managers: false,
+					},
+				},
+			},
+		})
+		expect(tightened.status).toBe(200)
+		const started = Date.now()
+		expect(await turn("Reach out.")).toBe("Done: alive\nrefused")
+		expect(Date.now() - started).toBeLessThan(60_000)
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 600_000)
+
+	it("stops a command when its turn is interrupted, so the next turn is not kept waiting", async () => {
+		const counting = "while true; do date >> /workspace/ticks; sleep 0.2; done"
+		fakeOpenAI.setHandler((req) =>
+			req.toolOutputs.length > 0
+				? { kind: "reply", text: `Done: ${req.toolOutputs.at(-1) ?? ""}` }
+				: req.lastUserText === "Start the machine."
+					? { kind: "tool_call", name: "bash", arguments: { command: "echo up" } }
+					: req.lastUserText === "Count."
+						? { kind: "tool_call", name: "bash", arguments: { command: counting, timeout: 600 } }
+						: {
+								kind: "tool_call",
+								name: "bash",
+								arguments: {
+									command:
+										'a=$(wc -l < /workspace/ticks); sleep 1; b=$(wc -l < /workspace/ticks); [ "$a" -gt 0 ] && [ "$a" = "$b" ] && echo stopped',
+								},
+							},
+		)
+		const session = await createSession()
+		const send = (events: ReadonlyArray<unknown>) =>
+			apiJson(`/v1/sessions/${session.id}/events`, { method: "POST", body: { events } })
+		expect((await send([userMessage("Start the machine.")])).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 1, 240_000)
+		expect((await send([userMessage("Count.")])).status).toBe(200)
+		await fakeOpenAI.waitForRequest((req) => req.lastUserText === "Count.")
+		await sleep(3000)
+		const interruptedAt = Date.now()
+		expect((await send([{ type: "user.interrupt" }])).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 2, 60_000)
+		expect((await send([userMessage("Is it still counting?")])).status).toBe(200)
+		await waitForSession(session.id, (s) => s.status === "idle" && s.turn === 3, 60_000)
+		expect(Date.now() - interruptedAt).toBeLessThan(60_000)
+		const reply = (await listAllEvents(session.id)).findLast((e) => e.type === "agent.message")
+		expect(reply?.content?.[0]?.text).toBe("Done: stopped")
+		const archived = await apiFetch(`/v1/sessions/${session.id}/archive`, { method: "POST" })
+		expect(archived.status).toBe(200)
+	}, 300_000)
 
 	it("stops a running turn when the session is archived", async () => {
 		const holdPrompt = "hold-for-archive"

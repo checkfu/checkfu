@@ -1757,7 +1757,7 @@ export class EffectEnvironmentsResource {
 		)
 	}
 
-	/** Update an environment */
+	/** Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts. */
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
@@ -3304,7 +3304,7 @@ export class EnvironmentsResource {
 		)
 	}
 
-	/** Update an environment */
+	/** Update an environment. A session already running picks up the new configuration, network rules included, when its next turn starts. */
 	update(
 		environmentId: PathParam<"environments", "update", "environment_id">,
 		params: EndpointBody<"environments", "update">,
