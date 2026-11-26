@@ -1884,7 +1884,10 @@ describe("Artifact bytes", () => {
 				})
 				const key = `artifacts/${DEFAULT_STORAGE_SCOPE}/${artifact.id}/blobs/${sha256}`
 				expect((yield* putBytes(`${blobs}/${sha256}`, data)).status).toBe(200)
-				expect(store.putCount(key)).toBe(1)
+				expect(store.objects.has(key)).toBe(true)
+				const short = yield* putBytes(`${blobs}/${sha256}`, data.slice(1))
+				expect(short.status).toBe(400)
+				expect((yield* json<ErrorBody>(short)).error.message).toContain("do not match")
 
 				const version = yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
 					version: 0,
@@ -1924,6 +1927,40 @@ describe("Artifact bytes", () => {
 					"content-length": "ten",
 				})
 				expect(refused.status).toBe(400)
+			}),
+		))
+
+	it("stores a zero-byte file, and sends a file too large for JSON to the raw download", () =>
+		withApi(({ call, putBytes }) =>
+			Effect.gen(function* () {
+				const artifact = yield* json<ArtifactBody>(
+					yield* call("POST", "/v1/artifacts", { name: "A" }),
+				)
+				const blobs = `/v1/artifacts/${artifact.id}/blobs`
+				const empty = new Uint8Array(0)
+				expect((yield* putBytes(`${blobs}/${hexOf(empty)}`, empty)).status).toBe(200)
+				const large = bytesOf(MAX_INLINE_FILE_BYTES + 1)
+				expect((yield* putBytes(`${blobs}/${hexOf(large)}`, large)).status).toBe(200)
+				expect(
+					(yield* call("POST", `/v1/artifacts/${artifact.id}/versions`, {
+						version: 0,
+						files: [
+							{ path: "empty.txt", sha256: hexOf(empty) },
+							{ path: "large.bin", sha256: hexOf(large) },
+						],
+					})).status,
+				).toBe(201)
+				const asJson = (path: string) =>
+					call("GET", `/v1/artifacts/${artifact.id}/versions/1/file?file=${path}`)
+				expect(yield* json(yield* asJson("empty.txt"))).toMatchObject({ size: 0, content: "" })
+				const refused = yield* asJson("large.bin")
+				expect(refused.status).toBe(400)
+				expect((yield* json<ErrorBody>(refused)).error.message).toContain("/content?file=large.bin")
+				const raw = yield* call(
+					"GET",
+					`/v1/artifacts/${artifact.id}/versions/1/content?file=large.bin`,
+				)
+				expect((yield* Effect.promise(() => raw.arrayBuffer())).byteLength).toBe(large.byteLength)
 			}),
 		))
 })

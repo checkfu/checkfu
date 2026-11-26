@@ -27,7 +27,11 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { PublicationAddress } from "@checkfu/sdk/Schemas"
-import { MAX_ARTIFACT_FILE_BYTES, buildArtifactVersion } from "../Artifacts/ArtifactFiles.ts"
+import {
+	MAX_ARTIFACT_FILE_BYTES,
+	MAX_INLINE_FILE_BYTES,
+	buildArtifactVersion,
+} from "../Artifacts/ArtifactFiles.ts"
 import type {
 	ArtifactManifest,
 	ArtifactVersionFileInput,
@@ -222,7 +226,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 				Effect.catchTag("InvalidArtifactFiles", (error) => reject(400, error.message)),
 			)
 
-		const stage = (id: ArtifactId, built: BuiltArtifactVersion, reservation: number | null) =>
+		const stage = (
+			id: ArtifactId,
+			built: BuiltArtifactVersion | null,
+			reservation: number | null,
+		) =>
 			stored(store.stage(id, built, reservation)).pipe(
 				Effect.catchTags({
 					ArtifactPurged: () => reject(404, `Artifact ${id} not found.`),
@@ -357,8 +365,8 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							Effect.map((reserved) => reserved.reply.reservation),
 							Effect.catchTag("ArtifactAlreadyExists", () => Effect.succeed(0)),
 						)
-						if (reservation !== 0 && built !== undefined) {
-							yield* stage(id, built, reservation)
+						if (reservation !== 0) {
+							yield* stage(id, built ?? null, reservation)
 						}
 					}
 					const commandOptions = sendOptions ?? { commandId: `create-artifact:${id}` }
@@ -582,16 +590,6 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 					if (size > MAX_ARTIFACT_FILE_BYTES) {
 						return yield* reject(413, `An upload may be at most ${MAX_ARTIFACT_FILE_BYTES} bytes.`)
 					}
-					const blob = (stored_size: number) => ({
-						type: "artifact_blob" as const,
-						artifact_id: id,
-						sha256,
-						size: stored_size,
-					})
-					const held = yield* stored(store.blobSize(id, sha256))
-					if (held !== null) {
-						return blob(held)
-					}
 					const outcome = yield* stored(
 						store.putBlob(
 							id,
@@ -599,15 +597,11 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 							payload.pipe(Stream.mapError((cause) => new ArtifactStoreError({ cause }))),
 							size,
 						),
-					)
+					).pipe(Effect.catchTag("ArtifactPurged", () => reject(404, `Artifact ${id} not found.`)))
 					if (outcome === "mismatch") {
 						return yield* reject(400, `The uploaded bytes do not match sha256 ${sha256}.`)
 					}
-					if ((yield* artifacts.get(id)).status !== "active") {
-						yield* stored(store.purge(id))
-						return yield* reject(404, `Artifact ${id} not found.`)
-					}
-					return blob(size)
+					return { type: "artifact_blob" as const, artifact_id: id, sha256, size }
 				}).pipe(handled),
 			)
 			.handle("getFile", ({ params, query }) =>
@@ -619,6 +613,12 @@ export const ArtifactsLive = HttpApiBuilder.group(CheckfuApi, "artifacts", (hand
 						return yield* reject(
 							404,
 							`Artifact ${id} version ${params.version} has no file "${query.file}".`,
+						)
+					}
+					if (file.size > MAX_INLINE_FILE_BYTES) {
+						return yield* reject(
+							400,
+							`File "${file.path}" is ${file.size} bytes, too large to return as JSON; download it from GET /v1/artifacts/${id}/versions/${params.version}/content?file=${encodeURIComponent(file.path)}.`,
 						)
 					}
 					const bytes =

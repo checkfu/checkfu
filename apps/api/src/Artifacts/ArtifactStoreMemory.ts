@@ -42,6 +42,25 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 	)
 
 	const bucket: ArtifactBucketWriter<never> = {
+		putStream: (key, body, size, sha256) =>
+			Effect.gen(function* () {
+				const bytes = new Uint8Array(
+					yield* Effect.tryPromise({
+						try: () => new Response(body).arrayBuffer(),
+						catch: (cause) => new ArtifactStoreError({ cause }),
+					}),
+				)
+				if (bytes.byteLength !== size) {
+					return yield* offline(`expected ${size} bytes, received ${bytes.byteLength}`)
+				}
+				return yield* bucket.put(key, bytes, { sha256 }).pipe(
+					Effect.as("stored" as const),
+					Effect.catchIf(
+						(error) => String(error.cause).includes("does not match its sha256"),
+						() => Effect.succeed("mismatch" as const),
+					),
+				)
+			}),
 		put: (key, body, options) =>
 			Effect.gen(function* () {
 				yield* online
@@ -148,30 +167,15 @@ export const makeArtifactStoreMemory = (options?: { readonly scope?: string }) =
 					return bytes === undefined ? null : Stream.make(bytes)
 				}),
 			putBlob: (artifactId, sha256, body, size) =>
-				Effect.gen(function* () {
-					yield* Effect.suspend(() => beforePut)
-					const chunks = yield* Stream.runCollect(body).pipe(
-						Effect.mapError((cause) => new ArtifactStoreError({ cause })),
-					)
-					const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
-					let offset = 0
-					for (const chunk of chunks) {
-						bytes.set(chunk, offset)
-						offset += chunk.byteLength
-					}
-					if (bytes.byteLength !== size) {
-						return yield* offline(`expected ${size} bytes, received ${bytes.byteLength}`)
-					}
-					return yield* bucket
-						.put(artifactBlobKey(scope, artifactId, sha256), bytes, { sha256 })
-						.pipe(
-							Effect.as("stored" as const),
-							Effect.catchIf(
-								(error) => String(error.cause).includes("does not match its sha256"),
-								() => Effect.succeed("mismatch" as const),
-							),
-						)
-				}),
+				Effect.andThen(
+					Effect.suspend(() => beforePut),
+					ownerOf(scope, artifactId).putBlob(
+						artifactId,
+						sha256,
+						Stream.toReadableStream(body),
+						size,
+					),
+				),
 			purge: (artifactId) => ownerOf(scope, artifactId).purge(artifactId),
 			release: (artifactId, reservation) =>
 				ownerOf(scope, artifactId).release(artifactId, reservation),

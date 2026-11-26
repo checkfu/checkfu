@@ -18,7 +18,17 @@ const makeOwner = () => {
 	const puts: Array<string> = []
 	let marks: ArtifactMarks = UNMARKED
 	let beforeList: Effect.Effect<void> = Effect.void
+	let duringUpload: Effect.Effect<void> = Effect.void
 	const bucket: ArtifactBucketWriter<never> = {
+		putStream: (key) =>
+			Effect.andThen(
+				Effect.suspend(() => duringUpload),
+				Effect.sync(() => {
+					puts.push(key)
+					objects.set(key, "uploaded")
+					return "stored" as const
+				}),
+			),
 		put: (key, body) =>
 			Effect.sync(() => {
 				puts.push(key)
@@ -53,6 +63,9 @@ const makeOwner = () => {
 		marks: () => marks,
 		setBeforeList: (effect: Effect.Effect<void>) => {
 			beforeList = effect
+		},
+		setDuringUpload: (effect: Effect.Effect<void>) => {
+			duringUpload = effect
 		},
 	}
 }
@@ -163,5 +176,47 @@ describe("artifact owner", () => {
 			expect(Exit.isFailure(yield* Fiber.join(staging))).toBe(true)
 			expect(objects.size).toBe(0)
 		}),
+	)
+
+	it.effect("waits for an upload in flight before purging, so the purge removes its bytes", () =>
+		Effect.gen(function* () {
+			const { owner, objects, setDuringUpload } = makeOwner()
+			const uploading = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			setDuringUpload(
+				Effect.andThen(Deferred.succeed(uploading, undefined), Deferred.await(release)),
+			)
+			const upload = yield* Effect.forkChild(
+				owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1),
+			)
+			yield* Deferred.await(uploading)
+			const purge = yield* Effect.forkChild(owner.purge(ID))
+			yield* Effect.yieldNow
+			expect(purge.pollUnsafe()).toBeUndefined()
+			yield* Deferred.succeed(release, undefined)
+			expect(yield* Fiber.join(upload)).toBe("stored")
+			yield* Fiber.join(purge)
+			expect(objects.size).toBe(0)
+			expect(
+				isFailure(
+					yield* Effect.exit(owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1)),
+					"ArtifactPurged",
+				),
+			).toBe(true)
+		}),
+	)
+
+	it.effect(
+		"records an empty artifact's reservation, so releasing an older one keeps its files",
+		() =>
+			Effect.gen(function* () {
+				const { owner, objects, marks } = makeOwner()
+				yield* owner.stage(ID, null, 2)
+				expect(marks()).toEqual({ purged: false, staged: 2, released: 0 })
+				yield* owner.putBlob(ID, "a".repeat(64), new ReadableStream(), 1)
+				yield* owner.stage(ID, yield* build([{ path: "a.txt", content: "a" }]), null)
+				yield* owner.release(ID, 1)
+				expect(objects.size).toBe(3)
+			}),
 	)
 })

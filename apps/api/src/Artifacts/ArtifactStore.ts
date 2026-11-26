@@ -20,7 +20,7 @@ export class ArtifactStoreError extends Schema.TaggedError<
 export interface ArtifactStoreService {
 	readonly stage: (
 		artifactId: string,
-		version: BuiltArtifactVersion,
+		version: BuiltArtifactVersion | null,
 		reservation: number | null,
 	) => Effect.Effect<void, ArtifactStoreError | ArtifactPurged | ArtifactReservationStale>
 	readonly getManifest: (
@@ -48,7 +48,7 @@ export interface ArtifactStoreService {
 		sha256: string,
 		body: Stream.Stream<Uint8Array, ArtifactStoreError>,
 		size: number,
-	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError>
+	) => Effect.Effect<"stored" | "mismatch", ArtifactStoreError | ArtifactPurged>
 	readonly purge: (artifactId: string) => Effect.Effect<void, ArtifactStoreError>
 	readonly release: (
 		artifactId: string,

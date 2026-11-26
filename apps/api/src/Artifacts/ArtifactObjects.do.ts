@@ -3,6 +3,7 @@ import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
 import { placedStub, placement, storageScope, storageScopeOf } from "../Placement.ts"
 import type { BuiltArtifactVersion } from "./ArtifactFiles.ts"
 import {
@@ -16,7 +17,6 @@ import {
 	ArtifactBucket,
 	ArtifactStore,
 	ArtifactStoreError,
-	artifactBlobKey,
 	artifactReads,
 	isChecksumMismatch,
 } from "./ArtifactStore.ts"
@@ -52,14 +52,37 @@ const makeWriter = (
 				onFailure: storeError,
 			}),
 		),
+	putStream: (key, body, size, sha256) =>
+		bucket
+			.put(
+				key,
+				size === 0
+					? new Uint8Array(0)
+					: Stream.fromReadableStream({ evaluate: () => body, onError: storeError }),
+				{ sha256, contentLength: size },
+			)
+			.pipe(
+				Effect.as("stored" as const),
+				Effect.catch((error) =>
+					isChecksumMismatch(error)
+						? Effect.succeed("mismatch" as const)
+						: Effect.fail(storeError(error)),
+				),
+			),
 })
 
 interface ArtifactObjectsShape {
 	readonly stage: (
 		artifactId: string,
-		built: BuiltArtifactVersion,
+		built: BuiltArtifactVersion | null,
 		reservation: number | null,
 	) => Effect.Effect<"staged" | "purged" | "stale", ArtifactStoreError, RuntimeContext>
+	readonly putBlob: (
+		artifactId: string,
+		sha256: string,
+		body: ReadableStream<Uint8Array>,
+		size: number,
+	) => Effect.Effect<"stored" | "mismatch" | "purged", ArtifactStoreError, RuntimeContext>
 	readonly release: (
 		artifactId: string,
 		reservation: number,
@@ -105,6 +128,12 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 								}),
 							),
 						),
+					putBlob: (artifactId, sha256, body, size) =>
+						overWire(
+							owner
+								.putBlob(artifactId, sha256, body, size)
+								.pipe(Effect.catchTag("ArtifactPurged", () => Effect.succeed("purged" as const))),
+						),
 					release: (artifactId, reservation) => overWire(owner.release(artifactId, reservation)),
 					purge: (artifactId) => overWire(owner.purge(artifactId)),
 				}
@@ -115,7 +144,7 @@ export const ArtifactObjectsLive = ArtifactObjects.make(
 export const ArtifactStoreR2 = Layer.effect(
 	ArtifactStore,
 	Effect.gen(function* () {
-		const bucket = yield* Cloudflare.R2.ReadWriteBucket(yield* ArtifactBucket)
+		const bucket = yield* Cloudflare.R2.ReadBucket(yield* ArtifactBucket)
 		const placed = yield* placement
 		const scope = storageScopeOf(placed)
 		const owners = placedStub(yield* ArtifactObjects, placed)
@@ -150,17 +179,14 @@ export const ArtifactStoreR2 = Layer.effect(
 				),
 			...artifactReads(scope, bucket, run),
 			putBlob: (artifactId, sha256, body, size) =>
-				bucket
-					.put(artifactBlobKey(scope, artifactId, sha256), body, { sha256, contentLength: size })
-					.pipe(
-						Effect.as("stored" as const),
-						Effect.catch((error) =>
-							isChecksumMismatch(error)
-								? Effect.succeed("mismatch" as const)
-								: Effect.fail(storeError(error)),
-						),
-						Effect.provideService(RuntimeContext, runtime),
+				call(() =>
+					owners(artifactId).putBlob(artifactId, sha256, Stream.toReadableStream(body), size),
+				).pipe(
+					Effect.filterOrFail(
+						(outcome): outcome is "stored" | "mismatch" => outcome !== "purged",
+						() => new ArtifactPurged({ artifact_id: artifactId }),
 					),
+				),
 			purge: (artifactId) => call(() => owners(artifactId).purge(artifactId)),
 			release: (artifactId, reservation) =>
 				call(() => owners(artifactId).release(artifactId, reservation)),

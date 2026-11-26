@@ -259,13 +259,14 @@ export const serveContent = (options: {
 						})
 					: notFound
 			}
-			const bytes = yield* store.getBlob(found.artifactId, file.sha256)
-			if (bytes === null) {
+			const body = yield* store.blobStream(found.artifactId, file.sha256)
+			if (body === null) {
 				return notFound
 			}
-			return HttpServerResponse.uint8Array(bytes, {
+			return HttpServerResponse.stream(body, {
 				status: 200,
 				contentType,
+				contentLength: file.size,
 				headers: fileHeaders,
 			})
 		}).pipe(

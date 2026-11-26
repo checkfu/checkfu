@@ -595,22 +595,34 @@ describe("PiSession real Durable Object under workerd", () => {
 		expect(opened.body.version).toBe(0)
 		const data = Uint8Array.from({ length: 70_000 }, (_, index) => (index * 31 + 7) % 256)
 		const sha256 = createHash("sha256").update(data).digest("hex")
-		const upload = (hash: string) =>
+		const upload = (hash: string, bytes: Uint8Array<ArrayBuffer> = data) =>
 			fetch(`${baseUrl}/v1/artifacts/${opened.body.id}/blobs/${hash}`, {
 				method: "PUT",
 				headers: {
 					...AUTH_HEADERS,
 					"content-type": "application/octet-stream",
-					"content-length": String(data.byteLength),
+					"content-length": String(bytes.byteLength),
 				},
-				body: data,
+				body: bytes,
 			})
 		expect((await upload("0".repeat(64))).status).toBe(400)
 		const stored = await upload(sha256)
 		expect(stored.status).toBe(200)
+		const empty = new Uint8Array(0)
+		const emptySha256 = createHash("sha256").update(empty).digest("hex")
+		expect((await upload(emptySha256, empty)).status).toBe(200)
 		const version = await apiJson<{ readonly version: number }>(
 			`/v1/artifacts/${opened.body.id}/versions`,
-			{ method: "POST", body: { version: 0, files: [{ path: "data.bin", sha256 }] } },
+			{
+				method: "POST",
+				body: {
+					version: 0,
+					files: [
+						{ path: "data.bin", sha256 },
+						{ path: "empty.txt", sha256: emptySha256 },
+					],
+				},
+			},
 		)
 		expect(version.status).toBe(201)
 		const download = await apiFetch(
