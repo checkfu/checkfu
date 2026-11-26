@@ -32,6 +32,8 @@ import { RuntimeContext } from "alchemy/RuntimeContext"
 import * as Schedule from "effect/Schedule"
 import { Checkfu, CheckfuHandlersLive } from "@checkfu/domain/Checkfu.model"
 import { Webhooks, WebhooksHandlersLive } from "@checkfu/domain/Webhooks.model"
+import { WebhookEvents } from "@checkfu/domain/Webhook/WebhookEvents.external"
+import type { WebhookEventPublication } from "@checkfu/domain/Webhook/WebhookEvents.external"
 import { ArtifactBytesKept } from "@checkfu/domain/Artifact/ArtifactBytes.external"
 import { ListingStore, makeListingStoreMemory } from "@checkfu/domain/Listing/ListingStore"
 import { makeCheckfuClientWith } from "../../src/Http/Api.ts"
@@ -282,6 +284,7 @@ export const makePiDurableTestLayer = (
 		mcpTools,
 		webhookSender,
 		webhookAutoDrain,
+		webhookPublicationCompleted,
 	}: {
 		readonly env?: Record<string, string>
 		readonly platform?: typeof Domain.InMemory
@@ -292,6 +295,7 @@ export const makePiDurableTestLayer = (
 		readonly mcpTools?: ReadonlyArray<TestMcpTool>
 		readonly webhookSender?: WebhookHttpSender
 		readonly webhookAutoDrain?: boolean
+		readonly webhookPublicationCompleted?: (event: WebhookEventPublication) => void
 	} = {},
 ) => {
 	const agentToolsBySession = new Map<string, string>()
@@ -774,12 +778,24 @@ export const makePiDurableTestLayer = (
 		Layer.provide(WebhookDeliveriesLive),
 		Layer.provide(Digest.layerWebCrypto),
 	)
-	const WebhookEventsRuntimeLive = makeWebhookEventsLive(listingMemory.page).pipe(
+	const webhookEvents = makeWebhookEventsLive(listingMemory.page).pipe(
 		Layer.provide(WebhooksLive),
 		Layer.provide(WebhookDeliveriesLive),
 		Layer.provide(WebhookFanoutRuntimeLive),
 		Layer.provide(Digest.layerWebCrypto),
 	)
+	const WebhookEventsRuntimeLive =
+		webhookPublicationCompleted === undefined
+			? webhookEvents
+			: Layer.effect(
+					WebhookEvents,
+					Effect.map(WebhookEvents, (events) => ({
+						publish: (event) =>
+							events
+								.publish(event)
+								.pipe(Effect.tap(() => Effect.sync(() => webhookPublicationCompleted(event)))),
+					})),
+				).pipe(Layer.provide(webhookEvents))
 	const HarnessLive = PiDurableHarnessLive.pipe(
 		Layer.provide(
 			Layer.effect(

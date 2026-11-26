@@ -66,6 +66,8 @@ describe("PublishWebhookEvents policy", () => {
 				const envId = EnvironmentId.make("env_pub_1")
 				const sessionId = SessionId.make("sess_pub_1")
 				const artifactId = ArtifactId.make("art_pub_1")
+				const emptyId = ArtifactId.make("art_pub_empty")
+				const uploadedId = ArtifactId.make("art_pub_uploaded")
 				const automationId = AutomationId.make("auto_pub_1")
 				const automations = yield* Automation
 
@@ -105,6 +107,17 @@ describe("PublishWebhookEvents policy", () => {
 					artifact_id: artifactId,
 					pinned_version: 1,
 					token: "pub_secret_token_never_leak",
+				})
+				for (const id of [emptyId, uploadedId]) {
+					yield* domain.ReserveArtifact({ artifact_id: id })
+					yield* domain.OpenArtifact({ artifact_id: id, name: "Upload", reservation: 1 })
+				}
+				yield* domain.AddArtifactVersion({
+					artifact_id: uploadedId,
+					expected_version: 0,
+					manifest: "b".repeat(64),
+					file_count: 1,
+					total_bytes: 5,
 				})
 				yield* domain.AdmitAutomation({
 					automation_id: automationId,
@@ -148,8 +161,21 @@ describe("PublishWebhookEvents policy", () => {
 				expect(byType.has("agent.created")).toBe(true)
 				expect(byType.has("environment.created")).toBe(true)
 				expect([...byType.keys()]).not.toContain("session.created")
-				expect(byType.has("artifact.created")).toBe(true)
-				expect(byType.has("artifact.published")).toBe(true)
+				const artifactEvents = (id: ArtifactId) =>
+					published.flatMap(({ resource_type, resource_id, event_type, event_id }) =>
+						resource_type === "artifact" && resource_id === id ? [{ event_type, event_id }] : [],
+					)
+				expect(artifactEvents(artifactId)).toEqual([
+					{ event_type: "artifact.created", event_id: `evt_artifact_${artifactId}_2` },
+					{ event_type: "artifact.published", event_id: `evt_artifact_${artifactId}_3` },
+				])
+				expect(artifactEvents(emptyId)).toEqual([
+					{ event_type: "artifact.created", event_id: `evt_artifact_${emptyId}_2` },
+				])
+				expect(artifactEvents(uploadedId)).toEqual([
+					{ event_type: "artifact.created", event_id: `evt_artifact_${uploadedId}_2` },
+					{ event_type: "artifact.version_added", event_id: `evt_artifact_${uploadedId}_3` },
+				])
 
 				expect(
 					published.flatMap(({ event_type, resource_id, resource_type }) =>
@@ -176,10 +202,6 @@ describe("PublishWebhookEvents policy", () => {
 				const agentEvent = byType.get("agent.created")
 				expect(agentEvent?.event_id).toMatch(/^evt_agent_agent_pub_1_\d+$/)
 				expect(agentEvent?.resource_id).toBe(agentId)
-
-				const artifactPub = byType.get("artifact.published")
-				expect(artifactPub?.event_id).toMatch(/^evt_artifact_art_pub_1_\d+$/)
-				expect(artifactPub?.resource_id).toBe(artifactId)
 			}).pipe(Effect.scoped, Effect.provide(layer))
 		},
 	)

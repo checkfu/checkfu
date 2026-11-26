@@ -348,6 +348,104 @@ describe("Webhooks HTTP API", () => {
 		}
 	})
 
+	it("publishes one creation for a keyed empty artifact and a distinct event for version one", async () => {
+		const creationFanout = Promise.withResolvers<void>()
+		const versionFanout = Promise.withResolvers<void>()
+		const harness = makePiDurableTestLayer(
+			async (model) => makeAssistantReply(model, null, "ok", 5, 3),
+			{
+				webhookPublicationCompleted: ({ event_type }) => {
+					if (event_type === "artifact.created") {
+						creationFanout.resolve()
+					}
+					if (event_type === "artifact.version_added") {
+						versionFanout.resolve()
+					}
+				},
+			},
+		)
+		try {
+			await Effect.runPromise(
+				Effect.gen(function* () {
+					const { fetch: apiFetch } = yield* makeApiHandler
+					const register = (name: string, eventTypes: ReadonlyArray<string>) =>
+						Effect.gen(function* () {
+							const response = yield* sendRequest(apiFetch, {
+								method: "POST",
+								path: "/v1/webhooks",
+								headers: AUTH_HEADERS,
+								body: { url: `https://hooks.example.com/${name}`, event_types: eventTypes },
+							})
+							expect(response.status).toBe(201)
+							return (yield* Effect.promise(() => response.json())) as WebhookJson
+						})
+					const wildcard = yield* register("all-artifact-events", ["*"])
+					const creationOnly = yield* register("artifact-creation", ["artifact.created"])
+					const deliveries = (id: string) =>
+						Effect.gen(function* () {
+							const response = yield* sendRequest(apiFetch, {
+								method: "GET",
+								path: `/v1/webhooks/${id}/deliveries`,
+								headers: AUTH_HEADERS,
+							})
+							expect(response.status).toBe(200)
+							const { data } = (yield* Effect.promise(() => response.json())) as {
+								readonly data: ReadonlyArray<WebhookDeliveryJson>
+							}
+							return data.map(({ event_id, event_type }) => ({ event_id, event_type }))
+						})
+
+					const create = sendRequest(apiFetch, {
+						method: "POST",
+						path: "/v1/artifacts",
+						headers: { ...AUTH_HEADERS, "idempotency-key": "empty-upload" },
+						body: { name: "Report" },
+					})
+					const response = yield* create
+					expect(response.status).toBe(201)
+					const artifact = (yield* Effect.promise(() => response.json())) as {
+						readonly id: string
+						readonly version: number
+					}
+					expect(artifact.version).toBe(0)
+					const opened = {
+						event_id: `evt_artifact_${artifact.id}_2`,
+						event_type: "artifact.created",
+					}
+					yield* Effect.promise(() => creationFanout.promise).pipe(Effect.timeout("2 seconds"))
+					expect(yield* deliveries(wildcard.id)).toEqual([opened])
+					expect(yield* deliveries(creationOnly.id)).toEqual([opened])
+
+					const replay = yield* create
+					expect(replay.status).toBe(201)
+					expect(yield* Effect.promise(() => replay.json())).toMatchObject(artifact)
+					const version = yield* sendRequest(apiFetch, {
+						method: "POST",
+						path: `/v1/artifacts/${artifact.id}/versions`,
+						headers: AUTH_HEADERS,
+						body: { version: 0, files: [{ path: "report.txt", content: "Ready" }] },
+					})
+					expect(version.status).toBe(201)
+					expect(yield* Effect.promise(() => version.json())).toMatchObject({
+						artifact_id: artifact.id,
+						version: 1,
+					})
+					const added = {
+						event_id: `evt_artifact_${artifact.id}_3`,
+						event_type: "artifact.version_added",
+					}
+					yield* Effect.promise(() => versionFanout.promise).pipe(Effect.timeout("2 seconds"))
+					const lifecycle = yield* deliveries(wildcard.id)
+					expect(lifecycle).toHaveLength(2)
+					expect(lifecycle).toEqual(expect.arrayContaining([opened, added]))
+					expect(yield* deliveries(creationOnly.id)).toEqual([opened])
+				}).pipe(Effect.scoped, Effect.provide(harness.layer)),
+			)
+		} finally {
+			await harness.closeAll()
+		}
+	})
+
 	it("fans out signed Checkfu lifecycle events to matching webhooks and never leaks artifact publication tokens", async () => {
 		const harness = makePiDurableTestLayer(async (model) =>
 			makeAssistantReply(model, null, "Hello webhook!", 8, 4),
