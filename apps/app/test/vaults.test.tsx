@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import type { JsonVault, JsonVaultCredential } from "@checkfu/sdk/client"
 import { createMemoryHistory, createRouter, useRouterState } from "@tanstack/react-router"
+import { waitFor } from "@testing-library/react"
 import type * as React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { NewVaultPage, VaultView } from "../src/pages/vaults.tsx"
@@ -77,6 +78,7 @@ const held = (container: HTMLElement, queryClient: ReturnType<typeof newQueryCli
 
 afterEach(() => {
 	vi.unstubAllGlobals()
+	vi.restoreAllMocks()
 	document.body.innerHTML = ""
 })
 
@@ -127,6 +129,7 @@ describe("vault pages", () => {
 	})
 
 	it("waits for a pending credential create until its token is stored", async () => {
+		const consoleErrors = vi.spyOn(console, "error")
 		const reads: Array<string> = []
 		stubApi((request) => {
 			if (request.method === "POST") {
@@ -156,11 +159,12 @@ describe("vault pages", () => {
 		await type(form?.querySelector('input[type="url"]') ?? null, "https://mcp.linear.app/mcp")
 		await type(form?.querySelector('input[type="password"]') ?? null, TOKEN)
 		await submit(form)
-		await vi.waitFor(() => expect(reads).toHaveLength(2), { timeout: 3000 })
-		await vi.waitFor(() =>
+		await waitFor(() => expect(reads).toHaveLength(2), { timeout: 3000 })
+		await waitFor(() =>
 			expect(form?.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe(""),
 		)
 		page.unmount()
+		expect(consoleErrors).not.toHaveBeenCalled()
 	})
 
 	it("keeps the form when a credential is created without its token, and saving again sends the same key", async () => {
@@ -665,6 +669,7 @@ describe("vault pages", () => {
 	})
 
 	it("keeps a pending token replacement open until a read shows the rotation", async () => {
+		const consoleErrors = vi.spyOn(console, "error")
 		const fresh = { ...credential, updated_at: "2026-11-24T01:00:00.000Z" }
 		let reads = 0
 		stubApi((request) => {
@@ -688,7 +693,7 @@ describe("vault pages", () => {
 		await settle()
 		expect(reads).toBe(1)
 		expect(page.container.querySelector('td input[type="password"]')).not.toBeNull()
-		await vi.waitFor(
+		await waitFor(
 			() => {
 				expect(page.container.querySelector('td input[type="password"]')).toBeNull()
 			},
@@ -696,6 +701,7 @@ describe("vault pages", () => {
 		)
 		expect(reads).toBe(2)
 		page.unmount()
+		expect(consoleErrors).not.toHaveBeenCalled()
 	})
 
 	it("shows the error of the action tried last, not an earlier one", async () => {
