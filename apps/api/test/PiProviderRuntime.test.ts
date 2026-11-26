@@ -6,7 +6,7 @@ import { join } from "node:path"
 import * as Cloudflare from "@alchemy.run/cloudflare"
 import type { ProviderRuntimeConfig, ProviderSpec } from "@checkfu/pi-providers/catalog"
 import { buildPiProvider } from "@checkfu/pi-providers/runtime"
-import { hasApi } from "@earendil-works/pi-ai/models"
+import { createProvider, hasApi } from "@earendil-works/pi-ai/models"
 import { describe, expect, it, vi } from "@effect/vitest"
 import * as Alchemy from "alchemy"
 import * as Alchemist from "alchemy/Alchemist"
@@ -453,6 +453,393 @@ describe("PiProviderRuntime", () => {
 					expect(submitCalls).toBe(0)
 				} finally {
 					releaseCheck()
+				}
+			}),
+	)
+
+	it.live("propagates stream AbortSignal into slow provider resolution", () =>
+		Effect.gen(function* () {
+			let interruptedCount = 0
+			let allowResolve = true
+
+			const runtime = dynamicPiProviderRuntime(({ provider }) => {
+				if (allowResolve || provider === undefined) {
+					return Effect.succeed({ env: { OPENAI_API_KEY: "sk-initial" } })
+				}
+				return Effect.never.pipe(
+					Effect.onInterrupt(() =>
+						Effect.sync(() => {
+							interruptedCount += 1
+						}),
+					),
+				)
+			})
+
+			const providers = yield* runtime.forSession({ sessionId: "sess_abort_stream" })
+			const models = providers.createModels()
+			const model = models.getModel("openai", "gpt-4o-mini")
+			expect(model).toBeDefined()
+			if (model === undefined || !hasApi(model, "openai-responses")) {
+				return
+			}
+
+			allowResolve = false
+
+			const abortAfterStart = async (
+				run: (signal: AbortSignal) => Promise<{ readonly stopReason: string }>,
+			) => {
+				const controller = new AbortController()
+				const pending = run(controller.signal)
+				await new Promise<void>((resolve) => {
+					setTimeout(() => {
+						resolve()
+					}, 10)
+				})
+				controller.abort()
+				return pending
+			}
+
+			const simpleOutcome = yield* Effect.promise(() =>
+				abortAfterStart((signal) =>
+					models
+						.streamSimple(
+							model,
+							{ messages: [{ role: "user", content: "hi", timestamp: 1_700_000_000_000 }] },
+							{ signal },
+						)
+						.result(),
+				),
+			)
+			expect(simpleOutcome.stopReason).toBe("aborted")
+
+			const typedOutcome = yield* Effect.promise(() =>
+				abortAfterStart((signal) =>
+					models
+						.stream(
+							model,
+							{ messages: [{ role: "user", content: "hi", timestamp: 1_700_000_000_001 }] },
+							{ signal },
+						)
+						.result(),
+				),
+			)
+			expect(typedOutcome.stopReason).toBe("aborted")
+
+			const deferredOutcome = yield* Effect.promise(() =>
+				abortAfterStart((signal) =>
+					models
+						.streamDeferred(
+							model,
+							{
+								id: "handle_abort",
+								provider: "openai",
+								modelId: "gpt-4o-mini",
+								api: "openai-responses",
+							},
+							{ signal },
+						)
+						.result(),
+				),
+			)
+			expect(deferredOutcome.stopReason).toBe("aborted")
+			expect(interruptedCount).toBe(3)
+		}),
+	)
+
+	it.live(
+		"prefers an existing submission over the cancellation fence after credential checks complete",
+		() =>
+			Effect.gen(function* () {
+				const cancelled = new Set<string>()
+				let submitted = false
+				let markEntered!: () => void
+				const entered = new Promise<void>((resolve) => {
+					markEntered = resolve
+				})
+				let releaseCheck!: () => void
+				const gate = new Promise<void>((resolve) => {
+					releaseCheck = resolve
+				})
+
+				const assistantMessage = {
+					role: "assistant" as const,
+					content: [{ type: "text" as const, text: "already submitted reply" }],
+					api: "openai-responses" as const,
+					provider: "openai",
+					model: "gpt-4o-mini",
+					usage: {
+						input: 5,
+						output: 3,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 8,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop" as const,
+					timestamp: 1_700_000_000_000,
+				}
+
+				const backend = makePiHarnessBackend(
+					{
+						pi: async () => ({
+							commit: async <T>(fn: (tx: unknown) => T): Promise<T> =>
+								fn({
+									submissionByRequest: () =>
+										submitted
+											? {
+													type: "input",
+													status: "done",
+													entry: 1,
+													answer: 2,
+												}
+											: undefined,
+									doc: async () => ({ operation: null }),
+								}),
+							snapshot: async () => ({ input_tokens: 5, output_tokens: 3 }),
+							conversation: async () => ({
+								entries: async () => ({
+									items: [{ id: 2, model: [assistantMessage] }],
+									next: undefined,
+								}),
+							}),
+						}),
+						wait: async () => ({ status: "done" as const }),
+						abort: async () => undefined,
+					} as unknown as Parameters<typeof makePiHarnessBackend>[0],
+					{
+						isCancelled: (operationId: string) => cancelled.has(operationId),
+						markCancelled: (operationId: string) => {
+							cancelled.add(operationId)
+						},
+					} as unknown as Parameters<typeof makePiHarnessBackend>[1],
+					{},
+					() => undefined,
+					() => Promise.resolve(true),
+					{
+						checkCredentials: async () => {
+							markEntered()
+							await gate
+							return { ok: true }
+						},
+					},
+				)
+
+				try {
+					const turnFiber = yield* Effect.forkChild(
+						runPiDurableTurn(backend, makeTurnRequest(1, "openai")),
+						{ startImmediately: true },
+					)
+					yield* Effect.promise(() => entered)
+
+					// Concurrent call submits and finishes while this call checks credentials, then abort marks fence.
+					submitted = true
+					cancelled.add("turn:1")
+					releaseCheck()
+
+					const outcome = yield* Fiber.join(turnFiber)
+					expect(outcome).toMatchObject({
+						ok: true,
+						reply: { text: "already submitted reply" },
+					})
+				} finally {
+					releaseCheck()
+				}
+			}),
+	)
+
+	it.live("releases discarded registries on reopen so they are no longer synced", () =>
+		Effect.gen(function* () {
+			let modelIds: ReadonlyArray<string> = ["model-v1"]
+			const runtime = dynamicPiProviderRuntime(() =>
+				Effect.succeed({
+					env: { ACME_API_KEY: "sk-acme" },
+					customProviders: [
+						{
+							id: "acme",
+							name: "Acme",
+							source: "custom",
+							defaultFormat: "openai-responses",
+							formats: ["openai-responses"],
+							baseUrl: "https://acme.example/v1",
+							auth: { kind: "bearer", env: "ACME_API_KEY", label: "Acme API Key" },
+							allowUnlistedModels: false,
+							models: Object.fromEntries(modelIds.map((id) => [id, {}])),
+						},
+					],
+				}),
+			)
+
+			const providers = yield* runtime.forSession({ sessionId: "sess_reopen_release" })
+			const discarded = providers.createModels()
+			providers.releaseModels?.(discarded)
+			const active = providers.createModels()
+
+			modelIds = ["model-v1", "model-v2"]
+			yield* Effect.promise(() => Promise.resolve(providers.checkCredentials("acme")))
+
+			expect(active.getModel("acme", "model-v2")?.id).toBe("model-v2")
+			expect(discarded.getModel("acme", "model-v2")).toBeUndefined()
+		}),
+	)
+
+	it.live("preserves a lowered provider-specific minContextWindow in synchronous lookups", () =>
+		Effect.gen(function* () {
+			const spec: ProviderSpec = {
+				id: "acme",
+				name: "Acme",
+				source: "custom",
+				defaultFormat: "openai-responses",
+				formats: ["openai-responses"],
+				baseUrl: "https://acme.example/v1",
+				auth: { kind: "bearer", env: "ACME_API_KEY", label: "Acme API Key" },
+				allowUnlistedModels: false,
+				models: {
+					"small-16k": { contextWindow: 16_384 },
+					"large-128k": { contextWindow: 128_000 },
+				},
+			}
+
+			const runtime = dynamicPiProviderRuntime(({ provider }) =>
+				Effect.succeed({
+					env: { ACME_API_KEY: "sk-acme" },
+					customProviders: [spec],
+					minContextWindow: provider === "acme" ? 8192 : 65_536,
+				}),
+			)
+
+			const providers = yield* runtime.forSession({ sessionId: "sess_ctx_floor" })
+			const models = providers.createModels()
+			expect(models.getModel("acme", "small-16k")).toBeUndefined()
+
+			const available = yield* Effect.promise(() => models.getAvailable("acme"))
+			expect(available.map((m) => m.id)).toContain("small-16k")
+			expect(models.getModel("acme", "small-16k")?.id).toBe("small-16k")
+			expect(models.getModels("acme").map((m) => m.id)).toContain("small-16k")
+		}),
+	)
+
+	it.live("keeps interactive login credentials across dynamic rebuilds until logout", () =>
+		Effect.gen(function* () {
+			const runtime = dynamicPiProviderRuntime(() =>
+				Effect.succeed({
+					env: { OPENAI_API_KEY: "sk-fresh-every-call" },
+				}),
+			)
+			const providers = yield* runtime.forSession({ sessionId: "sess_login_persist" })
+			const models = providers.createModels()
+
+			const interactiveProvider = createProvider({
+				id: "interactive",
+				name: "Interactive",
+				models: [],
+				api: {
+					stream: () => {
+						throw new Error("unused")
+					},
+					streamSimple: () => {
+						throw new Error("unused")
+					},
+				},
+				auth: {
+					apiKey: {
+						name: "Interactive Key",
+						login: async () => ({ type: "api_key", key: "sk-logged-in-secret" }),
+						resolve: async ({ credential }) =>
+							credential?.type === "api_key" && credential.key !== undefined
+								? { auth: { apiKey: credential.key }, source: "stored" }
+								: undefined,
+					},
+				},
+			})
+
+			models.setProvider(interactiveProvider)
+			expect(yield* Effect.promise(() => models.getAuth("interactive"))).toBeUndefined()
+
+			yield* Effect.promise(() =>
+				models.login("interactive", "api_key", {
+					prompt: async () => "sk-logged-in-secret",
+					notify: () => undefined,
+				}),
+			)
+
+			const afterLogin = yield* Effect.promise(() => models.getAuth("interactive"))
+			expect(afterLogin?.auth.apiKey).toBe("sk-logged-in-secret")
+
+			yield* Effect.promise(() => models.logout("interactive"))
+			expect(yield* Effect.promise(() => models.getAuth("interactive"))).toBeUndefined()
+		}),
+	)
+
+	it.live(
+		"prevents older concurrent resolutions from overwriting newer provider or full snapshots",
+		() =>
+			Effect.gen(function* () {
+				const makeSpec = (modelIds: ReadonlyArray<string>): ProviderSpec => ({
+					id: "acme",
+					name: "Acme",
+					source: "custom",
+					defaultFormat: "openai-responses",
+					formats: ["openai-responses"],
+					baseUrl: "https://acme.example/v1",
+					auth: { kind: "bearer", env: "ACME_API_KEY", label: "Acme API Key" },
+					allowUnlistedModels: false,
+					models: Object.fromEntries(modelIds.map((id) => [id, {}])),
+				})
+
+				let holdFullRefresh = false
+				let markFullRefreshEntered!: () => void
+				const fullRefreshEntered = new Promise<void>((resolve) => {
+					markFullRefreshEntered = resolve
+				})
+				let releaseFullRefresh!: () => void
+				const fullRefreshGate = new Promise<void>((resolve) => {
+					releaseFullRefresh = resolve
+				})
+
+				let currentModels: ReadonlyArray<string> = ["model-old", "model-keep"]
+				const runtime = dynamicPiProviderRuntime(({ provider }) => {
+					const captured = [...currentModels]
+					if (provider === undefined && holdFullRefresh) {
+						return Effect.promise(async () => {
+							markFullRefreshEntered()
+							await fullRefreshGate
+							return {
+								env: { ACME_API_KEY: "sk-acme" },
+								customProviders: [makeSpec(captured)],
+							}
+						})
+					}
+					return Effect.succeed({
+						env: { ACME_API_KEY: "sk-acme" },
+						customProviders: [makeSpec(captured)],
+					})
+				})
+
+				const providers = yield* runtime.forSession({ sessionId: "sess_snapshot_order" })
+				const models = providers.createModels()
+				expect(models.getModel("acme", "model-old")?.id).toBe("model-old")
+
+				try {
+					// Start an older full refresh capturing model-old before it is removed.
+					holdFullRefresh = true
+					const slowRefresh = models.getAvailable()
+					yield* Effect.promise(() => fullRefreshEntered)
+
+					// Remove model-old and run a newer provider-specific credential check.
+					currentModels = ["model-keep"]
+					yield* Effect.promise(() => Promise.resolve(providers.checkCredentials("acme")))
+					expect(models.getModel("acme", "model-old")).toBeUndefined()
+
+					// Now let the older full refresh complete; it must NOT restore model-old.
+					releaseFullRefresh()
+					const availableAfterSlow = yield* Effect.promise(() => slowRefresh)
+					expect(
+						availableAfterSlow.some((m) => m.provider === "acme" && m.id === "model-old"),
+					).toBe(false)
+					expect(models.getModel("acme", "model-old")).toBeUndefined()
+					expect(providers.createModels().getModel("acme", "model-old")).toBeUndefined()
+				} finally {
+					releaseFullRefresh()
 				}
 			}),
 	)

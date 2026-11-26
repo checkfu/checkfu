@@ -367,9 +367,6 @@ const admitPiTurnUnderWay = (
 								: await backend.missingCredentialsMessage(request.provider),
 					}
 				})
-				if (backend.isCancelled(operationId)) {
-					return false
-				}
 				if (typeof credentialOutcome === "object") {
 					const raced = yield* backend.withLock(
 						Effect.promise(async (): Promise<"submitted" | "cancelled" | "missing"> => {

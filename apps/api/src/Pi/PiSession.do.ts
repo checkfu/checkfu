@@ -4,6 +4,7 @@ import type {
 	ProviderCredentialCheck,
 	ProviderSpec,
 } from "@checkfu/pi-providers/catalog"
+import type { MutableModels } from "@earendil-works/pi-ai/models"
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import { Harness, ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable"
 import type { PiHarness } from "agents/harness/pi"
@@ -170,9 +171,14 @@ export const PiSessionLive = PiSession.make(
 			const admittedTurn = (): number => rawCtx.storage.kv.get<number>(ADMITTED_TURN) ?? 0
 
 			// PiHarness calls this factory again when it reopens after a storage error.
+			let activeModels: MutableModels | undefined
 			const harness = new PiHarnessClass({
 				harness: ({ storage, context, onWake }) => {
+					if (activeModels !== undefined) {
+						sessionProviders.releaseModels?.(activeModels)
+					}
 					const models = sessionProviders.createModels()
+					activeModels = models
 					const registry = createCheckfuRegistry()
 					registry.install(
 						workspaceExtension(workspaceTools, (call, signal) =>
