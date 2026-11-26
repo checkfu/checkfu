@@ -76,6 +76,7 @@ export type FetchClient = <Op extends JsonOperationId>(
 ) => Promise<FetchResult<Op>>
 
 export interface CheckfuFetchErrorDetails {
+	readonly code?: string | undefined
 	readonly requestId?: string | undefined
 	readonly accepted?: ReadonlyArray<unknown> | undefined
 	readonly failedIndex?: number | undefined
@@ -85,6 +86,7 @@ export interface CheckfuFetchErrorDetails {
 export class CheckfuFetchError extends Error {
 	readonly status: number
 	readonly type: string | null
+	readonly code: string | undefined
 	readonly requestId: string | undefined
 	readonly accepted: ReadonlyArray<unknown> | undefined
 	readonly failedIndex: number | undefined
@@ -100,6 +102,7 @@ export class CheckfuFetchError extends Error {
 		this.name = "CheckfuFetchError"
 		this.status = status
 		this.type = type
+		this.code = details.code
 		this.requestId = details.requestId
 		this.accepted = details.accepted
 		this.failedIndex = details.failedIndex
@@ -123,7 +126,7 @@ interface RawInput {
 }
 
 interface ErrorEnvelope {
-	readonly error?: { readonly type?: unknown; readonly message?: unknown }
+	readonly error?: { readonly type?: unknown; readonly message?: unknown; readonly code?: unknown }
 	readonly request_id?: unknown
 	readonly accepted?: unknown
 	readonly failed_index?: unknown
@@ -269,6 +272,7 @@ export const createFetchClient = (options: FetchClientOptions = {}): FetchClient
 				stringOr(envelope.error?.type) ?? null,
 				stringOr(envelope.error?.message) ?? `Request failed with status ${response.status}.`,
 				{
+					code: stringOr(envelope.error?.code),
 					requestId:
 						stringOr(envelope.request_id) ??
 						response.headers.get("request-id") ??
