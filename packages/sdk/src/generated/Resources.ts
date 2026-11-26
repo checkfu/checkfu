@@ -183,6 +183,14 @@ export interface CheckfuOperations {
 		EndpointJsonSuccess<"artifacts", "getVersion">,
 		EndpointJsonBody<"artifacts", "getVersion">
 	>
+	readonly "automationRuns.retrieve": OperationShape<
+		EndpointParams<"automations", "getRunById">,
+		EndpointQuery<"automations", "getRunById">,
+		EndpointBody<"automations", "getRunById">,
+		EndpointSuccess<"automations", "getRunById">,
+		EndpointJsonSuccess<"automations", "getRunById">,
+		EndpointJsonBody<"automations", "getRunById">
+	>
 	readonly "automations.archive": OperationShape<
 		EndpointParams<"automations", "archive">,
 		EndpointQuery<"automations", "archive">,
@@ -582,6 +590,102 @@ export interface CheckfuOperations {
 		EndpointSuccess<"vaults", "updateCredential">,
 		EndpointJsonSuccess<"vaults", "updateCredential">,
 		EndpointJsonBody<"vaults", "updateCredential">
+	>
+	readonly "webhooks.create": OperationShape<
+		EndpointParams<"webhooks", "create">,
+		EndpointQuery<"webhooks", "create">,
+		EndpointBody<"webhooks", "create">,
+		EndpointSuccess<"webhooks", "create">,
+		EndpointJsonSuccess<"webhooks", "create">,
+		EndpointJsonBody<"webhooks", "create">
+	>
+	readonly "webhooks.delete": OperationShape<
+		EndpointParams<"webhooks", "delete">,
+		EndpointQuery<"webhooks", "delete">,
+		EndpointBody<"webhooks", "delete">,
+		EndpointSuccess<"webhooks", "delete">,
+		EndpointJsonSuccess<"webhooks", "delete">,
+		EndpointJsonBody<"webhooks", "delete">
+	>
+	readonly "webhooks.list": OperationShape<
+		EndpointParams<"webhooks", "list">,
+		RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
+		EndpointBody<"webhooks", "list">,
+		EndpointSuccess<"webhooks", "list">,
+		EndpointJsonSuccess<"webhooks", "list">,
+		EndpointJsonBody<"webhooks", "list">
+	>
+	readonly "webhooks.pause": OperationShape<
+		EndpointParams<"webhooks", "pause">,
+		EndpointQuery<"webhooks", "pause">,
+		EndpointBody<"webhooks", "pause">,
+		EndpointSuccess<"webhooks", "pause">,
+		EndpointJsonSuccess<"webhooks", "pause">,
+		EndpointJsonBody<"webhooks", "pause">
+	>
+	readonly "webhooks.resume": OperationShape<
+		EndpointParams<"webhooks", "resume">,
+		EndpointQuery<"webhooks", "resume">,
+		EndpointBody<"webhooks", "resume">,
+		EndpointSuccess<"webhooks", "resume">,
+		EndpointJsonSuccess<"webhooks", "resume">,
+		EndpointJsonBody<"webhooks", "resume">
+	>
+	readonly "webhooks.retrieve": OperationShape<
+		EndpointParams<"webhooks", "get">,
+		EndpointQuery<"webhooks", "get">,
+		EndpointBody<"webhooks", "get">,
+		EndpointSuccess<"webhooks", "get">,
+		EndpointJsonSuccess<"webhooks", "get">,
+		EndpointJsonBody<"webhooks", "get">
+	>
+	readonly "webhooks.rotateSecret": OperationShape<
+		EndpointParams<"webhooks", "rotateSecret">,
+		EndpointQuery<"webhooks", "rotateSecret">,
+		EndpointBody<"webhooks", "rotateSecret">,
+		EndpointSuccess<"webhooks", "rotateSecret">,
+		EndpointJsonSuccess<"webhooks", "rotateSecret">,
+		EndpointJsonBody<"webhooks", "rotateSecret">
+	>
+	readonly "webhooks.test": OperationShape<
+		EndpointParams<"webhooks", "test">,
+		EndpointQuery<"webhooks", "test">,
+		EndpointBody<"webhooks", "test">,
+		EndpointSuccess<"webhooks", "test">,
+		EndpointJsonSuccess<"webhooks", "test">,
+		EndpointJsonBody<"webhooks", "test">
+	>
+	readonly "webhooks.update": OperationShape<
+		EndpointParams<"webhooks", "update">,
+		EndpointQuery<"webhooks", "update">,
+		EndpointBody<"webhooks", "update">,
+		EndpointSuccess<"webhooks", "update">,
+		EndpointJsonSuccess<"webhooks", "update">,
+		EndpointJsonBody<"webhooks", "update">
+	>
+	readonly "webhooks.deliveries.list": OperationShape<
+		EndpointParams<"webhooks", "listDeliveries">,
+		RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
+		EndpointBody<"webhooks", "listDeliveries">,
+		EndpointSuccess<"webhooks", "listDeliveries">,
+		EndpointJsonSuccess<"webhooks", "listDeliveries">,
+		EndpointJsonBody<"webhooks", "listDeliveries">
+	>
+	readonly "webhooks.deliveries.redeliver": OperationShape<
+		EndpointParams<"webhooks", "redeliver">,
+		EndpointQuery<"webhooks", "redeliver">,
+		EndpointBody<"webhooks", "redeliver">,
+		EndpointSuccess<"webhooks", "redeliver">,
+		EndpointJsonSuccess<"webhooks", "redeliver">,
+		EndpointJsonBody<"webhooks", "redeliver">
+	>
+	readonly "webhooks.deliveries.retrieve": OperationShape<
+		EndpointParams<"webhooks", "getDelivery">,
+		EndpointQuery<"webhooks", "getDelivery">,
+		EndpointBody<"webhooks", "getDelivery">,
+		EndpointSuccess<"webhooks", "getDelivery">,
+		EndpointJsonSuccess<"webhooks", "getDelivery">,
+		EndpointJsonBody<"webhooks", "getDelivery">
 	>
 }
 
@@ -1368,6 +1472,51 @@ export class EffectArtifactsResource {
 									responseMode: "decoded-and-response",
 								}),
 						),
+					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectAutomationRunsResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Retrieve a run by the ID returned in run results and webhook events. */
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"automations", "getRunById">>, CheckfuSdkError>
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"automations", "getRunById">, CheckfuSdkError>
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"automations", "getRunById">
+		| WithResponse<EndpointSuccess<"automations", "getRunById">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("automations", "getRunById", { automation_run_id: automationRunId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.automationRuns.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.automations.getRunById({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
 					),
 			),
 			options,
@@ -3846,23 +3995,578 @@ export class EffectVaultsResource {
 	}
 }
 
+export class EffectWebhooksDeliveriesResource {
+	readonly #runtime: EffectSdkRuntime
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List recent delivery attempts for a webhook endpoint, newest first. */
+	list(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params:
+			| (RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & AnyRequestOptions)
+			| undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "listDeliveries">>, CheckfuSdkError>
+	list(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> &
+			WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "listDeliveries">>, CheckfuSdkError>
+	list(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "listDeliveries">, CheckfuSdkError>
+	list(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"webhooks", "listDeliveries">
+		| WithResponse<EndpointSuccess<"webhooks", "listDeliveries">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "listDeliveries", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.deliveries.list",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.webhooks.listDeliveries({
+								params: pathParams,
+								query: {
+									...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+									...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+								},
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List recent delivery attempts for a webhook endpoint, newest first. */
+	listPages(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"webhooks", "listDeliveries">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(page) =>
+				this.list(
+					webhookId,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Auto-paginate items for List recent delivery attempts for a webhook endpoint, newest first. */
+	listStream(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"webhooks", "listDeliveries">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(page) =>
+				this.list(
+					webhookId,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Queue a fresh delivery attempt for the payload of an existing webhook delivery. */
+	redeliver(
+		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "redeliver">>, CheckfuSdkError>
+	redeliver(
+		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "redeliver">, CheckfuSdkError>
+	redeliver(
+		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"webhooks", "redeliver">
+		| WithResponse<EndpointSuccess<"webhooks", "redeliver">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "redeliver", {
+					webhook_id: webhookId,
+					delivery_id: deliveryId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.deliveries.redeliver",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.webhooks.redeliver({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve one delivery record for a webhook endpoint. */
+	retrieve(
+		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "getDelivery">>, CheckfuSdkError>
+	retrieve(
+		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "getDelivery">, CheckfuSdkError>
+	retrieve(
+		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"webhooks", "getDelivery">
+		| WithResponse<EndpointSuccess<"webhooks", "getDelivery">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "getDelivery", {
+					webhook_id: webhookId,
+					delivery_id: deliveryId,
+				}),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.deliveries.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.webhooks.getDelivery({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+}
+
+export class EffectWebhooksResource {
+	readonly #runtime: EffectSdkRuntime
+	readonly deliveries: EffectWebhooksDeliveriesResource
+
+	constructor(runtime: EffectSdkRuntime) {
+		this.#runtime = runtime
+		this.deliveries = new EffectWebhooksDeliveriesResource(runtime)
+	}
+
+	/** Register an outbound HTTPS webhook endpoint and return its Standard Webhooks signing secret once. */
+	create(
+		params: EndpointBody<"webhooks", "create">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "create">>, CheckfuSdkError>
+	create(
+		params: EndpointBody<"webhooks", "create">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "create">, CheckfuSdkError>
+	create(
+		params: EndpointBody<"webhooks", "create">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "create"> | WithResponse<EndpointSuccess<"webhooks", "create">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+				withPendingReadiness(
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.create",
+						key !== undefined ? "idempotent" : "pre-commit-only",
+						withResolvedIdempotencyKey(options, key),
+						() =>
+							this.#runtime.raw.webhooks.create({
+								headers: key === undefined ? {} : { "idempotency-key": key },
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+					{ kind: "create" },
+				),
+			),
+			options,
+		)
+	}
+
+	/** Delete a webhook endpoint, discard its signing secrets, and purge its delivery queue. */
+	delete(
+		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "delete">>, CheckfuSdkError>
+	delete(
+		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "delete">, CheckfuSdkError>
+	delete(
+		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "delete"> | WithResponse<EndpointSuccess<"webhooks", "delete">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "delete", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(this.#runtime, "checkfu.webhooks.delete", "idempotent", options, () =>
+						this.#runtime.raw.webhooks.delete({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
+	list(
+		params: (RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & AnyRequestOptions) | undefined,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "list">>, CheckfuSdkError>
+	list(
+		params: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "list">>, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & RequestOptions,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "list">, CheckfuSdkError>
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">> & AnyRequestOptions,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "list"> | WithResponse<EndpointSuccess<"webhooks", "list">>,
+		CheckfuSdkError
+	> {
+		options ??= params
+		return unwrapResponse(
+			executeWithRetries(this.#runtime, "checkfu.webhooks.list", "idempotent", options, () =>
+				this.#runtime.raw.webhooks.list({
+					query: {
+						...(params?.["page"] === undefined ? {} : { page: params["page"] }),
+						...(params?.["limit"] === undefined ? {} : { limit: params["limit"] }),
+						...(params?.["order"] === undefined ? {} : { order: params["order"] }),
+						...(params?.["id"] === undefined ? {} : { id: params["id"] }),
+					},
+					responseMode: "decoded-and-response",
+				}),
+			),
+			options,
+		)
+	}
+
+	/** Auto-paginate pages for List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
+	listPages(
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
+		options?: RequestOptions,
+	): Stream<EndpointSuccess<"webhooks", "list">, CheckfuSdkError> {
+		return executePaginatedPagesEffect(
+			(page) =>
+				this.list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Auto-paginate items for List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
+	listStream(
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
+		options?: RequestOptions,
+	): Stream<ItemOf<EndpointSuccess<"webhooks", "list">>, CheckfuSdkError> {
+		return executePaginatedStreamEffect(
+			(page) =>
+				this.list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					options,
+				),
+			params?.page,
+		)
+	}
+
+	/** Pause deliveries to a webhook endpoint without deleting it. */
+	pause(
+		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "pause">>, CheckfuSdkError>
+	pause(
+		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "pause">, CheckfuSdkError>
+	pause(
+		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "pause"> | WithResponse<EndpointSuccess<"webhooks", "pause">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "pause", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(this.#runtime, "checkfu.webhooks.pause", "idempotent", options, () =>
+						this.#runtime.raw.webhooks.pause({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Resume a paused or auto-disabled webhook endpoint and clear its failure window. */
+	resume(
+		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "resume">>, CheckfuSdkError>
+	resume(
+		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "resume">, CheckfuSdkError>
+	resume(
+		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "resume"> | WithResponse<EndpointSuccess<"webhooks", "resume">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "resume", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(this.#runtime, "checkfu.webhooks.resume", "idempotent", options, () =>
+						this.#runtime.raw.webhooks.resume({
+							params: pathParams,
+							responseMode: "decoded-and-response",
+						}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Retrieve a webhook endpoint by ID */
+	retrieve(
+		webhookId: PathParam<"webhooks", "get", "webhook_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "get">>, CheckfuSdkError>
+	retrieve(
+		webhookId: PathParam<"webhooks", "get", "webhook_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "get">, CheckfuSdkError>
+	retrieve(
+		webhookId: PathParam<"webhooks", "get", "webhook_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "get"> | WithResponse<EndpointSuccess<"webhooks", "get">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "get", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.retrieve",
+						"idempotent",
+						options,
+						() =>
+							this.#runtime.raw.webhooks.get({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict. */
+	rotateSecret(
+		webhookId: PathParam<"webhooks", "rotateSecret", "webhook_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "rotateSecret">>, CheckfuSdkError>
+	rotateSecret(
+		webhookId: PathParam<"webhooks", "rotateSecret", "webhook_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "rotateSecret">, CheckfuSdkError>
+	rotateSecret(
+		webhookId: PathParam<"webhooks", "rotateSecret", "webhook_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		| EndpointSuccess<"webhooks", "rotateSecret">
+		| WithResponse<EndpointSuccess<"webhooks", "rotateSecret">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "rotateSecret", { webhook_id: webhookId }),
+				(pathParams) =>
+					EffectFlatMap(resolveCallIdempotencyKey(this.#runtime, options, true), (key) =>
+						executeWithRetries(
+							this.#runtime,
+							"checkfu.webhooks.rotateSecret",
+							key !== undefined ? "idempotent" : "pre-commit-only",
+							withResolvedIdempotencyKey(options, key),
+							() =>
+								this.#runtime.raw.webhooks.rotateSecret({
+									params: pathParams,
+									headers: key === undefined ? {} : { "idempotency-key": key },
+									responseMode: "decoded-and-response",
+								}),
+						),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Queue a signed webhook.test delivery for an active webhook endpoint. */
+	test(
+		webhookId: PathParam<"webhooks", "test", "webhook_id">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "test">>, CheckfuSdkError>
+	test(
+		webhookId: PathParam<"webhooks", "test", "webhook_id">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "test">, CheckfuSdkError>
+	test(
+		webhookId: PathParam<"webhooks", "test", "webhook_id">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "test"> | WithResponse<EndpointSuccess<"webhooks", "test">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "test", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.test",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.webhooks.test({
+								params: pathParams,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+
+	/** Update a webhook endpoint's URL, description, or subscribed event types, and optionally reactivate it. */
+	update(
+		webhookId: PathParam<"webhooks", "update", "webhook_id">,
+		params: EndpointBody<"webhooks", "update">,
+		options: WithResponseRequestOptions,
+	): Effect<WithResponse<EndpointSuccess<"webhooks", "update">>, CheckfuSdkError>
+	update(
+		webhookId: PathParam<"webhooks", "update", "webhook_id">,
+		params: EndpointBody<"webhooks", "update">,
+		options?: RequestOptions,
+	): Effect<EndpointSuccess<"webhooks", "update">, CheckfuSdkError>
+	update(
+		webhookId: PathParam<"webhooks", "update", "webhook_id">,
+		params: EndpointBody<"webhooks", "update">,
+		options?: AnyRequestOptions,
+	): Effect<
+		EndpointSuccess<"webhooks", "update"> | WithResponse<EndpointSuccess<"webhooks", "update">>,
+		CheckfuSdkError
+	> {
+		return unwrapResponse(
+			EffectFlatMap(
+				decodeEndpointParams("webhooks", "update", { webhook_id: webhookId }),
+				(pathParams) =>
+					executeWithRetries(
+						this.#runtime,
+						"checkfu.webhooks.update",
+						"pre-commit-only",
+						options,
+						() =>
+							this.#runtime.raw.webhooks.update({
+								params: pathParams,
+								payload: params,
+								responseMode: "decoded-and-response",
+							}),
+					),
+			),
+			options,
+		)
+	}
+}
+
 export class EffectResources {
 	readonly agents: EffectAgentsResource
 	readonly artifacts: EffectArtifactsResource
+	readonly automationRuns: EffectAutomationRunsResource
 	readonly automations: EffectAutomationsResource
 	readonly environments: EffectEnvironmentsResource
 	readonly memoryStores: EffectMemoryStoresResource
 	readonly sessions: EffectSessionsResource
 	readonly vaults: EffectVaultsResource
+	readonly webhooks: EffectWebhooksResource
 
 	constructor(runtime: EffectSdkRuntime) {
 		this.agents = new EffectAgentsResource(runtime)
 		this.artifacts = new EffectArtifactsResource(runtime)
+		this.automationRuns = new EffectAutomationRunsResource(runtime)
 		this.automations = new EffectAutomationsResource(runtime)
 		this.environments = new EffectEnvironmentsResource(runtime)
 		this.memoryStores = new EffectMemoryStoresResource(runtime)
 		this.sessions = new EffectSessionsResource(runtime)
 		this.vaults = new EffectVaultsResource(runtime)
+		this.webhooks = new EffectWebhooksResource(runtime)
 	}
 }
 
@@ -4141,6 +4845,27 @@ export class ArtifactsResource {
 	): APIPromise<EndpointJsonSuccess<"artifacts", "unpublish">> {
 		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
 			new EffectArtifactsResource(effectRuntime).unpublish(artifactId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class AutomationRunsResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** Retrieve a run by the ID returned in run results and webhook events. */
+	retrieve(
+		automationRunId: PathParam<"automations", "getRunById", "automation_run_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"automations", "getRunById">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectAutomationRunsResource(effectRuntime).retrieve(automationRunId, {
 				...effectOpts,
 				withResponse: true,
 			}),
@@ -5018,22 +5743,225 @@ export class VaultsResource {
 	}
 }
 
+export class WebhooksDeliveriesResource {
+	readonly #runtime: PromiseSdkRuntime
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+	}
+
+	/** List recent delivery attempts for a webhook endpoint, newest first. */
+	list(
+		webhookId: PathParam<"webhooks", "listDeliveries", "webhook_id">,
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "listDeliveries">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"webhooks", "listDeliveries">>>,
+		ItemOf<EndpointJsonSuccess<"webhooks", "listDeliveries">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.page,
+			options,
+			(effectRuntime, page, effectOpts) =>
+				new EffectWebhooksDeliveriesResource(effectRuntime).list(
+					webhookId,
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
+	/** Queue a fresh delivery attempt for the payload of an existing webhook delivery. */
+	redeliver(
+		webhookId: PathParam<"webhooks", "redeliver", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "redeliver", "delivery_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "redeliver">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksDeliveriesResource(effectRuntime).redeliver(webhookId, deliveryId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve one delivery record for a webhook endpoint. */
+	retrieve(
+		webhookId: PathParam<"webhooks", "getDelivery", "webhook_id">,
+		deliveryId: PathParam<"webhooks", "getDelivery", "delivery_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "getDelivery">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksDeliveriesResource(effectRuntime).retrieve(webhookId, deliveryId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
+export class WebhooksResource {
+	readonly #runtime: PromiseSdkRuntime
+	readonly deliveries: WebhooksDeliveriesResource
+
+	constructor(runtime: PromiseSdkRuntime) {
+		this.#runtime = runtime
+		this.deliveries = new WebhooksDeliveriesResource(runtime)
+	}
+
+	/** Register an outbound HTTPS webhook endpoint and return its Standard Webhooks signing secret once. */
+	create(
+		params: EndpointBody<"webhooks", "create">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "create">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).create(params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Delete a webhook endpoint, discard its signing secrets, and purge its delivery queue. */
+	delete(
+		webhookId: PathParam<"webhooks", "delete", "webhook_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "delete">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).delete(webhookId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** List webhook endpoints in creation order, oldest first by default. Deleted endpoints never appear. */
+	list(
+		params?: RelaxOptionalProps<EndpointQuery<"webhooks", "list">>,
+		options?: PromiseRequestOptions,
+	): PagePromise<
+		CursorPage<ItemOf<EndpointJsonSuccess<"webhooks", "list">>>,
+		ItemOf<EndpointJsonSuccess<"webhooks", "list">>
+	> {
+		return executePaginatedPromise(
+			this.#runtime,
+			params?.page,
+			options,
+			(effectRuntime, page, effectOpts) =>
+				new EffectWebhooksResource(effectRuntime).list(
+					{
+						...params,
+						...(page === undefined ? {} : { page }),
+					},
+					{ ...effectOpts, withResponse: true },
+				),
+		)
+	}
+
+	/** Pause deliveries to a webhook endpoint without deleting it. */
+	pause(
+		webhookId: PathParam<"webhooks", "pause", "webhook_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "pause">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).pause(webhookId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Resume a paused or auto-disabled webhook endpoint and clear its failure window. */
+	resume(
+		webhookId: PathParam<"webhooks", "resume", "webhook_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "resume">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).resume(webhookId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Retrieve a webhook endpoint by ID */
+	retrieve(
+		webhookId: PathParam<"webhooks", "get", "webhook_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "get">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).retrieve(webhookId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Generate a new signing secret for a webhook endpoint and return it once. The previous signing secret continues to be included in webhook-signature for 24 hours; overlapping rotations during an active grace period return 409 Conflict. */
+	rotateSecret(
+		webhookId: PathParam<"webhooks", "rotateSecret", "webhook_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "rotateSecret">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).rotateSecret(webhookId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Queue a signed webhook.test delivery for an active webhook endpoint. */
+	test(
+		webhookId: PathParam<"webhooks", "test", "webhook_id">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "test">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).test(webhookId, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+
+	/** Update a webhook endpoint's URL, description, or subscribed event types, and optionally reactivate it. */
+	update(
+		webhookId: PathParam<"webhooks", "update", "webhook_id">,
+		params: EndpointBody<"webhooks", "update">,
+		options?: PromiseRequestOptions,
+	): APIPromise<EndpointJsonSuccess<"webhooks", "update">> {
+		return executeUnaryPromise(this.#runtime, options, (effectRuntime, effectOpts) =>
+			new EffectWebhooksResource(effectRuntime).update(webhookId, params, {
+				...effectOpts,
+				withResponse: true,
+			}),
+		)
+	}
+}
+
 export class PromiseResources {
 	readonly agents: AgentsResource
 	readonly artifacts: ArtifactsResource
+	readonly automationRuns: AutomationRunsResource
 	readonly automations: AutomationsResource
 	readonly environments: EnvironmentsResource
 	readonly memoryStores: MemoryStoresResource
 	readonly sessions: SessionsResource
 	readonly vaults: VaultsResource
+	readonly webhooks: WebhooksResource
 
 	constructor(runtime: PromiseSdkRuntime) {
 		this.agents = new AgentsResource(runtime)
 		this.artifacts = new ArtifactsResource(runtime)
+		this.automationRuns = new AutomationRunsResource(runtime)
 		this.automations = new AutomationsResource(runtime)
 		this.environments = new EnvironmentsResource(runtime)
 		this.memoryStores = new MemoryStoresResource(runtime)
 		this.sessions = new SessionsResource(runtime)
 		this.vaults = new VaultsResource(runtime)
+		this.webhooks = new WebhooksResource(runtime)
 	}
 }

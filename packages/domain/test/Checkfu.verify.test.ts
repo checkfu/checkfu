@@ -63,6 +63,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { Checkfu, CheckfuDomainApi, CheckfuHandlersLive } from "../src/Checkfu.model.ts"
 import { ListingStore } from "../src/Listing/ListingStore.ts"
+import { WebhookEventsNoop } from "../src/Webhook/WebhookEvents.external.ts"
 import { Memory } from "../src/Memory/Memory.aggregate.ts"
 import { MemoryIndex } from "../src/Memory/MemoryIndex.view.ts"
 import { MemoryStore } from "../src/Memory/MemoryStore.aggregate.ts"
@@ -370,7 +371,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 				faults: { redeliver: false, reorder: false, rerun: false },
 				walks: { count: 400, length: 12 },
 
-				allow: { skipped: ["EnsureTurnStarted"] },
+				allow: { skipped: ["EnsureTurnStarted", "PublishWebhookEvents"] },
 				opaque: [
 					sessionIdOfNextRun,
 					isUsableSchedule,
@@ -390,7 +391,10 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 			STANDING,
 		)
 		expect(report.undone).toEqual([])
-		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual(["EnsureTurnStarted"])
+		expect(report.explored.skipped.map((skipped) => skipped.policy)).toEqual([
+			"PublishWebhookEvents",
+			"EnsureTurnStarted",
+		])
 		expect(report.explored.aside).toEqual([
 			{
 				kind: "projection",
@@ -422,8 +426,7 @@ describe("Checkfu unified hosted model Z3 formal verification", () => {
 		const observedViewKeys = new Map<string, Set<string>>()
 		const layer = Checkfu.layer(
 			CheckfuHandlersLive.pipe(
-				Layer.provide(ArtifactBytesKept),
-				Layer.provide(SessionOutputsUnpublished),
+				Layer.provide([ArtifactBytesKept, SessionOutputsUnpublished, WebhookEventsNoop]),
 				Layer.provide([HarnessStubLayer, ListingStore.memory]),
 			),
 		).pipe(

@@ -20,8 +20,9 @@ import type {
 	Session,
 	Vault,
 	VaultCredential,
+	WebhookCreated,
 } from "./Api.ts"
-import { CheckfuConfigError } from "./Errors.ts"
+import { CheckfuConfigError, ConflictError, NotFoundError } from "./Errors.ts"
 import type { CheckfuSdkError } from "./Errors.ts"
 import { EffectResources } from "./generated/Resources.ts"
 import type { Op } from "./generated/Resources.ts"
@@ -110,6 +111,7 @@ export interface PendingResolved {
 	readonly artifact_version: ArtifactVersion
 	readonly vault: Vault
 	readonly vault_credential: VaultCredential
+	readonly webhook: WebhookCreated
 	readonly memory_store: MemoryStoreSnapshot
 	readonly memory: MemorySnapshot
 }
@@ -144,6 +146,26 @@ const retrievePending = (
 			return client.vaults.retrieve(pending.id, options)
 		case "vault_credential":
 			return client.vaults.credentials.retrieve(pending.vault_id, pending.id, options)
+		case "webhook":
+			return Effect.gen(function* () {
+				const page = yield* client.webhooks.list({ id: pending.id, limit: 1 }, options)
+				const found = page.data.find((item) => item.id === pending.id)
+				if (found === undefined) {
+					return yield* new NotFoundError({
+						status: 404,
+						errorType: "not_found_error",
+						message: `Webhook "${pending.id}" is not yet listed.`,
+					})
+				}
+				if (found.secret_revision !== 1) {
+					return yield* new ConflictError({
+						status: 409,
+						errorType: "conflict_error",
+						message: `Webhook "${pending.id}" has already rotated its signing secret (revision ${found.secret_revision}); the pending creation receipt's signing_secret is no longer current.`,
+					})
+				}
+				return { ...found, signing_secret: pending.signing_secret }
+			})
 		case "memory_store":
 			return client.memoryStores.retrieve(pending.id, options)
 		case "memory":

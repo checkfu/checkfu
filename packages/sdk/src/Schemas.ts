@@ -896,6 +896,106 @@ export const ArtifactFile = Schema.Struct({
 })
 export type ArtifactFile = typeof ArtifactFile.Type
 
+export const MAX_WEBHOOK_ID_LENGTH = 128
+export const MAX_WEBHOOK_EVENT_ID_LENGTH = 320
+export const MAX_WEBHOOK_URL_LENGTH = 2048
+export const MAX_WEBHOOK_DESCRIPTION_LENGTH = 1024
+export const MAX_WEBHOOK_EVENT_TYPES = 64
+
+export const WebhookId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_WEBHOOK_ID_LENGTH),
+	SinglePathSegmentCheck,
+).pipe(Schema.brand("WebhookId"))
+export type WebhookId = typeof WebhookId.Type
+
+export const WebhookDeliveryId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_WEBHOOK_ID_LENGTH),
+	SinglePathSegmentCheck,
+).pipe(Schema.brand("WebhookDeliveryId"))
+export type WebhookDeliveryId = typeof WebhookDeliveryId.Type
+
+export const WebhookEventId = Schema.String.check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_WEBHOOK_EVENT_ID_LENGTH),
+).pipe(Schema.brand("WebhookEventId"))
+export type WebhookEventId = typeof WebhookEventId.Type
+
+export const WebhookUrl = Schema.String.check(
+	Schema.isMinLength(8),
+	Schema.isMaxCodePoints(MAX_WEBHOOK_URL_LENGTH),
+)
+
+export const WebhookDescription = Schema.String.check(
+	Schema.isMaxCodePoints(MAX_WEBHOOK_DESCRIPTION_LENGTH),
+)
+
+export const WEBHOOK_EVENT_TYPES = [
+	"agent.created",
+	"agent.updated",
+	"agent.archived",
+	"environment.created",
+	"environment.updated",
+	"environment.archived",
+	"environment.deleted",
+	"session.status_run_started",
+	"session.status_idled",
+	"session.status_terminated",
+	"automation.created",
+	"automation.updated",
+	"automation.paused",
+	"automation.unpaused",
+	"automation.archived",
+	"automation_run.started",
+	"automation_run.succeeded",
+	"automation_run.failed",
+	"artifact.created",
+	"artifact.version_added",
+	"artifact.published",
+	"artifact.unpublished",
+	"artifact.deleted",
+	"vault.created",
+	"vault.archived",
+	"vault.deleted",
+	"vault_credential.created",
+	"vault_credential.archived",
+	"vault_credential.deleted",
+	"memory_store.created",
+	"memory_store.archived",
+	"memory_store.deleted",
+	"webhook.test",
+] as const
+
+export const WebhookEventType = Schema.Literals(WEBHOOK_EVENT_TYPES)
+export type WebhookEventType = typeof WebhookEventType.Type
+
+export const WebhookEventSubscription = Schema.Literals(["*", ...WEBHOOK_EVENT_TYPES])
+export type WebhookEventSubscription = typeof WebhookEventSubscription.Type
+
+export const WebhookEndpointStatus = Schema.Literals([
+	"active",
+	"paused",
+	"disabled_redirect",
+	"disabled_sustained_failure",
+	"deleted",
+])
+export type WebhookEndpointStatus = typeof WebhookEndpointStatus.Type
+
+export const WebhookDeliveryStatus = Schema.Literals(["pending", "succeeded", "failed", "skipped"])
+export type WebhookDeliveryStatus = typeof WebhookDeliveryStatus.Type
+
+export const WebhookDeliveryOutcome = Schema.Literals([
+	"http_2xx",
+	"http_redirect",
+	"http_4xx",
+	"http_5xx",
+	"timeout",
+	"network_error",
+	"invalid_destination",
+])
+export type WebhookDeliveryOutcome = typeof WebhookDeliveryOutcome.Type
+
 export const MAX_VAULT_DISPLAY_NAME_LENGTH = 255
 export const MAX_CREDENTIAL_DISPLAY_NAME_LENGTH = 255
 export const MAX_CREDENTIAL_SECRET_LENGTH = 16_384

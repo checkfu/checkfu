@@ -777,6 +777,7 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/artifacts/{artifact_id}/versions/{version}/file",
 						"/v1/artifacts/{artifact_id}/versions/{version}/links",
 						"/v1/auth/verify",
+						"/v1/automation_runs/{automation_run_id}",
 						"/v1/automations",
 						"/v1/automations/{automation_id}",
 						"/v1/automations/{automation_id}/archive",
@@ -807,6 +808,15 @@ describe("HTTP API routing, auth, validation, and quickstart", () => {
 						"/v1/vaults/{vault_id}/credentials",
 						"/v1/vaults/{vault_id}/credentials/{credential_id}",
 						"/v1/vaults/{vault_id}/credentials/{credential_id}/archive",
+						"/v1/webhooks",
+						"/v1/webhooks/{webhook_id}",
+						"/v1/webhooks/{webhook_id}/deliveries",
+						"/v1/webhooks/{webhook_id}/deliveries/{delivery_id}",
+						"/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver",
+						"/v1/webhooks/{webhook_id}/pause",
+						"/v1/webhooks/{webhook_id}/resume",
+						"/v1/webhooks/{webhook_id}/rotate-secret",
+						"/v1/webhooks/{webhook_id}/test",
 					])
 					const streamGet = spec.paths["/v1/sessions/{session_id}/events/stream"]?.["get"]
 					expect(Object.keys(streamGet?.responses ?? {})).toEqual(
