@@ -1,10 +1,10 @@
 import * as Domain from "@alchemy.run/domain"
 import { InitialMessagesPending } from "./InitialMessagesPending.rejection.ts"
 import {
+	decodeSystemMessage,
 	SendSystemMessage,
 	SystemContextFull,
 	SystemMessage,
-	systemMessageText,
 } from "./SendSystemMessage.command.ts"
 import { Session } from "./Session.aggregate.ts"
 import { SessionAwaitingAction } from "./SessionAwaitingAction.rejection.ts"
@@ -30,13 +30,15 @@ export class SendSystemMessageDecision extends Domain.Decision(SendSystemMessage
 		if (state._tag === "Running" && state.paused) {
 			return new SessionAwaitingAction({ session_id: session.id })
 		}
-		const length = system.state.length + systemMessageText(cmd.content).length + 2
+		const length = system.state.length + cmd.content_json.length
 		if (length > MAX_AGENT_SYSTEM_LENGTH || length <= system.state.length) {
 			return new SystemContextFull({ session_id: session.id })
 		}
 		return [
 			system.record(new SystemContextAppended({ length })),
-			session.record(new SystemMessage({ content: cmd.content, processed_at: now })),
+			session.record(
+				new SystemMessage({ content: decodeSystemMessage(cmd.content_json), processed_at: now }),
+			),
 		]
 	},
 	transitions: {
