@@ -146,6 +146,7 @@ const sampleAutomation = (overrides?: {
 	schedule: { type: "cron" as const, expression: "0 9 * * *", timezone: "UTC" },
 	status: "active" as const,
 	pause_reason: null,
+	revision: 1,
 	run_count: 0,
 	last_run_at: null,
 	upcoming_runs_at: [],
